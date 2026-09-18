@@ -2,9 +2,9 @@
 //
 // SkiaShell: pages with slide transitions, popups, modals, toasts, tabs, browser back. Almost all
 // of it is navigation driven from code — GoToAsync, OpenPopupAsync, PushModalAsync, ShowToast —
-// which needs event handlers, and the status line at the top reads the shell's live state, which
-// needs component state. The buttons are drawn and do nothing; the status line shows the state
-// the page opens in.
+// which this port binds no handlers for yet (the shell's methods have no NX expression), and the
+// status line at the top reads the shell's live state, which this port does not hold as component
+// state. The buttons are drawn and do nothing; the status line shows the state the page opens in.
 //
 // The nested tabbed shell is not ported at all: SkiaShell is a React component, not a drawn
 // control, so the catalog has nothing to put there. Its card keeps a note in its place.

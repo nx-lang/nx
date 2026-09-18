@@ -1136,3 +1136,103 @@ fn test_nested_short_circuit() {
     );
     assert_eq!(result.unwrap(), Value::Boolean(true));
 }
+
+// ============================================================================
+// String `+` with a primitive operand
+// ============================================================================
+
+/// Executes a function of the module as type analysis leaves it.
+///
+/// <para>Whether a `+` concatenates, which operands are rendered as text, and the width a literal
+/// takes are all decided by the type checker and written into the module, so a test of any of
+/// them has to evaluate the analyzed module rather than the freshly lowered one.</para>
+fn execute_checked(source: &str, function_name: &str, args: Vec<Value>) -> Result<Value, String> {
+    let checked = nx_types::check_str(source, "test.nx");
+    if !checked.errors().is_empty() {
+        let messages: Vec<_> = checked
+            .errors()
+            .iter()
+            .map(|diagnostic| diagnostic.message().to_string())
+            .collect();
+        return Err(format!("Type errors: {:?}", messages));
+    }
+
+    let module = checked.lowered_module.expect("lowered module");
+    Interpreter::new()
+        .execute_function(&module, function_name, args)
+        .map_err(|e| format!("Runtime error: {}", e))
+}
+
+fn text(value: &str) -> Value {
+    Value::String(smol_str::SmolStr::new(value))
+}
+
+#[test]
+fn test_string_plus_int_concatenates() {
+    let source = r#"let f(count:int) = { "Total: " + count }"#;
+    let result = execute_checked(source, "f", vec![Value::Int(3)]).unwrap();
+    assert_eq!(result, text("Total: 3"));
+}
+
+#[test]
+fn test_primitive_on_the_left_concatenates() {
+    let source = r#"let f(x:float64) = { x + " px" }"#;
+    let result = execute_checked(source, "f", vec![Value::Float(1.5)]).unwrap();
+    assert_eq!(result, text("1.5 px"));
+
+    // An integral float prints without a fraction, as it does in every other backend.
+    let result = execute_checked(source, "f", vec![Value::Float(2.0)]).unwrap();
+    assert_eq!(result, text("2 px"));
+}
+
+#[test]
+fn test_float32_concatenates_as_a_float32() {
+    let source = r#"let f(w:float32) = { w + " px" }"#;
+    let result = execute_checked(source, "f", vec![Value::Float32(0.1)]).unwrap();
+    assert_eq!(result, text("0.1 px"));
+}
+
+#[test]
+fn test_boolean_concatenates() {
+    let source = r#"let f(on:boolean) = { "enabled: " + on }"#;
+    let result = execute_checked(source, "f", vec![Value::Boolean(true)]).unwrap();
+    assert_eq!(result, text("enabled: true"));
+}
+
+#[test]
+fn test_concatenation_is_left_associative() {
+    let source = r#"
+        let f() = { 1 + 2 + " items" }
+        let g() = { "n=" + 1 + 2 }
+    "#;
+    assert_eq!(
+        execute_checked(source, "f", vec![]).unwrap(),
+        text("3 items")
+    );
+    assert_eq!(execute_checked(source, "g", vec![]).unwrap(), text("n=12"));
+}
+
+#[test]
+fn test_a_string_field_access_concatenates() {
+    let source = r#"
+        type Item = { title:string }
+        let f(item:Item) = { "Reorder " + item.title }
+    "#;
+    let mut fields = rustc_hash::FxHashMap::default();
+    fields.insert(smol_str::SmolStr::new("title"), text("Rust"));
+    let item = Value::Record {
+        type_name: nx_hir::Name::new("Item"),
+        fields,
+    };
+    let result = execute_checked(source, "f", vec![item]).unwrap();
+    assert_eq!(result, text("Reorder Rust"));
+}
+
+#[test]
+fn test_a_literal_operand_is_rendered_at_the_width_it_took() {
+    // `w * 1.5` is a float32 because the literal takes the other operand's width, so the text is
+    // the float32 text of the product and not the expansion of a float64 one.
+    let source = r#"let f(w:float32) = { "" + w * 0.1 }"#;
+    let result = execute_checked(source, "f", vec![Value::Float32(1.0)]).unwrap();
+    assert_eq!(result, text("0.1"));
+}

@@ -1,3 +1,8 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { evaluateFunction, prepareNxIrModule, prepareNxIrProgram } from "@nx-lang/ir-runtime";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { NxDisposedResourceError, NxEvaluationError } from "../src/errors.js";
@@ -12,22 +17,137 @@ describe("program artifacts", () => {
     host = createNxHost(nxModule);
   });
 
-  it("builds a program and emits NX IR with metadata", () => {
+  it("builds a program and emits an NX IR image with metadata", () => {
     const artifact = host.buildProgramArtifact("let root() = { 42 }", { fileName: "demo.nx" });
     try {
-      const ir = artifact.generateNxIr();
+      const artifacts = artifact.generateNxIr();
+      expect(artifacts).toHaveLength(1);
+      const ir = artifacts[0]!;
 
-      const parsed = JSON.parse(ir.json) as { schemaVersion: unknown };
-      expect(parsed.schemaVersion).toBe(ir.metadata.schemaVersion);
-      // Compact: the IR travels inside shares and between threads, where nobody reads the text.
-      expect(ir.json).not.toContain("\n");
-      expect(ir.metadata.schemaVersion).toBeTypeOf("number");
-      expect(ir.metadata.programFingerprint).toBeTypeOf("string");
-      expect(ir.metadata.runtimeAbi).toBeTypeOf("string");
-      expect(Array.isArray(ir.metadata.functionEntrypoints)).toBe(true);
+      expect(ir.bytes).toBeInstanceOf(Uint8Array);
+      expect(new TextDecoder().decode(ir.bytes.subarray(0, 4))).toBe("NXIR");
+      expect(new DataView(ir.bytes.buffer, ir.bytes.byteOffset).getUint32(4, true)).toBe(ir.metadata.schemaVersion);
+      expect(ir.bytes.byteLength % 4).toBe(0);
+      expect(ir.identity).toBe("demo.nx");
+      expect(ir.metadata.identity).toBe("demo.nx");
+      expect(ir.metadata.schemaVersion).toBe(4);
+      expect(ir.metadata.fingerprint).toBeTypeOf("string");
+      expect(ir.metadata.runtimeAbi).toBe("nx-ir-runtime-v2");
+      expect(ir.metadata.functionEntrypoints).toEqual(["root"]);
+
+      // The image is the caller's: it reads the same after the artifact is released.
+      const prepared = prepareNxIrProgram(ir.bytes);
+      artifact.dispose();
+      expect(evaluateFunction(prepared, "root")).toBe(42);
+      expect(evaluateFunction(prepareNxIrProgram(ir.bytes), "root")).toBe(42);
     } finally {
       artifact.dispose();
     }
+  });
+
+  it("emits the debug section on request, and nothing else changes", () => {
+    const artifact = host.buildProgramArtifact("let root() = { 42 }", { fileName: "demo.nx" });
+    try {
+      const stripped = artifact.generateNxIr()[0]!.bytes;
+      const debug = artifact.generateNxIr({ debug: true })[0]!.bytes;
+      const prepared = prepareNxIrProgram(debug);
+      expect(prepared.entry.module.artifact.source).toBe("let root() = { 42 }");
+      expect(prepareNxIrProgram(stripped).entry.module.artifact.hasDebug).toBe(false);
+      // Past the header and directory, the debug image is the stripped image's sections followed
+      // by the debug section.
+      const strippedBody = stripped.subarray(16 + 6 * 12);
+      const debugBody = debug.subarray(16 + 7 * 12, 16 + 7 * 12 + strippedBody.byteLength);
+      expect(Buffer.compare(Buffer.from(debugBody), Buffer.from(strippedBody))).toBe(0);
+    } finally {
+      artifact.dispose();
+    }
+  });
+
+  it("explains an image as the CLI does, and refuses bytes that are not one", () => {
+    const artifact = host.buildProgramArtifact("let root() = { 42 }", { fileName: "demo.nx" });
+    try {
+      const [ir] = artifact.generateNxIr();
+      const text = host.explainNxIr(ir!.bytes);
+      expect(text).toContain("module demo.nx fingerprint ");
+      expect(text).toContain("function root() =\n  42\n");
+
+      expect(() => host.explainNxIr(ir!.bytes.subarray(0, 8))).toThrowError(NxEvaluationError);
+      expect(() => host.explainNxIr(new TextEncoder().encode("{}"))).toThrowError(/not an NX IR image/);
+      const old = ir!.bytes.slice();
+      new DataView(old.buffer).setUint32(4, 2, true);
+      expect(() => host.explainNxIr(old)).toThrowError(/schema version 2/);
+      expect(host.crashed).toBe(false);
+    } finally {
+      artifact.dispose();
+    }
+  });
+
+  it("explains the corpus snippet exactly as its committed text", () => {
+    const corpus = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../specs/ir-conformance/snippet/expected");
+    const image = new Uint8Array(readFileSync(path.join(corpus, "input.nx.nxir")));
+    const expected = readFileSync(path.join(corpus, "input.nx.nxir.txt"), "utf8");
+    expect(host.explainNxIr(image)).toBe(expected);
+  });
+
+  const catalog = 'export external component <SkiaLabel Text:string FontSize:int = 14 />';
+
+  it("emits a snippet without the catalog it uses, naming the catalog's version", () => {
+    const artifact = host.buildWorkspaceArtifact({
+      modules: [
+        { identity: "drawnui.nx", source: catalog, version: "9" },
+        { identity: "input.nx", source: 'let root() = <SkiaLabel Text="hi" />' }
+      ],
+      entry: "input.nx",
+      implicitImports: ["drawnui.nx"]
+    });
+    try {
+      const artifacts = artifact.generateNxIr();
+      expect(artifacts.map((entry) => entry.identity)).toEqual(["input.nx"]);
+      const ir = prepareNxIrModule(artifacts[0]!.bytes).artifact;
+      expect(ir.modules.map((entry) => entry.identity)).toEqual(["input.nx", "drawnui.nx"]);
+      expect(ir.modules[1]!.version).toBe("9");
+      const strings = Array.from({ length: ir.stringCount }, (_, index) => ir.string(index));
+      expect(strings).not.toContain("FontSize");
+      expect(ir.hasDebug).toBe(false);
+    } finally {
+      artifact.dispose();
+    }
+  });
+
+  it("emits a catalog on its own", () => {
+    const artifact = host.buildWorkspaceArtifact({
+      modules: [{ identity: "drawnui.nx", source: catalog, version: "9" }],
+      entry: "drawnui.nx"
+    });
+    try {
+      const [ir] = artifact.generateNxIr();
+      const parsed = prepareNxIrModule(ir!.bytes).artifact;
+      expect(parsed.modules).toEqual([expect.objectContaining({ identity: "drawnui.nx", version: "9" })]);
+      expect(ir!.metadata.componentEntrypoints).toEqual(["SkiaLabel"]);
+    } finally {
+      artifact.dispose();
+    }
+  });
+
+  it("reports a workspace build failure against the module it belongs to", () => {
+    let thrown: unknown;
+    try {
+      host.buildWorkspaceArtifact({
+        modules: [
+          { identity: "drawnui.nx", source: catalog },
+          { identity: "input.nx", source: 'let root() =\n  <SkiaLabel Text={ 1 - "x" } />' }
+        ],
+        entry: "input.nx",
+        implicitImports: ["drawnui.nx"]
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(NxEvaluationError);
+    const label = (thrown as NxEvaluationError).diagnostics[0]!.labels[0]!;
+    expect(label.file).toBe("input.nx");
+    expect(label.span.startLine).toBe(2);
   });
 
   it("reports a build failure as diagnostics carrying spans against the given file name", () => {

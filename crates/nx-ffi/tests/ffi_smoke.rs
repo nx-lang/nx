@@ -4,15 +4,17 @@ use nx_api::{
     load_program_artifact_from_source, ComponentDispatchResult, ComponentInitResult, NxDiagnostic,
     ProgramBuildContext,
 };
+use nx_codegen::{read_nx_ir_bundle, NxIrImage};
 use nx_ffi::{
     nx_build_program_artifact, nx_build_workspace_program_artifact, nx_codegen_js_program_module,
     nx_codegen_nx_ir, nx_component_dispatch_actions_program_artifact,
     nx_component_evaluate_program_artifact, nx_component_init_program_artifact,
     nx_create_library_registry, nx_create_program_build_context, nx_eval_program_artifact,
     nx_eval_source, nx_ffi_abi_version, nx_free_buffer, nx_free_library_registry,
-    nx_free_program_artifact, nx_free_program_build_context, nx_load_library_into_registry,
-    nx_validate_workspace, NxBuffer, NxEvalStatus, NxLibraryRegistryHandle, NxOutputFormat,
-    NxProgramArtifactHandle, NxProgramBuildContextHandle, NxWorkspaceModule, NX_FFI_ABI_VERSION,
+    nx_free_program_artifact, nx_free_program_build_context, nx_ir_explain,
+    nx_load_library_into_registry, nx_validate_workspace, NxBuffer, NxEvalStatus,
+    NxLibraryRegistryHandle, NxOutputFormat, NxProgramArtifactHandle, NxProgramBuildContextHandle,
+    NxUtf8Slice, NxWorkspaceModule, NX_FFI_ABI_VERSION,
 };
 use nx_interpreter::Interpreter;
 use nx_value::NxValue;
@@ -46,29 +48,6 @@ struct JsProgramModuleComponentExport {
     schema_export_name: String,
     initial_state_export_name: Option<String>,
     render_export_name: Option<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct NxIrPayload {
-    json: String,
-    metadata: NxIrMetadataPayload,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct NxIrMetadataPayload {
-    program_fingerprint: u64,
-    schema_version: u32,
-    runtime_abi: String,
-    function_entrypoints: Vec<NxIrEntrypointPayload>,
-    component_entrypoints: Vec<NxIrEntrypointPayload>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct NxIrEntrypointPayload {
-    name: String,
 }
 
 fn empty_buffer() -> NxBuffer {
@@ -215,21 +194,44 @@ fn workspace_descriptors(
             identity_len: identity.len(),
             source_utf8_ptr: source.as_ptr(),
             source_utf8_len: source.len(),
+            version_ptr: std::ptr::null(),
+            version_len: 0,
         })
         .collect::<Vec<_>>();
 
     (identities, sources, descriptors)
 }
 
+fn utf8_slices(values: &[&str]) -> Vec<NxUtf8Slice> {
+    values
+        .iter()
+        .map(|value| NxUtf8Slice {
+            ptr: value.as_ptr(),
+            len: value.len(),
+        })
+        .collect()
+}
+
 fn validate_workspace_handle(
     build_context: *const NxProgramBuildContextHandle,
     descriptors: &[NxWorkspaceModule],
 ) -> (NxEvalStatus, Vec<u8>) {
+    validate_workspace_handle_with_implicit_imports(build_context, descriptors, &[])
+}
+
+fn validate_workspace_handle_with_implicit_imports(
+    build_context: *const NxProgramBuildContextHandle,
+    descriptors: &[NxWorkspaceModule],
+    implicit_imports: &[&str],
+) -> (NxEvalStatus, Vec<u8>) {
+    let implicit_imports = utf8_slices(implicit_imports);
     let mut out = empty_buffer();
     let status = nx_validate_workspace(
         build_context,
         descriptors.as_ptr(),
         descriptors.len(),
+        implicit_imports.as_ptr(),
+        implicit_imports.len(),
         &mut out as *mut NxBuffer,
     );
 
@@ -241,7 +243,22 @@ fn build_workspace_artifact_handle(
     descriptors: &[NxWorkspaceModule],
     entry_identity: &str,
 ) -> (*mut NxProgramArtifactHandle, NxEvalStatus, Vec<u8>) {
+    build_workspace_artifact_handle_with_implicit_imports(
+        build_context,
+        descriptors,
+        entry_identity,
+        &[],
+    )
+}
+
+fn build_workspace_artifact_handle_with_implicit_imports(
+    build_context: *const NxProgramBuildContextHandle,
+    descriptors: &[NxWorkspaceModule],
+    entry_identity: &str,
+    implicit_imports: &[&str],
+) -> (*mut NxProgramArtifactHandle, NxEvalStatus, Vec<u8>) {
     let entry_bytes = entry_identity.as_bytes();
+    let implicit_imports = utf8_slices(implicit_imports);
     let mut out_handle: *mut NxProgramArtifactHandle = std::ptr::null_mut();
     let mut out = empty_buffer();
 
@@ -251,6 +268,8 @@ fn build_workspace_artifact_handle(
         descriptors.len(),
         entry_bytes.as_ptr(),
         entry_bytes.len(),
+        implicit_imports.as_ptr(),
+        implicit_imports.len(),
         &mut out_handle as *mut *mut NxProgramArtifactHandle,
         &mut out as *mut NxBuffer,
     );
@@ -313,18 +332,29 @@ fn codegen_js_program_module(
     )
 }
 
-fn codegen_nx_ir(program_artifact: *mut NxProgramArtifactHandle) -> (NxEvalStatus, String) {
-    let mut out = empty_buffer();
+fn codegen_nx_ir(program_artifact: *mut NxProgramArtifactHandle) -> (NxEvalStatus, Vec<u8>) {
+    codegen_nx_ir_with_options(program_artifact, "")
+}
 
+fn codegen_nx_ir_with_options(
+    program_artifact: *mut NxProgramArtifactHandle,
+    options: &str,
+) -> (NxEvalStatus, Vec<u8>) {
+    let mut out = empty_buffer();
     let status = nx_codegen_nx_ir(
         program_artifact as *const NxProgramArtifactHandle,
+        options.as_ptr(),
+        options.len(),
         &mut out as *mut NxBuffer,
     );
 
-    (
-        status,
-        String::from_utf8(copy_and_free_buffer(out)).unwrap(),
-    )
+    (status, copy_and_free_buffer(out))
+}
+
+fn explain_nx_ir(image: &[u8]) -> (NxEvalStatus, Vec<u8>) {
+    let mut out = empty_buffer();
+    let status = nx_ir_explain(image.as_ptr(), image.len(), &mut out as *mut NxBuffer);
+    (status, copy_and_free_buffer(out))
 }
 
 fn component_init_msgpack_with_program_artifact(
@@ -662,7 +692,7 @@ let root() = { <SearchBox /> }
 }
 
 #[test]
-fn ffi_codegen_nx_ir_returns_json_and_metadata() {
+fn ffi_codegen_nx_ir_returns_a_bundle_of_images_and_metadata() {
     let build_context = create_empty_build_context();
     let (program, build_status, build_bytes) =
         build_program_artifact_handle(build_context, "let root() = { 1 + 2 }", "root.nx");
@@ -672,23 +702,82 @@ fn ffi_codegen_nx_ir_returns_json_and_metadata() {
     assert!(build_bytes.is_empty());
     assert!(!program.is_null());
 
-    let (status, json) = codegen_nx_ir(program);
+    let (status, bundle) = codegen_nx_ir(program);
+    let (debug_status, debug_bundle) = codegen_nx_ir_with_options(program, r#"{"debug":true}"#);
     nx_free_program_artifact(program);
 
     assert!(matches!(status, NxEvalStatus::Ok));
-    let payload: NxIrPayload = serde_json::from_str(&json).unwrap();
-    let document: serde_json::Value = serde_json::from_str(&payload.json).unwrap();
+    let artifacts = read_nx_ir_bundle(&bundle).expect("the payload is a bundle");
+    assert_eq!(artifacts.len(), 1);
+    let artifact = &artifacts[0];
+    let image = NxIrImage::open(&artifact.bytes).expect("the image opens");
 
-    assert_eq!(document["format"], "nx-ir-json");
-    assert_eq!(payload.metadata.schema_version, 2);
-    assert_eq!(payload.metadata.runtime_abi, "nx-ir-runtime-v1");
-    assert!(payload.metadata.program_fingerprint > 0);
-    assert_eq!(payload.metadata.function_entrypoints[0].name, "root");
-    assert!(payload.metadata.component_entrypoints.is_empty());
+    assert_eq!(artifact.identity, "root.nx");
+    assert!(!image.has_debug());
+    assert_eq!(artifact.metadata.identity, "root.nx");
+    assert_eq!(artifact.metadata.schema_version, 4);
+    assert_eq!(artifact.metadata.runtime_abi, "nx-ir-runtime-v2");
+    assert_eq!(
+        artifact.metadata.fingerprint,
+        image.modules().next().unwrap().fingerprint
+    );
+    assert_eq!(
+        artifact.metadata.function_entrypoints,
+        vec!["root".to_string()]
+    );
+    assert!(artifact.metadata.component_entrypoints.is_empty());
+
+    assert!(matches!(debug_status, NxEvalStatus::Ok));
+    let debug_artifacts = read_nx_ir_bundle(&debug_bundle).expect("the payload is a bundle");
+    let debug_image = NxIrImage::open(&debug_artifacts[0].bytes).expect("the image opens");
+    assert_eq!(debug_image.source(), Some("let root() = { 1 + 2 }"));
+
+    let (status, text) = explain_nx_ir(&artifact.bytes);
+    assert!(matches!(status, NxEvalStatus::Ok));
+    let text = String::from_utf8(text).unwrap();
+    assert!(text.contains("function root() ="), "{text}");
+
+    let (status, payload) = explain_nx_ir(&artifact.bytes[..8]);
+    assert!(matches!(status, NxEvalStatus::Error));
+    let diagnostics: Vec<NxDiagnostic> = serde_json::from_slice(&payload).unwrap();
+    assert_eq!(diagnostics[0].code.as_deref(), Some("nx-ir-malformed"));
 }
 
+/// A conditional property fragment is a construct NX IR has no node for.
 #[test]
 fn ffi_codegen_nx_ir_returns_json_diagnostics_for_ir_errors() {
+    let build_context = create_empty_build_context();
+    let (program, build_status, build_bytes) = build_program_artifact_handle(
+        build_context,
+        r#"
+external component <Notice density:string />
+let root(compact:boolean) = { <Notice if compact { density="tight" } else { density="normal" } /> }
+"#,
+        "root.nx",
+    );
+    nx_free_program_build_context(build_context);
+
+    assert!(matches!(build_status, NxEvalStatus::Ok));
+    assert!(build_bytes.is_empty());
+    assert!(!program.is_null());
+
+    let (status, json) = codegen_nx_ir(program);
+    nx_free_program_artifact(program);
+
+    assert!(matches!(status, NxEvalStatus::Error));
+    let diagnostics: Vec<NxDiagnostic> = serde_json::from_slice(&json).unwrap();
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code.as_deref() == Some("codegen-unsupported-construct")),
+        "{diagnostics:?}"
+    );
+}
+
+/// An action handler is an IR node, so the source the JavaScript target refuses below emits an
+/// image whose explained text names the handler and whose feature list names handler support.
+#[test]
+fn ffi_codegen_nx_ir_carries_action_handlers() {
     let build_context = create_empty_build_context();
     let (program, build_status, build_bytes) = build_program_artifact_handle(
         build_context,
@@ -706,14 +795,24 @@ let root() = { <SearchBox onSearchSubmitted=<DoSearch query={action.query} /> />
     assert!(build_bytes.is_empty());
     assert!(!program.is_null());
 
-    let (status, json) = codegen_nx_ir(program);
+    let (status, bundle) = codegen_nx_ir(program);
     nx_free_program_artifact(program);
 
-    assert!(matches!(status, NxEvalStatus::Error));
-    let diagnostics: Vec<NxDiagnostic> = serde_json::from_str(&json).unwrap();
-    assert!(diagnostics.iter().any(|diagnostic| diagnostic
-        .message
-        .contains("action-handler codegen is not supported")));
+    assert!(matches!(status, NxEvalStatus::Ok));
+    let artifacts = read_nx_ir_bundle(&bundle).expect("the payload is a bundle");
+    assert_eq!(
+        artifacts[0].metadata.required_features,
+        vec!["action-handlers-v1".to_string()]
+    );
+    let (status, text) = explain_nx_ir(&artifacts[0].bytes);
+    assert!(matches!(status, NxEvalStatus::Ok));
+    let text = String::from_utf8(text).unwrap();
+    assert!(
+        text.contains(
+            "onSearchSubmitted=handler SearchBox.SearchSubmitted action@0:SearchBox.SearchSubmitted =>"
+        ),
+        "{text}"
+    );
 }
 
 #[test]
@@ -813,6 +912,94 @@ fn ffi_validate_workspace_returns_empty_diagnostics_payload_for_valid_workspace(
 }
 
 #[test]
+fn ffi_workspace_calls_accept_implicit_imports() {
+    let build_context = create_empty_build_context();
+    let (_identities, _sources, descriptors) = workspace_descriptors(&[
+        (
+            b"drawnui.nx",
+            b"export external component <SkiaLabel Text:string />",
+        ),
+        (b"input.nx", b"let root() = <SkiaLabel Text=\"hi\" />"),
+    ]);
+
+    let (status, bytes) = validate_workspace_handle_with_implicit_imports(
+        build_context,
+        &descriptors,
+        &["drawnui.nx"],
+    );
+    assert!(matches!(status, NxEvalStatus::Ok));
+    let diagnostics: Vec<NxDiagnostic> = rmp_serde::from_slice(&bytes).unwrap();
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+    let (handle, status, bytes) = build_workspace_artifact_handle_with_implicit_imports(
+        build_context,
+        &descriptors,
+        "input.nx",
+        &["drawnui.nx"],
+    );
+    assert!(matches!(status, NxEvalStatus::Ok), "{bytes:?}");
+    assert!(!handle.is_null());
+    nx_free_program_artifact(handle);
+
+    let (status, bytes) = validate_workspace_handle_with_implicit_imports(
+        build_context,
+        &descriptors,
+        &["missing.nx"],
+    );
+    assert!(matches!(status, NxEvalStatus::Ok));
+    let diagnostics: Vec<NxDiagnostic> = rmp_serde::from_slice(&bytes).unwrap();
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code.as_deref() == Some("implicit-import-not-found")),
+        "{diagnostics:?}"
+    );
+    nx_free_program_build_context(build_context);
+}
+
+#[test]
+fn ffi_workspace_module_version_reaches_the_module_table() {
+    let build_context = create_empty_build_context();
+    let (_identities, _sources, mut descriptors) = workspace_descriptors(&[
+        (
+            b"drawnui.nx",
+            b"export external component <SkiaLabel Text:string />",
+        ),
+        (b"input.nx", b"let root() = <SkiaLabel Text=\"hi\" />"),
+    ]);
+    let version = b"9";
+    descriptors[0].version_ptr = version.as_ptr();
+    descriptors[0].version_len = version.len();
+
+    let (handle, status, bytes) = build_workspace_artifact_handle_with_implicit_imports(
+        build_context,
+        &descriptors,
+        "input.nx",
+        &["drawnui.nx"],
+    );
+    nx_free_program_build_context(build_context);
+    assert!(matches!(status, NxEvalStatus::Ok), "{bytes:?}");
+
+    let (status, bundle) = codegen_nx_ir(handle);
+    let (versions_status, versions_bytes) =
+        codegen_nx_ir_with_options(handle, r#"{"versions":{"drawnui.nx":"9"}}"#);
+    nx_free_program_artifact(handle);
+
+    assert!(matches!(status, NxEvalStatus::Ok));
+    let artifacts = read_nx_ir_bundle(&bundle).expect("the payload is a bundle");
+    let image = NxIrImage::open(&artifacts[0].bytes).expect("the image opens");
+    let modules = image
+        .modules()
+        .map(|module| (module.identity, module.version))
+        .collect::<Vec<_>>();
+    assert_eq!(modules, vec![("input.nx", ""), ("drawnui.nx", "9")]);
+
+    // Versions are not an emit option any more; passing them is an error, not a silent no-op.
+    assert!(matches!(versions_status, NxEvalStatus::InvalidArgument));
+    assert!(versions_bytes.is_empty());
+}
+
+#[test]
 fn ffi_validate_workspace_rejects_null_module_array_with_count() {
     let build_context = create_empty_build_context();
     let mut out = empty_buffer();
@@ -821,6 +1008,8 @@ fn ffi_validate_workspace_rejects_null_module_array_with_count() {
         build_context as *const NxProgramBuildContextHandle,
         std::ptr::null(),
         1,
+        std::ptr::null(),
+        0,
         &mut out as *mut NxBuffer,
     );
     nx_free_program_build_context(build_context);
@@ -839,6 +1028,8 @@ fn ffi_validate_workspace_rejects_non_empty_null_module_fields() {
         identity_len: identity.len(),
         source_utf8_ptr: source.as_ptr(),
         source_utf8_len: source.len(),
+        version_ptr: std::ptr::null(),
+        version_len: 0,
     };
     let (identity_status, identity_bytes) =
         validate_workspace_handle(build_context, &[null_identity]);
@@ -848,6 +1039,8 @@ fn ffi_validate_workspace_rejects_non_empty_null_module_fields() {
         identity_len: identity.len(),
         source_utf8_ptr: std::ptr::null(),
         source_utf8_len: source.len(),
+        version_ptr: std::ptr::null(),
+        version_len: 0,
     };
     let (source_status, source_bytes) = validate_workspace_handle(build_context, &[null_source]);
     nx_free_program_build_context(build_context);

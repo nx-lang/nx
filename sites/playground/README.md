@@ -13,16 +13,25 @@ WebAssembly module, loaded into a Web Worker when the editor view mounts; nothin
 server.
 
 ```
-NX source ──▶ @nx-lang/sdk-wasm ──▶ nx-ir-json ──▶ @nx-lang/ir-runtime ──▶ renderer ──▶ DrawnUI
+NX source ──▶ @nx-lang/sdk-wasm ──▶ NX IR image ──▶ @nx-lang/ir-runtime ──▶ renderer ──▶ DrawnUI
    editor        (worker)                            (browser)              (browser)     canvas
      │
      └── hover / completion ──▶ @nx-lang/language-core ──▶ sdk-wasm language snapshot
            (@nx-lang/monaco)          (worker)                    (worker)
 ```
 
-One worker, one host: compiling and answering hover share an instance and the same catalog prelude,
+One worker, one host: compiling and answering hover share an instance and the same catalog module,
 so a diagnostic and a hover range land on the same line of the author's text. A compile that traps
 or overruns its deadline costs that one request — the worker is replaced and the editor stays live.
+
+The catalog (`catalog/skia.nx`) is a module of its own that every compile and every language query
+imports implicitly, so the visitor's document is analyzed exactly as written. A compile answers
+with the visitor's module alone: an NX IR artifact of a few kilobytes that names the catalog in its
+module table and carries none of its declarations. The catalog's own artifact is emitted at build
+time — a Vite plugin in `vite.config.ts` compiles it through the same wasm module and serves it as
+`virtual:nx-catalog-artifact` — and the renderer prepares it once per page and links each compile
+against it. Nothing derived is committed: the catalog text is the one source, and in development
+an edit to it re-emits the artifact.
 
 ## Prerequisites
 
@@ -65,8 +74,9 @@ pnpm test                # server, route, compile, worker and dev-shell tests, t
 pnpm run check-examples  # every example compiles, evaluates, and declares its coverage
 ```
 
-The example check compiles through the same module and the same catalog path the browser uses, so
-what is checked is what ships.
+The example check compiles through the same module and the same catalog path the browser uses, and
+links each example against the catalog artifact emitted the way the build emits it, so what is
+checked is what ships.
 
 The server tests serve a stand-in `dist/` from a temporary directory (`PLAYGROUND_DIST`), so they
 do not need a build to have run.
@@ -76,7 +86,7 @@ do not need a build to have run.
 | Path | What it is |
 |---|---|
 | `base.mjs` | the site's path prefix, and the API and health paths derived from it |
-| `catalog/skia.nx` | the generated NX catalog: external components for the DrawnUI control set |
+| `catalog/skia.nx` | the generated NX catalog: external components for the DrawnUI control set, compiled to its artifact at build time |
 | `catalog/catalog-meta.json` | which types are unions, which are records, which records are constructed |
 | `scripts/generate-catalog.mjs` | generates both from the vendored TypeScript |
 | `scripts/sync-drawnui.mjs` | re-copies DrawnUI's source, demo pages and assets |
@@ -85,10 +95,10 @@ do not need a build to have run.
 | `scripts/compile-example.mjs` | the wasm host and catalog those two scripts compile through |
 | `server/index.mjs` | serves `dist/` under the prefix, the health route, and the root redirect |
 | `src/paths.ts`, `src/routes.ts` | the prefix as the client sees it, and the address scheme under it |
-| `src/compile/` | the compile seam, and NX source + catalog → NX IR with diagnostics |
+| `src/compile/` | the compile seam, NX source + catalog → the visitor's NX IR with diagnostics, and the catalog's own artifact |
 | `src/worker/` | the compiler worker: its module load, its session, and the main thread's channel to it |
 | `src/language/` | the language service the Monaco integration is registered with |
-| `src/render/` | evaluated NX values → DrawnUI controls |
+| `src/render/` | the catalog prepared once, each compile linked against it, and evaluated NX values → DrawnUI controls |
 | `src/editor/` | the editor view, and Monaco through `@nx-lang/monaco` (grammar, highlighting, hover, completion) over `src/language/` |
 | `src/gallery/` | the gallery |
 | `src/examples/` | the ported examples and their metadata |
@@ -120,21 +130,58 @@ cached like the previous one.
 
 ## What it does not do
 
-**Authored interaction is not supported.** The TypeScript IR runtime has no action dispatch, so
-`Tapped`, `Toggled` and the rest are not in the catalog and authored NX renders statically. DrawnUI's
-own behavior still works: scroll regions scroll, carousels swipe, drawers drag, ripples play,
-switches toggle, sliders drag. What is missing is anything that would have to run authored NX in
-response — counters, readouts, navigation, animation.
+**Handlers and state run inside components; the root is evaluated once.** The renderer holds an
+instance for every use of an authored component, keyed by its position in the drawn tree. A handler
+bound on a control inside a component body becomes that control's DrawnUI event (`onTapped` is
+`Tapped`, `onToggled` is `Toggled`, and so on through the catalog's emits); the event dispatches
+the handler against the instance whose body bound it, its `<Update ... />` patches that instance's
+state, and the drawing redraws from the root without a compile. An action a component emits goes
+to the handler its parent bound, and the parent's state is patched in turn. An action nothing in
+the tree handles — an emit nobody bound, or an action outside the component's contract that a
+handler returns, such as `<DoSearch />` from a page component — is a host effect, listed in the
+diagnostics pane with the instance that produced it; the site has no host to receive it. A dispatch
+that fails is reported there too, and leaves the drawing as it was.
+Editing the source recompiles and starts every instance again.
+
+The root function is evaluated, not instantiated, so a handler bound outside any component has
+nothing to run it: the control draws without a callback and the site says so. The pattern every
+interactive example uses is a page component:
+
+```nx
+component <Page /> = {
+  state { count:int = 0 }
+  <SkiaStack>
+    <SkiaLabel Text={if count > 0 { "tapped" } else { "untapped" }} />
+    <SkiaButton Text="Tap" onTapped=<Update count={count + 1} /> />
+  </SkiaStack>
+}
+
+<Page />
+```
+
+DrawnUI's own behavior works as before: scroll regions scroll, carousels swipe, drawers drag,
+ripples play, switches toggle, sliders drag, whether or not a handler is bound.
 
 All twenty DrawnUI demo pages at the vendored commit are ported — none is omitted — and each says
-where it stands: **complete** (no note), **static** (drawn correctly, nothing responds), or
-**reduced** (scaled down, because NX cannot express the mechanism the original demonstrates). Only
-SVG is complete today; the rest gained interaction or code-driven mechanisms upstream and say so.
-Every non-complete example names the missing capability from a fixed vocabulary —
-`event-handlers`, `animation`, `component-state`, `list-virtualization`, `code-behind` (an engine
-object built or driven from code: a shader effect, a CanvasKit filter, a sprite set, a cell class
-with drag logic) — so the gallery can be read as a coverage report on NX rather than a list of
-disclaimers.
+where it stands: **complete** (no note), **static** (drawn correctly, with some of the original's
+motion or interaction absent), or **reduced** (scaled down, because NX cannot express the mechanism
+the original demonstrates). SVG, Text, Shapes and Common Controls are complete; the rest gained
+interaction or code-driven mechanisms upstream and say so. Every non-complete example names its gap
+from a fixed vocabulary, and the vocabulary separates what NX lacks from what a port has not used:
+`animation` and `code-behind` (an engine object built, driven or read from code: a shader effect,
+a CanvasKit filter, a sprite set, a cell class with drag logic, a method called on a control) are
+capabilities NX does not have, while `event-handlers` and `component-state` are capabilities NX has
+and the port does not use yet. List virtualization is not a gap: a templated `SkiaLayout` binds
+`ItemsSource` and an element function through `ItemTemplate`, and DrawnUI realizes, recycles and
+measures the cells, which is how Recycled cells and Uneven cells are ported. The gallery can be
+read as a coverage report on NX rather than a list of disclaimers, and a landed capability is never
+presented as missing.
+
+The readouts are wired: a tap count, a selected index, a slider's value, a speed, `IsOpen`. Each is
+a number or a boolean held in a page component's state, and `+` converts it to text where it joins
+the words around it (`"Tapped " + taps + "×"`). What a wired example still leaves out is what the
+original does by calling into a control — `Seek(30)`, `SelectAll()`, the accessibility manager's
+node count — which is `code-behind`, and the example says so at the point the call would appear.
 
 See `docs/FINDINGS.md` for the toolchain gaps this site ran into, and `docs/CATALOG.md` for where the
 catalog diverges from the DrawnUI object model.

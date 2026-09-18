@@ -1,0 +1,49 @@
+{
+  "app/main.nx::Panel": {
+    "batches": [
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Tap",
+          "count": 1,
+          "onTapped": {
+            "$type": "ActionHandler",
+            "action": "Control.Tapped",
+            "token": "h2-1"
+          }
+        }
+      }
+    ],
+    "initial": {
+      "$type": "Tap",
+      "count": 0,
+      "onTapped": {
+        "$type": "ActionHandler",
+        "action": "Control.Tapped",
+        "token": "h1-1"
+      }
+    }
+  },
+  "app/main.nx::card": {
+    "$type": "Card",
+    "Theme": "dark",
+    "Title": "hi"
+  },
+  "app/main.nx::local": {
+    "$type": "Local",
+    "id": 7,
+    "label": "x"
+  },
+  "app/main.nx::root": {
+    "$type": "Card",
+    "Theme": "light",
+    "Title": "Ada"
+  },
+  "app/main.nx::total": 43,
+  "app/main.nx::user": {
+    "$type": "User",
+    "id": 1,
+    "name": "Ada"
+  },
+  "shared/model.nx::answer": 42
+}

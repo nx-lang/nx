@@ -14,6 +14,30 @@ type Score = int
 
 Use aliases to name primitives or composite types for clarity.
 
+## Numbers
+
+The numeric primitives are `int`, `int32`, `int64`, `float32` and `float64`. Use `int` unless a
+declaration has a reason to name a width. A number converts on its own only when nothing can be
+lost, so numeric types widen in one direction: `int32` to `int` to `int64`, `float32` to `float64`,
+and `int32` or `int` to `float64`, which holds every `int` exactly.
+
+```nx
+type Box = { width: float64  height: float64 }
+
+// Accepted: `n` is an int, and an int is exact in a float64.
+let scaled(n: int) = { <Box width={n} height={n} /> }
+
+let total(n: int, x: float64) = { n + x }   // float64
+```
+
+Nothing narrows: an `int64` at an `int32` site, a `float64` at a `float32` site, and an `int64` at
+any floating-point site are type errors. A literal is the exception that makes this comfortable. It
+takes the numeric type of the site it is written at, so `<Box width=24 />` and `let small: int32 =
+1` both type check. Arithmetic over literals alone, such as `1.5 * 2`, is computed first and then
+does the same, so `let scale: float32 = { 1.5 * 2 }` type checks too. See
+[Numeric Types and Conversions](/reference/syntax/types#numeric-types-and-conversions) for the full
+rules.
+
 ## Records and inheritance
 
 ```nx

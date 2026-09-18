@@ -105,8 +105,8 @@ is never mistaken for a broken example, and so that an example whose drawing is 
 presented as if it were faulty:
 
 - **complete** — nothing the DrawnUI original does is missing;
-- **static** — the drawing is correct and complete, but motion or interaction the original has is
-  absent;
+- **static** — the drawing is correct and complete, but some of the motion or interaction the
+  original has is absent;
 - **reduced** — the example is scaled down because NX cannot express the mechanism the original
   demonstrates.
 
@@ -115,8 +115,13 @@ presented as if it were faulty:
 - **THEN** it SHALL NOT carry a coverage note or badge
 
 #### Scenario: A static example is distinguished from a reduced one
-- **WHEN** an example draws the original correctly but omits its motion or interaction
+- **WHEN** an example draws the original correctly but omits some of its motion or interaction
 - **THEN** it SHALL declare itself static rather than reduced
+
+#### Scenario: A static example that responds is not described as inert
+- **WHEN** a static example's coverage note is shown
+- **THEN** the note SHALL say that some of the original's motion or interaction is absent
+- **AND** it SHALL NOT say that nothing in the example responds
 
 #### Scenario: A reduced example states what the original demonstrates
 - **WHEN** an example is scaled down from the original
@@ -134,9 +139,13 @@ presented as if it were faulty:
 - **AND** the gallery SHALL NOT show an entry for it
 
 ### Requirement: Missing capabilities are named from a shared vocabulary
-An example that is not complete SHALL attribute its gap to one or more named NX capabilities drawn
+An example that is not complete SHALL attribute its gap to one or more named capabilities drawn
 from a fixed vocabulary shared across all examples, rather than to prose written per example, so
-that gaps can be counted, compared, and found again when a capability lands.
+that gaps can be counted, compared, and found again when a capability lands. The vocabulary SHALL
+distinguish a capability NX does not have from one NX has and the port does not use yet, so that
+a landed capability is not presented as missing from NX. List virtualization SHALL NOT be in the
+vocabulary of capabilities NX lacks: the two examples built on it, Cells and Uneven Cells, SHALL
+be ported with the virtualization the originals demonstrate and SHALL NOT be reduced.
 
 #### Scenario: A gap names a capability
 - **WHEN** an example declares itself static or reduced
@@ -147,9 +156,21 @@ that gaps can be counted, compared, and found again when a capability lands.
 - **THEN** the wording SHALL derive from the capabilities it names
 - **AND** two examples blocked by the same capability SHALL describe it the same way
 
+#### Scenario: A landed capability reads as a porting gap
+- **WHEN** an example names event handlers or component state as its gap
+- **THEN** the wording SHALL say the port does not use them yet
+- **AND** it SHALL NOT say NX lacks them
+
 #### Scenario: Gaps can be surveyed across the example set
 - **WHEN** the example set is inspected
 - **THEN** it SHALL be possible to determine which examples are blocked by any given capability
+
+#### Scenario: The list examples are virtualized
+- **WHEN** the Cells or Uneven Cells example is opened
+- **THEN** its source SHALL bind the original's item count through `ItemsSource` and an element
+  function through `ItemTemplate`, with the original's recycling and measuring settings
+- **AND** it SHALL NOT declare itself reduced
+- **AND** its source SHALL NOT say that NX cannot express a collection or a template
 
 ### Requirement: Example source marks where dropped behavior belonged
 Where an example omits behavior the DrawnUI original has, its NX source SHALL say so at the point
@@ -184,13 +205,53 @@ the example SHALL be authored so that the state it rests in is a deliberate one.
 - **THEN** the control SHALL be drawn at a resting position that looks intentional rather than
   mid-transition
 
+### Requirement: Examples format numbers and booleans into their readouts
+Where a DrawnUI original formats a number or a boolean into text a visitor reads, such as a tap
+count, a selected index, a slider's value, a speed or an `IsOpen` flag, and the value is one NX can
+hold, the example SHALL hold it in component state and build the text with the language's implicit
+conversion, rather than drawing a fixed string in its place. A value is one NX can hold when it is
+the example's own state or arrives in the payload of an action the catalog declares. Where the
+original numbers a run of items from an index, the example SHALL generate the run from a loop's
+index rather than spelling each item out.
+
+#### Scenario: A counter follows its taps
+- **WHEN** a visitor taps the counting button on the Transforms or the Accessibility example
+- **THEN** the button's text SHALL read `Tapped 1×`, then `Tapped 2×` on the next tap
+
+#### Scenario: A readout follows the control it reports
+- **WHEN** a visitor swipes a carousel on the Carousel & Drawer example
+- **THEN** that carousel's `SelectedIndex=` readout SHALL show the index the carousel reports
+- **AND** a whole index SHALL be shown without a fraction
+
+#### Scenario: A boolean is shown as the language prints it
+- **WHEN** a visitor opens the drawer on the Carousel & Drawer example
+- **THEN** its readout SHALL read `IsOpen: true`
+
+#### Scenario: Numbered rows come from a loop
+- **WHEN** the SkiaScroll example's source is read
+- **THEN** its numbered rows SHALL be produced by a loop that joins a prefix to the loop's index
+- **AND** the drawing SHALL show the same rows the original shows
+
+#### Scenario: A value NX cannot reach keeps its note
+- **WHEN** the original reads the value from a control or an engine object, such as a Lottie's frame
+  count or the accessibility manager's node count
+- **THEN** the example SHALL leave that part of the readout out
+- **AND** its source SHALL say so at that point, naming the code-behind capability
+
 ### Requirement: Example NX is authored against the catalog
 Every example SHALL be NX source that compiles through the site's own pipeline, rather than a
-hand-built value tree or a drawing produced some other way.
+hand-built value tree or a drawing produced some other way, and the example check SHALL expand
+every authored component in every example the way the renderer does.
 
 #### Scenario: Examples compile
 - **WHEN** the site's examples are checked
 - **THEN** every example SHALL compile with no diagnostics
+
+#### Scenario: Examples are expanded as the renderer draws them
+- **WHEN** the site's examples are checked
+- **THEN** every authored component use in every example SHALL be initialized under the instance
+  that encloses it, handler properties resolved through the parent
+- **AND** a failure inside any component body SHALL fail the check
 
 #### Scenario: An example is exactly what the editor loads
 - **WHEN** a visitor opens an example in the editor view
@@ -296,9 +357,16 @@ the source the visitor actually wrote.
 The visitor SHALL be able to use catalog controls without declaring or importing them, and the
 catalog SHALL NOT appear in the source pane.
 
-How the catalog is injected SHALL NOT constrain the shape of the visitor's file. Any source the
-language accepts as a whole file SHALL compile in the playground, and SHALL do so with the
-diagnostics and positions the visitor would see compiling that same text on its own.
+The catalog SHALL be a module of its own that every compile and every language query imports
+implicitly, so that the visitor's document is analyzed exactly as written. Any source the language
+accepts as a whole file SHALL compile in the playground, and SHALL do so with the diagnostics and
+positions the visitor would see compiling that same text on its own.
+
+A compile SHALL answer with the visitor's module alone: an NX IR artifact that names the catalog in
+its module table and carries none of the catalog's declarations and no debug section. The catalog's
+own artifact SHALL be emitted once, at build time, through the same compiler module the browser
+loads, and the site SHALL prepare it once per page and link every compile against that preparation.
+The catalog source SHALL remain the one committed form; the artifact SHALL NOT be committed.
 
 #### Scenario: Controls are used without an import
 - **WHEN** a visitor writes an element naming a catalog control
@@ -312,12 +380,30 @@ diagnostics and positions the visitor would see compiling that same text on its 
 - **WHEN** a visitor's source declares no `root` and consists of one element expression, such as
   `<SkiaLayer VerticalOptions=Fill></SkiaLayer>`
 - **THEN** compilation SHALL accept it and return IR
-- **AND** it SHALL NOT report a syntax error caused by the injected catalog
+- **AND** it SHALL NOT report a syntax error caused by the catalog
+
+#### Scenario: A compile carries the visitor's module alone
+- **WHEN** a visitor's source compiles
+- **THEN** the result SHALL be one NX IR artifact whose module table names the visitor's module
+  first and the catalog second
+- **AND** it SHALL contain no declaration of the catalog and no debug section
+
+#### Scenario: The catalog artifact is built once and linked every time
+- **WHEN** the site is built
+- **THEN** the bundle SHALL carry the catalog's NX IR artifact, emitted from the catalog source by the
+  same compiler module the worker loads
+- **AND** a visitor's compiles SHALL be linked against one preparation of that artifact
+- **AND** the example check SHALL link each example against the catalog artifact emitted the same way
+
+#### Scenario: A catalog that lacks a control the visitor names is an application fault
+- **WHEN** the bundled catalog artifact does not declare a control a compiled snippet references
+- **THEN** linking SHALL fail naming the control
+- **AND** the site SHALL report the failure rather than draw a partial tree
 
 ### Requirement: Evaluated NX values are translated to drawn controls
 The site SHALL evaluate compiled NX to a value tree and translate that tree into DrawnUI controls,
-mapping each element to the control its type names and each property to that control's
-corresponding input.
+mapping each element to the control its type names, each property to that control's corresponding
+input, and each handler property to that control's corresponding event.
 
 #### Scenario: Element types select controls
 - **WHEN** the evaluated tree contains an element naming a catalog control
@@ -336,6 +422,19 @@ corresponding input.
 - **THEN** the site SHALL reconstruct the value in the form DrawnUI expects, rather than passing the
   raw record
 
+#### Scenario: Handler properties become event callbacks
+- **WHEN** a drawn control carries a handler property `on<Event>` whose value is a handler record
+  with a token
+- **THEN** the control SHALL receive a callback under DrawnUI's event name `<Event>`
+- **AND** the callback SHALL build the emit's action record from the event's arguments, by the
+  parameter names the catalog metadata records, and dispatch it under the token
+
+#### Scenario: Authored components are drawn as instances
+- **WHEN** the evaluated tree contains a descriptor of a component the author declared
+- **THEN** the site SHALL initialize an instance from the descriptor's fields, with the enclosing
+  instance as its parent when there is one
+- **AND** it SHALL draw what the instance rendered in the descriptor's place
+
 #### Scenario: Unset properties keep DrawnUI defaults
 - **WHEN** an evaluated property carries no value
 - **THEN** the site SHALL leave the control's own default in place
@@ -345,19 +444,75 @@ corresponding input.
 - **THEN** the site SHALL report the unknown element to the visitor
 - **AND** it SHALL NOT abort drawing the rest of the tree
 
-### Requirement: Interaction is limited to DrawnUI's own behavior
-Authored NX SHALL describe appearance and structure only. The site SHALL NOT invoke authored NX in
-response to visitor interaction with the drawing.
+### Requirement: Authored handlers run in the output pane
+The site SHALL draw every use of an authored component as a component instance held by the
+renderer, SHALL turn each handler an author binds on a drawn control into that control's DrawnUI
+event, and on the event SHALL dispatch the handler against the instance whose body bound it and
+redraw from the result. Results SHALL be routed as the language defines them: an update record
+patches the state of the instance that owns the handler; an action a component emits is delivered
+to the handler its parent bound for that emit, through the token the parent's rendered output
+carries, and the parent's state is patched in turn; anything else is a host effect. Every dispatch
+SHALL be atomic with respect to the instance it targets, and a dispatch that fails SHALL leave the
+drawing as it was.
 
-#### Scenario: Built-in gestures still work
-- **WHEN** a visitor interacts with a drawn control that DrawnUI handles on its own, such as
-  scrolling a scrollable region
-- **THEN** the control SHALL respond as DrawnUI does
+#### Scenario: A tap patches state and redraws
+- **WHEN** a visitor's source declares `component <Counter /> = { state { count:int = 0 } <SkiaStack><SkiaLabel Text={if count > 0 { "tapped" } else { "untapped" }} /><SkiaButton Text="Tap" onTapped=<Update count={count + 1} /> /></SkiaStack> }` and a root of `<Counter />`
+- **AND** the visitor taps the drawn button
+- **THEN** the label SHALL redraw as `tapped`
+- **AND** no compile SHALL be issued
 
-#### Scenario: Event properties are unavailable
-- **WHEN** a visitor tries to attach behavior to a control event from NX
-- **THEN** compilation SHALL fail with a diagnostic naming the unknown property
-- **AND** the site's documentation SHALL state that authored interaction is not yet supported
+#### Scenario: Live state across taps
+- **WHEN** the button above is tapped twice
+- **THEN** the second tap's handler SHALL read the state the first tap left, so `count` is `2`
+
+#### Scenario: An emitted action reaches the parent's handler
+- **WHEN** a child component declares `emits { Chosen { name:string } }` and its body binds `onTapped=<Child.Chosen name="a" />` on a button
+- **AND** a parent component with state `picked:string = ""` uses it as `<Child onChosen=<Update picked={action.name} /> />` and draws `picked` in a label
+- **AND** the visitor taps the child's button
+- **THEN** the parent's label SHALL redraw as `a`
+
+#### Scenario: A handler in a content child patches its owner
+- **WHEN** a parent component's body places a button with `onTapped=<Update ... />` inside the content of an authored component
+- **AND** the visitor taps that button
+- **THEN** the parent's state SHALL be patched and its drawing updated
+- **AND** the content component's instance SHALL keep its own state
+
+#### Scenario: Child state survives a parent redraw
+- **WHEN** an authored child with its own state is drawn inside a parent whose state changes
+- **THEN** after the parent redraws, the child SHALL be drawn from the parent's new props and the
+  state the child held before
+
+#### Scenario: A handler outside a component is inert and reported
+- **WHEN** a visitor's source binds `onTapped` on a control in the root function rather than inside a
+  component
+- **THEN** the control SHALL draw without a callback
+- **AND** the site SHALL report, as it reports an unknown control, that handlers run inside a
+  component
+
+#### Scenario: A failed dispatch leaves the drawing
+- **WHEN** a handler's dispatch fails with a runtime diagnostic
+- **THEN** the site SHALL show the diagnostic's message in the diagnostics pane
+- **AND** the drawing SHALL be the one from before the event
+
+#### Scenario: Editing resets the instances
+- **WHEN** the visitor edits the source and it recompiles
+- **THEN** every instance SHALL start again from its initial state
+
+### Requirement: Effects the tree does not handle are shown to the visitor
+An action a handler returns that no instance in the tree handles — an emitted action nobody bound,
+or an action outside the component's contract, such as `<DoSearch />` from a page component — SHALL
+be shown to the visitor as a host effect, naming the action and the instance that produced it, so
+that a visitor can see an action leave the tree even though the site has no host to receive it.
+
+#### Scenario: An unbound emit is listed
+- **WHEN** a component declares `emits { Saved }`, its body returns `<Saved />` from a handler, and
+  its use binds no `onSaved`
+- **AND** the handler is dispatched
+- **THEN** the diagnostics pane SHALL list a `Saved` effect from that component
+
+#### Scenario: Effects are cleared on recompile
+- **WHEN** the visitor edits the source and it recompiles
+- **THEN** the listed effects SHALL be cleared
 
 ### Requirement: Compilation and language queries run in the browser behind the same seam
 The site SHALL compile NX and answer hover, completion, diagnostics and symbol queries in the
@@ -538,3 +693,41 @@ where the original names no font family.
 #### Scenario: A named font family still wins
 - **WHEN** an example sets a font family on a label or button
 - **THEN** that family SHALL be used rather than the default
+
+### Requirement: Item templates draw virtualized cells
+When a drawn control carries an `ItemTemplate` whose value is a `Function` record and an
+`ItemsSource`, the site SHALL hand DrawnUI a cell factory for that control, so that DrawnUI
+decides which cells exist, realizes them, recycles them and measures them by its own strategy.
+Each cell SHALL be a host control that, whenever DrawnUI binds it to an item, calls the function
+with `Item` bound to that item and `Index` to the item's index, and draws the resulting value as
+its content by the same translation the output pane applies to the root. The items DrawnUI is
+given SHALL be the evaluated items themselves, so that what a cell receives is what the author's
+collection holds. A cell that is rebound to another item SHALL redraw with the new item. A
+function call that fails SHALL be reported in the diagnostics pane once per failure and SHALL
+leave that cell empty rather than abort the drawing. A handler bound inside a cell SHALL be
+drawn inert and reported as such, since a cell's content is not an instance of the tree.
+
+#### Scenario: A templated list draws only the cells DrawnUI asks for
+- **WHEN** the evaluated tree contains a `SkiaLayout` with `ItemsSource` of ten thousand items,
+  `ItemTemplate` bound to a function and `RecyclingTemplate=Enabled`
+- **THEN** the site SHALL realize cells for the visible range and reuse them as the visitor scrolls
+- **AND** SHALL NOT call the function once per item up front
+
+#### Scenario: A cell is drawn from the function's result
+- **WHEN** DrawnUI binds a cell to the item at index 3
+- **THEN** the cell SHALL show what the function renders for `Item` = that item and `Index` = 3
+
+#### Scenario: Cells of uneven height are measured by the strategy the author set
+- **WHEN** a templated `SkiaLayout` sets `MeasureItemsStrategy=MeasureAll` and its template
+  renders cells of differing heights
+- **THEN** each cell SHALL be laid out at its own height
+
+#### Scenario: A failing template reports and continues
+- **WHEN** the function fails for one item
+- **THEN** the diagnostics pane SHALL show the failure with the item's index
+- **AND** the rest of the list SHALL still draw
+
+#### Scenario: An ItemTemplate without ItemsSource draws nothing templated
+- **WHEN** a control carries `ItemTemplate` and no `ItemsSource`
+- **THEN** the site SHALL pass the factory and leave DrawnUI to draw the control's static content,
+  as DrawnUI does

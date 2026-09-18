@@ -1746,7 +1746,7 @@ fn rewrite_type_ref_names(ty: &mut TypeRef, rename: &mut impl FnMut(&str) -> Opt
             return_type,
         } => {
             for param in params {
-                rewrite_type_ref_names(param, rename);
+                rewrite_type_ref_names(&mut param.ty, rename);
             }
             rewrite_type_ref_names(return_type, rename);
         }
@@ -1874,7 +1874,8 @@ fn export_literal_default(literal: &Literal) -> ExportedLiteralDefault {
     match literal {
         Literal::String(value) => ExportedLiteralDefault::String(value.as_str().to_string()),
         Literal::Int(value) => ExportedLiteralDefault::Int(*value),
-        Literal::Float(value) => ExportedLiteralDefault::Float(*value),
+        Literal::Int32(value) => ExportedLiteralDefault::Int(i64::from(*value)),
+        Literal::Float(value) | Literal::Float32(value) => ExportedLiteralDefault::Float(*value),
         Literal::Boolean(value) => ExportedLiteralDefault::Boolean(*value),
         Literal::Null => ExportedLiteralDefault::Null,
     }

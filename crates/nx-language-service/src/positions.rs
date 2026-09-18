@@ -343,12 +343,15 @@ fn type_annotation_context(chain: &[SyntaxNode<'_>], offset: usize) -> Option<Po
         }
     }
 
-    // Where error recovery produced no annotation node at all — `let value:| = 1` recovers as one
-    // flat error span — the colon that introduces the annotation is still a token in the tree.
-    // Reading it there rather than from the line keeps the answer layout-independent: the colon
-    // counts wherever it was written. This applies only inside a recovered region; a well-formed
-    // document is classified by its shape.
-    if !chain.iter().any(|node| node.kind() == SyntaxKind::ERROR) {
+    // Where error recovery produced no annotation node at all — `let value:| = 1` recovers with
+    // an error node in place of the annotation — the colon that introduces the annotation is
+    // still a token in the tree. Reading it there rather than from the line keeps the answer
+    // layout-independent: the colon counts wherever it was written. This applies only inside a
+    // recovered region, whether the cursor sits in the error node or beside it in the definition
+    // that holds it; a well-formed document is classified by its shape.
+    let in_recovered_region = chain.iter().any(|node| node.kind() == SyntaxKind::ERROR)
+        || chain.last().is_some_and(|node| node.has_error());
+    if !in_recovered_region {
         return None;
     }
     let (kind, _) = last_significant_token(*chain.first()?, offset)?;

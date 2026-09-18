@@ -1,0 +1,44 @@
+{
+  "entry": "app/main.nx",
+  "emit": [
+    "app/main.nx",
+    "shared/model.nx"
+  ],
+  "entrypoints": [
+    {
+      "module": "app/main.nx",
+      "function": "total"
+    },
+    {
+      "module": "app/main.nx",
+      "function": "user"
+    },
+    {
+      "module": "app/main.nx",
+      "function": "card"
+    },
+    {
+      "module": "app/main.nx",
+      "function": "local"
+    },
+    {
+      "module": "app/main.nx",
+      "function": "root"
+    },
+    {
+      "module": "shared/model.nx",
+      "function": "answer"
+    }
+  ],
+  "lifecycles": [
+    {
+      "module": "app/main.nx",
+      "component": "Panel",
+      "batches": [
+        [
+          { "$type": "ActionHandlerInvocation", "token": "h1-1", "action": { "$type": "Control.Tapped" } }
+        ]
+      ]
+    }
+  ]
+}

@@ -129,6 +129,11 @@ public static class NxRuntime
     /// <param name="buildContext">
     /// Build context used to resolve libraries that are not provided by workspace modules.
     /// </param>
+    /// <param name="implicitImports">
+    /// Workspace identities every other module imports implicitly, as if it began with a wildcard
+    /// import of each; a listed module imports nothing implicitly itself. An identity the workspace
+    /// does not hold is reported as a diagnostic naming it.
+    /// </param>
     /// <returns>All diagnostics reported by NX validation, or an empty list when the workspace is valid.</returns>
     /// <exception cref="ArgumentNullException">
     /// Thrown when <paramref name="workspace"/> or <paramref name="buildContext"/> is <see langword="null"/>.
@@ -141,7 +146,8 @@ public static class NxRuntime
     /// </exception>
     public static IReadOnlyList<NxDiagnostic> ValidateWorkspace(
         NxWorkspace workspace,
-        NxProgramBuildContext buildContext)
+        NxProgramBuildContext buildContext,
+        IReadOnlyList<string>? implicitImports = null)
     {
         ArgumentNullException.ThrowIfNull(workspace);
         ArgumentNullException.ThrowIfNull(buildContext);
@@ -149,10 +155,13 @@ public static class NxRuntime
         NxNativeLibrary.EnsureLoaded();
 
         using NxWorkspaceDescriptorScope descriptors = new(workspace);
+        using NxUtf8SliceScope implicitImportSlices = new(implicitImports);
         NxEvalStatus status = NxNativeMethods.nx_validate_workspace(
             buildContext.SafeHandle,
             descriptors.Pointer,
             descriptors.Count,
+            implicitImportSlices.Pointer,
+            implicitImportSlices.Count,
             out NxBuffer buffer);
         byte[] payload = CopyAndFreeBuffer(buffer);
 
@@ -343,12 +352,11 @@ public static class NxRuntime
     }
 
     /// <summary>
-    /// Builds a short-lived source artifact, generates deterministic NX IR JSON and metadata, then disposes the
-    /// artifact.
+    /// Builds a short-lived source artifact, generates its NX IR image and metadata, then disposes the artifact.
     /// </summary>
     /// <param name="source">The NX source code to compile into NX IR.</param>
     /// <param name="fileName">Optional file name used for diagnostics and local import normalization.</param>
-    /// <returns>Deterministic NX IR JSON and structured metadata.</returns>
+    /// <returns>The NX IR image and structured metadata.</returns>
     /// <exception cref="ArgumentNullException">
     /// Thrown when <paramref name="source"/> is <see langword="null"/>.
     /// </exception>
@@ -363,13 +371,13 @@ public static class NxRuntime
     }
 
     /// <summary>
-    /// Builds a short-lived source artifact against a caller-supplied build context, generates deterministic NX IR JSON
-    /// and metadata, then disposes the artifact.
+    /// Builds a short-lived source artifact against a caller-supplied build context, generates its NX IR image and
+    /// metadata, then disposes the artifact.
     /// </summary>
     /// <param name="source">The NX source code to compile into NX IR.</param>
     /// <param name="buildContext">Build context used to resolve preloaded libraries.</param>
     /// <param name="fileName">Optional file name used for diagnostics and local import normalization.</param>
-    /// <returns>Deterministic NX IR JSON and structured metadata.</returns>
+    /// <returns>The NX IR image and structured metadata.</returns>
     /// <exception cref="ArgumentNullException">
     /// Thrown when <paramref name="source"/> or <paramref name="buildContext"/> is <see langword="null"/>.
     /// </exception>
@@ -389,6 +397,34 @@ public static class NxRuntime
 
         using NxProgramArtifact programArtifact = NxProgramArtifact.Build(source, buildContext, fileName);
         return programArtifact.GenerateNxIr();
+    }
+
+    /// <summary>
+    /// Renders an NX IR image as text with every table index resolved: the same text <c>nxlang ir explain</c>
+    /// prints.
+    /// </summary>
+    /// <param name="image">The NX IR image.</param>
+    /// <returns>The explained text.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when <paramref name="image"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="NxEvaluationException">
+    /// Thrown when the bytes are not an NX IR image this build reads, with a diagnostic saying why.
+    /// </exception>
+    public static string ExplainNxIr(byte[] image)
+    {
+        ArgumentNullException.ThrowIfNull(image);
+        NxNativeLibrary.EnsureLoaded();
+
+        NxEvalStatus status = NxNativeMethods.nx_ir_explain(image, (nuint)image.Length, out NxBuffer buffer);
+        byte[] payload = CopyAndFreeBuffer(buffer);
+
+        return status switch
+        {
+            NxEvalStatus.Ok => Encoding.UTF8.GetString(payload),
+            NxEvalStatus.Error => throw CreateEvaluationExceptionFromJson(payload),
+            _ => throw CreateInteropStatusException(status),
+        };
     }
 
     /// <summary>

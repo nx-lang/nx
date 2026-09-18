@@ -1,0 +1,352 @@
+{
+  "coverage": {
+    "binaryOperators": {
+      "add": [
+        "components",
+        "conversions",
+        "expressions",
+        "handlers",
+        "two-module"
+      ],
+      "and": [
+        "expressions"
+      ],
+      "concat": [
+        "components",
+        "conversions",
+        "expressions",
+        "function-values"
+      ],
+      "div": [
+        "conversions",
+        "expressions"
+      ],
+      "eq": [
+        "conversions",
+        "expressions",
+        "function-values"
+      ],
+      "fadd32": [
+        "conversions"
+      ],
+      "fdiv32": [
+        "conversions"
+      ],
+      "fmul32": [
+        "conversions"
+      ],
+      "fsub32": [
+        "conversions"
+      ],
+      "ge": [
+        "expressions"
+      ],
+      "gt": [
+        "expressions"
+      ],
+      "idiv": [
+        "conversions",
+        "expressions"
+      ],
+      "imod": [
+        "expressions"
+      ],
+      "le": [
+        "expressions"
+      ],
+      "lt": [
+        "conversions",
+        "expressions"
+      ],
+      "mod": [
+        "expressions"
+      ],
+      "mul": [
+        "expressions",
+        "function-values"
+      ],
+      "ne": [
+        "expressions"
+      ],
+      "or": [
+        "expressions"
+      ],
+      "sub": [
+        "expressions"
+      ]
+    },
+    "constants": {
+      "bigint": [
+        "expressions"
+      ],
+      "float": [
+        "conversions",
+        "expressions"
+      ],
+      "int": [
+        "components",
+        "conversions",
+        "expressions",
+        "function-values",
+        "handlers",
+        "records",
+        "snippet",
+        "trailing-element",
+        "two-module"
+      ]
+    },
+    "declarations": {
+      "component": [
+        "components",
+        "function-values",
+        "handlers",
+        "snippet",
+        "trailing-element",
+        "two-module"
+      ],
+      "function": [
+        "components",
+        "conversions",
+        "expressions",
+        "function-values",
+        "handlers",
+        "records",
+        "snippet",
+        "trailing-element",
+        "two-module"
+      ],
+      "record": [
+        "conversions",
+        "function-values",
+        "handlers",
+        "records",
+        "two-module"
+      ],
+      "typeAlias": [
+        "function-values",
+        "records"
+      ],
+      "union": [
+        "handlers",
+        "records",
+        "two-module"
+      ],
+      "value": [
+        "components",
+        "conversions",
+        "expressions",
+        "function-values",
+        "handlers",
+        "snippet"
+      ]
+    },
+    "intrinsics": {
+      "apply": [
+        "records"
+      ],
+      "changed": [
+        "records"
+      ],
+      "diff": [
+        "records"
+      ],
+      "merge": [
+        "records"
+      ]
+    },
+    "nodes": {
+      "actionHandler": [
+        "handlers",
+        "two-module"
+      ],
+      "array": [
+        "components",
+        "conversions",
+        "expressions",
+        "function-values",
+        "handlers"
+      ],
+      "binary": [
+        "components",
+        "conversions",
+        "expressions",
+        "function-values",
+        "handlers",
+        "two-module"
+      ],
+      "bool": [
+        "conversions",
+        "expressions",
+        "snippet",
+        "trailing-element"
+      ],
+      "call": [
+        "conversions",
+        "expressions",
+        "function-values",
+        "records",
+        "two-module"
+      ],
+      "component": [
+        "components",
+        "function-values",
+        "handlers",
+        "snippet",
+        "trailing-element",
+        "two-module"
+      ],
+      "element": [
+        "expressions",
+        "handlers"
+      ],
+      "for": [
+        "components",
+        "expressions",
+        "handlers"
+      ],
+      "if": [
+        "conversions",
+        "expressions"
+      ],
+      "ifIs": [
+        "conversions",
+        "expressions"
+      ],
+      "intrinsic": [
+        "records"
+      ],
+      "member": [
+        "conversions",
+        "function-values",
+        "handlers",
+        "records",
+        "two-module"
+      ],
+      "namedCall": [
+        "function-values"
+      ],
+      "null": [
+        "expressions",
+        "records"
+      ],
+      "number": [
+        "components",
+        "conversions",
+        "expressions",
+        "function-values",
+        "handlers",
+        "records",
+        "snippet",
+        "trailing-element",
+        "two-module"
+      ],
+      "record": [
+        "conversions",
+        "function-values",
+        "handlers",
+        "records",
+        "two-module"
+      ],
+      "reference": [
+        "components",
+        "conversions",
+        "expressions",
+        "function-values",
+        "handlers",
+        "records",
+        "snippet",
+        "two-module"
+      ],
+      "slot": [
+        "components",
+        "conversions",
+        "expressions",
+        "function-values",
+        "handlers",
+        "records",
+        "two-module"
+      ],
+      "string": [
+        "components",
+        "conversions",
+        "expressions",
+        "function-values",
+        "handlers",
+        "records",
+        "snippet",
+        "trailing-element",
+        "two-module"
+      ],
+      "text": [
+        "conversions",
+        "function-values"
+      ],
+      "unary": [
+        "expressions"
+      ],
+      "unionCase": [
+        "handlers",
+        "records",
+        "two-module"
+      ]
+    },
+    "types": {
+      "array": [
+        "components",
+        "conversions",
+        "function-values",
+        "handlers",
+        "records",
+        "snippet",
+        "trailing-element"
+      ],
+      "function": [
+        "function-values"
+      ],
+      "nominal": [
+        "components",
+        "function-values",
+        "handlers",
+        "records",
+        "snippet",
+        "trailing-element",
+        "two-module"
+      ],
+      "nullable": [
+        "conversions",
+        "function-values",
+        "records"
+      ],
+      "primitive": [
+        "components",
+        "conversions",
+        "expressions",
+        "function-values",
+        "handlers",
+        "records",
+        "snippet",
+        "trailing-element",
+        "two-module"
+      ]
+    },
+    "unaryOperators": {
+      "neg": [
+        "expressions"
+      ],
+      "not": [
+        "expressions"
+      ]
+    }
+  },
+  "programs": [
+    "components",
+    "conversions",
+    "expressions",
+    "function-values",
+    "handlers",
+    "records",
+    "snippet",
+    "trailing-element",
+    "two-module"
+  ]
+}

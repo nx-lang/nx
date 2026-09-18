@@ -150,17 +150,6 @@ direction and is deferred to its own change. Note that `JSON.stringify` throws o
 `bigint`, so the IR's existing string encoding for large integer literals stays
 mandatory.
 
-### Type compatibility is widening-only at the type level but not enforced directionally
-
-`Type::is_compatible_with` treats any integer width as compatible with any other
-(same for floats). This means `int64 → int32` is implicitly allowed in argument
-passing and assignment. If width should be enforced, this needs to be split into
-directional "assignable" (widening only: int32 → int → int64 ok, the reverse an
-error) vs "comparable" (either direction) checks.
-
-`Primitive::numeric_promotion` already encodes the rank order int32 < int < int64,
-so the widening direction is defined even though compatibility does not enforce it.
-
 ### FFI boundary validation
 
 Even without full runtime 32-bit support, FFI calls should validate that values
@@ -546,6 +535,108 @@ If this is revisited in the future:
 - Note that this closes the second half of "Findings not fixed" in the `resolve-editor-positions`
   review; the first half, literal spans, was fixed in that change.
 
+## String Literal Quotes And Escapes: The Semantics Are Unconfirmed
+
+**Observed.** A string literal is one opaque token. The grammar accepts a backslash before any
+character (`seq('\\', /./)` in `crates/nx-syntax/grammar.js`), and `unquote_string_literal`
+(`crates/nx-hir/src/lower.rs`) strips the outer quotes and does nothing else. Nothing inside is
+decoded: not backslash escapes, and not the character entities the scanner already recognizes
+everywhere else. Measured today:
+
+| written | value |
+| --- | --- |
+| `"a\nb"` | `a\nb` — six characters, a literal backslash |
+| `"\""` | `\"` — a backslash and a quote |
+| `"say &quot;hi&quot;"` | `say &quot;hi&quot;` — kept as written |
+| `"a&#10;b"` | `a&#10;b` — kept as written |
+| `"Tom & Jerry"` | `Tom & Jerry` — a bare `&` is fine |
+| `'say "hi"'` | `L1: Syntax error` |
+| `let p = "C:\"` | `L1: Syntax error` — the literal never terminates |
+| a literal spanning two lines | a newline in the value |
+
+**The decision to confirm.** Which mechanism an NX string uses for a character that would otherwise
+be syntax has never been decided, and the current state is not a decision — it is a grammar that
+lexes escapes and a lowering that ignores them. Nothing in the reference documents an escape set.
+The four candidates are not exclusive:
+
+- **Backslash escapes** (`\n`, `\t`, `\r`, `\\`, `\"`, possibly `\u{...}`). What the grammar's
+  escape branch and the TextMate grammar already presume, and what the playground's examples
+  presume *against* — `sites/playground/src/examples/nx/text.nx` tells authors that "a backslash in
+  a string stays a backslash", which is true today.
+- **Character entities**, which is the answer this language already gives for text content:
+  `$.entity` is an external token admitted in `text_run` and `embed_text_run`, and
+  `crates/nx-syntax/src/scanner.c` scans named, decimal `&#DDDD;` and hex `&#xHHHH;` forms with a
+  bare `&` falling back to text, exactly HTML's rule. Extending it to string literals would make
+  the two consistent and reuse the scanner. It is not backward compatible for a string that happens
+  to contain a `&name;`-shaped run.
+- **Single-quoted literals**, which is how XML and HTML answer this in the first instance: delimit
+  with the quote the content does not use. This is purely additive — `'` has no token in the grammar
+  and there is no `char_literal` rule — and the corpus already reaches for it from the other side:
+  `sites/playground/src/examples/nx/svg.nx` writes its embedded SVG with single-quoted XML
+  attributes precisely so the NX string can keep its double quotes.
+- **No escapes at all**, making a backslash ordinary as it is in XML, which requires one of the two
+  mechanisms above to exist first or a `"` stays unwritable.
+
+These semantics want confirming deliberately before any of the bugs below are fixed, because each
+fix presumes an answer, and because two of the candidates change what existing sources mean.
+
+**Bugs in what is there today.** Each is a consequence of the above, and each should be fixed
+whichever mechanism is chosen:
+
+1. **A double quote cannot be written in a string at all.** `"\""` yields a backslash and a quote,
+   and there is no other spelling, since `'...'` does not parse. Found from the DrawnUI fiddle,
+   whose NX Welcome preset wants the `"Clicked 3 times!"` its C# and TSX twins put in a label and
+   omits the quotation marks instead.
+2. **A string cannot end with a backslash.** `let p = "C:\"` reports `L1: Syntax error`: the escape
+   branch consumes the closing quote, so the literal runs on to the next quote in the file or to the
+   end of it. A Windows path and a regex are both unwritable, and the diagnostic names neither the
+   string nor the backslash — it points at the line and says nothing else.
+3. **`"\n"` is not a line break.** A joined `string` body reads a line break in its text as one
+   space (see `implicit-primitive-conversions`), and a braced string is how an exact line break is
+   put back — but only a literal that really spans two lines does it, not `{"\n"}`.
+4. **The editor grammar paints three things the language does not have.**
+   `src/vscode/syntaxes/nx.tmLanguage.json` scopes `string.quoted.single.nx` for `'...'`, includes
+   `#entities` inside both string patterns, and matches `\\[\\"nrt]` as
+   `constant.character.escape.nx`. Single quotes are a syntax error and neither entities nor escapes
+   are decoded, so the highlighter is describing an intended language rather than the real one.
+   Whatever is chosen, that grammar and the formatter have to be brought into agreement with it.
+5. **Nothing tells an author any of this.** No reference page states the escape set, so every item
+   above is discovered by experiment. The playground recorded it as F11 in
+   `sites/playground/docs/FINDINGS.md` rather than in the language's own documentation.
+
+**What would settle it.** Confirm the mechanism, then decode in exactly one place in lowering so
+every backend sees the same value; decide whether an unknown escape or entity name is an error or
+is kept; document it in the expressions reference; and add conformance corpus cases for each form,
+beside the ones in `specs/ir-conformance/`. Search `examples/`, `specs/ir-conformance/` and
+`src/vscode/samples/` before changing any decoding, since a literal backslash or a `&name;`-shaped
+string changes meaning. If single-quoted literals are part of the answer they can land first and
+alone: they are additive, they need no decoding decision, and they close bug 1 by themselves.
+
+**Related.** "Entities in text content are kept as written" is this same question asked from the
+text side and shares the scanner — decide the two together, since whether a string carries entities
+and whether text decodes them is either one rule or two that have to be explained separately.
+"Typed Text Bodies: What A Text Type Means" turns on the same answer for a body handed to a second
+parser.
+
+## Typed Text Bodies: What A Text Type Means
+
+`implicit-primitive-conversions` made a typed body (`<Note:markdown>`) bind its text: lowering has
+an arm for `EMBED_TEXT_RUN`, the escapes `\@`, `\{` and `\}` are decoded, the body keeps its line
+breaks and loses the indentation its lines share, and `Element` records the `text_type` the tag
+names. What a text type *means* is still open.
+
+Today the text type is recorded and nothing reads it: every typed body binds as one string, exactly
+as a plain body does, and a host that wants Markdown rendered has to know from the property which
+processor to run.
+
+If this is revisited in the future:
+- Decide what a text type gives a host: the joined string as now, the text and its interpolated
+  values separately (so a processor can escape a value it did not write), or a processor named in
+  the type system rather than the tag.
+- Decide whether an unknown text type is an error, and where the known ones are declared.
+- Entities in a typed body are still kept as written, and decoding them for a Markdown processor
+  would turn `&lt;script&gt;` into raw HTML. See "Entities in text content are kept as written".
+
 ## Editor Hover: The Positions Still Unanswered
 
 `resolve-editor-positions` made hover answer at declarations, references, expressions, literals,
@@ -796,3 +887,83 @@ compiler hang — none is known; the compiler is a type checker and code generat
 non-terminating paths — would freeze the tab. Blocked on nothing but a reason: the worker's
 message protocol, the deadline and the crash handling are the playground's `src/worker`, and
 moving them to the fiddle is a port that adds a thread hop to every compile and every hover.
+
+## Logical operands: the IR runtime coerces, the interpreter demands a boolean
+
+**Observed.** The two runtimes disagree about what a non-boolean operand of `&&` or `||` means. The
+TypeScript IR runtime passes each operand through a truthiness helper, `truthy` in
+`runtime/typescript/src/index.ts`, which is `Boolean(value)`, so a string or a number is accepted
+and coerced. The Rust interpreter rejects it, raising a type error naming `logical and` at
+`crates/nx-interpreter/src/interpreter.rs`.
+
+**Why it might matter.** This is the same family as the short-circuit divergence that was fixed by
+making the IR runtime non-strict in the right operand of `and` and `or`. That one was observable and
+wrong. This one may not be observable at all, because the type checker probably rejects a
+non-boolean operand before either runtime sees it, in which case the coercion is dead code rather
+than a semantic difference. It was not verified either way.
+
+**What would settle it.** Try to compile a program whose `&&` operand is not a boolean, for example
+`let root() = { "a" && true }`. If static analysis rejects it, the coercion is unreachable and the
+helper can be replaced with a check that fails loudly, which is the safer thing for a runtime that
+reads images written by strangers. If static analysis accepts it, the two runtimes genuinely
+disagree and one of them is wrong, and a conformance corpus case should pin whichever behavior the
+language intends.
+
+**Related.** The conformance corpus gained short-circuit cases in
+`specs/ir-conformance/expressions/main.nx`. A case for this would belong beside them.
+
+## `int32` overflow: the interpreter wraps, JavaScript does not
+
+**Observed.** An `int32` result outside the `int32` range differs between backends. The interpreter
+wraps it (`wrapping_add`, `wrapping_sub` and `wrapping_mul` in
+`crates/nx-interpreter/src/eval/arithmetic.rs`), so `2147483647 + 1` at `int32` is `-2147483648`.
+The TypeScript IR runtime and generated JavaScript carry an `int32` as a `number` and compute
+`2147483648`. The TS runtime refuses that value once it reaches an `int32` parameter or field
+(`normalizePrimitiveValue`), but generated JavaScript carries it on silently. Negating `int32::MIN`
+and dividing it by `-1` hit the same edge, and the interpreter's `a / b` on `i32` panics on the
+second.
+
+**Why it might matter.** It is the one remaining way a narrow numeric type can compute a different
+value on different backends. `float32` arithmetic was made to agree by giving the IR `float32`
+operators (`fadd32` and siblings, `implicit-primitive-conversions` RF14). Integer arithmetic was
+not changed, because the `primitive-type-names` spec already says arithmetic should be checked
+rather than wrapping, and leaves that enforcement to a later change that also covers `int`'s
+±(2^53−1) range and user-declared ranges.
+
+**What would settle it.** The range-enforcement change: make integer overflow an error in the
+interpreter (`checked_add` and siblings, including `MIN / -1`), and have the JS targets check the
+result of each `int32` operation. A check after the fact is enough for checked arithmetic, since a
+product that leaves the `int32` range stays outside it even when a `float64` rounds it. That may
+mean `int32` IR operators like the `float32` ones, or a range check the runtime derives from the
+operator's checked type. Add conformance corpus cases for overflow on each operator.
+
+**Related.** `int` has the same shape at a larger scale: the interpreter wraps an `i64`, and
+JavaScript loses precision beyond 2^53.
+
+## Entities in text content are kept as written
+
+**Observed.** The grammar lexes `&amp;`, `&#10;` and `&#x0A;` in a text run as `entity` tokens, and
+the language tour says `<Tag:raw>` exists "to prevent interpretation of braces or entities". No
+backend decodes them, though. Lowering copies a run's source text (`text_run_value` in
+`crates/nx-hir/src/lower.rs`), so `<Label>a &amp; b</Label>` binds `text` to `a &amp; b`. The
+escapes `\@`, `\{` and `\}` are decoded there (`implicit-primitive-conversions` RF21). Entities
+were left alone because decoding them is a design choice, not a bug fix.
+
+**Why it might matter.** `implicit-primitive-conversions` made a text body a user-visible string
+at a `string` content property, so the undecoded form now reaches hosts and output. Decoding raises
+two questions:
+- **Which names.** The scanner accepts any `&name;`. Candidates are XML's five (`amp`, `lt`, `gt`,
+  `quot`, `apos`) plus numeric references, or HTML's full table. An unknown name could be kept, or
+  it could be a diagnostic.
+- **Where.** A typed body such as `<Note:markdown>` is handed to a host that parses it again.
+  Decoding `&lt;script&gt;` before a Markdown renderer sees it turns escaped text into raw HTML. A
+  plain body at a `string` site has no second parser, so decoding it is safe.
+
+**What would settle it.** Choose the name set and whether typed bodies decode. A likely answer is to
+decode XML's five and numeric references in plain text, reject an unknown name, and pass typed
+text through unchanged for its host to interpret. Put the decoding in `text_run_value` and add
+checker diagnostics and a conformance corpus case. Then make the tour's `raw` sentence true, or
+reword it.
+
+**Related.** The same function decodes the escapes. `\{` in a plain body does not parse today,
+although the `text_run` grammar lists `escaped_lbrace`.

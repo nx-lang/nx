@@ -93,6 +93,7 @@ body {
 .diagnostic .where { color: var(--ink-dim); white-space: nowrap; }
 .diagnostic.error .what { color: #ff8787; }
 .diagnostic.app .what { color: #ffd43b; }
+.diagnostic.effect .what { color: #74c0fc; }
 .quiet { padding: 6px 12px; color: var(--ink-dim); }
 
 .chip {

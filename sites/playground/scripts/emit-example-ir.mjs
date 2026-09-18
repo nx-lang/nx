@@ -1,35 +1,25 @@
 /**
- * Emits each example's NX IR into a directory, for comparing one edit of the corpus against another.
+ * Emits each example's NX IR, explained, into a directory, for comparing one edit of the corpus
+ * against another.
  *
- * Source provenance is stripped: spans, the retained source text, and the fingerprint over them all
- * move when a literal changes width in the file, and that movement is correct rather than a
- * difference in meaning. What is left is what must not change.
+ * Each image is written as the text `nxlang ir explain` prints rather than as bytes, so a diff
+ * between two baselines names what changed about the program. The module fingerprints are stripped
+ * from the text: a fingerprint moves whenever the source text does, and that movement is correct
+ * rather than a difference in meaning. A compile emits the example's own module without a debug
+ * section, so what is left is what must not change.
  *
  * Usage: node scripts/emit-example-ir.mjs <out-dir>
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { compile } from "./compile-example.mjs";
+import { compile, explain } from "./compile-example.mjs";
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = resolve(process.argv[2] ?? "ir-baseline");
 
-function stripProvenance(value) {
-  if (Array.isArray(value)) {
-    return value.map(stripProvenance);
-  }
-  if (value && typeof value === "object") {
-    const stripped = {};
-    for (const [key, nested] of Object.entries(value)) {
-      if (key === "span" || key === "source" || key === "sources" || key === "programFingerprint") {
-        continue;
-      }
-      stripped[key] = stripProvenance(nested);
-    }
-    return stripped;
-  }
-  return value;
+function stripProvenance(text) {
+  return text.replace(/ fingerprint \d+/g, "");
 }
 
 mkdirSync(outDir, { recursive: true });
@@ -46,7 +36,7 @@ for (const example of examples) {
     process.exitCode = 1;
     continue;
   }
-  writeFileSync(join(outDir, `${example.file}.json`), JSON.stringify(stripProvenance(ir), null, 2));
+  writeFileSync(join(outDir, `${example.file}.nxir.txt`), stripProvenance(explain(ir)));
 }
 
 console.log(`wrote IR for ${examples.length} examples to ${outDir}`);

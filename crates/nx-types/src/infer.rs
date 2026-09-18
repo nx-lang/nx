@@ -1,10 +1,13 @@
 //! Type inference for expressions.
 
 use crate::{
-    common_supertype as generic_common_supertype, float_literal_target, is_object_type,
+    common_supertype as generic_common_supertype, is_object_type, numeric_literal_target,
     resolve_type_ref_with, resolve_type_ref_with_seen,
     semantics::PRIMITIVE_TYPE_NAMES,
-    ty::{DeclaringOrigin, NamedType, Primitive, TypeParameterRef, UnionCaseType, UnionType},
+    ty::{
+        check_function_satisfies, DeclaringOrigin, FunctionMismatch, FunctionParam, NamedType,
+        Primitive, TypeParameterRef, UnionCaseType, UnionType,
+    },
     type_satisfies_expected as generic_type_satisfies_expected, Type, TypeEnvironment,
 };
 use nx_diagnostics::{Diagnostic, Label, TextSpan};
@@ -13,7 +16,7 @@ use nx_hir::{
     interface_component, interface_function_signature, interface_type_alias, interface_union,
     is_record_subtype, ElementId, ExprId, InterfaceItemKind, Item, Name, PreparedBindingOrigin,
     PreparedItemKind, PreparedModule, PreparedNamespace, PropertyEntry, ResolvedPreparedItem,
-    UnionCaseDef, UnionDef, UpdateIntrinsic,
+    StringConversions, UnionCaseDef, UnionDef, UpdateIntrinsic,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -153,6 +156,75 @@ struct PropertyPathBinding {
     value: ExprId,
 }
 
+/// The source spelling of a binary operator, for diagnostics.
+fn binop_spelling(op: ast::BinOp) -> &'static str {
+    use ast::BinOp::*;
+    match op {
+        Add => "+",
+        Sub => "-",
+        Mul => "*",
+        Div => "/",
+        Mod => "%",
+        Eq => "==",
+        Ne => "!=",
+        Lt => "<",
+        Le => "<=",
+        Gt => ">",
+        Ge => ">=",
+        And => "&&",
+        Or => "||",
+    }
+}
+
+/// Why a constant expression has no value.
+enum ConstantProblem {
+    DivisionByZero,
+    Overflow,
+}
+
+/// Applies an arithmetic operator to two folded constants, as evaluation would: two integers as an
+/// `int`, and anything else as a `float64`.
+fn fold_binary(
+    op: ast::BinOp,
+    lhs: ast::Literal,
+    rhs: ast::Literal,
+) -> Result<ast::Literal, ConstantProblem> {
+    use ast::{BinOp, Literal, OrderedFloat};
+
+    if let (Literal::Int(a), Literal::Int(b)) = (&lhs, &rhs) {
+        let (a, b) = (*a, *b);
+        if matches!(op, BinOp::Div | BinOp::Mod) && b == 0 {
+            return Err(ConstantProblem::DivisionByZero);
+        }
+        let value = match op {
+            BinOp::Add => a.checked_add(b),
+            BinOp::Sub => a.checked_sub(b),
+            BinOp::Mul => a.checked_mul(b),
+            BinOp::Div => a.checked_div(b),
+            _ => a.checked_rem(b),
+        };
+        return value.map(Literal::Int).ok_or(ConstantProblem::Overflow);
+    }
+
+    let real = |literal: &Literal| match literal {
+        Literal::Int(value) => *value as f64,
+        Literal::Float(value) => value.0,
+        _ => unreachable!("only numeric literals are folded"),
+    };
+    let (a, b) = (real(&lhs), real(&rhs));
+    if matches!(op, BinOp::Div | BinOp::Mod) && b == 0.0 {
+        return Err(ConstantProblem::DivisionByZero);
+    }
+    let value = match op {
+        BinOp::Add => a + b,
+        BinOp::Sub => a - b,
+        BinOp::Mul => a * b,
+        BinOp::Div => a / b,
+        _ => a % b,
+    };
+    Ok(Literal::Float(OrderedFloat(value)))
+}
+
 fn handler_prop_name(emit_name: &str) -> String {
     format!("on{}", emit_name)
 }
@@ -207,12 +279,33 @@ pub struct InferenceContext<'a> {
     /// Consumed after analysis to rewrite each `Expr::ContextualName` into the qualified member
     /// access it resolved to, so nothing downstream of type checking can observe the bare spelling.
     resolved_contextual_names: FxHashMap<ExprId, ContextualResolution>,
-    /// Integer literals that took a floating-point type from their binding site.
+    /// Numeric literals that took a numeric type from their site, and the type each took.
     ///
-    /// Consumed after analysis to rewrite each one into a float literal, on the same terms and for
-    /// the same reason as `resolved_contextual_names`: nothing downstream of type checking should
-    /// have to know that the author wrote `24` where `24.0` was expected, or be able to tell.
-    converted_int_literals: FxHashMap<ExprId, Primitive>,
+    /// Consumed after analysis to rewrite each one into a literal of that width, on the same terms
+    /// and for the same reason as `resolved_contextual_names`: nothing downstream of type checking
+    /// should have to know that the author wrote `24` where `24.0` was expected, or `1` where an
+    /// `int32` was, or be able to tell.
+    converted_literals: FxHashMap<ExprId, Primitive>,
+    /// Constant expressions that took a numeric type from their site, and the value each folded
+    /// to, at the type its literals have on their own.
+    ///
+    /// Consumed after analysis to replace each with that literal, before `converted_literals`
+    /// gives the literal the site's width. The expression is also in `converted_literals`.
+    folded_constants: FxHashMap<ExprId, ast::Literal>,
+    /// The additions that concatenate, the operands rendered as text, and the text bodies joined
+    /// into one string.
+    ///
+    /// Consumed after analysis to rewrite each into `Concat` and `ToText` nodes, on the same
+    /// terms as `converted_literals`. Whether a `+` adds or concatenates is decided here, where
+    /// every operand's type is known, and nowhere else.
+    string_conversions: StringConversions,
+    /// The branches of a join that widen, and the numeric type each widens to.
+    ///
+    /// Joining an `int` branch with a `float64` one types the join as `float64`, but the `int`
+    /// branch still produces an integer. Consumed after analysis to wrap each such branch in an
+    /// `Expr::Widen`, on the same terms as `converted_literals`, so a runtime that tells the two
+    /// apart produces the value the join's type says.
+    widened_joins: FxHashMap<ExprId, Primitive>,
     /// The type parameters a type annotation can currently name, and what each one denotes.
     ///
     /// <para>While a component's signature, defaults, and body are checked, each of its effective
@@ -230,11 +323,31 @@ pub struct InferenceContext<'a> {
     /// Consumed after analysis to remove each binding from its element, on the same terms as
     /// `resolved_contextual_names`: a type argument is a spelling only the checker understands.
     consumed_type_arguments: FxHashSet<ExprId>,
+    /// Elements whose tag named a function-typed value rather than a declared element, so the
+    /// element is a call of that value with arguments bound by name; each maps to the name of the
+    /// type's content parameter, which body content binds to, when the type has one.
+    function_value_calls: FxHashMap<ElementId, Option<Name>>,
     /// The type each use site bound to each of its target's type parameters, by element.
     ///
     /// Nothing in analysis reads this back; it is kept in the analysis result so that carrying
     /// use-site arguments into generated output later is an additive change below the checker.
     resolved_type_arguments: FxHashMap<ElementId, Vec<(Name, Type)>>,
+    /// The `for` loops with an index whose body is being checked, innermost last.
+    ///
+    /// Read when a type error is reported, to say which name is the item and which the index
+    /// when the error reads like the two were swapped.
+    indexed_loops: Vec<IndexedLoop>,
+}
+
+/// The names an indexed `for` binds, and where its body uses them.
+struct IndexedLoop {
+    item: Name,
+    index: Name,
+    item_ty: Type,
+    /// The depth of the scope the loop binds its names in.
+    scope_depth: usize,
+    item_uses: Vec<TextSpan>,
+    index_uses: Vec<TextSpan>,
 }
 
 impl<'a> InferenceContext<'a> {
@@ -259,10 +372,15 @@ impl<'a> InferenceContext<'a> {
             record_origins: FxHashMap::default(),
             component_origins: FxHashMap::default(),
             resolved_contextual_names: FxHashMap::default(),
-            converted_int_literals: FxHashMap::default(),
+            converted_literals: FxHashMap::default(),
+            folded_constants: FxHashMap::default(),
+            string_conversions: StringConversions::default(),
+            widened_joins: FxHashMap::default(),
             type_parameter_scope: FxHashMap::default(),
             consumed_type_arguments: FxHashSet::default(),
+            function_value_calls: FxHashMap::default(),
             resolved_type_arguments: FxHashMap::default(),
+            indexed_loops: Vec::new(),
         };
         ctx.register_type_definitions();
         ctx.register_function_signatures();
@@ -321,6 +439,7 @@ impl<'a> InferenceContext<'a> {
 
             // Identifiers look up in environment
             ast::Expr::Ident(name) => {
+                self.record_loop_name_use(expr_id, name);
                 if let Some(ty) = self.env.lookup(name) {
                     ty.clone()
                 } else {
@@ -330,10 +449,15 @@ impl<'a> InferenceContext<'a> {
 
             // Binary operations
             ast::Expr::BinaryOp { lhs, op, rhs, span } => {
-                let lhs_ty = self.infer_expr(*lhs);
-                let rhs_ty = self.infer_expr(*rhs);
+                self.infer_binop(expr_id, *op, *lhs, *rhs, *span)
+            }
 
-                self.infer_binop(*op, &lhs_ty, &rhs_ty, *span)
+            // Only reached by re-inference: both are produced by the rewrite that runs after
+            // analysis, from decisions this checker made.
+            ast::Expr::Concat { .. } | ast::Expr::ToText { .. } => Type::string(),
+            ast::Expr::Widen { expr, ty, .. } => {
+                let inner = self.infer_expr(*expr);
+                widened_type(&inner, *ty)
             }
 
             // Unary operations
@@ -350,6 +474,29 @@ impl<'a> InferenceContext<'a> {
                     self.infer_intrinsic_call(intrinsic, args, *span)
                 } else {
                     let func_ty = self.infer_expr(*func);
+
+                    // A function-typed value is called as an element, never by position: the
+                    // value's own declaration may order — or omit — parameters differently from
+                    // the type, so positions would mean nothing at run time.
+                    if let Some((name, params)) = self.function_value_callee(*func) {
+                        let form = std::iter::once(format!("<{name}"))
+                            .chain(params.iter().map(|param| format!("{}=...", param.name)))
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                            + " />";
+                        self.error(
+                            "positional-call-of-function-value",
+                            format!(
+                                "'{name}' is a function-typed value, so its arguments bind by name; \
+                                 call it as an element, {form}"
+                            ),
+                            *span,
+                        );
+                        for arg in args {
+                            self.infer_expr(*arg);
+                        }
+                        return Type::Error;
+                    }
 
                     // Infer argument types
                     let arg_tys: Vec<_> = args.iter().map(|arg| self.infer_expr(*arg)).collect();
@@ -381,7 +528,12 @@ impl<'a> InferenceContext<'a> {
                 if let Some(else_id) = else_branch {
                     let else_ty = self.infer_expr(*else_id);
 
-                    self.common_supertype(&then_ty, &else_ty)
+                    let joined = self.common_supertype(&then_ty, &else_ty);
+                    self.record_join_widenings(
+                        &[(*then_branch, then_ty), (*else_id, else_ty)],
+                        &joined,
+                    );
+                    joined
                 } else {
                     // No else branch - type is void
                     Type::void()
@@ -406,6 +558,8 @@ impl<'a> InferenceContext<'a> {
                 } else {
                     let elem_tys: Vec<_> = elements.iter().map(|e| self.infer_expr(*e)).collect();
                     let item_ty = self.common_sequence_item_type(&elem_tys, *span);
+                    let members = elements.iter().copied().zip(elem_tys).collect::<Vec<_>>();
+                    self.record_join_widenings(&members, &item_ty);
                     Type::array(item_ty)
                 }
             }
@@ -535,11 +689,22 @@ impl<'a> InferenceContext<'a> {
                 };
 
                 self.env.push_scope();
-                self.env.bind(item.clone(), item_ty);
+                self.env.bind(item.clone(), item_ty.clone());
                 if let Some(index_name) = index {
                     self.env.bind(index_name.clone(), Type::int());
+                    self.indexed_loops.push(IndexedLoop {
+                        item: item.clone(),
+                        index: index_name.clone(),
+                        item_ty,
+                        scope_depth: self.env.scope_depth(),
+                        item_uses: Vec::new(),
+                        index_uses: Vec::new(),
+                    });
                 }
                 let body_ty = self.infer_expr(*body);
+                if index.is_some() {
+                    self.indexed_loops.pop();
+                }
                 self.env.pop_scope();
 
                 Type::array(body_ty)
@@ -578,19 +743,17 @@ impl<'a> InferenceContext<'a> {
 
     /// Infers all types within a function, binding parameters while visiting the body.
     pub fn infer_function(&mut self, func: &nx_hir::Function) {
-        let mut bound_names = Vec::new();
-
+        // Parameters get a scope of their own, so one that shares a name with a top-level binding
+        // — a function-typed parameter `Row` beside a declared function `Row` — shadows it for
+        // the body and leaves it in place afterwards.
+        self.env.push_scope();
         for param in &func.params {
             let param_ty = self.type_from_type_ref(&param.ty);
             self.env.bind(param.name.clone(), param_ty);
-            bound_names.push(param.name.clone());
         }
 
         let body_ty = self.infer_expr(func.body);
-
-        for name in bound_names {
-            self.env.remove(&name);
-        }
+        self.env.pop_scope();
 
         let return_ty = if let Some(ty) = func.return_type.as_ref() {
             let expected = self.type_from_type_ref(ty);
@@ -984,7 +1147,9 @@ impl<'a> InferenceContext<'a> {
         match lit {
             ast::Literal::String(_) => Type::string(),
             ast::Literal::Int(_) => Type::int(),
+            ast::Literal::Int32(_) => Type::int32(),
             ast::Literal::Float(_) => Type::float64(),
+            ast::Literal::Float32(_) => Type::float32(),
             ast::Literal::Boolean(_) => Type::boolean(),
             ast::Literal::Null => Type::nullable(self.fresh_var()),
         }
@@ -1009,6 +1174,7 @@ impl<'a> InferenceContext<'a> {
 
         let mut covered_cases = FxHashSet::default();
         let mut result_tys = Vec::new();
+        let mut result_members = Vec::new();
 
         for arm in arms {
             let pattern_tys = arm
@@ -1039,6 +1205,7 @@ impl<'a> InferenceContext<'a> {
                     self.infer_expr(arm.body)
                 };
 
+            result_members.push((arm.body, body_ty.clone()));
             result_tys.push(body_ty);
         }
 
@@ -1050,7 +1217,9 @@ impl<'a> InferenceContext<'a> {
         });
 
         if let Some(else_id) = else_branch {
-            result_tys.push(self.infer_expr(else_id));
+            let else_ty = self.infer_expr(else_id);
+            result_members.push((else_id, else_ty.clone()));
+            result_tys.push(else_ty);
         } else if let Some(union_ty) = union_ty.as_ref() {
             if !is_exhaustive {
                 let missing = union_ty
@@ -1074,7 +1243,9 @@ impl<'a> InferenceContext<'a> {
             result_tys.push(Type::void());
         }
 
-        self.common_result_type(&result_tys)
+        let joined = self.common_result_type(&result_tys);
+        self.record_join_widenings(&result_members, &joined);
+        joined
     }
 
     fn infer_match_pattern(&mut self, pattern: ExprId, scrutinee_ty: &Type) -> Type {
@@ -1182,6 +1353,25 @@ impl<'a> InferenceContext<'a> {
         }
     }
 
+    /// Records each branch of a join whose numeric type is narrower than the join's.
+    ///
+    /// <para>A branch is recorded against the join's numeric type, which is also what it widens
+    /// to inside a list or a nullable type. A branch that already has the join's type, or that
+    /// the join did not widen (an `object` join, say), is forgotten, since inference can visit a
+    /// join more than once.</para>
+    fn record_join_widenings(&mut self, members: &[(ExprId, Type)], joined: &Type) {
+        for (expr, ty) in members {
+            match join_widening(ty, joined) {
+                Some(target) => {
+                    self.widened_joins.insert(*expr, target);
+                }
+                None => {
+                    self.widened_joins.remove(expr);
+                }
+            }
+        }
+    }
+
     fn common_result_type(&self, result_tys: &[Type]) -> Type {
         let mut current = result_tys.first().cloned().unwrap_or_else(Type::void);
 
@@ -1192,72 +1382,131 @@ impl<'a> InferenceContext<'a> {
         current
     }
 
-    /// Infers the result type of a binary operation.
+    /// Infers the result type of a binary operation, typing its operands first.
+    ///
+    /// <para>Two numeric operands are typed at the narrowest type both widen to, for arithmetic
+    /// and comparison alike; a pair with no such type is rejected naming both. A literal operand
+    /// first takes the other operand's numeric type, on the same terms as at a binding site, so a
+    /// width the author chose for one operand is not lost to the literal's default: `w * 1.5` is
+    /// a `float32` when `w` is.</para>
+    ///
+    /// <para>`+` with a string operand is concatenation. That is decided here, the one place both
+    /// operand types are known, and recorded for the rewrite that makes it an `Expr::Concat` with
+    /// each non-string operand wrapped in its text conversion.</para>
     fn infer_binop(
         &mut self,
+        expr_id: ExprId,
         op: ast::BinOp,
-        lhs: &Type,
-        rhs: &Type,
+        lhs: ExprId,
+        rhs: ExprId,
         span: nx_diagnostics::TextSpan,
     ) -> Type {
         use ast::BinOp::*;
 
+        let mut lhs_ty = self.infer_expr(lhs);
+        let mut rhs_ty = self.infer_expr(rhs);
+
         // Skip error checking if either operand is error
-        if lhs.is_error() || rhs.is_error() {
+        if lhs_ty.is_error() || rhs_ty.is_error() {
             return Type::Error;
         }
 
+        if !matches!(op, And | Or) {
+            match self.convert_literal_operand(op, lhs, &rhs_ty, span) {
+                Some(Ok(ty)) => lhs_ty = ty,
+                Some(Err(())) => return Type::Error,
+                None => {}
+            }
+            match self.convert_literal_operand(op, rhs, &lhs_ty, span) {
+                Some(Ok(ty)) => rhs_ty = ty,
+                Some(Err(())) => return Type::Error,
+                None => {}
+            }
+        }
+        let (lhs_ty, rhs_ty) = (lhs_ty, rhs_ty);
+
+        let numeric_pair = match (&lhs_ty, &rhs_ty) {
+            (Type::Primitive(a), Type::Primitive(b)) if a.is_numeric() && b.is_numeric() => {
+                Some((*a, *b))
+            }
+            _ => None,
+        };
+
         match op {
-            // Arithmetic: same numeric category with promotion
+            // Arithmetic: the narrowest type both operands widen to
             Add | Sub | Mul | Div | Mod => {
-                if let (Type::Primitive(a), Type::Primitive(b)) = (lhs, rhs) {
-                    if a.is_numeric() && b.is_numeric() {
-                        if let Some(promoted) = crate::ty::Primitive::numeric_promotion(*a, *b) {
-                            return Type::Primitive(promoted);
-                        } else {
+                if let Some((a, b)) = numeric_pair {
+                    return match Primitive::numeric_promotion(a, b) {
+                        Some(promoted) => Type::Primitive(promoted),
+                        None => {
                             self.error(
                                 "type-mismatch",
-                                format!("Cannot mix integer and float types: {} and {}", lhs, rhs),
+                                format!(
+                                    "Cannot apply {} to {} and {}: neither converts to the other \
+                                     without loss, so the conversion is not implicit",
+                                    binop_spelling(op),
+                                    lhs_ty,
+                                    rhs_ty
+                                ),
                                 span,
                             );
-                            return Type::Error;
+                            Type::Error
                         }
+                    };
+                }
+                if op == Add {
+                    if let Some(ty) =
+                        self.infer_concatenation(expr_id, lhs, &lhs_ty, rhs, &rhs_ty, span)
+                    {
+                        return ty;
                     }
                 }
-                if lhs == &Type::string() && rhs == &Type::string() && op == Add {
-                    Type::string()
-                } else {
+                self.error(
+                    "type-mismatch",
+                    format!(
+                        "Binary operator {:?} cannot be applied to types {} and {}",
+                        op, lhs_ty, rhs_ty
+                    ),
+                    span,
+                );
+                Type::Error
+            }
+
+            // Comparison: T × T → bool (where T supports comparison). Two numeric operands compare
+            // at the narrowest type both widen to. Two cases of one union are comparable for
+            // equality with each other, since a value of that union is either of them; union
+            // cases have no order, so the relational operators stay rejected.
+            Eq | Ne | Lt | Le | Gt | Ge => {
+                if let Some((a, b)) = numeric_pair {
+                    if Primitive::numeric_promotion(a, b).is_some() {
+                        return Type::boolean();
+                    }
                     self.error(
                         "type-mismatch",
                         format!(
-                            "Binary operator {:?} cannot be applied to types {} and {}",
-                            op, lhs, rhs
+                            "Cannot compare {} and {}: neither converts to the other without \
+                             loss, so the conversion is not implicit",
+                            lhs_ty, rhs_ty
                         ),
                         span,
                     );
-                    Type::Error
+                    return Type::Error;
                 }
-            }
-
-            // Comparison: T × T → bool (where T supports comparison). Two cases of one union are
-            // comparable for equality with each other, since a value of that union is either of
-            // them; union cases have no order, so the relational operators stay rejected.
-            Eq | Ne | Lt | Le | Gt | Ge => {
                 let sibling_cases = matches!(op, Eq | Ne)
                     && matches!(
-                        (lhs, rhs),
+                        (&lhs_ty, &rhs_ty),
                         (Type::UnionCase(lhs_case), Type::UnionCase(rhs_case))
                             if lhs_case.shares_union_with(rhs_case)
                     );
                 if sibling_cases
-                    || self.type_satisfies_expected(lhs, rhs)
-                    || self.type_satisfies_expected(rhs, lhs)
+                    || self.type_satisfies_expected(&lhs_ty, &rhs_ty)
+                    || self.type_satisfies_expected(&rhs_ty, &lhs_ty)
                 {
                     Type::boolean()
                 } else {
                     self.error(
                         "type-mismatch",
-                        format!("Cannot compare types {} and {}", lhs, rhs),
+                        format!("Cannot compare types {} and {}", lhs_ty, rhs_ty),
                         span,
                     );
                     Type::Error
@@ -1266,37 +1515,113 @@ impl<'a> InferenceContext<'a> {
 
             // Logical: boolean × boolean → boolean
             And | Or => {
-                if lhs == &Type::boolean() && rhs == &Type::boolean() {
+                if lhs_ty == Type::boolean() && rhs_ty == Type::boolean() {
                     Type::boolean()
                 } else {
                     self.error(
                         "type-mismatch",
                         format!(
                             "Logical operator {:?} requires boolean operands, found {} and {}",
-                            op, lhs, rhs
+                            op, lhs_ty, rhs_ty
                         ),
                         span,
                     );
                     Type::Error
                 }
             }
+        }
+    }
 
-            Concat => {
-                // String concatenation
-                if lhs == &Type::string() && rhs == &Type::string() {
-                    Type::string()
-                } else {
+    /// Types a literal operand by the other operand's numeric type, if it is one.
+    ///
+    /// <para>`None` when `operand` is not a numeric literal or `other` is not numeric, so the
+    /// operand keeps the type it has. `Some(Ok(ty))` is the type the literal now has, and
+    /// `Some(Err(()))` means it could not take the type — out of range, or not exact — and the
+    /// diagnostic is already reported.</para>
+    fn convert_literal_operand(
+        &mut self,
+        op: ast::BinOp,
+        operand: ExprId,
+        other: &Type,
+        span: TextSpan,
+    ) -> Option<Result<Type, ()>> {
+        if !matches!(other, Type::Primitive(primitive) if primitive.is_numeric()) {
+            return None;
+        }
+        let context = format!("An operand of {}", binop_spelling(op));
+        match self.convert_literals(operand, other, span, &context)? {
+            true => Some(Ok(self
+                .env
+                .get_expr_type(operand)
+                .cloned()
+                .unwrap_or(Type::Error))),
+            false => Some(Err(())),
+        }
+    }
+
+    /// Types a `+` as string concatenation when either operand is a string.
+    ///
+    /// <para>`None` when neither operand is a string, so the caller reports the addition as it
+    /// would any other mistyped one. With a string operand, the other must be a string or a
+    /// stringifiable primitive — a number or a boolean — and is recorded for its text conversion;
+    /// anything else is rejected naming its type. `null` and a nullable type are among the
+    /// rejected: there is no one text a missing value obviously has.</para>
+    fn infer_concatenation(
+        &mut self,
+        expr_id: ExprId,
+        lhs: ExprId,
+        lhs_ty: &Type,
+        rhs: ExprId,
+        rhs_ty: &Type,
+        span: TextSpan,
+    ) -> Option<Type> {
+        let string = Type::string();
+        if lhs_ty != &string && rhs_ty != &string {
+            return None;
+        }
+
+        let mut accepted = true;
+        for (operand, ty) in [(lhs, lhs_ty), (rhs, rhs_ty)] {
+            if ty == &string {
+                continue;
+            }
+            match Self::stringifiable_primitive(ty) {
+                Some(primitive) => {
+                    self.string_conversions
+                        .text_conversions
+                        .insert(operand, primitive);
+                }
+                None => {
+                    let found = if Self::is_null_literal_type(ty) {
+                        "null".to_string()
+                    } else {
+                        ty.to_string()
+                    };
                     self.error(
                         "type-mismatch",
                         format!(
-                            "String concatenation requires string operands, found {} and {}",
-                            lhs, rhs
+                            "Cannot join {} to a string with +: only a string, a number or a \
+                             boolean has a text form",
+                            found
                         ),
                         span,
                     );
-                    Type::Error
+                    accepted = false;
                 }
             }
+        }
+        if !accepted {
+            return Some(Type::Error);
+        }
+        self.string_conversions.concatenations.insert(expr_id);
+        Some(string)
+    }
+
+    /// The HIR name of `ty` when it is a primitive with a canonical text form.
+    fn stringifiable_primitive(ty: &Type) -> Option<ast::PrimitiveType> {
+        match ty {
+            Type::Primitive(primitive) if primitive.is_stringifiable() => primitive.hir_type(),
+            _ => None,
         }
     }
 
@@ -1373,11 +1698,11 @@ impl<'a> InferenceContext<'a> {
 
                 // Check argument types. The argument expression is passed so a literal written
                 // there can take the parameter's type.
-                for (i, (param_ty, arg_ty)) in params.iter().zip(arg_tys.iter()).enumerate() {
+                for (i, (param, arg_ty)) in params.iter().zip(arg_tys.iter()).enumerate() {
                     self.check_typed_binding_for(
                         args.get(i).copied(),
                         arg_ty,
-                        param_ty,
+                        &param.ty,
                         span,
                         "type-mismatch",
                         format!("Argument {}", i),
@@ -1448,7 +1773,7 @@ impl<'a> InferenceContext<'a> {
             // declared *that field*, which is not always the module the record itself came from.
             Type::Named(named) => {
                 let Ok(Some(shape)) = self.record_shape_of(named) else {
-                    return self.member_access_unsupported(member, span);
+                    return self.member_access_unsupported(member, span, None);
                 };
                 let Some(field) = shape.fields.iter().find(|field| field.name == *member) else {
                     let known = shape
@@ -1472,16 +1797,25 @@ impl<'a> InferenceContext<'a> {
                 self.type_from_type_ref_in(Some(&declaring_module), &field_ty)
             }
             Type::Error => Type::Error,
-            _ => self.member_access_unsupported(member, span),
+            other => {
+                let base_ty = other.clone();
+                self.member_access_unsupported(member, span, Some(&base_ty))
+            }
         }
     }
 
     /// Reports a member access on a base that has no fields to reach.
-    fn member_access_unsupported(&mut self, member: &Name, span: TextSpan) -> Type {
-        self.error(
+    fn member_access_unsupported(
+        &mut self,
+        member: &Name,
+        span: TextSpan,
+        base_ty: Option<&Type>,
+    ) -> Type {
+        self.error_involving(
             "not-implemented",
             format!("Member access not yet implemented: .{}", member),
             span,
+            base_ty,
         );
         Type::Error
     }
@@ -1675,6 +2009,34 @@ impl<'a> InferenceContext<'a> {
         element: &nx_hir::Element,
         span: TextSpan,
     ) -> Type {
+        // A tag that names a function-typed value — a prop, a parameter, a `let` — is a call of
+        // that value: every parameter of the type is required, since the value's own declaration
+        // may need any of them, and an argument the type lacks has nowhere to go.
+        if let Some((params, ret)) = self.function_typed_value(&element.tag) {
+            let content_property = params
+                .iter()
+                .find(|param| param.is_content)
+                .map(|param| param.name.clone());
+            let spec = ElementBindingSpec {
+                content_property: content_property.clone(),
+                properties: params
+                    .iter()
+                    .map(|param| {
+                        (
+                            param.name.clone(),
+                            ElementPropertySpec::new(param.ty.clone(), true),
+                        )
+                    })
+                    .collect(),
+                handler_properties: FxHashSet::default(),
+                type_parameters: FxHashSet::default(),
+            };
+            self.check_element_bindings(element_id, element, span, &spec);
+            self.function_value_calls
+                .insert(element_id, content_property);
+            return ret;
+        }
+
         if let Some(function) = self.resolve_function_definition(&element.tag) {
             let declaring_module = function.module_identity().to_string();
             match function {
@@ -1683,6 +2045,7 @@ impl<'a> InferenceContext<'a> {
                     ..
                 } => {
                     self.check_element_bindings_against_function(
+                        element_id,
                         element,
                         &function,
                         span,
@@ -1710,7 +2073,7 @@ impl<'a> InferenceContext<'a> {
                                 .iter()
                                 .map(|param| (&param.name, &param.ty, param.is_content, true)),
                         );
-                        self.check_element_bindings(element, span, &spec);
+                        self.check_element_bindings(element_id, element, span, &spec);
                         return self.type_from_type_ref(&return_type);
                     }
                 }
@@ -1778,6 +2141,7 @@ impl<'a> InferenceContext<'a> {
                 );
             }
             self.check_element_bindings_against_record(
+                element_id,
                 element,
                 &record_def,
                 span,
@@ -1794,6 +2158,7 @@ impl<'a> InferenceContext<'a> {
                 .as_ref()
                 .map(|origin| origin.module_identity().to_string());
             self.check_element_bindings_against_union_case(
+                element_id,
                 element,
                 &entry.def,
                 &case,
@@ -2205,6 +2570,7 @@ impl<'a> InferenceContext<'a> {
 
     fn check_element_bindings_against_function(
         &mut self,
+        element_id: ElementId,
         element: &nx_hir::Element,
         function: &nx_hir::Function,
         span: TextSpan,
@@ -2217,7 +2583,7 @@ impl<'a> InferenceContext<'a> {
                 .iter()
                 .map(|param| (&param.name, &param.ty, param.is_content, true)),
         );
-        self.check_element_bindings(element, span, &spec);
+        self.check_element_bindings(element_id, element, span, &spec);
     }
 
     /// Checks a use site of a component: its type arguments first, then its value bindings
@@ -2289,8 +2655,13 @@ impl<'a> InferenceContext<'a> {
             self.type_parameter_scope = previous_scope;
         }
         if let Some(arguments) = arguments {
-            // A prop typed by a parameter the site left unbound is checked against the bottom
-            // type, and remembers the parameter so a failure can be reported by its name.
+            // A prop typed by a parameter the site left unbound is checked against a type no
+            // value can be assumed to have, and remembers the parameter so a failure can be
+            // reported by its name. Where the prop *produces* a value of the parameter — a list
+            // of items — that is the bottom type, so only the empty list or `null` binds. Where
+            // the prop *consumes* one — a template's `Item` parameter, which the host will call
+            // with whatever the items are — it is the top type, so a template that assumes any
+            // particular item type fails and the diagnostic asks for the argument.
             let unspecified = arguments.unspecified;
             let is_unspecified = |param: &TypeParameterRef| {
                 param.owner == owner && unspecified.contains(&param.name)
@@ -2302,7 +2673,15 @@ impl<'a> InferenceContext<'a> {
                 entry.unspecified_parameter = Some(param.name);
                 entry.ty = entry
                     .ty
-                    .substitute_parameters(&|param| is_unspecified(param).then(Type::never));
+                    .substitute_parameters_by_variance(true, &|param, covariant| {
+                        is_unspecified(param).then(|| {
+                            if covariant {
+                                Type::never()
+                            } else {
+                                Type::named("object")
+                            }
+                        })
+                    });
             }
             spec.type_parameters = type_param_names.iter().cloned().collect();
             self.consumed_type_arguments.extend(arguments.consumed);
@@ -2318,7 +2697,7 @@ impl<'a> InferenceContext<'a> {
                 .into_iter()
                 .map(|name| Name::new(&handler_prop_name(name.as_str()))),
         );
-        self.check_element_bindings(element, span, &spec);
+        self.check_element_bindings(element_id, element, span, &spec);
     }
 
     /// Resolves the type arguments a use site binds for `type_params`, the target's effective
@@ -2507,6 +2886,7 @@ impl<'a> InferenceContext<'a> {
 
     fn check_element_bindings_against_record(
         &mut self,
+        element_id: ElementId,
         element: &nx_hir::Element,
         record_def: &nx_hir::RecordDef,
         span: TextSpan,
@@ -2534,11 +2914,12 @@ impl<'a> InferenceContext<'a> {
                 }),
             )
         };
-        self.check_record_element_bindings(element, span, &spec);
+        self.check_record_element_bindings(element_id, element, span, &spec);
     }
 
     fn check_record_element_bindings(
         &mut self,
+        element_id: ElementId,
         element: &nx_hir::Element,
         span: TextSpan,
         spec: &ElementBindingSpec,
@@ -2564,6 +2945,7 @@ impl<'a> InferenceContext<'a> {
                     false
                 } else if let Some(expected) = spec.properties.get(content_name) {
                     self.check_content_binding(
+                        element_id,
                         &element.content,
                         &expected.ty,
                         span,
@@ -2607,6 +2989,7 @@ impl<'a> InferenceContext<'a> {
     /// its module's `Size`, not a same-named record visible here.</para>
     fn check_element_bindings_against_union_case(
         &mut self,
+        element_id: ElementId,
         element: &nx_hir::Element,
         union_def: &UnionDef,
         case: &UnionCaseDef,
@@ -2673,6 +3056,7 @@ impl<'a> InferenceContext<'a> {
                     false
                 } else if let Some(expected) = spec.properties.get(content_name) {
                     self.check_content_binding(
+                        element_id,
                         &element.content,
                         &expected.ty,
                         span,
@@ -2836,7 +3220,11 @@ impl<'a> InferenceContext<'a> {
             } => {
                 let params = params
                     .iter()
-                    .map(|param| self.type_from_type_ref_in(declaring_module, param))
+                    .map(|param| FunctionParam {
+                        name: param.name.clone(),
+                        ty: self.type_from_type_ref_in(declaring_module, &param.ty),
+                        is_content: param.is_content,
+                    })
                     .collect();
                 let ret = self.type_from_type_ref_in(declaring_module, return_type);
                 Type::function(params, ret)
@@ -2873,6 +3261,7 @@ impl<'a> InferenceContext<'a> {
 
     fn check_element_bindings(
         &mut self,
+        element_id: ElementId,
         element: &nx_hir::Element,
         span: TextSpan,
         spec: &ElementBindingSpec,
@@ -2898,6 +3287,7 @@ impl<'a> InferenceContext<'a> {
                     false
                 } else if let Some(expected) = spec.properties.get(content_name) {
                     self.check_content_binding(
+                        element_id,
                         &element.content,
                         &expected.ty,
                         span,
@@ -3467,10 +3857,13 @@ impl<'a> InferenceContext<'a> {
     ///
     /// <para>Content is a sequence of expressions with no expression of its own, so a rule that
     /// attaches to an expression — a contextual name, an integer literal at a float site — cannot
-    /// reach it the way it reaches a property binding. A single content expression is checked as
-    /// itself; several are checked as the elements of the declared list.</para>
+    /// reach it the way it reaches a property binding. At a `string` property a body of several
+    /// pieces, or a single text run, number or boolean, is joined into one string; any other single
+    /// content expression is checked as itself, and several anywhere else are checked as the
+    /// elements of the declared list.</para>
     fn check_content_binding(
         &mut self,
+        element_id: ElementId,
         content: &[ExprId],
         expected: &Type,
         span: TextSpan,
@@ -3478,6 +3871,18 @@ impl<'a> InferenceContext<'a> {
     ) -> bool {
         if content.len() == 1 {
             let actual = self.infer_expr(content[0]);
+            // A lone braced number or boolean at a `string` property is a join of one piece, and so
+            // is a lone text run, whose layout the join removes.
+            let lone_text_run = self.module.raw_module().element(element_id).text_runs == [0];
+            if expected.strip_nullable() == &Type::string()
+                && (lone_text_run || Self::stringifiable_primitive(&actual).is_some())
+            {
+                let accepted = self.check_string_content_piece(content[0], &actual, span, &context);
+                if accepted {
+                    self.string_conversions.joined_bodies.insert(element_id);
+                }
+                return accepted;
+            }
             return self.check_typed_binding_for(
                 Some(content[0]),
                 &actual,
@@ -3488,22 +3893,93 @@ impl<'a> InferenceContext<'a> {
             );
         }
 
-        let actual = self.normalized_sequence_type(content, span);
-
-        if self.type_satisfies_expected_with_coercion(&actual, expected) {
-            return true;
+        if expected.strip_nullable() == &Type::string() {
+            return self.check_string_content_join(element_id, content, span, &context);
         }
 
+        let actual = self.normalized_sequence_type(content, span);
+
         if let Type::Array(element_expected) = expected.strip_nullable() {
-            match self.convert_int_literals_in(content, element_expected, span, &context) {
+            match self.convert_literals_in(content, element_expected, span, &context) {
                 Some(true) => return true,
-                // The inexactness diagnostic is already reported.
+                // The diagnostic is already reported.
                 Some(false) => return false,
                 None => {}
             }
         }
 
+        if self.type_satisfies_expected_with_coercion(&actual, expected) {
+            return true;
+        }
+
         self.check_typed_binding(&actual, expected, span, "content-type-mismatch", context)
+    }
+
+    /// Checks a text body that binds to a `string` content property as a join of its pieces.
+    ///
+    /// <para>The body binds as one string: each text run as written and each braced value in its
+    /// canonical text form, so every braced piece must be a string or a stringifiable primitive.
+    /// The join itself is recorded for the rewrite after analysis, which replaces the content list
+    /// with a `Concat` chain; below the checker a joined body is just a string expression bound to
+    /// the property.</para>
+    fn check_string_content_join(
+        &mut self,
+        element_id: ElementId,
+        content: &[ExprId],
+        span: TextSpan,
+        context: &str,
+    ) -> bool {
+        let mut accepted = true;
+        for piece in content {
+            let ty = self.infer_expr(*piece);
+            accepted &= self.check_string_content_piece(*piece, &ty, span, context);
+        }
+        if accepted {
+            self.string_conversions.joined_bodies.insert(element_id);
+        }
+        accepted
+    }
+
+    /// Checks one piece of a joined `string` body, already inferred as `ty`, recording its text
+    /// conversion when it is a number or a boolean.
+    fn check_string_content_piece(
+        &mut self,
+        piece: ExprId,
+        ty: &Type,
+        span: TextSpan,
+        context: &str,
+    ) -> bool {
+        if ty.is_error() {
+            return false;
+        }
+        if *ty == Type::string() {
+            return true;
+        }
+        match Self::stringifiable_primitive(ty) {
+            Some(primitive) => {
+                self.string_conversions
+                    .text_conversions
+                    .insert(piece, primitive);
+                true
+            }
+            None => {
+                let found = if Self::is_null_literal_type(ty) {
+                    "null".to_string()
+                } else {
+                    ty.to_string()
+                };
+                self.error(
+                    "content-type-mismatch",
+                    format!(
+                        "{}: a value of type {} cannot be written into text; only a string, \
+                         a number or a boolean has a text form",
+                        context, found
+                    ),
+                    span,
+                );
+                false
+            }
+        }
     }
 
     fn check_typed_binding(
@@ -3555,17 +4031,18 @@ impl<'a> InferenceContext<'a> {
             };
         }
 
-        if self.type_satisfies_expected_with_coercion(actual, expected) {
-            return true;
-        }
-
-        // An integer literal written where a float is declared takes the declared type. Tried only
-        // after ordinary satisfaction, so a site that already accepts the value — `object`, an
-        // undecided type variable — keeps the literal an integer.
+        // A numeric literal takes the numeric type its site declares. Tried before ordinary
+        // satisfaction so that `1` at an `int64` site is recorded at `int64`, not left an `int`
+        // that merely widens; `numeric_literal_target` declines `object` and an undecided type
+        // variable, so a site that accepts any value keeps the literal's default type.
         if let Some(expr) = expr {
-            if let Some(converted) = self.convert_int_literals(expr, expected, span, &context) {
+            if let Some(converted) = self.convert_literals(expr, expected, span, &context) {
                 return converted;
             }
+        }
+
+        if self.type_satisfies_expected_with_coercion(actual, expected) {
+            return true;
         }
 
         // Two same-named types are told apart by their declaring modules; one nominal type in
@@ -3588,26 +4065,56 @@ impl<'a> InferenceContext<'a> {
                 context, expected_display, actual_display
             )
         } else {
-            let hint = self.bare_form_hint(actual, expected);
+            let mut hint = self.bare_form_hint(actual, expected);
+            // Two function signatures side by side leave the reader to compare them; the reason
+            // names the parameter that decided it.
+            if let Err(reason) = self.function_satisfies_expected(actual, expected.strip_nullable())
+            {
+                hint = format!("{hint}; {reason}");
+            }
+            let lossy = match (actual, expected.strip_nullable()) {
+                (Type::Primitive(found), Type::Primitive(wanted))
+                    if found.is_numeric() && wanted.is_numeric() =>
+                {
+                    format!(
+                        "; {} does not convert to {} without loss, so the conversion is not implicit",
+                        found, wanted
+                    )
+                }
+                _ => String::new(),
+            };
             format!(
-                "{} expects {}, found {}{}",
-                context, expected_display, actual_display, hint
+                "{} expects {}, found {}{}{}",
+                context, expected_display, actual_display, hint, lossy
             )
         };
         self.error(code, message, span);
         false
     }
 
-    /// Types the integer literals `expr` is made of by the floating-point type expected of them.
+    /// Types the numeric literals `expr` is made of by the numeric type expected of them.
     ///
-    /// <para>Returns `None` when the rule does not reach this expression, so the caller reports its
-    /// own mismatch; `Some(true)` when every literal converted, and `Some(false)` when one could not
-    /// be represented exactly and the diagnostic has already been reported.</para>
+    /// <para>Returns `None` when the rule does not reach this expression — it is not a numeric
+    /// literal or constant expression, the site expects no numeric type, or the value already has
+    /// the type — so the caller checks the binding as it would any other; `Some(true)` when every
+    /// literal converted, and `Some(false)` when one could not take the type and the diagnostic has
+    /// already been reported.</para>
+    ///
+    /// <para>An integer literal takes any numeric width: an integer one after a range check, a
+    /// floating-point one after an exactness check. A real literal takes `float32` by rounding, as
+    /// a `float32` literal does in any language, and takes no integer type. The recorded type moves
+    /// with the value, so the literal is typed as the width the site chose and the rewrite after
+    /// analysis gives it that width in the module.</para>
+    ///
+    /// <para>A constant expression, arithmetic over numeric literals only, is folded first at the
+    /// types its literals have on their own, so `7 / 2` is `3` wherever it is written. The folded
+    /// value then takes the site's type on a literal's terms: `1.5 * 2` binds at `float32`, and
+    /// `1000000 * 3000` is out of range for `int32`.</para>
     ///
     /// <para>A list is walked because its elements are each written at the element type, and the
     /// binding site names only the list. A single literal at a list-typed site is reached the same
     /// way, since a scalar binds there by coercion.</para>
-    fn convert_int_literals(
+    fn convert_literals(
         &mut self,
         expr: ExprId,
         expected: &Type,
@@ -3615,40 +4122,59 @@ impl<'a> InferenceContext<'a> {
         context: &str,
     ) -> Option<bool> {
         match self.module.raw_module().expr(expr).clone() {
-            ast::Expr::Literal(ast::Literal::Int(value)) => {
-                let target = float_literal_target(expected)?;
-                if !target.represents_integer_exactly(value) {
-                    self.error(
-                        "float-literal-not-exact",
-                        format!(
-                            "{}: {} is not exactly representable as {}; write the value you mean as \
-                             a {} literal",
-                            context, value, target, target
-                        ),
-                        span,
-                    );
-                    return Some(false);
+            ast::Expr::Literal(literal) => {
+                self.convert_numeric_literal(expr, &literal, expected, span, context)
+            }
+            ast::Expr::BinaryOp { .. } | ast::Expr::UnaryOp { .. } => {
+                // Nothing to fold unless the site would give the value another type: an `int`
+                // expression at an `int` or `int64` site, or a `float64` one anywhere but a
+                // `float32` site, is left for evaluation, as a literal is left as written.
+                let target = numeric_literal_target(expected)?;
+                match self.env.get_expr_type(expr)? {
+                    Type::Primitive(Primitive::Int)
+                        if matches!(target, Primitive::Int | Primitive::Int64) =>
+                    {
+                        return None;
+                    }
+                    Type::Primitive(Primitive::Float64) if target != Primitive::Float32 => {
+                        return None;
+                    }
+                    Type::Primitive(Primitive::Int | Primitive::Float64) => {}
+                    _ => return None,
                 }
-                // The recorded type moves with the value. Leaving it `int` would put a float
-                // literal in the IR under an integer type annotation, which is the inconsistency
-                // the conversion exists to prevent rather than a cosmetic mismatch.
-                //
-                // It becomes `float64` rather than the target, because that is the type a written
-                // real literal takes at the same site — `infer_literal` gives every float literal
-                // `float64`, and a `float32` site narrows it no further. Recording the target here
-                // instead would make the converted `24` more precisely typed than the `24.0` it is
-                // supposed to be indistinguishable from. Which type a float literal should take at
-                // a `float32` site is a real question, but it is the same question for both
-                // spellings and not one this change answers.
-                self.env.set_expr_type(expr, Type::float64());
-                self.converted_int_literals.insert(expr, target);
-                Some(true)
+                let folded = match self.fold_constant(expr)? {
+                    Ok(folded) => folded,
+                    Err(problem) => {
+                        let (code, message) = match problem {
+                            ConstantProblem::DivisionByZero => (
+                                "constant-division-by-zero",
+                                format!("{}: the constant expression divides by zero", context),
+                            ),
+                            ConstantProblem::Overflow => (
+                                "constant-overflow",
+                                format!(
+                                    "{}: the constant expression overflows {}",
+                                    context,
+                                    Primitive::Int
+                                ),
+                            ),
+                        };
+                        self.error(code, message, span);
+                        return Some(false);
+                    }
+                };
+                let converted =
+                    self.convert_numeric_literal(expr, &folded, expected, span, context)?;
+                if converted {
+                    self.folded_constants.insert(expr, folded);
+                }
+                Some(converted)
             }
             ast::Expr::Array { elements, .. } => {
                 let Type::Array(element_expected) = expected.strip_nullable() else {
                     return None;
                 };
-                if !self.convert_int_literals_in(&elements, element_expected, span, context)? {
+                if !self.convert_literals_in(&elements, element_expected, span, context)? {
                     return Some(false);
                 }
                 // The list's own recorded type was inferred from elements that were still
@@ -3672,12 +4198,119 @@ impl<'a> InferenceContext<'a> {
         }
     }
 
-    /// Types the integer literals in a sequence of expressions by the type expected of each one.
+    /// Types one numeric literal, written as `expr` or folded from it, by the numeric type
+    /// expected of it. Returns what [`Self::convert_literals`] does.
+    fn convert_numeric_literal(
+        &mut self,
+        expr: ExprId,
+        literal: &ast::Literal,
+        expected: &Type,
+        span: TextSpan,
+        context: &str,
+    ) -> Option<bool> {
+        match literal {
+            ast::Literal::Int(value) => {
+                let value = *value;
+                let target = numeric_literal_target(expected)?;
+                match target {
+                    // Its own type already.
+                    Primitive::Int => return None,
+                    Primitive::Int32 => {
+                        if i32::try_from(value).is_err() {
+                            self.error(
+                                "integer-literal-out-of-range",
+                                format!(
+                                    "{}: {} is out of range for {}, which holds {} to {}",
+                                    context,
+                                    value,
+                                    target,
+                                    i32::MIN,
+                                    i32::MAX
+                                ),
+                                span,
+                            );
+                            return Some(false);
+                        }
+                    }
+                    Primitive::Int64 => {}
+                    _ => {
+                        if !target.represents_integer_exactly(value) {
+                            self.error(
+                                "float-literal-not-exact",
+                                format!(
+                                    "{}: {} is not exactly representable as {}; write the value \
+                                     you mean as a {} literal",
+                                    context, value, target, target
+                                ),
+                                span,
+                            );
+                            return Some(false);
+                        }
+                    }
+                }
+                self.env.set_expr_type(expr, Type::Primitive(target));
+                self.converted_literals.insert(expr, target);
+                Some(true)
+            }
+            ast::Literal::Float(_) => {
+                if numeric_literal_target(expected)? != Primitive::Float32 {
+                    return None;
+                }
+                self.env.set_expr_type(expr, Type::float32());
+                self.converted_literals.insert(expr, Primitive::Float32);
+                Some(true)
+            }
+            _ => None,
+        }
+    }
+
+    /// Folds a constant expression: arithmetic whose operands are all numeric literals.
+    ///
+    /// <para>`None` when `expr` is not one. Otherwise the value, computed at the types the literals
+    /// have on their own, as evaluation would compute it: two integers as an `int`, with `/`
+    /// truncating, and anything with a real operand as a `float64`. A division by zero, or an
+    /// integer result an `int` cannot hold, is a problem rather than a value.</para>
+    fn fold_constant(&self, expr: ExprId) -> Option<Result<ast::Literal, ConstantProblem>> {
+        use ast::{BinOp, Literal};
+
+        match self.module.raw_module().expr(expr) {
+            ast::Expr::Literal(literal @ (Literal::Int(_) | Literal::Float(_))) => {
+                Some(Ok(literal.clone()))
+            }
+            ast::Expr::UnaryOp {
+                op: ast::UnOp::Neg,
+                expr: operand,
+                ..
+            } => Some(match self.fold_constant(*operand)? {
+                Ok(Literal::Int(value)) => value
+                    .checked_neg()
+                    .map(Literal::Int)
+                    .ok_or(ConstantProblem::Overflow),
+                Ok(Literal::Float(value)) => Ok(Literal::Float(ast::OrderedFloat(-value.0))),
+                other => other,
+            }),
+            ast::Expr::BinaryOp { lhs, op, rhs, .. } => {
+                let (lhs, op, rhs) = (*lhs, *op, *rhs);
+                if !matches!(
+                    op,
+                    BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod
+                ) {
+                    return None;
+                }
+                let lhs = self.fold_constant(lhs)?;
+                let rhs = self.fold_constant(rhs)?;
+                Some(lhs.and_then(|lhs| fold_binary(op, lhs, rhs?)))
+            }
+            _ => None,
+        }
+    }
+
+    /// Types the numeric literals in a sequence of expressions by the type expected of each one.
     ///
     /// <para>Every element has to end up satisfying the element type. One that is not a convertible
     /// literal must already do so on its own, or the sequence as a whole does not bind and the
     /// caller's mismatch is the right diagnostic.</para>
-    fn convert_int_literals_in(
+    fn convert_literals_in(
         &mut self,
         elements: &[ExprId],
         element_expected: &Type,
@@ -3686,7 +4319,7 @@ impl<'a> InferenceContext<'a> {
     ) -> Option<bool> {
         let mut converted_any = false;
         for element in elements {
-            match self.convert_int_literals(*element, element_expected, span, context) {
+            match self.convert_literals(*element, element_expected, span, context) {
                 Some(true) => converted_any = true,
                 Some(false) => return Some(false),
                 None => {
@@ -3706,11 +4339,87 @@ impl<'a> InferenceContext<'a> {
 
     /// Records a type error.
     fn error(&mut self, code: &str, message: String, span: nx_diagnostics::TextSpan) {
-        let diag = Diagnostic::error(code)
+        self.error_involving(code, message, span, None);
+    }
+
+    /// Reports an error whose message may not name every type it is about.
+    ///
+    /// `involved` is a type the error concerns beyond those the message names, such as the base
+    /// of a member access, and is considered by the swapped-loop-names hint.
+    fn error_involving(
+        &mut self,
+        code: &str,
+        message: String,
+        span: nx_diagnostics::TextSpan,
+        involved: Option<&Type>,
+    ) {
+        let help = self.swapped_loop_names_help(&message, span, involved);
+        let mut builder = Diagnostic::error(code)
             .with_message(message)
-            .with_label(Label::primary(self.file_name.clone(), span))
-            .build();
-        self.diagnostics.push(diag);
+            .with_label(Label::primary(self.file_name.clone(), span));
+        if let Some(help) = help {
+            builder = builder.with_help(help);
+        }
+        self.diagnostics.push(builder.build());
+    }
+
+    /// Notes a use of an indexed loop's item or index name, when the name resolves to the loop.
+    fn record_loop_name_use(&mut self, expr_id: ExprId, name: &Name) {
+        let Some(depth) = self.env.binding_depth(name) else {
+            return;
+        };
+        let Some(indexed_loop) = self
+            .indexed_loops
+            .iter_mut()
+            .rev()
+            .find(|indexed_loop| indexed_loop.scope_depth == depth)
+        else {
+            return;
+        };
+        let span = self.module.raw_module().expr_span(expr_id);
+        if *name == indexed_loop.item {
+            indexed_loop.item_uses.push(span);
+        } else if *name == indexed_loop.index {
+            indexed_loop.index_uses.push(span);
+        }
+    }
+
+    /// Says which name is the item and which the index, for an error that reads like the two
+    /// were swapped.
+    ///
+    /// <para>`for index, row in rows` binds `index` to each row and `row` to its position, the
+    /// reverse of what the names say. The mistake surfaces far from the loop, as an operator or
+    /// member access on the wrong type, so the hint is given when the error's span uses one of the
+    /// loop's names and the error is about the type that name really has alongside the type the
+    /// other name has: the item beside an `int`, or the index where the item was expected. A loop
+    /// over `int` items is skipped, since there a swap is not a type error.</para>
+    fn swapped_loop_names_help(
+        &self,
+        message: &str,
+        span: TextSpan,
+        involved: Option<&Type>,
+    ) -> Option<String> {
+        let int = Type::int();
+        let concerns = |ty: &Type| involved == Some(ty) || mentions_word(message, &ty.to_string());
+        let uses_within =
+            |uses: &[TextSpan]| uses.iter().any(|use_span| span.contains_range(*use_span));
+        let indexed_loop = self.indexed_loops.iter().rev().find(|indexed_loop| {
+            let item_ty = &indexed_loop.item_ty;
+            if *item_ty == int || *item_ty == Type::Error {
+                return false;
+            }
+            let item_as_index =
+                uses_within(&indexed_loop.item_uses) && concerns(item_ty) && concerns(&int);
+            let index_as_item = uses_within(&indexed_loop.index_uses) && concerns(&int);
+            item_as_index || index_as_item
+        })?;
+        Some(format!(
+            "In `for {item}, {index} in ...`, `{item}` is each item ({item_ty}) and `{index}` is \
+             its zero-based index (int): the item comes first",
+            item = indexed_loop.item,
+            index = indexed_loop.index,
+            item_ty = indexed_loop.item_ty,
+        ))
     }
 
     /// Returns the contextual names resolved during analysis, as `expr → (type, member)`.
@@ -3726,14 +4435,38 @@ impl<'a> InferenceContext<'a> {
         &self.consumed_type_arguments
     }
 
+    /// Elements that call a function-typed value, by element id, each with the name of the
+    /// callee type's content parameter when it has one.
+    pub fn function_value_calls(&self) -> &FxHashMap<ElementId, Option<Name>> {
+        &self.function_value_calls
+    }
+
     /// The type each use site bound to each of its target's type parameters, by element.
     pub fn resolved_type_arguments(&self) -> &FxHashMap<ElementId, Vec<(Name, Type)>> {
         &self.resolved_type_arguments
     }
 
-    /// Returns the integer literals that took a floating-point type from their binding site.
-    pub fn converted_int_literals(&self) -> &FxHashMap<ExprId, Primitive> {
-        &self.converted_int_literals
+    /// Returns the numeric literals that took a numeric type from their site, and the type each
+    /// took.
+    pub fn converted_literals(&self) -> &FxHashMap<ExprId, Primitive> {
+        &self.converted_literals
+    }
+
+    /// Returns the constant expressions that took a numeric type from their site, and the literal
+    /// each folded to before taking it.
+    pub fn folded_constants(&self) -> &FxHashMap<ExprId, ast::Literal> {
+        &self.folded_constants
+    }
+
+    /// Returns the string conversions analysis decided on: the additions that concatenate, the
+    /// operands rendered as text, and the text bodies joined into one string.
+    pub fn string_conversions(&self) -> &StringConversions {
+        &self.string_conversions
+    }
+
+    /// The branches of a join that widen, and the numeric type each widens to.
+    pub fn widened_joins(&self) -> &FxHashMap<ExprId, Primitive> {
+        &self.widened_joins
     }
 
     /// Returns the collected diagnostics.
@@ -3944,8 +4677,10 @@ impl<'a> InferenceContext<'a> {
                     {
                         let param_types = params
                             .iter()
-                            .map(|param| {
-                                self.type_from_type_ref_in(Some(&declaring_module), &param.ty)
+                            .map(|param| FunctionParam {
+                                name: param.name.clone(),
+                                ty: self.type_from_type_ref_in(Some(&declaring_module), &param.ty),
+                                is_content: param.is_content,
                             })
                             .collect::<Vec<_>>();
                         let return_type =
@@ -4297,10 +5032,39 @@ impl<'a> InferenceContext<'a> {
     ) {
         let param_types = params
             .iter()
-            .map(|param| self.type_from_type_ref_in(declaring_module, &param.ty))
+            .map(|param| FunctionParam {
+                name: param.name.clone(),
+                ty: self.type_from_type_ref_in(declaring_module, &param.ty),
+                is_content: param.is_content,
+            })
             .collect::<Vec<_>>();
         self.env
             .bind(name, Type::function(param_types, return_type));
+    }
+
+    /// The function type a tag or callee `name` denotes as a *value*: a parameter, a prop, a local
+    /// or top-level `let` of function type, or a lexical binding that shadows a declared function.
+    ///
+    /// <para>A declared function reached under its own name is not a value here: `<Row />` on a
+    /// declaration `Row` is the declaration's call, checked against the declaration itself, and
+    /// `add(1, 2)` on a declared paren function is the positional call it always was.</para>
+    fn function_typed_value(&self, name: &Name) -> Option<(Vec<FunctionParam>, Type)> {
+        let ty = self.env.lookup(name)?;
+        let (params, ret) = ty.function_parts()?;
+        let shadows_declaration = self.env.binding_depth(name).is_some_and(|depth| depth > 1);
+        if self.resolve_function_definition(name).is_some() && !shadows_declaration {
+            return None;
+        }
+        Some((params.to_vec(), ret.clone()))
+    }
+
+    /// The name and parameters of a call's callee when it is a function-typed value.
+    fn function_value_callee(&self, callee: ExprId) -> Option<(Name, Vec<FunctionParam>)> {
+        let ast::Expr::Ident(name) = self.module.raw_module().expr(callee) else {
+            return None;
+        };
+        let (params, _) = self.function_typed_value(name)?;
+        Some((name.clone(), params))
     }
 
     fn effective_record_shape(
@@ -4435,14 +5199,42 @@ impl<'a> InferenceContext<'a> {
             (Type::Union(union), Type::Named(expected_name)) => {
                 self.union_type_satisfies_record(&union.name, union.origin(), expected_name)
             }
+            (Type::Nullable(actual_inner), Type::Nullable(expected_inner)) => {
+                self.type_satisfies_expected(actual_inner, expected_inner)
+            }
             (_, Type::Nullable(expected_inner)) => {
                 self.type_satisfies_expected(actual, expected_inner)
             }
             (Type::Array(actual_inner), Type::Array(expected_inner)) => {
                 self.type_satisfies_expected(actual_inner, expected_inner)
             }
+            (Type::Function { .. }, Type::Function { .. }) => {
+                self.function_satisfies_expected(actual, expected).is_ok()
+            }
             _ => false,
         }
+    }
+
+    /// Checks a function's type against a function type by parameter name, under this checker's
+    /// own relation, so a parameter typed by a record or a component subtype pairs the way any
+    /// other binding does.
+    fn function_satisfies_expected(
+        &self,
+        actual: &Type,
+        expected: &Type,
+    ) -> Result<(), FunctionMismatch> {
+        let (Some((actual_params, actual_ret)), Some((expected_params, expected_ret))) =
+            (actual.function_parts(), expected.function_parts())
+        else {
+            return Ok(());
+        };
+        check_function_satisfies(
+            actual_params,
+            actual_ret,
+            expected_params,
+            expected_ret,
+            &mut |value, target| self.type_satisfies_expected(value, target),
+        )
     }
 
     fn is_null_literal_type(ty: &Type) -> bool {
@@ -4523,8 +5315,11 @@ impl<'a> InferenceContext<'a> {
             (Type::Array(lhs_inner), Type::Array(rhs_inner)) => {
                 Type::array(self.common_supertype(lhs_inner, rhs_inner))
             }
-            (Type::Nullable(lhs_inner), Type::Nullable(rhs_inner)) => {
-                Type::nullable(self.common_supertype(lhs_inner, rhs_inner))
+            (Type::Nullable(_), _) | (_, Type::Nullable(_)) => {
+                crate::semantics::nullable_join(lhs, rhs, |lhs, rhs| {
+                    self.common_supertype(lhs, rhs)
+                })
+                .expect("one side is nullable")
             }
             (Type::UnionCase(lhs_case), Type::UnionCase(rhs_case))
                 if lhs_case.shares_union_with(rhs_case) =>
@@ -4634,6 +5429,43 @@ impl TypeInference {
     }
 }
 
+/// Whether `text` contains `word` with no identifier character on either side.
+fn mentions_word(text: &str, word: &str) -> bool {
+    let is_ident = |c: char| c.is_alphanumeric() || c == '_';
+    text.match_indices(word).any(|(start, _)| {
+        let before = text[..start].chars().next_back();
+        let after = text[start + word.len()..].chars().next();
+        !before.is_some_and(is_ident) && !after.is_some_and(is_ident)
+    })
+}
+
+/// The numeric type a value of `member` type widens to when it is joined into `joined`, or `None`
+/// when it does not widen.
+fn join_widening(member: &Type, joined: &Type) -> Option<Primitive> {
+    match (member, joined) {
+        (Type::Primitive(from), Type::Primitive(to)) => {
+            (from != to && from.is_numeric() && from.widens_to(*to)).then_some(*to)
+        }
+        (Type::Array(member), Type::Array(joined))
+        | (Type::Nullable(member), Type::Nullable(joined)) => join_widening(member, joined),
+        (member, Type::Nullable(joined)) => join_widening(member, joined),
+        _ => None,
+    }
+}
+
+/// The type of a value of type `ty` once its numbers are widened to `target`.
+pub(crate) fn widened_type(ty: &Type, target: nx_hir::ast::PrimitiveType) -> Type {
+    fn widen(ty: &Type, target: Primitive) -> Type {
+        match ty {
+            Type::Primitive(primitive) if primitive.is_numeric() => Type::Primitive(target),
+            Type::Array(inner) => Type::array(widen(inner, target)),
+            Type::Nullable(inner) => Type::nullable(widen(inner, target)),
+            other => other.clone(),
+        }
+    }
+    widen(ty, Primitive::from_hir_type(target))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4701,7 +5533,7 @@ mod tests {
     }
 
     #[test]
-    fn test_converted_int_literals_records_only_the_literal_that_took_a_float_type() {
+    fn test_converted_literals_records_only_the_literal_that_took_a_float_type() {
         let mut module = LoweredModule::new(SourceId::new(0));
         let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
 
@@ -4735,12 +5567,12 @@ mod tests {
         }
 
         assert_eq!(
-            ctx.converted_int_literals().get(&converted_body),
+            ctx.converted_literals().get(&converted_body),
             Some(&Primitive::Float64),
             "the literal at the declared float type should be recorded"
         );
         assert!(
-            !ctx.converted_int_literals().contains_key(&untouched_body),
+            !ctx.converted_literals().contains_key(&untouched_body),
             "a literal with no float expectation should not be recorded"
         );
         assert!(ctx.diagnostics().is_empty());
@@ -4815,7 +5647,7 @@ mod tests {
         match func_ty {
             Type::Function { params, ret } => {
                 assert_eq!(params.len(), 1);
-                assert_eq!(params[0], Type::int());
+                assert_eq!(params[0].ty, Type::int());
                 assert_eq!(**ret, Type::int());
             }
             other => panic!("Expected function type, got {:?}", other),
@@ -4912,8 +5744,10 @@ mod tests {
         match add_ty {
             Type::Function { params, ret } => {
                 assert_eq!(params.len(), 2);
-                assert_eq!(params[0], Type::int());
-                assert_eq!(params[1], Type::int());
+                assert_eq!(params[0].name.as_str(), "a");
+                assert_eq!(params[0].ty, Type::int());
+                assert_eq!(params[1].name.as_str(), "b");
+                assert_eq!(params[1].ty, Type::int());
                 assert_eq!(**ret, Type::int());
             }
             _ => panic!("expected function type"),

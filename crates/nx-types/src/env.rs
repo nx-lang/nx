@@ -111,6 +111,19 @@ impl TypeEnvironment {
             .and_then(|scope| scope.bindings.remove(name))
     }
 
+    /// The number of scopes on the stack, the global scope included.
+    pub fn scope_depth(&self) -> usize {
+        self.scopes.len()
+    }
+
+    /// The depth of the scope a name resolves in, counting the global scope as 1.
+    pub fn binding_depth(&self, name: &Name) -> Option<usize> {
+        self.scopes
+            .iter()
+            .rposition(|scope| scope.lookup(name).is_some())
+            .map(|position| position + 1)
+    }
+
     /// Looks up the type of a name, searching from innermost to outermost scope.
     pub fn lookup(&self, name: &Name) -> Option<&Type> {
         for scope in self.scopes.iter().rev() {

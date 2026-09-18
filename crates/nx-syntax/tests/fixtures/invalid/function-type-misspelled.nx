@@ -1,0 +1,2 @@
+// Only `function` may follow `<` in type position.
+external component <List Name: <functon /> />

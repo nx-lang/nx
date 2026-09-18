@@ -1,0 +1,29 @@
+{
+  "input.nx::root": {
+    "$type": "SkiaLayout",
+    "Children": [
+      {
+        "$type": "SkiaLabel",
+        "FontSize": 24,
+        "Text": "Conformance"
+      },
+      {
+        "$type": "SkiaLabel",
+        "FontSize": 14,
+        "Text": "A snippet links by name to a catalog the runtime already holds."
+      },
+      {
+        "$type": "SkiaButton",
+        "Enabled": true,
+        "Text": "Run"
+      },
+      {
+        "$type": "SkiaButton",
+        "Enabled": false,
+        "Text": "Share"
+      }
+    ],
+    "Spacing": 8,
+    "Type": "Column"
+  }
+}

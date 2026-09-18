@@ -3,75 +3,102 @@
 ## Purpose
 TBD - created by archiving change add-nx-ir-format. Update Purpose after archive.
 ## Requirements
-### Requirement: NX IR JSON program artifacts are versioned and deterministic
-The system SHALL define a versioned NX IR JSON program artifact emitted from a successful
-`ProgramArtifact`. The IR document SHALL include a format identifier, IR schema version, expected
-runtime ABI, program fingerprint, required feature list, public entrypoints, resolved modules,
-declarations, expression data, type/schema metadata, and source provenance metadata. Equivalent
-`ProgramArtifact` inputs with equivalent IR options SHALL produce byte-for-byte stable JSON output
-apart from explicitly documented formatting choices.
+### Requirement: NX IR program artifacts are versioned and deterministic
+The system SHALL define a versioned NX IR artifact emitted from a successful `ProgramArtifact`, one
+per emitted module. The artifact SHALL be a little-endian binary image whose fixed header carries a
+format magic, IR schema version `4` and the image's total length, and whose sections carry the
+expected runtime ABI `nx-ir-runtime-v2`, the required feature list, the module table, the module's
+public entrypoints, and the module's tables and declarations. Equivalent `ProgramArtifact` inputs
+with equivalent IR options SHALL produce byte-identical images. A reader SHALL refuse an image whose
+magic or schema version it does not implement with a diagnostic naming the version found and the
+version supported, and SHALL NOT interpret the bytes that follow the header.
+
+Schema `4` differs from schema `3` by the `text` node kind, `20`, by the `float32` binary operators
+`16` to `19`, and by `concat` taking string operands only. Every other kind, table and layout is
+unchanged.
 
 #### Scenario: Valid program artifact emits IR metadata
 - **WHEN** a caller emits NX IR from a valid `ProgramArtifact` containing a `root()` function
-- **THEN** the IR JSON SHALL include the program fingerprint
-- **AND** the IR JSON SHALL include the IR schema version and runtime ABI expected by loaders
-- **AND** the IR JSON SHALL list `root` as a function entrypoint
+- **THEN** the image SHALL carry schema version `4` and runtime ABI `nx-ir-runtime-v2`
+- **AND** the image SHALL list `root` as a function entrypoint
+- **AND** the module table's first entry SHALL carry the module's identity and fingerprint
 
-#### Scenario: Equivalent inputs produce deterministic JSON
+#### Scenario: Equivalent inputs produce byte-identical images
 - **WHEN** two equivalent `ProgramArtifact` inputs are emitted as NX IR with the same options
-- **THEN** the emitted JSON SHALL use stable ordering for modules, declarations, fields,
-  properties, entrypoints, references, and expression records
-- **AND** the two emitted JSON documents SHALL be equivalent for cache-key purposes
+- **THEN** the emitted images SHALL use stable ordering for the module table, tables,
+  declarations, fields, properties, entrypoints and nodes
+- **AND** the two emitted images SHALL be byte-identical
 
 #### Scenario: Invalid artifact is rejected
 - **WHEN** a caller requests NX IR emission for a `ProgramArtifact` containing static error
   diagnostics
 - **THEN** IR emission SHALL fail with diagnostics
-- **AND** the system SHALL NOT emit a partial IR document
+- **AND** the system SHALL NOT emit a partial artifact
+
+#### Scenario: An older schema is refused
+- **WHEN** a runtime is given an image whose schema version is `3`
+- **THEN** preparation SHALL fail with a diagnostic naming version `3` and the supported version `4`
+- **AND** the reader SHALL NOT interpret the bytes that follow the header
+
+#### Scenario: A document that is not an image is refused
+- **WHEN** a runtime is given bytes that do not begin with the NX IR magic
+- **THEN** preparation SHALL fail with a diagnostic saying the input is not an NX IR image
 
 ### Requirement: NX IR program fingerprints are lossless for JavaScript consumers
-NX IR JSON and structured IR metadata SHALL expose program fingerprints in a form that can represent
-the native fingerprint without JavaScript `number` precision loss.
+Every fingerprint in an NX IR artifact, whether of the artifact's own module or of a module in its
+table, SHALL be encoded in a form that represents the native fingerprint without JavaScript `number`
+precision loss.
 
 #### Scenario: Fingerprint exceeds JavaScript safe integer range
-- **WHEN** an emitted program fingerprint is greater than JavaScript's maximum safe integer
-- **THEN** the NX IR JSON SHALL encode `programFingerprint` as a decimal string
+- **WHEN** an emitted module fingerprint is greater than JavaScript's maximum safe integer
+- **THEN** the artifact SHALL store the full 64-bit value, as a low and a high 32-bit cell
+- **AND** a JavaScript reader SHALL recombine the cells without converting the value to `number`
 - **AND** structured metadata returned with the generated IR SHALL expose the same fingerprint as a
   string or another explicitly lossless representation
 - **AND** JavaScript consumers SHALL NOT need to parse the value as `number` to compare cache
   identity
 
 ### Requirement: NX IR preserves resolved module-qualified references
-NX IR SHALL represent executable references using module-qualified identifiers assigned by the
-resolved program rather than relying on visible string-name lookup at runtime. Function calls,
-value references, component descriptors, record construction, union cases, default expressions,
-selected entrypoints, and nominal type references SHALL identify the owning module and declaration
-or expression slot needed for execution. Primitive type references SHALL be encoded separately from
-nominal type references so runtimes do not resolve records, unions, or type aliases through global
-bare declaration-name lookup.
+NX IR SHALL represent every reference to a declaration as a module-table slot and the declaration's
+name, with slot `0` meaning the artifact's own module. Function calls, value references, component
+descriptors, record construction, union cases, default expressions, selected entrypoints and nominal
+type references SHALL all use this form, and no reference SHALL depend on the position of a
+declaration in its module or of a module in a program. Top-level declaration names SHALL be unique
+within a module, and the compiler SHALL reject a module that declares one name twice. Primitive type
+references SHALL be encoded separately from nominal type references so runtimes do not resolve
+records, unions or type aliases through global bare-name lookup.
 
 #### Scenario: Imported function reference is module-qualified
 - **WHEN** a root module imports function `answer()` from a resolved library module
 - **AND** NX IR is emitted for the program
-- **THEN** the call to `answer()` in the IR SHALL reference the owning library module and function
-  declaration
-- **AND** the TypeScript runtime SHALL NOT need to rediscover the function by scanning visible
-  string names
+- **THEN** the call to `answer()` SHALL reference the library module's table slot and the name
+  `answer`
+- **AND** the TypeScript runtime SHALL resolve it through the linked module's declarations by name
 
 #### Scenario: Imported component descriptor reference is module-qualified
 - **WHEN** a root module constructs a component exported by another resolved module
 - **AND** NX IR is emitted for the program
-- **THEN** the component descriptor expression SHALL reference the concrete component declaration
-  by module-qualified reference
+- **THEN** the component descriptor expression SHALL reference the component by that module's table
+  slot and the component's name
 
 #### Scenario: Imported nominal type reference is module-qualified
 - **WHEN** a root module declares a function parameter or component prop using record, union, or
   type-alias `User` imported from another module
-- **AND** another module in the same IR program also declares an item named `User`
-- **THEN** the emitted type reference SHALL be nominal and SHALL include the imported declaration's
-  module-qualified reference
-- **AND** supported runtimes SHALL normalize boundary values through that declaration reference
-  rather than a bare `User` lookup
+- **AND** another module in the same program also declares an item named `User`
+- **THEN** the emitted type reference SHALL be nominal and SHALL name the imported module's slot and
+  `User`
+- **AND** supported runtimes SHALL normalize boundary values through that declaration rather than a
+  bare `User` lookup
+
+#### Scenario: A regenerated module keeps old references valid
+- **WHEN** a snippet artifact references `SkiaLabel` in `drawnui`
+- **AND** `drawnui` is regenerated with a new control declared before `SkiaLabel`
+- **THEN** the snippet artifact, unchanged, SHALL still reference `SkiaLabel`
+- **AND** a runtime linking it against the regenerated `drawnui` SHALL resolve `SkiaLabel`
+
+#### Scenario: Duplicate top-level names are rejected
+- **WHEN** a module declares `let Card = 1` and `type Card = { }`
+- **THEN** analysis SHALL report an error naming `Card` and both declarations
 
 ### Requirement: NX IR generation preserves directory-loaded library nominal references
 NX IR generation SHALL preserve module-qualified nominal type references for declarations that
@@ -123,17 +150,27 @@ nullable union fields and content-derived required fields.
 NX IR SHALL encode the supported non-reactive expression forms needed for eager evaluation,
 including literals, local slot references, top-level references, unary and binary operations,
 function calls, intrinsic calls, `if`, match-style `if is` forms, `let`, blocks, arrays, loops,
-index access, member access, record literals, union cases, intrinsic elements, and component
-descriptors. There SHALL be one union-case construct covering both constant and payload cases
-rather than separate constructs for enum members and union cases, and that construct SHALL mark a
-constant case as constant in expression position as well as in the declaration, so a runtime
-produces the bare case name without consulting the declaration. A call to one of the update
-intrinsics (`apply`, `merge`, `diff`, `changed`) SHALL be encoded as an intrinsic call construct
-that names the intrinsic and carries its argument expressions, distinct from a call to a declared
-function, and a program that contains one SHALL list a required feature naming update-intrinsic
-support. A `changed` call SHALL also carry the declared field order of the target record, so a
-runtime orders the result without consulting the declaration. Unsupported executable constructs
-SHALL be reported as IR build diagnostics.
+index access, member access, record literals, union cases, intrinsic elements, component
+descriptors, and action handlers. There SHALL be one union-case construct covering both constant
+and payload cases rather than separate constructs for enum members and union cases, and that
+construct SHALL mark a constant case as constant in expression position as well as in the
+declaration, so a runtime produces the bare case name without consulting the declaration. A call to
+one of the update intrinsics (`apply`, `merge`, `diff`, `changed`) SHALL be encoded as an intrinsic
+call construct that names the intrinsic and carries its argument expressions, distinct from a call
+to a declared function, and a program that contains one SHALL list a required feature naming
+update-intrinsic support. A `changed` call SHALL also carry the declared field order of the target
+record, so a runtime orders the result without consulting the declaration.
+
+An action-handler binding (`onTapped=<Update count={count + 1} />`) SHALL be encoded as an
+action-handler node kind that carries a reference to the component and the name of the emit the
+handler answers, a reference to the action record it accepts, the slot the handler's `action`
+binding occupies, a reference to the owner component whose state the handler may patch (absent for
+a handler bound outside any component body), and the body node. The node SHALL NOT carry an
+evaluated environment; captured locals are the slots the body references. The public name of the
+action a runtime reports for the handler SHALL be the action reference's declaration name. A
+module that contains the node SHALL list a required feature naming action-handler support, and a
+module that contains none SHALL NOT list it. Unsupported executable constructs SHALL be reported
+as IR build diagnostics.
 
 #### Scenario: Match expressions are preserved
 - **WHEN** NX source contains a match-style `if value is { ... }` expression accepted by static
@@ -174,18 +211,112 @@ SHALL be reported as IR build diagnostics.
 - **AND** the required feature list SHALL name update-intrinsic support
 - **AND** for `let c = {changed(<User.Update name="Bo" />)}` the construct SHALL name `changed` and carry the field order `name`
 
+#### Scenario: A handler bound inside a component body is encoded with its owner
+- **WHEN** NX source declares `external component <Button emits { Tapped { } } />` and
+  `component <Counter /> = { state { count:int = 0 } <Button onTapped=<Update count={count + 1} /> /> }`
+- **AND** NX IR is emitted for the program
+- **THEN** the `onTapped` property of the `Button` descriptor SHALL be encoded with the
+  action-handler node kind
+- **AND** the node SHALL reference component `Button`, name emit `Tapped`, and reference the
+  `Button.Tapped` action record
+- **AND** the node SHALL reference `Counter` as the owner
+- **AND** the body SHALL be the `Counter.Update` construction, referencing `count` through the
+  slot of `Counter`'s `count` state field
+- **AND** the required feature list SHALL name action-handler support
+
+#### Scenario: A handler bound outside a component body has no owner
+- **WHEN** NX source contains `let root() = { <SearchBox onSearchSubmitted=<DoSearch search={action.searchString} /> /> }`
+- **AND** NX IR is emitted for the program
+- **THEN** the node SHALL carry no owner
+- **AND** the body SHALL reference `action` through the slot the node declares for it
+- **AND** that slot SHALL be the next slot of the enclosing frame, as a `let` binding's would be
+
+#### Scenario: A program without handlers lists no handler feature
+- **WHEN** NX source binds no action handler
+- **AND** NX IR is emitted for the program
+- **THEN** the required feature list SHALL NOT name action-handler support
+
 #### Scenario: Unsupported action handler is rejected in v1
-- **WHEN** NX source requires an action-handler value that cannot be represented by the v1 IR
-  feature set
-- **THEN** IR emission SHALL fail with a diagnostic identifying the unsupported construct
-- **AND** the emitted IR SHALL NOT silently drop the handler
+- **WHEN** NX source binds an action handler
+- **AND** NX IR is emitted for the program
+- **THEN** emission SHALL succeed, carrying the handler as the action-handler node
+- **AND** the same source SHALL still fail executable TypeScript or JavaScript generation as
+  `executable-code-generation` requires
+
+### Requirement: NX IR makes primitive-to-text conversion explicit
+NX IR SHALL encode the conversion of a primitive value to its canonical text form as its own node
+kind, `text`, with the layout `[20, node, str]`: the operand node and the name of the operand's
+static primitive type (`int`, `int32`, `int64`, `float32`, `float64` or `boolean`). The emitter
+SHALL wrap every non-string operand of a string `+` in a `text` node, so the `concat` binary
+operator's operands are always strings and a runtime SHALL NOT need to coerce them. The named type
+is what lets a runtime that carries every number as a `float64` print a `float32` operand in the
+`float32` text form `implicit-primitive-conversions` requires.
+
+Whether a `+` is emitted as `add` or `concat` SHALL follow the type analysis recorded for the
+expression, never the syntactic form of its operands. A numeric operand that analysis widened (an
+`int` at a `float64` site, or an `int` operand of a `float64` addition) SHALL be recorded at its own
+type with no conversion node, because every supported runtime carries the integer and floating-point
+types in one numeric representation and the widening is unobservable there; a `div` or `mod` whose
+checked type is floating-point SHALL be emitted as the floating-point operator even when one operand
+is an integer.
+
+An `ir explain` rendering SHALL print a `text` node as a readable conversion naming the operand
+type.
+
+#### Scenario: A string plus an int is emitted as concat over a text node
+- **WHEN** NX source contains `let f(count:int) = "Total: " + count` and NX IR is emitted
+- **THEN** the body SHALL be a `binary` node with the `concat` operator
+- **AND** its right operand SHALL be a `text` node naming `int` over the slot of `count`
+- **AND** its left operand SHALL be the string constant with no conversion node
+
+#### Scenario: A float32 operand names its type
+- **WHEN** NX source contains `let f(w:float32) = w + " px"` and NX IR is emitted
+- **THEN** the left operand of the `concat` SHALL be a `text` node naming `float32`
+
+#### Scenario: A string field access is emitted as concat
+- **WHEN** NX source contains `type Item = { title:string }` and
+  `let f(item:Item) = "Reorder " + item.title`, and NX IR is emitted
+- **THEN** the body SHALL be a `binary` node with the `concat` operator
+- **AND** neither operand SHALL be wrapped in a `text` node
+
+#### Scenario: A widened operand carries no conversion node
+- **WHEN** NX source contains `let f(n:int, x:float64) = n + x` and NX IR is emitted
+- **THEN** the body SHALL be a `binary` node with the `add` operator whose operands are the two
+  slots directly
+- **AND** for `let g(n:int, x:float64) = n / x` the operator SHALL be `div`, not `idiv`
+
+### Requirement: NX IR makes float32 arithmetic explicit
+NX IR SHALL encode an addition, subtraction, multiplication or division whose checked type is
+`float32` with its own binary operator: `fadd32` (`16`), `fsub32` (`17`), `fmul32` (`18`) or
+`fdiv32` (`19`). A runtime SHALL evaluate each by computing the operation on its operands and
+rounding the result to the nearest `float32`, so that a runtime which carries every number as a
+`float64` computes the value the interpreter computes, and widening or comparing that value
+observes no difference. A remainder whose checked type is `float32` SHALL stay `mod`, since a
+`float32` remainder is exact. A runtime SHALL round a number the host supplies at a `float32` site
+to the nearest `float32`, and SHALL refuse an integer there that a `float32` does not represent
+exactly, so every `float32` value it holds is one.
+
+#### Scenario: A float32 product is emitted as fmul32
+- **WHEN** NX source contains `let f(v:float32) = v * 3` and NX IR is emitted
+- **THEN** the body SHALL be a `binary` node with the `fmul32` operator
+- **AND** for `let g(v:float32, d:float32) = v % d` the operator SHALL be `mod`
+- **AND** for `let h(v:float32, x:float64) = v * x` the operator SHALL be `mul`
+
+#### Scenario: A widened float32 product agrees with the interpreter
+- **WHEN** `let scaled(v:float32): float64 = { v * 3 }` is evaluated by the TypeScript IR runtime
+  with `v` holding the `float32` nearest `2.3`
+- **THEN** the result SHALL be `6.899999618530273`, as the interpreter computes it
+- **AND** `scaled(2.3) == 6.899999618530273` SHALL be `true`
 
 ### Requirement: NX IR encodes component contracts, descriptors, and state metadata
 NX IR SHALL preserve effective component prop contracts, declared state fields, defaults, content
-field metadata, abstract/external/concrete component flags, component body expressions where
-available, and schemas needed to normalize props and state at runtime. Component descriptor
-expressions SHALL remain atomic and SHALL encode normalized descriptor construction rather than
-deep-rendering the referenced component body.
+field metadata, abstract/external/concrete component flags, the effective emits of the component
+(each emit's name and a reference to the action record it carries, inherited emits included, in
+declaration order), component body expressions where available, and schemas needed to normalize
+props and state at runtime. Component descriptor expressions SHALL remain atomic and SHALL encode
+normalized descriptor construction rather than deep-rendering the referenced component body. A
+descriptor's handler properties SHALL be encoded as properties of the descriptor, alongside its
+declared props, so a runtime can carry the parent's bindings with the instance.
 
 #### Scenario: Stateful component emits state metadata
 - **WHEN** NX source declares `component <SearchBox placeholder:string = "Find docs" /> = { state { query:string = placeholder } <TextInput value={query} /> }`
@@ -199,6 +330,29 @@ deep-rendering the referenced component body.
 - **AND** NX IR is emitted for `Parent`
 - **THEN** the expression for `<Child />` SHALL be represented as descriptor construction
 - **AND** it SHALL NOT inline or pre-render `Child`'s body into `Parent`
+
+#### Scenario: Component declarations carry their emits
+- **WHEN** NX source declares `action Reset = { }` and
+  `component <Counter emits { Reset ValueChanged { value:int } } /> = { <Label /> }`
+- **AND** NX IR is emitted for the program
+- **THEN** the `Counter` declaration SHALL list emits `Reset` and `ValueChanged` in declaration
+  order
+- **AND** `Reset` SHALL reference the `Reset` action record and `ValueChanged` SHALL reference the
+  inline `Counter.ValueChanged` record
+- **AND** a component that declares no emits SHALL list none
+
+#### Scenario: An inherited emit references its declaring module
+- **WHEN** a component extends a base declared in another module whose inline emit is `Tapped`
+- **AND** NX IR is emitted for the extending component's module
+- **THEN** the extending component's `emits` SHALL list `Tapped` referencing the base module's
+  `<Base>.Tapped` record
+
+#### Scenario: A descriptor keeps its handler property beside its props
+- **WHEN** NX source constructs `<Counter step=2 onReset=<Log /> />` for a component that declares
+  prop `step` and emits `Reset`
+- **AND** NX IR is emitted for the program
+- **THEN** the descriptor SHALL carry both `step` and `onReset` as properties
+- **AND** `onReset`'s value SHALL be the action-handler node
 
 ### Requirement: NX IR preserves canonical NX value encoding rules
 NX IR SHALL preserve enough type and value metadata for runtimes to produce canonical raw NX values.
@@ -227,15 +381,26 @@ numbers SHALL use a lossless tagged representation.
   preserve the exact integer value or reject unsupported arithmetic explicitly
 
 ### Requirement: NX IR preserves source provenance for diagnostics and source maps
-NX IR SHALL include source identities, optional source spans, and source entries or source-map
-inputs needed for runtime diagnostics, generated tooling diagnostics, and artifact inspection
-without re-reading source files from disk.
+An NX IR artifact SHALL be able to carry a debug section holding source spans for declarations and
+nodes and the module's source text, and the section SHALL be optional: an artifact without it SHALL
+prepare and evaluate exactly as one with it. The module's source fingerprint SHALL be present
+whether or not the section is. A runtime diagnostic SHALL cite the span when the section is present
+and the declaration name when it is not, and SHALL never need to read a source file from disk.
 
 #### Scenario: Runtime diagnostic can identify source expression
-- **WHEN** the TypeScript IR runtime reports a runtime diagnostic for an expression with preserved
-  source span metadata
-- **THEN** the diagnostic SHALL be able to identify the originating source identity and span
-- **AND** the runtime SHALL NOT need to read the original source file from disk
+- **WHEN** the TypeScript IR runtime reports a runtime diagnostic for an expression of an artifact
+  that carries a debug section
+- **THEN** the diagnostic SHALL identify the originating source identity and span
+
+#### Scenario: A stripped artifact still diagnoses
+- **WHEN** the same diagnostic arises in the same artifact emitted without a debug section
+- **THEN** the diagnostic SHALL name the declaration the expression belongs to
+- **AND** evaluation up to that point SHALL be identical to the artifact with the section
+
+#### Scenario: Stripping is the emitter's choice
+- **WHEN** a caller emits an artifact and asks for no debug section
+- **THEN** the artifact SHALL contain no spans and no source text
+- **AND** the artifact with and without the section SHALL differ only in that section
 
 ### Requirement: NX IR declares the update records a program references
 When a program references a derived update record `T.Update` — by constructing one, by naming it in
@@ -318,3 +483,221 @@ a program with generic components SHALL remain deterministic and boundary-clean.
 - **WHEN** NX source declares `component <List TItem:type items:TItem[]? /> = { state { sel:TItem? = null } <Label /> } let u = <List.Update sel=null />`
 - **AND** NX IR is emitted for the program
 - **THEN** the `List.Update` declaration in IR SHALL type `sel` as nullable `object` and SHALL NOT mention `TItem`
+
+### Requirement: An artifact carries one module and names the modules it links against
+An NX IR artifact SHALL carry exactly one module. It SHALL carry a module table whose first entry
+describes the artifact's own module and whose remaining entries describe every module the artifact
+references, each entry giving the module's logical identity, the version string the build was given
+for it (empty when none was given) and a fingerprint of its source. A program that spans several
+modules SHALL be emitted as one artifact per module, and a build SHALL let the caller choose which
+modules to emit.
+
+#### Scenario: A snippet compiled against a catalog names the catalog
+- **WHEN** a workspace holds `drawnui` with version `9` and `input.nx`, and `input.nx` uses a control
+  `drawnui` declares
+- **AND** the caller emits an artifact for `input.nx` only
+- **THEN** the build SHALL return one artifact
+- **AND** its module table SHALL list `input.nx` first and `drawnui` with version `9` second
+- **AND** the artifact SHALL contain no declaration from `drawnui`
+
+#### Scenario: A module nothing references is not in the table
+- **WHEN** a workspace holds a module the entry never imports, directly or transitively
+- **THEN** the entry's artifact SHALL NOT list that module
+
+#### Scenario: A catalog emits as its own artifact
+- **WHEN** the caller emits an artifact for `drawnui` alone
+- **THEN** the artifact's module table SHALL hold only `drawnui`
+- **AND** it SHALL carry every external component, union and record `drawnui` declares
+
+### Requirement: NX IR modules are encoded as flat tables
+A module SHALL be encoded as a string table, a type table, a constant table, a node table and a
+declaration list. Node kinds, type kinds and declaration kinds SHALL be small integers; every name,
+literal and type SHALL appear once in its table and be referenced by index; children SHALL be node
+indices or index ranges. Slots SHALL be integers local to the declaration that owns them, and
+element identities SHALL be integers local to the module.
+
+The string table SHALL be stored as an offset array over one UTF-8 blob, so a reader borrows a
+name as a slice of the image and MAY decode only the names it resolves. Every other table SHALL be
+stored as an offset array over a flat pool of 32-bit cells, so entry `k` is addressable by index
+without reading the entries before it. Sections of the image SHALL be listed in a directory in its
+header, and a reader SHALL skip a directory entry whose kind it does not know, so a section can be
+added without a schema change.
+
+#### Scenario: A name is written once
+- **WHEN** a module uses the property name `Text` on forty elements
+- **THEN** the emitted artifact SHALL contain the string `Text` once in its string table
+- **AND** every use SHALL refer to it by index
+
+#### Scenario: A type is written once
+- **WHEN** twenty component props share the type nullable `string`
+- **THEN** the type table SHALL contain nullable `string` once
+- **AND** each prop SHALL refer to it by index
+
+#### Scenario: Slots are declaration-local integers
+- **WHEN** a function declares two parameters and a `let` inside its body
+- **THEN** their slots SHALL be the integers `0`, `1` and `2` within that function
+- **AND** another declaration SHALL be free to use the same integers
+
+#### Scenario: An entry is addressable without reading its predecessors
+- **WHEN** a runtime resolves a declaration referenced by a linked module
+- **THEN** it SHALL read that declaration's entry without decoding the entries before it
+
+#### Scenario: A name is decoded only when it is named
+- **WHEN** a module of five hundred strings is prepared and three of its declarations are resolved
+- **THEN** the reader SHALL decode only the strings those resolutions name
+
+#### Scenario: An unknown section is skipped
+- **WHEN** an image's directory lists a section of a kind the reader does not know, beside every
+  section it requires
+- **THEN** the reader SHALL prepare the module from the sections it knows
+- **AND** SHALL NOT refuse the artifact for the unknown section
+
+### Requirement: A conformance corpus defines NX IR behavior
+The repository SHALL hold a corpus of NX programs, each with its expected artifact for every emitted
+module, the explained text of each expected artifact, and its expected evaluation results for every
+entrypoint the corpus names. A corpus program MAY also name component lifecycles: a component to
+initialize, optional props, and ordered batches to dispatch against it, whose entries are written
+as a host would send them, handler tokens included. The expected results SHALL then record the
+rendered output of initialization and, for each batch in turn, the rendered output and the ordered
+effects, all as canonical values with their handler tokens, as the interpreter produces them. The
+emitter's tests SHALL check that each program emits its expected artifact byte for byte, SHALL
+report a difference as explained text, and SHALL check that each committed explained text is the
+explanation of its committed artifact. Every supported runtime SHALL check that it evaluates each
+expected artifact to the expected results, lifecycles included. One regeneration command SHALL
+write the artifacts, their explained text and the expected results together. The corpus SHALL cover
+every node kind, type kind and declaration kind, cross-artifact references, and a program emitted
+without its debug section. For every corpus program, the artifact emitted without a debug section
+SHALL be at most six times the UTF-8 length of the program's own module source.
+
+#### Scenario: Emitter output is pinned by the corpus
+- **WHEN** the emitter is changed so that a corpus program's artifact differs
+- **THEN** the emitter's corpus test SHALL fail naming the program and the difference as explained
+  text
+
+#### Scenario: A change to the emitter is readable in review
+- **WHEN** the emitter is changed so that a corpus program's artifact differs
+- **AND** the corpus is regenerated
+- **THEN** both the image and its explained text SHALL be updated
+- **AND** the explained text's diff SHALL name what changed about the program
+
+#### Scenario: Stale explained text is caught
+- **WHEN** a corpus image is committed without regenerating its explained text
+- **THEN** the emitter's corpus test SHALL fail naming the program
+
+#### Scenario: A runtime is checked against the corpus
+- **WHEN** a runtime evaluates a corpus artifact's named entrypoint
+- **THEN** its canonical value SHALL equal the expected result recorded for it
+
+#### Scenario: A runtime's dispatch is checked against the corpus
+- **WHEN** a runtime initializes a corpus lifecycle's component and dispatches its batches in order
+- **THEN** each rendered output, its tokens included, and each effect list SHALL equal the values
+  recorded for it
+
+#### Scenario: The size budget is enforced
+- **WHEN** a corpus program of 8,000 bytes of source is emitted without a debug section
+- **THEN** the artifact SHALL be at most 48,000 bytes
+
+### Requirement: An NX IR reader validates an artifact before it evaluates it
+A reader SHALL establish, before answering any question about an artifact, that the image's header
+is one it implements, that its recorded length equals the bytes it was given, that every section,
+offset, string range, table index, module slot and optional operand the artifact contains lies
+within the artifact's own bounds, and that every string is valid UTF-8. A malformed or truncated
+artifact SHALL be refused with a diagnostic rather than an exception or a crash, SHALL NOT produce
+a value, and SHALL NOT cause a read outside the artifact in any runtime.
+
+#### Scenario: A truncated artifact is refused
+- **WHEN** a runtime is given an image cut short at any four-byte boundary
+- **THEN** preparation SHALL fail with a diagnostic
+- **AND** no evaluation SHALL take place
+
+#### Scenario: An out-of-range index is refused rather than followed
+- **WHEN** an artifact's node names a string index beyond the string table
+- **THEN** the reader SHALL report the artifact as malformed
+- **AND** SHALL NOT read memory outside the artifact
+
+#### Scenario: A hostile artifact cannot escape its bounds
+- **WHEN** a host plays a share authored by someone else whose offsets have been altered
+- **THEN** the runtime SHALL refuse it with a diagnostic rather than reading outside the artifact
+
+#### Scenario: Every cell of an artifact can be damaged without a crash
+- **WHEN** any single cell of a valid artifact is overwritten with an arbitrary value
+- **THEN** every reader SHALL either refuse the artifact with a diagnostic or read it as a valid
+  artifact
+- **AND** no reader SHALL throw an exception or panic
+
+### Requirement: NX IR encodes function types
+The type table SHALL have a function type kind. A function type entry SHALL record its result type
+and, in declared order, each parameter's name, type and whether it is the content parameter, every
+name and type by table index. A function type SHALL be written once in the type table and referred
+to by index, like every other type. A prop, field, parameter, return or local typed by a function
+type in source SHALL be typed by that entry in IR; the top type SHALL NOT stand in for it. The
+explained form of an artifact SHALL render a function type in NX spelling.
+
+#### Scenario: A function-typed prop is typed as a function
+- **WHEN** NX source declares `external component <List ItemTemplate:(<function Item:object Index:int />: string)? />`
+- **AND** NX IR is emitted for the program
+- **THEN** the component declaration's prop schema for `ItemTemplate` SHALL be a nullable type
+  whose inner type is a function type with the parameters `Item` of `object` and `Index` of `int`
+  and the result `string`
+- **AND** the explained text SHALL show it as `(<function Item:object Index:int />: string)?`
+
+#### Scenario: Two identical function types share one entry
+- **WHEN** two props are declared at the same function type
+- **THEN** the type table SHALL contain that function type once
+
+### Requirement: NX IR erases type parameters inside function types
+Where a component's type parameter occurs inside a function type — as a parameter type or the
+result type — the erasure that replaces the parameter with `object` SHALL reach it, so no emitted
+type mentions the parameter.
+
+#### Scenario: A template prop is erased through the function type
+- **WHEN** NX source declares `external component <SkiaLayout TItem:type ItemTemplate:(<function Item:TItem Index:int />: object)? />`
+- **AND** NX IR is emitted for the program
+- **THEN** the prop schema for `ItemTemplate` SHALL be a nullable function type whose `Item`
+  parameter is typed `object`
+- **AND** the artifact SHALL NOT mention `TItem`
+
+### Requirement: NX IR carries a function as a value
+A `reference` node that names a function declaration SHALL be a value in any expression position,
+not only as a call's callee: a property value, a list element, a function result, a field, a
+call argument. A module whose node table contains such a reference in a position other than a
+callee, or whose type table contains a function type, SHALL list a required feature naming
+function-value support, `function-values-v1`, so a runtime that predates function values refuses
+the module by name rather than by an unknown kind. A module with neither SHALL NOT list it. The
+explained form SHALL render the reference by the function's module-qualified name.
+
+#### Scenario: A function bound to a prop is a reference node
+- **WHEN** NX source declares `let <Row Item:object />: string = "r" external component <List ItemTemplate:(<function Item:object />: string)? /> let root() = <List ItemTemplate={Row} />`
+- **AND** NX IR is emitted for the program
+- **THEN** the `ItemTemplate` property of the descriptor in `root` SHALL be a `reference` node
+  naming `Row`
+- **AND** the required feature list SHALL name function-value support
+
+#### Scenario: A program without function values lists no feature
+- **WHEN** NX IR is emitted for a program that declares functions and calls them but never binds
+  one as a value and declares no function type
+- **THEN** the required feature list SHALL be unchanged from before this feature existed
+
+### Requirement: NX IR encodes a call of a function-typed value by name
+An element invocation whose tag is a function-typed binding SHALL be encoded as a named-call node:
+the callee expression, then each argument as a name and a node, sorted by argument name as a
+property list is, since binding is by name and a stable order keeps the artifact canonical. A runtime SHALL
+evaluate the callee to a function value and bind the arguments to that function's parameters by
+name, dropping a name the function does not declare and failing with a diagnostic when a declared
+parameter has no argument. A module containing a named-call node SHALL list the
+`function-values-v1` feature. The existing positional call node SHALL be unchanged.
+
+#### Scenario: Invoking a function-typed prop emits a named call
+- **WHEN** NX source declares `component <Section Row:<function Item:object Index:int />: string /> = { <Row Item="a" Index=1 /> }`
+- **AND** NX IR is emitted for the program
+- **THEN** the body of `Section` SHALL contain a named-call node whose callee is the `Row` slot and
+  whose arguments are `Item` and `Index`
+- **AND** the explained text SHALL show the call with its argument names
+
+#### Scenario: The conformance corpus covers function values
+- **WHEN** the conformance corpus is inspected
+- **THEN** it SHALL contain a program that declares a function type, binds a function to a
+  function-typed prop and to a function-typed parameter, invokes the parameter by element and by
+  call, and renders a function value in a function result
+- **AND** the recorded results SHALL show the `Function` record for the rendered value and the
+  results of both invocations

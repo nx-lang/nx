@@ -2,8 +2,9 @@
 //
 // SkiaLabel's text engine: wrapping, MaxLines, alignment, spacing, weights, transforms, spans.
 //
-// The original keeps two readouts — the last tapped span and the last tapped markdown link. NX has
-// no event handlers, so those readouts are dropped and the taps do nothing.
+// The page is a component so it can hold state: the last tapped span and the last tapped markdown
+// link, each reported at the foot of its card. The original stamps the span tap with the time; NX
+// has no clock, so the readout says "link tapped".
 
 component <Card extends DrawnNode Title:string content Children:DrawnNode[] /> = {
   <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=8 />
@@ -36,132 +37,144 @@ const label = new SkiaRichLabel();
 label.Text = '# Hello';
 ```"
 
-<SkiaScroll Orientation=Vertical>
-  <SkiaStack Spacing=16 Padding=<Thickness Left=16 Top=16 Right=16 Bottom=16 />
-    HorizontalOptions=Center MaximumWidthRequest=720>
-    <SkiaLabel Text="SkiaLabel" FontSize=24 TextColor="#FFFFFF" HorizontalOptions=Center />
+component <Page /> = {
+  state {
+    tapped:string = "nothing yet"
+    link:string = "none"
+  }
 
-    <Card Title="Word wrap · HorizontalOptions=Fill">
-      <SkiaLabel Text={lorem} FontSize=15 TextColor="#DEE2E6" HorizontalOptions=Fill />
-    </Card>
+  <SkiaScroll Orientation=Vertical>
+    <SkiaStack Spacing=16 Padding=<Thickness Left=16 Top=16 Right=16 Bottom=16 />
+      HorizontalOptions=Center MaximumWidthRequest=720>
+      <SkiaLabel Text="SkiaLabel" FontSize=24 TextColor="#FFFFFF" HorizontalOptions=Center />
 
-    <Card Title="Spans — TextSpan children: color, size, bold, italic, underline, strikeout, background">
-      <SkiaLabel FontSize=16 TextColor="#DEE2E6" HorizontalOptions=Fill FontFamilyFallback="FontSymbols">
-        <TextSpan Text="One label, many styles: " />
-        <TextSpan Text="bold" IsBold=true />
-        <TextSpan Text=", " />
-        <TextSpan Text="italic" IsItalic=true />
-        <TextSpan Text=", " />
-        <TextSpan Text="colored" TextColor="#FFC107" />
-        <TextSpan Text=", " />
-        <TextSpan Text="bigger" FontSize=22 TextColor="#20C997" />
-        <TextSpan Text=", " />
-        <TextSpan Text="underlined" Underline=true />
-        <TextSpan Text=", " />
-        <TextSpan Text="struck out" Strikeout=true />
-        <TextSpan Text=", " />
-        <TextSpan Text=" highlighted " BackgroundColor="#6610F2" TextColor="#FFFFFF" />
-        <TextSpan Text=" and a " />
-        // The original makes this span tappable and reports the time of the last tap below the
-        // paragraph — NX has no event handlers yet, so it is styled as a link but does nothing.
-        <TextSpan Text="tappable link →" TextColor="#6EA8FE" Underline=true />
-        <TextSpan Text=" that wraps with the rest of the paragraph like any other word." />
-      </SkiaLabel>
-    </Card>
+      <Card Title="Word wrap · HorizontalOptions=Fill">
+        <SkiaLabel Text={lorem} FontSize=15 TextColor="#DEE2E6" HorizontalOptions=Fill />
+      </Card>
 
-    <Card Title="SkiaRichLabel — markdown in Text, rendered as spans">
-      // The original reports the last markdown link tapped; that readout needs event handlers.
-      <SkiaRichLabel FontSize=15 TextColor="#DEE2E6" HorizontalOptions=Fill
-        FontFamilyFallback="FontSymbols,FontSymbols2" Text={markdown} />
-    </Card>
+      <Card Title="Spans — TextSpan children: color, size, bold, italic, underline, strikeout, background, Tapped">
+        <SkiaLabel FontSize=16 TextColor="#DEE2E6" HorizontalOptions=Fill FontFamilyFallback="FontSymbols">
+          <TextSpan Text="One label, many styles: " />
+          <TextSpan Text="bold" IsBold=true />
+          <TextSpan Text=", " />
+          <TextSpan Text="italic" IsItalic=true />
+          <TextSpan Text=", " />
+          <TextSpan Text="colored" TextColor="#FFC107" />
+          <TextSpan Text=", " />
+          <TextSpan Text="bigger" FontSize=22 TextColor="#20C997" />
+          <TextSpan Text=", " />
+          <TextSpan Text="underlined" Underline=true />
+          <TextSpan Text=", " />
+          <TextSpan Text="struck out" Strikeout=true />
+          <TextSpan Text=", " />
+          <TextSpan Text=" highlighted " BackgroundColor="#6610F2" TextColor="#FFFFFF" />
+          <TextSpan Text=" and a " />
+          // Tapping this span patches the page's state, and the readout below the paragraph redraws.
+          <TextSpan Text="tappable link →" TextColor="#6EA8FE" Underline=true
+            onTapped=<Update tapped="link tapped" /> />
+          <TextSpan Text=" that wraps with the rest of the paragraph like any other word." />
+        </SkiaLabel>
+        <SkiaLabel Text={"Last span tap: " + tapped} FontSize=13 TextColor="#ADB5BD" />
+      </Card>
 
-    <Card Title="MaxLines={2} · TailTruncation (default)">
-      <SkiaLabel Text={lorem} FontSize=15 TextColor="#DEE2E6" HorizontalOptions=Fill MaxLines=2 />
-    </Card>
+      <Card Title="SkiaRichLabel — markdown in Text, rendered as spans">
+        // A tapped markdown link arrives as the LinkTapped action's url.
+        <SkiaRichLabel FontSize=15 TextColor="#DEE2E6" HorizontalOptions=Fill
+          FontFamilyFallback="FontSymbols,FontSymbols2" Text={markdown}
+          onLinkTapped=<Update link={action.url} /> />
+        <SkiaLabel Text={"Last link tapped: " + link} FontSize=13 TextColor="#ADB5BD" />
+      </Card>
 
-    <Card Title="LineSpacing={1.6}">
-      <SkiaLabel Text={lorem} FontSize=14 TextColor="#DEE2E6" HorizontalOptions=Fill
-        LineSpacing=1.6 MaxLines=3 />
-    </Card>
+      <Card Title="MaxLines={2} · TailTruncation (default)">
+        <SkiaLabel Text={lorem} FontSize=15 TextColor="#DEE2E6" HorizontalOptions=Fill MaxLines=2 />
+      </Card>
 
-    <Card Title="HorizontalTextAlignment Start / Center / End">
-      <SkiaWrap Spacing=12>
-        <SkiaLabel Text="Start aligned text wraps inside its own column" FontSize=13 TextColor="#DEE2E6"
-          WidthRequest=215 HorizontalTextAlignment=Start BackgroundColor="#22FFFFFF"
-          Padding=<Thickness Left=6 Top=6 Right=6 Bottom=6 /> />
-        <SkiaLabel Text="Center aligned text wraps inside its own column" FontSize=13 TextColor="#DEE2E6"
-          WidthRequest=215 HorizontalTextAlignment=Center BackgroundColor="#22FFFFFF"
-          Padding=<Thickness Left=6 Top=6 Right=6 Bottom=6 /> />
-        <SkiaLabel Text="End aligned text wraps inside its own column" FontSize=13 TextColor="#DEE2E6"
-          WidthRequest=215 HorizontalTextAlignment=End BackgroundColor="#22FFFFFF"
-          Padding=<Thickness Left=6 Top=6 Right=6 Bottom=6 /> />
-      </SkiaWrap>
-    </Card>
+      <Card Title="LineSpacing={1.6}">
+        <SkiaLabel Text={lorem} FontSize=14 TextColor="#DEE2E6" HorizontalOptions=Fill
+          LineSpacing=1.6 MaxLines=3 />
+      </Card>
 
-    <Card Title="VerticalTextAlignment in a 90pt box">
-      <SkiaWrap Spacing=12>
-        <SkiaLabel Text="Start" FontSize=14 TextColor="#DEE2E6" WidthRequest=215 HeightRequest=90
-          VerticalTextAlignment=Start HorizontalTextAlignment=Center BackgroundColor="#22FFFFFF" />
-        <SkiaLabel Text="Center" FontSize=14 TextColor="#DEE2E6" WidthRequest=215 HeightRequest=90
-          VerticalTextAlignment=Center HorizontalTextAlignment=Center BackgroundColor="#22FFFFFF" />
-        <SkiaLabel Text="End" FontSize=14 TextColor="#DEE2E6" WidthRequest=215 HeightRequest=90
-          VerticalTextAlignment=End HorizontalTextAlignment=Center BackgroundColor="#22FFFFFF" />
-      </SkiaWrap>
-    </Card>
+      <Card Title="HorizontalTextAlignment Start / Center / End">
+        <SkiaWrap Spacing=12>
+          <SkiaLabel Text="Start aligned text wraps inside its own column" FontSize=13 TextColor="#DEE2E6"
+            WidthRequest=215 HorizontalTextAlignment=Start BackgroundColor="#22FFFFFF"
+            Padding=<Thickness Left=6 Top=6 Right=6 Bottom=6 /> />
+          <SkiaLabel Text="Center aligned text wraps inside its own column" FontSize=13 TextColor="#DEE2E6"
+            WidthRequest=215 HorizontalTextAlignment=Center BackgroundColor="#22FFFFFF"
+            Padding=<Thickness Left=6 Top=6 Right=6 Bottom=6 /> />
+          <SkiaLabel Text="End aligned text wraps inside its own column" FontSize=13 TextColor="#DEE2E6"
+            WidthRequest=215 HorizontalTextAlignment=End BackgroundColor="#22FFFFFF"
+            Padding=<Thickness Left=6 Top=6 Right=6 Bottom=6 /> />
+        </SkiaWrap>
+      </Card>
 
-    <Card Title="StrokeColor / StrokeWidth, StrokeGradient, DropShadow* — outline under the fill, shadow below (C# DrawText order)">
-      <SkiaWrap Spacing=16>
-        <SkiaLabel Text="Outlined" FontSize=32 FontFamily="FontTextBold" TextColor="#212529"
-          StrokeColor="#FFC107" StrokeWidth=1.5 />
-        <SkiaLabel Text="Gradient stroke" FontSize=32 FontFamily="FontTextBold" TextColor="#212529"
-          StrokeColor="#FFFFFF" StrokeWidth=2
-          StrokeGradient=<SkiaGradient Type=Linear Angle=0 Colors={ "#0DCAF0" "#D63384" } /> />
-        <SkiaLabel Text="Drop shadow" FontSize=32 FontFamily="FontTextBold" TextColor="#DEE2E6"
-          DropShadowColor="#000000" DropShadowSize=2 DropShadowOffsetX=3 DropShadowOffsetY=3 />
-        <SkiaLabel Text="Both + gradient fill" FontSize=32 FontFamily="FontTextBold" TextColor="#FFFFFF"
-          FillGradient=<SkiaGradient Type=Linear Angle=90 Colors={ "#FFC107" "#FD7E14" } />
-          StrokeColor="#3D2B00" StrokeWidth=1
-          DropShadowColor="#66000000" DropShadowSize=3 DropShadowOffsetX=2 DropShadowOffsetY=4 />
-      </SkiaWrap>
-    </Card>
+      <Card Title="VerticalTextAlignment in a 90pt box">
+        <SkiaWrap Spacing=12>
+          <SkiaLabel Text="Start" FontSize=14 TextColor="#DEE2E6" WidthRequest=215 HeightRequest=90
+            VerticalTextAlignment=Start HorizontalTextAlignment=Center BackgroundColor="#22FFFFFF" />
+          <SkiaLabel Text="Center" FontSize=14 TextColor="#DEE2E6" WidthRequest=215 HeightRequest=90
+            VerticalTextAlignment=Center HorizontalTextAlignment=Center BackgroundColor="#22FFFFFF" />
+          <SkiaLabel Text="End" FontSize=14 TextColor="#DEE2E6" WidthRequest=215 HeightRequest=90
+            VerticalTextAlignment=End HorizontalTextAlignment=Center BackgroundColor="#22FFFFFF" />
+        </SkiaWrap>
+      </Card>
 
-    <Card Title="FontFamilyFallback — symbols and emoji the text font lacks">
-      <SkiaLabel FontSize=16 TextColor="#DEE2E6" FontFamilyFallback="FontSymbols,FontSymbols2"
-        HorizontalOptions=Fill
-        Text="Arrows ← ↑ → ↓ ⇒ ⇔  math ∑ ∞ ≈ ≠ ≤ ≥ √  misc ♥ ★ ✓ ✗ ⚠ via FontFamilyFallback" />
-      <SkiaLabel FontSize=16 TextColor="#DEE2E6" FontFamilyFallback="FontEmoji" HorizontalOptions=Fill
-        Text="Emoji 😀 😎 🤖 😂 👍 🙌 via FontFamilyFallback=FontEmoji" />
-      <SkiaLabel FontSize=16 TextColor="#ADB5BD" HorizontalOptions=Fill
-        Text="Without a fallback the same arrow → and emoji 😀 render as tofu" />
-    </Card>
+      <Card Title="StrokeColor / StrokeWidth, StrokeGradient, DropShadow* — outline under the fill, shadow below (C# DrawText order)">
+        <SkiaWrap Spacing=16>
+          <SkiaLabel Text="Outlined" FontSize=32 FontFamily="FontTextBold" TextColor="#212529"
+            StrokeColor="#FFC107" StrokeWidth=1.5 />
+          <SkiaLabel Text="Gradient stroke" FontSize=32 FontFamily="FontTextBold" TextColor="#212529"
+            StrokeColor="#FFFFFF" StrokeWidth=2
+            StrokeGradient=<SkiaGradient Type=Linear Angle=0 Colors={ "#0DCAF0" "#D63384" } /> />
+          <SkiaLabel Text="Drop shadow" FontSize=32 FontFamily="FontTextBold" TextColor="#DEE2E6"
+            DropShadowColor="#000000" DropShadowSize=2 DropShadowOffsetX=3 DropShadowOffsetY=3 />
+          <SkiaLabel Text="Both + gradient fill" FontSize=32 FontFamily="FontTextBold" TextColor="#FFFFFF"
+            FillGradient=<SkiaGradient Type=Linear Angle=90 Colors={ "#FFC107" "#FD7E14" } />
+            StrokeColor="#3D2B00" StrokeWidth=1
+            DropShadowColor="#66000000" DropShadowSize=3 DropShadowOffsetX=2 DropShadowOffsetY=4 />
+        </SkiaWrap>
+      </Card>
 
-    <Card Title="FontAttributes / FontWeight (weights registered via ConfigureFonts)">
-      <SkiaLabel Text="Regular 400 — the family default" FontSize=16 TextColor="#DEE2E6" />
-      <SkiaLabel Text="FontAttributes=Bold → nearest registered weight (600 Semibold)" FontSize=16
-        TextColor="#DEE2E6" FontAttributes=Bold FontFamilyFallback="FontSymbols" />
-      <SkiaLabel Text="FontAttributes=Italic → synthetic skew when no italic face" FontSize=16
-        TextColor="#DEE2E6" FontAttributes=Italic FontFamilyFallback="FontSymbols" />
-      <SkiaLabel Text="FontAttributes=BoldItalic" FontSize=16 TextColor="#DEE2E6" FontAttributes=BoldItalic />
-      <SkiaLabel Text="FontWeight={600} explicit" FontSize=16 TextColor="#DEE2E6" FontWeight=600 />
-    </Card>
+      <Card Title="FontFamilyFallback — symbols and emoji the text font lacks">
+        <SkiaLabel FontSize=16 TextColor="#DEE2E6" FontFamilyFallback="FontSymbols,FontSymbols2"
+          HorizontalOptions=Fill
+          Text="Arrows ← ↑ → ↓ ⇒ ⇔  math ∑ ∞ ≈ ≠ ≤ ≥ √  misc ♥ ★ ✓ ✗ ⚠ via FontFamilyFallback" />
+        <SkiaLabel FontSize=16 TextColor="#DEE2E6" FontFamilyFallback="FontEmoji" HorizontalOptions=Fill
+          Text="Emoji 😀 😎 🤖 😂 👍 🙌 via FontFamilyFallback=FontEmoji" />
+        <SkiaLabel FontSize=16 TextColor="#ADB5BD" HorizontalOptions=Fill
+          Text="Without a fallback the same arrow → and emoji 😀 render as tofu" />
+      </Card>
 
-    <Card Title="TextTransform · NoWrap · Padding">
-      <SkiaLabel Text="uppercase transform applied at layout time" FontSize=14 TextColor="#DEE2E6"
-        TextTransform=Uppercase />
-      <SkiaLabel Text="Titlecase transform applied at layout time" FontSize=14 TextColor="#DEE2E6"
-        TextTransform=Titlecase />
-      <SkiaLabel FontSize=14 TextColor="#DEE2E6" LineBreakMode=NoWrap HorizontalOptions=Fill
-        Text="LineBreakMode=NoWrap keeps this on one line even when it is far too long for the card width, so it simply runs past the edge" />
-      <SkiaLabel Text="Padding={new Thickness(12, 6)} + background" FontSize=14 TextColor="#FFFFFF"
-        BackgroundColor="#0D6EFD" Padding=<Thickness Left=12 Top=6 Right=12 Bottom=6 /> />
-    </Card>
+      <Card Title="FontAttributes / FontWeight (weights registered via ConfigureFonts)">
+        <SkiaLabel Text="Regular 400 — the family default" FontSize=16 TextColor="#DEE2E6" />
+        <SkiaLabel Text="FontAttributes=Bold → nearest registered weight (600 Semibold)" FontSize=16
+          TextColor="#DEE2E6" FontAttributes=Bold FontFamilyFallback="FontSymbols" />
+        <SkiaLabel Text="FontAttributes=Italic → synthetic skew when no italic face" FontSize=16
+          TextColor="#DEE2E6" FontAttributes=Italic FontFamilyFallback="FontSymbols" />
+        <SkiaLabel Text="FontAttributes=BoldItalic" FontSize=16 TextColor="#DEE2E6" FontAttributes=BoldItalic />
+        <SkiaLabel Text="FontWeight={600} explicit" FontSize=16 TextColor="#DEE2E6" FontWeight=600 />
+      </Card>
 
-    <Card Title="Multiline text with explicit line breaks">
-      <SkiaLabel FontSize=14 TextColor="#DEE2E6"
-        HorizontalTextAlignment=Center HorizontalOptions=Fill
-        Text="Line one
+      <Card Title="TextTransform · NoWrap · Padding">
+        <SkiaLabel Text="uppercase transform applied at layout time" FontSize=14 TextColor="#DEE2E6"
+          TextTransform=Uppercase />
+        <SkiaLabel Text="Titlecase transform applied at layout time" FontSize=14 TextColor="#DEE2E6"
+          TextTransform=Titlecase />
+        <SkiaLabel FontSize=14 TextColor="#DEE2E6" LineBreakMode=NoWrap HorizontalOptions=Fill
+          Text="LineBreakMode=NoWrap keeps this on one line even when it is far too long for the card width, so it simply runs past the edge" />
+        <SkiaLabel Text="Padding={new Thickness(12, 6)} + background" FontSize=14 TextColor="#FFFFFF"
+          BackgroundColor="#0D6EFD" Padding=<Thickness Left=12 Top=6 Right=12 Bottom=6 /> />
+      </Card>
+
+      <Card Title="Multiline text with explicit line breaks">
+        <SkiaLabel FontSize=14 TextColor="#DEE2E6"
+          HorizontalTextAlignment=Center HorizontalOptions=Fill
+          Text="Line one
 Line two is a bit longer
 Line three" />
-    </Card>
-  </SkiaStack>
-</SkiaScroll>
+      </Card>
+    </SkiaStack>
+  </SkiaScroll>
+}
+
+<Page />

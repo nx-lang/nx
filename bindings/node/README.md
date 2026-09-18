@@ -6,8 +6,8 @@ same Rust `nx-api` host model used by the CLI and .NET SDK.
 
 This package is separate from `@nx-lang/ir-runtime` under `runtime/typescript`. Use
 `@nx-lang/sdk-node` when Node needs to build, validate, generate IR from, or evaluate NX source.
-Use the pure TypeScript IR runtime when JavaScript only needs to execute an already persisted NX IR
-JSON document.
+Use the pure TypeScript IR runtime when JavaScript only needs to execute an already emitted NX IR
+image.
 
 It is also separate from [`@nx-lang/sdk-wasm`](../wasm/README.md), which compiles NX and answers
 editor queries from a WebAssembly module. Reach for the wasm SDK in a browser, in a Web Worker, or
@@ -68,6 +68,7 @@ import {
   NxProgramArtifact,
   NxWorkspace,
   evaluateJsonFromSource,
+  explainNxIr,
   generateNxIrFromSource
 } from "@nx-lang/sdk-node";
 ```
@@ -158,12 +159,20 @@ const artifact = NxProgramArtifact.buildWorkspace(workspace, {
   entryIdentity: "app/main.nx"
 });
 
-const ir = artifact.generateNxIr();
-const fingerprint = ir.metadata.programFingerprint; // decimal string, safe for cache comparisons
+const [ir] = artifact.generateNxIr(); // one artifact per module; the entry alone by default
+const image = ir.bytes; // the NX IR image as a Buffer, what @nx-lang/ir-runtime reads
+const fingerprint = ir.metadata.fingerprint; // decimal string, safe for cache comparisons
+const text = explainNxIr(image); // the same text `nxlang ir explain` prints
 const jsonValue = artifact.evaluateJson();
 const messagePackBytes = artifact.evaluateBytes();
 const jsonBytes = artifact.evaluateBytes({ outputFormat: "json" });
 ```
+
+`generateNxIr({ modules: [] })` emits every module of the program, and `{ debug: true }` keeps each
+artifact's debug section. A module's version is part of the workspace, not an emit option: give it
+as `{ identity, source, version }` and every artifact built from that workspace records it in its
+module table, which is what `@nx-lang/ir-runtime` compares when it links one artifact against
+another.
 
 Source convenience APIs build and dispose a short-lived artifact for simple workflows:
 

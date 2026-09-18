@@ -88,6 +88,8 @@ pub struct ProgramArtifact {
     /// Runtime-ready resolved program for this artifact.
     pub resolved_program: ResolvedProgram,
     pub(crate) source_map: FxHashMap<String, Arc<str>>,
+    /// The version string of each source-provider module the host gave one, by identity.
+    pub(crate) version_map: FxHashMap<String, String>,
 }
 
 /// Borrowed source text entry preserved in a [`ProgramArtifact`].
@@ -95,6 +97,8 @@ pub struct ProgramArtifact {
 pub struct ProgramSourceEntry<'a> {
     pub identity: &'a str,
     pub source: &'a str,
+    /// The version string the host gave the module, if any.
+    pub version: Option<&'a str>,
 }
 
 impl ProgramArtifact {
@@ -111,6 +115,7 @@ impl ProgramArtifact {
             .map(|(identity, source)| ProgramSourceEntry {
                 identity: identity.as_str(),
                 source: source.as_ref(),
+                version: self.version_map.get(identity).map(String::as_str),
             })
             .collect::<Vec<_>>();
         entries.sort_by(|lhs, rhs| lhs.identity.cmp(rhs.identity));
@@ -177,6 +182,7 @@ impl LibraryRegistry {
         ProgramBuildContext {
             registry: self.clone(),
             visible_roots: self.loaded_roots().into_iter().collect(),
+            implicit_imports: Vec::new(),
         }
     }
 
@@ -196,6 +202,7 @@ impl LibraryRegistry {
         Ok(ProgramBuildContext {
             registry: self.clone(),
             visible_roots,
+            implicit_imports: Vec::new(),
         })
     }
 
@@ -317,6 +324,10 @@ impl LibraryRegistry {
 pub struct ProgramBuildContext {
     registry: LibraryRegistry,
     visible_roots: FxHashSet<PathBuf>,
+    /// Workspace identities every other module is analyzed as though it began with a wildcard
+    /// import of. This is a host's context — a catalog a playground puts in scope — not something
+    /// the module's own text says.
+    implicit_imports: Vec<String>,
 }
 
 impl Default for ProgramBuildContext {
@@ -330,11 +341,37 @@ impl ProgramBuildContext {
         Self {
             registry: LibraryRegistry::new(),
             visible_roots: FxHashSet::default(),
+            implicit_imports: Vec::new(),
         }
     }
 
     pub fn from_registry(registry: &LibraryRegistry) -> Self {
         registry.build_context()
+    }
+
+    /// Returns this context with `identities` implicitly imported: every workspace module other
+    /// than those identities is analyzed as though it began with `import "<identity>"`.
+    ///
+    /// <para>An identity the workspace does not contain fails the build with a diagnostic naming
+    /// it, rather than silently putting nothing in scope.</para>
+    pub fn with_implicit_imports<I, S>(mut self, identities: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.implicit_imports = identities
+            .into_iter()
+            .map(|identity| {
+                let identity = identity.into();
+                normalize_workspace_identity(&identity).unwrap_or(identity)
+            })
+            .collect();
+        self
+    }
+
+    /// The workspace identities every other module implicitly wildcard-imports.
+    pub fn implicit_imports(&self) -> &[String] {
+        &self.implicit_imports
     }
 
     fn visible_library(&self, root: &Path) -> Option<Arc<LibraryArtifact>> {
@@ -464,11 +501,14 @@ struct LogicalProgramAnalysis {
     modules: Vec<ModuleArtifact>,
     libraries: Vec<Arc<LibraryArtifact>>,
     source_map: FxHashMap<String, Arc<str>>,
+    /// Faults in the build request itself rather than in any module's text, such as an implicit
+    /// import naming an identity the workspace does not hold.
+    program_diagnostics: Vec<Diagnostic>,
 }
 
 impl LogicalProgramAnalysis {
     fn diagnostics(&self) -> Vec<Diagnostic> {
-        let mut diagnostics = Vec::new();
+        let mut diagnostics = self.program_diagnostics.clone();
         for module in &self.modules {
             diagnostics.extend(module.diagnostics.iter().cloned());
         }
@@ -881,6 +921,7 @@ fn analyze_logical_module_graph(
 ) -> LogicalProgramAnalysis {
     let source_files = parse_logical_source_files(graph);
     let source_map = graph.source_map();
+    let program_diagnostics = unknown_implicit_import_diagnostics(graph, build_context);
     let mut modules = Vec::with_capacity(source_files.len());
     let mut libraries_by_root = FxHashMap::<PathBuf, Arc<LibraryArtifact>>::default();
 
@@ -924,6 +965,7 @@ fn analyze_logical_module_graph(
         modules,
         libraries,
         source_map,
+        program_diagnostics,
     }
 }
 
@@ -1063,6 +1105,7 @@ fn prepare_logical_source_file(
 
     let mut prepared_module = PreparedModule::new(&source_file.identity, preserved_module);
     add_graph_peer_modules(&mut prepared_module, source_files, current_file_index);
+    synthesize_implicit_imports(&mut prepared_module, source_file, build_context);
     let resolved_imports = apply_graph_imports(
         &mut prepared_module,
         source_files,
@@ -1083,6 +1126,84 @@ fn prepare_logical_source_file(
         libraries: selection.libraries,
         selection_diagnostics: selection.diagnostics,
     }
+}
+
+/// Reports every implicitly imported identity the workspace does not hold.
+///
+/// An implicit import is the host's claim about what the workspace contains; a claim the workspace
+/// does not bear out is a fault in the build request, not in any module's text, so it is reported
+/// with no file or span and fails the build.
+fn unknown_implicit_import_diagnostics(
+    graph: &LogicalModuleGraph,
+    build_context: &ProgramBuildContext,
+) -> Vec<Diagnostic> {
+    build_context
+        .implicit_imports()
+        .iter()
+        .filter(|identity| !graph.contains_identity(identity))
+        .map(|identity| {
+            Diagnostic::error("implicit-import-not-found")
+                .with_message(format!(
+                    "Implicitly imported module '{}' was not found in the workspace",
+                    identity
+                ))
+                .build()
+        })
+        .collect()
+}
+
+/// Appends a wildcard import of every implicitly imported module to `module`, so the rest of
+/// analysis and the resolved program see exactly what a written `import "<identity>"` would have
+/// produced.
+///
+/// <para>A module that is itself implicitly imported gets none: the implicit modules are a host's
+/// context, and the context does not depend on itself. An identity the module already imports as an
+/// alias-less wildcard is skipped: the author wrote the very import that would be synthesized, and
+/// repeating it is not an error they made. Any other written import of the identity — a named one,
+/// or a wildcard behind an alias — says how *those* names are spelled without saying anything about
+/// the rest, so the wildcard is still synthesized and the module's other names stay in scope. The
+/// synthesized import has an empty span at the start of the document, which is where a diagnostic
+/// about it, such as an ambiguity between two imported names, points.</para>
+fn synthesize_implicit_imports(
+    module: &mut PreparedModule,
+    source_file: &GraphSourceFile,
+    build_context: &ProgramBuildContext,
+) {
+    let implicit_imports = build_context.implicit_imports();
+    if implicit_imports.is_empty()
+        || implicit_imports
+            .iter()
+            .any(|identity| identity == &source_file.identity)
+    {
+        return;
+    }
+
+    let written_wildcards = module
+        .raw_module()
+        .imports
+        .iter()
+        .filter(|import| matches!(import.kind, ImportKind::Wildcard { alias: None }))
+        .filter_map(|import| {
+            normalize_workspace_import_identity(&source_file.identity, &import.library_path).ok()
+        })
+        .collect::<FxHashSet<_>>();
+    for identity in implicit_imports {
+        if written_wildcards.contains(identity) {
+            continue;
+        }
+        module.raw_module_mut().imports.push(Import {
+            library_path: workspace_import_path(&source_file.identity, identity),
+            kind: ImportKind::Wildcard { alias: None },
+            span: TextSpan::new(0.into(), 0.into()),
+        });
+    }
+}
+
+/// The import path that reaches `target` from `importer`: imports resolve relative to the
+/// importing module's directory, so the path climbs out of it first.
+fn workspace_import_path(importer: &str, target: &str) -> String {
+    let depth = importer.matches('/').count();
+    format!("{}{}", "../".repeat(depth), target)
 }
 
 fn add_graph_peer_modules(
@@ -1157,9 +1278,25 @@ fn apply_graph_imports(
             }
         };
 
+        // A synthesized implicit import carries an empty span, which no written import has. It is
+        // the host's context rather than a line the author repeated, so an explicit import of the
+        // same module is not a duplicate of it: the written import decides how its own names are
+        // spelled, and the wildcard still brings in the ones it did not name.
+        let is_synthesized = import.span.start() == import.span.end();
         if let Some(first_import_span) =
             seen_import_targets.insert(target_identity.clone(), import.span)
         {
+            if is_synthesized {
+                if let Some(target_index) = identity_to_index.get(&target_identity).copied() {
+                    add_workspace_import_bindings(
+                        module,
+                        &source_files[target_index],
+                        &import,
+                        &mut imported_visible_names,
+                    );
+                }
+                continue;
+            }
             let first_import_location =
                 line_col_for_span(source_file.source.as_ref(), first_import_span)
                     .map(|(line, column)| {
@@ -1450,6 +1587,7 @@ pub fn build_program_artifact_from_source(
     let graph = LogicalModuleGraph::from_modules(vec![LogicalSourceModule {
         identity: identity.clone(),
         source: Arc::<str>::from(source),
+        version: None,
     }])
     .map_err(source_provider_error_to_io)?;
     Ok(build_program_artifact_from_graph(
@@ -1470,9 +1608,17 @@ fn build_program_artifact_from_graph(
     for module in graph.modules() {
         module.identity.hash(&mut hasher);
         module.source.hash(&mut hasher);
+        // A version compiles to nothing, but every artifact emitted from the program records it,
+        // so a program built under another version is not the same program.
+        module.version.hash(&mut hasher);
     }
     for library in &analysis.libraries {
         hasher.write_u64(library.fingerprint);
+    }
+    // The implicit imports are part of what was compiled: the same text sees different names under
+    // a different context, so it must not reuse a cached program built under another.
+    for identity in build_context.implicit_imports() {
+        identity.hash(&mut hasher);
     }
 
     let diagnostics = analysis.diagnostics();
@@ -1493,6 +1639,7 @@ fn build_program_artifact_from_graph(
         fingerprint,
         resolved_program,
         source_map,
+        version_map: graph.version_map(),
     }
 }
 
@@ -1511,6 +1658,7 @@ fn parse_failure_artifact(
         imports: Vec::new(),
         prepared_bindings: Vec::new(),
         element_type_arguments: FxHashMap::default(),
+        function_value_calls: Default::default(),
         prepared_module: None,
     }
 }
@@ -2369,7 +2517,13 @@ fn type_to_type_ref(ty: &Type) -> Option<TypeRef> {
         Type::Function { params, ret } => Some(TypeRef::function(
             params
                 .iter()
-                .map(type_to_type_ref)
+                .map(|param| {
+                    Some(nx_hir::ast::FunctionParam {
+                        name: param.name.clone(),
+                        ty: type_to_type_ref(&param.ty)?,
+                        is_content: param.is_content,
+                    })
+                })
                 .collect::<Option<Vec<_>>>()?,
             type_to_type_ref(ret)?,
         )),
@@ -5643,5 +5797,230 @@ let root(): int = { answer() }"#
             panic!("Expected artifact evaluation to succeed after build context drop");
         };
         assert_eq!(value, nx_value::NxValue::Int(42));
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // Implicit imports
+    // --------------------------------------------------------------------------------------------
+
+    fn catalog_source() -> &'static [u8] {
+        b"export external component <SkiaLabel Text:string FontSize:int = 14 />\n"
+    }
+
+    fn implicit_context() -> ProgramBuildContext {
+        ProgramBuildContext::empty().with_implicit_imports(["drawnui.nx"])
+    }
+
+    #[test]
+    fn implicit_import_puts_a_control_in_scope_without_an_import_line() {
+        let workspace = workspace(vec![
+            workspace_module("drawnui.nx", catalog_source().to_vec()),
+            workspace_module(
+                "input.nx",
+                b"let root() = <SkiaLabel Text=\"hi\" />\n".to_vec(),
+            ),
+        ]);
+
+        let artifact =
+            build_workspace_program_artifact(&workspace, "input.nx", &implicit_context())
+                .unwrap_or_else(|diagnostics| panic!("workspace artifact: {diagnostics:?}"));
+
+        assert!(
+            artifact.diagnostics.is_empty(),
+            "{:?}",
+            artifact.diagnostics
+        );
+        let EvalResult::Ok(value) = eval_program_artifact(&artifact) else {
+            panic!("expected evaluation to succeed");
+        };
+        assert!(
+            matches!(&value, NxValue::Record { type_name: Some(name), .. } if name == "SkiaLabel"),
+            "{value:?}"
+        );
+    }
+
+    /// The option must not touch the document's text: a fault on line 3 is reported on line 3, not
+    /// shifted by a synthesized import line.
+    #[test]
+    fn implicit_import_leaves_the_document_positions_alone() {
+        let workspace = workspace(vec![
+            workspace_module("drawnui.nx", catalog_source().to_vec()),
+            workspace_module(
+                "input.nx",
+                b"let root() =\n  <SkiaLabel\n    Text=1.0 />\n".to_vec(),
+            ),
+        ]);
+
+        let diagnostics = validate_workspace(&workspace, &implicit_context());
+        let diagnostic = diagnostics
+            .first()
+            .unwrap_or_else(|| panic!("expected a diagnostic"));
+        let label = diagnostic.labels.first().expect("a label");
+        assert_eq!(label.file, "input.nx");
+        assert_eq!(label.span.start_line, 3);
+    }
+
+    /// A document that declares no `root` and is one element expression is accepted exactly as the
+    /// same text with a written wildcard import would be.
+    #[test]
+    fn a_document_that_is_one_trailing_element_compiles_with_an_implicit_import() {
+        let workspace = workspace(vec![
+            workspace_module("drawnui.nx", catalog_source().to_vec()),
+            workspace_module("input.nx", b"<SkiaLabel Text=\"hi\" />\n".to_vec()),
+        ]);
+
+        let artifact =
+            build_workspace_program_artifact(&workspace, "input.nx", &implicit_context())
+                .unwrap_or_else(|diagnostics| panic!("workspace artifact: {diagnostics:?}"));
+
+        let EvalResult::Ok(value) = eval_program_artifact(&artifact) else {
+            panic!("expected evaluation to succeed");
+        };
+        assert!(
+            matches!(&value, NxValue::Record { type_name: Some(name), .. } if name == "SkiaLabel"),
+            "{value:?}"
+        );
+    }
+
+    #[test]
+    fn the_implicitly_imported_module_does_not_import_itself() {
+        let workspace = workspace(vec![
+            workspace_module("drawnui.nx", catalog_source().to_vec()),
+            workspace_module(
+                "input.nx",
+                b"let root() = <SkiaLabel Text=\"hi\" />\n".to_vec(),
+            ),
+        ]);
+
+        let artifact =
+            build_workspace_program_artifact(&workspace, "drawnui.nx", &implicit_context())
+                .unwrap_or_else(|diagnostics| panic!("workspace artifact: {diagnostics:?}"));
+
+        let catalog = artifact
+            .root_modules
+            .iter()
+            .find(|module| module.file_name == "drawnui.nx")
+            .expect("catalog artifact");
+        assert!(catalog.imports.is_empty(), "{:?}", catalog.imports);
+        assert!(
+            artifact.diagnostics.is_empty(),
+            "{:?}",
+            artifact.diagnostics
+        );
+    }
+
+    #[test]
+    fn an_explicit_import_of_the_implicit_module_is_not_a_repeated_import() {
+        let workspace = workspace(vec![
+            workspace_module("drawnui.nx", catalog_source().to_vec()),
+            workspace_module(
+                "input.nx",
+                b"import \"./drawnui.nx\"\nlet root() = <SkiaLabel Text=\"hi\" />\n".to_vec(),
+            ),
+        ]);
+
+        let diagnostics = validate_workspace(&workspace, &implicit_context());
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    /// A catalog of three names — two controls and a function — so a test can import one of them
+    /// explicitly and ask what became of the others.
+    fn two_name_catalog_source() -> &'static [u8] {
+        b"export external component <SkiaLabel Text:string />\n\
+          export external component <SkiaButton Text:string />\n\
+          export let hint(): string = { \"tap\" }\n"
+    }
+
+    /// A written import of the implicitly imported module is not a repeated import of it: the
+    /// synthesized wildcard still joins it rather than tripping the one-import-per-module rule,
+    /// so naming one declaration does not hide the rest. The name the author imported is bound
+    /// once, by the written import, and the wildcard binds only what it did not name.
+    #[test]
+    fn a_named_import_of_the_implicit_module_leaves_its_other_names_in_scope() {
+        let workspace = workspace(vec![
+            workspace_module("drawnui.nx", two_name_catalog_source().to_vec()),
+            workspace_module(
+                "input.nx",
+                b"import { SkiaLabel } from \"./drawnui.nx\"\nlet root() = <SkiaButton Text={hint()} />\n"
+                    .to_vec(),
+            ),
+        ]);
+
+        let artifact =
+            build_workspace_program_artifact(&workspace, "input.nx", &implicit_context())
+                .unwrap_or_else(|diagnostics| panic!("workspace artifact: {diagnostics:?}"));
+        let EvalResult::Ok(value) = eval_program_artifact(&artifact) else {
+            panic!("expected evaluation to succeed");
+        };
+        assert!(
+            matches!(&value, NxValue::Record { type_name: Some(name), .. } if name == "SkiaButton"),
+            "{value:?}"
+        );
+    }
+
+    /// The same for an aliased wildcard, which puts the names behind a qualifier.
+    #[test]
+    fn an_aliased_wildcard_import_of_the_implicit_module_leaves_its_other_names_in_scope() {
+        let workspace = workspace(vec![
+            workspace_module("drawnui.nx", two_name_catalog_source().to_vec()),
+            workspace_module(
+                "input.nx",
+                b"import \"./drawnui.nx\" as Ui\nlet root() = <SkiaButton Text={hint()} />\n"
+                    .to_vec(),
+            ),
+        ]);
+
+        let artifact =
+            build_workspace_program_artifact(&workspace, "input.nx", &implicit_context())
+                .unwrap_or_else(|diagnostics| panic!("workspace artifact: {diagnostics:?}"));
+        let EvalResult::Ok(value) = eval_program_artifact(&artifact) else {
+            panic!("expected evaluation to succeed");
+        };
+        assert!(
+            matches!(&value, NxValue::Record { type_name: Some(name), .. } if name == "SkiaButton"),
+            "{value:?}"
+        );
+    }
+
+    #[test]
+    fn an_unknown_implicit_import_fails_the_build_naming_it() {
+        let workspace = workspace(vec![workspace_module(
+            "input.nx",
+            b"let root() = 1\n".to_vec(),
+        )]);
+        let build_context = ProgramBuildContext::empty().with_implicit_imports(["missing"]);
+
+        let error = build_workspace_program_artifact(&workspace, "input.nx", &build_context)
+            .expect_err("an unknown implicit import fails the build");
+        assert!(
+            error.iter().any(|diagnostic| {
+                diagnostic.code.as_deref() == Some("implicit-import-not-found")
+                    && diagnostic.message.contains("'missing'")
+            }),
+            "{error:?}"
+        );
+        let diagnostics = validate_workspace(&workspace, &build_context);
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("'missing'")),
+            "{diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn implicit_imports_change_the_program_fingerprint() {
+        let workspace = workspace(vec![
+            workspace_module("drawnui.nx", catalog_source().to_vec()),
+            workspace_module("input.nx", b"let root() = 1\n".to_vec()),
+        ]);
+
+        let plain =
+            build_workspace_program_artifact(&workspace, "input.nx", &ProgramBuildContext::empty())
+                .expect("plain artifact");
+        let implicit =
+            build_workspace_program_artifact(&workspace, "input.nx", &implicit_context())
+                .expect("implicit artifact");
+        assert_ne!(plain.fingerprint, implicit.fingerprint);
     }
 }

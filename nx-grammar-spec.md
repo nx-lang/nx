@@ -250,15 +250,29 @@ ValueDefinitionTypeOpt
 Type (AST: TypeSyntax)
 - Type → PrimitiveType TypeSuffix*
 - Type → UserDefinedType TypeSuffix*
-  - fields: kind: "primitive"|"user", name: string (qualified), suffixes: ("nullable"|"sequence")[]
+- Type → FunctionType TypeSuffix*
+- Type → ParenthesizedType TypeSuffix*
+  - fields: kind: "primitive"|"user"|"function", name?: string (qualified), params?: FunctionTypeParamSyntax[], result?: TypeSyntax, suffixes: ("nullable"|"sequence")[]
 
 TypeSuffix
 - TypeSuffix → QMARK
 - TypeSuffix → LBRACK RBRACK
 
+FunctionType (AST: FunctionTypeSyntax)
+- FunctionType → LT FUNCTION PropertyDefinition* SLASH GT COLON Type
+  - fields: params: FunctionTypeParamSyntax[] (name, type, isContent), result: TypeSyntax
+  - `FUNCTION` is the contextual keyword `function`, a keyword only after `LT` in type position; the
+    identifier `function` keeps its meaning everywhere else.
+  - The trailing `Type` takes suffixes greedily: a suffix after the result binds to the result.
+
+ParenthesizedType
+- ParenthesizedType → LPAREN Type RPAREN
+  - No AST node of its own: it denotes the enclosed type, and exists so a suffix can apply to a
+    function type as a whole, `(<function />: DrawnNode)?`.
+
 Semantic note: `TypeSuffix*` preserves source-order composition, but post-parse validation rejects
-reapplying `QMARK` to the same outer type layer. `string?[]?` is valid; `string??` and
-`string?[]??` are invalid.
+reapplying `QMARK` to the same outer type layer. `string?[]?` is valid; `string??`,
+`string?[]??` and `(string?)?` are invalid.
 
 PrimitiveType (AST: PrimitiveTypeSyntax)
 - PrimitiveType → STRING | INT32 | INT64 | FLOAT32 | FLOAT64 | BOOLEAN | OBJECT
@@ -696,9 +710,11 @@ This section lists the AST node types with fields for implementers.
 - ActionDefinitionSyntax: visibility?: "private"|"export", isAbstract: boolean, name: string, base?: QualifiedNameSyntax, properties: RecordPropertyDefinitionSyntax[]
 - RecordPropertyDefinitionSyntax: modifier?: "content", name: string, type: TypeSyntax, default?: ExpressionSyntax
 - ValueDefinitionSyntax: visibility?: "private"|"export", name: string, type?: TypeSyntax, value: ExpressionSyntax
-- TypeSyntax: kind: "primitive"|"user", name: string (qualified), suffixes: ("nullable"|"sequence")[]
+- TypeSyntax: kind: "primitive"|"user"|"function", name?: string (qualified), params?: FunctionTypeParamSyntax[], result?: TypeSyntax, suffixes: ("nullable"|"sequence")[]
 - PrimitiveTypeSyntax: name: string
 - UserTypeSyntax: name: QualifiedNameSyntax
+- FunctionTypeSyntax: params: FunctionTypeParamSyntax[], result: TypeSyntax
+- FunctionTypeParamSyntax: name: string, type: TypeSyntax, isContent: boolean
 - FunctionDefinitionSyntax: ElementFunctionDefinitionSyntax | ParenFunctionDefinitionSyntax
 - ElementFunctionDefinitionSyntax: visibility?: "private"|"export", elementName: QualifiedMarkupNameSyntax, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
 - ParenFunctionDefinitionSyntax: visibility?: "private"|"export", name: string, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
@@ -808,7 +824,10 @@ This section lists the AST node types with fields for implementers.
 - SelectiveImport aliases must contain exactly one DOT and the final identifier must match the imported name.
 - Omitted visibility on top-level declarations defaults to internal; `private` is file-scoped,
   omitted visibility is library-scoped or program-scoped, and `export` is visible to consumers.
-- Type suffixes: zero or more of QMARK or LBRACK RBRACK, applied in source order.
+- Type suffixes: zero or more of QMARK or LBRACK RBRACK, applied in source order; a QMARK that
+  makes the same outer layer nullable twice is rejected, across a parenthesis included.
+- A function type's parameters carry no default value, at most one is marked `content`, and none
+  is a `type` parameter.
 - Union declarations require at least one leading-pipe case, case names must be unique within the union, and a union `extends` target must resolve to an abstract record.
 - `type Result = Success | Failure` is intentionally not accepted as a discriminated union declaration.
 - Switch expressions (property variants): at least one case; patterns per case must be non-empty.

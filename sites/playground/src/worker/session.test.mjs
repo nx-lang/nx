@@ -6,6 +6,7 @@
  * a crashed host — is here.
  */
 import { strict as assert } from "node:assert";
+import { prepareNxIrModule } from "@nx-lang/ir-runtime";
 import { readFileSync } from "node:fs";
 import { after, test } from "node:test";
 import { NxHostCrashedError, createNxHost, loadNxModule } from "@nx-lang/sdk-wasm";
@@ -25,7 +26,9 @@ test("answers a valid compile with NX IR and no diagnostics", async () => {
     source: 'let root() = { <SkiaLabel Text="hi" /> }',
   });
   assert.deepEqual(result.diagnostics, []);
-  assert.equal(result.ir.format, "nx-ir-json");
+  assert.ok(result.ir instanceof Uint8Array, "the compile answers with the snippet's image");
+  const { artifact } = prepareNxIrModule(result.ir);
+  assert.deepEqual(artifact.modules.map((module) => module.identity), ["playground.nx", "skia.nx"]);
 });
 
 test("answers a compile that fails with diagnostics in the author's own coordinates", async () => {
@@ -40,7 +43,7 @@ test("answers a compile that fails with diagnostics in the author's own coordina
   assert.equal(result.diagnostics[0].span.startLine, 2);
 });
 
-test("answers language queries through the catalog prelude", async () => {
+test("answers language queries through the implicitly imported catalog", async () => {
   const documents = [{ uri, source: '<SkiaLabel Text="hi" />\n', version: 1 }];
 
   const hover = await session.answer({
@@ -51,7 +54,7 @@ test("answers language queries through the catalog prelude", async () => {
   });
   assert.ok(hover !== null, "the catalog's SkiaLabel should be known");
   assert.match(hover.contents, /SkiaLabel/);
-  // The catalog is a prelude, so the range is in the author's own first line.
+  // The catalog is its own module, so the range is in the author's own first line as written.
   assert.equal(hover.range.start.line, 0);
 
   const symbols = await session.answer({
@@ -94,7 +97,11 @@ test("a crashed host is reported once and replaced, and the next request is answ
           crashed = true;
           throw new NxHostCrashedError("nx_wasm_program_build");
         },
-        createLanguageSnapshot: (documents) => host.createLanguageSnapshot(documents),
+        buildWorkspaceArtifact: () => {
+          crashed = true;
+          throw new NxHostCrashedError("nx_wasm_workspace_build");
+        },
+        createLanguageSnapshot: (documents, options) => host.createLanguageSnapshot(documents, options),
         dispose: () => host.dispose(),
       };
     },
@@ -113,7 +120,7 @@ test("a crashed host is reported once and replaced, and the next request is answ
       source: 'let root() = { <SkiaLabel Text="hi" /> }',
     });
     assert.deepEqual(result.diagnostics, []);
-    assert.equal(result.ir.format, "nx-ir-json");
+    assert.ok(result.ir instanceof Uint8Array, "the compile answers with the snippet's image");
     assert.equal(crashing.replacements, 1);
   } finally {
     crashing.dispose();

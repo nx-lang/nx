@@ -654,50 +654,467 @@ pub fn apply_contextual_name_resolutions<T>(
     }
 }
 
-/// Rewrites each integer literal that took a floating-point type into a float literal.
+/// Replaces each constant expression that took a type from its site with the literal it folded to.
+///
+/// <para>`folded` maps a constant expression, arithmetic over numeric literals only, to its value
+/// at the type its literals have on their own. The expression keeps its id, so the type analysis
+/// recorded for it still applies, and [`apply_literal_conversions`] then gives the literal the
+/// site's width, as it would a literal the author wrote. Run it first.</para>
+pub fn apply_constant_folds(module: &mut PreparedModule, folded: &FxHashMap<ExprId, ast::Literal>) {
+    let raw_module = module.raw_module_mut();
+    for (expr_id, literal) in folded {
+        *raw_module.expr_mut(*expr_id) = ast::Expr::Literal(literal.clone());
+    }
+}
+
+/// Rewrites each numeric literal that took a type from its site into a literal of that width.
 ///
 /// <para>Runs on the same terms as [`apply_contextual_name_resolutions`] and for the same reason:
 /// once this has run, source that wrote `24` at a float-typed property is indistinguishable from
-/// source that wrote `24.0`, so no consumer below type checking needs to know the rule exists — or
-/// is able to observe that it applied.</para>
+/// source that wrote `24.0`, and `1` at an `int32` site is an `int32` literal, so no consumer below
+/// type checking needs to know the rule exists — or is able to observe that it applied.</para>
 ///
-/// <para>The span is kept, so a diagnostic or a source map still points at what the author
+/// <para>`converted` maps each literal to the primitive it was typed as. An integer literal at a
+/// floating-point site becomes a real literal of that width; at `int32` it becomes an `int32`
+/// literal; at `int64` it stays as it is, since `int64` shares the `int` literal form. A real
+/// literal at a `float32` site is rounded to the nearest `float32`, as a `float32` literal is in
+/// any language. The span is kept, so a diagnostic or a source map still points at what the author
 /// wrote.</para>
-pub fn apply_int_literal_conversions(module: &mut PreparedModule, converted: &[ExprId]) {
+pub fn apply_literal_conversions(
+    module: &mut PreparedModule,
+    converted: &FxHashMap<ExprId, ast::PrimitiveType>,
+) {
     if converted.is_empty() {
         return;
     }
 
     let raw_module = module.raw_module_mut();
-    for expr_id in converted {
-        let value = match raw_module.expr(*expr_id) {
-            ast::Expr::Literal(ast::Literal::Int(value)) => *value,
-            // Already rewritten, or never an integer literal: leave it alone.
+    for (expr_id, target) in converted {
+        let rewritten = match (raw_module.expr(*expr_id), target) {
+            (ast::Expr::Literal(ast::Literal::Int(value)), ast::PrimitiveType::Float64) => {
+                ast::Literal::Float(ast::OrderedFloat(*value as f64))
+            }
+            (ast::Expr::Literal(ast::Literal::Int(value)), ast::PrimitiveType::Float32) => {
+                ast::Literal::Float32(ast::OrderedFloat(f64::from(*value as f32)))
+            }
+            (ast::Expr::Literal(ast::Literal::Int(value)), ast::PrimitiveType::Int32) => {
+                // The checker recorded `int32` only after checking the range.
+                ast::Literal::Int32(*value as i32)
+            }
+            (ast::Expr::Literal(ast::Literal::Float(value)), ast::PrimitiveType::Float32) => {
+                ast::Literal::Float32(ast::OrderedFloat(f64::from(value.0 as f32)))
+            }
+            // `int` and `int64` keep the literal form they have; anything else is already
+            // rewritten, or was never a numeric literal.
             _ => continue,
         };
-        *raw_module.expr_mut(*expr_id) =
-            ast::Expr::Literal(ast::Literal::Float(ast::OrderedFloat(value as f64)));
+        *raw_module.expr_mut(*expr_id) = ast::Expr::Literal(rewritten);
+    }
+}
+
+/// Wraps each branch of a join that type analysis found to widen in an [`ast::Expr::Widen`].
+///
+/// <para>Runs on the same terms as [`apply_string_conversions`]. `widened` maps a branch of an
+/// `if` or `match`, or an element of a list literal, to the numeric type the join has. The
+/// wrapper takes the branch's place in its parent, so the branch keeps its id and the types
+/// recorded for it stay valid. The nodes this creates are returned with the branch each wraps, so
+/// the caller can type them.</para>
+pub fn apply_join_widenings(
+    module: &mut PreparedModule,
+    widened: &FxHashMap<ExprId, ast::PrimitiveType>,
+) -> Vec<(ExprId, ExprId)> {
+    let mut created = Vec::new();
+    if widened.is_empty() {
+        return created;
+    }
+
+    let raw_module = module.raw_module_mut();
+    let parents = raw_module
+        .exprs()
+        .filter(|(_, expr)| {
+            matches!(
+                expr,
+                ast::Expr::If { .. } | ast::Expr::Match { .. } | ast::Expr::Array { .. }
+            )
+        })
+        .map(|(id, _)| id)
+        .collect::<Vec<_>>();
+
+    for parent in parents {
+        let mut parent_expr = raw_module.expr(parent).clone();
+        let mut children = match &mut parent_expr {
+            ast::Expr::If {
+                then_branch,
+                else_branch,
+                ..
+            } => std::iter::once(then_branch)
+                .chain(else_branch.as_mut())
+                .collect::<Vec<_>>(),
+            ast::Expr::Match {
+                arms, else_branch, ..
+            } => arms
+                .iter_mut()
+                .map(|arm| &mut arm.body)
+                .chain(else_branch.as_mut())
+                .collect(),
+            ast::Expr::Array { elements, .. } => elements.iter_mut().collect(),
+            _ => continue,
+        };
+
+        let mut changed = false;
+        for child in children.iter_mut() {
+            let Some(ty) = widened.get(child) else {
+                continue;
+            };
+            let span = raw_module.expr_span(**child);
+            let wrapped = raw_module.alloc_expr(ast::Expr::Widen {
+                expr: **child,
+                ty: *ty,
+                span,
+            });
+            raw_module.set_expr_span(wrapped, span);
+            created.push((wrapped, **child));
+            **child = wrapped;
+            changed = true;
+        }
+        drop(children);
+        if changed {
+            *raw_module.expr_mut(parent) = parent_expr;
+        }
+    }
+
+    created
+}
+
+/// The string conversions type analysis decided on, to be applied to the prepared module.
+///
+/// <para>Every `+` in `concatenations` had a string operand; every expression in `text_conversions`
+/// is an operand (of one of those, or of a joined body) whose primitive value is rendered as text;
+/// every element in `joined_bodies` has a body of text runs and braced values that binds to a
+/// `string` content property and is joined into one string.</para>
+#[derive(Debug, Default, Clone)]
+pub struct StringConversions {
+    pub concatenations: FxHashSet<ExprId>,
+    pub text_conversions: FxHashMap<ExprId, ast::PrimitiveType>,
+    pub joined_bodies: FxHashSet<ElementId>,
+}
+
+/// Rewrites the additions, operands and bodies type analysis recorded as string conversions.
+///
+/// <para>Runs on the same terms as [`apply_contextual_name_resolutions`]: the type checker is the
+/// one place every operand's type is known, so it decides which `+` concatenates, and after this
+/// has run neither the interpreter nor a code generator has to decide again. A recorded `+`
+/// becomes an [`ast::Expr::Concat`]; a recorded operand is wrapped in an [`ast::Expr::ToText`]
+/// naming its type; a recorded body is replaced by one `Concat` chain over its pieces, with the
+/// layout taken out of the text (see [`collapse_line_breaks`]): the whitespace between two pieces
+/// and inside each text run is kept, except that a stretch containing a line break becomes one
+/// space, and a text run at the start or end of the body is stripped of its leading or trailing
+/// whitespace. A braced value, and raw text, is kept as written.</para>
+///
+/// <para>Existing expressions keep their ids, so the types recorded for them stay valid. The nodes
+/// this creates are returned so the caller can record their type, which is `string` for every
+/// one.</para>
+pub fn apply_string_conversions(
+    module: &mut PreparedModule,
+    conversions: &StringConversions,
+) -> Vec<ExprId> {
+    let mut created = Vec::new();
+    if conversions.concatenations.is_empty() && conversions.joined_bodies.is_empty() {
+        return created;
+    }
+
+    let raw_module = module.raw_module_mut();
+
+    // Wraps a recorded operand in its text conversion; any other expression is returned as is.
+    fn as_text(
+        raw_module: &mut crate::LoweredModule,
+        conversions: &StringConversions,
+        created: &mut Vec<ExprId>,
+        operand: ExprId,
+    ) -> ExprId {
+        let Some(ty) = conversions.text_conversions.get(&operand) else {
+            return operand;
+        };
+        let span = raw_module.expr_span(operand);
+        let wrapped = raw_module.alloc_expr(ast::Expr::ToText {
+            expr: operand,
+            ty: *ty,
+            span,
+        });
+        raw_module.set_expr_span(wrapped, span);
+        created.push(wrapped);
+        wrapped
+    }
+
+    for expr_id in &conversions.concatenations {
+        let (lhs, rhs, span) = match raw_module.expr(*expr_id) {
+            ast::Expr::BinaryOp {
+                lhs,
+                op: ast::BinOp::Add,
+                rhs,
+                span,
+            } => (*lhs, *rhs, *span),
+            // Already rewritten, or never an addition: leave it alone.
+            _ => continue,
+        };
+        let lhs = as_text(raw_module, conversions, &mut created, lhs);
+        let rhs = as_text(raw_module, conversions, &mut created, rhs);
+        *raw_module.expr_mut(*expr_id) = ast::Expr::Concat { lhs, rhs, span };
+    }
+
+    for element_id in &conversions.joined_bodies {
+        let element = raw_module.element(*element_id);
+        let pieces = element.content.clone();
+        let whitespace_runs = element.whitespace_runs.clone();
+        let text_runs = element.text_runs.clone();
+        let typed_body = element.text_type.is_some();
+        let starts_with_text = text_runs.first() == Some(&0);
+        let ends_with_text = text_runs.last() == Some(&(pieces.len().wrapping_sub(1)));
+        let span = element.span;
+        if pieces.is_empty() {
+            continue;
+        }
+
+        // The pieces in source order, with the whitespace between two of them put back. In a plain
+        // body the line breaks in it, and in each text run, read as a space; in a typed body the
+        // text is kept as written and only its indentation comes off below.
+        let mut sequence = Vec::with_capacity(pieces.len() * 2);
+        let mut layout = Vec::new();
+        for (index, piece) in pieces.iter().enumerate() {
+            if index > 0 {
+                for run in whitespace_runs.iter().filter(|run| run.before == index) {
+                    let text = if typed_body {
+                        run.text.clone()
+                    } else {
+                        collapse_line_breaks(&run.text)
+                    };
+                    let literal =
+                        raw_module.alloc_expr(ast::Expr::Literal(ast::Literal::String(text)));
+                    raw_module.set_expr_span(literal, span);
+                    created.push(literal);
+                    layout.push(literal);
+                    sequence.push(literal);
+                }
+            }
+            if text_runs.contains(&index) {
+                if !typed_body {
+                    if let ast::Expr::Literal(ast::Literal::String(text)) = raw_module.expr(*piece)
+                    {
+                        let collapsed = ast::Literal::String(collapse_line_breaks(text));
+                        *raw_module.expr_mut(*piece) = ast::Expr::Literal(collapsed);
+                    }
+                }
+                layout.push(*piece);
+            }
+            sequence.push(*piece);
+        }
+
+        if typed_body {
+            dedent_typed_body(raw_module, &sequence, &layout);
+        } else {
+            // Layout around the body is not text: a run that opens the body loses its leading
+            // whitespace and one that closes it its trailing, the way the body reads. A braced
+            // string is a value, so it keeps its spaces wherever it stands.
+            let first = sequence[0];
+            if starts_with_text {
+                if let ast::Expr::Literal(ast::Literal::String(text)) = raw_module.expr(first) {
+                    let trimmed = ast::Literal::String(smol_str::SmolStr::new(text.trim_start()));
+                    *raw_module.expr_mut(first) = ast::Expr::Literal(trimmed);
+                }
+            }
+            let last = sequence[sequence.len() - 1];
+            if ends_with_text {
+                if let ast::Expr::Literal(ast::Literal::String(text)) = raw_module.expr(last) {
+                    let trimmed = ast::Literal::String(smol_str::SmolStr::new(text.trim_end()));
+                    *raw_module.expr_mut(last) = ast::Expr::Literal(trimmed);
+                }
+            }
+        }
+
+        let mut chain = as_text(raw_module, conversions, &mut created, sequence[0]);
+        for piece in &sequence[1..] {
+            let rhs = as_text(raw_module, conversions, &mut created, *piece);
+            let joined = raw_module.alloc_expr(ast::Expr::Concat {
+                lhs: chain,
+                rhs,
+                span,
+            });
+            raw_module.set_expr_span(joined, span);
+            created.push(joined);
+            chain = joined;
+        }
+        raw_module.element_mut(*element_id).content = vec![chain];
+    }
+
+    created
+}
+
+/// Takes the source's indentation out of a typed body, leaving its line breaks as written.
+///
+/// <para>A typed body (`<Note:markdown>`) is text for a processor the host supplies, so its blank
+/// lines and list markers are its own and a plain body's rule — a line break reads as one space —
+/// would destroy them. What is layout in a typed body is only the indentation it is written at:
+/// the common indentation of its lines comes off every line, the line break that opens the body
+/// goes, and so does the whitespace-only line that closes it. A braced value keeps its own text,
+/// and a line break inside one is not indentation.</para>
+fn dedent_typed_body(
+    raw_module: &mut crate::LoweredModule,
+    sequence: &[ExprId],
+    layout: &[ExprId],
+) {
+    // The body as written, with each braced value standing in as one non-space character, so a
+    // line that holds only a value still counts as a line with text on it.
+    let mut written = String::new();
+    for piece in sequence {
+        match (layout.contains(piece), raw_module.expr(*piece)) {
+            (true, ast::Expr::Literal(ast::Literal::String(text))) => written.push_str(text),
+            _ => written.push('\u{0}'),
+        }
+    }
+
+    let indent = common_indent(&written);
+    if !indent.is_empty() {
+        for piece in layout {
+            let ast::Expr::Literal(ast::Literal::String(text)) = raw_module.expr(*piece) else {
+                continue;
+            };
+            let stripped = strip_indent(text, &indent);
+            *raw_module.expr_mut(*piece) = ast::Expr::Literal(ast::Literal::String(stripped));
+        }
+    }
+
+    // The tag's own line and the closing tag's are the source's, not the text's.
+    let first = sequence[0];
+    if layout.contains(&first) {
+        if let ast::Expr::Literal(ast::Literal::String(text)) = raw_module.expr(first) {
+            if let Some(rest) = text.split_once('\n').and_then(|(head, rest)| {
+                head.chars()
+                    .all(|ch| ch == ' ' || ch == '\t')
+                    .then_some(rest)
+            }) {
+                let opened = ast::Literal::String(smol_str::SmolStr::new(rest));
+                *raw_module.expr_mut(first) = ast::Expr::Literal(opened);
+            }
+        }
+    }
+    let last = sequence[sequence.len() - 1];
+    if layout.contains(&last) {
+        if let ast::Expr::Literal(ast::Literal::String(text)) = raw_module.expr(last) {
+            if let Some(head) = text.rsplit_once('\n').and_then(|(head, tail)| {
+                tail.chars()
+                    .all(|ch| ch == ' ' || ch == '\t')
+                    .then_some(head)
+            }) {
+                let closed = ast::Literal::String(smol_str::SmolStr::new(head));
+                *raw_module.expr_mut(last) = ast::Expr::Literal(closed);
+            }
+        }
+    }
+}
+
+/// The whitespace every line of `written` that has text on it begins with.
+///
+/// <para>The first line is the tag's own line, which carries no indentation of its own, and a
+/// blank line indents nothing, so neither takes part.</para>
+fn common_indent(written: &str) -> String {
+    let mut common: Option<&str> = None;
+    for line in written.split('\n').skip(1) {
+        if line.chars().all(char::is_whitespace) {
+            continue;
+        }
+        let indent = &line[..line.len() - line.trim_start().len()];
+        common = Some(match common {
+            None => indent,
+            Some(current) => {
+                let shared = current
+                    .char_indices()
+                    .zip(indent.chars())
+                    .take_while(|((_, left), right)| left == right)
+                    .map(|((offset, left), _)| offset + left.len_utf8())
+                    .last()
+                    .unwrap_or(0);
+                &current[..shared]
+            }
+        });
+    }
+    common.unwrap_or("").to_string()
+}
+
+/// `text` with `indent` removed from the start of every line it begins.
+fn strip_indent(text: &str, indent: &str) -> smol_str::SmolStr {
+    let mut stripped = String::with_capacity(text.len());
+    for (index, line) in text.split('\n').enumerate() {
+        if index > 0 {
+            stripped.push('\n');
+            stripped.push_str(line.strip_prefix(indent).unwrap_or(line));
+        } else {
+            stripped.push_str(line);
+        }
+    }
+    smol_str::SmolStr::new(stripped)
+}
+
+/// Replaces each stretch of whitespace in `text` that contains a line break with one space.
+///
+/// <para>A line break in a body is layout: where a line ends and how far the next is indented
+/// depend on how the source is formatted, not on the text, so a body reads the same whether it is
+/// written on one line or several. Whitespace within a line is kept as written.</para>
+pub fn collapse_line_breaks(text: &str) -> smol_str::SmolStr {
+    let mut collapsed = String::with_capacity(text.len());
+    let mut stretch = String::new();
+    for ch in text.chars() {
+        if ch.is_whitespace() {
+            stretch.push(ch);
+            continue;
+        }
+        push_whitespace_stretch(&mut collapsed, &stretch);
+        stretch.clear();
+        collapsed.push(ch);
+    }
+    push_whitespace_stretch(&mut collapsed, &stretch);
+    smol_str::SmolStr::new(collapsed)
+}
+
+fn push_whitespace_stretch(out: &mut String, stretch: &str) {
+    if stretch.contains(['\n', '\r']) {
+        out.push(' ');
+    } else {
+        out.push_str(stretch);
     }
 }
 
 /// Replaces every reference to one of `params` in `ty` with the top type `object`, keeping the
-/// `[]` and `?` layers around it.
+/// `[]`, `?` and function layers around it.
 ///
 /// <para>This is the erasure a generated surface applies when it receives a component value
 /// dynamically and so has nothing to bind a type parameter to: the IR prop schema, the C# contract
-/// record, and the serializable TypeScript element type. Function types are left alone: a type
-/// parameter cannot appear in one, since the only place a parameter is a type is a component's
-/// own prop and state annotations.</para>
+/// record, and the serializable TypeScript element type. A parameter inside a function type — a
+/// template prop's `Item:TItem` — is erased where it stands, so the function type keeps its
+/// parameter names and result.</para>
 pub fn erase_type_parameters(ty: &ast::TypeRef, params: &[Name]) -> ast::TypeRef {
     match ty {
         ast::TypeRef::Name(name) if params.iter().any(|param| param == name) => {
             ast::TypeRef::name("object")
         }
-        ast::TypeRef::Name(_) | ast::TypeRef::Function { .. } => ty.clone(),
+        ast::TypeRef::Name(_) => ty.clone(),
         ast::TypeRef::Array(inner) => ast::TypeRef::array(erase_type_parameters(inner, params)),
         ast::TypeRef::Nullable(inner) => {
             ast::TypeRef::nullable(erase_type_parameters(inner, params))
         }
+        ast::TypeRef::Function {
+            params: function_params,
+            return_type,
+        } => ast::TypeRef::Function {
+            params: function_params
+                .iter()
+                .map(|param| ast::FunctionParam {
+                    name: param.name.clone(),
+                    ty: erase_type_parameters(&param.ty, params),
+                    is_content: param.is_content,
+                })
+                .collect(),
+            return_type: Box::new(erase_type_parameters(return_type, params)),
+        },
     }
 }
 
@@ -832,11 +1249,13 @@ fn collect_handler_rewrites_in_expr(
         | ast::Expr::ContextualName { .. }
         | ast::Expr::ResolvedUnionCase { .. }
         | ast::Expr::Error(_) => {}
-        ast::Expr::BinaryOp { lhs, rhs, .. } => {
+        ast::Expr::BinaryOp { lhs, rhs, .. } | ast::Expr::Concat { lhs, rhs, .. } => {
             collect_handler_rewrites_in_expr(module, *lhs, owner, rewrites);
             collect_handler_rewrites_in_expr(module, *rhs, owner, rewrites);
         }
-        ast::Expr::UnaryOp { expr, .. } => {
+        ast::Expr::UnaryOp { expr, .. }
+        | ast::Expr::ToText { expr, .. }
+        | ast::Expr::Widen { expr, .. } => {
             collect_handler_rewrites_in_expr(module, *expr, owner, rewrites);
         }
         ast::Expr::Call { func, args, .. } => {
@@ -1662,6 +2081,30 @@ mod tests {
         );
     }
 
+    /// The DrawnUI catalog the fiddle generates leans on this: an event declared on a base class is
+    /// stated once, on the component for that class, and never restated on the controls below it.
+    #[test]
+    fn redeclaring_an_inherited_emit_is_rejected() {
+        let prepared = prepared(
+            r#"
+            abstract component <ToggleBase emits { Toggled { value:boolean } } />
+            component <Bad extends ToggleBase emits { Toggled { value:boolean } } /> = { <Label /> }
+        "#,
+        );
+
+        let messages = validate_component_definitions(&prepared)
+            .into_iter()
+            .map(|error| error.message())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            messages,
+            vec![
+                "Component 'Bad' redeclares inherited emitted action 'Toggled' from 'ToggleBase'"
+                    .to_string(),
+            ]
+        );
+    }
+
     #[test]
     fn redeclaring_an_inherited_type_parameter_is_rejected() {
         let prepared = prepared(
@@ -1701,6 +2144,24 @@ mod tests {
         assert_eq!(
             erase_type_parameters(&ast::TypeRef::name("Contact"), &params),
             ast::TypeRef::name("Contact")
+        );
+    }
+
+    #[test]
+    fn erase_type_parameters_reaches_inside_a_function_type() {
+        let params = [Name::new("TItem")];
+        let template = |item: &str| {
+            ast::TypeRef::nullable(ast::TypeRef::function(
+                vec![
+                    ast::FunctionParam::new("Item", ast::TypeRef::name(item)),
+                    ast::FunctionParam::new("Index", ast::TypeRef::name("int")),
+                ],
+                ast::TypeRef::array(ast::TypeRef::name(item)),
+            ))
+        };
+        assert_eq!(
+            erase_type_parameters(&template("TItem"), &params),
+            template("object")
         );
     }
 

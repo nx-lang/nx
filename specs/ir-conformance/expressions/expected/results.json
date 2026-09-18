@@ -1,0 +1,41 @@
+{
+  "main.nx::andSkipsRight": false,
+  "main.nx::andTakesRight": true,
+  "main.nx::arithmetic": 5,
+  "main.nx::big": {
+    "$type": "nx.int",
+    "value": "9007199254740993"
+  },
+  "main.nx::classified": "small",
+  "main.nx::doubled": [
+    2,
+    5,
+    8
+  ],
+  "main.nx::element": {
+    "$type": "div",
+    "class": "box",
+    "content": {
+      "$type": "span"
+    },
+    "count": 42
+  },
+  "main.nx::greeting": "Hello, Ada",
+  "main.nx::integerDivision": 3,
+  "main.nx::integerRemainder": 1,
+  "main.nx::logicalNot": false,
+  "main.nx::maybe": "Ada",
+  "main.nx::negation": -42,
+  "main.nx::orSkipsRight": true,
+  "main.nx::orTakesRight": true,
+  "main.nx::ordered": true,
+  "main.nx::realDivision": 3.5,
+  "main.nx::realRemainder": 1.5,
+  "main.nx::root": 5,
+  "main.nx::small": "small",
+  "main.nx::squares": [
+    1,
+    4,
+    9
+  ]
+}

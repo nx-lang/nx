@@ -3,7 +3,7 @@
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
 use nx_api::{
-    build_workspace_program_artifact,
+    build_workspace_program_artifact, diagnostics_to_api_with_source_entries,
     dispatch_component_actions_program_artifact as api_dispatch_component_actions_program_artifact,
     eval_program_artifact as api_eval_program_artifact, eval_source,
     evaluate_component_program_artifact as api_evaluate_component_program_artifact,
@@ -14,16 +14,16 @@ use nx_api::{
     NxWorkspaceModule as ApiNxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
 };
 use nx_codegen::{
-    emit_js_program_module, emit_nx_ir, GeneratedJsProgramModule,
-    GeneratedJsProgramModuleComponentExport, GeneratedJsProgramModuleFunctionExport, GeneratedNxIr,
-    JsProgramModuleOptions, NxIrFormat, NxIrMetadata,
+    emit_js_program_module, emit_nx_ir, explain_nx_ir_image, write_nx_ir_bundle,
+    GeneratedJsProgramModule, GeneratedJsProgramModuleComponentExport,
+    GeneratedJsProgramModuleFunctionExport, JsProgramModuleOptions, NxIrEmitOptions,
 };
 use nx_value::NxValue;
 use serde::Serialize;
 use std::any::Any;
 use std::panic;
 
-pub const NX_FFI_ABI_VERSION: u32 = 12;
+pub const NX_FFI_ABI_VERSION: u32 = 13;
 
 #[repr(C)]
 pub struct NxBuffer {
@@ -38,6 +38,16 @@ pub struct NxWorkspaceModule {
     pub identity_len: usize,
     pub source_utf8_ptr: *const u8,
     pub source_utf8_len: usize,
+    /// The module's version string as UTF-8; a zero length is no version.
+    pub version_ptr: *const u8,
+    pub version_len: usize,
+}
+
+/// One borrowed UTF-8 string, such as a workspace identity in an implicit-import list.
+#[repr(C)]
+pub struct NxUtf8Slice {
+    pub ptr: *const u8,
+    pub len: usize,
 }
 
 pub struct NxProgramArtifactHandle;
@@ -137,22 +147,19 @@ struct JsonGeneratedJsProgramModuleComponentExport {
     render_export_name: Option<String>,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct JsonGeneratedNxIr {
-    json: String,
-    metadata: NxIrMetadata,
-}
-
 enum FfiPayload {
     Msgpack(Vec<u8>),
     Json(String),
+    /// Bytes in a format the export documents: an NX IR bundle, or explained text.
+    Bytes(Vec<u8>),
 }
 
 impl FfiPayload {
     fn write(self, out_buffer: *mut NxBuffer) {
         match self {
-            Self::Msgpack(payload) => write_msgpack_payload(out_buffer, payload),
+            Self::Msgpack(payload) | Self::Bytes(payload) => {
+                write_msgpack_payload(out_buffer, payload)
+            }
             Self::Json(payload) => write_json_payload(out_buffer, payload),
         }
     }
@@ -328,14 +335,55 @@ fn parse_workspace_modules(
                 .map_err(|_| NxEvalStatus::InvalidArgument)?
         };
         let source = std::str::from_utf8(source_utf8).map_err(|_| NxEvalStatus::InvalidArgument)?;
+        let version = unsafe {
+            slice_to_str(descriptor.version_ptr, descriptor.version_len)
+                .map_err(|_| NxEvalStatus::InvalidArgument)?
+        };
 
         modules.push(
             ApiNxWorkspaceModule::from_source(identity, source)
-                .map_err(|_| NxEvalStatus::InvalidArgument)?,
+                .map_err(|_| NxEvalStatus::InvalidArgument)?
+                .with_version(version),
         );
     }
 
     NxWorkspace::new(modules).map_err(|_| NxEvalStatus::InvalidArgument)
+}
+
+fn parse_utf8_slices(
+    slices_ptr: *const NxUtf8Slice,
+    slice_count: usize,
+) -> Result<Vec<String>, NxEvalStatus> {
+    if slice_count > 0 && slices_ptr.is_null() {
+        return Err(NxEvalStatus::InvalidArgument);
+    }
+
+    let slices = if slice_count == 0 {
+        &[][..]
+    } else {
+        unsafe { std::slice::from_raw_parts(slices_ptr, slice_count) }
+    };
+    slices
+        .iter()
+        .map(|slice| parse_required_utf8(slice.ptr, slice.len))
+        .collect()
+}
+
+/// The build context a workspace call runs against: the handle's own, or a copy of it naming the
+/// implicit imports the caller passed.
+fn workspace_build_context(
+    build_context: &ProgramBuildContext,
+    implicit_imports: Vec<String>,
+) -> std::borrow::Cow<'_, ProgramBuildContext> {
+    if implicit_imports.is_empty() {
+        std::borrow::Cow::Borrowed(build_context)
+    } else {
+        std::borrow::Cow::Owned(
+            build_context
+                .clone()
+                .with_implicit_imports(implicit_imports),
+        )
+    }
 }
 
 fn parse_required_utf8(ptr: *const u8, len: usize) -> Result<String, NxEvalStatus> {
@@ -463,14 +511,6 @@ fn json_generated_js_program_module_payload(
 ) -> Result<String, String> {
     serde_json::to_string(&JsonGeneratedJsProgramModule::from(module))
         .map_err(|e| format!("json serialize failed: {e}"))
-}
-
-fn json_generated_nx_ir_payload(ir: GeneratedNxIr) -> Result<String, String> {
-    serde_json::to_string(&JsonGeneratedNxIr {
-        json: ir.json,
-        metadata: ir.metadata,
-    })
-    .map_err(|e| format!("json serialize failed: {e}"))
 }
 
 impl From<GeneratedJsProgramModule> for JsonGeneratedJsProgramModule {
@@ -608,6 +648,8 @@ pub extern "C" fn nx_validate_workspace(
     build_context_ptr: *const NxProgramBuildContextHandle,
     modules_ptr: *const NxWorkspaceModule,
     module_count: usize,
+    implicit_imports_ptr: *const NxUtf8Slice,
+    implicit_import_count: usize,
     out_buffer: *mut NxBuffer,
 ) -> NxEvalStatus {
     if let Err(status) = prepare_out_buffer(out_buffer) {
@@ -622,10 +664,15 @@ pub extern "C" fn nx_validate_workspace(
         Ok(workspace) => workspace,
         Err(status) => return status,
     };
+    let implicit_imports = match parse_utf8_slices(implicit_imports_ptr, implicit_import_count) {
+        Ok(implicit_imports) => implicit_imports,
+        Err(status) => return status,
+    };
 
     let result = panic::catch_unwind(|| {
         let handle = unsafe { &*build_context_ptr.cast::<ProgramBuildContextHandleInner>() };
-        let diagnostics = validate_workspace(&workspace, &handle.build_context);
+        let build_context = workspace_build_context(&handle.build_context, implicit_imports);
+        let diagnostics = validate_workspace(&workspace, &build_context);
         let payload = rmp_serde::to_vec_named(&diagnostics)
             .map_err(|e| format!("messagepack serialize failed: {e}"))?;
         Ok((NxEvalStatus::Ok, payload))
@@ -641,6 +688,8 @@ pub extern "C" fn nx_build_workspace_program_artifact(
     module_count: usize,
     entry_identity_ptr: *const u8,
     entry_identity_len: usize,
+    implicit_imports_ptr: *const NxUtf8Slice,
+    implicit_import_count: usize,
     out_handle: *mut *mut NxProgramArtifactHandle,
     out_buffer: *mut NxBuffer,
 ) -> NxEvalStatus {
@@ -664,10 +713,15 @@ pub extern "C" fn nx_build_workspace_program_artifact(
         Ok(entry_identity) => entry_identity,
         Err(status) => return status,
     };
+    let implicit_imports = match parse_utf8_slices(implicit_imports_ptr, implicit_import_count) {
+        Ok(implicit_imports) => implicit_imports,
+        Err(status) => return status,
+    };
 
     let result = panic::catch_unwind(|| {
         let handle = unsafe { &*build_context_ptr.cast::<ProgramBuildContextHandleInner>() };
-        match build_workspace_program_artifact(&workspace, &entry_identity, &handle.build_context) {
+        let build_context = workspace_build_context(&handle.build_context, implicit_imports);
+        match build_workspace_program_artifact(&workspace, &entry_identity, &build_context) {
             Ok(program_artifact) => {
                 let handle = Box::new(ProgramArtifactHandleInner { program_artifact });
                 unsafe {
@@ -907,9 +961,72 @@ pub extern "C" fn nx_codegen_js_program_module(
     finish_output_entry(out_buffer, output_format, result)
 }
 
+/// Explains an NX IR image as text with every table index resolved.
+///
+/// `image_ptr` and `image_len` describe the image. The payload is the UTF-8 text on success, or
+/// the JSON diagnostics with [`NxEvalStatus::Error`] when the image is malformed, truncated or of
+/// a schema version this build does not read. The image is validated before it is read, so no
+/// input traps.
+#[no_mangle]
+pub extern "C" fn nx_ir_explain(
+    image_ptr: *const u8,
+    image_len: usize,
+    out_buffer: *mut NxBuffer,
+) -> NxEvalStatus {
+    if let Err(status) = prepare_out_buffer(out_buffer) {
+        return status;
+    }
+    if image_ptr.is_null() && image_len > 0 {
+        return NxEvalStatus::InvalidArgument;
+    }
+    let image: &[u8] = if image_len == 0 {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(image_ptr, image_len) }
+    };
+
+    let output_format = NxOutputFormat::Json;
+    let result = panic::catch_unwind(|| match explain_nx_ir_image(image) {
+        Ok(text) => Ok((NxEvalStatus::Ok, FfiPayload::Bytes(text.into_bytes()))),
+        Err(error) => {
+            let code = match error {
+                nx_codegen::ExplainError::SchemaVersion { .. } => "nx-ir-schema-version",
+                nx_codegen::ExplainError::Malformed(_) => "nx-ir-malformed",
+            };
+            let diagnostics = vec![NxDiagnostic {
+                severity: NxSeverity::Error,
+                code: Some(code.to_string()),
+                message: error.to_string(),
+                labels: Vec::new(),
+                help: None,
+                note: None,
+            }];
+            Ok((
+                NxEvalStatus::Error,
+                serialize_diagnostics_payload(output_format, &diagnostics)?,
+            ))
+        }
+    });
+
+    finish_output_entry(out_buffer, output_format, result)
+}
+
+/// Emits NX IR artifacts from a program artifact.
+///
+/// `options_ptr` and `options_len` describe the emit options as UTF-8 JSON, `{ "modules": [...],
+/// "debug": false }` with every key optional; an empty text is the default, which emits the entry
+/// module alone without its debug section. Each module's version comes from the workspace the
+/// program was built from.
+///
+/// The payload is an NX IR bundle: a little-endian `u32` header length, a JSON header
+/// `[{ identity, metadata, offset, length }]`, zero padding to four bytes, then the images at the
+/// offsets the header gives, measured from the start of the payload. On error the payload is the
+/// JSON diagnostics.
 #[no_mangle]
 pub extern "C" fn nx_codegen_nx_ir(
     program_artifact_ptr: *const NxProgramArtifactHandle,
+    options_ptr: *const u8,
+    options_len: usize,
     out_buffer: *mut NxBuffer,
 ) -> NxEvalStatus {
     if let Err(status) = prepare_out_buffer(out_buffer) {
@@ -919,28 +1036,43 @@ pub extern "C" fn nx_codegen_nx_ir(
     if program_artifact_ptr.is_null() {
         return NxEvalStatus::InvalidArgument;
     }
+    let options_json = if options_len == 0 {
+        String::new()
+    } else {
+        match parse_required_utf8(options_ptr, options_len) {
+            Ok(options) => options,
+            Err(status) => return status,
+        }
+    };
+    let options = match NxIrEmitOptions::from_json(&options_json) {
+        Ok(options) => options,
+        Err(_) => return NxEvalStatus::InvalidArgument,
+    };
 
     let output_format = NxOutputFormat::Json;
     let result = panic::catch_unwind(|| {
         let payload = with_program_artifact(program_artifact_ptr, |program_artifact| {
-            match emit_nx_ir(program_artifact, NxIrFormat::Compact) {
-                Ok(ir) => Ok((
+            match emit_nx_ir(program_artifact, &options) {
+                Ok(artifacts) => Ok((
                     NxEvalStatus::Ok,
-                    FfiPayload::Json(json_generated_nx_ir_payload(ir)?),
+                    FfiPayload::Bytes(
+                        write_nx_ir_bundle(&artifacts)
+                            .map_err(|e| format!("bundle serialize failed: {e}"))?,
+                    ),
                 )),
                 Err(error) => {
-                    let diagnostics = error
-                        .diagnostics
-                        .iter()
-                        .map(|diagnostic| NxDiagnostic {
-                            severity: diagnostic.severity().into(),
-                            code: diagnostic.code().map(str::to_string),
-                            message: diagnostic.message().to_string(),
-                            labels: Vec::new(),
-                            help: None,
-                            note: None,
-                        })
-                        .collect::<Vec<_>>();
+                    let fallback_source = program_artifact
+                        .source_text(&program_artifact.entry_identity)
+                        .unwrap_or_default();
+                    let sources = program_artifact
+                        .source_entries()
+                        .into_iter()
+                        .map(|entry| (entry.identity, entry.source));
+                    let diagnostics = diagnostics_to_api_with_source_entries(
+                        &error.diagnostics,
+                        fallback_source,
+                        sources,
+                    );
                     Ok((
                         NxEvalStatus::Error,
                         serialize_diagnostics_payload(output_format, &diagnostics)?,

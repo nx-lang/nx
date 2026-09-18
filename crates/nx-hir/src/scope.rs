@@ -438,11 +438,13 @@ impl<'a> UndefinedIdentifierChecker<'a> {
                     self.report_undefined(name, self.module.raw_module().expr_span(expr_id));
                 }
             }
-            ast::Expr::BinaryOp { lhs, rhs, .. } => {
+            ast::Expr::BinaryOp { lhs, rhs, .. } | ast::Expr::Concat { lhs, rhs, .. } => {
                 self.check_expr(*lhs, scope);
                 self.check_expr(*rhs, scope);
             }
-            ast::Expr::UnaryOp { expr, .. } => {
+            ast::Expr::UnaryOp { expr, .. }
+            | ast::Expr::ToText { expr, .. }
+            | ast::Expr::Widen { expr, .. } => {
                 self.check_expr(*expr, scope);
             }
             ast::Expr::Call { func, args, .. } => {

@@ -4,27 +4,25 @@
     "name": "Recycled cells",
     "blurb": "100 000 items in a SkiaScroll, RecyclingTemplate + MeasureFirst, UseCache=Image",
     "file": "cells.nx",
-    "coverage": "reduced",
+    "coverage": "static",
     "capabilities": [
-      "list-virtualization"
-    ],
-    "demonstrates": "recycling 100 000 cells through ItemsSource and an ItemTemplate"
+      "code-behind"
+    ]
   },
   {
     "id": "uneven-cells",
     "name": "Uneven cells",
-    "blurb": "Rows of different heights \u2014 MeasureVisible, LoadMore at both ends, ImageDoubleBuffered cells",
+    "blurb": "Rows of different heights — MeasureVisible over 200 posts, ImageDoubleBuffered cells",
     "file": "uneven-cells.nx",
-    "coverage": "reduced",
+    "coverage": "static",
     "capabilities": [
-      "list-virtualization"
-    ],
-    "demonstrates": "measuring visible rows out of a paging feed, with LoadMore at both ends"
+      "code-behind"
+    ]
   },
   {
     "id": "images",
     "name": "Images",
-    "blurb": "SkiaImage \u2014 every TransformAspect, alignment, clipping",
+    "blurb": "SkiaImage — every TransformAspect, alignment, clipping",
     "file": "images.nx",
     "coverage": "reduced",
     "capabilities": [
@@ -37,7 +35,7 @@
   {
     "id": "svg",
     "name": "SVG",
-    "blurb": "SkiaSvg \u2014 file and inline sources, TintColor, LockRatio",
+    "blurb": "SkiaSvg — file and inline sources, TintColor, LockRatio",
     "file": "svg.nx",
     "coverage": "complete",
     "capabilities": []
@@ -45,47 +43,39 @@
   {
     "id": "shapes",
     "name": "Shapes",
-    "blurb": "SkiaShape \u2014 rectangle, circle, ellipse, arc, polygon, line, path; stroke, corner radii, clipping",
+    "blurb": "SkiaShape — rectangle, circle, ellipse, arc, polygon, line, path; stroke, corner radii, clipping",
     "file": "shapes.nx",
-    "coverage": "static",
-    "capabilities": [
-      "event-handlers"
-    ]
+    "coverage": "complete",
+    "capabilities": []
   },
   {
     "id": "text",
     "name": "Text",
-    "blurb": "SkiaLabel \u2014 word wrap, MaxLines, alignment, spans, weights, glyph fallback",
+    "blurb": "SkiaLabel — word wrap, MaxLines, alignment, spans, weights, glyph fallback",
     "file": "text.nx",
-    "coverage": "static",
-    "capabilities": [
-      "event-handlers"
-    ]
+    "coverage": "complete",
+    "capabilities": []
   },
   {
     "id": "layouts",
     "name": "Layouts",
-    "blurb": "Every SkiaLayout type \u2014 Absolute, Column, Row, Wrap, Grid (tracks, spans, spacing)",
+    "blurb": "Every SkiaLayout type — Absolute, Column, Row, Wrap, Grid (tracks, spans, spacing)",
     "file": "layouts.nx",
     "coverage": "reduced",
     "capabilities": [
-      "list-virtualization",
       "code-behind",
       "animation",
       "event-handlers"
     ],
-    "demonstrates": "templated Wrap, Row, Grid and DecoratedGrid with Split, and an ImageComposite layer re-recording one spinning child"
+    "demonstrates": "Wrap, Row, Grid and DecoratedGrid over recycled cell classes with Split changed from buttons, and an ImageComposite layer re-recording one spinning child"
   },
   {
     "id": "looks",
     "name": "Common Controls",
-    "blurb": "SkiaSwitch, SkiaCheckbox, SkiaRadioButton, SkiaProgress, SkiaSlider, SkiaButton \u2014 five styles",
+    "blurb": "SkiaSwitch, SkiaCheckbox, SkiaRadioButton, SkiaProgress, SkiaSlider, SkiaButton — five styles",
     "file": "looks.nx",
-    "coverage": "static",
-    "capabilities": [
-      "event-handlers",
-      "component-state"
-    ]
+    "coverage": "complete",
+    "capabilities": []
   },
   {
     "id": "snapping",
@@ -94,9 +84,7 @@
     "file": "snapping.nx",
     "coverage": "static",
     "capabilities": [
-      "event-handlers",
-      "component-state",
-      "list-virtualization"
+      "code-behind"
     ]
   },
   {
@@ -106,14 +94,13 @@
     "file": "animations.nx",
     "coverage": "static",
     "capabilities": [
-      "event-handlers",
-      "component-state"
+      "code-behind"
     ]
   },
   {
     "id": "shell",
     "name": "Shell",
-    "blurb": "SkiaShell \u2014 page transitions, OpenPopupAsync, PushModalAsync (drawer), ShowToast",
+    "blurb": "SkiaShell — page transitions, OpenPopupAsync, PushModalAsync (drawer), ShowToast",
     "file": "shell.nx",
     "coverage": "reduced",
     "capabilities": [
@@ -125,18 +112,17 @@
   {
     "id": "editor",
     "name": "Editor",
-    "blurb": "SkiaEditor \u2014 drawn text input: caret, selection, placeholder, password, multiline, ControlStyle looks",
+    "blurb": "SkiaEditor — drawn text input: caret, selection, placeholder, password, multiline, ControlStyle looks",
     "file": "editor.nx",
     "coverage": "static",
     "capabilities": [
-      "event-handlers",
-      "component-state"
+      "code-behind"
     ]
   },
   {
     "id": "keyboard",
     "name": "Keyboard Input",
-    "blurb": "KeyboardManager \u2014 window-level KeyDown / KeyUp / KeyChar with modifier state, the Blazor sandbox probe",
+    "blurb": "KeyboardManager — window-level KeyDown / KeyUp / KeyChar with modifier state, the Blazor sandbox probe",
     "file": "keyboard.nx",
     "coverage": "static",
     "capabilities": [
@@ -151,14 +137,13 @@
     "file": "scroll.nx",
     "coverage": "static",
     "capabilities": [
-      "event-handlers",
-      "component-state"
+      "code-behind"
     ]
   },
   {
     "id": "shaders",
     "name": "Shaders",
-    "blurb": "SkiaShaderEffect \u2014 SkSL on any control (iImage1, iTime, iMouse, custom uniforms, touch ripples) and SkiaShaderCarousel gl-transitions",
+    "blurb": "SkiaShaderEffect — SkSL on any control (iImage1, iTime, iMouse, custom uniforms, touch ripples) and SkiaShaderCarousel gl-transitions",
     "file": "shaders.nx",
     "coverage": "reduced",
     "capabilities": [
@@ -184,13 +169,11 @@
   {
     "id": "transforms",
     "name": "Transforms",
-    "blurb": "Rotation, Scale, Skew, Translation, Opacity \u2014 hit-testing through them, *ToAsync animations",
+    "blurb": "Rotation, Scale, Skew, Translation, Opacity — hit-testing through them, *ToAsync animations",
     "file": "transforms.nx",
     "coverage": "static",
     "capabilities": [
-      "event-handlers",
-      "animation",
-      "component-state"
+      "animation"
     ]
   },
   {
@@ -202,26 +185,24 @@
     "capabilities": [
       "code-behind",
       "event-handlers",
-      "component-state",
-      "list-virtualization"
+      "component-state"
     ],
-    "demonstrates": "reordering a templated list in place by dragging a row, the row lifted into a ghost that floats over the list"
+    "demonstrates": "reordering a list in place by dragging a row, the row lifted into a ghost that floats over the list"
   },
   {
     "id": "accessibility",
     "name": "Accessibility",
-    "blurb": "ARIA overlay over the canvas \u2014 roles, labels, hints, toggles, live regions, keyboard",
+    "blurb": "ARIA overlay over the canvas — roles, labels, hints, toggles, live regions, keyboard",
     "file": "accessibility.nx",
     "coverage": "static",
     "capabilities": [
-      "event-handlers",
-      "component-state"
+      "code-behind"
     ]
   },
   {
     "id": "root",
     "name": "Root menu",
-    "blurb": "The demo site's own landing page \u2014 logo, title, subtitle and a card per sample",
+    "blurb": "The demo site's own landing page — logo, title, subtitle and a card per sample",
     "file": "root.nx",
     "coverage": "static",
     "capabilities": [

@@ -27,9 +27,13 @@ import type {
   NxDiagnostic,
   NxDiagnosticLabel,
   NxGeneratedNxIr,
+  NxIrEmitOptions,
+  NxIrMetadata,
   NxLanguageDocumentInput,
+  NxLanguageSnapshotOptions,
   NxSourceBuildOptions,
-  NxTextSpan
+  NxTextSpan,
+  NxWorkspaceBuildOptions
 } from "./types.js";
 
 const encoder = new TextEncoder();
@@ -58,7 +62,7 @@ export interface NxHost {
   readonly memoryBytes: number;
 
   /**
-   * Builds a reusable program artifact from one NX source text.
+   * Builds a reusable program artifact from one NX source text: a workspace of one module.
    *
    * @throws NxEvaluationError when NX analysis reports diagnostics.
    * @throws NxHostCrashedError when the module traps, or has already trapped.
@@ -66,12 +70,24 @@ export interface NxHost {
   buildProgramArtifact(source: string, options?: NxSourceBuildOptions): NxProgramArtifact;
 
   /**
+   * Builds a reusable program artifact from a workspace of in-memory modules and an entry.
+   *
+   * @throws NxEvaluationError when NX analysis reports diagnostics, each against the identity of
+   * the module it belongs to.
+   * @throws NxHostCrashedError when the module traps, or has already trapped.
+   */
+  buildWorkspaceArtifact(options: NxWorkspaceBuildOptions): NxProgramArtifact;
+
+  /**
    * Analyzes in-memory documents into an immutable snapshot that answers editor queries.
    *
    * @throws NxEvaluationError when a URI is unparseable or two documents share an identity.
    * @throws NxHostCrashedError when the module traps, or has already trapped.
    */
-  createLanguageSnapshot(documents: Iterable<NxLanguageDocumentInput>): NxLanguageSnapshot;
+  createLanguageSnapshot(
+    documents: Iterable<NxLanguageDocumentInput>,
+    options?: NxLanguageSnapshotOptions
+  ): NxLanguageSnapshot;
 
   /**
    * Abandons the instance and every resource in it.
@@ -80,6 +96,16 @@ export interface NxHost {
    * `NxDisposedResourceError`.
    */
   dispose(): void;
+
+  /**
+   * Renders an NX IR image as text with every table index resolved: the same text
+   * `nxlang ir explain` prints.
+   *
+   * @throws NxEvaluationError when the bytes are not an NX IR image this build reads, with a
+   * diagnostic saying why.
+   * @throws NxHostCrashedError when the module traps, or has already trapped.
+   */
+  explainNxIr(image: Uint8Array): string;
 }
 
 /**
@@ -87,13 +113,14 @@ export interface NxHost {
  */
 export interface NxProgramArtifact {
   /**
-   * Generates deterministic NX IR JSON and metadata from this artifact.
+   * Emits NX IR for the modules `options` names, the entry module alone by default: one image per
+   * module with its metadata, without a debug section unless asked.
    *
    * @throws NxEvaluationError when IR generation reports NX diagnostics.
    * @throws NxDisposedResourceError when this artifact has already been disposed.
    * @throws NxHostCrashedError when the module traps, or has already trapped.
    */
-  generateNxIr(): NxGeneratedNxIr;
+  generateNxIr(options?: NxIrEmitOptions): readonly NxGeneratedNxIr[];
 
   /**
    * Releases the artifact inside the module. Calling `dispose` more than once is allowed.
@@ -204,13 +231,35 @@ class WasmHost implements NxHost {
     return new WasmProgramArtifact(this, handle);
   }
 
-  createLanguageSnapshot(documents: Iterable<NxLanguageDocumentInput>): NxLanguageSnapshot {
-    const payload = Array.from(documents, (document) => ({
-      uri: document.uri,
-      source: document.source,
-      ...(document.identity === undefined ? {} : { identity: document.identity }),
-      ...(document.version === undefined ? {} : { version: document.version })
-    }));
+  buildWorkspaceArtifact(options: NxWorkspaceBuildOptions): NxProgramArtifact {
+    const handle = this.#handle("nx_wasm_workspace_build", (argument) =>
+      this.#exports.nx_wasm_workspace_build(argument.pointer, argument.length),
+      {
+        modules: options.modules.map((module) => ({
+          identity: module.identity,
+          source: module.source,
+          ...(module.version === undefined ? {} : { version: module.version })
+        })),
+        entry: options.entry,
+        implicitImports: Array.from(options.implicitImports ?? [])
+      }
+    );
+    return new WasmProgramArtifact(this, handle);
+  }
+
+  createLanguageSnapshot(
+    documents: Iterable<NxLanguageDocumentInput>,
+    options: NxLanguageSnapshotOptions = {}
+  ): NxLanguageSnapshot {
+    const payload = {
+      documents: Array.from(documents, (document) => ({
+        uri: document.uri,
+        source: document.source,
+        ...(document.identity === undefined ? {} : { identity: document.identity }),
+        ...(document.version === undefined ? {} : { version: document.version })
+      })),
+      implicitImports: Array.from(options.implicitImports ?? [])
+    };
     const handle = this.#handle("nx_wasm_snapshot_new", (argument) =>
       this.#exports.nx_wasm_snapshot_new(argument.pointer, argument.length),
       payload
@@ -229,7 +278,7 @@ class WasmHost implements NxHost {
    */
   call<T>(operation: string, run: (exports: NxWasmExports) => number): T {
     const result = this.#enter(operation, () => run(this.#exports));
-    return this.#read(operation, result) as T;
+    return parseJson(operation, decoder.decode(this.#read(operation, result))) as T;
   }
 
   /**
@@ -237,18 +286,48 @@ class WasmHost implements NxHost {
    *
    * @internal
    */
+  explainNxIr(image: Uint8Array): string {
+    return this.callWithBytes<string>(
+      "nx_wasm_ir_explain",
+      (exports, pointer, length) => exports.nx_wasm_ir_explain(pointer, length),
+      image
+    );
+  }
+
   callWithArgument<T>(
     operation: string,
     run: (exports: NxWasmExports, pointer: number, length: number) => number,
     argument: unknown
   ): T {
-    const bytes = encoder.encode(JSON.stringify(argument));
+    return this.callWithBytes<T>(operation, run, encoder.encode(JSON.stringify(argument)));
+  }
+
+  /**
+   * Makes one call whose argument is raw bytes and whose payload is JSON.
+   */
+  callWithBytes<T>(
+    operation: string,
+    run: (exports: NxWasmExports, pointer: number, length: number) => number,
+    bytes: Uint8Array
+  ): T {
+    return parseJson(operation, decoder.decode(this.callForBytes(operation, run, bytes))) as T;
+  }
+
+  /**
+   * Makes one call whose argument is raw bytes and whose payload is bytes the export documents,
+   * copied out of the module's memory before the result is released.
+   */
+  callForBytes(
+    operation: string,
+    run: (exports: NxWasmExports, pointer: number, length: number) => number,
+    bytes: Uint8Array
+  ): Uint8Array {
     const pointer = this.#write(operation, bytes);
     try {
       const result = this.#enter(operation, () =>
         run(this.#exports, pointer, bytes.length)
       );
-      return this.#read(operation, result) as T;
+      return this.#read(operation, result);
     } finally {
       this.#release(operation, pointer, bytes.length);
     }
@@ -335,7 +414,11 @@ class WasmHost implements NxHost {
     }
   }
 
-  #read(operation: string, result: number): unknown {
+  /**
+   * Reads a result record's payload, copied out of the module's memory, and releases the record.
+   * A success answers with the bytes; a failure throws the error the status names.
+   */
+  #read(operation: string, result: number): Uint8Array {
     if (result === 0) {
       throw new NxWasmError(`${operation} answered with a null result record.`);
     }
@@ -346,8 +429,8 @@ class WasmHost implements NxHost {
     const length = view.getUint32(result + resultLengthOffset, true);
     const payload =
       pointer === 0 || length === 0
-        ? ""
-        : decoder.decode(new Uint8Array(this.#exports.memory.buffer, pointer, length).slice());
+        ? new Uint8Array(0)
+        : new Uint8Array(this.#exports.memory.buffer, pointer, length).slice();
 
     this.#enter(operation, () => {
       this.#exports.nx_wasm_result_free(result);
@@ -356,13 +439,13 @@ class WasmHost implements NxHost {
 
     switch (status) {
       case statusOk:
-        return parseJson(operation, payload);
+        return payload;
       case statusEvaluationError: {
-        const diagnostics = normalizeDiagnostics(parseJson(operation, payload));
+        const diagnostics = normalizeDiagnostics(parseJson(operation, decoder.decode(payload)));
         throw new NxEvaluationError(evaluationMessage(diagnostics), diagnostics);
       }
       case statusInternalError:
-        throw new NxWasmError(String(parseJson(operation, payload)));
+        throw new NxWasmError(String(parseJson(operation, decoder.decode(payload))));
       default:
         throw new NxWasmError(`${operation} answered with unknown status ${status}.`);
     }
@@ -378,11 +461,20 @@ class WasmProgramArtifact implements NxProgramArtifact {
     this.#handle = handle;
   }
 
-  generateNxIr(): NxGeneratedNxIr {
+  generateNxIr(options: NxIrEmitOptions = {}): readonly NxGeneratedNxIr[] {
     const handle = this.#live();
-    return this.#host.call<NxGeneratedNxIr>("nx_wasm_program_nx_ir", (exports) =>
-      exports.nx_wasm_program_nx_ir(handle)
+    const operation = "nx_wasm_program_nx_ir";
+    const bundle = this.#host.callForBytes(
+      operation,
+      (exports, pointer, length) => exports.nx_wasm_program_nx_ir(handle, pointer, length),
+      encoder.encode(
+        JSON.stringify({
+          ...(options.modules === undefined ? {} : { modules: Array.from(options.modules) }),
+          debug: options.debug === true
+        })
+      )
     );
+    return readNxIrBundle(operation, bundle);
   }
 
   dispose(): void {
@@ -471,6 +563,41 @@ class WasmLanguageSnapshot implements NxLanguageSnapshot {
     }
     return this.#handle;
   }
+}
+
+/**
+ * Splits an NX IR bundle into its artifacts.
+ *
+ * The bundle is what the module answers `nx_wasm_program_nx_ir` with: a little-endian `u32` header
+ * length, a JSON header `[{ identity, metadata, offset, length }]`, padding to four bytes, then the
+ * images at the offsets the header gives, measured from the start of the bundle. Each image is
+ * sliced out as its own copy so a caller holds nothing but its artifact.
+ */
+function readNxIrBundle(operation: string, bundle: Uint8Array): readonly NxGeneratedNxIr[] {
+  if (bundle.byteLength < 4) {
+    throw new NxWasmError(`${operation} answered with a bundle that has no header.`);
+  }
+  const headerLength = new DataView(bundle.buffer, bundle.byteOffset, bundle.byteLength).getUint32(0, true);
+  if (4 + headerLength > bundle.byteLength) {
+    throw new NxWasmError(`${operation} answered with a bundle whose header does not fit.`);
+  }
+  const header = parseJson(operation, decoder.decode(bundle.subarray(4, 4 + headerLength)));
+  if (!Array.isArray(header)) {
+    throw new NxWasmError(`${operation} answered with a bundle header that is not a list.`);
+  }
+  return header.map((raw) => {
+    const entry = asRecord(raw, "bundle entry");
+    const offset = entry["offset"];
+    const length = entry["length"];
+    if (typeof offset !== "number" || typeof length !== "number" || offset + length > bundle.byteLength) {
+      throw new NxWasmError(`${operation} answered with an image outside its bundle.`);
+    }
+    return {
+      identity: String(entry["identity"]),
+      bytes: bundle.slice(offset, offset + length),
+      metadata: entry["metadata"] as NxIrMetadata
+    };
+  });
 }
 
 function parseJson(operation: string, payload: string): unknown {

@@ -37,6 +37,8 @@ internal static class NxNativeMethods
         NxProgramBuildContextSafeHandle? buildContextPtr,
         IntPtr modulesPtr,
         nuint moduleCount,
+        IntPtr implicitImportsPtr,
+        nuint implicitImportCount,
         out NxBuffer outBuffer);
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
@@ -46,6 +48,8 @@ internal static class NxNativeMethods
         nuint moduleCount,
         byte[] entryIdentityPtr,
         nuint entryIdentityLen,
+        IntPtr implicitImportsPtr,
+        nuint implicitImportCount,
         out IntPtr outHandle,
         out NxBuffer outBuffer);
 
@@ -91,6 +95,14 @@ internal static class NxNativeMethods
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NxEvalStatus nx_codegen_nx_ir(
         NxProgramArtifactSafeHandle programArtifactPtr,
+        byte[] optionsPtr,
+        nuint optionsLen,
+        out NxBuffer outBuffer);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NxEvalStatus nx_ir_explain(
+        byte[] imagePtr,
+        nuint imageLen,
         out NxBuffer outBuffer);
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]

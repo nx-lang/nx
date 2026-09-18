@@ -1,0 +1,2 @@
+// A `type` parameter is legal only at the head of a component signature.
+type T = <function TItem:type />: string

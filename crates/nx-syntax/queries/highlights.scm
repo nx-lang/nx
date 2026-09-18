@@ -55,6 +55,21 @@
   base: (qualified_name
     (identifier) @type))
 
+;; Function types: `<function Item:Contact Index:int />: DrawnNode`. The keyword is contextual —
+;; `function` is an identifier everywhere else — so it is captured from the node, not by name.
+(function_type
+  "function" @keyword)
+
+(function_type
+  (property_definition
+    name: (markup_identifier) @variable.parameter))
+
+(parenthesized_type
+  [
+    "("
+    ")"
+  ] @punctuation.bracket)
+
 ;; Variables
 (value_definition
   name: (identifier) @variable)

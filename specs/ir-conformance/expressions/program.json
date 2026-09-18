@@ -1,0 +1,92 @@
+{
+  "entry": "main.nx",
+  "emit": [
+    "main.nx"
+  ],
+  "entrypoints": [
+    {
+      "module": "main.nx",
+      "function": "arithmetic"
+    },
+    {
+      "module": "main.nx",
+      "function": "integerDivision"
+    },
+    {
+      "module": "main.nx",
+      "function": "realDivision"
+    },
+    {
+      "module": "main.nx",
+      "function": "integerRemainder"
+    },
+    {
+      "module": "main.nx",
+      "function": "realRemainder"
+    },
+    {
+      "module": "main.nx",
+      "function": "ordered"
+    },
+    {
+      "module": "main.nx",
+      "function": "andSkipsRight"
+    },
+    {
+      "module": "main.nx",
+      "function": "orSkipsRight"
+    },
+    {
+      "module": "main.nx",
+      "function": "andTakesRight"
+    },
+    {
+      "module": "main.nx",
+      "function": "orTakesRight"
+    },
+    {
+      "module": "main.nx",
+      "function": "negation"
+    },
+    {
+      "module": "main.nx",
+      "function": "logicalNot"
+    },
+    {
+      "module": "main.nx",
+      "function": "greeting"
+    },
+    {
+      "module": "main.nx",
+      "function": "small"
+    },
+    {
+      "module": "main.nx",
+      "function": "classified"
+    },
+    {
+      "module": "main.nx",
+      "function": "doubled"
+    },
+    {
+      "module": "main.nx",
+      "function": "squares"
+    },
+    {
+      "module": "main.nx",
+      "function": "big"
+    },
+    {
+      "module": "main.nx",
+      "function": "maybe"
+    },
+    {
+      "module": "main.nx",
+      "function": "element"
+    },
+    {
+      "module": "main.nx",
+      "function": "root"
+    }
+  ]
+}

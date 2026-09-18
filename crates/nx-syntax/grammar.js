@@ -223,15 +223,41 @@ module.exports = grammar({
       field('value', $.rhs_expression),
     ),
 
-    type: $ => seq(
+    // `prec.right` makes a suffix after a function type's result bind to the result, so
+    // `<function />: string?` is a function returning `string?`; a nullable function type is
+    // written `(<function />: string)?`.
+    type: $ => prec.right(seq(
       choice(
         $.primitive_type,
         $.user_defined_type,
+        $.function_type,
+        $.parenthesized_type,
       ),
       repeat(choice(
         '?',          // nullable
         seq('[', ']'), // sequence/list
       )),
+    )),
+
+    // A function type is an element function's signature with `function` in the name slot and
+    // the result type after `/>`: `<function Item:Contact Index:int />: DrawnNode`. `function` is
+    // a keyword only here: tree-sitter offers it to the lexer in this state alone, so the word
+    // stays an identifier everywhere else. Parameters reuse `property_definition`; validation
+    // rejects a default, a `type` parameter and a second `content` parameter.
+    function_type: $ => seq(
+      '<',
+      'function',
+      repeat(field('parameters', $.property_definition)),
+      '/',
+      '>',
+      ':',
+      field('result', $.type),
+    ),
+
+    parenthesized_type: $ => seq(
+      '(',
+      field('type', $.type),
+      ')',
     ),
 
     primitive_type: $ => choice(

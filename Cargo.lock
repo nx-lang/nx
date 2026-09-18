@@ -781,6 +781,7 @@ dependencies = [
  "nx-hir",
  "nx-interpreter",
  "nx-types",
+ "nx-value",
  "rustc-hash 2.1.3",
  "serde",
  "serde_json",

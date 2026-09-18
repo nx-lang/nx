@@ -67,12 +67,56 @@ fn as_i64(v: &Value) -> Option<i64> {
     }
 }
 
-/// Extract an f64 from any float Value variant, for comparison.
+/// Extract an f64 from any numeric Value variant, for comparison.
 fn as_f64(v: &Value) -> Option<f64> {
     match v {
-        Value::Float32(n) => Some(*n as f64),
+        Value::Int32(n) => Some(f64::from(*n)),
+        Value::Int(n) => Some(*n as f64),
+        Value::Float32(n) => Some(f64::from(*n)),
         Value::Float(n) => Some(*n),
         _ => None,
+    }
+}
+
+/// Two numeric operands at the type they compare at.
+///
+/// <para>Two integers compare as integers. Any pair involving a float compares as `float64`, the
+/// type analysis gives a mixed pair: `int` and `int32` widen to it exactly, which is why the
+/// comparison is implicit at all, so `2 == 2.0` is true and `2 < 2.5` compares numerically.</para>
+enum NumericPair {
+    Ints(i64, i64),
+    Floats(f64, f64),
+}
+
+fn numeric_pair(lhs: &Value, rhs: &Value) -> Option<NumericPair> {
+    if let (Some(a), Some(b)) = (as_i64(lhs), as_i64(rhs)) {
+        return Some(NumericPair::Ints(a, b));
+    }
+    Some(NumericPair::Floats(as_f64(lhs)?, as_f64(rhs)?))
+}
+
+/// How two ordered operands compare, or `None` when they do not: `NaN` with anything.
+///
+/// <para>`Err` is a pair with no order at all. The four relational operators differ only in which
+/// orderings they accept, so they share this.</para>
+fn ordering(
+    lhs: &Value,
+    rhs: &Value,
+    operation: &str,
+) -> Result<Option<std::cmp::Ordering>, RuntimeError> {
+    if let Some(pair) = numeric_pair(lhs, rhs) {
+        return Ok(match pair {
+            NumericPair::Ints(a, b) => Some(a.cmp(&b)),
+            NumericPair::Floats(a, b) => a.partial_cmp(&b),
+        });
+    }
+    match (lhs, rhs) {
+        (Value::String(a), Value::String(b)) => Ok(Some(a.cmp(b))),
+        _ => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+            expected: "two numbers or two strings".to_string(),
+            actual: format!("{} and {}", lhs.type_name(), rhs.type_name()),
+            operation: operation.to_string(),
+        })),
     }
 }
 
@@ -83,20 +127,21 @@ fn eval_eq(lhs: Value, rhs: Value) -> Result<Value, RuntimeError> {
 }
 
 /// The language's equality: scalars by value, records and lists structurally, a constant case by
-/// its union and name.
+/// its union and name, a function by the declaration it names.
 ///
 /// <para>A record equals another of the same type whose every field is equal, and a list equals
-/// another of the same length whose elements are equal in order. `null` equals only `null`. This
-/// is the one equality `==`, match patterns, and `diff` share, so what an author can test by hand
-/// is what every other comparison sees.</para>
+/// another of the same length whose elements are equal in order. A function value equals another
+/// exactly when both name the same declaration, which is its whole identity. `null` equals only
+/// `null`. This is the one equality `==`, match patterns, and `diff` share, so what an author can
+/// test by hand is what every other comparison sees.</para>
 pub fn values_equal(lhs: &Value, rhs: &Value) -> bool {
+    if let Some(pair) = numeric_pair(lhs, rhs) {
+        return match pair {
+            NumericPair::Ints(a, b) => a == b,
+            NumericPair::Floats(a, b) => a == b,
+        };
+    }
     match (lhs, rhs) {
-        (Value::Int32(_) | Value::Int(_), Value::Int32(_) | Value::Int(_)) => {
-            as_i64(lhs).unwrap() == as_i64(rhs).unwrap()
-        }
-        (Value::Float32(_) | Value::Float(_), Value::Float32(_) | Value::Float(_)) => {
-            as_f64(lhs).unwrap() == as_f64(rhs).unwrap()
-        }
         (Value::String(a), Value::String(b)) => a == b,
         (Value::Boolean(a), Value::Boolean(b)) => a == b,
         (
@@ -110,6 +155,16 @@ pub fn values_equal(lhs: &Value, rhs: &Value) -> bool {
             },
         ) => a_union == b_union && a_case == b_case,
         (Value::Null, Value::Null) => true,
+        (
+            Value::Function {
+                module: a_module,
+                name: a_name,
+            },
+            Value::Function {
+                module: b_module,
+                name: b_name,
+            },
+        ) => a_module == b_module && a_name == b_name,
         (Value::Array(a), Value::Array(b)) => {
             a.len() == b.len() && a.iter().zip(b).all(|(a, b)| values_equal(a, b))
         }
@@ -142,83 +197,27 @@ fn eval_ne(lhs: Value, rhs: Value) -> Result<Value, RuntimeError> {
 }
 
 fn eval_lt(lhs: Value, rhs: Value) -> Result<Value, RuntimeError> {
-    let result = match (&lhs, &rhs) {
-        (Value::Int32(_) | Value::Int(_), Value::Int32(_) | Value::Int(_)) => {
-            as_i64(&lhs).unwrap() < as_i64(&rhs).unwrap()
-        }
-        (Value::Float32(_) | Value::Float(_), Value::Float32(_) | Value::Float(_)) => {
-            as_f64(&lhs).unwrap() < as_f64(&rhs).unwrap()
-        }
-        (Value::String(a), Value::String(b)) => a < b,
-        _ => {
-            return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                expected: "comparable types within same category".to_string(),
-                actual: format!("{} and {}", lhs.type_name(), rhs.type_name()),
-                operation: "less than".to_string(),
-            }))
-        }
-    };
-    Ok(Value::Boolean(result))
+    use std::cmp::Ordering::Less;
+    let ordering = ordering(&lhs, &rhs, "less than")?;
+    Ok(Value::Boolean(matches!(ordering, Some(Less))))
 }
 
 fn eval_le(lhs: Value, rhs: Value) -> Result<Value, RuntimeError> {
-    let result = match (&lhs, &rhs) {
-        (Value::Int32(_) | Value::Int(_), Value::Int32(_) | Value::Int(_)) => {
-            as_i64(&lhs).unwrap() <= as_i64(&rhs).unwrap()
-        }
-        (Value::Float32(_) | Value::Float(_), Value::Float32(_) | Value::Float(_)) => {
-            as_f64(&lhs).unwrap() <= as_f64(&rhs).unwrap()
-        }
-        (Value::String(a), Value::String(b)) => a <= b,
-        _ => {
-            return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                expected: "comparable types within same category".to_string(),
-                actual: format!("{} and {}", lhs.type_name(), rhs.type_name()),
-                operation: "less than or equal".to_string(),
-            }))
-        }
-    };
-    Ok(Value::Boolean(result))
+    use std::cmp::Ordering::{Equal, Less};
+    let ordering = ordering(&lhs, &rhs, "less than or equal")?;
+    Ok(Value::Boolean(matches!(ordering, Some(Less | Equal))))
 }
 
 fn eval_gt(lhs: Value, rhs: Value) -> Result<Value, RuntimeError> {
-    let result = match (&lhs, &rhs) {
-        (Value::Int32(_) | Value::Int(_), Value::Int32(_) | Value::Int(_)) => {
-            as_i64(&lhs).unwrap() > as_i64(&rhs).unwrap()
-        }
-        (Value::Float32(_) | Value::Float(_), Value::Float32(_) | Value::Float(_)) => {
-            as_f64(&lhs).unwrap() > as_f64(&rhs).unwrap()
-        }
-        (Value::String(a), Value::String(b)) => a > b,
-        _ => {
-            return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                expected: "comparable types within same category".to_string(),
-                actual: format!("{} and {}", lhs.type_name(), rhs.type_name()),
-                operation: "greater than".to_string(),
-            }))
-        }
-    };
-    Ok(Value::Boolean(result))
+    use std::cmp::Ordering::Greater;
+    let ordering = ordering(&lhs, &rhs, "greater than")?;
+    Ok(Value::Boolean(matches!(ordering, Some(Greater))))
 }
 
 fn eval_ge(lhs: Value, rhs: Value) -> Result<Value, RuntimeError> {
-    let result = match (&lhs, &rhs) {
-        (Value::Int32(_) | Value::Int(_), Value::Int32(_) | Value::Int(_)) => {
-            as_i64(&lhs).unwrap() >= as_i64(&rhs).unwrap()
-        }
-        (Value::Float32(_) | Value::Float(_), Value::Float32(_) | Value::Float(_)) => {
-            as_f64(&lhs).unwrap() >= as_f64(&rhs).unwrap()
-        }
-        (Value::String(a), Value::String(b)) => a >= b,
-        _ => {
-            return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                expected: "comparable types within same category".to_string(),
-                actual: format!("{} and {}", lhs.type_name(), rhs.type_name()),
-                operation: "greater than or equal".to_string(),
-            }))
-        }
-    };
-    Ok(Value::Boolean(result))
+    use std::cmp::Ordering::{Equal, Greater};
+    let ordering = ordering(&lhs, &rhs, "greater than or equal")?;
+    Ok(Value::Boolean(matches!(ordering, Some(Greater | Equal))))
 }
 
 // Logical operators
@@ -284,10 +283,19 @@ mod tests {
     }
 
     #[test]
-    fn test_eq_cross_category_false() {
-        // Int vs Float returns false (not an error for eq/ne)
-        let result = eval_eq(Value::Int(5), Value::Float(5.0)).unwrap();
-        assert_eq!(result, Value::Boolean(false));
+    fn test_eq_int_and_float_compares_numerically() {
+        assert_eq!(
+            eval_eq(Value::Int(5), Value::Float(5.0)).unwrap(),
+            Value::Boolean(true)
+        );
+        assert_eq!(
+            eval_eq(Value::Float(2.5), Value::Int32(2)).unwrap(),
+            Value::Boolean(false)
+        );
+        assert_eq!(
+            eval_ne(Value::Int(2), Value::Float(2.0)).unwrap(),
+            Value::Boolean(false)
+        );
     }
 
     #[test]
@@ -312,9 +320,38 @@ mod tests {
     }
 
     #[test]
-    fn test_lt_cross_category_error() {
-        let result = eval_lt(Value::Int(3), Value::Float(5.0));
-        assert!(result.is_err());
+    fn test_ordering_int_and_float_compares_numerically() {
+        assert_eq!(
+            eval_lt(Value::Int(2), Value::Float(2.5)).unwrap(),
+            Value::Boolean(true)
+        );
+        assert_eq!(
+            eval_le(Value::Float(2.0), Value::Int32(2)).unwrap(),
+            Value::Boolean(true)
+        );
+        assert_eq!(
+            eval_gt(Value::Int(3), Value::Float32(2.5)).unwrap(),
+            Value::Boolean(true)
+        );
+        assert_eq!(
+            eval_ge(Value::Int(2), Value::Float(2.5)).unwrap(),
+            Value::Boolean(false)
+        );
+    }
+
+    #[test]
+    fn test_ordering_with_nan_is_false_every_way() {
+        for compare in [eval_lt, eval_le, eval_gt, eval_ge] {
+            assert_eq!(
+                compare(Value::Float(f64::NAN), Value::Float(1.0)).unwrap(),
+                Value::Boolean(false)
+            );
+        }
+    }
+
+    #[test]
+    fn test_ordering_a_number_with_a_string_is_an_error() {
+        assert!(eval_lt(Value::Int(3), Value::String("a".into())).is_err());
     }
 
     #[test]

@@ -42,13 +42,23 @@ impl<'tree> SyntaxNode<'tree> {
         TextRange::new(start, end)
     }
 
-    /// Returns an iterator over the named child nodes.
+    /// Returns an iterator over the named child nodes, skipping comments.
+    ///
+    /// A comment is a named node in `extras`, so it appears among any node's named children. Every
+    /// caller here reads children as the constructs a node is made of, and a comment is not one of
+    /// those: a wrapper whose first child is a comment would otherwise lower the comment as the
+    /// expression it wraps. `children_with_tokens` keeps them, for the prose scan that needs to know
+    /// where they are.
+    ///
+    /// `child`, `child_count`, `next_sibling` and `prev_sibling` read the same view, so the i-th
+    /// child is the i-th construct however the source is commented.
     pub fn children(&self) -> impl Iterator<Item = SyntaxNode<'tree>> {
         let node = self.node;
         let source = self.source;
         (0..node.named_child_count())
             .filter_map(move |i| node.named_child(i))
             .map(move |n| SyntaxNode::new(n, source))
+            .filter(|child| !child.kind().is_comment())
     }
 
     /// Returns an iterator over all child nodes (including anonymous nodes).
@@ -74,18 +84,28 @@ impl<'tree> SyntaxNode<'tree> {
             .map(|node| SyntaxNode::new(node, self.source))
     }
 
-    /// Returns the next sibling node, if any.
+    /// Returns the next sibling node, skipping comments.
     pub fn next_sibling(&self) -> Option<SyntaxNode<'tree>> {
-        self.node
-            .next_named_sibling()
-            .map(|node| SyntaxNode::new(node, self.source))
+        let mut node = self.node;
+        loop {
+            node = node.next_named_sibling()?;
+            let sibling = SyntaxNode::new(node, self.source);
+            if !sibling.kind().is_comment() {
+                return Some(sibling);
+            }
+        }
     }
 
-    /// Returns the previous sibling node, if any.
+    /// Returns the previous sibling node, skipping comments.
     pub fn prev_sibling(&self) -> Option<SyntaxNode<'tree>> {
-        self.node
-            .prev_named_sibling()
-            .map(|node| SyntaxNode::new(node, self.source))
+        let mut node = self.node;
+        loop {
+            node = node.prev_named_sibling()?;
+            let sibling = SyntaxNode::new(node, self.source);
+            if !sibling.kind().is_comment() {
+                return Some(sibling);
+            }
+        }
     }
 
     /// Returns true if this node represents an error.
@@ -98,16 +118,15 @@ impl<'tree> SyntaxNode<'tree> {
         self.node.has_error()
     }
 
-    /// Returns the number of named children.
+    /// Returns the number of named children, not counting comments.
     pub fn child_count(&self) -> usize {
-        self.node.named_child_count()
+        self.children().count()
     }
 
-    /// Returns a specific named child by index.
+    /// Returns a specific named child by index, not counting comments, so index `i` is the i-th
+    /// construct the node is made of.
     pub fn child(&self, index: usize) -> Option<SyntaxNode<'tree>> {
-        self.node
-            .named_child(index)
-            .map(|node| SyntaxNode::new(node, self.source))
+        self.children().nth(index)
     }
 
     /// Returns the start byte position.
@@ -187,6 +206,69 @@ import { Bar } from "./bar""#;
         assert_eq!(children.len(), 2);
         assert_eq!(children[0].kind(), SyntaxKind::IMPORT_STATEMENT);
         assert_eq!(children[1].kind(), SyntaxKind::IMPORT_STATEMENT);
+    }
+
+    /// A comment is a named node in `extras`, so it lands among a node's named children. Lowering
+    /// reads a wrapper's first child as the expression it wraps, so a comment there is not a child
+    /// it can use; `children_with_tokens` still sees everything, which is what prose scanning wants.
+    #[test]
+    fn children_skips_comments_and_children_with_tokens_keeps_them() {
+        let mut parser = parser();
+        let source = "let items = {\n  // leading\n  1 2\n}";
+        let tree = parser.parse(source, None).unwrap();
+        let root = SyntaxNode::new(tree.root_node(), source);
+        let braced = find_kind(&root, SyntaxKind::VALUES_BRACED_EXPRESSION).expect("braced body");
+
+        assert!(
+            braced.children().all(|child| !child.kind().is_comment()),
+            "children(): {:?}",
+            braced.children().map(|c| c.kind()).collect::<Vec<_>>()
+        );
+        assert!(
+            braced
+                .children_with_tokens()
+                .any(|child| child.kind().is_comment()),
+            "children_with_tokens() should still see the comment"
+        );
+    }
+
+    /// `child`, `child_count` and the sibling walkers read the same view as `children()`, so a
+    /// comment between two constructs never shifts an index or stands between two siblings.
+    #[test]
+    fn index_and_sibling_access_skip_comments() {
+        let mut parser = parser();
+        let source = "let items = {\n  // leading\n  1\n  // between\n  2\n}";
+        let tree = parser.parse(source, None).unwrap();
+        let root = SyntaxNode::new(tree.root_node(), source);
+        let braced = find_kind(&root, SyntaxKind::VALUES_BRACED_EXPRESSION).expect("braced body");
+
+        assert_eq!(
+            braced.child_count(),
+            2,
+            "child_count() should not count comments"
+        );
+        let first = braced.child(0).expect("first construct");
+        let second = braced.child(1).expect("second construct");
+        assert_eq!(first.text(), "1");
+        assert_eq!(second.text(), "2");
+        assert_eq!(
+            first.next_sibling().map(|node| node.text()),
+            Some("2"),
+            "next_sibling() should step over the comment between them"
+        );
+        assert_eq!(
+            second.prev_sibling().map(|node| node.text()),
+            Some("1"),
+            "prev_sibling() should step over the comment between them"
+        );
+    }
+
+    fn find_kind<'tree>(node: &SyntaxNode<'tree>, kind: SyntaxKind) -> Option<SyntaxNode<'tree>> {
+        if node.kind() == kind {
+            return Some(*node);
+        }
+        node.children_with_tokens()
+            .find_map(|child| find_kind(&child, kind))
     }
 
     #[test]

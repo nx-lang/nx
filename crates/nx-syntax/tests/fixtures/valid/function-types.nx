@@ -1,0 +1,37 @@
+// Function types: an element function's signature with `function` in the name slot.
+type Contact = { name:string }
+
+abstract external component <DrawnNode />
+
+// Inline on a property, and aliased.
+external component <DataTable
+  RowTemplate: <function Item:Contact Index:int />: DrawnNode
+  HeaderTemplate: <function />: DrawnNode
+/>
+
+type RowTemplate = <function Item:Contact Index:int />: DrawnNode
+
+// A content parameter.
+type Wrap = <function content Children:object[] />: string
+
+// A suffix after the result binds to the result; parentheses make the function itself
+// nullable or a list element.
+type Maybe = <function Count:int />: string?
+type Template = (<function Item:object />: string)?
+type Templates = (<function Item:object />: string)[]
+type Names = (string)[]
+
+// A multi-line function type.
+type Multi =
+  <function
+    Item:Contact
+    Index:int
+  />: DrawnNode
+
+// Function types in every other type position.
+component <Section extends DrawnNode Items:Contact[] Row:RowTemplate Header:(<function />: DrawnNode)? /> = {
+  <DrawnNode />
+}
+
+let apply(f: <function n:int />: int, n:int): int = {n}
+let picked: (<function Item:Contact />: DrawnNode)? = null

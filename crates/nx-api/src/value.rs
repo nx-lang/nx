@@ -24,6 +24,16 @@ impl FromNxValueError {
         }
     }
 
+    fn unsupported_function(path: &str) -> Self {
+        Self {
+            path: path.to_string(),
+            message: format!(
+                "NxValue at {path} encodes a Function record, but a function value names a \
+                 declaration of the running program and cannot be provided as host input"
+            ),
+        }
+    }
+
     /// Returns the path to the invalid value within the input tree.
     pub fn path(&self) -> &str {
         self.path.as_str()
@@ -53,6 +63,10 @@ impl Error for FromNxValueError {}
 /// action it accepts and, when a lifecycle render gave it one, the `token` a host passes back in a
 /// dispatch handler invocation. That record names the handler; it is not the handler, so it is
 /// intentionally not round-trippable through [`from_nx_value`].
+///
+/// `Value::Function` is encoded as a `Function` record with the declaring module's identity and
+/// the function's name, the same record the TypeScript runtime renders. It names a declaration of
+/// the running program, so it is likewise not decoded from host input.
 pub fn to_nx_value(value: &Value) -> NxValue {
     match value {
         Value::Null => NxValue::Null,
@@ -67,6 +81,13 @@ pub fn to_nx_value(value: &Value) -> NxValue {
         Value::Record { type_name, fields } => NxValue::Record {
             type_name: Some(type_name.as_str().to_string()),
             properties: fields_to_properties(fields),
+        },
+        Value::Function { module, name } => NxValue::Record {
+            type_name: Some("Function".to_string()),
+            properties: BTreeMap::from([
+                ("module".to_string(), NxValue::String(module.to_string())),
+                ("name".to_string(), NxValue::String(name.to_string())),
+            ]),
         },
         Value::ActionHandler {
             action_name, token, ..
@@ -116,6 +137,9 @@ fn from_nx_value_at_path(value: &NxValue, path: &str) -> Result<Value, FromNxVal
         } => {
             if type_name.as_deref() == Some("ActionHandler") {
                 return Err(FromNxValueError::unsupported_action_handler(path));
+            }
+            if type_name.as_deref() == Some("Function") {
+                return Err(FromNxValueError::unsupported_function(path));
             }
 
             Ok(Value::Record {
@@ -227,6 +251,30 @@ mod tests {
         let error = from_nx_value(&value).expect_err("Expected ActionHandler input to be rejected");
         assert_eq!(error.path(), "$");
         assert!(error.to_string().contains("ActionHandler"));
+    }
+
+    #[test]
+    fn a_function_value_renders_as_a_function_record() {
+        let value = to_nx_value(&Value::Function {
+            module: SmolStr::new("app/main.nx"),
+            name: SmolStr::new("ContactRow"),
+        });
+        assert_eq!(
+            value.to_json_string().expect("JSON encodes"),
+            r#"{"$type":"Function","module":"app/main.nx","name":"ContactRow"}"#
+        );
+    }
+
+    #[test]
+    fn from_nx_value_rejects_function_records() {
+        let value = NxValue::from_json_str(
+            r#"{ "$type": "Function", "module": "app/main.nx", "name": "ContactRow" }"#,
+        )
+        .expect("JSON parses");
+
+        let error = from_nx_value(&value).expect_err("Expected Function input to be rejected");
+        assert_eq!(error.path(), "$");
+        assert!(error.to_string().contains("Function"), "{error}");
     }
 
     #[test]

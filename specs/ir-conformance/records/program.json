@@ -1,0 +1,64 @@
+{
+  "entry": "main.nx",
+  "emit": [
+    "main.nx"
+  ],
+  "entrypoints": [
+    {
+      "module": "main.nx",
+      "function": "ada"
+    },
+    {
+      "module": "main.nx",
+      "function": "home"
+    },
+    {
+      "module": "main.nx",
+      "function": "failure"
+    },
+    {
+      "module": "main.nx",
+      "function": "idle"
+    },
+    {
+      "module": "main.nx",
+      "function": "cover"
+    },
+    {
+      "module": "main.nx",
+      "function": "userName"
+    },
+    {
+      "module": "main.nx",
+      "function": "userAge"
+    },
+    {
+      "module": "main.nx",
+      "function": "city"
+    },
+    {
+      "module": "main.nx",
+      "function": "patch"
+    },
+    {
+      "module": "main.nx",
+      "function": "applied"
+    },
+    {
+      "module": "main.nx",
+      "function": "merged"
+    },
+    {
+      "module": "main.nx",
+      "function": "changedKeys"
+    },
+    {
+      "module": "main.nx",
+      "function": "key"
+    },
+    {
+      "module": "main.nx",
+      "function": "root"
+    }
+  ]
+}

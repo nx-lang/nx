@@ -5,9 +5,9 @@
 // so an unset property is left for the control to decide rather than restated here, and the
 // catalog cannot drift from the vendored code it was generated against.
 
-type BevelType = None | Bevel | Emboss
+export type BevelType = None | Bevel | Emboss
 
-type BlendMode =
+export type BlendMode =
   | Color
   | Darken
   | Lighten
@@ -38,11 +38,11 @@ type BlendMode =
   | Hue
   | Luminosity
 
-type DrawerDirection = FromBottom | FromTop | FromLeft | FromRight
+export type DrawerDirection = FromBottom | FromTop | FromLeft | FromRight
 
-type DrawImageAlignment = Start | Center | End
+export type DrawImageAlignment = Start | Center | End
 
-type DrawTextAlignment =
+export type DrawTextAlignment =
   | Start
   | Center
   | End
@@ -51,9 +51,9 @@ type DrawTextAlignment =
   | FillCharacters
   | FillCharactersFull
 
-type FontAttributes = None | Bold | Italic | BoldItalic
+export type FontAttributes = None | Bold | Italic | BoldItalic
 
-type GradientType =
+export type GradientType =
   | None
   | Linear
   | Circular
@@ -61,9 +61,9 @@ type GradientType =
   | Sweep
   | Conical
 
-type LayoutOptions = Start | Center | End | Fill
+export type LayoutOptions = Start | Center | End | Fill
 
-type LineBreakMode =
+export type LineBreakMode =
   | NoWrap
   | WordWrap
   | CharacterWrap
@@ -71,13 +71,13 @@ type LineBreakMode =
   | MiddleTruncation
   | TailTruncation
 
-type LoadPriority = Low | Normal | High
+export type LoadPriority = Low | Normal | High
 
-type LockTouch = Enabled | Disabled | PassNone | PassTap | PassTapAndLongPress
+export type LockTouch = Enabled | Disabled | PassNone | PassTap | PassTapAndLongPress
 
-type MeasuringStrategy = MeasureAll | MeasureFirst | MeasureVisible
+export type MeasuringStrategy = MeasureAll | MeasureFirst | MeasureVisible
 
-type PrebuiltControlStyle =
+export type PrebuiltControlStyle =
   | Unset
   | Platform
   | Cupertino
@@ -85,11 +85,11 @@ type PrebuiltControlStyle =
   | Material3
   | Windows
 
-type RecyclingTemplate = Enabled | Disabled
+export type RecyclingTemplate = Enabled | Disabled
 
-type RelativePositionType = Start | Center | End | None
+export type RelativePositionType = Start | Center | End | None
 
-type ReturnType =
+export type ReturnType =
   | Default
   | Done
   | Go
@@ -97,15 +97,15 @@ type ReturnType =
   | Search
   | Send
 
-type ScrollBarDock = Start | End
+export type ScrollBarDock = Start | End
 
-type ScrollBarVisibility = None | Horizontal | Vertical | Both
+export type ScrollBarVisibility = None | Horizontal | Vertical | Both
 
-type ScrollOrientation = Horizontal | Vertical | Both | Neither
+export type ScrollOrientation = Horizontal | Vertical | Both | Neither
 
-type ShaderTileMode = Clamp | Repeat | Mirror | Decal
+export type ShaderTileMode = Clamp | Repeat | Mirror | Decal
 
-type ShapeType =
+export type ShapeType =
   | Rectangle
   | Circle
   | Ellipse
@@ -116,7 +116,7 @@ type ShapeType =
   | Line
   | Custom
 
-type SkiaCacheType =
+export type SkiaCacheType =
   | None
   | Operations
   | OperationsFull
@@ -126,9 +126,9 @@ type SkiaCacheType =
   | ImageCompositeGPU
   | GPU
 
-type SkiaEditorKeyboard = Default | Numeric | Decimal | Phone | Email
+export type SkiaEditorKeyboard = Default | Numeric | Decimal | Phone | Email
 
-type SkiaImageEffect =
+export type SkiaImageEffect =
   | Custom
   | None
   | Brightness
@@ -146,7 +146,7 @@ type SkiaImageEffect =
   | TSL
   | HSL
 
-type SkiaLayoutType =
+export type SkiaLayoutType =
   | Column
   | Row
   | Absolute
@@ -162,17 +162,17 @@ type SkiaLayoutType =
   | Line
   | Custom
 
-type SkiaTouchAnimation = None | Ripple | Shimmer
+export type SkiaTouchAnimation = None | Ripple | Shimmer
 
-type SnapToChildrenType = Disabled | Center | Side
+export type SnapToChildrenType = Disabled | Center | Side
 
-type StrokeCap = Butt | Round | Square
+export type StrokeCap = Butt | Round | Square
 
-type TextAlignment = Start | Center | End
+export type TextAlignment = Start | Center | End
 
-type TextTransform = None | Lowercase | Uppercase | Titlecase
+export type TextTransform = None | Lowercase | Uppercase | Titlecase
 
-type TransformAspect =
+export type TransformAspect =
   | Fill
   | None
   | Fit
@@ -184,21 +184,21 @@ type TransformAspect =
   | AspectCover
   | Tile
 
-type CornerRadius = {
+export type CornerRadius = {
   TopLeft: float64?
   TopRight: float64?
   BottomLeft: float64?
   BottomRight: float64?
 }
 
-type SkiaBevel = {
+export type SkiaBevel = {
   Depth: float64?
   LightColor: string?
   ShadowColor: string?
   Opacity: float64?
 }
 
-type SkiaGradient = {
+export type SkiaGradient = {
   Type: GradientType?
   Colors: string[]?
   ColorPositions: float64[]?
@@ -213,12 +213,12 @@ type SkiaGradient = {
   BlendMode: string?
 }
 
-type SkiaPoint = {
+export type SkiaPoint = {
   X: float64?
   Y: float64?
 }
 
-type SkiaShadow = {
+export type SkiaShadow = {
   X: float64?
   Y: float64?
   Blur: float64?
@@ -227,16 +227,16 @@ type SkiaShadow = {
   ShadowOnly: boolean?
 }
 
-type Thickness = {
+export type Thickness = {
   Left: float64?
   Top: float64?
   Right: float64?
   Bottom: float64?
 }
 
-abstract external component <DrawnNode />
+export abstract external component <DrawnNode />
 
-abstract external component
+export abstract external component
 <SkiaControl extends DrawnNode
   AccessibilityCanInteract: boolean?
   AccessibilityHint: string?
@@ -293,10 +293,17 @@ abstract external component
   VirtualisationInflated: float64?
   WidthRequest: float64?
   ZIndex: float64?
+  emits {
+    ChildTapped { }
+    ConsumeGestures { }
+    ContextMenu { }
+    Tapped { }
+  }
 />
 
-abstract external component
+export abstract external component
 <SkiaLayoutBase extends SkiaControl
+  TItem: type
   BackgroundMeasurementBatchSize: float64?
   ColumnDefinitions: string?
   ColumnSpacing: float64?
@@ -304,6 +311,8 @@ abstract external component
   DefaultRowDefinition: string?
   DynamicColumns: boolean?
   Invert: boolean?
+  ItemsSource: TItem[]?
+  ItemTemplate: (<function Item:TItem Index:int />: DrawnNode)?
   MeasureItemsStrategy: MeasuringStrategy?
   Padding: Thickness?
   RecyclingTemplate: RecyclingTemplate?
@@ -315,9 +324,9 @@ abstract external component
   Type: SkiaLayoutType?
 />
 
-abstract external component <SkiaGridBase extends SkiaLayoutBase />
+export abstract external component <SkiaGridBase extends SkiaLayoutBase />
 
-abstract external component
+export abstract external component
 <SkiaShapeBase extends SkiaLayoutBase
   Bevel: SkiaBevel?
   BevelType: BevelType?
@@ -332,15 +341,19 @@ abstract external component
   StrokeWidth: float64?
 />
 
-abstract external component
+export abstract external component
 <AnimatedFramesRenderer extends SkiaControl
   AutoPlay: boolean?
   DefaultFrame: float64?
   Repeat: float64?
   SpeedRatio: float64?
+  emits {
+    Finished { }
+    Started { }
+  }
 />
 
-abstract external component
+export abstract external component
 <SkiaLabelBase extends SkiaControl
   DropShadowColor: string?
   DropShadowOffsetX: float64?
@@ -369,7 +382,7 @@ abstract external component
   VerticalTextAlignment: TextAlignment?
 />
 
-abstract external component
+export abstract external component
 <SkiaImageBase extends SkiaControl
   AddEffect: SkiaImageEffect?
   Aspect: TransformAspect?
@@ -390,9 +403,13 @@ abstract external component
   VerticalOffset: float64?
   ZoomX: float64?
   ZoomY: float64?
+  emits {
+    Error { }
+    Success { source:string }
+  }
 />
 
-abstract external component
+export abstract external component
 <SkiaToggle extends SkiaLayoutBase
   ColorFrameOff: string?
   ColorFrameOn: string?
@@ -403,9 +420,12 @@ abstract external component
   IsAnimated: boolean?
   IsToggled: boolean?
   RespondsToGestures: boolean?
+  emits {
+    Toggled { value:boolean }
+  }
 />
 
-abstract external component
+export abstract external component
 <SnappingLayout extends SkiaLayoutBase
   Animated: boolean?
   AutoVelocityMultiplyPts: float64?
@@ -415,9 +435,14 @@ abstract external component
   RubberDamping: float64?
   RubberEffect: float64?
   SnapDistanceRatio: float64?
+  emits {
+    Scrolled { }
+    Stopped { }
+    TransitionChanged { inTransition:boolean }
+  }
 />
 
-abstract external component
+export abstract external component
 <SkiaCarouselBase extends SnappingLayout
   DynamicSize: boolean?
   IsLooped: boolean?
@@ -428,46 +453,51 @@ abstract external component
   SelectedIndex: float64?
   SidesOffset: float64?
   SwipeSpeed: float64?
+  emits {
+    ItemAppearing { index:float64 }
+    ItemDisappearing { index:float64 }
+    SelectedIndexChanged { index:float64 }
+  }
 />
 
-external component
+export external component
 <SkiaLayout extends SkiaLayoutBase
   content Children: DrawnNode[]?
 />
 
-external component
+export external component
 <SkiaStack extends SkiaLayoutBase
   content Children: DrawnNode[]?
 />
 
-external component
+export external component
 <SkiaRow extends SkiaLayoutBase
   content Children: DrawnNode[]?
 />
 
-external component
+export external component
 <SkiaLayer extends SkiaLayoutBase
   content Children: DrawnNode[]?
 />
 
-external component
+export external component
 <SkiaWrap extends SkiaLayoutBase
   content Children: DrawnNode[]?
 />
 
-external component
+export external component
 <SkiaGrid extends SkiaGridBase
   content Children: DrawnNode[]?
 />
 
-external component
+export external component
 <SkiaDecoratedGrid extends SkiaGridBase
   HorizontalLine: SkiaGradient?
   VerticalLine: SkiaGradient?
   content Children: DrawnNode[]?
 />
 
-external component
+export external component
 <SkiaBackdrop extends SkiaLayoutBase
   Blur: float64?
   Brightness: float64?
@@ -475,7 +505,7 @@ external component
   content Children: DrawnNode[]?
 />
 
-external component
+export external component
 <SkiaEditor extends SkiaShapeBase
   AutoHeight: boolean?
   CanShowCursor: boolean?
@@ -505,9 +535,15 @@ external component
   UseMarkdown: boolean?
   UseUnicode: boolean?
   VerticalTextAlignment: TextAlignment?
+  emits {
+    CursorMoved { }
+    FocusChanged { focused:boolean }
+    TextChanged { text:string }
+    TextSubmitted { text:string }
+  }
 />
 
-external component
+export external component
 <SkiaSprite extends AnimatedFramesRenderer
   AnimationName: string?
   Columns: float64?
@@ -524,20 +560,24 @@ external component
   RenderWidthUnits: float64?
   Rows: float64?
   Source: string?
+  emits {
+    Error { }
+    Success { source:string }
+  }
 />
 
-external component
+export external component
 <SkiaSpriteSet extends SkiaLayoutBase
   State: float64?
   content Children: DrawnNode[]?
 />
 
-external component
+export external component
 <SkiaLabel extends SkiaLabelBase
   content Children: DrawnNode[]?
 />
 
-external component
+export external component
 <SkiaRichLabel extends SkiaLabelBase
   CodeBackgroundColor: string?
   CodeBlockBackgroundColor: string?
@@ -550,9 +590,12 @@ external component
   StrikeoutColor: string?
   UnderlineLink: boolean?
   UnderlineWidth: float64?
+  emits {
+    LinkTapped { url:string }
+  }
 />
 
-external component
+export external component
 <TextSpan extends DrawnNode
   BackgroundColor: string?
   FontFamily: string?
@@ -570,14 +613,21 @@ external component
   TextColor: string?
   Underline: boolean?
   UnderlineWidth: float64?
+  emits {
+    Tapped { }
+  }
 />
 
-external component
+export external component
 <SkiaHotspot extends SkiaControl
   LockPanning: boolean?
+  emits {
+    Down { }
+    Up { }
+  }
 />
 
-external component
+export external component
 <SkiaButton extends SkiaLayoutBase
   ApplyEffect: SkiaTouchAnimation?
   ControlStyle: PrebuiltControlStyle?
@@ -592,11 +642,15 @@ external component
   StrokeWidth: float64?
   Text: string?
   TextColor: string?
+  emits {
+    Down { }
+    Up { }
+  }
 />
 
-external component <SkiaImage extends SkiaImageBase />
+export external component <SkiaImage extends SkiaImageBase />
 
-external component
+export external component
 <SkiaImageTiles extends SkiaImageBase
   TileAspect: TransformAspect?
   TileCacheType: SkiaCacheType?
@@ -606,7 +660,7 @@ external component
   TileWidth: float64?
 />
 
-external component
+export external component
 <SkiaSvg extends SkiaControl
   Aspect: TransformAspect?
   HorizontalAlignment: DrawImageAlignment?
@@ -614,9 +668,13 @@ external component
   SvgString: string?
   TintColor: string?
   VerticalAlignment: DrawImageAlignment?
+  emits {
+    Error { }
+    Success { source:string }
+  }
 />
 
-external component
+export external component
 <SkiaLottie extends AnimatedFramesRenderer
   ApplyIsOnWhenNotPlaying: boolean?
   Colors: string[]?
@@ -625,17 +683,25 @@ external component
   IsOn: boolean?
   Source: string?
   StopAtCurrentFrame: boolean?
+  emits {
+    Error { }
+    Success { source:string }
+  }
 />
 
-external component
+export external component
 <SkiaGif extends AnimatedFramesRenderer
   Aspect: TransformAspect?
   HorizontalAlignment: DrawImageAlignment?
   Source: string?
   VerticalAlignment: DrawImageAlignment?
+  emits {
+    Error { }
+    Success { source:string }
+  }
 />
 
-external component
+export external component
 <SkiaScroll extends SkiaControl
   AutoScrollingSpeedMs: float64?
   Bounces: boolean?
@@ -670,9 +736,16 @@ external component
   ViewportOffsetX: float64?
   ViewportOffsetY: float64?
   content Children: DrawnNode[]?
+  emits {
+    CurrentIndexChanged { index:float64 }
+    LoadMoreCommand { }
+    LoadMoreTopCommand { }
+    RefreshCommand { }
+    Scrolled { }
+  }
 />
 
-external component
+export external component
 <SkiaScrollBar extends SkiaLayoutBase
   AutoHide: boolean?
   Dock: ScrollBarDock?
@@ -685,36 +758,36 @@ external component
   content Children: DrawnNode[]?
 />
 
-external component
+export external component
 <RefreshIndicator extends SkiaLayoutBase
   Orientation: ScrollOrientation?
   content Children: DrawnNode[]?
 />
 
-external component
+export external component
 <SkiaShape extends SkiaShapeBase
   content Children: DrawnNode[]?
 />
 
-external component
+export external component
 <SkiaFrame extends SkiaShapeBase
   content Children: DrawnNode[]?
 />
 
-external component <SkiaSwitch extends SkiaToggle />
+export external component <SkiaSwitch extends SkiaToggle />
 
-external component
+export external component
 <SkiaCheckbox extends SkiaToggle
   ColorCheckOn: string?
 />
 
-external component
+export external component
 <SkiaRadioButton extends SkiaToggle
   GroupName: string?
   Text: string?
 />
 
-external component
+export external component
 <SkiaProgress extends SkiaControl
   ControlStyle: PrebuiltControlStyle?
   Max: float64?
@@ -724,7 +797,7 @@ external component
   Value: float64?
 />
 
-external component
+export external component
 <SkiaSlider extends SkiaControl
   ClickOnTrailEnabled: boolean?
   ControlStyle: PrebuiltControlStyle?
@@ -742,23 +815,30 @@ external component
   ThumbColor: string?
   TrackColor: string?
   TrackSelectedColor: string?
+  emits {
+    EndChanged { value:float64 }
+    StartChanged { value:float64 }
+  }
 />
 
-external component
+export external component
 <SkiaCarousel extends SkiaCarouselBase
   content Children: DrawnNode[]?
 />
 
-external component
+export external component
 <SkiaShaderCarousel extends SkiaCarouselBase
   InterruptedTransitionMs: float64?
   TransitionShader: string?
   TransitionShaderCode: string?
   TransitionTemplate: string?
   content Children: DrawnNode[]?
+  emits {
+    FromToChanged { }
+  }
 />
 
-external component
+export external component
 <SkiaDrawer extends SnappingLayout
   AmplitudeSize: float64?
   AutoClose: boolean?
@@ -766,4 +846,8 @@ external component
   HeaderSize: float64?
   IsOpen: boolean?
   content Children: DrawnNode[]?
+  emits {
+    IsOpenChanged { isOpen:boolean }
+    StateTransitionComplete { isOpen:boolean }
+  }
 />

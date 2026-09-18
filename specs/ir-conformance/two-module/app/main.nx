@@ -1,0 +1,18 @@
+// A program that spans two artifacts: every reference below crosses into shared/model.nx.
+import "../shared/model.nx"
+
+type Local extends Base = { label:string }
+let total() = { answer() + 1 }
+let user(): User = { makeUser(1, "Ada") }
+let card() = <Card Title="hi" Theme={Theme.dark} />
+let local() = <Local label="x" />
+let nameOf(u:User) = { u.name }
+let root() = <Card Title={nameOf(user())} />
+
+// An emit inherited from the other module: its action record, and the handler bound to it, both
+// reference shared/model.nx.
+external component <Tap extends Control count:int />
+component <Panel /> = {
+  state { taps:int = 0 }
+  <Tap count={taps} onTapped=<Update taps={taps + 1} /> />
+}

@@ -1,0 +1,20 @@
+module drawnui.nx fingerprint 10443083107296702259
+entrypoints functions [] components [SkiaControl SkiaLabel SkiaButton SkiaLayout]
+
+component SkiaControl abstract external
+
+component SkiaLabel external
+  props
+    Text: string required
+    FontSize: int = 14
+
+component SkiaButton external
+  props
+    Text: string required
+    Enabled: boolean = true
+
+component SkiaLayout external
+  props
+    Type: string = "Absolute"
+    Spacing: int = 0
+    content Children: SkiaControl[] required

@@ -1,0 +1,147 @@
+module main.nx fingerprint 7397562101735551248
+requires update-records-v1 property-unions-v1 action-handlers-v1
+entrypoints functions [root] components [Node Label Button TextInput Card Stack Counter Tens SearchBox Page]
+
+component Node abstract external
+
+component Label external
+  props
+    text: int required
+
+component Button external
+  props
+    label: string required
+  emits
+    Tapped = Button.Tapped
+
+record Button.Tapped
+
+component TextInput external
+  props
+    value: string required
+
+component Card external
+  props
+    items: Node[] required
+    header: Node required
+    count: int required
+
+component Stack
+  props
+    content children: Node[] required
+  body =
+    <column>
+      children
+    </column>
+
+record Reset
+
+record SearchSubmitted
+  searchString: string required
+
+record DoSearch
+  search: string required
+
+component Counter
+  props
+    step: int = 1
+  state
+    count: int = 0
+    last: Counter.Property = Counter.Property.count
+  emits
+    Reset = Reset
+  body =
+    <Stack>
+      <Label text=count />
+      <Button label="Add"
+        onTapped=handler Button.Tapped action@3:Button.Tapped owner Counter =>
+          <Counter.Update count=(count add step) last=Counter.Property.count />
+      >
+      </Button>
+      <Button label="Reset"
+        onTapped=handler Button.Tapped action@4:Button.Tapped owner Counter =>
+          [<Counter.Update count=0 />, <Reset />]
+      >
+      </Button>
+    </Stack>
+
+value tens =
+  [10, 20]
+
+component Tens
+  state
+    count: int = 0
+  body =
+    <Card count=count
+      header=<Button label="Header"
+        onTapped=handler Button.Tapped action@1:Button.Tapped owner Tens =>
+          <Tens.Update count=(count add 100) />
+      >
+      </Button>
+      items=for count in tens yield
+        <Button label="Ten"
+          onTapped=handler Button.Tapped action@3:Button.Tapped owner Tens =>
+            <Tens.Update count=(count add 1) />
+        >
+        </Button>
+    >
+    </Card>
+
+component SearchBox
+  props
+    placeholder: string = "Find"
+  state
+    query: string = placeholder
+  emits
+    SearchSubmitted = SearchSubmitted
+  body =
+    <TextInput value=query />
+
+component Page
+  state
+    count: int = 0
+    query: string = ""
+  emits
+    DoSearch = DoSearch
+  body =
+    <Stack>
+      <Label text=count />
+      <TextInput value=query />
+      <Button label="More"
+        onTapped=handler Button.Tapped action@2:Button.Tapped owner Page =>
+          <Page.Update count=(count add 1) />
+      >
+      </Button>
+      <SearchBox
+        onSearchSubmitted=handler SearchBox.SearchSubmitted action@3:SearchSubmitted owner Page =>
+          <DoSearch search=action.searchString />
+      >
+      </SearchBox>
+      <SearchBox placeholder="Again"
+        onSearchSubmitted=handler SearchBox.SearchSubmitted action@4:SearchSubmitted owner Page =>
+          <Page.Update query=action.searchString />
+      >
+      </SearchBox>
+    </Stack>
+
+function root() =
+  <SearchBox
+    onSearchSubmitted=handler SearchBox.SearchSubmitted action@0:SearchSubmitted =>
+      <DoSearch search=action.searchString />
+  >
+  </SearchBox>
+
+record Counter.Update update of Counter
+  count: int
+  last: Counter.Property
+
+record Tens.Update update of Tens
+  count: int
+
+record Page.Update update of Page
+  count: int
+  query: string
+
+union Counter.Property property of Counter
+  case count constant
+  case last constant

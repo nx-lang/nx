@@ -2,7 +2,7 @@
 //!
 //! These tests verify end-to-end type checking behavior on realistic NX code.
 
-use nx_types::{check_str, Type, TypeCheckSession};
+use nx_types::{check_str, FunctionParam, Type, TypeCheckSession};
 
 // ============================================================================
 // Type Inference Tests (T131, T136)
@@ -1970,9 +1970,12 @@ fn test_nullable_list_property_rejects_incompatible_element_types_with_full_shap
 
 #[test]
 fn test_function_type_compatibility() {
-    let f1 = Type::function(vec![Type::int()], Type::string());
-    let f2 = Type::function(vec![Type::int()], Type::string());
-    let f3 = Type::function(vec![Type::string()], Type::string());
+    let f1 = Type::function(vec![FunctionParam::new("n", Type::int())], Type::string());
+    let f2 = Type::function(vec![FunctionParam::new("n", Type::int())], Type::string());
+    let f3 = Type::function(
+        vec![FunctionParam::new("n", Type::string())],
+        Type::string(),
+    );
 
     assert!(f1.is_compatible_with(&f2));
     assert!(!f1.is_compatible_with(&f3));

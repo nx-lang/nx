@@ -1,33 +1,242 @@
+//! NX IR schema 4: one module per artifact, encoded as flat tables.
+//!
+//! <para>An artifact carries the module's string, type, constant and node tables and its
+//! declaration list, plus a module table naming every module it references. A reference is a
+//! module-table slot and a declaration name, never a position, so a module regenerated with a new
+//! declaration in the middle still satisfies every artifact compiled against the old one. The
+//! layout of every table entry is documented in `docs/nx-ir-format.md`; the kind numbers live in
+//! [`kinds`] and are never reused. The model here is what the emitter builds; the bytes a host
+//! receives are the image `ir_image` writes from it.</para>
+
 use crate::builder::build_codegen_program;
+use crate::ir_image::{write_nx_ir_image, NxIrImageError};
 use crate::model::{
-    CodegenComponent, CodegenComponentDescriptor, CodegenComponentField,
-    CodegenComponentTargetKind, CodegenDeclaration, CodegenDeclarationKind, CodegenElement,
-    CodegenEntrypoint, CodegenExpression, CodegenExpressionKind, CodegenMatchArm, CodegenModule,
-    CodegenModuleProvenance, CodegenParam, CodegenProgram, CodegenProperty, CodegenRecordField,
-    CodegenReference, CodegenSourceEntry, CodegenStatement, CodegenTypeRef, CodegenUnionCase,
+    CodegenActionHandler, CodegenComponent, CodegenComponentField, CodegenDeclaration,
+    CodegenDeclarationKind, CodegenExpression, CodegenExpressionKind, CodegenModule,
+    CodegenModuleProvenance, CodegenProgram, CodegenProperty, CodegenRecordField, CodegenReference,
+    CodegenSourceEntry, CodegenStatement, CodegenTypeRef,
 };
 use crate::options::CodegenError;
 use nx_api::ProgramArtifact;
 use nx_diagnostics::{Diagnostic, Label, TextSpan};
 use nx_hir::ast::{BinOp, Literal, UnOp};
+use nx_hir::UpdateIntrinsic;
 use nx_interpreter::{ResolvedItemKind, RuntimeModuleId};
 use nx_types::{Primitive, Type};
+use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
-pub const NX_IR_FORMAT_ID: &str = "nx-ir-json";
-pub const NX_IR_SCHEMA_VERSION: u32 = 2;
-pub const NX_IR_RUNTIME_ABI: &str = "nx-ir-runtime-v1";
-pub const NX_IR_REQUIRED_FEATURE_EAGER_V1: &str = "eager-v1";
-/// Required by a program that declares a derived update record, so a runtime that predates them
-/// refuses the program rather than normalizing a patch as a whole record.
+pub const NX_IR_SCHEMA_VERSION: u32 = 4;
+pub const NX_IR_RUNTIME_ABI: &str = "nx-ir-runtime-v2";
+/// Required by a module that declares a derived update record, so a runtime that predates them
+/// refuses the module rather than normalizing a patch as a whole record.
 pub const NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1: &str = "update-records-v1";
-/// Required by a program that declares a derived property union, so a runtime that predates them
-/// rejects the program rather than misreading the declaration.
+/// Required by a module that declares a derived property union, so a runtime that predates them
+/// rejects the module rather than misreading the declaration.
 pub const NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1: &str = "property-unions-v1";
-/// Required by a program that calls an update intrinsic, so a runtime that predates them rejects
-/// the program rather than failing on an unknown expression.
+/// Required by a module that calls an update intrinsic, so a runtime that predates them rejects
+/// the module rather than failing on an unknown node.
 pub const NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1: &str = "update-intrinsics-v1";
+/// Required by a module that binds an action handler, so a runtime that predates them refuses the
+/// module by name rather than failing on an unknown node.
+pub const NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1: &str = "action-handlers-v1";
+
+/// A module carrying a function type, a function referenced as a value, or a call of a
+/// function-typed value by name, which a runtime that predates function values cannot run.
+pub const NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1: &str = "function-values-v1";
+
+/// The kind numbers of schema 4. A number, once assigned, is never reused for anything else.
+pub mod kinds {
+    /// Node kinds: the first element of every `nodes` entry.
+    pub mod node {
+        pub const NULL: i64 = 0;
+        pub const BOOL: i64 = 1;
+        pub const STRING: i64 = 2;
+        pub const NUMBER: i64 = 3;
+        pub const SLOT: i64 = 4;
+        pub const REFERENCE: i64 = 5;
+        pub const BINARY: i64 = 6;
+        pub const UNARY: i64 = 7;
+        pub const CALL: i64 = 8;
+        pub const INTRINSIC: i64 = 9;
+        pub const IF: i64 = 10;
+        pub const IF_IS: i64 = 11;
+        pub const ARRAY: i64 = 12;
+        pub const FOR: i64 = 13;
+        pub const MEMBER: i64 = 14;
+        pub const RECORD: i64 = 15;
+        pub const UNION_CASE: i64 = 16;
+        pub const ELEMENT: i64 = 17;
+        pub const COMPONENT: i64 = 18;
+        pub const ACTION_HANDLER: i64 = 19;
+        pub const TEXT: i64 = 20;
+        pub const NAMED_CALL: i64 = 21;
+
+        pub const NAMES: &[(i64, &str)] = &[
+            (NULL, "null"),
+            (BOOL, "bool"),
+            (STRING, "string"),
+            (NUMBER, "number"),
+            (SLOT, "slot"),
+            (REFERENCE, "reference"),
+            (BINARY, "binary"),
+            (UNARY, "unary"),
+            (CALL, "call"),
+            (INTRINSIC, "intrinsic"),
+            (IF, "if"),
+            (IF_IS, "ifIs"),
+            (ARRAY, "array"),
+            (FOR, "for"),
+            (MEMBER, "member"),
+            (RECORD, "record"),
+            (UNION_CASE, "unionCase"),
+            (ELEMENT, "element"),
+            (COMPONENT, "component"),
+            (ACTION_HANDLER, "actionHandler"),
+            (TEXT, "text"),
+            (NAMED_CALL, "namedCall"),
+        ];
+    }
+
+    /// Type kinds: the first element of every `types` entry.
+    pub mod ty {
+        pub const PRIMITIVE: i64 = 0;
+        pub const NOMINAL: i64 = 1;
+        pub const ARRAY: i64 = 2;
+        pub const NULLABLE: i64 = 3;
+        pub const FUNCTION: i64 = 4;
+
+        /// Bit 0 of a function type parameter's flags cell: the parameter takes body content.
+        pub const FUNCTION_PARAM_CONTENT: i64 = 1;
+
+        pub const NAMES: &[(i64, &str)] = &[
+            (PRIMITIVE, "primitive"),
+            (NOMINAL, "nominal"),
+            (ARRAY, "array"),
+            (NULLABLE, "nullable"),
+            (FUNCTION, "function"),
+        ];
+    }
+
+    /// Constant kinds: the first element of every `constants` entry.
+    pub mod constant {
+        pub const INT: i64 = 0;
+        pub const BIGINT: i64 = 1;
+        pub const FLOAT: i64 = 2;
+
+        pub const NAMES: &[(i64, &str)] = &[(INT, "int"), (BIGINT, "bigint"), (FLOAT, "float")];
+    }
+
+    /// Declaration kinds: the first element of every `declarations` entry.
+    pub mod declaration {
+        pub const FUNCTION: i64 = 0;
+        pub const VALUE: i64 = 1;
+        pub const RECORD: i64 = 2;
+        pub const COMPONENT: i64 = 3;
+        pub const UNION: i64 = 4;
+        pub const TYPE_ALIAS: i64 = 5;
+
+        pub const NAMES: &[(i64, &str)] = &[
+            (FUNCTION, "function"),
+            (VALUE, "value"),
+            (RECORD, "record"),
+            (COMPONENT, "component"),
+            (UNION, "union"),
+            (TYPE_ALIAS, "typeAlias"),
+        ];
+    }
+
+    /// Binary operators: the second element of a `binary` node.
+    pub mod binary {
+        pub const ADD: i64 = 0;
+        pub const SUB: i64 = 1;
+        pub const MUL: i64 = 2;
+        pub const DIV: i64 = 3;
+        pub const IDIV: i64 = 4;
+        pub const MOD: i64 = 5;
+        pub const IMOD: i64 = 6;
+        pub const CONCAT: i64 = 7;
+        pub const EQ: i64 = 8;
+        pub const NE: i64 = 9;
+        pub const LT: i64 = 10;
+        pub const LE: i64 = 11;
+        pub const GT: i64 = 12;
+        pub const GE: i64 = 13;
+        pub const AND: i64 = 14;
+        pub const OR: i64 = 15;
+        pub const FADD32: i64 = 16;
+        pub const FSUB32: i64 = 17;
+        pub const FMUL32: i64 = 18;
+        pub const FDIV32: i64 = 19;
+
+        pub const NAMES: &[(i64, &str)] = &[
+            (ADD, "add"),
+            (SUB, "sub"),
+            (MUL, "mul"),
+            (DIV, "div"),
+            (IDIV, "idiv"),
+            (MOD, "mod"),
+            (IMOD, "imod"),
+            (CONCAT, "concat"),
+            (EQ, "eq"),
+            (NE, "ne"),
+            (LT, "lt"),
+            (LE, "le"),
+            (GT, "gt"),
+            (GE, "ge"),
+            (AND, "and"),
+            (OR, "or"),
+            (FADD32, "fadd32"),
+            (FSUB32, "fsub32"),
+            (FMUL32, "fmul32"),
+            (FDIV32, "fdiv32"),
+        ];
+    }
+
+    /// Unary operators: the second element of a `unary` node.
+    pub mod unary {
+        pub const NEG: i64 = 0;
+        pub const NOT: i64 = 1;
+
+        pub const NAMES: &[(i64, &str)] = &[(NEG, "neg"), (NOT, "not")];
+    }
+
+    /// Update intrinsics: the second element of an `intrinsic` node.
+    pub mod intrinsic {
+        pub const APPLY: i64 = 0;
+        pub const MERGE: i64 = 1;
+        pub const DIFF: i64 = 2;
+        pub const CHANGED: i64 = 3;
+
+        pub const NAMES: &[(i64, &str)] = &[
+            (APPLY, "apply"),
+            (MERGE, "merge"),
+            (DIFF, "diff"),
+            (CHANGED, "changed"),
+        ];
+    }
+
+    /// Field flags: bits of the last element of a field entry.
+    pub mod field {
+        pub const CONTENT: i64 = 1;
+        pub const REQUIRED: i64 = 2;
+    }
+
+    /// Component flags: bits of the last element of a component declaration.
+    pub mod component {
+        pub const ABSTRACT: i64 = 1;
+        pub const EXTERNAL: i64 = 2;
+    }
+
+    /// The name a kind table gives a number, or `None` for a number it does not assign.
+    pub fn name(table: &[(i64, &'static str)], kind: i64) -> Option<&'static str> {
+        table
+            .iter()
+            .find(|(number, _)| *number == kind)
+            .map(|(_, name)| *name)
+    }
+}
 
 mod u64_decimal_string {
     use serde::{Deserialize, Deserializer, Serializer};
@@ -48,141 +257,545 @@ mod u64_decimal_string {
     }
 }
 
-/// The features a runtime must support to run `program`.
+/// One operand of a table entry: an integer, a float constant's value, or a nested list.
 ///
-/// <para>Update-record support is required only by a program that declares one, so a program that
-/// never uses a patch lists exactly what it did before update records existed.</para>
-fn required_features(program: &CodegenProgram) -> Vec<String> {
-    let mut features = vec![NX_IR_REQUIRED_FEATURE_EAGER_V1.to_string()];
-    let declares_update_record = program.modules.iter().any(|module| {
-        module.declarations.iter().any(|declaration| {
-            matches!(
-                &declaration.kind,
-                CodegenDeclarationKind::Record {
-                    update_target: Some(_),
-                    ..
-                }
-            )
-        })
-    });
-    if declares_update_record {
-        features.push(NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1.to_string());
+/// Every table entry is a list whose first element is its kind; the layouts are in
+/// `docs/nx-ir-format.md`. Keeping the operands untyped in Rust is deliberate: the artifact is
+/// defined by the document, and this crate's readers walk the lists the same way the image's
+/// layouts are written.
+#[derive(Debug, Clone, PartialEq)]
+pub enum IrItem {
+    Int(i64),
+    Float(f64),
+    List(Vec<IrItem>),
+}
+
+impl IrItem {
+    pub fn list(items: impl IntoIterator<Item = IrItem>) -> Self {
+        Self::List(items.into_iter().collect())
     }
-    let declares_property_union = program.modules.iter().any(|module| {
-        module.declarations.iter().any(|declaration| {
-            matches!(
-                &declaration.kind,
-                CodegenDeclarationKind::Union {
-                    property_target: Some(_),
-                    ..
-                }
-            )
-        })
-    });
-    if declares_property_union {
-        features.push(NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1.to_string());
+
+    pub fn ints(items: impl IntoIterator<Item = i64>) -> Self {
+        Self::List(items.into_iter().map(IrItem::Int).collect())
     }
-    if program
+
+    pub fn as_int(&self) -> Option<i64> {
+        match self {
+            Self::Int(value) => Some(*value),
+            _ => None,
+        }
+    }
+
+    pub fn as_list(&self) -> Option<&[IrItem]> {
+        match self {
+            Self::List(items) => Some(items),
+            _ => None,
+        }
+    }
+}
+
+/// One NX IR artifact: one module and the tables that encode it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NxIrArtifact {
+    pub schema_version: u32,
+    pub runtime_abi: String,
+    pub required_features: Vec<String>,
+    /// Slot 0 is the artifact's own module; the rest are the modules it references directly.
+    pub modules: Vec<NxIrModuleEntry>,
+    /// Declaration indices of the module's top-level functions, in declaration order.
+    pub function_entrypoints: Vec<u32>,
+    /// Declaration indices of the module's top-level components, in declaration order.
+    pub component_entrypoints: Vec<u32>,
+    pub strings: Vec<String>,
+    pub types: Vec<IrItem>,
+    pub constants: Vec<IrItem>,
+    pub nodes: Vec<IrItem>,
+    pub declarations: Vec<IrItem>,
+    pub debug: Option<NxIrDebug>,
+}
+
+/// One entry of the module table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NxIrModuleEntry {
+    pub identity: String,
+    /// The version string the build was given for the module, or empty.
+    pub version: String,
+    /// A hash of the module's identity and source text.
+    pub fingerprint: u64,
+}
+
+/// The optional debug section: spans parallel to the declaration list and node table, and the
+/// module's source text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NxIrDebug {
+    pub spans: NxIrDebugSpans,
+    pub source: String,
+}
+
+/// Byte offsets into the source; `[-1, -1]` for a node written in another module's text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NxIrDebugSpans {
+    pub declarations: Vec<[i64; 2]>,
+    pub nodes: Vec<[i64; 2]>,
+}
+
+/// What to emit from a program.
+///
+/// The SDKs take the same options as JSON: `{ "modules": [...], "debug": false }`, every key
+/// optional. A module's version is not an option: it is part of the module, given when the program
+/// is built, so every artifact emitted from one program agrees on it.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+pub struct NxIrEmitOptions {
+    /// The identities of the modules to emit an artifact for. `None` emits the entry module alone;
+    /// an empty list emits every module of the program, entry first.
+    pub modules: Option<Vec<String>>,
+    /// Whether each artifact carries its debug section.
+    pub debug: bool,
+}
+
+impl NxIrEmitOptions {
+    /// Parses the SDKs' JSON form; an empty or blank text is the default options.
+    pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
+        if json.trim().is_empty() {
+            return Ok(Self::default());
+        }
+        serde_json::from_str(json)
+    }
+}
+
+impl NxIrEmitOptions {
+    /// The entry module alone, without debug data: what an SDK emits by default.
+    pub fn entry_only() -> Self {
+        Self::default()
+    }
+
+    /// Every module of the program, with debug data: what the CLI writes.
+    pub fn every_module_with_debug() -> Self {
+        Self {
+            modules: Some(Vec::new()),
+            debug: true,
+        }
+    }
+}
+
+/// One emitted artifact: its image and what a host learns about it without opening the image.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GeneratedNxIr {
+    /// The identity of the module the artifact carries.
+    pub identity: String,
+    /// The artifact as an NX IR image.
+    pub bytes: Vec<u8>,
+    pub metadata: NxIrMetadata,
+}
+
+/// What a host learns about an artifact without parsing it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NxIrMetadata {
+    pub identity: String,
+    #[serde(with = "u64_decimal_string")]
+    pub fingerprint: u64,
+    pub schema_version: u32,
+    pub runtime_abi: String,
+    pub required_features: Vec<String>,
+    pub function_entrypoints: Vec<String>,
+    pub component_entrypoints: Vec<String>,
+}
+
+/// Emits NX IR artifacts from a program artifact.
+pub fn emit_nx_ir(
+    artifact: &ProgramArtifact,
+    options: &NxIrEmitOptions,
+) -> Result<Vec<GeneratedNxIr>, CodegenError> {
+    let program = build_codegen_program(artifact)?;
+    emit_codegen_nx_ir(&program, options)
+}
+
+/// Emits NX IR artifacts from a codegen program.
+pub fn emit_codegen_nx_ir(
+    program: &CodegenProgram,
+    options: &NxIrEmitOptions,
+) -> Result<Vec<GeneratedNxIr>, CodegenError> {
+    build_nx_ir_artifacts(program, options)?
+        .into_iter()
+        .map(|artifact| {
+            let bytes = write_nx_ir_image(&artifact).map_err(image_error)?;
+            let metadata = artifact.metadata();
+            Ok(GeneratedNxIr {
+                identity: metadata.identity.clone(),
+                bytes,
+                metadata,
+            })
+        })
+        .collect()
+}
+
+fn image_error(error: NxIrImageError) -> CodegenError {
+    CodegenError::single(
+        Diagnostic::error("nx-ir-serialization-error")
+            .with_message(format!("failed to write the NX IR image: {error}"))
+            .build(),
+    )
+}
+
+/// Builds the artifact model for each requested module without serializing it.
+pub fn build_nx_ir_artifacts(
+    program: &CodegenProgram,
+    options: &NxIrEmitOptions,
+) -> Result<Vec<NxIrArtifact>, CodegenError> {
+    validate_ir_program(program)?;
+    let modules = selected_modules(program, options)?;
+    let mut artifacts = Vec::with_capacity(modules.len());
+    for module in modules {
+        artifacts.push(ModuleEmitter::new(program, module, options).emit()?);
+    }
+    Ok(artifacts)
+}
+
+impl NxIrArtifact {
+    pub fn metadata(&self) -> NxIrMetadata {
+        let own = self.modules.first();
+        let names = |indices: &[u32]| {
+            indices
+                .iter()
+                .filter_map(|index| self.declaration_name(*index))
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        };
+        NxIrMetadata {
+            identity: own.map(|entry| entry.identity.clone()).unwrap_or_default(),
+            fingerprint: own.map(|entry| entry.fingerprint).unwrap_or_default(),
+            schema_version: self.schema_version,
+            runtime_abi: self.runtime_abi.clone(),
+            required_features: self.required_features.clone(),
+            function_entrypoints: names(&self.function_entrypoints),
+            component_entrypoints: names(&self.component_entrypoints),
+        }
+    }
+
+    /// The name of the declaration at `index`, if the entry is well formed.
+    pub fn declaration_name(&self, index: u32) -> Option<&str> {
+        let entry = self.declarations.get(index as usize)?.as_list()?;
+        let name = entry.get(1)?.as_int()?;
+        self.strings
+            .get(usize::try_from(name).ok()?)
+            .map(String::as_str)
+    }
+}
+
+/// The modules the options select, entry first.
+fn selected_modules<'a>(
+    program: &'a CodegenProgram,
+    options: &NxIrEmitOptions,
+) -> Result<Vec<&'a CodegenModule>, CodegenError> {
+    let by_identity = program
         .modules
         .iter()
-        .any(|module| module.declarations.iter().any(declaration_calls_intrinsic))
-    {
+        .map(|module| (module_identity(module), module))
+        .collect::<BTreeMap<_, _>>();
+    let identities = match &options.modules {
+        None => vec![program.entry_identity.clone()],
+        Some(identities) if identities.is_empty() => {
+            let mut all = by_identity.keys().cloned().collect::<Vec<_>>();
+            // The entry module leads, so a caller reading the first artifact reads the program's.
+            all.retain(|identity| identity != &program.entry_identity);
+            all.insert(0, program.entry_identity.clone());
+            all
+        }
+        Some(identities) => identities.clone(),
+    };
+
+    let mut diagnostics = Vec::new();
+    let mut modules = Vec::with_capacity(identities.len());
+    for identity in identities {
+        match by_identity.get(&identity) {
+            Some(module) => modules.push(*module),
+            None => diagnostics.push(
+                Diagnostic::error("nx-ir-unknown-module")
+                    .with_message(format!(
+                        "NX IR emission was asked for module '{identity}', which the program does not contain"
+                    ))
+                    .build(),
+            ),
+        }
+    }
+    if diagnostics.is_empty() {
+        Ok(modules)
+    } else {
+        Err(CodegenError::new(diagnostics))
+    }
+}
+
+fn module_identity(module: &CodegenModule) -> String {
+    match &module.provenance {
+        CodegenModuleProvenance::SourceProvider { identity } => identity.clone(),
+        CodegenModuleProvenance::Library { module_path, .. } => module_path.display().to_string(),
+    }
+}
+
+fn module_source_entry<'a>(
+    program: &'a CodegenProgram,
+    module: &CodegenModule,
+) -> Option<&'a CodegenSourceEntry> {
+    let identity = module_identity(module);
+    program
+        .source_entries
+        .iter()
+        .find(|entry| entry.identity == identity)
+}
+
+fn module_source<'a>(program: &'a CodegenProgram, module: &CodegenModule) -> Option<&'a str> {
+    module_source_entry(program, module).map(|entry| entry.source.as_str())
+}
+
+/// The version string the host gave a module; `""` for one it gave none, and for a library module.
+fn module_version(program: &CodegenProgram, module: &CodegenModule) -> String {
+    module_source_entry(program, module)
+        .and_then(|entry| entry.version.clone())
+        .unwrap_or_default()
+}
+
+/// The fingerprint of a module: a hash of its identity and source text, so a regenerated module
+/// with the same text keeps its fingerprint and one with different text does not.
+///
+/// <para>The hash is FNV-1a over the identity, a zero byte, and the source. It is spelled out here
+/// rather than taken from `DefaultHasher`, whose algorithm the standard library explicitly does not
+/// promise across releases: the fingerprint travels in the artifact, so the same source must hash
+/// the same whatever toolchain emitted it. `docs/nx-ir-format.md` says so as part of the format.
+/// </para>
+fn module_fingerprint(program: &CodegenProgram, module: &CodegenModule) -> u64 {
+    const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut hash = OFFSET_BASIS;
+    let mut write = |bytes: &[u8]| {
+        for byte in bytes {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(PRIME);
+        }
+    };
+    write(module_identity(module).as_bytes());
+    write(&[0]);
+    write(
+        module_source(program, module)
+            .unwrap_or_default()
+            .as_bytes(),
+    );
+    hash
+}
+
+/// The features a runtime must support to run `module`.
+fn required_features(module: &CodegenModule) -> Vec<String> {
+    let mut features: Vec<String> = Vec::new();
+    if module.declarations.iter().any(|declaration| {
+        matches!(
+            &declaration.kind,
+            CodegenDeclarationKind::Record {
+                update_target: Some(_),
+                ..
+            }
+        )
+    }) {
+        features.push(NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1.to_string());
+    }
+    if module.declarations.iter().any(|declaration| {
+        matches!(
+            &declaration.kind,
+            CodegenDeclarationKind::Union {
+                property_target: Some(_),
+                ..
+            }
+        )
+    }) {
+        features.push(NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1.to_string());
+    }
+    if module.declarations.iter().any(|declaration| {
+        declaration_contains(declaration, |expression| {
+            matches!(expression.kind, CodegenExpressionKind::IntrinsicCall { .. })
+        })
+    }) {
         features.push(NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1.to_string());
+    }
+    if module.declarations.iter().any(|declaration| {
+        declaration_contains(declaration, |expression| {
+            matches!(expression.kind, CodegenExpressionKind::ActionHandler(_))
+        })
+    }) {
+        features.push(NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1.to_string());
+    }
+    if module
+        .declarations
+        .iter()
+        .any(declaration_uses_function_values)
+    {
+        features.push(NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1.to_string());
     }
     features
 }
 
-/// Returns true when any expression of the declaration calls an update intrinsic.
-fn declaration_calls_intrinsic(declaration: &CodegenDeclaration) -> bool {
-    match &declaration.kind {
-        CodegenDeclarationKind::Function { body, .. } => expression_calls_intrinsic(body),
-        CodegenDeclarationKind::Value { value, .. } => expression_calls_intrinsic(value),
-        CodegenDeclarationKind::Record { fields, .. } => fields
-            .iter()
-            .filter_map(|field| field.default.as_ref())
-            .any(expression_calls_intrinsic),
-        CodegenDeclarationKind::Union { cases, .. } => cases.iter().any(|case| {
-            case.fields
-                .iter()
-                .filter_map(|field| field.default.as_ref())
-                .any(expression_calls_intrinsic)
-        }),
-        CodegenDeclarationKind::Component(component) => {
-            component
-                .props
-                .iter()
-                .chain(component.state.iter())
-                .filter_map(|field| field.default.as_ref())
-                .any(expression_calls_intrinsic)
-                || component
-                    .body
-                    .as_ref()
-                    .is_some_and(expression_calls_intrinsic)
+/// Whether a declaration names a function as a value — a `reference` to a function anywhere but
+/// as a `call`'s callee — or calls a function-typed value by name.
+///
+/// <para>The walk visits a parent before its children, so a call's callee is noted before the
+/// callee expression itself is reached, and a function reference in that position is not a
+/// value.</para>
+fn declaration_uses_function_values(declaration: &CodegenDeclaration) -> bool {
+    let mut callees: FxHashSet<*const CodegenExpression> = FxHashSet::default();
+    let mut found = false;
+    visit_declaration_expressions(declaration, &mut |expression| match &expression.kind {
+        CodegenExpressionKind::Call { callee, .. } => {
+            callees.insert(callee.as_ref() as *const CodegenExpression);
         }
-        CodegenDeclarationKind::TypeAlias | CodegenDeclarationKind::Unsupported(_) => false,
+        CodegenExpressionKind::NamedCall { .. } => found = true,
+        CodegenExpressionKind::Identifier {
+            reference: Some(reference),
+            ..
+        } if reference.kind == ResolvedItemKind::Function
+            && !callees.contains(&(expression as *const CodegenExpression)) =>
+        {
+            found = true;
+        }
+        _ => {}
+    });
+    found
+}
+
+/// Whether any expression a declaration owns, at any depth, satisfies `predicate`.
+fn declaration_contains(
+    declaration: &CodegenDeclaration,
+    predicate: impl Fn(&CodegenExpression) -> bool,
+) -> bool {
+    let mut found = false;
+    visit_declaration_expressions(declaration, &mut |expression| {
+        if predicate(expression) {
+            found = true;
+        }
+    });
+    found
+}
+
+/// Calls `visit` on every expression a declaration owns, parents before children.
+fn visit_declaration_expressions(
+    declaration: &CodegenDeclaration,
+    visit: &mut dyn FnMut(&CodegenExpression),
+) {
+    let mut fields = |fields: &[CodegenRecordField]| {
+        for field in fields {
+            if let Some(default) = &field.default {
+                visit_expression(default, visit);
+            }
+        }
+    };
+    match &declaration.kind {
+        CodegenDeclarationKind::Function { body, .. } => visit_expression(body, visit),
+        CodegenDeclarationKind::Value { value, .. } => visit_expression(value, visit),
+        CodegenDeclarationKind::Record { fields: items, .. } => fields(items),
+        CodegenDeclarationKind::Union { cases, .. } => {
+            for case in cases {
+                fields(&case.fields);
+            }
+        }
+        CodegenDeclarationKind::Component(component) => {
+            for field in component.props.iter().chain(component.state.iter()) {
+                if let Some(default) = &field.default {
+                    visit_expression(default, visit);
+                }
+            }
+            if let Some(body) = &component.body {
+                visit_expression(body, visit);
+            }
+        }
+        CodegenDeclarationKind::TypeAlias | CodegenDeclarationKind::Unsupported(_) => {}
     }
 }
 
-fn expression_calls_intrinsic(expression: &CodegenExpression) -> bool {
+fn visit_expressions(items: &[CodegenExpression], visit: &mut dyn FnMut(&CodegenExpression)) {
+    for item in items {
+        visit_expression(item, visit);
+    }
+}
+
+fn visit_expression(expression: &CodegenExpression, visit: &mut dyn FnMut(&CodegenExpression)) {
+    visit(expression);
     match &expression.kind {
-        CodegenExpressionKind::IntrinsicCall { .. } => true,
         CodegenExpressionKind::Literal(_)
         | CodegenExpressionKind::Identifier { .. }
-        | CodegenExpressionKind::Unsupported(_) => false,
+        | CodegenExpressionKind::Unsupported(_) => {}
         CodegenExpressionKind::Binary { lhs, rhs, .. } => {
-            expression_calls_intrinsic(lhs) || expression_calls_intrinsic(rhs)
+            visit_expression(lhs, visit);
+            visit_expression(rhs, visit);
         }
-        CodegenExpressionKind::Unary { expr, .. } => expression_calls_intrinsic(expr),
+        CodegenExpressionKind::Unary { expr, .. } | CodegenExpressionKind::ToText { expr, .. } => {
+            visit_expression(expr, visit)
+        }
+        CodegenExpressionKind::Concat { lhs, rhs } => {
+            visit_expression(lhs, visit);
+            visit_expression(rhs, visit);
+        }
         CodegenExpressionKind::Call { callee, args } => {
-            expression_calls_intrinsic(callee) || args.iter().any(expression_calls_intrinsic)
+            visit_expression(callee, visit);
+            visit_expressions(args, visit);
         }
+        CodegenExpressionKind::NamedCall { callee, args } => {
+            visit_expression(callee, visit);
+            for arg in args {
+                visit_expression(&arg.value, visit);
+            }
+        }
+        CodegenExpressionKind::IntrinsicCall { args, .. } => visit_expressions(args, visit),
         CodegenExpressionKind::If {
             condition,
             then_branch,
             else_branch,
         } => {
-            expression_calls_intrinsic(condition)
-                || expression_calls_intrinsic(then_branch)
-                || else_branch
-                    .as_ref()
-                    .is_some_and(|e| expression_calls_intrinsic(e))
+            visit_expression(condition, visit);
+            visit_expression(then_branch, visit);
+            if let Some(else_branch) = else_branch {
+                visit_expression(else_branch, visit);
+            }
         }
         CodegenExpressionKind::Match {
             scrutinee,
             arms,
             else_branch,
         } => {
-            expression_calls_intrinsic(scrutinee)
-                || arms.iter().any(|arm| {
-                    arm.patterns.iter().any(expression_calls_intrinsic)
-                        || expression_calls_intrinsic(&arm.body)
-                })
-                || else_branch
-                    .as_ref()
-                    .is_some_and(|e| expression_calls_intrinsic(e))
+            visit_expression(scrutinee, visit);
+            for arm in arms {
+                visit_expressions(&arm.patterns, visit);
+                visit_expression(&arm.body, visit);
+            }
+            if let Some(else_branch) = else_branch {
+                visit_expression(else_branch, visit);
+            }
         }
         CodegenExpressionKind::Let { value, body, .. } => {
-            expression_calls_intrinsic(value) || expression_calls_intrinsic(body)
+            visit_expression(value, visit);
+            visit_expression(body, visit);
         }
         CodegenExpressionKind::Block {
             statements,
             expression,
         } => {
-            statements.iter().any(|statement| match statement {
-                CodegenStatement::Let { init, .. } => expression_calls_intrinsic(init),
-                CodegenStatement::Expr(expr) => expression_calls_intrinsic(expr),
-            }) || expression
-                .as_ref()
-                .is_some_and(|e| expression_calls_intrinsic(e))
+            for statement in statements {
+                match statement {
+                    CodegenStatement::Let { init, .. } => visit_expression(init, visit),
+                    CodegenStatement::Expr(expr) => visit_expression(expr, visit),
+                }
+            }
+            if let Some(expression) = expression {
+                visit_expression(expression, visit);
+            }
         }
-        CodegenExpressionKind::Array(elements) => elements.iter().any(expression_calls_intrinsic),
+        CodegenExpressionKind::Array(elements) => visit_expressions(elements, visit),
         CodegenExpressionKind::For { iterable, body, .. } => {
-            expression_calls_intrinsic(iterable) || expression_calls_intrinsic(body)
+            visit_expression(iterable, visit);
+            visit_expression(body, visit);
         }
         CodegenExpressionKind::Index { base, index } => {
-            expression_calls_intrinsic(base) || expression_calls_intrinsic(index)
+            visit_expression(base, visit);
+            visit_expression(index, visit);
         }
-        CodegenExpressionKind::Member { base, .. } => expression_calls_intrinsic(base),
+        CodegenExpressionKind::Member { base, .. } => visit_expression(base, visit),
         CodegenExpressionKind::UnionCase {
             properties,
             content,
@@ -195,652 +808,56 @@ fn expression_calls_intrinsic(expression: &CodegenExpression) -> bool {
             fields,
             ..
         } => {
-            properties
-                .iter()
-                .any(|property| expression_calls_intrinsic(&property.value))
-                || content.iter().any(expression_calls_intrinsic)
-                || fields
-                    .iter()
-                    .filter_map(|field| field.default.as_ref())
-                    .any(expression_calls_intrinsic)
+            for property in properties {
+                visit_expression(&property.value, visit);
+            }
+            visit_expressions(content, visit);
+            for field in fields {
+                if let Some(default) = &field.default {
+                    visit_expression(default, visit);
+                }
+            }
         }
         CodegenExpressionKind::ComponentDescriptor(descriptor) => {
-            descriptor
-                .properties
-                .iter()
-                .any(|property| expression_calls_intrinsic(&property.value))
-                || descriptor.content.iter().any(expression_calls_intrinsic)
+            for property in &descriptor.properties {
+                visit_expression(&property.value, visit);
+            }
+            visit_expressions(&descriptor.content, visit);
         }
         CodegenExpressionKind::Element(element) => {
-            element
-                .properties
-                .iter()
-                .any(|property| expression_calls_intrinsic(&property.value))
-                || element.content.iter().any(expression_calls_intrinsic)
+            for property in &element.properties {
+                visit_expression(&property.value, visit);
+            }
+            visit_expressions(&element.content, visit);
         }
+        CodegenExpressionKind::ActionHandler(handler) => visit_expression(&handler.body, visit),
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GeneratedNxIr {
-    pub json: String,
-    pub metadata: NxIrMetadata,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NxIrMetadata {
-    pub program_fingerprint: u64,
-    pub schema_version: u32,
-    pub runtime_abi: String,
-    pub required_features: Vec<String>,
-    pub function_entrypoints: Vec<NxIrEntrypointMetadata>,
-    pub component_entrypoints: Vec<NxIrEntrypointMetadata>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NxIrEntrypointMetadata {
-    pub name: String,
-    pub reference: NxIrReference,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NxIrProgram {
-    pub format: String,
-    pub schema_version: u32,
-    pub runtime_abi: String,
-    #[serde(with = "u64_decimal_string")]
-    pub program_fingerprint: u64,
-    pub required_features: Vec<String>,
-    pub function_entrypoints: Vec<NxIrEntrypoint>,
-    pub component_entrypoints: Vec<NxIrEntrypoint>,
-    pub modules: Vec<NxIrModule>,
-    pub sources: Vec<NxIrSourceEntry>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NxIrEntrypoint {
-    pub name: String,
-    pub reference: NxIrReference,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NxIrModule {
-    pub id: String,
-    pub runtime_id: u32,
-    pub provenance: NxIrModuleProvenance,
-    pub imports: Vec<NxIrReference>,
-    pub declarations: Vec<NxIrDeclaration>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-pub enum NxIrModuleProvenance {
-    SourceProvider {
-        identity: String,
-    },
-    Library {
-        root_path: String,
-        module_path: String,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NxIrReference {
-    pub module: String,
-    pub declaration: String,
-    pub name: String,
-    pub kind: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NxIrDeclaration {
-    pub id: String,
-    pub reference: NxIrReference,
-    pub span: NxIrSourceSpan,
-    pub kind: NxIrDeclarationKind,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "tag", rename_all = "camelCase", rename_all_fields = "camelCase")]
-pub enum NxIrDeclarationKind {
-    Function {
-        params: Vec<NxIrParam>,
-        body: NxIrExpression,
-        return_type: Option<NxIrSemanticType>,
-    },
-    Value {
-        value: NxIrExpression,
-        ty: Option<NxIrSemanticType>,
-    },
-    Record {
-        fields: Vec<NxIrRecordField>,
-        /// The record's abstract bases, nearest first.
-        ///
-        /// Fields arrive already flattened, so this answers only what flattening cannot: a value
-        /// stamped with this record's name is acceptable wherever any of these is expected.
-        bases: Vec<NxIrReference>,
-        /// Whether the record was declared `abstract`, and so has no values of its own.
-        ///
-        /// A base-typed site accepts a value of a record that extends this one, never one of this
-        /// one. Analysis holds that line for NX source; this is how a runtime holds it for host
-        /// input.
-        is_abstract: bool,
-        /// The record or component a derived `<Target>.Update` record patches.
-        ///
-        /// Present only on update records: every field is optional, none has a default, and a
-        /// value keeps an absent field absent.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        update_target: Option<NxIrReference>,
-    },
-    Component(NxIrComponent),
-    Union {
-        cases: Vec<NxIrUnionCase>,
-        /// The union's abstract bases, nearest first, inherited by every case.
-        bases: Vec<NxIrReference>,
-        /// The record, action, or component a derived `<Target>.Property` union names the fields
-        /// of.
-        ///
-        /// Present only on property unions: every case is constant and names one effective field
-        /// of the target, in `T.Property` case order, so a runtime can validate a bare-string value
-        /// without consulting the target.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        property_target: Option<NxIrReference>,
-    },
-    TypeAlias,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NxIrParam {
-    pub name: String,
-    pub slot: String,
-    pub ty: NxIrTypeRef,
-    pub is_content: bool,
-    pub span: NxIrSourceSpan,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NxIrRecordField {
-    pub name: String,
-    pub slot: String,
-    pub ty: NxIrTypeRef,
-    pub is_content: bool,
-    pub is_required: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub default: Option<NxIrExpression>,
-    pub span: NxIrSourceSpan,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NxIrComponent {
-    pub is_abstract: bool,
-    pub is_external: bool,
-    pub props: Vec<NxIrComponentField>,
-    pub state: Vec<NxIrComponentField>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub body: Option<NxIrExpression>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NxIrComponentField {
-    pub name: String,
-    pub slot: String,
-    pub owner_module: String,
-    pub ty: NxIrTypeRef,
-    pub is_content: bool,
-    pub is_required: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub default: Option<NxIrExpression>,
-    pub span: NxIrSourceSpan,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NxIrUnionCase {
-    pub name: String,
-    pub fields: Vec<NxIrRecordField>,
-    /// Whether this case declares no fields in a union that declares no base.
-    ///
-    /// This is what decides the wire shape: a constant case is a bare string, every other case
-    /// is a `$type` object.
-    pub is_constant: bool,
-    pub span: NxIrSourceSpan,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NxIrExpression {
-    pub id: String,
-    pub span: NxIrSourceSpan,
-    pub ty: Option<NxIrSemanticType>,
-    pub op: NxIrExpressionOp,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "tag", rename_all = "camelCase", rename_all_fields = "camelCase")]
-pub enum NxIrExpressionOp {
-    Literal {
-        value: NxIrLiteral,
-    },
-    Slot {
-        slot: String,
-        name: String,
-    },
-    Reference {
-        reference: NxIrReference,
-    },
-    Binary {
-        lhs: Box<NxIrExpression>,
-        operator: String,
-        rhs: Box<NxIrExpression>,
-    },
-    Unary {
-        operator: String,
-        expr: Box<NxIrExpression>,
-    },
-    Call {
-        callee: Box<NxIrExpression>,
-        args: Vec<NxIrExpression>,
-    },
-    /// A call to one of the update intrinsics (`apply`, `merge`, `diff`, `changed`), which names
-    /// the operation rather than a declared function.
-    IntrinsicCall {
-        intrinsic: String,
-        args: Vec<NxIrExpression>,
-        /// For `changed`, the declared field order of the target record, so a runtime orders the
-        /// result without consulting the declaration.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        field_order: Option<Vec<String>>,
-    },
-    If {
-        condition: Box<NxIrExpression>,
-        then_branch: Box<NxIrExpression>,
-        else_branch: Option<Box<NxIrExpression>>,
-    },
-    IfIs {
-        scrutinee: Box<NxIrExpression>,
-        arms: Vec<NxIrMatchArm>,
-        else_branch: Option<Box<NxIrExpression>>,
-    },
-    Let {
-        name: String,
-        slot: String,
-        value: Box<NxIrExpression>,
-        body: Box<NxIrExpression>,
-    },
-    Block {
-        statements: Vec<NxIrStatement>,
-        expression: Option<Box<NxIrExpression>>,
-    },
-    Array {
-        elements: Vec<NxIrExpression>,
-    },
-    For {
-        item: String,
-        item_slot: String,
-        index: Option<String>,
-        index_slot: Option<String>,
-        iterable: Box<NxIrExpression>,
-        body: Box<NxIrExpression>,
-    },
-    Index {
-        base: Box<NxIrExpression>,
-        index: Box<NxIrExpression>,
-    },
-    Member {
-        base: Box<NxIrExpression>,
-        member: String,
-        reference: Option<NxIrReference>,
-    },
-    Record {
-        name: String,
-        fields: Vec<NxIrRecordField>,
-        properties: Vec<NxIrProperty>,
-        content_field: Option<String>,
-        content: Vec<NxIrExpression>,
-        /// Present and true when this constructs a derived update record, whose absent fields
-        /// stay absent instead of taking a default or `null`.
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-        is_update: bool,
-    },
-    UnionCase {
-        union: NxIrReference,
-        case_name: String,
-        fields: Vec<NxIrRecordField>,
-        properties: Vec<NxIrProperty>,
-        content_field: Option<String>,
-        content: Vec<NxIrExpression>,
-        /// Whether this is a constant case — fieldless, in a union with no base — which a runtime
-        /// produces as the bare case name rather than a `$type` map.
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-        is_constant: bool,
-    },
-    IntrinsicElement {
-        element_id: String,
-        tag_name: String,
-        properties: Vec<NxIrProperty>,
-        content: Vec<NxIrExpression>,
-    },
-    ComponentDescriptor {
-        component: NxIrReference,
-        target_kind: String,
-        properties: Vec<NxIrProperty>,
-        content_field: Option<String>,
-        content: Vec<NxIrExpression>,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NxIrMatchArm {
-    pub patterns: Vec<NxIrExpression>,
-    pub body: NxIrExpression,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "tag", rename_all = "camelCase", rename_all_fields = "camelCase")]
-pub enum NxIrStatement {
-    Let {
-        name: String,
-        slot: String,
-        init: NxIrExpression,
-        span: NxIrSourceSpan,
-    },
-    Expr {
-        expr: NxIrExpression,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NxIrProperty {
-    pub name: String,
-    pub value: NxIrExpression,
-    pub span: NxIrSourceSpan,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-pub enum NxIrLiteral {
-    String { value: String },
-    Int { value: String, number: Option<i64> },
-    Float { value: f64 },
-    Boolean { value: bool },
-    Null,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(
-    tag = "kind",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-pub enum NxIrTypeRef {
-    Primitive {
-        name: String,
-    },
-    Nominal {
-        reference: NxIrReference,
-        display: String,
-    },
-    Array {
-        element: Box<NxIrTypeRef>,
-    },
-    Nullable {
-        inner: Box<NxIrTypeRef>,
-    },
-    Function {
-        params: Vec<NxIrTypeRef>,
-        return_type: Box<NxIrTypeRef>,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NxIrSemanticType {
-    pub display: String,
-    pub shape: NxIrSemanticTypeShape,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(
-    tag = "kind",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-pub enum NxIrSemanticTypeShape {
-    Primitive {
-        name: String,
-    },
-    Array {
-        element: Box<NxIrSemanticType>,
-    },
-    Nullable {
-        inner: Box<NxIrSemanticType>,
-    },
-    Function {
-        params: Vec<NxIrSemanticType>,
-        return_type: Box<NxIrSemanticType>,
-    },
-    Named {
-        name: String,
-    },
-    Union {
-        name: String,
-        cases: Vec<String>,
-        base: Option<String>,
-    },
-    UnionCase {
-        union: String,
-        case_name: String,
-    },
-    Variable {
-        id: u32,
-    },
-    Unknown,
-    Error,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NxIrSourceSpan {
-    pub source: Option<String>,
-    pub start: u32,
-    pub end: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NxIrSourceEntry {
-    pub identity: String,
-    pub source: String,
-}
-
-/// How the NX IR JSON is laid out.
-///
-/// The content is the same either way: parsing compact and pretty output of one program yields
-/// equal values. Compact is for IR that travels — over the FFI, out of the wasm module, inside a
-/// share — where every byte is paid for and nobody reads the text. Pretty is for files a person
-/// opens, which is what the CLI writes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum NxIrFormat {
-    /// No indentation and no line breaks between tokens.
-    #[default]
-    Compact,
-    /// Indented, one token per line, ending in a newline.
-    Pretty,
-}
-
-pub fn emit_nx_ir(
-    artifact: &ProgramArtifact,
-    format: NxIrFormat,
-) -> Result<GeneratedNxIr, CodegenError> {
-    let program = build_codegen_program(artifact)?;
-    emit_codegen_nx_ir(&program, format)
-}
-
-pub fn emit_codegen_nx_ir(
-    program: &CodegenProgram,
-    format: NxIrFormat,
-) -> Result<GeneratedNxIr, CodegenError> {
-    validate_ir_program(program)?;
-
-    let ir = NxIrProgram::from_codegen(program);
-    let serialized = match format {
-        NxIrFormat::Compact => serde_json::to_string(&ir),
-        NxIrFormat::Pretty => serde_json::to_string_pretty(&ir).map(|json| format!("{json}\n")),
-    };
-    let json = serialized.map_err(|error| {
-        CodegenError::single(
-            Diagnostic::error("nx-ir-serialization-error")
-                .with_message(format!("failed to serialize NX IR JSON: {error}"))
-                .build(),
-        )
-    })?;
-    let metadata = ir.metadata();
-
-    Ok(GeneratedNxIr { json, metadata })
-}
-
-impl NxIrProgram {
-    pub fn from_codegen(program: &CodegenProgram) -> Self {
-        let mut context = ProgramIrContext::new(program);
-        let function_entrypoints = program
-            .entrypoints
-            .iter()
-            .map(ir_entrypoint)
-            .collect::<Vec<_>>();
-        let component_entrypoints = program
-            .component_entrypoints
-            .iter()
-            .map(ir_entrypoint)
-            .collect::<Vec<_>>();
-        let modules = program
-            .modules
-            .iter()
-            .map(|module| ir_module(module, &mut context))
-            .collect::<Vec<_>>();
-        let sources = program
-            .source_entries
-            .iter()
-            .map(ir_source_entry)
-            .collect::<Vec<_>>();
-
-        Self {
-            format: NX_IR_FORMAT_ID.to_string(),
-            schema_version: NX_IR_SCHEMA_VERSION,
-            runtime_abi: NX_IR_RUNTIME_ABI.to_string(),
-            program_fingerprint: program.fingerprint,
-            required_features: required_features(program),
-            function_entrypoints,
-            component_entrypoints,
-            modules,
-            sources,
-        }
-    }
-
-    pub fn metadata(&self) -> NxIrMetadata {
-        NxIrMetadata {
-            program_fingerprint: self.program_fingerprint,
-            schema_version: self.schema_version,
-            runtime_abi: self.runtime_abi.clone(),
-            required_features: self.required_features.clone(),
-            function_entrypoints: self
-                .function_entrypoints
-                .iter()
-                .map(|entrypoint| NxIrEntrypointMetadata {
-                    name: entrypoint.name.clone(),
-                    reference: entrypoint.reference.clone(),
-                })
-                .collect(),
-            component_entrypoints: self
-                .component_entrypoints
-                .iter()
-                .map(|entrypoint| NxIrEntrypointMetadata {
-                    name: entrypoint.name.clone(),
-                    reference: entrypoint.reference.clone(),
-                })
-                .collect(),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct ProgramIrContext {
-    module_sources: BTreeMap<u32, Option<String>>,
-}
-
-impl ProgramIrContext {
-    fn new(program: &CodegenProgram) -> Self {
-        let module_sources = program
-            .modules
-            .iter()
-            .map(|module| (module.id.as_u32(), module_source_identity(module)))
-            .collect();
-        Self { module_sources }
-    }
-
-    fn source_for(&self, module_id: RuntimeModuleId) -> Option<String> {
-        self.module_sources
-            .get(&module_id.as_u32())
-            .and_then(|source| source.clone())
-    }
-}
-
-#[derive(Debug, Clone)]
-struct SlotScope {
-    frames: Vec<BTreeMap<String, String>>,
-}
-
-impl SlotScope {
-    fn new() -> Self {
-        Self {
-            frames: vec![BTreeMap::new()],
-        }
-    }
-
-    fn push(&mut self) {
-        self.frames.push(BTreeMap::new());
-    }
-
-    fn pop(&mut self) {
-        if self.frames.len() > 1 {
-            self.frames.pop();
-        }
-    }
-
-    fn insert(&mut self, name: &str, slot: impl Into<String>) {
-        if let Some(frame) = self.frames.last_mut() {
-            frame.insert(name.to_string(), slot.into());
-        }
-    }
-
-    fn resolve(&self, name: &str) -> Option<&str> {
-        self.frames
-            .iter()
-            .rev()
-            .find_map(|frame| frame.get(name).map(String::as_str))
-    }
-}
-
+/// Refuses a program that carries a construct no IR node represents, before any artifact is
+/// built, so a failure never leaves a partial artifact behind.
 fn validate_ir_program(program: &CodegenProgram) -> Result<(), CodegenError> {
     let mut diagnostics = Vec::new();
     for module in &program.modules {
         for declaration in &module.declarations {
-            collect_ir_unsupported_diagnostics(module, declaration, &mut diagnostics);
+            if let CodegenDeclarationKind::Unsupported(unsupported) = &declaration.kind {
+                diagnostics.push(unsupported_diagnostic(
+                    module,
+                    unsupported.span,
+                    &unsupported.message,
+                ));
+            }
+            visit_declaration_expressions(declaration, &mut |expression| {
+                if let CodegenExpressionKind::Unsupported(unsupported) = &expression.kind {
+                    diagnostics.push(unsupported_diagnostic(
+                        module,
+                        unsupported.span,
+                        &unsupported.message,
+                    ));
+                }
+            });
         }
     }
-
     if diagnostics.is_empty() {
         Ok(())
     } else {
@@ -848,1309 +865,928 @@ fn validate_ir_program(program: &CodegenProgram) -> Result<(), CodegenError> {
     }
 }
 
-fn collect_ir_unsupported_diagnostics(
-    module: &CodegenModule,
-    declaration: &CodegenDeclaration,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    match &declaration.kind {
-        CodegenDeclarationKind::Unsupported(unsupported) => {
-            diagnostics.push(ir_unsupported_diagnostic(
-                module,
-                unsupported.span,
-                &unsupported.message,
-            ));
+fn unsupported_diagnostic(module: &CodegenModule, span: TextSpan, message: &str) -> Diagnostic {
+    Diagnostic::error("nx-ir-unsupported-construct")
+        .with_message(message.to_string())
+        .with_label(Label::primary(module_identity(module), span))
+        .build()
+}
+
+/// A table that stores each distinct entry once and hands out its index.
+struct Interner<T> {
+    items: Vec<T>,
+    index: HashMap<String, i64>,
+}
+
+impl<T> Interner<T> {
+    fn new() -> Self {
+        Self {
+            items: Vec::new(),
+            index: HashMap::new(),
         }
-        CodegenDeclarationKind::Function { body, .. } => {
-            collect_ir_expression_unsupported_diagnostics(module, body, diagnostics);
+    }
+
+    fn intern(&mut self, key: String, make: impl FnOnce() -> T) -> i64 {
+        if let Some(index) = self.index.get(&key) {
+            return *index;
         }
-        CodegenDeclarationKind::Value { value, .. } => {
-            collect_ir_expression_unsupported_diagnostics(module, value, diagnostics);
-        }
-        CodegenDeclarationKind::Record { fields, .. } => {
-            collect_ir_record_field_unsupported_diagnostics(module, fields, diagnostics);
-        }
-        CodegenDeclarationKind::Component(component) => {
-            collect_ir_component_field_unsupported_diagnostics(
-                module,
-                &component.props,
-                diagnostics,
-            );
-            collect_ir_component_field_unsupported_diagnostics(
-                module,
-                &component.state,
-                diagnostics,
-            );
-            if let Some(body) = component.body.as_ref() {
-                collect_ir_expression_unsupported_diagnostics(module, body, diagnostics);
-            }
-        }
-        CodegenDeclarationKind::Union { cases, .. } => {
-            for case in cases {
-                collect_ir_record_field_unsupported_diagnostics(module, &case.fields, diagnostics);
-            }
-        }
-        CodegenDeclarationKind::TypeAlias => {}
+        let index = self.items.len() as i64;
+        self.items.push(make());
+        self.index.insert(key, index);
+        index
     }
 }
 
-fn collect_ir_component_field_unsupported_diagnostics(
-    module: &CodegenModule,
-    fields: &[CodegenComponentField],
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    for field in fields {
-        if let Some(default) = field.default.as_ref() {
-            collect_ir_expression_unsupported_diagnostics(module, default, diagnostics);
-        }
-    }
+/// The locals of the declaration being emitted: which integer each visible name reads, and the
+/// next integer to hand out.
+struct Frame {
+    next_slot: i64,
+    scopes: Vec<BTreeMap<String, i64>>,
 }
 
-fn collect_ir_record_field_unsupported_diagnostics(
-    module: &CodegenModule,
-    fields: &[CodegenRecordField],
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    for field in fields {
-        if let Some(default) = field.default.as_ref() {
-            collect_ir_expression_unsupported_diagnostics(module, default, diagnostics);
+impl Frame {
+    fn new() -> Self {
+        Self {
+            next_slot: 0,
+            scopes: vec![BTreeMap::new()],
         }
     }
-}
 
-fn collect_ir_expression_unsupported_diagnostics(
-    module: &CodegenModule,
-    expression: &CodegenExpression,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    match &expression.kind {
-        CodegenExpressionKind::Unsupported(unsupported) => {
-            diagnostics.push(ir_unsupported_diagnostic(
-                module,
-                unsupported.span,
-                &unsupported.message,
-            ));
-        }
-        CodegenExpressionKind::Binary { lhs, rhs, .. } => {
-            collect_ir_expression_unsupported_diagnostics(module, lhs, diagnostics);
-            collect_ir_expression_unsupported_diagnostics(module, rhs, diagnostics);
-        }
-        CodegenExpressionKind::Unary { expr, .. } => {
-            collect_ir_expression_unsupported_diagnostics(module, expr, diagnostics);
-        }
-        CodegenExpressionKind::Call { callee, args } => {
-            collect_ir_expression_unsupported_diagnostics(module, callee, diagnostics);
-            for arg in args {
-                collect_ir_expression_unsupported_diagnostics(module, arg, diagnostics);
-            }
-        }
-        CodegenExpressionKind::IntrinsicCall { args, .. } => {
-            for arg in args {
-                collect_ir_expression_unsupported_diagnostics(module, arg, diagnostics);
-            }
-        }
-        CodegenExpressionKind::If {
-            condition,
-            then_branch,
-            else_branch,
-        } => {
-            collect_ir_expression_unsupported_diagnostics(module, condition, diagnostics);
-            collect_ir_expression_unsupported_diagnostics(module, then_branch, diagnostics);
-            if let Some(else_branch) = else_branch {
-                collect_ir_expression_unsupported_diagnostics(module, else_branch, diagnostics);
-            }
-        }
-        CodegenExpressionKind::Match {
-            scrutinee,
-            arms,
-            else_branch,
-        } => {
-            collect_ir_expression_unsupported_diagnostics(module, scrutinee, diagnostics);
-            for arm in arms {
-                for pattern in &arm.patterns {
-                    collect_ir_expression_unsupported_diagnostics(module, pattern, diagnostics);
-                }
-                collect_ir_expression_unsupported_diagnostics(module, &arm.body, diagnostics);
-            }
-            if let Some(else_branch) = else_branch {
-                collect_ir_expression_unsupported_diagnostics(module, else_branch, diagnostics);
-            }
-        }
-        CodegenExpressionKind::Let { value, body, .. } => {
-            collect_ir_expression_unsupported_diagnostics(module, value, diagnostics);
-            collect_ir_expression_unsupported_diagnostics(module, body, diagnostics);
-        }
-        CodegenExpressionKind::Block {
-            statements,
-            expression,
-        } => {
-            for statement in statements {
-                match statement {
-                    CodegenStatement::Let { init, .. } => {
-                        collect_ir_expression_unsupported_diagnostics(module, init, diagnostics);
-                    }
-                    CodegenStatement::Expr(expr) => {
-                        collect_ir_expression_unsupported_diagnostics(module, expr, diagnostics);
-                    }
-                }
-            }
-            if let Some(expression) = expression {
-                collect_ir_expression_unsupported_diagnostics(module, expression, diagnostics);
-            }
-        }
-        CodegenExpressionKind::Array(elements) => {
-            for element in elements {
-                collect_ir_expression_unsupported_diagnostics(module, element, diagnostics);
-            }
-        }
-        CodegenExpressionKind::For { iterable, body, .. } => {
-            collect_ir_expression_unsupported_diagnostics(module, iterable, diagnostics);
-            collect_ir_expression_unsupported_diagnostics(module, body, diagnostics);
-        }
-        CodegenExpressionKind::Index { base, index } => {
-            collect_ir_expression_unsupported_diagnostics(module, base, diagnostics);
-            collect_ir_expression_unsupported_diagnostics(module, index, diagnostics);
-        }
-        CodegenExpressionKind::Member { base, .. } => {
-            collect_ir_expression_unsupported_diagnostics(module, base, diagnostics);
-        }
-        CodegenExpressionKind::Record {
-            fields,
-            properties,
-            content,
-            ..
-        } => {
-            collect_ir_record_field_unsupported_diagnostics(module, fields, diagnostics);
-            for property in properties {
-                collect_ir_expression_unsupported_diagnostics(module, &property.value, diagnostics);
-            }
-            for item in content {
-                collect_ir_expression_unsupported_diagnostics(module, item, diagnostics);
-            }
-        }
-        CodegenExpressionKind::UnionCase {
-            fields,
-            properties,
-            content,
-            ..
-        } => {
-            collect_ir_record_field_unsupported_diagnostics(module, fields, diagnostics);
-            for property in properties {
-                collect_ir_expression_unsupported_diagnostics(module, &property.value, diagnostics);
-            }
-            for content in content {
-                collect_ir_expression_unsupported_diagnostics(module, content, diagnostics);
-            }
-        }
-        CodegenExpressionKind::ComponentDescriptor(descriptor) => {
-            for property in &descriptor.properties {
-                collect_ir_expression_unsupported_diagnostics(module, &property.value, diagnostics);
-            }
-            for content in &descriptor.content {
-                collect_ir_expression_unsupported_diagnostics(module, content, diagnostics);
-            }
-        }
-        CodegenExpressionKind::Element(element) => {
-            for property in &element.properties {
-                collect_ir_expression_unsupported_diagnostics(module, &property.value, diagnostics);
-            }
-            for content in &element.content {
-                collect_ir_expression_unsupported_diagnostics(module, content, diagnostics);
-            }
-        }
-        CodegenExpressionKind::Literal(_) | CodegenExpressionKind::Identifier { .. } => {}
+    /// Reserves `count` consecutive slots and returns the first, for the leading parameters or
+    /// fields of a frame, which take their declaration position whether or not their defaults
+    /// allocate locals of their own.
+    fn reserve(&mut self, count: usize) -> i64 {
+        let first = self.next_slot;
+        self.next_slot += count as i64;
+        first
     }
-}
 
-fn ir_module(module: &CodegenModule, context: &mut ProgramIrContext) -> NxIrModule {
-    NxIrModule {
-        id: module_id(module.id),
-        runtime_id: module.id.as_u32(),
-        provenance: ir_module_provenance(&module.provenance),
-        imports: module.imports.iter().map(ir_reference).collect(),
-        declarations: module
-            .declarations
+    fn alloc(&mut self, name: &str) -> i64 {
+        let slot = self.reserve(1);
+        self.bind(name, slot);
+        slot
+    }
+
+    fn bind(&mut self, name: &str, slot: i64) {
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.insert(name.to_string(), slot);
+        }
+    }
+
+    fn resolve(&self, name: &str) -> Option<i64> {
+        self.scopes
             .iter()
-            .map(|declaration| ir_declaration(module.id, declaration, context))
-            .collect(),
+            .rev()
+            .find_map(|scope| scope.get(name).copied())
+    }
+
+    fn push(&mut self) {
+        self.scopes.push(BTreeMap::new());
+    }
+
+    fn pop(&mut self) {
+        if self.scopes.len() > 1 {
+            self.scopes.pop();
+        }
     }
 }
 
-fn ir_declaration(
-    module_id_value: RuntimeModuleId,
-    declaration: &CodegenDeclaration,
-    context: &ProgramIrContext,
-) -> NxIrDeclaration {
-    let declaration_id = declaration_id(&declaration.reference);
-    let source = context.source_for(module_id_value);
-    let kind = match &declaration.kind {
-        CodegenDeclarationKind::Function {
-            params,
-            body,
-            return_type,
-        } => {
-            let mut scope = SlotScope::new();
-            let params = params
-                .iter()
-                .enumerate()
-                .map(|(index, param)| {
-                    let param = ir_param(
-                        module_id_value,
-                        &declaration_id,
-                        index,
-                        param,
-                        source.clone(),
-                    );
-                    scope.insert(&param.name, param.slot.clone());
-                    param
-                })
-                .collect::<Vec<_>>();
-            let body = ir_expression(
-                module_id_value,
-                source.clone(),
-                body,
-                &mut scope,
-                &format!("{declaration_id}:body"),
-            );
-            NxIrDeclarationKind::Function {
-                params,
-                body,
-                return_type: return_type.as_ref().map(ir_semantic_type),
+struct ModuleEmitter<'a> {
+    program: &'a CodegenProgram,
+    module: &'a CodegenModule,
+    options: &'a NxIrEmitOptions,
+    strings: Interner<String>,
+    types: Interner<IrItem>,
+    constants: Interner<IrItem>,
+    nodes: Vec<IrItem>,
+    node_spans: Vec<[i64; 2]>,
+    declarations: Vec<IrItem>,
+    declaration_spans: Vec<[i64; 2]>,
+    /// The module table, by slot: the module itself first, then every module referenced, in the
+    /// order the emitter first met them.
+    module_slots: Vec<RuntimeModuleId>,
+    frame: Frame,
+    /// The module whose text the expressions being emitted were written in. Spans index the
+    /// artifact's own source only, so an expression inherited from another module gets none.
+    span_module: RuntimeModuleId,
+    diagnostics: Vec<Diagnostic>,
+}
+
+impl<'a> ModuleEmitter<'a> {
+    fn new(
+        program: &'a CodegenProgram,
+        module: &'a CodegenModule,
+        options: &'a NxIrEmitOptions,
+    ) -> Self {
+        Self {
+            program,
+            module,
+            options,
+            strings: Interner::new(),
+            types: Interner::new(),
+            constants: Interner::new(),
+            nodes: Vec::new(),
+            node_spans: Vec::new(),
+            declarations: Vec::new(),
+            declaration_spans: Vec::new(),
+            module_slots: vec![module.id],
+            frame: Frame::new(),
+            span_module: module.id,
+            diagnostics: Vec::new(),
+        }
+    }
+
+    fn emit(mut self) -> Result<NxIrArtifact, CodegenError> {
+        let mut function_entrypoints = Vec::new();
+        let mut component_entrypoints = Vec::new();
+        for declaration in &self.module.declarations {
+            let index = self.declarations.len() as u32;
+            match &declaration.kind {
+                CodegenDeclarationKind::Function { .. } => function_entrypoints.push(index),
+                CodegenDeclarationKind::Component(_) => component_entrypoints.push(index),
+                _ => {}
             }
+            self.declaration(declaration);
         }
-        CodegenDeclarationKind::Value { value, ty } => {
-            let mut scope = SlotScope::new();
-            NxIrDeclarationKind::Value {
-                value: ir_expression(
-                    module_id_value,
-                    source.clone(),
-                    value,
-                    &mut scope,
-                    &format!("{declaration_id}:value"),
-                ),
-                ty: ty.as_ref().map(ir_semantic_type),
-            }
+        if !self.diagnostics.is_empty() {
+            return Err(CodegenError::new(self.diagnostics));
         }
-        CodegenDeclarationKind::Record {
-            fields,
-            bases,
-            is_abstract,
-            update_target,
-        } => {
-            let scope = SlotScope::new();
-            NxIrDeclarationKind::Record {
-                fields: ir_record_fields(
-                    module_id_value,
-                    source.clone(),
-                    &declaration_id,
-                    "field",
-                    fields,
-                    &scope,
-                ),
-                bases: bases.iter().map(ir_reference).collect(),
-                is_abstract: *is_abstract,
-                update_target: update_target.as_ref().map(ir_reference),
-            }
-        }
-        CodegenDeclarationKind::Component(component) => {
-            NxIrDeclarationKind::Component(ir_component(
-                module_id_value,
-                source.clone(),
-                &declaration_id,
-                component,
-                context,
-            ))
-        }
-        CodegenDeclarationKind::Union {
-            cases,
-            bases,
-            property_target,
-        } => NxIrDeclarationKind::Union {
-            property_target: property_target.as_ref().map(ir_reference),
-            cases: cases
-                .iter()
-                .enumerate()
-                .map(|(index, case)| {
-                    ir_union_case(
-                        module_id_value,
-                        source.clone(),
-                        &declaration_id,
-                        index,
-                        case,
-                    )
-                })
-                .collect(),
-            bases: bases.iter().map(ir_reference).collect(),
-        },
-        CodegenDeclarationKind::TypeAlias | CodegenDeclarationKind::Unsupported(_) => {
-            NxIrDeclarationKind::TypeAlias
-        }
-    };
 
-    NxIrDeclaration {
-        id: declaration_id,
-        reference: ir_reference(&declaration.reference),
-        span: ir_span(source, declaration.span),
-        kind,
-    }
-}
-
-fn ir_component(
-    module_id_value: RuntimeModuleId,
-    source: Option<String>,
-    declaration_id: &str,
-    component: &CodegenComponent,
-    context: &ProgramIrContext,
-) -> NxIrComponent {
-    let mut prop_scope = SlotScope::new();
-    let props = ir_component_fields(
-        declaration_id,
-        "prop",
-        &component.props,
-        &mut prop_scope,
-        context,
-    );
-
-    let mut state_scope = prop_scope.clone();
-    let state = ir_component_fields(
-        declaration_id,
-        "state",
-        &component.state,
-        &mut state_scope,
-        context,
-    );
-
-    let mut body_scope = SlotScope::new();
-    for field in &props {
-        body_scope.insert(&field.name, field.slot.clone());
-    }
-    for field in &state {
-        body_scope.insert(&field.name, field.slot.clone());
-    }
-    let body = component.body.as_ref().map(|body| {
-        ir_expression(
-            module_id_value,
-            source.clone(),
-            body,
-            &mut body_scope,
-            &format!("{declaration_id}:body"),
-        )
-    });
-
-    NxIrComponent {
-        is_abstract: component.is_abstract,
-        is_external: component.is_external,
-        props,
-        state,
-        body,
-    }
-}
-
-fn ir_param(
-    module_id_value: RuntimeModuleId,
-    declaration_id: &str,
-    index: usize,
-    param: &CodegenParam,
-    source: Option<String>,
-) -> NxIrParam {
-    NxIrParam {
-        name: param.name.clone(),
-        slot: format!("{declaration_id}:param:{index}"),
-        ty: ir_type_ref(&param.resolved_ty),
-        is_content: param.is_content,
-        span: ir_span_for_module(module_id_value, source, param.span),
-    }
-}
-
-fn ir_component_fields(
-    declaration_id: &str,
-    slot_kind: &str,
-    fields: &[CodegenComponentField],
-    scope: &mut SlotScope,
-    context: &ProgramIrContext,
-) -> Vec<NxIrComponentField> {
-    fields
-        .iter()
-        .enumerate()
-        .map(|(index, field)| {
-            let slot = format!("{declaration_id}:{slot_kind}:{index}");
-            let default_source = context.source_for(field.owner_module_id);
-            let default = field.default.as_ref().map(|default| {
-                ir_expression(
-                    field.owner_module_id,
-                    default_source.clone(),
-                    default,
-                    scope,
-                    &format!("{slot}:default"),
-                )
-            });
-            let ir_field = NxIrComponentField {
-                name: field.name.clone(),
-                slot: slot.clone(),
-                owner_module: module_id(field.owner_module_id),
-                ty: ir_type_ref(&field.resolved_ty),
-                is_content: field.is_content,
-                is_required: field.is_required,
-                default,
-                span: ir_span_for_module(field.owner_module_id, default_source.clone(), field.span),
-            };
-            scope.insert(&field.name, slot);
-            ir_field
-        })
-        .collect()
-}
-
-fn ir_record_fields(
-    module_id_value: RuntimeModuleId,
-    source: Option<String>,
-    owner_id: &str,
-    slot_kind: &str,
-    fields: &[CodegenRecordField],
-    outer_scope: &SlotScope,
-) -> Vec<NxIrRecordField> {
-    let mut scope = outer_scope.clone();
-    fields
-        .iter()
-        .enumerate()
-        .map(|(index, field)| {
-            let slot = format!("{owner_id}:{slot_kind}:{index}");
-            let default = field.default.as_ref().map(|default| {
-                ir_expression(
-                    module_id_value,
-                    source.clone(),
-                    default,
-                    &mut scope,
-                    &format!("{slot}:default"),
-                )
-            });
-            let ir_field = NxIrRecordField {
-                name: field.name.clone(),
-                slot: slot.clone(),
-                ty: ir_type_ref(&field.resolved_ty),
-                is_content: field.is_content,
-                is_required: field.is_required,
-                default,
-                span: ir_span(source.clone(), field.span),
-            };
-            scope.insert(&field.name, slot);
-            ir_field
-        })
-        .collect()
-}
-
-fn ir_union_case(
-    module_id_value: RuntimeModuleId,
-    source: Option<String>,
-    declaration_id: &str,
-    index: usize,
-    case: &CodegenUnionCase,
-) -> NxIrUnionCase {
-    let case_id = format!("{declaration_id}:case:{index}");
-    NxIrUnionCase {
-        name: case.name.clone(),
-        fields: ir_record_fields(
-            module_id_value,
-            source.clone(),
-            &case_id,
-            "field",
-            &case.fields,
-            &SlotScope::new(),
-        ),
-        is_constant: case.is_constant,
-        span: ir_span(source, case.span),
-    }
-}
-
-fn ir_expression(
-    module_id_value: RuntimeModuleId,
-    source: Option<String>,
-    expression: &CodegenExpression,
-    scope: &mut SlotScope,
-    path: &str,
-) -> NxIrExpression {
-    let id = expression_id(module_id_value, expression.expr_id, path);
-    let op = match &expression.kind {
-        CodegenExpressionKind::Literal(literal) => NxIrExpressionOp::Literal {
-            value: ir_literal(literal),
-        },
-        CodegenExpressionKind::Identifier { name, reference } => {
-            if let Some(reference) = reference {
-                NxIrExpressionOp::Reference {
-                    reference: ir_reference(reference),
+        let modules = self
+            .module_slots
+            .clone()
+            .iter()
+            .map(|id| {
+                let module = self
+                    .program
+                    .module(*id)
+                    .expect("a referenced module is part of the program");
+                let identity = module_identity(module);
+                let version = module_version(self.program, module);
+                // The module section of the image names these through the string table, after
+                // every string the declarations use.
+                self.string(&identity);
+                self.string(&version);
+                NxIrModuleEntry {
+                    version,
+                    fingerprint: module_fingerprint(self.program, module),
+                    identity,
                 }
-            } else if let Some(slot) = scope.resolve(name) {
-                NxIrExpressionOp::Slot {
-                    slot: slot.to_string(),
-                    name: name.clone(),
-                }
-            } else {
-                NxIrExpressionOp::Slot {
-                    slot: format!("unresolved:{name}"),
-                    name: name.clone(),
-                }
-            }
-        }
-        CodegenExpressionKind::Binary { lhs, op, rhs } => NxIrExpressionOp::Binary {
-            lhs: Box::new(ir_expression(
-                module_id_value,
-                source.clone(),
-                lhs,
-                scope,
-                &format!("{path}:lhs"),
-            )),
-            operator: binop_name(*op).to_string(),
-            rhs: Box::new(ir_expression(
-                module_id_value,
-                source.clone(),
-                rhs,
-                scope,
-                &format!("{path}:rhs"),
-            )),
-        },
-        CodegenExpressionKind::Unary { op, expr } => NxIrExpressionOp::Unary {
-            operator: unop_name(*op).to_string(),
-            expr: Box::new(ir_expression(
-                module_id_value,
-                source.clone(),
-                expr,
-                scope,
-                &format!("{path}:expr"),
-            )),
-        },
-        CodegenExpressionKind::IntrinsicCall {
-            intrinsic,
-            args,
-            field_order,
-        } => NxIrExpressionOp::IntrinsicCall {
-            intrinsic: intrinsic.name().to_string(),
-            field_order: field_order.clone(),
-            args: args
+            })
+            .collect();
+        let mut required_features = required_features(self.module);
+        // A function type anywhere in the type table needs the feature too; the table is complete
+        // here, so it is asked directly rather than by walking every declaration's types.
+        let has_function_type = self.types.items.iter().any(|entry| {
+            entry
+                .as_list()
+                .and_then(|entry| entry.first())
+                .and_then(IrItem::as_int)
+                == Some(kinds::ty::FUNCTION)
+        });
+        if has_function_type
+            && !required_features
                 .iter()
-                .enumerate()
-                .map(|(index, arg)| {
-                    ir_expression(
-                        module_id_value,
-                        source.clone(),
-                        arg,
-                        scope,
-                        &format!("{path}:arg:{index}"),
-                    )
-                })
-                .collect(),
-        },
-        CodegenExpressionKind::Call { callee, args } => NxIrExpressionOp::Call {
-            callee: Box::new(ir_expression(
-                module_id_value,
-                source.clone(),
-                callee,
-                scope,
-                &format!("{path}:callee"),
-            )),
-            args: args
-                .iter()
-                .enumerate()
-                .map(|(index, arg)| {
-                    ir_expression(
-                        module_id_value,
-                        source.clone(),
-                        arg,
-                        scope,
-                        &format!("{path}:arg:{index}"),
-                    )
-                })
-                .collect(),
-        },
-        CodegenExpressionKind::If {
-            condition,
-            then_branch,
-            else_branch,
-        } => NxIrExpressionOp::If {
-            condition: Box::new(ir_expression(
-                module_id_value,
-                source.clone(),
-                condition,
-                scope,
-                &format!("{path}:condition"),
-            )),
-            then_branch: Box::new(ir_expression(
-                module_id_value,
-                source.clone(),
-                then_branch,
-                scope,
-                &format!("{path}:then"),
-            )),
-            else_branch: else_branch.as_ref().map(|else_branch| {
-                Box::new(ir_expression(
-                    module_id_value,
-                    source.clone(),
-                    else_branch,
-                    scope,
-                    &format!("{path}:else"),
-                ))
-            }),
-        },
-        CodegenExpressionKind::Match {
-            scrutinee,
-            arms,
-            else_branch,
-        } => NxIrExpressionOp::IfIs {
-            scrutinee: Box::new(ir_expression(
-                module_id_value,
-                source.clone(),
-                scrutinee,
-                scope,
-                &format!("{path}:scrutinee"),
-            )),
-            arms: arms
-                .iter()
-                .enumerate()
-                .map(|(index, arm)| {
-                    ir_match_arm(
-                        module_id_value,
-                        source.clone(),
-                        arm,
-                        scope,
-                        &format!("{path}:arm:{index}"),
-                    )
-                })
-                .collect(),
-            else_branch: else_branch.as_ref().map(|else_branch| {
-                Box::new(ir_expression(
-                    module_id_value,
-                    source.clone(),
-                    else_branch,
-                    scope,
-                    &format!("{path}:else"),
-                ))
-            }),
-        },
-        CodegenExpressionKind::Let { name, value, body } => {
-            let value = Box::new(ir_expression(
-                module_id_value,
-                source.clone(),
-                value,
-                scope,
-                &format!("{path}:value"),
-            ));
-            let slot = format!("{id}:let:{name}");
-            scope.push();
-            scope.insert(name, slot.clone());
-            let body = Box::new(ir_expression(
-                module_id_value,
-                source.clone(),
-                body,
-                scope,
-                &format!("{path}:body"),
-            ));
-            scope.pop();
-            NxIrExpressionOp::Let {
-                name: name.clone(),
-                slot,
-                value,
-                body,
-            }
+                .any(|feature| feature == NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1)
+        {
+            required_features.push(NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1.to_string());
         }
-        CodegenExpressionKind::Block {
-            statements,
-            expression,
-        } => {
-            scope.push();
-            let statements = statements
-                .iter()
-                .enumerate()
-                .map(|(index, statement)| {
-                    ir_statement(
-                        module_id_value,
-                        source.clone(),
-                        statement,
-                        scope,
-                        &format!("{path}:stmt:{index}"),
-                    )
-                })
-                .collect();
-            let expression = expression.as_ref().map(|expression| {
-                Box::new(ir_expression(
-                    module_id_value,
-                    source.clone(),
-                    expression,
-                    scope,
-                    &format!("{path}:result"),
-                ))
-            });
-            scope.pop();
-            NxIrExpressionOp::Block {
-                statements,
-                expression,
-            }
+        self.string(NX_IR_RUNTIME_ABI);
+        for feature in &required_features {
+            self.string(feature);
         }
-        CodegenExpressionKind::Array(elements) => NxIrExpressionOp::Array {
-            elements: elements
-                .iter()
-                .enumerate()
-                .map(|(index, element)| {
-                    ir_expression(
-                        module_id_value,
-                        source.clone(),
-                        element,
-                        scope,
-                        &format!("{path}:element:{index}"),
-                    )
-                })
-                .collect(),
-        },
-        CodegenExpressionKind::For {
-            item,
-            index,
-            iterable,
-            body,
-        } => {
-            let iterable = Box::new(ir_expression(
-                module_id_value,
-                source.clone(),
-                iterable,
-                scope,
-                &format!("{path}:iterable"),
-            ));
-            let item_slot = format!("{id}:for:item");
-            let index_slot = index.as_ref().map(|_| format!("{id}:for:index"));
-            scope.push();
-            scope.insert(item, item_slot.clone());
-            if let (Some(index_name), Some(index_slot)) = (index.as_ref(), index_slot.as_ref()) {
-                scope.insert(index_name, index_slot.clone());
-            }
-            let body = Box::new(ir_expression(
-                module_id_value,
-                source.clone(),
-                body,
-                scope,
-                &format!("{path}:body"),
-            ));
-            scope.pop();
-            NxIrExpressionOp::For {
-                item: item.clone(),
-                item_slot,
-                index: index.clone(),
-                index_slot,
-                iterable,
-                body,
-            }
-        }
-        CodegenExpressionKind::Index { base, index } => NxIrExpressionOp::Index {
-            base: Box::new(ir_expression(
-                module_id_value,
-                source.clone(),
-                base,
-                scope,
-                &format!("{path}:base"),
-            )),
-            index: Box::new(ir_expression(
-                module_id_value,
-                source.clone(),
-                index,
-                scope,
-                &format!("{path}:index"),
-            )),
-        },
-        CodegenExpressionKind::Member {
-            base,
-            member,
-            reference,
-        } => NxIrExpressionOp::Member {
-            base: Box::new(ir_expression(
-                module_id_value,
-                source.clone(),
-                base,
-                scope,
-                &format!("{path}:base"),
-            )),
-            member: member.clone(),
-            reference: reference.as_ref().map(ir_reference),
-        },
-        CodegenExpressionKind::UnionCase {
-            union_reference,
-            case_name,
-            fields,
-            properties,
-            content_field,
-            content,
-            is_constant,
-            ..
-        } => NxIrExpressionOp::UnionCase {
-            is_constant: *is_constant,
-            union: ir_reference(union_reference),
-            case_name: case_name.clone(),
-            fields: ir_record_fields(module_id_value, source.clone(), &id, "field", fields, scope),
-            properties: ir_properties(
-                module_id_value,
-                source.clone(),
-                properties,
-                scope,
-                &format!("{path}:property"),
-            ),
-            content_field: content_field.clone(),
-            content: ir_expressions(
-                module_id_value,
-                source.clone(),
-                content,
-                scope,
-                &format!("{path}:content"),
-            ),
-        },
-        CodegenExpressionKind::Record {
-            name,
-            fields,
-            properties,
-            content_field,
-            content,
-            is_update,
-        } => NxIrExpressionOp::Record {
-            is_update: *is_update,
-            name: name.clone(),
-            fields: ir_record_fields(module_id_value, source.clone(), &id, "field", fields, scope),
-            properties: ir_properties(
-                module_id_value,
-                source.clone(),
-                properties,
-                scope,
-                &format!("{path}:property"),
-            ),
-            content_field: content_field.clone(),
-            content: ir_expressions(
-                module_id_value,
-                source.clone(),
-                content,
-                scope,
-                &format!("{path}:content"),
-            ),
-        },
-        CodegenExpressionKind::ComponentDescriptor(descriptor) => {
-            ir_component_descriptor_op(module_id_value, source.clone(), descriptor, scope, path)
-        }
-        CodegenExpressionKind::Element(element) => {
-            ir_element_op(module_id_value, source.clone(), element, scope, path)
-        }
-        CodegenExpressionKind::Unsupported(unsupported) => NxIrExpressionOp::Literal {
-            value: NxIrLiteral::String {
-                value: unsupported.message.clone(),
+        let debug = self.options.debug.then(|| NxIrDebug {
+            spans: NxIrDebugSpans {
+                declarations: self.declaration_spans,
+                nodes: self.node_spans,
             },
-        },
-    };
+            source: module_source(self.program, self.module)
+                .unwrap_or_default()
+                .to_string(),
+        });
 
-    NxIrExpression {
-        id,
-        span: ir_span(source, expression.span),
-        ty: expression.ty.as_ref().map(ir_semantic_type),
-        op,
-    }
-}
-
-fn ir_match_arm(
-    module_id_value: RuntimeModuleId,
-    source: Option<String>,
-    arm: &CodegenMatchArm,
-    scope: &mut SlotScope,
-    path: &str,
-) -> NxIrMatchArm {
-    NxIrMatchArm {
-        patterns: ir_expressions(
-            module_id_value,
-            source.clone(),
-            &arm.patterns,
-            scope,
-            &format!("{path}:pattern"),
-        ),
-        body: ir_expression(
-            module_id_value,
-            source,
-            &arm.body,
-            scope,
-            &format!("{path}:body"),
-        ),
-    }
-}
-
-fn ir_statement(
-    module_id_value: RuntimeModuleId,
-    source: Option<String>,
-    statement: &CodegenStatement,
-    scope: &mut SlotScope,
-    path: &str,
-) -> NxIrStatement {
-    match statement {
-        CodegenStatement::Let { name, init, span } => {
-            let init = ir_expression(
-                module_id_value,
-                source.clone(),
-                init,
-                scope,
-                &format!("{path}:init"),
-            );
-            let slot = format!("{}:block:{name}", init.id);
-            scope.insert(name, slot.clone());
-            NxIrStatement::Let {
-                name: name.clone(),
-                slot,
-                init,
-                span: ir_span(source, *span),
-            }
-        }
-        CodegenStatement::Expr(expr) => NxIrStatement::Expr {
-            expr: ir_expression(
-                module_id_value,
-                source,
-                expr,
-                scope,
-                &format!("{path}:expr"),
-            ),
-        },
-    }
-}
-
-fn ir_component_descriptor_op(
-    module_id_value: RuntimeModuleId,
-    source: Option<String>,
-    descriptor: &CodegenComponentDescriptor,
-    scope: &mut SlotScope,
-    path: &str,
-) -> NxIrExpressionOp {
-    NxIrExpressionOp::ComponentDescriptor {
-        component: ir_reference(&descriptor.component),
-        target_kind: match descriptor.target_kind {
-            CodegenComponentTargetKind::Normal => "normal".to_string(),
-            CodegenComponentTargetKind::External => "external".to_string(),
-        },
-        properties: ir_properties(
-            module_id_value,
-            source.clone(),
-            &descriptor.properties,
-            scope,
-            &format!("{path}:property"),
-        ),
-        content_field: descriptor.content_field.clone(),
-        content: ir_expressions(
-            module_id_value,
-            source,
-            &descriptor.content,
-            scope,
-            &format!("{path}:content"),
-        ),
-    }
-}
-
-fn ir_element_op(
-    module_id_value: RuntimeModuleId,
-    source: Option<String>,
-    element: &CodegenElement,
-    scope: &mut SlotScope,
-    path: &str,
-) -> NxIrExpressionOp {
-    NxIrExpressionOp::IntrinsicElement {
-        element_id: format!(
-            "{}:element:{}",
-            module_id(module_id_value),
-            element.element_id
-        ),
-        tag_name: element.tag.clone(),
-        properties: ir_properties(
-            module_id_value,
-            source.clone(),
-            &element.properties,
-            scope,
-            &format!("{path}:property"),
-        ),
-        content: ir_expressions(
-            module_id_value,
-            source,
-            &element.content,
-            scope,
-            &format!("{path}:content"),
-        ),
-    }
-}
-
-fn ir_properties(
-    module_id_value: RuntimeModuleId,
-    source: Option<String>,
-    properties: &[CodegenProperty],
-    scope: &mut SlotScope,
-    path: &str,
-) -> Vec<NxIrProperty> {
-    properties
-        .iter()
-        .enumerate()
-        .map(|(index, property)| NxIrProperty {
-            name: property.name.clone(),
-            value: ir_expression(
-                module_id_value,
-                source.clone(),
-                &property.value,
-                scope,
-                &format!("{path}:{index}"),
-            ),
-            span: ir_span(source.clone(), property.span),
+        Ok(NxIrArtifact {
+            schema_version: NX_IR_SCHEMA_VERSION,
+            runtime_abi: NX_IR_RUNTIME_ABI.to_string(),
+            required_features,
+            modules,
+            function_entrypoints,
+            component_entrypoints,
+            strings: self.strings.items,
+            types: self.types.items,
+            constants: self.constants.items,
+            nodes: self.nodes,
+            declarations: self.declarations,
+            debug,
         })
-        .collect()
-}
-
-fn ir_expressions(
-    module_id_value: RuntimeModuleId,
-    source: Option<String>,
-    expressions: &[CodegenExpression],
-    scope: &mut SlotScope,
-    path: &str,
-) -> Vec<NxIrExpression> {
-    expressions
-        .iter()
-        .enumerate()
-        .map(|(index, expression)| {
-            ir_expression(
-                module_id_value,
-                source.clone(),
-                expression,
-                scope,
-                &format!("{path}:{index}"),
-            )
-        })
-        .collect()
-}
-
-fn ir_entrypoint(entrypoint: &CodegenEntrypoint) -> NxIrEntrypoint {
-    NxIrEntrypoint {
-        name: entrypoint.name.clone(),
-        reference: ir_reference(&entrypoint.reference),
     }
-}
 
-fn ir_source_entry(entry: &CodegenSourceEntry) -> NxIrSourceEntry {
-    NxIrSourceEntry {
-        identity: entry.identity.clone(),
-        source: entry.source.clone(),
+    fn string(&mut self, value: &str) -> i64 {
+        self.strings.intern(value.to_string(), || value.to_string())
     }
-}
 
-fn ir_module_provenance(provenance: &CodegenModuleProvenance) -> NxIrModuleProvenance {
-    match provenance {
-        CodegenModuleProvenance::SourceProvider { identity } => {
-            NxIrModuleProvenance::SourceProvider {
-                identity: identity.clone(),
+    fn module_slot(&mut self, id: RuntimeModuleId) -> i64 {
+        if let Some(slot) = self.module_slots.iter().position(|slot| *slot == id) {
+            return slot as i64;
+        }
+        self.module_slots.push(id);
+        (self.module_slots.len() - 1) as i64
+    }
+
+    /// A reference as its two operands: module slot and name.
+    fn reference(&mut self, reference: &CodegenReference) -> (i64, i64) {
+        let slot = self.module_slot(reference.module_id);
+        let name = self.string(&reference.name);
+        (slot, name)
+    }
+
+    fn reference_item(&mut self, reference: &CodegenReference) -> IrItem {
+        let (slot, name) = self.reference(reference);
+        IrItem::ints([slot, name])
+    }
+
+    fn optional_reference(&mut self, reference: Option<&CodegenReference>) -> IrItem {
+        match reference {
+            Some(reference) => self.reference_item(reference),
+            None => IrItem::List(Vec::new()),
+        }
+    }
+
+    fn references(&mut self, references: &[CodegenReference]) -> IrItem {
+        let items = references
+            .iter()
+            .map(|reference| self.reference_item(reference))
+            .collect::<Vec<_>>();
+        IrItem::List(items)
+    }
+
+    fn intern_type(&mut self, entry: IrItem) -> i64 {
+        let key = format!("{entry:?}");
+        self.types.intern(key, || entry)
+    }
+
+    fn type_ref(&mut self, ty: &CodegenTypeRef) -> i64 {
+        let entry = match ty {
+            CodegenTypeRef::Primitive { name } => {
+                let name = self.string(name);
+                IrItem::ints([kinds::ty::PRIMITIVE, name])
             }
-        }
-        CodegenModuleProvenance::Library {
-            root_path,
-            module_path,
-        } => NxIrModuleProvenance::Library {
-            root_path: root_path.display().to_string(),
-            module_path: module_path.display().to_string(),
-        },
+            CodegenTypeRef::Nominal { reference, .. } => {
+                let (slot, name) = self.reference(reference);
+                IrItem::ints([kinds::ty::NOMINAL, slot, name])
+            }
+            CodegenTypeRef::Array { element } => {
+                let element = self.type_ref(element);
+                IrItem::ints([kinds::ty::ARRAY, element])
+            }
+            CodegenTypeRef::Nullable { inner } => {
+                let inner = self.type_ref(inner);
+                IrItem::ints([kinds::ty::NULLABLE, inner])
+            }
+            // `[4, result, [[name, type, flags]...]]`: the parameters keep their names because a
+            // function satisfies the type by name, and a runtime binds a call's arguments by name.
+            CodegenTypeRef::Function {
+                params,
+                return_type,
+            } => {
+                let result = self.type_ref(return_type);
+                let params = params
+                    .iter()
+                    .map(|param| {
+                        let name = self.string(&param.name);
+                        let ty = self.type_ref(&param.ty);
+                        let flags = if param.is_content {
+                            kinds::ty::FUNCTION_PARAM_CONTENT
+                        } else {
+                            0
+                        };
+                        IrItem::ints([name, ty, flags])
+                    })
+                    .collect::<Vec<_>>();
+                IrItem::list([
+                    IrItem::Int(kinds::ty::FUNCTION),
+                    IrItem::Int(result),
+                    IrItem::List(params),
+                ])
+            }
+        };
+        self.intern_type(entry)
     }
-}
 
-fn ir_reference(reference: &CodegenReference) -> NxIrReference {
-    NxIrReference {
-        module: module_id(reference.module_id),
-        declaration: declaration_id(reference),
-        name: reference.name.clone(),
-        kind: resolved_item_kind_name(reference.kind).to_string(),
+    fn constant(&mut self, entry: IrItem) -> i64 {
+        let key = format!("{entry:?}");
+        self.constants.intern(key, || entry)
     }
-}
 
-fn ir_literal(literal: &Literal) -> NxIrLiteral {
-    match literal {
-        Literal::String(value) => NxIrLiteral::String {
-            value: value.to_string(),
-        },
-        Literal::Int(value) => NxIrLiteral::Int {
-            value: value.to_string(),
-            number: is_js_safe_integer(*value).then_some(*value),
-        },
-        Literal::Float(value) => NxIrLiteral::Float { value: value.0 },
-        Literal::Boolean(value) => NxIrLiteral::Boolean { value: *value },
-        Literal::Null => NxIrLiteral::Null,
-    }
-}
-
-fn ir_type_ref(ty: &CodegenTypeRef) -> NxIrTypeRef {
-    match ty {
-        CodegenTypeRef::Primitive { name } => NxIrTypeRef::Primitive { name: name.clone() },
-        CodegenTypeRef::Nominal { reference, display } => NxIrTypeRef::Nominal {
-            reference: ir_reference(reference),
-            display: display.clone(),
-        },
-        CodegenTypeRef::Array { element } => NxIrTypeRef::Array {
-            element: Box::new(ir_type_ref(element)),
-        },
-        CodegenTypeRef::Nullable { inner } => NxIrTypeRef::Nullable {
-            inner: Box::new(ir_type_ref(inner)),
-        },
-        CodegenTypeRef::Function {
-            params,
-            return_type,
-        } => NxIrTypeRef::Function {
-            params: params.iter().map(ir_type_ref).collect(),
-            return_type: Box::new(ir_type_ref(return_type)),
-        },
-    }
-}
-
-fn ir_semantic_type(ty: &Type) -> NxIrSemanticType {
-    // NX IR carries no component type parameters: a host receiving a value by `$type` has
-    // nothing to bind one to, so a parameter is erased to the top type before it is rendered.
-    let erased = ty.substitute_parameters(&|_| Some(Type::named("object")));
-    NxIrSemanticType {
-        display: erased.to_string(),
-        shape: ir_semantic_type_shape(&erased),
-    }
-}
-
-fn ir_semantic_type_shape(ty: &Type) -> NxIrSemanticTypeShape {
-    match ty {
-        Type::Primitive(primitive) => NxIrSemanticTypeShape::Primitive {
-            name: primitive_name(*primitive).to_string(),
-        },
-        Type::Array(element) => NxIrSemanticTypeShape::Array {
-            element: Box::new(ir_semantic_type(element)),
-        },
-        Type::Nullable(inner) => NxIrSemanticTypeShape::Nullable {
-            inner: Box::new(ir_semantic_type(inner)),
-        },
-        Type::Function { params, ret } => NxIrSemanticTypeShape::Function {
-            params: params.iter().map(ir_semantic_type).collect(),
-            return_type: Box::new(ir_semantic_type(ret)),
-        },
-        Type::Named(named) => NxIrSemanticTypeShape::Named {
-            name: named.name.as_str().to_string(),
-        },
-        Type::Union(union_ty) => NxIrSemanticTypeShape::Union {
-            name: union_ty.name.as_str().to_string(),
-            cases: union_ty
-                .cases
-                .iter()
-                .map(|case| case.as_str().to_string())
-                .collect(),
-            base: union_ty.base.as_ref().map(|base| base.as_str().to_string()),
-        },
-        Type::UnionCase(case_ty) => NxIrSemanticTypeShape::UnionCase {
-            union: case_ty.union.as_str().to_string(),
-            case_name: case_ty.case.as_str().to_string(),
-        },
-        Type::Variable(id) => NxIrSemanticTypeShape::Variable { id: *id },
-        // Erased by `ir_semantic_type` before this is reached; kept total for the same reason.
-        Type::Parameter(_) => NxIrSemanticTypeShape::Named {
-            name: "object".to_string(),
-        },
-        // Never survives type analysis; treated as unknown if it somehow reaches IR.
-        Type::ContextualName(_) | Type::Unknown => NxIrSemanticTypeShape::Unknown,
-        Type::Error => NxIrSemanticTypeShape::Error,
-    }
-}
-
-fn ir_span_for_module(
-    _module_id_value: RuntimeModuleId,
-    source: Option<String>,
-    span: TextSpan,
-) -> NxIrSourceSpan {
-    ir_span(source, span)
-}
-
-fn ir_span(source: Option<String>, span: TextSpan) -> NxIrSourceSpan {
-    NxIrSourceSpan {
-        source,
-        start: span.start().into(),
-        end: span.end().into(),
-    }
-}
-
-fn module_source_identity(module: &CodegenModule) -> Option<String> {
-    match &module.provenance {
-        CodegenModuleProvenance::SourceProvider { identity } => Some(identity.clone()),
-        CodegenModuleProvenance::Library { module_path, .. } => {
-            Some(module_path.display().to_string())
+    fn span(&self, span: TextSpan) -> [i64; 2] {
+        if self.span_module == self.module.id {
+            [u32::from(span.start()) as i64, u32::from(span.end()) as i64]
+        } else {
+            [-1, -1]
         }
     }
-}
 
-fn module_id(module_id_value: RuntimeModuleId) -> String {
-    format!("m{}", module_id_value.as_u32())
-}
+    fn push_node(&mut self, entry: IrItem, span: TextSpan) -> i64 {
+        let index = self.nodes.len() as i64;
+        self.nodes.push(entry);
+        let span = self.span(span);
+        self.node_spans.push(span);
+        index
+    }
 
-fn declaration_id(reference: &CodegenReference) -> String {
-    format!(
-        "{}:d{}",
-        module_id(reference.module_id),
-        reference.definition_id.index()
-    )
-}
+    fn declaration(&mut self, declaration: &CodegenDeclaration) {
+        self.frame = Frame::new();
+        self.span_module = self.module.id;
+        let name = self.string(&declaration.reference.name);
+        let entry = match &declaration.kind {
+            CodegenDeclarationKind::Function { params, body, .. } => {
+                let first = self.frame.reserve(params.len());
+                let params = params
+                    .iter()
+                    .enumerate()
+                    .map(|(index, param)| {
+                        self.frame.bind(&param.name, first + index as i64);
+                        let name = self.string(&param.name);
+                        let ty = self.type_ref(&param.resolved_ty);
+                        IrItem::ints([name, ty, i64::from(param.is_content)])
+                    })
+                    .collect::<Vec<_>>();
+                let body = self.expression(body);
+                IrItem::list([
+                    IrItem::Int(kinds::declaration::FUNCTION),
+                    IrItem::Int(name),
+                    IrItem::List(params),
+                    IrItem::Int(body),
+                ])
+            }
+            CodegenDeclarationKind::Value { value, .. } => {
+                let value = self.expression(value);
+                IrItem::ints([kinds::declaration::VALUE, name, value])
+            }
+            CodegenDeclarationKind::Record {
+                fields,
+                bases,
+                is_abstract,
+                update_target,
+            } => {
+                let fields = self.record_fields(fields);
+                let bases = self.references(bases);
+                let update_target = self.optional_reference(update_target.as_ref());
+                IrItem::list([
+                    IrItem::Int(kinds::declaration::RECORD),
+                    IrItem::Int(name),
+                    fields,
+                    bases,
+                    IrItem::Int(i64::from(*is_abstract)),
+                    update_target,
+                ])
+            }
+            CodegenDeclarationKind::Component(component) => self.component(name, component),
+            CodegenDeclarationKind::Union {
+                cases,
+                bases,
+                property_target,
+            } => {
+                let cases = cases
+                    .iter()
+                    .map(|case| {
+                        self.frame = Frame::new();
+                        let case_name = self.string(&case.name);
+                        let fields = self.record_fields(&case.fields);
+                        IrItem::list([
+                            IrItem::Int(case_name),
+                            fields,
+                            IrItem::Int(i64::from(case.is_constant)),
+                        ])
+                    })
+                    .collect::<Vec<_>>();
+                let bases = self.references(bases);
+                let property_target = self.optional_reference(property_target.as_ref());
+                IrItem::list([
+                    IrItem::Int(kinds::declaration::UNION),
+                    IrItem::Int(name),
+                    IrItem::List(cases),
+                    bases,
+                    property_target,
+                ])
+            }
+            CodegenDeclarationKind::TypeAlias | CodegenDeclarationKind::Unsupported(_) => {
+                IrItem::ints([kinds::declaration::TYPE_ALIAS, name])
+            }
+        };
+        self.declarations.push(entry);
+        self.span_module = self.module.id;
+        let span = self.span(declaration.span);
+        self.declaration_spans.push(span);
+    }
 
-fn expression_id(module_id_value: RuntimeModuleId, expr_id: u32, path: &str) -> String {
-    format!("{}:e{}:{path}", module_id(module_id_value), expr_id)
-}
+    fn component(&mut self, name: i64, component: &CodegenComponent) -> IrItem {
+        let first = self
+            .frame
+            .reserve(component.props.len() + component.state.len());
+        let props = self.component_fields(&component.props, first);
+        let state = self.component_fields(&component.state, first + component.props.len() as i64);
+        self.span_module = self.module.id;
+        let body = match &component.body {
+            Some(body) => self.expression(body),
+            None => -1,
+        };
+        let flags = i64::from(component.is_abstract) * kinds::component::ABSTRACT
+            + i64::from(component.is_external) * kinds::component::EXTERNAL;
+        let emits = component
+            .emits
+            .iter()
+            .map(|emit| {
+                let name = self.string(&emit.name);
+                let action = self.reference_item(&emit.action);
+                IrItem::list([IrItem::Int(name), action])
+            })
+            .collect::<Vec<_>>();
+        IrItem::list([
+            IrItem::Int(kinds::declaration::COMPONENT),
+            IrItem::Int(name),
+            props,
+            state,
+            IrItem::Int(body),
+            IrItem::Int(flags),
+            IrItem::List(emits),
+        ])
+    }
 
-fn resolved_item_kind_name(kind: ResolvedItemKind) -> &'static str {
-    match kind {
-        ResolvedItemKind::Function => "function",
-        ResolvedItemKind::Value => "value",
-        ResolvedItemKind::Component => "component",
-        ResolvedItemKind::TypeAlias => "typeAlias",
-        ResolvedItemKind::Union => "union",
-        ResolvedItemKind::Record => "record",
+    /// Emits a component's props or state, whose slots start at `first`. Each field's default
+    /// sees the fields before it; an inherited default was written in its owner's text.
+    fn component_fields(&mut self, fields: &[CodegenComponentField], first: i64) -> IrItem {
+        let items = fields
+            .iter()
+            .enumerate()
+            .map(|(index, field)| {
+                self.span_module = field.owner_module_id;
+                let default = match &field.default {
+                    Some(default) => self.expression(default),
+                    None => -1,
+                };
+                self.frame.bind(&field.name, first + index as i64);
+                let name = self.string(&field.name);
+                let ty = self.type_ref(&field.resolved_ty);
+                let flags = i64::from(field.is_content) * kinds::field::CONTENT
+                    + i64::from(field.is_required) * kinds::field::REQUIRED;
+                IrItem::ints([name, ty, default, flags])
+            })
+            .collect::<Vec<_>>();
+        IrItem::List(items)
+    }
+
+    /// Emits a record's or union case's fields into the current frame, each default seeing the
+    /// fields before it. An inherited default was written in its owner's text, so its spans only
+    /// mean anything in that module.
+    fn record_fields(&mut self, fields: &[CodegenRecordField]) -> IrItem {
+        let first = self.frame.reserve(fields.len());
+        let items = fields
+            .iter()
+            .enumerate()
+            .map(|(index, field)| {
+                self.span_module = field.owner_module_id;
+                let default = match &field.default {
+                    Some(default) => self.expression(default),
+                    None => -1,
+                };
+                self.frame.bind(&field.name, first + index as i64);
+                let name = self.string(&field.name);
+                let ty = self.type_ref(&field.resolved_ty);
+                let flags = i64::from(field.is_content) * kinds::field::CONTENT
+                    + i64::from(field.is_required) * kinds::field::REQUIRED;
+                IrItem::ints([name, ty, default, flags])
+            })
+            .collect::<Vec<_>>();
+        self.span_module = self.module.id;
+        IrItem::List(items)
+    }
+
+    fn expressions(&mut self, expressions: &[CodegenExpression]) -> IrItem {
+        let items = expressions
+            .iter()
+            .map(|expression| self.expression(expression))
+            .collect::<Vec<_>>();
+        IrItem::ints(items)
+    }
+
+    /// Emits properties sorted by name, each as `[name, value]`.
+    fn properties(&mut self, properties: &[CodegenProperty]) -> IrItem {
+        let mut sorted = properties.iter().collect::<Vec<_>>();
+        sorted.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
+        let items = sorted
+            .into_iter()
+            .map(|property| {
+                let value = self.expression(&property.value);
+                let name = self.string(&property.name);
+                IrItem::ints([name, value])
+            })
+            .collect::<Vec<_>>();
+        IrItem::List(items)
+    }
+
+    fn unresolved(&mut self, name: &str, span: TextSpan) {
+        self.diagnostics.push(
+            Diagnostic::error("nx-ir-unresolved-name")
+                .with_message(format!(
+                    "'{name}' is neither a local of this declaration nor a top-level declaration, so no NX IR node can reach it"
+                ))
+                .with_label(Label::primary(module_identity(self.module), span))
+                .build(),
+        );
+    }
+
+    fn expression(&mut self, expression: &CodegenExpression) -> i64 {
+        let span = expression.span;
+        let entry = match &expression.kind {
+            CodegenExpressionKind::Literal(literal) => self.literal(literal),
+            CodegenExpressionKind::Identifier { name, reference } => match reference {
+                Some(reference) => {
+                    let (slot, name) = self.reference(reference);
+                    IrItem::ints([kinds::node::REFERENCE, slot, name])
+                }
+                None => match self.frame.resolve(name) {
+                    Some(slot) => {
+                        let name = self.string(name);
+                        IrItem::ints([kinds::node::SLOT, slot, name])
+                    }
+                    None => {
+                        self.unresolved(name, span);
+                        IrItem::ints([kinds::node::NULL])
+                    }
+                },
+            },
+            CodegenExpressionKind::Binary { lhs, op, rhs } => {
+                let lhs = self.expression(lhs);
+                let rhs = self.expression(rhs);
+                let op = binary_operator(*op, expression.ty.as_ref());
+                IrItem::ints([kinds::node::BINARY, op, lhs, rhs])
+            }
+            CodegenExpressionKind::Unary { op, expr } => {
+                let operand = self.expression(expr);
+                let op = match op {
+                    UnOp::Neg => kinds::unary::NEG,
+                    UnOp::Not => kinds::unary::NOT,
+                };
+                IrItem::ints([kinds::node::UNARY, op, operand])
+            }
+            // Whether a `+` concatenates was decided by type analysis and is the node's own
+            // kind here, so nothing about the operands is consulted. `concat` takes strings
+            // only: the operand that was not one arrives wrapped in a `text` node.
+            CodegenExpressionKind::Concat { lhs, rhs } => {
+                let lhs = self.expression(lhs);
+                let rhs = self.expression(rhs);
+                IrItem::ints([kinds::node::BINARY, kinds::binary::CONCAT, lhs, rhs])
+            }
+            CodegenExpressionKind::ToText { expr, ty } => {
+                let operand = self.expression(expr);
+                let ty = self.string(ty.as_str());
+                IrItem::ints([kinds::node::TEXT, operand, ty])
+            }
+            CodegenExpressionKind::Call { callee, args } => {
+                let callee = self.expression(callee);
+                let args = self.expressions(args);
+                IrItem::list([IrItem::Int(kinds::node::CALL), IrItem::Int(callee), args])
+            }
+            CodegenExpressionKind::NamedCall { callee, args } => {
+                let callee = self.expression(callee);
+                let args = self.properties(args);
+                IrItem::list([
+                    IrItem::Int(kinds::node::NAMED_CALL),
+                    IrItem::Int(callee),
+                    args,
+                ])
+            }
+            CodegenExpressionKind::IntrinsicCall {
+                intrinsic,
+                args,
+                field_order,
+            } => {
+                let args = self.expressions(args);
+                let op = match intrinsic {
+                    UpdateIntrinsic::Apply => kinds::intrinsic::APPLY,
+                    UpdateIntrinsic::Merge => kinds::intrinsic::MERGE,
+                    UpdateIntrinsic::Diff => kinds::intrinsic::DIFF,
+                    UpdateIntrinsic::Changed => kinds::intrinsic::CHANGED,
+                };
+                let order = field_order
+                    .iter()
+                    .flatten()
+                    .map(|name| self.string(name))
+                    .collect::<Vec<_>>();
+                IrItem::list([
+                    IrItem::Int(kinds::node::INTRINSIC),
+                    IrItem::Int(op),
+                    args,
+                    IrItem::ints(order),
+                ])
+            }
+            CodegenExpressionKind::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                let condition = self.expression(condition);
+                let then_branch = self.expression(then_branch);
+                let else_branch = match else_branch {
+                    Some(else_branch) => self.expression(else_branch),
+                    None => -1,
+                };
+                IrItem::ints([kinds::node::IF, condition, then_branch, else_branch])
+            }
+            CodegenExpressionKind::Match {
+                scrutinee,
+                arms,
+                else_branch,
+            } => {
+                let scrutinee = self.expression(scrutinee);
+                let arms = arms
+                    .iter()
+                    .map(|arm| {
+                        let patterns = self.expressions(&arm.patterns);
+                        let body = self.expression(&arm.body);
+                        IrItem::list([patterns, IrItem::Int(body)])
+                    })
+                    .collect::<Vec<_>>();
+                let else_branch = match else_branch {
+                    Some(else_branch) => self.expression(else_branch),
+                    None => -1,
+                };
+                IrItem::list([
+                    IrItem::Int(kinds::node::IF_IS),
+                    IrItem::Int(scrutinee),
+                    IrItem::List(arms),
+                    IrItem::Int(else_branch),
+                ])
+            }
+            CodegenExpressionKind::Let { name, .. } => {
+                self.diagnostics.push(
+                    Diagnostic::error("nx-ir-unsupported-construct")
+                        .with_message(format!(
+                            "a let binding of '{name}' has no NX IR node; NX source cannot write one"
+                        ))
+                        .with_label(Label::primary(module_identity(self.module), span))
+                        .build(),
+                );
+                IrItem::ints([kinds::node::NULL])
+            }
+            CodegenExpressionKind::Block {
+                statements,
+                expression: result,
+            } => {
+                // A block is its result: NX source writes no statements, so a block with any is
+                // a construct the IR has no node for.
+                if !statements.is_empty() {
+                    self.diagnostics.push(
+                        Diagnostic::error("nx-ir-unsupported-construct")
+                            .with_message(
+                                "a block with statements has no NX IR node; NX source cannot write one",
+                            )
+                            .with_label(Label::primary(module_identity(self.module), span))
+                            .build(),
+                    );
+                }
+                return match result {
+                    Some(result) => self.expression(result),
+                    None => self.push_node(IrItem::ints([kinds::node::NULL]), span),
+                };
+            }
+            CodegenExpressionKind::Array(elements) => {
+                let elements = self.expressions(elements);
+                IrItem::list([IrItem::Int(kinds::node::ARRAY), elements])
+            }
+            CodegenExpressionKind::For {
+                item,
+                index,
+                iterable,
+                body,
+            } => {
+                let iterable = self.expression(iterable);
+                self.frame.push();
+                let item_slot = self.frame.alloc(item);
+                let item_name = self.string(item);
+                let (index_slot, index_name) = match index {
+                    Some(index) => (self.frame.alloc(index), self.string(index)),
+                    None => (-1, -1),
+                };
+                let body = self.expression(body);
+                self.frame.pop();
+                IrItem::ints([
+                    kinds::node::FOR,
+                    item_slot,
+                    item_name,
+                    index_slot,
+                    index_name,
+                    iterable,
+                    body,
+                ])
+            }
+            // NX has no syntax for an index expression, so nothing reaches here.
+            CodegenExpressionKind::Index { .. } => {
+                self.diagnostics.push(
+                    Diagnostic::error("nx-ir-unsupported-construct")
+                        .with_message(
+                            "an index expression has no NX IR node; NX source cannot write one",
+                        )
+                        .with_label(Label::primary(module_identity(self.module), span))
+                        .build(),
+                );
+                IrItem::ints([kinds::node::NULL])
+            }
+            CodegenExpressionKind::Member {
+                base,
+                member,
+                reference,
+            } => {
+                // A member chain that analysis resolved to a declaration is that declaration.
+                if let Some(reference) = reference {
+                    let (slot, name) = self.reference(reference);
+                    IrItem::ints([kinds::node::REFERENCE, slot, name])
+                } else {
+                    let base = self.expression(base);
+                    let member = self.string(member);
+                    IrItem::ints([kinds::node::MEMBER, base, member])
+                }
+            }
+            CodegenExpressionKind::Record {
+                name,
+                reference,
+                properties,
+                content,
+                ..
+            } => {
+                let Some(reference) = reference else {
+                    self.diagnostics.push(
+                        Diagnostic::error("nx-ir-unresolved-name")
+                            .with_message(format!(
+                                "record construction of '{name}' does not reach a record declaration"
+                            ))
+                            .with_label(Label::primary(module_identity(self.module), span))
+                            .build(),
+                    );
+                    return self.push_node(IrItem::ints([kinds::node::NULL]), span);
+                };
+                let properties = self.properties(properties);
+                let content = self.expressions(content);
+                let (slot, name) = self.reference(reference);
+                IrItem::list([
+                    IrItem::Int(kinds::node::RECORD),
+                    IrItem::Int(slot),
+                    IrItem::Int(name),
+                    properties,
+                    content,
+                ])
+            }
+            CodegenExpressionKind::UnionCase {
+                union_reference,
+                case_name,
+                properties,
+                content,
+                ..
+            } => {
+                let properties = self.properties(properties);
+                let content = self.expressions(content);
+                let (slot, union) = self.reference(union_reference);
+                let case = self.string(case_name);
+                IrItem::list([
+                    IrItem::Int(kinds::node::UNION_CASE),
+                    IrItem::Int(slot),
+                    IrItem::Int(union),
+                    IrItem::Int(case),
+                    properties,
+                    content,
+                ])
+            }
+            CodegenExpressionKind::ComponentDescriptor(descriptor) => {
+                let properties = self.properties(&descriptor.properties);
+                let content = self.expressions(&descriptor.content);
+                let (slot, name) = self.reference(&descriptor.component);
+                IrItem::list([
+                    IrItem::Int(kinds::node::COMPONENT),
+                    IrItem::Int(slot),
+                    IrItem::Int(name),
+                    properties,
+                    content,
+                ])
+            }
+            CodegenExpressionKind::Element(element) => {
+                let properties = self.properties(&element.properties);
+                let content = self.expressions(&element.content);
+                let tag = self.string(&element.tag);
+                IrItem::list([
+                    IrItem::Int(kinds::node::ELEMENT),
+                    IrItem::Int(i64::from(element.element_id)),
+                    IrItem::Int(tag),
+                    properties,
+                    content,
+                ])
+            }
+            CodegenExpressionKind::ActionHandler(handler) => self.action_handler(handler),
+            // Refused by `validate_ir_program` before emission starts.
+            CodegenExpressionKind::Unsupported(_) => IrItem::ints([kinds::node::NULL]),
+        };
+        self.push_node(entry, span)
+    }
+
+    /// Emits a handler as `[19, ref, str, ref, slot, ref?, node]`: the component and emit it
+    /// answers, the action record it accepts, the slot of its `action` binding, its owner, and
+    /// its body. The slot is the next integer of the enclosing frame, as a `let` binding's would
+    /// be, and the body reads every other local through the slots it already had.
+    fn action_handler(&mut self, handler: &CodegenActionHandler) -> IrItem {
+        let (component_slot, component_name) = self.reference(&handler.component);
+        let emit = self.string(&handler.emit);
+        let (action_slot, action_name) = self.reference(&handler.action);
+        self.frame.push();
+        let slot = self.frame.alloc("action");
+        let body = self.expression(&handler.body);
+        self.frame.pop();
+        let owner = self.optional_reference(handler.owner.as_ref());
+        IrItem::list([
+            IrItem::Int(kinds::node::ACTION_HANDLER),
+            IrItem::Int(component_slot),
+            IrItem::Int(component_name),
+            IrItem::Int(emit),
+            IrItem::Int(action_slot),
+            IrItem::Int(action_name),
+            IrItem::Int(slot),
+            owner,
+            IrItem::Int(body),
+        ])
+    }
+
+    fn literal(&mut self, literal: &Literal) -> IrItem {
+        match literal {
+            Literal::String(value) => {
+                let value = self.string(value);
+                IrItem::ints([kinds::node::STRING, value])
+            }
+            Literal::Int(value) => {
+                let constant = if is_js_safe_integer(*value) {
+                    IrItem::ints([kinds::constant::INT, *value])
+                } else {
+                    let digits = self.string(&value.to_string());
+                    IrItem::ints([kinds::constant::BIGINT, digits])
+                };
+                let constant = self.constant(constant);
+                IrItem::ints([kinds::node::NUMBER, constant])
+            }
+            // A literal's width is not part of the IR: every supported runtime carries the
+            // numeric types in one representation, so an `int32` is an `int` constant and a
+            // `float32` is the `float` constant of its rounded value.
+            Literal::Int32(value) => {
+                let constant =
+                    self.constant(IrItem::ints([kinds::constant::INT, i64::from(*value)]));
+                IrItem::ints([kinds::node::NUMBER, constant])
+            }
+            Literal::Float(value) | Literal::Float32(value) => {
+                let constant = self.constant(IrItem::list([
+                    IrItem::Int(kinds::constant::FLOAT),
+                    IrItem::Float(value.0),
+                ]));
+                IrItem::ints([kinds::node::NUMBER, constant])
+            }
+            Literal::Boolean(value) => IrItem::ints([kinds::node::BOOL, i64::from(*value)]),
+            Literal::Null => IrItem::ints([kinds::node::NULL]),
+        }
     }
 }
 
-fn primitive_name(primitive: Primitive) -> &'static str {
-    match primitive {
-        Primitive::Int => "int",
-        Primitive::Int32 => "int32",
-        Primitive::Int64 => "int64",
-        Primitive::Float32 => "float32",
-        Primitive::Float64 => "float64",
-        Primitive::String => "string",
-        Primitive::Boolean => "boolean",
-        Primitive::Void => "void",
-        Primitive::Never => "never",
-    }
-}
-
-fn binop_name(op: BinOp) -> &'static str {
+/// The operator code of a binary expression, chosen by the expression's own type as the
+/// interpreter chooses it. A runtime carries every number as a `float64`, so the type picks integer
+/// division and remainder, and the `float32` arithmetic whose result is rounded to a `float32`. A
+/// `float32` remainder is exact, so it needs no variant.
+fn binary_operator(op: BinOp, ty: Option<&Type>) -> i64 {
+    let integer = matches!(
+        ty,
+        Some(Type::Primitive(
+            Primitive::Int | Primitive::Int32 | Primitive::Int64
+        ))
+    );
+    let float32 = matches!(ty, Some(Type::Primitive(Primitive::Float32)));
     match op {
-        BinOp::Add => "add",
-        BinOp::Sub => "sub",
-        BinOp::Mul => "mul",
-        BinOp::Div => "div",
-        BinOp::Mod => "mod",
-        BinOp::Eq => "eq",
-        BinOp::Ne => "ne",
-        BinOp::Lt => "lt",
-        BinOp::Le => "le",
-        BinOp::Gt => "gt",
-        BinOp::Ge => "ge",
-        BinOp::And => "and",
-        BinOp::Or => "or",
-        BinOp::Concat => "concat",
-    }
-}
-
-fn unop_name(op: UnOp) -> &'static str {
-    match op {
-        UnOp::Neg => "neg",
-        UnOp::Not => "not",
+        BinOp::Add if float32 => kinds::binary::FADD32,
+        BinOp::Add => kinds::binary::ADD,
+        BinOp::Sub if float32 => kinds::binary::FSUB32,
+        BinOp::Sub => kinds::binary::SUB,
+        BinOp::Mul if float32 => kinds::binary::FMUL32,
+        BinOp::Mul => kinds::binary::MUL,
+        BinOp::Div if integer => kinds::binary::IDIV,
+        BinOp::Div if float32 => kinds::binary::FDIV32,
+        BinOp::Div => kinds::binary::DIV,
+        BinOp::Mod if integer => kinds::binary::IMOD,
+        BinOp::Mod => kinds::binary::MOD,
+        BinOp::Eq => kinds::binary::EQ,
+        BinOp::Ne => kinds::binary::NE,
+        BinOp::Lt => kinds::binary::LT,
+        BinOp::Le => kinds::binary::LE,
+        BinOp::Gt => kinds::binary::GT,
+        BinOp::Ge => kinds::binary::GE,
+        BinOp::And => kinds::binary::AND,
+        BinOp::Or => kinds::binary::OR,
     }
 }
 
 fn is_js_safe_integer(value: i64) -> bool {
     const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
     (-MAX_SAFE_INTEGER..=MAX_SAFE_INTEGER).contains(&value)
-}
-
-fn ir_unsupported_diagnostic(module: &CodegenModule, span: TextSpan, message: &str) -> Diagnostic {
-    Diagnostic::error("nx-ir-unsupported-construct")
-        .with_message(message.to_string())
-        .with_label(Label::primary(module_diagnostic_identity(module), span))
-        .build()
-}
-
-fn module_diagnostic_identity(module: &CodegenModule) -> String {
-    match &module.provenance {
-        CodegenModuleProvenance::SourceProvider { identity } => identity.clone(),
-        CodegenModuleProvenance::Library { module_path, .. } => module_path.display().to_string(),
-    }
 }

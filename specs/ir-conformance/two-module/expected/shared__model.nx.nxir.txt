@@ -1,0 +1,30 @@
+module shared/model.nx fingerprint 14674601980650906756
+entrypoints functions [answer makeUser] components [Card Control]
+
+record Base abstract @2:1-2:43
+  id: int = 7
+
+record User extends Base @3:1-3:48
+  id: int = 7
+  name: string required
+
+union Theme @4:1-4:33
+  case light constant
+  case dark constant
+
+function answer() @5:1-5:34 =
+  42
+
+component Card external @6:1-6:76
+  props
+    Title: string required
+    Theme: Theme = Theme.light
+
+function makeUser(id: int, name: string) @7:1-7:78 =
+  <User id=id name=name />
+
+component Control abstract external @8:1-8:68
+  emits
+    Tapped = Control.Tapped
+
+record Control.Tapped @8:53-8:63

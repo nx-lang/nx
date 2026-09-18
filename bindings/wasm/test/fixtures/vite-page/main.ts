@@ -8,6 +8,6 @@ const module = await compileNxModule(fetch(nxModuleUrl));
 const host = createNxHost(module);
 const artifact = host.buildProgramArtifact("let root() = { 42 }", { fileName: "input.nx" });
 
-document.body.textContent = artifact.generateNxIr().metadata.programFingerprint;
+document.body.textContent = artifact.generateNxIr()[0]!.metadata.fingerprint;
 artifact.dispose();
 host.dispose();

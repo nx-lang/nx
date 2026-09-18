@@ -17,7 +17,7 @@ use nx_hir::{
 };
 use nx_types::{
     common_supertype, is_object_type, resolve_type_ref_with, resolve_type_ref_with_seen,
-    type_satisfies_expected, Type,
+    type_satisfies_expected, Primitive, Type,
 };
 use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
@@ -102,6 +102,10 @@ enum SerializedValue {
     Record {
         type_name: String,
         fields: BTreeMap<String, SerializedValue>,
+    },
+    Function {
+        module: String,
+        name: String,
     },
     ActionHandler {
         module_id: u32,
@@ -200,6 +204,10 @@ enum ValueOrigin {
     Internal,
     /// Supplied by the host through props, explicit state, or a dispatch batch.
     Host,
+    /// Supplied by the host as an argument of an entry call. A number in it takes the width of its
+    /// parameter as a [`ValueOrigin::Host`] number does, but a record in it is passed through as
+    /// the host built it rather than rebuilt from its fields.
+    EntryArgument,
 }
 
 impl Interpreter {
@@ -889,8 +897,13 @@ impl Interpreter {
         let mut ctx = ExecutionContext::with_limits(limits);
         self.bind_top_level_values(module, &mut ctx)?;
 
-        let coerced_args =
-            self.coerce_arguments_for_params(module, args, &function.params, "function call")?;
+        let coerced_args = self.coerce_arguments_for_params(
+            module,
+            args,
+            &function.params,
+            "function call",
+            ValueOrigin::EntryArgument,
+        )?;
 
         // T012: Bind parameters to argument values
         for (param, arg) in function.params.iter().zip(coerced_args.iter()) {
@@ -1648,11 +1661,15 @@ impl Interpreter {
             &format!("component props for '{}'", component.name.as_str()),
         )?;
         let mut visible_fields = FxHashMap::default();
+        // A prop typed by a component type parameter takes whatever the use site's argument
+        // named, and the checker consumed that argument; here the parameter is the top type, as
+        // it is below the checker everywhere else.
+        let props = Self::erase_contract_type_parameters(contract, &contract.props);
         let mut normalized = self.materialize_component_fields(
             module,
             ctx,
             component,
-            &contract.props,
+            &props,
             &mut overrides,
             &mut visible_fields,
             "prop initialization",
@@ -1709,6 +1726,28 @@ impl Interpreter {
         Ok(normalized)
     }
 
+    /// The fields with every type parameter of `contract` replaced by `object` in their types.
+    fn erase_contract_type_parameters(
+        contract: &nx_hir::EffectiveComponentContract,
+        fields: &[nx_hir::EffectiveField],
+    ) -> Vec<nx_hir::EffectiveField> {
+        if contract.type_params.is_empty() {
+            return fields.to_vec();
+        }
+        let params: Vec<Name> = contract
+            .type_params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect();
+        fields
+            .iter()
+            .map(|field| nx_hir::EffectiveField {
+                ty: nx_hir::erase_type_parameters(&field.ty, &params),
+                ..field.clone()
+            })
+            .collect()
+    }
+
     fn materialize_component_state(
         &self,
         module: &LoweredModule,
@@ -1738,12 +1777,14 @@ impl Interpreter {
             .runtime_prepared_module(module)
             .module_identity()
             .to_string();
-        component
+        let fields: Vec<nx_hir::EffectiveField> = component
             .state
             .iter()
             .cloned()
             .map(|field| nx_hir::EffectiveField::from_record_field(field, module_identity.clone()))
-            .collect()
+            .collect();
+        let contract = self.effective_component_contract(module, component);
+        Self::erase_contract_type_parameters(&contract, &fields)
     }
 
     fn normalize_explicit_component_state(
@@ -1984,6 +2025,10 @@ impl Interpreter {
                     .map(|(name, value)| (name.to_string(), Self::serialize_runtime_value(value)))
                     .collect(),
             },
+            Value::Function { module, name } => SerializedValue::Function {
+                module: module.to_string(),
+                name: name.to_string(),
+            },
             Value::ActionHandler {
                 module_id,
                 component,
@@ -2046,6 +2091,10 @@ impl Interpreter {
                         ))
                     })
                     .collect::<Result<FxHashMap<_, _>, RuntimeError>>()?,
+            }),
+            SerializedValue::Function { module, name } => Ok(Value::Function {
+                module: SmolStr::new(module.as_str()),
+                name: SmolStr::new(name.as_str()),
             }),
             SerializedValue::ActionHandler {
                 module_id,
@@ -2116,7 +2165,7 @@ impl Interpreter {
         let expr = module.expr(expr_id);
         match expr {
             ast::Expr::Literal(lit) => self.eval_literal(lit),
-            ast::Expr::Ident(name) => self.eval_ident(ctx, name),
+            ast::Expr::Ident(name) => self.eval_ident(module, ctx, name),
             ast::Expr::Block { stmts, expr, .. } => {
                 self.eval_block(module, ctx, stmts, expr.as_ref())
             }
@@ -2124,6 +2173,15 @@ impl Interpreter {
                 self.eval_binary_op(module, ctx, *lhs, *op, *rhs)
             }
             ast::Expr::UnaryOp { op, expr, .. } => self.eval_unary_op(module, ctx, *op, *expr),
+            ast::Expr::Concat { lhs, rhs, .. } => self.eval_concat(module, ctx, *lhs, *rhs),
+            ast::Expr::ToText { expr, .. } => self.eval_to_text(module, ctx, *expr),
+            ast::Expr::Widen { expr, ty, .. } => {
+                let value = self.eval_expr(module, ctx, *expr)?;
+                Ok(Self::widened_value(
+                    value,
+                    &Type::Primitive(Primitive::from_hir_type(*ty)),
+                ))
+            }
             ast::Expr::If {
                 condition,
                 then_branch,
@@ -2194,11 +2252,61 @@ impl Interpreter {
         }
     }
 
+    /// Evaluate a string concatenation: a `+` analysis found to have a string operand.
+    ///
+    /// <para>Both operands are strings here. Whether a `+` concatenates was decided by the type
+    /// checker, and the same rewrite wrapped each operand that was not a string in an
+    /// `Expr::ToText`, so there is nothing left to decide from the values.</para>
+    fn eval_concat(
+        &self,
+        module: &LoweredModule,
+        ctx: &mut ExecutionContext,
+        lhs: ExprId,
+        rhs: ExprId,
+    ) -> Result<Value, RuntimeError> {
+        let lhs = self.eval_expr(module, ctx, lhs)?;
+        let rhs = self.eval_expr(module, ctx, rhs)?;
+        match (lhs, rhs) {
+            (Value::String(lhs), Value::String(rhs)) => {
+                let mut joined = String::with_capacity(lhs.len() + rhs.len());
+                joined.push_str(&lhs);
+                joined.push_str(&rhs);
+                Ok(Value::String(joined.into()))
+            }
+            (lhs, rhs) => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: "string".to_string(),
+                actual: format!("{} and {}", lhs.type_name(), rhs.type_name()),
+                operation: "concatenation".to_string(),
+            })),
+        }
+    }
+
+    /// Evaluate the conversion of a primitive value to its canonical text form.
+    fn eval_to_text(
+        &self,
+        module: &LoweredModule,
+        ctx: &mut ExecutionContext,
+        expr: ExprId,
+    ) -> Result<Value, RuntimeError> {
+        let value = self.eval_expr(module, ctx, expr)?;
+        match value.to_text() {
+            Some(text) => Ok(Value::String(text.into())),
+            None => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: "a string, a number or a boolean".to_string(),
+                actual: value.type_name().to_string(),
+                operation: "text conversion".to_string(),
+            })),
+        }
+    }
+
     /// Evaluate a literal expression (T015 - placeholder)
     fn eval_literal(&self, lit: &ast::Literal) -> Result<Value, RuntimeError> {
         let value = match lit {
             ast::Literal::Int(n) => Value::Int(*n),
+            ast::Literal::Int32(n) => Value::Int32(*n),
             ast::Literal::Float(f) => Value::Float(f.0),
+            // Already rounded to the nearest float32 when the literal took the type.
+            ast::Literal::Float32(f) => Value::Float32(f.0 as f32),
             ast::Literal::String(s) => Value::String(s.clone()),
             ast::Literal::Boolean(b) => Value::Boolean(*b),
             ast::Literal::Null => Value::Null,
@@ -2265,8 +2373,91 @@ impl Interpreter {
     }
 
     /// Evaluate an identifier (T016 - placeholder)
-    fn eval_ident(&self, ctx: &ExecutionContext, name: &Name) -> Result<Value, RuntimeError> {
-        ctx.lookup_variable(name.as_str())
+    /// A name in expression position: a variable in scope, or else a visible function, which is a
+    /// value naming its declaration. A variable shadows a function of the same name, as it shadows
+    /// any top-level name.
+    fn eval_ident(
+        &self,
+        module: &LoweredModule,
+        ctx: &ExecutionContext,
+        name: &Name,
+    ) -> Result<Value, RuntimeError> {
+        if let Some(value) = ctx.try_lookup_variable(name.as_str()) {
+            return Ok(value);
+        }
+        if let Some((target_module, Item::Function(function))) =
+            self.resolve_item(module, name.as_str())
+        {
+            return Ok(Value::Function {
+                module: SmolStr::new(
+                    self.runtime_prepared_module(target_module)
+                        .module_identity(),
+                ),
+                name: SmolStr::new(function.name.as_str()),
+            });
+        }
+        Err(RuntimeError::new(RuntimeErrorKind::UndefinedVariable {
+            name: SmolStr::new(name.as_str()),
+        }))
+    }
+
+    /// Calls the function a [`Value::Function`] names with arguments bound by name.
+    ///
+    /// <para>This is the run-time half of the subset rule: the caller supplied every parameter of
+    /// the *type* it knows, so a parameter the declaration does not have is dropped, and one it
+    /// does have is required. Body content goes to the declaration's content parameter when it
+    /// has one, and is dropped like any other undeclared parameter otherwise.</para>
+    fn call_function_value(
+        &self,
+        module: &LoweredModule,
+        ctx: &mut ExecutionContext,
+        function_module: &str,
+        function_name: &str,
+        mut fields: FxHashMap<SmolStr, Value>,
+        normalized_content: Option<Value>,
+    ) -> Result<Value, RuntimeError> {
+        const OPERATION: &str = "function value call";
+        let target_module = self.module_for_identity(module, function_module, OPERATION)?;
+        let Some(Item::Function(function)) = target_module.find_item(function_name) else {
+            return Err(RuntimeError::new(RuntimeErrorKind::FunctionNotFound {
+                name: SmolStr::new(function_name),
+            }));
+        };
+
+        if let Some(content_param) = function.content_param() {
+            self.inject_element_content_field(
+                &mut fields,
+                normalized_content,
+                Some(content_param.name.as_str()),
+                "function without a declared content parameter",
+                OPERATION,
+            )?;
+        }
+
+        let mut arg_values = Vec::with_capacity(function.params.len());
+        for param in &function.params {
+            match fields.remove(param.name.as_str()) {
+                Some(value) => arg_values.push(self.coerce_value_to_type(
+                    target_module,
+                    value,
+                    &param.ty,
+                    &format!("parameter '{}'", param.name.as_str()),
+                )?),
+                None => {
+                    return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                        expected: format!(
+                            "argument '{}' for function '{}'",
+                            param.name.as_str(),
+                            function_name
+                        ),
+                        actual: "missing".to_string(),
+                        operation: OPERATION.to_string(),
+                    }))
+                }
+            }
+        }
+
+        self.eval_function_call(target_module, ctx, function_name, function, arg_values)
     }
 
     /// Evaluate a block expression (T014 - placeholder)
@@ -2381,8 +2572,7 @@ impl Interpreter {
                     | ast::BinOp::Sub
                     | ast::BinOp::Mul
                     | ast::BinOp::Div
-                    | ast::BinOp::Mod
-                    | ast::BinOp::Concat => {
+                    | ast::BinOp::Mod => {
                         crate::eval::arithmetic::eval_arithmetic_op(lhs_val, op, rhs_val)
                     }
 
@@ -2834,6 +3024,7 @@ impl Interpreter {
             arg_values,
             &function.params,
             "function call",
+            ValueOrigin::Internal,
         )?;
 
         ctx.push_scope();
@@ -2927,6 +3118,23 @@ impl Interpreter {
 
         let content_values = self.eval_content_expressions(module, ctx, &element.content)?;
         let normalized_content = self.normalize_content_values(&element.content, content_values);
+
+        // A tag that names a function-typed value in scope — a parameter, a prop, a `let` — is a
+        // call of that value, ahead of any declared element of the same name.
+        if let Some(Value::Function {
+            module: function_module,
+            name: function_name,
+        }) = ctx.try_lookup_variable(tag_name)
+        {
+            return self.call_function_value(
+                module,
+                ctx,
+                &function_module,
+                &function_name,
+                fields,
+                normalized_content,
+            );
+        }
 
         if let Some((target_module, union_def, case)) =
             self.resolve_union_case_definition(module, tag_name)
@@ -3253,14 +3461,16 @@ impl Interpreter {
         arg_values: Vec<Value>,
         params: &[nx_hir::Param],
         operation: &str,
+        origin: ValueOrigin,
     ) -> Result<Vec<Value>, RuntimeError> {
         let mut coerced = Vec::with_capacity(arg_values.len());
         for (param, value) in params.iter().zip(arg_values) {
-            coerced.push(self.coerce_value_to_type(
+            coerced.push(self.coerce_value_to_type_from(
                 module,
                 value,
                 &param.ty,
                 &format!("{} parameter '{}'", operation, param.name.as_str()),
+                origin,
             )?);
         }
         Ok(coerced)
@@ -3370,6 +3580,20 @@ impl Interpreter {
             }
         }
 
+        // A function value at a function type was checked against it statically — by name, with
+        // the subset rule — and carries no fields to rebuild, so it passes as it is. `object`
+        // takes it like any value.
+        if let Value::Function { .. } = &value {
+            if matches!(expected, Type::Function { .. }) || is_object_type(expected) {
+                return Ok(value);
+            }
+            return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: expected.to_string(),
+                actual: value.to_string(),
+                operation: operation.to_string(),
+            }));
+        }
+
         // A record the interpreter built keeps its shape: it was constructed against its
         // declaration already, so re-checking it on every function call would only cost time. A
         // record the host supplied is rebuilt from its fields, which is where unknown fields,
@@ -3384,7 +3608,9 @@ impl Interpreter {
                     }));
                 }
                 match origin {
-                    ValueOrigin::Internal => Ok(Value::Record { type_name, fields }),
+                    ValueOrigin::Internal | ValueOrigin::EntryArgument => {
+                        Ok(Value::Record { type_name, fields })
+                    }
                     ValueOrigin::Host => {
                         self.construct_host_record_value(module, type_name, fields, operation)
                     }
@@ -3404,7 +3630,7 @@ impl Interpreter {
                     }))
                 }
             }
-            other => self.coerce_non_record_value(other, expected, operation),
+            other => self.coerce_non_record_value(other, expected, operation, origin),
         }
     }
 
@@ -3413,7 +3639,15 @@ impl Interpreter {
         value: Value,
         expected: &Type,
         operation: &str,
+        origin: ValueOrigin,
     ) -> Result<Value, RuntimeError> {
+        let value = match origin {
+            ValueOrigin::Internal => value,
+            ValueOrigin::Host | ValueOrigin::EntryArgument => {
+                Self::host_number_at_site(value, expected, operation)?
+            }
+        };
+
         if matches!(value, Value::Array(_)) && !is_object_type(expected) {
             let actual_ty = self.runtime_type_of_value(&value);
             return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
@@ -3424,7 +3658,7 @@ impl Interpreter {
         }
 
         if self.value_matches_expected_type(&value, expected) {
-            Ok(value)
+            Ok(Self::widened_to_site(value, expected))
         } else {
             let actual_ty = self.runtime_type_of_value(&value);
             Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
@@ -3432,6 +3666,84 @@ impl Interpreter {
                 actual: actual_ty.to_string(),
                 operation: operation.to_string(),
             }))
+        }
+    }
+
+    /// Gives a numeric value that was accepted by widening the type of the site it is bound at.
+    ///
+    /// <para>This is the one place a declared type meets a value, so it is where an implicit
+    /// numeric conversion happens at run time: an `int` bound at a `float64` property is the
+    /// `float64` `3.0` from here on, not an integer a consumer is left to widen. The canonical
+    /// output tells the two apart, which is why the value is converted rather than left alone.
+    /// Lists and nullable types have been taken apart by the caller, so only a scalar arrives.
+    /// `int64` has no carrier of its own, so widening to it changes only an `int32`.</para>
+    fn widened_to_site(value: Value, expected: &Type) -> Value {
+        let Type::Primitive(expected) = expected else {
+            return value;
+        };
+        match (value, expected) {
+            (Value::Int32(n), Primitive::Int | Primitive::Int64) => Value::Int(i64::from(n)),
+            (Value::Int32(n), Primitive::Float64) => Value::Float(f64::from(n)),
+            (Value::Int(n), Primitive::Float64) => Value::Float(n as f64),
+            (Value::Float32(n), Primitive::Float64) => Value::Float(f64::from(n)),
+            (value, _) => value,
+        }
+    }
+
+    /// Gives a number the host supplied the width of the site it is bound at.
+    ///
+    /// <para>A host has no way to spell `int32` or `float32`: a JSON number arrives as an `int` or
+    /// a `float64`. Such a number takes a narrower site's width on the terms a literal written
+    /// there does: an integer after a range check at `int32` and an exactness check at `float32`,
+    /// and a real by rounding at `float32`. A number that cannot take the width is refused here.
+    /// Checked NX never needs this, because analysis already guarantees nothing narrows.
+    /// Lists and nullable types have been taken apart by the caller, so only a scalar
+    /// arrives.</para>
+    fn host_number_at_site(
+        value: Value,
+        expected: &Type,
+        operation: &str,
+    ) -> Result<Value, RuntimeError> {
+        let out_of_range = |actual: String, target: &str| {
+            RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: target.to_string(),
+                actual,
+                operation: operation.to_string(),
+            })
+        };
+        match (value, expected) {
+            (Value::Int(n), Type::Primitive(Primitive::Int32)) => i32::try_from(n)
+                .map(Value::Int32)
+                .map_err(|_| out_of_range(format!("{} (out of range for int32)", n), "int32")),
+            (Value::Int(n), Type::Primitive(Primitive::Float32)) => {
+                if Primitive::Float32.represents_integer_exactly(n) {
+                    Ok(Value::Float32(n as f32))
+                } else {
+                    Err(out_of_range(
+                        format!("{} (not exact as a float32)", n),
+                        "float32",
+                    ))
+                }
+            }
+            (Value::Float(x), Type::Primitive(Primitive::Float32)) => Ok(Value::Float32(x as f32)),
+            (value, _) => Ok(value),
+        }
+    }
+
+    /// Widens the numbers in a branch of a join to the join's numeric type, item by item in a list.
+    ///
+    /// <para>The type checker wrapped the branch in an `Expr::Widen` because its type is narrower
+    /// than the join's. `null` and anything that is not a number are left alone.</para>
+    fn widened_value(value: Value, target: &Type) -> Value {
+        match value {
+            Value::Array(items) => Value::Array(
+                items
+                    .iter()
+                    .cloned()
+                    .map(|item| Self::widened_value(item, target))
+                    .collect(),
+            ),
+            value => Self::widened_to_site(value, target),
         }
     }
 
@@ -3467,6 +3779,10 @@ impl Interpreter {
             }
             Value::UnionCase { union, .. } => Type::named(union.clone()),
             Value::Record { type_name, .. } => Type::named(type_name.clone()),
+            // A function value's type is its declaration's, which needs the declaring module to
+            // read; coercion accepts a function value at a function type before asking here, so
+            // this is only ever display.
+            Value::Function { .. } => Type::named("function"),
             // Handlers are opaque runtime callback objects rather than first-class typed functions.
             Value::ActionHandler { .. } => Type::named("action_handler"),
         }

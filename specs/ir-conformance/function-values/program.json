@@ -1,0 +1,36 @@
+{
+  "entry": "main.nx",
+  "emit": [
+    "main.nx"
+  ],
+  "entrypoints": [
+    {
+      "module": "main.nx",
+      "function": "identical"
+    },
+    {
+      "module": "main.nx",
+      "function": "distinct"
+    },
+    {
+      "module": "main.nx",
+      "function": "exact"
+    },
+    {
+      "module": "main.nx",
+      "function": "subset"
+    },
+    {
+      "module": "main.nx",
+      "function": "called"
+    },
+    {
+      "module": "main.nx",
+      "function": "template"
+    },
+    {
+      "module": "main.nx",
+      "function": "root"
+    }
+  ]
+}

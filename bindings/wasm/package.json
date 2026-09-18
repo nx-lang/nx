@@ -48,6 +48,7 @@
   },
   "devDependencies": {
     "@nx-lang/language-http": "workspace:*",
+    "@nx-lang/ir-runtime": "workspace:*",
     "@nx-lang/sdk-node": "workspace:*",
     "@types/node": "^22.20.0",
     "typescript": "^6.0.3",

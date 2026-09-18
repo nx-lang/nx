@@ -319,139 +319,596 @@
   "components": {
     "SkiaLayout": {
       "class": "SkiaLayout",
-      "content": "Children"
+      "content": "Children",
+      "events": {
+        "ChildTapped": [],
+        "ConsumeGestures": [],
+        "ContextMenu": [],
+        "Tapped": []
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaStack": {
       "class": "SkiaStack",
-      "content": "Children"
+      "content": "Children",
+      "events": {
+        "ChildTapped": [],
+        "ConsumeGestures": [],
+        "ContextMenu": [],
+        "Tapped": []
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaRow": {
       "class": "SkiaRow",
-      "content": "Children"
+      "content": "Children",
+      "events": {
+        "ChildTapped": [],
+        "ConsumeGestures": [],
+        "ContextMenu": [],
+        "Tapped": []
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaLayer": {
       "class": "SkiaLayer",
-      "content": "Children"
+      "content": "Children",
+      "events": {
+        "ChildTapped": [],
+        "ConsumeGestures": [],
+        "ContextMenu": [],
+        "Tapped": []
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaWrap": {
       "class": "SkiaWrap",
-      "content": "Children"
+      "content": "Children",
+      "events": {
+        "ChildTapped": [],
+        "ConsumeGestures": [],
+        "ContextMenu": [],
+        "Tapped": []
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaGrid": {
       "class": "SkiaGrid",
-      "content": "Children"
+      "content": "Children",
+      "events": {
+        "ChildTapped": [],
+        "ConsumeGestures": [],
+        "ContextMenu": [],
+        "Tapped": []
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaDecoratedGrid": {
       "class": "SkiaDecoratedGrid",
-      "content": "Children"
+      "content": "Children",
+      "events": {
+        "ChildTapped": [],
+        "ConsumeGestures": [],
+        "ContextMenu": [],
+        "Tapped": []
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaBackdrop": {
       "class": "SkiaBackdrop",
-      "content": "Children"
+      "content": "Children",
+      "events": {
+        "ChildTapped": [],
+        "ConsumeGestures": [],
+        "ContextMenu": [],
+        "Tapped": []
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaEditor": {
       "class": "SkiaEditor",
-      "content": null
+      "content": null,
+      "events": {
+        "ChildTapped": [],
+        "ConsumeGestures": [],
+        "ContextMenu": [],
+        "CursorMoved": [],
+        "FocusChanged": [
+          "focused"
+        ],
+        "Tapped": [],
+        "TextChanged": [
+          "text"
+        ],
+        "TextSubmitted": [
+          "text"
+        ]
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaSprite": {
       "class": "SkiaSprite",
-      "content": null
+      "content": null,
+      "events": {
+        "ChildTapped": [],
+        "ConsumeGestures": [],
+        "ContextMenu": [],
+        "Error": [],
+        "Finished": [],
+        "Started": [],
+        "Success": [
+          "source"
+        ],
+        "Tapped": []
+      }
     },
     "SkiaSpriteSet": {
       "class": "SkiaSpriteSet",
-      "content": "Children"
+      "content": "Children",
+      "events": {
+        "ChildTapped": [],
+        "ConsumeGestures": [],
+        "ContextMenu": [],
+        "Tapped": []
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaLabel": {
       "class": "SkiaLabel",
-      "content": "Children"
+      "content": "Children",
+      "events": {
+        "ChildTapped": [],
+        "ConsumeGestures": [],
+        "ContextMenu": [],
+        "Tapped": []
+      }
     },
     "SkiaRichLabel": {
       "class": "SkiaRichLabel",
-      "content": null
+      "content": null,
+      "events": {
+        "ChildTapped": [],
+        "ConsumeGestures": [],
+        "ContextMenu": [],
+        "LinkTapped": [
+          "url"
+        ],
+        "Tapped": []
+      }
     },
     "TextSpan": {
       "class": "TextSpan",
-      "content": null
+      "content": null,
+      "events": {
+        "Tapped": []
+      }
     },
     "SkiaHotspot": {
       "class": "SkiaHotspot",
-      "content": null
+      "content": null,
+      "events": {
+        "ChildTapped": [],
+        "ConsumeGestures": [],
+        "ContextMenu": [],
+        "Down": [],
+        "Tapped": [],
+        "Up": []
+      }
     },
     "SkiaButton": {
       "class": "SkiaButton",
-      "content": null
+      "content": null,
+      "events": {
+        "ChildTapped": [],
+        "ConsumeGestures": [],
+        "ContextMenu": [],
+        "Down": [],
+        "Tapped": [],
+        "Up": []
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaImage": {
       "class": "SkiaImage",
-      "content": null
+      "content": null,
+      "events": {
+        "ChildTapped": [],
+        "ConsumeGestures": [],
+        "ContextMenu": [],
+        "Error": [],
+        "Success": [
+          "source"
+        ],
+        "Tapped": []
+      }
     },
     "SkiaImageTiles": {
       "class": "SkiaImageTiles",
-      "content": null
+      "content": null,
+      "events": {
+        "ChildTapped": [],
+        "ConsumeGestures": [],
+        "ContextMenu": [],
+        "Error": [],
+        "Success": [
+          "source"
+        ],
+        "Tapped": []
+      }
     },
     "SkiaSvg": {
       "class": "SkiaSvg",
-      "content": null
+      "content": null,
+      "events": {
+        "ChildTapped": [],
+        "ConsumeGestures": [],
+        "ContextMenu": [],
+        "Error": [],
+        "Success": [
+          "source"
+        ],
+        "Tapped": []
+      }
     },
     "SkiaLottie": {
       "class": "SkiaLottie",
-      "content": null
+      "content": null,
+      "events": {
+        "ChildTapped": [],
+        "ConsumeGestures": [],
+        "ContextMenu": [],
+        "Error": [],
+        "Finished": [],
+        "Started": [],
+        "Success": [
+          "source"
+        ],
+        "Tapped": []
+      }
     },
     "SkiaGif": {
       "class": "SkiaGif",
-      "content": null
+      "content": null,
+      "events": {
+        "ChildTapped": [],
+        "ConsumeGestures": [],
+        "ContextMenu": [],
+        "Error": [],
+        "Finished": [],
+        "Started": [],
+        "Success": [
+          "source"
+        ],
+        "Tapped": []
+      }
     },
     "SkiaScroll": {
       "class": "SkiaScroll",
-      "content": "Children"
+      "content": "Children",
+      "events": {
+        "ChildTapped": [],
+        "ConsumeGestures": [],
+        "ContextMenu": [],
+        "CurrentIndexChanged": [
+          "index"
+        ],
+        "LoadMoreCommand": [],
+        "LoadMoreTopCommand": [],
+        "RefreshCommand": [],
+        "Scrolled": [],
+        "Tapped": []
+      }
     },
     "SkiaScrollBar": {
       "class": "SkiaScrollBar",
-      "content": "Children"
+      "content": "Children",
+      "events": {
+        "ChildTapped": [],
+        "ConsumeGestures": [],
+        "ContextMenu": [],
+        "Tapped": []
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "RefreshIndicator": {
       "class": "RefreshIndicator",
-      "content": "Children"
+      "content": "Children",
+      "events": {
+        "ChildTapped": [],
+        "ConsumeGestures": [],
+        "ContextMenu": [],
+        "Tapped": []
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaShape": {
       "class": "SkiaShape",
-      "content": "Children"
+      "content": "Children",
+      "events": {
+        "ChildTapped": [],
+        "ConsumeGestures": [],
+        "ContextMenu": [],
+        "Tapped": []
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaFrame": {
       "class": "SkiaFrame",
-      "content": "Children"
+      "content": "Children",
+      "events": {
+        "ChildTapped": [],
+        "ConsumeGestures": [],
+        "ContextMenu": [],
+        "Tapped": []
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaSwitch": {
       "class": "SkiaSwitch",
-      "content": null
+      "content": null,
+      "events": {
+        "ChildTapped": [],
+        "ConsumeGestures": [],
+        "ContextMenu": [],
+        "Tapped": [],
+        "Toggled": [
+          "value"
+        ]
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaCheckbox": {
       "class": "SkiaCheckbox",
-      "content": null
+      "content": null,
+      "events": {
+        "ChildTapped": [],
+        "ConsumeGestures": [],
+        "ContextMenu": [],
+        "Tapped": [],
+        "Toggled": [
+          "value"
+        ]
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaRadioButton": {
       "class": "SkiaRadioButton",
-      "content": null
+      "content": null,
+      "events": {
+        "ChildTapped": [],
+        "ConsumeGestures": [],
+        "ContextMenu": [],
+        "Tapped": [],
+        "Toggled": [
+          "value"
+        ]
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaProgress": {
       "class": "SkiaProgress",
-      "content": null
+      "content": null,
+      "events": {
+        "ChildTapped": [],
+        "ConsumeGestures": [],
+        "ContextMenu": [],
+        "Tapped": []
+      }
     },
     "SkiaSlider": {
       "class": "SkiaSlider",
-      "content": null
+      "content": null,
+      "events": {
+        "ChildTapped": [],
+        "ConsumeGestures": [],
+        "ContextMenu": [],
+        "EndChanged": [
+          "value"
+        ],
+        "StartChanged": [
+          "value"
+        ],
+        "Tapped": []
+      }
     },
     "SkiaCarousel": {
       "class": "SkiaCarousel",
-      "content": "Children"
+      "content": "Children",
+      "events": {
+        "ChildTapped": [],
+        "ConsumeGestures": [],
+        "ContextMenu": [],
+        "ItemAppearing": [
+          "index"
+        ],
+        "ItemDisappearing": [
+          "index"
+        ],
+        "Scrolled": [],
+        "SelectedIndexChanged": [
+          "index"
+        ],
+        "Stopped": [],
+        "Tapped": [],
+        "TransitionChanged": [
+          "inTransition"
+        ]
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaShaderCarousel": {
       "class": "SkiaShaderCarousel",
-      "content": "Children"
+      "content": "Children",
+      "events": {
+        "ChildTapped": [],
+        "ConsumeGestures": [],
+        "ContextMenu": [],
+        "FromToChanged": [],
+        "ItemAppearing": [
+          "index"
+        ],
+        "ItemDisappearing": [
+          "index"
+        ],
+        "Scrolled": [],
+        "SelectedIndexChanged": [
+          "index"
+        ],
+        "Stopped": [],
+        "Tapped": [],
+        "TransitionChanged": [
+          "inTransition"
+        ]
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaDrawer": {
       "class": "SkiaDrawer",
-      "content": "Children"
+      "content": "Children",
+      "events": {
+        "ChildTapped": [],
+        "ConsumeGestures": [],
+        "ContextMenu": [],
+        "IsOpenChanged": [
+          "isOpen"
+        ],
+        "Scrolled": [],
+        "StateTransitionComplete": [
+          "isOpen"
+        ],
+        "Stopped": [],
+        "Tapped": [],
+        "TransitionChanged": [
+          "inTransition"
+        ]
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     }
   }
 }

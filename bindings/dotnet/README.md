@@ -522,6 +522,33 @@ A token is valid only with the snapshot returned by the same call: every dispatc
 returns fresh tokens and retires the previous ones. Pure evaluation output carries no tokens. A batch that mixes
 emitted actions and handler invocations can be passed as an `object[]`.
 
+### Function Values in Rendered Output
+
+A function value in NX names a declaration and captures nothing, so rendered output represents one as a `Function`
+record with the declaring module's identity and the function's name — a template bound to a list, most often. Type the
+property as `NxFunctionRef` to read which function it was handed:
+
+```csharp
+string source = """
+    external component <List ItemTemplate:(<function Item:object Index:int />: string)? />
+    let <Row Item:object Index:int />: string = "r"
+    let root() = <List ItemTemplate={Row} />
+    """;
+
+[MessagePackObject]
+public sealed class ListElement
+{
+    [Key("ItemTemplate")] public NxFunctionRef? ItemTemplate { get; set; }
+}
+
+ListElement rendered = NxRuntime.Evaluate<ListElement>(source, "templates.nx");
+// rendered.ItemTemplate.Module == "templates.nx"; rendered.ItemTemplate.Name == "Row"
+```
+
+`typegen` types a function-typed member this way too. A .NET host can read a function value and pass the record
+along, but not call it: a function value is invoked by the NX program that received it, and a `Function` record
+supplied back as a prop, as state, or inside an action is refused.
+
 ### Update Records and `NxOptional<T>`
 
 Generated `<Name>_update` DTOs type every property as `NxOptional<T>`, which tells an unset property ("leave this

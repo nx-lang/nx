@@ -307,6 +307,57 @@ component <Counter step:int = 1 /> = {
 let touched(patch:Counter.Update): Counter.Property[] = {changed(patch)}
 ```
 
+## Functions as values
+
+A bare identifier that names a visible function — element or paren style, declared in the same
+file, a same-library peer, or an import — is a value of that function's [type](/reference/syntax/types#function-types).
+Bind it to a function-typed property or value by name:
+
+```nx
+abstract external component <DrawnNode />
+type Contact = { name:string }
+type RowTemplate = <function Item:Contact Index:int />: DrawnNode
+external component <List extends DrawnNode
+  TItem:type
+  ItemsSource:TItem[]?
+  ItemTemplate:(<function Item:TItem Index:int />: DrawnNode)?
+/>
+external component <Label extends DrawnNode Text:string? />
+
+let <ContactRow Item:Contact Index:int />: DrawnNode = <Label Text={"" + Index + " " + Item.name} />
+let <Compact Item:Contact />: DrawnNode = <Label Text={Item.name} />
+
+let contacts = { <Contact name="Ada" /> <Contact name="Kai" /> }
+let full = <List TItem=Contact ItemsSource={contacts} ItemTemplate={ContactRow} />
+let short = <List TItem=Contact ItemsSource={contacts} ItemTemplate={Compact} />
+let rows: RowTemplate[] = { ContactRow Compact }
+```
+
+A function value is a reference to its declaration and captures nothing: functions are module-level
+and a body declares nothing of its own. A runtime renders one as the record
+`{ "$type": "Function", "module": "<module>", "name": "ContactRow" }`, which a host — a list that
+recycles its cells, say — calls once per item. A lexical binding of the same name shadows the
+function, as it shadows any top-level name.
+
+### Invoking a function-typed value
+
+A parameter, prop or local `let` whose type is a function type is invoked as an element. Arguments
+bind to the **type's** parameters by name, every parameter of the type is required, and the call
+has the type's result type:
+
+```nx
+component <Highlight extends DrawnNode Item:Contact Row:RowTemplate /> = {
+  <Row Item={Item} Index=0 />
+}
+let pinned = <Highlight Item=<Contact name="Zed" /> Row={Compact} />
+```
+
+The **subset rule** decides what happens at run time: the arguments reach the function by name, a
+parameter the function does not declare is dropped (`Compact` never sees `Index`), and a parameter
+it does declare is always present, because the type supplied it. A paren-style call on a
+function-typed value, `Row(item, 0)`, is rejected with a diagnostic showing the element form:
+positions would depend on the order of parameters the value's own declaration does not share.
+
 ## Paren-style Functions
 
 ```nx

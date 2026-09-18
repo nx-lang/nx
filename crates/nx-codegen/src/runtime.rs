@@ -36,6 +36,7 @@ export type NxResult<T> =
 export type NxSchema =
   | "any"
   | "boolean"
+  | "float32"
   | "number"
   | "string"
   | { readonly array: NxSchema }
@@ -83,6 +84,7 @@ export type NxComponentSchema<TProps, TState, TRendered> = {
 
 export const nxAnySchema: NxSchema = "any";
 export const nxBooleanSchema: NxSchema = "boolean";
+export const nxFloat32Schema: NxSchema = "float32";
 export const nxNumberSchema: NxSchema = "number";
 export const nxStringSchema: NxSchema = "string";
 
@@ -330,6 +332,17 @@ export function nxNormalizeValue(value: NxValue, schema: NxSchema, path: string)
         return value;
       }
       break;
+    // JSON cannot spell a float32, so a number takes the width of its site as a literal written
+    // there does: an integer only when a float32 holds it exactly, a real rounded to the nearest.
+    case "float32":
+      if (
+        typeof value === "number" &&
+        Number.isFinite(value) &&
+        (!Number.isInteger(value) || Math.fround(value) === value)
+      ) {
+        return Math.fround(value);
+      }
+      break;
     case "string":
       if (typeof value === "string") {
         return value;
@@ -442,6 +455,54 @@ export function nxDiffRecords(before: unknown, after: unknown): any {
   return output;
 }
 
+/**
+ * Integer division, which truncates toward zero as the interpreter and the IR runtime's `idiv` do.
+ */
+export function nxIntDiv(dividend: number, divisor: number): number {
+  return Math.trunc(nxDiv(dividend, divisor)) + 0;
+}
+
+/**
+ * Division, which fails on a zero divisor as the interpreter and the IR runtime's `div` do, rather
+ * than producing JavaScript's `Infinity` or `NaN`.
+ */
+export function nxDiv(dividend: number, divisor: number): number {
+  if (divisor === 0) {
+    nxRuntimeError("Division by zero");
+  }
+  return dividend / divisor;
+}
+
+/**
+ * A remainder, which fails on a zero divisor as the interpreter and the IR runtime's `mod` do,
+ * rather than producing JavaScript's `NaN`.
+ */
+export function nxMod(dividend: number, divisor: number): number {
+  if (divisor === 0) {
+    nxRuntimeError("Division by zero");
+  }
+  return (dividend % divisor) + 0;
+}
+
+/**
+ * The canonical text form of a `float32`, which generated code carries as the `number` it widens
+ * to. `String(value)` would print that widening's digits (`0.10000000149011612`); this prints the
+ * shortest digits that round-trip to the same `float32` (`0.1`), in the same ECMAScript layout.
+ */
+export function nxFloat32Text(value: number): string {
+  const target = Math.fround(value);
+  if (!Number.isFinite(target) || target === 0) {
+    return String(target);
+  }
+  for (let precision = 1; precision <= 9; precision += 1) {
+    const candidate = Number(target.toPrecision(precision));
+    if (Math.fround(candidate) === target) {
+      return String(candidate);
+    }
+  }
+  return String(target);
+}
+
 export function nxChangedFields(update: unknown, order: readonly string[]): any[] {
   if (!Array.isArray(order)) {
     nxRuntimeError("nxChangedFields needs the update record's declared field order");
@@ -493,6 +554,7 @@ fn javascript_runtime() -> String {
 
 export const nxAnySchema = "any";
 export const nxBooleanSchema = "boolean";
+export const nxFloat32Schema = "float32";
 export const nxNumberSchema = "number";
 export const nxStringSchema = "string";
 
@@ -709,6 +771,17 @@ export function nxNormalizeValue(value, schema, path) {
         return value;
       }
       break;
+    // JSON cannot spell a float32, so a number takes the width of its site as a literal written
+    // there does: an integer only when a float32 holds it exactly, a real rounded to the nearest.
+    case "float32":
+      if (
+        typeof value === "number" &&
+        Number.isFinite(value) &&
+        (!Number.isInteger(value) || Math.fround(value) === value)
+      ) {
+        return Math.fround(value);
+      }
+      break;
     case "string":
       if (typeof value === "string") {
         return value;
@@ -813,6 +886,54 @@ export function nxDiffRecords(before, after) {
     }
   }
   return output;
+}
+
+/**
+ * Integer division, which truncates toward zero as the interpreter and the IR runtime's `idiv` do.
+ */
+export function nxIntDiv(dividend, divisor) {
+  return Math.trunc(nxDiv(dividend, divisor)) + 0;
+}
+
+/**
+ * Division, which fails on a zero divisor as the interpreter and the IR runtime's `div` do, rather
+ * than producing JavaScript's `Infinity` or `NaN`.
+ */
+export function nxDiv(dividend, divisor) {
+  if (divisor === 0) {
+    nxRuntimeError("Division by zero");
+  }
+  return dividend / divisor;
+}
+
+/**
+ * A remainder, which fails on a zero divisor as the interpreter and the IR runtime's `mod` do,
+ * rather than producing JavaScript's `NaN`.
+ */
+export function nxMod(dividend, divisor) {
+  if (divisor === 0) {
+    nxRuntimeError("Division by zero");
+  }
+  return (dividend % divisor) + 0;
+}
+
+/**
+ * The canonical text form of a `float32`, which generated code carries as the `number` it widens
+ * to. `String(value)` would print that widening's digits (`0.10000000149011612`); this prints the
+ * shortest digits that round-trip to the same `float32` (`0.1`), in the same ECMAScript layout.
+ */
+export function nxFloat32Text(value) {
+  const target = Math.fround(value);
+  if (!Number.isFinite(target) || target === 0) {
+    return String(target);
+  }
+  for (let precision = 1; precision <= 9; precision += 1) {
+    const candidate = Number(target.toPrecision(precision));
+    if (Math.fround(candidate) === target) {
+      return String(candidate);
+    }
+  }
+  return String(target);
 }
 
 export function nxChangedFields(update, order) {

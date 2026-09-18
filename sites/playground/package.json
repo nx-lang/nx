@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "start": "node server/index.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --no-warnings --test --test-force-exit \"server/*.test.mjs\" \"scripts/*.test.mjs\" \"src/**/*.test.mjs\" \"vite.config.test.mjs\" && pnpm run check-examples",
+    "test": "node --no-warnings --experimental-transform-types --import ./scripts/node-url-imports.mjs --test --test-force-exit \"server/*.test.mjs\" \"scripts/*.test.mjs\" \"src/**/*.test.mjs\" \"vite.config.test.mjs\" && pnpm run check-examples",
     "check-examples": "node --no-warnings scripts/check-examples.mjs",
     "sync-drawnui": "node scripts/sync-drawnui.mjs",
     "generate-catalog": "node scripts/generate-catalog.mjs"

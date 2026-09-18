@@ -2,8 +2,11 @@
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
 using System;
+using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using NxLang.Nx.Interop;
 
 namespace NxLang.Nx;
@@ -70,10 +73,11 @@ public sealed class NxProgramArtifact : IDisposable
     public static NxProgramArtifact BuildWorkspace(
         NxWorkspace workspace,
         string entryIdentity,
-        NxProgramBuildContext buildContext)
+        NxProgramBuildContext buildContext,
+        IReadOnlyList<string>? implicitImports = null)
     {
         ArgumentNullException.ThrowIfNull(buildContext);
-        return BuildWorkspaceCore(workspace, entryIdentity, buildContext.SafeHandle);
+        return BuildWorkspaceCore(workspace, entryIdentity, buildContext.SafeHandle, implicitImports);
     }
 
     /// <summary>
@@ -147,7 +151,8 @@ public sealed class NxProgramArtifact : IDisposable
     private static NxProgramArtifact BuildWorkspaceCore(
         NxWorkspace workspace,
         string entryIdentity,
-        NxProgramBuildContextSafeHandle? buildContextHandle)
+        NxProgramBuildContextSafeHandle? buildContextHandle,
+        IReadOnlyList<string>? implicitImports)
     {
         ArgumentNullException.ThrowIfNull(workspace);
         ArgumentNullException.ThrowIfNull(entryIdentity);
@@ -164,12 +169,15 @@ public sealed class NxProgramArtifact : IDisposable
         try
         {
             using NxWorkspaceDescriptorScope descriptors = new(workspace);
+            using NxUtf8SliceScope implicitImportSlices = new(implicitImports);
             NxEvalStatus status = NxNativeMethods.nx_build_workspace_program_artifact(
                 buildContextHandle,
                 descriptors.Pointer,
                 descriptors.Count,
                 entryIdentityBytes,
                 (nuint)entryIdentityBytes.Length,
+                implicitImportSlices.Pointer,
+                implicitImportSlices.Count,
                 out handle,
                 out NxBuffer buffer);
 
@@ -238,9 +246,10 @@ public sealed class NxProgramArtifact : IDisposable
     }
 
     /// <summary>
-    /// Generates deterministic NX IR JSON from this reusable program artifact.
+    /// Generates the NX IR artifact of this program's entry module, compact and without its debug
+    /// section.
     /// </summary>
-    /// <returns>NX IR JSON and structured metadata.</returns>
+    /// <returns>The NX IR image and structured metadata.</returns>
     /// <exception cref="NxEvaluationException">Thrown when IR generation reports NX diagnostics.</exception>
     /// <exception cref="ObjectDisposedException">Thrown when this artifact has already been disposed.</exception>
     /// <exception cref="InvalidOperationException">
@@ -248,9 +257,40 @@ public sealed class NxProgramArtifact : IDisposable
     /// </exception>
     public NxGeneratedNxIr GenerateNxIr()
     {
+        IReadOnlyList<NxGeneratedNxIr> artifacts = GenerateNxIr(new NxIrEmitOptions());
+        if (artifacts.Count == 0)
+        {
+            throw new InvalidOperationException("NX native runtime returned no NX IR artifact for the entry module.");
+        }
+
+        return artifacts[0];
+    }
+
+    /// <summary>
+    /// Generates NX IR artifacts for the modules <paramref name="options"/> names, the entry alone
+    /// by default, one image per module.
+    /// </summary>
+    /// <param name="options">Which modules to emit, and whether to include debug data.</param>
+    /// <returns>One artifact per emitted module, in the order requested.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when <paramref name="options"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="NxEvaluationException">Thrown when IR generation reports NX diagnostics.</exception>
+    /// <exception cref="ObjectDisposedException">Thrown when this artifact has already been disposed.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when the native runtime returns an invalid generated NX IR payload.
+    /// </exception>
+    public IReadOnlyList<NxGeneratedNxIr> GenerateNxIr(NxIrEmitOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
         NxNativeLibrary.EnsureLoaded();
 
-        NxEvalStatus status = NxNativeMethods.nx_codegen_nx_ir(SafeHandle, out NxBuffer buffer);
+        byte[] optionsBytes = JsonSerializer.SerializeToUtf8Bytes(options);
+        NxEvalStatus status = NxNativeMethods.nx_codegen_nx_ir(
+            SafeHandle,
+            optionsBytes,
+            (nuint)optionsBytes.Length,
+            out NxBuffer buffer);
         byte[] payload = NxRuntime.CopyAndFreeBuffer(buffer);
 
         return status switch
@@ -281,24 +321,77 @@ public sealed class NxProgramArtifact : IDisposable
         }
     }
 
-    private static NxGeneratedNxIr DeserializeGeneratedNxIr(byte[] payload)
+    /// <summary>
+    /// Splits an NX IR bundle into its artifacts. The bundle is a little-endian 32-bit header length, a
+    /// JSON header of <c>[{ identity, metadata, offset, length }]</c>, zero padding to a four-byte boundary,
+    /// then the images at the offsets the header gives, measured from the start of the payload.
+    /// </summary>
+    private static IReadOnlyList<NxGeneratedNxIr> DeserializeGeneratedNxIr(byte[] payload)
     {
         try
         {
-            NxGeneratedNxIr? ir = JsonSerializer.Deserialize<NxGeneratedNxIr>(payload);
-            if (ir is null)
+            if (payload.Length < 4)
             {
-                throw new JsonException("Expected generated NX IR payload.");
+                throw new JsonException("Expected an NX IR bundle header length.");
             }
 
-            return ir;
+            uint headerLength = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0, 4));
+            if (headerLength > (uint)(payload.Length - 4))
+            {
+                throw new JsonException("The NX IR bundle header does not fit its payload.");
+            }
+
+            NxIrBundleEntry[]? entries = JsonSerializer.Deserialize<NxIrBundleEntry[]>(
+                payload.AsSpan(4, (int)headerLength));
+            if (entries is null)
+            {
+                throw new JsonException("Expected an NX IR bundle header.");
+            }
+
+            List<NxGeneratedNxIr> artifacts = new(entries.Length);
+            foreach (NxIrBundleEntry entry in entries)
+            {
+                // Both fit an int once the end is inside the payload, so the casts below cannot overflow.
+                long end = (long)entry.Offset + entry.Length;
+                if (end > payload.Length)
+                {
+                    throw new JsonException($"The image of '{entry.Identity}' lies outside its bundle.");
+                }
+
+                artifacts.Add(new NxGeneratedNxIr
+                {
+                    Identity = entry.Identity,
+                    Bytes = payload.AsSpan((int)entry.Offset, (int)entry.Length).ToArray(),
+                    Metadata = entry.Metadata,
+                });
+            }
+
+            return artifacts;
         }
         catch (JsonException e)
         {
             throw new InvalidOperationException(
-                "NX native runtime returned an invalid generated NX IR JSON payload.",
+                "NX native runtime returned an invalid generated NX IR payload.",
                 e);
         }
+    }
+
+    /// <summary>
+    /// One entry of an NX IR bundle's header.
+    /// </summary>
+    private sealed class NxIrBundleEntry
+    {
+        [JsonPropertyName("identity")]
+        public string Identity { get; init; } = string.Empty;
+
+        [JsonPropertyName("metadata")]
+        public NxIrMetadata Metadata { get; init; } = new();
+
+        [JsonPropertyName("offset")]
+        public uint Offset { get; init; }
+
+        [JsonPropertyName("length")]
+        public uint Length { get; init; }
     }
 
     /// <summary>

@@ -20,13 +20,11 @@ lowering folds the negation into the literal.
 The expected type SHALL be the one the site declares after nullability is stripped, so an integer
 literal SHALL be accepted at a `float64?` site on the same terms as at a `float64` site.
 
-The declared type decides which floating-point type the value is *bound at*; it does not change the
-type *recorded for the literal*, which SHALL be whatever a written real literal takes at the same
-site. Today that is `float64` at every floating-point site, `float32` included, because a literal
-node carries no width and the declared type is authoritative. Recording the narrower type for a
-converted `24` would make it more precisely typed than the `24.0` it is required to be
-indistinguishable from. Whether a real literal should take `float32` at a `float32` site is a real
-question, but it is the same question for both spellings and this capability does not answer it.
+The declared type decides both the type the value is *bound at* and the type *recorded for the
+literal*, and the recorded type SHALL be the same one a written real literal takes at that site.
+Under `implicit-primitive-conversions` a real literal takes the floating-point width of its site,
+so a converted `24` at a `float32` site SHALL record `float32`, exactly as `24.0` there does. The
+two spellings remain indistinguishable, now at the site's own width rather than at `float64`.
 
 #### Scenario: Integer literal binds at a float64 property
 - **WHEN** a file declares `external component <B v:float64 />` and binds `<B v=1 />`
@@ -36,8 +34,8 @@ question, but it is the same question for both spellings and this capability doe
 #### Scenario: Integer literal binds at a float32 property
 - **WHEN** a file declares `external component <B v:float32 />` and binds `<B v=1 />`
 - **THEN** type checking SHALL accept the binding
-- **AND** the type recorded for the literal SHALL be the one a written `1.0` takes at that same
-  site, so that the two spellings remain indistinguishable
+- **AND** the type recorded for the literal SHALL be `float32`, the one a written `1.0` takes at
+  that same site, so that the two spellings remain indistinguishable
 
 #### Scenario: Integer literal and float literal spellings agree
 - **WHEN** a file declares `external component <B v:float64 />` and binds `<B v=24 />` in one program
@@ -157,27 +155,6 @@ wrote.
   written as the integer literal `0`
 - **THEN** the generated C# default SHALL be a `double` value
 - **AND** the generated output SHALL be equivalent to that for the same declaration written `0.0`
-
-### Requirement: Contextual typing does not widen integer-typed expressions
-The system SHALL NOT accept an expression whose type is an integer primitive at a floating-point
-site merely because a floating-point type is expected there. Only a literal is typed by context. An
-integer-typed variable, parameter, field access, function result, or arithmetic expression at a
-floating-point site SHALL continue to be rejected.
-
-This boundary is deliberate: a literal's value is known when the program is analyzed, so exactness
-can be decided then, while a value of type `int` spans a 64-bit range whose upper reaches cannot be
-represented exactly in any floating-point type and whose loss could not be detected until run time.
-
-#### Scenario: An integer-typed parameter is rejected at a float site
-- **WHEN** a file declares `external component <B v:float64 />` and a component parameter `n: int`,
-  and binds `<B v={n} />`
-- **THEN** type checking SHALL reject the binding
-- **AND** the diagnostic SHALL name the expected type `float64` and the actual type `int`
-
-#### Scenario: An integer arithmetic expression is rejected at a float site
-- **WHEN** a file declares `external component <B v:float64 />` and binds `<B v={1 + 2} />` where
-  both operands are typed `int`
-- **THEN** type checking SHALL reject the binding
 
 ### Requirement: A floating-point literal at an integer site remains rejected
 The system SHALL continue to reject a floating-point literal at a site whose expected type is an

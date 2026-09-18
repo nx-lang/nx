@@ -1,0 +1,14 @@
+module input.nx fingerprint 2080198121860257358
+links drawnui.nx version "9" fingerprint 10443083107296702259
+entrypoints functions [root] components []
+
+value title =
+  "Conformance"
+
+function root() =
+  <drawnui.nx:SkiaLayout Spacing=8 Type="Column">
+    <drawnui.nx:SkiaLabel FontSize=24 Text=title />
+    <drawnui.nx:SkiaLabel Text="A snippet links by name to a catalog the runtime already holds." />
+    <drawnui.nx:SkiaButton Text="Run" />
+    <drawnui.nx:SkiaButton Enabled=false Text="Share" />
+  </drawnui.nx:SkiaLayout>

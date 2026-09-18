@@ -16,17 +16,17 @@ let gallery = for image in images {
 - `for` returns a sequence.
 - The loop variable is scoped to the body.
 
-## Index + Value Form
+## Item + Index Form
 
 ```nx
-let stripedRows = for index, row in rows {
+let stripedRows = for row, index in rows {
   <tr className={if (index % 2 == 0) { "even" } else { "odd" }}>
     <td>{row.label}</td>
   </tr>
 }
 ```
 
-- The first identifier receives the zero-based index.
+- The item comes first; the optional second identifier receives its zero-based index.
 - Use this form when you need stable keys or different styling per position.
 
 ## Filtering While Iterating

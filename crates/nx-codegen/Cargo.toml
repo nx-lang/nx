@@ -20,4 +20,5 @@ serde_json = { workspace = true }
 smol_str = { workspace = true }
 
 [dev-dependencies]
+nx-value = { path = "../nx-value" }
 tempfile = "3"

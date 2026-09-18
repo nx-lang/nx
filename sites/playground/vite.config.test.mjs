@@ -1,16 +1,19 @@
 /**
- * Proves the dev server serves the shell the app needs.
+ * Proves the dev server serves the shell the app needs and the catalog's artifact the renderer
+ * imports.
  *
- * There is nothing else in the config to prove any more: the API proxy and the compile-server
- * probe went with the compile server, and the client loads the compiler itself.
+ * The API proxy and the compile-server probe went with the compile server; what the config does
+ * now is inject the base and compile the catalog to its artifact at build time.
  */
 import { strict as assert } from "node:assert";
+import { prepareNxIrModule } from "@nx-lang/ir-runtime";
 import { createServer as createHttpServer } from "node:http";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { stop as stopEsbuild } from "esbuild";
 import { createServer } from "vite";
 import { BASE_HREF } from "./base.mjs";
+import { CATALOG_ARTIFACT_MODULE } from "./vite.config.ts";
 
 const appRoot = fileURLToPath(new URL(".", import.meta.url));
 const TIMEOUT_MS = 8000;
@@ -66,4 +69,21 @@ test("the shell carries the site's <base href>, put there by the config rather t
   const response = await fetch(`${origin}${BASE_HREF}`, { signal: AbortSignal.timeout(TIMEOUT_MS) });
   assert.equal(response.status, 200);
   assert.match(await response.text(), new RegExp(`<base href="${BASE_HREF}"`));
+});
+
+test("the catalog's artifact is a module the build emits, so a compile never has to", async () => {
+  // What the renderer imports: the catalog compiled on its own, by the wasm module under Node,
+  // naming the same identity the worker's compiles name in their module tables.
+  const result = await vite.transformRequest(CATALOG_ARTIFACT_MODULE);
+  assert.ok(result !== null, "the virtual module resolves");
+  // The image as base64 in one string literal, decoded on first use by `render/catalog.ts`.
+  const match = /^export default "([A-Za-z0-9+/=]+)";$/.exec(result.code);
+  assert.ok(match, "the module is one default export of a base64 string");
+  const image = new Uint8Array(Buffer.from(match[1], "base64"));
+  assert.equal(new TextDecoder().decode(image.subarray(0, 4)), "NXIR");
+  const { artifact } = prepareNxIrModule(image);
+  assert.deepEqual(artifact.modules.map((module) => module.identity), ["skia.nx"]);
+  const strings = Array.from({ length: artifact.stringCount }, (_, index) => artifact.string(index));
+  assert.ok(strings.includes("SkiaLabel"));
+  assert.equal(artifact.hasDebug, false, "no debug section: nobody reads the catalog's spans");
 });

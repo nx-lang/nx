@@ -10,30 +10,21 @@ export {
 } from "./errors.js";
 export { createLanguageService, type NxLanguageServiceOptions } from "./language.js";
 export { compileNxModule, type NxModuleSource } from "./module.js";
-export {
-  buildProgramWithPrelude,
-  type NxDiagnosticOrigin,
-  type NxPreludeBuildOptions,
-  type NxPreludeBuildResult,
-  type NxPreludeDiagnostic
-} from "./prelude.js";
 export type { NxHost, NxLanguageSnapshot, NxProgramArtifact } from "./host.js";
-export type {
-  SnapshotLanguageService,
-  SnapshotLike,
-  PreludeOffsets
-} from "@nx-lang/language-core";
+export type { SnapshotLanguageService, SnapshotLike } from "@nx-lang/language-core";
 export type {
   NxDiagnostic,
   NxDiagnosticLabel,
   NxGeneratedNxIr,
-  NxIrEntrypointMetadata,
+  NxIrEmitOptions,
   NxIrMetadata,
-  NxIrReferenceMetadata,
   NxLanguageDocumentInput,
+  NxLanguageSnapshotOptions,
   NxSeverity,
   NxSourceBuildOptions,
-  NxTextSpan
+  NxTextSpan,
+  NxWorkspaceBuildOptions,
+  NxWorkspaceModuleInput
 } from "./types.js";
 export type {
   CompletionItem,

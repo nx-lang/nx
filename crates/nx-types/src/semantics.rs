@@ -1,4 +1,4 @@
-use crate::{Primitive, Type};
+use crate::{FunctionParam, Primitive, Type};
 use nx_hir::{ast, Name};
 use rustc_hash::FxHashSet;
 
@@ -9,6 +9,10 @@ pub fn common_supertype(lhs: &Type, rhs: &Type) -> Type {
 
     if lhs == rhs {
         return lhs.clone();
+    }
+
+    if let Some(joined) = nullable_join(lhs, rhs, common_supertype) {
+        return joined;
     }
 
     if let (Type::Primitive(a), Type::Primitive(b)) = (lhs, rhs) {
@@ -32,23 +36,50 @@ pub fn common_supertype(lhs: &Type, rhs: &Type) -> Type {
     Type::named("object")
 }
 
+/// The join of two types when either is nullable, or `None` when neither is.
+///
+/// <para>Nullability is lifted out of the join: `A?` with `B`, or with `B?`, is the join of `A`
+/// and `B`, made nullable. The `null` literal is typed `T?` for a `T` nothing has decided, so it
+/// adds nullability and nothing else: `null` with `float64` is `float64?`. A join that climbs to
+/// `object` stays `object`, which already admits `null`. `join` is the join the caller applies to
+/// the inner types, so a join that knows about records and unions keeps knowing inside `?`.</para>
+pub(crate) fn nullable_join(
+    lhs: &Type,
+    rhs: &Type,
+    mut join: impl FnMut(&Type, &Type) -> Type,
+) -> Option<Type> {
+    let joined = match (lhs, rhs) {
+        (Type::Nullable(inner), other) | (other, Type::Nullable(inner)) if inner.is_variable() => {
+            other.clone()
+        }
+        (Type::Nullable(lhs), Type::Nullable(rhs)) => join(lhs, rhs),
+        (Type::Nullable(inner), other) | (other, Type::Nullable(inner)) => join(inner, other),
+        _ => return None,
+    };
+    Some(match joined {
+        Type::Nullable(_) | Type::Error => joined,
+        joined if is_object_type(&joined) => joined,
+        joined => Type::nullable(joined),
+    })
+}
+
 pub fn is_object_type(ty: &Type) -> bool {
     matches!(ty, Type::Named(named) if named.name.as_str() == "object")
 }
 
-/// The floating-point primitive an integer literal written at this site would take, if any.
+/// The numeric primitive a numeric literal written at this site would take, if any.
 ///
 /// <para>`None` for every other expected type, and that breadth is the point: `object` accepts any
 /// value, and an unresolved type variable has not decided what it accepts yet. Converting a literal
 /// on either basis would change the value a host receives on the strength of an expectation that
-/// was never a floating-point one.</para>
+/// was never a numeric one.</para>
 ///
 /// <para>A list-typed site answers with its element type because a scalar binds there by coercion,
 /// so the element type is the expectation a literal written at that site actually meets.</para>
-pub fn float_literal_target(expected: &Type) -> Option<Primitive> {
+pub fn numeric_literal_target(expected: &Type) -> Option<Primitive> {
     match expected.strip_nullable() {
-        Type::Primitive(primitive) if primitive.is_float() => Some(*primitive),
-        Type::Array(element) => float_literal_target(element),
+        Type::Primitive(primitive) if primitive.is_numeric() => Some(*primitive),
+        Type::Array(element) => numeric_literal_target(element),
         _ => None,
     }
 }
@@ -105,7 +136,11 @@ where
         } => {
             let params = params
                 .iter()
-                .map(|param| resolve_type_ref_with_seen(param, seen, resolve_named))
+                .map(|param| FunctionParam {
+                    name: param.name.clone(),
+                    ty: resolve_type_ref_with_seen(&param.ty, seen, resolve_named),
+                    is_content: param.is_content,
+                })
                 .collect();
             let ret = resolve_type_ref_with_seen(return_type, seen, resolve_named);
             Type::function(params, ret)
@@ -161,6 +196,23 @@ mod tests {
         assert_eq!(
             common_supertype(&Type::array(Type::float32()), &Type::array(Type::float64())),
             Type::array(Type::float64())
+        );
+    }
+
+    #[test]
+    fn test_common_supertype_lifts_nullability_out_of_the_join() {
+        let null = Type::nullable(Type::var(0));
+        assert_eq!(
+            common_supertype(&null, &Type::float64()),
+            Type::nullable(Type::float64())
+        );
+        assert_eq!(
+            common_supertype(&Type::nullable(Type::int()), &Type::float64()),
+            Type::nullable(Type::float64())
+        );
+        assert_eq!(
+            common_supertype(&Type::nullable(Type::string()), &Type::float64()),
+            Type::named("object")
         );
     }
 
@@ -282,29 +334,30 @@ mod tests {
     }
 
     #[test]
-    fn test_float_literal_target_finds_each_float_width() {
-        assert_eq!(
-            float_literal_target(&Type::float64()),
-            Some(Primitive::Float64)
-        );
-        assert_eq!(
-            float_literal_target(&Type::float32()),
-            Some(Primitive::Float32)
-        );
+    fn test_numeric_literal_target_finds_each_numeric_width() {
+        for (ty, primitive) in [
+            (Type::int(), Primitive::Int),
+            (Type::int32(), Primitive::Int32),
+            (Type::int64(), Primitive::Int64),
+            (Type::float32(), Primitive::Float32),
+            (Type::float64(), Primitive::Float64),
+        ] {
+            assert_eq!(numeric_literal_target(&ty), Some(primitive));
+        }
     }
 
     #[test]
-    fn test_float_literal_target_sees_through_nullable_and_list() {
+    fn test_numeric_literal_target_sees_through_nullable_and_list() {
         assert_eq!(
-            float_literal_target(&Type::nullable(Type::float64())),
+            numeric_literal_target(&Type::nullable(Type::float64())),
             Some(Primitive::Float64)
         );
         assert_eq!(
-            float_literal_target(&Type::array(Type::float32())),
-            Some(Primitive::Float32)
+            numeric_literal_target(&Type::array(Type::int32())),
+            Some(Primitive::Int32)
         );
         assert_eq!(
-            float_literal_target(&Type::nullable(Type::array(
+            numeric_literal_target(&Type::nullable(Type::array(
                 Type::nullable(Type::float64())
             ))),
             Some(Primitive::Float64)
@@ -312,25 +365,26 @@ mod tests {
     }
 
     #[test]
-    fn test_float_literal_target_declines_every_non_float_expectation() {
+    fn test_numeric_literal_target_declines_every_non_numeric_expectation() {
         // `object` accepts anything and a type variable has not decided yet; converting on either
         // basis would change the value on the strength of an expectation nobody made.
-        assert_eq!(float_literal_target(&Type::named("object")), None);
-        assert_eq!(float_literal_target(&Type::Variable(0)), None);
-        assert_eq!(float_literal_target(&Type::int()), None);
-        assert_eq!(float_literal_target(&Type::int32()), None);
-        assert_eq!(float_literal_target(&Type::string()), None);
-        assert_eq!(float_literal_target(&Type::boolean()), None);
-        assert_eq!(float_literal_target(&Type::named("Thickness")), None);
-        assert_eq!(float_literal_target(&Type::array(Type::int())), None);
+        assert_eq!(numeric_literal_target(&Type::named("object")), None);
+        assert_eq!(numeric_literal_target(&Type::Variable(0)), None);
+        assert_eq!(numeric_literal_target(&Type::string()), None);
+        assert_eq!(numeric_literal_target(&Type::boolean()), None);
+        assert_eq!(numeric_literal_target(&Type::named("Thickness")), None);
+        assert_eq!(numeric_literal_target(&Type::array(Type::string())), None);
     }
 
     #[test]
     fn test_resolve_type_ref_with_uses_builtin_and_callback_resolution() {
         let type_ref = ast::TypeRef::function(
             vec![
-                ast::TypeRef::name("string"),
-                ast::TypeRef::array(ast::TypeRef::name("Custom")),
+                ast::FunctionParam::new("Label", ast::TypeRef::name("string")),
+                ast::FunctionParam::content(
+                    "Items",
+                    ast::TypeRef::array(ast::TypeRef::name("Custom")),
+                ),
             ],
             ast::TypeRef::nullable(ast::TypeRef::name("boolean")),
         );
@@ -341,7 +395,10 @@ mod tests {
         assert_eq!(
             resolved,
             Type::function(
-                vec![Type::string(), Type::array(Type::named("Custom"))],
+                vec![
+                    FunctionParam::new("Label", Type::string()),
+                    FunctionParam::content("Items", Type::array(Type::named("Custom"))),
+                ],
                 Type::nullable(Type::boolean())
             )
         );

@@ -79,6 +79,43 @@ impl Primitive {
         self.is_integer() || self.is_float()
     }
 
+    /// Whether a value of this type has a canonical text form: the numeric types and `boolean`.
+    ///
+    /// <para>These are the types `+` joins to a string and a text body may embed. `string` is
+    /// already text and needs no conversion, and `void` and `never` name no value.</para>
+    pub fn is_stringifiable(&self) -> bool {
+        self.is_numeric() || matches!(self, Primitive::Boolean)
+    }
+
+    /// This primitive as a HIR node names it, or `None` for the inference-internal ones.
+    pub fn hir_type(&self) -> Option<nx_hir::ast::PrimitiveType> {
+        use nx_hir::ast::PrimitiveType;
+        Some(match self {
+            Primitive::Int => PrimitiveType::Int,
+            Primitive::Int32 => PrimitiveType::Int32,
+            Primitive::Int64 => PrimitiveType::Int64,
+            Primitive::Float32 => PrimitiveType::Float32,
+            Primitive::Float64 => PrimitiveType::Float64,
+            Primitive::String => PrimitiveType::String,
+            Primitive::Boolean => PrimitiveType::Boolean,
+            Primitive::Void | Primitive::Never => return None,
+        })
+    }
+
+    /// The primitive a HIR node names.
+    pub fn from_hir_type(ty: nx_hir::ast::PrimitiveType) -> Self {
+        use nx_hir::ast::PrimitiveType;
+        match ty {
+            PrimitiveType::Int => Primitive::Int,
+            PrimitiveType::Int32 => Primitive::Int32,
+            PrimitiveType::Int64 => Primitive::Int64,
+            PrimitiveType::Float32 => Primitive::Float32,
+            PrimitiveType::Float64 => Primitive::Float64,
+            PrimitiveType::String => Primitive::String,
+            PrimitiveType::Boolean => Primitive::Boolean,
+        }
+    }
+
     /// Whether this floating-point primitive represents `value` exactly.
     ///
     /// <para>Always false for a non-floating-point primitive: the question is whether converting an
@@ -97,36 +134,52 @@ impl Primitive {
         }
     }
 
-    /// Returns the promoted type when combining two numeric primitives of the
-    /// same category (both integer or both float). Returns `None` for
-    /// cross-category combinations (e.g. int32 + float64).
+    /// Whether a value of this primitive type is accepted, unchanged in meaning, at a site of
+    /// `target`'s type.
     ///
-    /// Promotion rules follow the integer rank order int32 < int < int64, so the wider operand
-    /// wins:
-    /// - int32 + int32 → int32
-    /// - int32 + int → int
-    /// - int + int → int
-    /// - int64 with any integer → int64
-    /// - float32 + float32 → float32
-    /// - float32 + float64 → float64 (the wider operand wins)
-    pub fn numeric_promotion(a: Primitive, b: Primitive) -> Option<Primitive> {
-        if a.is_integer() && b.is_integer() {
-            if matches!(a, Primitive::Int64) || matches!(b, Primitive::Int64) {
-                Some(Primitive::Int64)
-            } else if matches!(a, Primitive::Int) || matches!(b, Primitive::Int) {
-                Some(Primitive::Int)
-            } else {
-                Some(Primitive::Int32)
-            }
-        } else if a.is_float() && b.is_float() {
-            if matches!(a, Primitive::Float32) && matches!(b, Primitive::Float32) {
-                Some(Primitive::Float32)
-            } else {
-                Some(Primitive::Float64)
-            }
-        } else {
-            None
+    /// <para>This is the implicit numeric conversion lattice, written once: `int32 → int → int64`,
+    /// `float32 → float64`, and the two exact crossings into floating point, `int32 → float64` and
+    /// `int → float64`. A conversion is on the list only when it is total, exact, and has one
+    /// obvious result. `int` is exact over ±(2^53−1), precisely the integer range a `float64`
+    /// holds without loss, so those two crossings qualify; `int64` exceeds it and `float32` is
+    /// exact only to ±2^24, so `int64` to any float and any integer to `float32` do not. Every
+    /// primitive widens to itself. The relation runs one way: nothing narrows.</para>
+    pub fn widens_to(self, target: Primitive) -> bool {
+        if self == target {
+            return true;
         }
+        match self {
+            Primitive::Int32 => matches!(
+                target,
+                Primitive::Int | Primitive::Int64 | Primitive::Float64
+            ),
+            Primitive::Int => matches!(target, Primitive::Int64 | Primitive::Float64),
+            Primitive::Float32 => matches!(target, Primitive::Float64),
+            _ => false,
+        }
+    }
+
+    /// The narrowest numeric primitive both operands widen to, or `None` when there is none.
+    ///
+    /// <para>This is what a mixed arithmetic or comparison operation is typed at. It is computed
+    /// from [`Primitive::widens_to`] over the rank order `int32, int, int64, float32, float64`
+    /// rather than written as its own table, so the lattice has one home. The results that fall
+    /// out: `int32 + int → int`, `int + int64 → int64`, `float32 + float64 → float64`,
+    /// `int + float64 → float64`, `int32 + float32 → float64` (neither widens to `float32`, both
+    /// widen exactly to `float64`), and `int64` with either float has no common type.</para>
+    pub fn numeric_promotion(a: Primitive, b: Primitive) -> Option<Primitive> {
+        const RANK: [Primitive; 5] = [
+            Primitive::Int32,
+            Primitive::Int,
+            Primitive::Int64,
+            Primitive::Float32,
+            Primitive::Float64,
+        ];
+        if !a.is_numeric() || !b.is_numeric() {
+            return None;
+        }
+        RANK.into_iter()
+            .find(|candidate| a.widens_to(*candidate) && b.widens_to(*candidate))
     }
 }
 
@@ -154,12 +207,13 @@ pub enum Type {
     /// Example: `int?`, `string?`
     Nullable(Box<Type>),
 
-    /// Function type: (T1, T2, ...) => R
+    /// Function type: an element function's signature with `function` in the name slot.
     ///
-    /// Example: `(int, string) => boolean`
+    /// Example: `<function Item:Contact Index:int />: DrawnNode`
     Function {
-        /// Parameter types
-        params: Vec<Type>,
+        /// Parameters, in declared order. A function satisfies a function type by parameter
+        /// name, so the order is display information.
+        params: Vec<FunctionParam>,
         /// Return type
         ret: Box<Type>,
     },
@@ -209,6 +263,153 @@ pub enum Type {
     ///
     /// Used to continue type checking despite errors.
     Error,
+}
+
+/// One parameter of a function type.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FunctionParam {
+    /// Parameter name, which arguments bind to.
+    pub name: Name,
+    /// Parameter type.
+    pub ty: Type,
+    /// Whether the parameter receives markup body content.
+    pub is_content: bool,
+}
+
+impl FunctionParam {
+    /// Creates a plain (non-content) parameter.
+    pub fn new(name: impl Into<Name>, ty: Type) -> Self {
+        Self {
+            name: name.into(),
+            ty,
+            is_content: false,
+        }
+    }
+
+    /// Creates the content parameter.
+    pub fn content(name: impl Into<Name>, ty: Type) -> Self {
+        Self {
+            name: name.into(),
+            ty,
+            is_content: true,
+        }
+    }
+}
+
+/// Why a function fails to satisfy a function type.
+///
+/// A plain "expects F, found G" leaves the reader comparing two signatures by eye; the reason
+/// names the parameter that decided it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FunctionMismatch {
+    /// The function declares a parameter the type does not supply. A function may declare fewer
+    /// parameters than its type, never more.
+    UnsuppliedParameter(Name),
+    /// A parameter is the content parameter on one side only.
+    ContentMismatch(Name),
+    /// What the type supplies for a parameter is not acceptable to the function.
+    ParameterType {
+        name: Name,
+        supplied: Type,
+        declared: Type,
+    },
+    /// The function's result is not acceptable where the type's result is expected.
+    Result { returned: Type, expected: Type },
+}
+
+impl fmt::Display for FunctionMismatch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FunctionMismatch::UnsuppliedParameter(name) => write!(
+                f,
+                "the function declares parameter '{name}', which the function type does not supply"
+            ),
+            FunctionMismatch::ContentMismatch(name) => write!(
+                f,
+                "parameter '{name}' is the content parameter on one side only"
+            ),
+            FunctionMismatch::ParameterType {
+                name,
+                supplied,
+                declared,
+            } => {
+                let (supplied, declared) = display_type_pair(supplied, declared);
+                write!(
+                    f,
+                    "parameter '{name}' is supplied as {supplied}, which is not {declared}"
+                )
+            }
+            FunctionMismatch::Result { returned, expected } => {
+                let (returned, expected) = display_type_pair(returned, expected);
+                write!(f, "the result {returned} is not {expected}")
+            }
+        }
+    }
+}
+
+/// Checks a function's type against a function type by parameter name.
+///
+/// <para>`satisfies(value, target)` decides each pairing: for a parameter, whether what the type
+/// supplies satisfies what the function declares (contravariance); for the result, whether what
+/// the function returns satisfies what the type expects (covariance). Every parameter the
+/// function declares must be one the type supplies, under the same name and the same `content`
+/// marking; the function may leave parameters of the type undeclared, and a caller supplying them
+/// is what makes that safe. Parameter order is not compared.</para>
+pub fn check_function_satisfies(
+    actual_params: &[FunctionParam],
+    actual_ret: &Type,
+    expected_params: &[FunctionParam],
+    expected_ret: &Type,
+    satisfies: &mut dyn FnMut(&Type, &Type) -> bool,
+) -> Result<(), FunctionMismatch> {
+    for declared in actual_params {
+        let Some(supplied) = expected_params
+            .iter()
+            .find(|param| param.name == declared.name)
+        else {
+            return Err(FunctionMismatch::UnsuppliedParameter(declared.name.clone()));
+        };
+        if supplied.is_content != declared.is_content {
+            return Err(FunctionMismatch::ContentMismatch(declared.name.clone()));
+        }
+        if !satisfies(&supplied.ty, &declared.ty) {
+            return Err(FunctionMismatch::ParameterType {
+                name: declared.name.clone(),
+                supplied: supplied.ty.clone(),
+                declared: declared.ty.clone(),
+            });
+        }
+    }
+    if !satisfies(actual_ret, expected_ret) {
+        return Err(FunctionMismatch::Result {
+            returned: actual_ret.clone(),
+            expected: expected_ret.clone(),
+        });
+    }
+    Ok(())
+}
+
+/// Renders a function type in NX spelling, with `render` spelling each part.
+///
+/// <para>The spelling itself belongs to [`nx_hir::ast::spell_function_type`], which the hover and
+/// the explained form of an IR artifact render through too; only the parts are this crate's.</para>
+fn format_function_type(
+    params: &[FunctionParam],
+    ret: &Type,
+    render: &dyn Fn(&Type) -> String,
+) -> String {
+    let types: Vec<String> = params.iter().map(|param| render(&param.ty)).collect();
+    nx_hir::ast::spell_function_type(
+        params
+            .iter()
+            .zip(&types)
+            .map(|(param, ty)| nx_hir::ast::SpelledParam {
+                is_content: param.is_content,
+                name: param.name.as_str(),
+                ty,
+            }),
+        &render(ret),
+    )
 }
 
 impl Type {
@@ -276,7 +477,7 @@ impl Type {
             Type::Array(inner) | Type::Nullable(inner) => inner.find_parameter(matches),
             Type::Function { params, ret } => params
                 .iter()
-                .find_map(|param| param.find_parameter(matches))
+                .find_map(|param| param.ty.find_parameter(matches))
                 .or_else(|| ret.find_parameter(matches)),
             _ => None,
         }
@@ -295,9 +496,47 @@ impl Type {
             Type::Function { params, ret } => Type::function(
                 params
                     .iter()
-                    .map(|param| param.substitute_parameters(substitute))
+                    .map(|param| FunctionParam {
+                        name: param.name.clone(),
+                        ty: param.ty.substitute_parameters(substitute),
+                        is_content: param.is_content,
+                    })
                     .collect(),
                 ret.substitute_parameters(substitute),
+            ),
+            _ => self.clone(),
+        }
+    }
+
+    /// Replaces each type parameter `substitute` answers for, telling it whether the parameter
+    /// stands in a covariant position (a value of the type is produced there) or a contravariant
+    /// one (a value is consumed there: a function type's parameter). Nesting a function type's
+    /// parameter flips the polarity; its result and every list or nullable layer keep it.
+    pub fn substitute_parameters_by_variance(
+        &self,
+        covariant: bool,
+        substitute: &impl Fn(&TypeParameterRef, bool) -> Option<Type>,
+    ) -> Type {
+        match self {
+            Type::Parameter(param) => substitute(param, covariant).unwrap_or_else(|| self.clone()),
+            Type::Array(inner) => {
+                Type::array(inner.substitute_parameters_by_variance(covariant, substitute))
+            }
+            Type::Nullable(inner) => {
+                Type::nullable(inner.substitute_parameters_by_variance(covariant, substitute))
+            }
+            Type::Function { params, ret } => Type::function(
+                params
+                    .iter()
+                    .map(|param| FunctionParam {
+                        name: param.name.clone(),
+                        ty: param
+                            .ty
+                            .substitute_parameters_by_variance(!covariant, substitute),
+                        is_content: param.is_content,
+                    })
+                    .collect(),
+                ret.substitute_parameters_by_variance(covariant, substitute),
             ),
             _ => self.clone(),
         }
@@ -319,7 +558,7 @@ impl Type {
     }
 
     /// Creates a function type.
-    pub fn function(params: Vec<Type>, ret: Type) -> Self {
+    pub fn function(params: Vec<FunctionParam>, ret: Type) -> Self {
         Type::Function {
             params,
             ret: Box::new(ret),
@@ -386,6 +625,14 @@ impl Type {
     }
 
     /// Unwraps the inner type if this is nullable, otherwise returns self.
+    /// The parameters and result of a function type, or `None` for any other type.
+    pub fn function_parts(&self) -> Option<(&[FunctionParam], &Type)> {
+        match self {
+            Type::Function { params, ret } => Some((params.as_slice(), ret.as_ref())),
+            _ => None,
+        }
+    }
+
     pub fn strip_nullable(&self) -> &Type {
         match self {
             Type::Nullable(inner) => inner,
@@ -434,12 +681,18 @@ impl Type {
             return true;
         }
 
-        // Numeric width promotion within the same category
+        // Numeric widening, one way only: `int32 → int → int64`, `float32 → float64`, and the
+        // exact crossings `int32`/`int → float64`. A narrowing is never compatible.
         if let (Type::Primitive(a), Type::Primitive(b)) = (self, other) {
-            if a.is_integer() && b.is_integer() {
+            if a.widens_to(*b) {
                 return true;
             }
-            if a.is_float() && b.is_float() {
+        }
+
+        // T? is compatible with U? when T is compatible with U: `null` stays `null`, and anything
+        // else converts as T to U does.
+        if let (Type::Nullable(a), Type::Nullable(b)) = (self, other) {
+            if a.is_compatible_with(b) {
                 return true;
             }
         }
@@ -464,33 +717,28 @@ impl Type {
             return t1.is_compatible_with(t2);
         }
 
-        // Functions: (T1, T2) => R1 is compatible with (U1, U2) => R2
-        // if U1 is compatible with T1, U2 is compatible with T2 (contravariant params)
-        // and R1 is compatible with R2 (covariant return)
+        // Functions match by parameter name: every parameter the value declares must be one the
+        // expected type supplies, contravariantly; the result is covariant. See
+        // `check_function_satisfies`.
         if let (
             Type::Function {
-                params: p1,
-                ret: r1,
+                params: actual_params,
+                ret: actual_ret,
             },
             Type::Function {
-                params: p2,
-                ret: r2,
+                params: expected_params,
+                ret: expected_ret,
             },
         ) = (self, other)
         {
-            if p1.len() != p2.len() {
-                return false;
-            }
-
-            // Check parameters (contravariant)
-            for (t1, t2) in p1.iter().zip(p2.iter()) {
-                if !t2.is_compatible_with(t1) {
-                    return false;
-                }
-            }
-
-            // Check return type (covariant)
-            return r1.is_compatible_with(r2);
+            return check_function_satisfies(
+                actual_params,
+                actual_ret,
+                expected_params,
+                expected_ret,
+                &mut |value, target| value.is_compatible_with(target),
+            )
+            .is_ok();
         }
 
         false
@@ -504,14 +752,9 @@ impl fmt::Display for Type {
             Type::Array(elem) => write_postfix_type(f, elem, "[]"),
             Type::Nullable(inner) => write_postfix_type(f, inner, "?"),
             Type::Function { params, ret } => {
-                write!(f, "(")?;
-                for (i, param) in params.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{}", param)?;
-                }
-                write!(f, ") => {}", ret)
+                f.write_str(&format_function_type(params, ret, &|ty: &Type| {
+                    ty.to_string()
+                }))
             }
             Type::Named(named) => write!(f, "{}", named.name),
             Type::Union(union_ty) => write!(f, "{}", union_ty.name),
@@ -569,7 +812,7 @@ fn collect_nominal_parts<'ty>(
         Type::Array(inner) | Type::Nullable(inner) => collect_nominal_parts(inner, parts),
         Type::Function { params, ret } => {
             for param in params {
-                collect_nominal_parts(param, parts);
+                collect_nominal_parts(&param.ty, parts);
             }
             collect_nominal_parts(ret, parts);
         }
@@ -597,17 +840,19 @@ fn qualified_display(ty: &Type) -> String {
             Some(origin) => format!("{}:{}", origin.module_identity(), named.name),
             None => named.name.to_string(),
         },
-        Type::Array(inner) => format!("{}[]", qualified_display(inner)),
-        Type::Nullable(inner) => format!("{}?", qualified_display(inner)),
-        Type::Function { params, ret } => {
-            let params = params
-                .iter()
-                .map(qualified_display)
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("({}) => {}", params, qualified_display(ret))
-        }
+        Type::Array(inner) => qualified_postfix_display(inner, "[]"),
+        Type::Nullable(inner) => qualified_postfix_display(inner, "?"),
+        Type::Function { params, ret } => format_function_type(params, ret, &qualified_display),
         _ => ty.to_string(),
+    }
+}
+
+/// A suffix after a function type's result would bind to the result, so a function type under a
+/// suffix is parenthesized, as source spells it.
+fn qualified_postfix_display(inner: &Type, suffix: &str) -> String {
+    match inner {
+        Type::Function { .. } => format!("({}){suffix}", qualified_display(inner)),
+        _ => format!("{}{suffix}", qualified_display(inner)),
     }
 }
 
@@ -899,11 +1144,83 @@ mod tests {
             assert_eq!(Primitive::numeric_promotion(a, b), Some(Primitive::Int64));
         }
 
-        // `int` stays in its own category.
+        // Cross-category promotion follows the exact crossings into `float64`.
         assert_eq!(
             Primitive::numeric_promotion(Primitive::Int, Primitive::Float64),
+            Some(Primitive::Float64)
+        );
+        assert_eq!(
+            Primitive::numeric_promotion(Primitive::Float32, Primitive::Int32),
+            Some(Primitive::Float64)
+        );
+        assert_eq!(
+            Primitive::numeric_promotion(Primitive::Float32, Primitive::Float64),
+            Some(Primitive::Float64)
+        );
+        assert_eq!(
+            Primitive::numeric_promotion(Primitive::Float32, Primitive::Float32),
+            Some(Primitive::Float32)
+        );
+        // `int64` is lossy in every float, so it has no common type with either.
+        assert_eq!(
+            Primitive::numeric_promotion(Primitive::Int64, Primitive::Float64),
             None
         );
+        assert_eq!(
+            Primitive::numeric_promotion(Primitive::Float32, Primitive::Int64),
+            None
+        );
+        assert_eq!(
+            Primitive::numeric_promotion(Primitive::String, Primitive::Int),
+            None
+        );
+    }
+
+    #[test]
+    fn test_widens_to_admits_exactly_the_six_widenings() {
+        use Primitive::*;
+        for (from, to) in [
+            (Int32, Int),
+            (Int32, Int64),
+            (Int, Int64),
+            (Float32, Float64),
+            (Int32, Float64),
+            (Int, Float64),
+        ] {
+            assert!(from.widens_to(to), "{from} should widen to {to}");
+            assert!(
+                Type::Primitive(from).is_compatible_with(&Type::Primitive(to)),
+                "{from} should be compatible with {to}"
+            );
+        }
+        for p in [Int32, Int, Int64, Float32, Float64, String, Boolean] {
+            assert!(p.widens_to(p), "{p} should widen to itself");
+        }
+    }
+
+    #[test]
+    fn test_widens_to_rejects_every_narrowing_and_lossy_crossing() {
+        use Primitive::*;
+        for (from, to) in [
+            (Int64, Int),
+            (Int64, Int32),
+            (Int, Int32),
+            (Float64, Float32),
+            (Int64, Float64),
+            (Int, Float32),
+            (Int32, Float32),
+            (Int64, Float32),
+            (Float32, Int),
+            (Float64, Int),
+            (String, Int),
+            (Boolean, Int32),
+        ] {
+            assert!(!from.widens_to(to), "{from} should not widen to {to}");
+            assert!(
+                !Type::Primitive(from).is_compatible_with(&Type::Primitive(to)),
+                "{from} should not be compatible with {to}"
+            );
+        }
     }
 
     #[test]
@@ -944,15 +1261,6 @@ mod tests {
     }
 
     #[test]
-    fn test_int_is_compatible_with_the_other_integer_widths() {
-        assert!(Type::int().is_compatible_with(&Type::int32()));
-        assert!(Type::int32().is_compatible_with(&Type::int()));
-        assert!(Type::int().is_compatible_with(&Type::int64()));
-        assert!(Type::int64().is_compatible_with(&Type::int()));
-        assert!(!Type::int().is_compatible_with(&Type::float64()));
-    }
-
-    #[test]
     fn test_numeric_promotion() {
         // Same width
         assert_eq!(
@@ -977,34 +1285,6 @@ mod tests {
             Primitive::numeric_promotion(Primitive::Float32, Primitive::Float64),
             Some(Primitive::Float64)
         );
-
-        // Cross category: error
-        assert_eq!(
-            Primitive::numeric_promotion(Primitive::Int32, Primitive::Float32),
-            None
-        );
-        assert_eq!(
-            Primitive::numeric_promotion(Primitive::Int64, Primitive::Float64),
-            None
-        );
-    }
-
-    #[test]
-    fn test_is_compatible_same_category_widths() {
-        // int32 compatible with int64 (same category, different width)
-        assert!(Type::int32().is_compatible_with(&Type::int64()));
-        assert!(Type::int64().is_compatible_with(&Type::int32()));
-
-        // float32 compatible with float64
-        assert!(Type::float32().is_compatible_with(&Type::float64()));
-        assert!(Type::float64().is_compatible_with(&Type::float32()));
-    }
-
-    #[test]
-    fn test_is_not_compatible_cross_category() {
-        // int32 not compatible with float32
-        assert!(!Type::int32().is_compatible_with(&Type::float32()));
-        assert!(!Type::int64().is_compatible_with(&Type::float64()));
     }
 
     #[test]
@@ -1023,8 +1303,21 @@ mod tests {
 
     #[test]
     fn test_function_type() {
-        let func = Type::function(vec![Type::int(), Type::string()], Type::boolean());
-        assert_eq!(func.to_string(), "(int, string) => boolean");
+        let func = Type::function(
+            vec![
+                FunctionParam::new("Count", Type::int()),
+                FunctionParam::content("Children", Type::array(Type::string())),
+            ],
+            Type::boolean(),
+        );
+        assert_eq!(
+            func.to_string(),
+            "<function Count:int content Children:string[] />: boolean"
+        );
+        assert_eq!(
+            Type::function(vec![], Type::named("DrawnNode")).to_string(),
+            "<function />: DrawnNode"
+        );
     }
 
     #[test]
@@ -1079,14 +1372,105 @@ mod tests {
         assert!(!arr_int.is_compatible_with(&arr_string));
     }
 
+    fn function(params: &[(&str, Type)], ret: Type) -> Type {
+        Type::function(
+            params
+                .iter()
+                .map(|(name, ty)| FunctionParam::new(*name, ty.clone()))
+                .collect(),
+            ret,
+        )
+    }
+
     #[test]
     fn test_is_compatible_functions() {
-        let f1 = Type::function(vec![Type::int()], Type::string());
-        let f2 = Type::function(vec![Type::int()], Type::string());
-        let f3 = Type::function(vec![Type::string()], Type::string());
+        let f1 = function(&[("n", Type::int())], Type::string());
+        let f2 = function(&[("n", Type::int())], Type::string());
+        let f3 = function(&[("n", Type::string())], Type::string());
 
         assert!(f1.is_compatible_with(&f2));
         assert!(!f1.is_compatible_with(&f3));
+    }
+
+    #[test]
+    fn a_function_may_declare_fewer_parameters_than_its_type_but_not_more() {
+        let full = function(
+            &[("Item", Type::named("Contact")), ("Index", Type::int())],
+            Type::string(),
+        );
+        let compact = function(&[("Item", Type::named("Contact"))], Type::string());
+        assert!(
+            compact.is_compatible_with(&full),
+            "ignoring Index is allowed"
+        );
+        assert!(
+            !full.is_compatible_with(&compact),
+            "needing Index where none is supplied is not"
+        );
+        let mismatch = check_function_satisfies(
+            full.function_parts().unwrap().0,
+            full.function_parts().unwrap().1,
+            compact.function_parts().unwrap().0,
+            compact.function_parts().unwrap().1,
+            &mut |value, target| value.is_compatible_with(target),
+        )
+        .unwrap_err();
+        assert_eq!(
+            mismatch,
+            FunctionMismatch::UnsuppliedParameter(Name::new("Index"))
+        );
+        assert!(mismatch.to_string().contains("'Index'"), "{mismatch}");
+    }
+
+    #[test]
+    fn function_parameters_match_by_name_not_position() {
+        let declared = function(
+            &[("Index", Type::int()), ("Item", Type::named("object"))],
+            Type::string(),
+        );
+        let expected = function(
+            &[("Item", Type::named("object")), ("Index", Type::int())],
+            Type::string(),
+        );
+        assert!(declared.is_compatible_with(&expected));
+
+        let renamed = function(&[("Entry", Type::named("object"))], Type::string());
+        assert!(!renamed.is_compatible_with(&expected));
+    }
+
+    #[test]
+    fn function_parameters_are_contravariant_and_results_covariant() {
+        let takes_object = function(&[("Value", Type::named("object"))], Type::string());
+        let takes_int = function(&[("Value", Type::int())], Type::string());
+        // `object` is not below `int`, and this structural relation does not know `int` is below
+        // `object`; the checker's richer relation does. Contravariance shows through widening.
+        let takes_int32 = function(&[("Value", Type::int32())], Type::string());
+        assert!(
+            takes_int.is_compatible_with(&takes_int32),
+            "a function taking int accepts the int32 the type supplies"
+        );
+        assert!(!takes_int32.is_compatible_with(&takes_int));
+        assert!(!takes_object.is_compatible_with(&takes_int));
+
+        let returns_int32 = function(&[], Type::int32());
+        let returns_int = function(&[], Type::int());
+        assert!(returns_int32.is_compatible_with(&returns_int));
+        assert!(!returns_int.is_compatible_with(&returns_int32));
+    }
+
+    #[test]
+    fn a_content_parameter_pairs_only_with_a_content_parameter() {
+        let content = Type::function(
+            vec![FunctionParam::content(
+                "Children",
+                Type::array(Type::string()),
+            )],
+            Type::string(),
+        );
+        let plain = function(&[("Children", Type::array(Type::string()))], Type::string());
+        assert!(content.is_compatible_with(&content));
+        assert!(!content.is_compatible_with(&plain));
+        assert!(!plain.is_compatible_with(&content));
     }
 
     #[test]
@@ -1103,8 +1487,8 @@ mod tests {
         assert_eq!(Type::array(Type::string()).to_string(), "string[]");
         assert_eq!(Type::nullable(Type::boolean()).to_string(), "boolean?");
         assert_eq!(
-            Type::function(vec![Type::int(), Type::int()], Type::int()).to_string(),
-            "(int, int) => int"
+            function(&[("a", Type::int()), ("b", Type::int())], Type::int()).to_string(),
+            "<function a:int b:int />: int"
         );
         assert_eq!(
             Type::union_type(Name::new("Direction"), vec![Name::new("north")], None, None)
@@ -1123,11 +1507,16 @@ mod tests {
         assert!(!nested.is_compatible_with(&nullable_list));
         assert!(!nullable_list.is_compatible_with(&nested));
 
-        let func_array = Type::array(Type::function(vec![Type::int()], Type::string()));
-        assert_eq!(func_array.to_string(), "((int) => string)[]");
+        let func_array = Type::array(function(&[("n", Type::int())], Type::string()));
+        assert_eq!(func_array.to_string(), "(<function n:int />: string)[]");
 
-        let nullable_func = Type::nullable(Type::function(vec![Type::int()], Type::string()));
-        assert_eq!(nullable_func.to_string(), "((int) => string)?");
+        let nullable_func = Type::nullable(function(&[("n", Type::int())], Type::string()));
+        assert_eq!(nullable_func.to_string(), "(<function n:int />: string)?");
+
+        // A suffix on the result is written on the result, so no parentheses appear.
+        let returns_nullable = function(&[("n", Type::int())], Type::nullable(Type::string()));
+        assert_eq!(returns_nullable.to_string(), "<function n:int />: string?");
+        assert!(!nullable_func.to_string().contains("=>"));
     }
 
     #[test]

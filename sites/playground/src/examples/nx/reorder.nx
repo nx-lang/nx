@@ -3,9 +3,11 @@
 // The original is Android's language preferences: drag a row by its grip and it lifts into a ghost
 // that floats over the list, the list reorders live under it keeping its measured heights and its
 // scroll offset, and the drop glides into the new slot. Every part of that is built in code — a
-// ReorderCell class carrying the drag logic (code-behind) over a recycled ItemsSource (list
-// virtualization), a ghost the page moves per frame and a status line it rewrites (component state,
-// event handlers). None of it can be expressed in NX yet.
+// ReorderCell class carrying the drag logic (code-behind) over a recycled ItemsSource, a ghost
+// the page moves per frame and a status line it rewrites (component state, event handlers). The
+// cell class cannot be expressed in NX yet, and without it the ghost and the status line have
+// nothing to report on, so this port does not use handlers or
+// state.
 //
 // What is ported is the list itself: every language as a static row with its grip, title, locale
 // tag and colored stroke, in a SkiaScroll that scrolls, under the two status lines as the page
@@ -23,11 +25,8 @@ component <Row extends DrawnNode Item:Language /> = {
   <SkiaLayer HeightRequest=44 HorizontalOptions=Fill>
     <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=8 /> BackgroundColor="#111827"
       StrokeWidth=1 StrokeColor={Item.Color} HorizontalOptions=Fill VerticalOptions=Fill />
-    // The original labels the grip "Reorder <title>". `"Reorder " + Item.Title` compiles but fails
-    // at runtime: `+` on a record field lowers to a numeric add (FINDINGS F22), so the label is the
-    // title and the verb goes in the hint.
     <SkiaLayer WidthRequest=26 HorizontalOptions=Start VerticalOptions=Fill Margin=<Thickness Left=10 />
-      AccessibilityRole="button" AccessibilityLabel={Item.Title} AccessibilityHint="Reorder">
+      AccessibilityRole="button" AccessibilityLabel={"Reorder " + Item.Title}>
       <SkiaStack Spacing=3 VerticalOptions=Center HorizontalOptions=Fill>
         <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=1 /> HeightRequest=2 WidthRequest=16 BackgroundColor="#94A3B8" HorizontalOptions=Center />
         <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=1 /> HeightRequest=2 WidthRequest=16 BackgroundColor="#94A3B8" HorizontalOptions=Center />

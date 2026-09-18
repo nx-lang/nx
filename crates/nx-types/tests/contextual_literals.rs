@@ -189,11 +189,13 @@ fn binary_subtraction_is_unaffected() {
 
 #[test]
 fn bare_name_resolves_to_a_visible_type_at_a_type_parameter_site() {
+    // A parameter named like the type is in lexical scope at the use site, and a type parameter
+    // site still reads the type. (A second top-level `Contact` is not the way to shadow it: a
+    // module's top-level names are unique.)
     assert_clean(
         "type Contact = { name:string }\n\
          external component <List TItem:type items:TItem[]? />\n\
-         let Contact = \"shadow\"\n\
-         let v = <List TItem=Contact />",
+         let v(Contact:string) = <List TItem=Contact />",
     );
 }
 
@@ -212,4 +214,56 @@ fn unknown_type_name_at_a_type_parameter_site_suggests_a_near_match() {
         }),
         "expected the type-name diagnostic with a suggestion, got: {errors:?}"
     );
+}
+
+/// Every numeric literal of the analyzed module with the type recorded for it.
+fn numeric_literals(source: &str) -> Vec<(nx_hir::ast::Literal, String)> {
+    use nx_hir::ast::{Expr, Literal};
+
+    let checked = check_str(source, "test.nx");
+    assert!(checked.errors().is_empty(), "{:?}", errors(source));
+    let module = checked.lowered_module.as_ref().expect("lowered module");
+    module
+        .exprs()
+        .filter_map(|(id, expr)| match expr {
+            Expr::Literal(
+                literal @ (Literal::Int(_)
+                | Literal::Int32(_)
+                | Literal::Float(_)
+                | Literal::Float32(_)),
+            ) => Some((
+                literal.clone(),
+                checked
+                    .type_env
+                    .get_expr_type(id)
+                    .map(|ty| ty.to_string())
+                    .unwrap_or_default(),
+            )),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_real_literal_binds_at_a_float32_site_as_float32() {
+    use nx_hir::ast::{Literal, OrderedFloat};
+
+    assert_eq!(
+        numeric_literals("external component <B v:float32 />\nlet root() = { <B v=1.5 /> }"),
+        vec![(Literal::Float32(OrderedFloat(1.5)), "float32".to_string())]
+    );
+}
+
+#[test]
+fn an_integer_literal_binds_at_a_float32_property_as_the_literal_a_real_one_is_there() {
+    let converted =
+        numeric_literals("external component <B v:float32 />\nlet root() = { <B v=1 /> }");
+    let written =
+        numeric_literals("external component <B v:float32 />\nlet root() = { <B v=1.0 /> }");
+
+    assert_eq!(
+        converted, written,
+        "the two spellings stay indistinguishable"
+    );
+    assert_eq!(converted[0].1, "float32");
 }

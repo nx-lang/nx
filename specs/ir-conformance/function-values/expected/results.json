@@ -1,0 +1,30 @@
+{
+  "main.nx::called": 42,
+  "main.nx::distinct": false,
+  "main.nx::exact": "Ada#1",
+  "main.nx::identical": true,
+  "main.nx::root": {
+    "$type": "List",
+    "ItemTemplate": {
+      "$type": "Function",
+      "module": "main.nx",
+      "name": "ContactRow"
+    },
+    "ItemsSource": [
+      {
+        "$type": "Contact",
+        "name": "Ada"
+      },
+      {
+        "$type": "Contact",
+        "name": "Kai"
+      }
+    ]
+  },
+  "main.nx::subset": "Kai",
+  "main.nx::template": {
+    "$type": "Function",
+    "module": "main.nx",
+    "name": "ContactRow"
+  }
+}

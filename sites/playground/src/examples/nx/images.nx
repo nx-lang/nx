@@ -7,8 +7,8 @@
 // Three of the original's cards are built in code. The custom-filter card hands CanvasKit filter
 // objects to PaintColorFilter and PaintImageFilter (code-behind); those hosts draw plain here. The
 // tile card animates TileOffsetX from a timer (animation); here the offset is fixed. The preload
-// card drives SkiaImageManager from a button and reports the queue (event handlers); the button is
-// drawn and does nothing.
+// card drives SkiaImageManager from a button and reports the queue (event handlers, which this port
+// does not use yet); the button is drawn and does nothing.
 
 type AspectDemo = {
   Aspect: TransformAspect
@@ -134,7 +134,7 @@ let aspects = {
 
     <Heading Text="SkiaImageManager preload queue · idle" />
     // The original's button preloads eight urls through the priority queue and reports how many
-    // were in flight; without event handlers it is drawn and does nothing.
+    // were in flight; this port binds no handler to it yet, so it is drawn and does nothing.
     <SkiaButton Text="PreloadImages(8 urls, Low)" BackgroundColor="#0D6EFD" FontSize=13 HorizontalOptions=Center />
 
     <Heading Text="Alignment inside the box" />

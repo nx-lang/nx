@@ -6,7 +6,7 @@ use nx_api::{
     LibraryRegistry, NxDiagnostic, NxSeverity, NxWorkspace, NxWorkspaceModule, ProgramArtifact,
     ProgramBuildContext,
 };
-use nx_codegen::{emit_nx_ir, GeneratedNxIr, NxIrEntrypointMetadata, NxIrFormat, NxIrMetadata};
+use nx_codegen::{emit_nx_ir, explain_nx_ir_image, NxIrEmitOptions};
 use nx_language_service::{
     DocumentInput, DocumentUri, SnapshotError, TextPosition, WorkspaceSnapshot,
 };
@@ -23,28 +23,32 @@ enum OutputFormat {
     Json,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct GeneratedNxIrPayload {
-    json: String,
-    metadata: NxIrMetadataPayload,
+/// One emitted NX IR artifact: its binary image, plus its metadata serialized as JSON.
+#[napi(object)]
+pub struct NativeGeneratedNxIr {
+    pub identity: String,
+    pub bytes: Buffer,
+    pub metadata_json: String,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct NxIrMetadataPayload {
-    program_fingerprint: String,
-    schema_version: u32,
-    runtime_abi: String,
-    required_features: Vec<String>,
-    function_entrypoints: Vec<NxIrEntrypointMetadata>,
-    component_entrypoints: Vec<NxIrEntrypointMetadata>,
+/// Explains an NX IR image as text with every table index resolved. A malformed, truncated or
+/// unsupported image is an evaluation error carrying one diagnostic.
+#[napi]
+pub fn explain_nx_ir(image: Buffer) -> Result<String> {
+    explain_nx_ir_image(&image).map_err(|error| {
+        let code = match error {
+            nx_codegen::ExplainError::SchemaVersion { .. } => "nx-ir-schema-version",
+            nx_codegen::ExplainError::Malformed(_) => "nx-ir-malformed",
+        };
+        input_error_message(code, error.to_string())
+    })
 }
 
 #[napi(object)]
 pub struct NativeWorkspaceModule {
     pub identity: String,
     pub source: Either<String, Buffer>,
+    pub version: Option<String>,
 }
 
 #[napi]
@@ -61,7 +65,10 @@ impl NativeNxWorkspace {
             let source = source_input_to_string(module.source)?;
             let workspace_module =
                 NxWorkspaceModule::from_source(module.identity, source).map_err(input_error)?;
-            workspace_modules.push(workspace_module);
+            workspace_modules.push(match module.version {
+                Some(version) => workspace_module.with_version(version),
+                None => workspace_module,
+            });
         }
 
         let workspace = NxWorkspace::new(workspace_modules).map_err(input_error)?;
@@ -71,10 +78,15 @@ impl NativeNxWorkspace {
     }
 
     #[napi]
-    pub fn validate(&self, build_context: &NativeNxProgramBuildContext) -> Result<String> {
+    pub fn validate(
+        &self,
+        build_context: &NativeNxProgramBuildContext,
+        implicit_imports: Option<Vec<String>>,
+    ) -> Result<String> {
         let workspace = self.workspace()?;
         let build_context = build_context.build_context()?;
-        let diagnostics = validate_workspace(workspace, build_context);
+        let build_context = workspace_build_context(build_context, implicit_imports);
+        let diagnostics = validate_workspace(workspace, &build_context);
         diagnostics_json(&diagnostics)
     }
 
@@ -159,10 +171,12 @@ impl NativeNxProgramBuildContext {
         &self,
         workspace: &NativeNxWorkspace,
         entry_identity: String,
+        implicit_imports: Option<Vec<String>>,
     ) -> Result<NativeNxProgramArtifact> {
         let build_context = self.build_context()?;
+        let build_context = workspace_build_context(build_context, implicit_imports);
         let workspace = workspace.workspace()?;
-        let program = build_workspace_program_artifact(workspace, &entry_identity, build_context)
+        let program = build_workspace_program_artifact(workspace, &entry_identity, &build_context)
             .map_err(evaluation_error)?;
         Ok(NativeNxProgramArtifact::new(program))
     }
@@ -176,6 +190,20 @@ impl NativeNxProgramBuildContext {
         self.build_context
             .as_ref()
             .ok_or_else(|| disposed_error("NxProgramBuildContext"))
+    }
+}
+
+/// The build context a workspace call runs against: the caller's own, or a copy of it naming the
+/// implicit imports the caller passed.
+fn workspace_build_context(
+    build_context: &ProgramBuildContext,
+    implicit_imports: Option<Vec<String>>,
+) -> std::borrow::Cow<'_, ProgramBuildContext> {
+    match implicit_imports {
+        Some(identities) if !identities.is_empty() => {
+            std::borrow::Cow::Owned(build_context.clone().with_implicit_imports(identities))
+        }
+        _ => std::borrow::Cow::Borrowed(build_context),
     }
 }
 
@@ -316,12 +344,28 @@ impl NativeNxProgramArtifact {
         Ok(self.program()?.entry_identity.clone())
     }
 
+    /// Emits NX IR for the modules `options` names (the entry alone by default): one binary image
+    /// per module, plus its metadata serialized as JSON.
     #[napi]
-    pub fn generate_nx_ir(&self) -> Result<String> {
+    pub fn generate_nx_ir(&self, options: Option<String>) -> Result<Vec<NativeGeneratedNxIr>> {
         let program = self.program()?;
-        let ir = emit_nx_ir(program, NxIrFormat::Compact)
-            .map_err(|error| codegen_error(error, program))?;
-        generated_nx_ir_json(ir)
+        let options = NxIrEmitOptions::from_json(options.as_deref().unwrap_or_default())
+            .map_err(|error| input_error_message("nx-ir-options", error.to_string()))?;
+        let artifacts =
+            emit_nx_ir(program, &options).map_err(|error| codegen_error(error, program))?;
+        artifacts
+            .into_iter()
+            .map(|artifact| {
+                let metadata_json = serde_json::to_string(&artifact.metadata).map_err(|error| {
+                    native_error(format!("Failed to serialize NX IR metadata: {error}"))
+                })?;
+                Ok(NativeGeneratedNxIr {
+                    identity: artifact.identity,
+                    bytes: Buffer::from(artifact.bytes),
+                    metadata_json,
+                })
+            })
+            .collect()
     }
 
     #[napi]
@@ -395,25 +439,6 @@ fn value_bytes(value: &NxValue, output_format: OutputFormat) -> Result<Vec<u8>> 
             native_error(format!("Failed to serialize NX MessagePack value: {error}"))
         }),
         OutputFormat::Json => value_json(value).map(String::into_bytes),
-    }
-}
-
-fn generated_nx_ir_json(ir: GeneratedNxIr) -> Result<String> {
-    serde_json::to_string(&GeneratedNxIrPayload {
-        json: ir.json,
-        metadata: ir_metadata_payload(ir.metadata),
-    })
-    .map_err(|error| native_error(format!("Failed to serialize generated NX IR: {error}")))
-}
-
-fn ir_metadata_payload(metadata: NxIrMetadata) -> NxIrMetadataPayload {
-    NxIrMetadataPayload {
-        program_fingerprint: metadata.program_fingerprint.to_string(),
-        schema_version: metadata.schema_version,
-        runtime_abi: metadata.runtime_abi,
-        required_features: metadata.required_features,
-        function_entrypoints: metadata.function_entrypoints,
-        component_entrypoints: metadata.component_entrypoints,
     }
 }
 

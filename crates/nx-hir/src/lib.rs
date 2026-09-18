@@ -23,6 +23,7 @@
 pub mod ast;
 pub mod components;
 pub mod db;
+pub mod declarations;
 pub mod lower;
 pub mod prepared;
 pub mod records;
@@ -47,16 +48,18 @@ pub use prepared::{
 };
 
 pub use components::{
-    apply_contextual_name_resolutions, apply_int_literal_conversions, component_declaration_origin,
+    apply_constant_folds, apply_contextual_name_resolutions, apply_join_widenings,
+    apply_literal_conversions, apply_string_conversions, component_declaration_origin,
     effective_component_contract, effective_component_contract_at,
     effective_component_contract_for_name, erase_type_parameters, is_component_subtype,
     promote_component_handler_bindings, remove_property_entries, resolve_component_definition,
     validate_component_definitions, ComponentAncestor, ComponentResolutionError, ContextualRewrite,
-    EffectiveComponentContract, InvalidComponentBaseReason,
+    EffectiveComponentContract, InvalidComponentBaseReason, StringConversions,
 };
 
 // Re-export database types
 pub use db::{DatabaseImpl, NxDatabase};
+pub use declarations::{validate_declaration_names, DuplicateDeclarationError};
 
 // Re-export scope and symbol types
 pub use records::{
@@ -494,7 +497,7 @@ pub fn type_ref_names(ty: &ast::TypeRef) -> Vec<&Name> {
                 return_type,
             } => {
                 for param in params {
-                    collect(param, names);
+                    collect(&param.ty, names);
                 }
                 collect(return_type, names);
             }
@@ -889,6 +892,15 @@ impl PropertyEntry {
     }
 }
 
+/// The whitespace written between two pieces of an element body, and where.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WhitespaceRun {
+    /// The index of the content piece the run precedes, which is never the first.
+    pub before: usize,
+    /// The run as written.
+    pub text: SmolStr,
+}
+
 /// NX element (XML-like syntax).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Element {
@@ -903,6 +915,25 @@ pub struct Element {
     pub property_entries: Vec<PropertyEntry>,
     /// Nested body-content expressions in source order
     pub content: Vec<ExprId>,
+    /// The whitespace written between two pieces of content, which is not itself content.
+    ///
+    /// <para>Whitespace in a body is layout, so it is in no piece of `content` and a body of
+    /// elements never sees it. It is kept here because a body that binds to a `string` content
+    /// property is joined as written, and there the space between `{first}` and `{last}` is part
+    /// of the text.</para>
+    pub whitespace_runs: Vec<WhitespaceRun>,
+    /// The indices of the pieces of `content` written as plain text rather than in braces.
+    ///
+    /// <para>A text run and a braced string literal lower to the same expression, but only the
+    /// text carries layout: a joined `string` body turns each line break in a run into a space and
+    /// trims a run at its edges, and keeps a braced value, or raw text, as written.</para>
+    pub text_runs: Vec<usize>,
+    /// The text type a typed body names, as in `<Note:markdown>`.
+    ///
+    /// <para>A typed body is text for a processor the host supplies, so its line breaks are its
+    /// own: it keeps its text as written, minus the indentation the source is written at, rather
+    /// than reading line breaks as layout the way a plain body does.</para>
+    pub text_type: Option<Name>,
     /// Closing tag name (must match opening tag)
     pub close_name: Option<Name>,
     /// Source location

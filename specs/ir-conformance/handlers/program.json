@@ -1,0 +1,72 @@
+{
+  "entry": "main.nx",
+  "emit": [
+    "main.nx"
+  ],
+  "entrypoints": [
+    {
+      "module": "main.nx",
+      "function": "root"
+    }
+  ],
+  "lifecycles": [
+    {
+      "module": "main.nx",
+      "component": "Counter",
+      "props": { "step": 2 },
+      "batches": [
+        [
+          { "$type": "ActionHandlerInvocation", "token": "h1-1", "action": { "$type": "Button.Tapped" } }
+        ],
+        [
+          { "$type": "ActionHandlerInvocation", "token": "h2-1", "action": { "$type": "Button.Tapped" } },
+          { "$type": "ActionHandlerInvocation", "token": "h2-1", "action": { "$type": "Button.Tapped" } }
+        ],
+        [
+          { "$type": "ActionHandlerInvocation", "token": "h3-2", "action": { "$type": "Button.Tapped" } }
+        ],
+        [
+          { "$type": "Reset" }
+        ],
+        []
+      ]
+    },
+    {
+      "module": "main.nx",
+      "component": "Tens",
+      "batches": [
+        [
+          { "$type": "ActionHandlerInvocation", "token": "h1-2", "action": { "$type": "Button.Tapped" } }
+        ],
+        [
+          { "$type": "ActionHandlerInvocation", "token": "h2-3", "action": { "$type": "Button.Tapped" } },
+          { "$type": "ActionHandlerInvocation", "token": "h2-1", "action": { "$type": "Button.Tapped" } }
+        ]
+      ]
+    },
+    {
+      "module": "main.nx",
+      "component": "Page",
+      "batches": [
+        [
+          { "$type": "ActionHandlerInvocation", "token": "h1-1", "action": { "$type": "Button.Tapped" } }
+        ],
+        [
+          {
+            "$type": "ActionHandlerInvocation",
+            "token": "h2-2",
+            "action": { "$type": "SearchSubmitted", "searchString": "docs" }
+          }
+        ],
+        [
+          {
+            "$type": "ActionHandlerInvocation",
+            "token": "h3-3",
+            "action": { "$type": "SearchSubmitted", "searchString": "guides" }
+          }
+        ],
+        []
+      ]
+    }
+  ]
+}

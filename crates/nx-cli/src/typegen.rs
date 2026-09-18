@@ -527,6 +527,48 @@ mod tests {
         assert!(output.contains("matrix: string[][];"));
     }
 
+    /// NX arguments bind by name, so a function type is a function of one object of named
+    /// arguments; a parameter inside it that is a component type parameter is erased like any
+    /// other, and the nullable suffix wraps the function, not its result.
+    #[test]
+    fn generates_a_typescript_function_type_with_named_arguments() {
+        let source = "abstract external component <DrawnNode />\n\
+                      export external component <DataTable TItem:type RowTemplate:(<function Item:TItem Index:int />: DrawnNode)? HeaderTemplate:<function />: DrawnNode />\n";
+        let typescript = generate_for(source, TargetLanguage::TypeScript);
+        assert!(
+            typescript.contains(
+                "RowTemplate: ((args: { Item: TItem; Index: number }) => DrawnNode) | null;"
+            ),
+            "{typescript}"
+        );
+        assert!(
+            typescript.contains("HeaderTemplate: () => DrawnNode;"),
+            "{typescript}"
+        );
+    }
+
+    /// A .NET host reads *which* function it was handed, not a callable: `NxFunctionRef` is the
+    /// `Function` record the runtime renders, as `NxActionHandlerRef` is for a handler. A delegate
+    /// would serialize in neither supported format — MessagePack has no formatter for
+    /// `System.Delegate`, which breaks the containing type even when the member is null, and
+    /// `System.Text.Json` refuses it on both read and write. The round trip itself is pinned by
+    /// `NxFunctionValueTests` in `bindings/dotnet`, which serializes what this emits.
+    #[test]
+    fn generates_a_csharp_function_reference_for_a_function_type() {
+        let source = "abstract external component <DrawnNode />\n\
+                      export external component <DataTable TItem:type RowTemplate:(<function Item:TItem Index:int />: DrawnNode)? HeaderTemplate:<function />: DrawnNode />\n";
+        let csharp = generate_for(source, TargetLanguage::CSharp);
+        assert!(
+            csharp.contains("global::NxLang.Nx.NxFunctionRef? RowTemplate"),
+            "{csharp}"
+        );
+        assert!(
+            csharp.contains("global::NxLang.Nx.NxFunctionRef HeaderTemplate"),
+            "{csharp}"
+        );
+        assert!(!csharp.contains("System.Delegate"), "{csharp}");
+    }
+
     #[test]
     fn generates_typescript_abstract_record_runtime_unions() {
         let source = r#"

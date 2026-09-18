@@ -1,7 +1,6 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   NxDisposedResourceError,
@@ -13,6 +12,7 @@ import {
   buildProgramArtifactFromSource,
   evaluateBytesFromSource,
   evaluateJsonFromSource,
+  explainNxIr,
   generateNxIrFromSource
 } from "../src/index.js";
 
@@ -50,62 +50,37 @@ function captureEvaluationError(callback: () => void): NxEvaluationError {
   return thrown as NxEvaluationError;
 }
 
-interface TestIrReference {
-  readonly name: string;
-  readonly kind: string;
-  readonly module: string;
+/** The parts of a schema 4 artifact these tests read. */
+type IrRuntimeModule = typeof import("@nx-lang/ir-runtime");
+
+/**
+ * The explained text of an image, the way `nxlang ir explain` prints it: every index resolved, a
+ * record's fields indented under `record Name`, and a type from another module spelled
+ * `identity:Name`.
+ */
+function explainedLines(image: Buffer): readonly string[] {
+  return explainNxIr(image).split("\n");
 }
 
-interface TestIrTypeRef {
-  readonly kind: string;
-  readonly display?: string;
-  readonly reference?: TestIrReference;
-}
-
-interface TestIrRecordField {
-  readonly name: string;
-  readonly ty: TestIrTypeRef;
-}
-
-interface TestIrDeclaration {
-  readonly reference: TestIrReference;
-  readonly kind: {
-    readonly fields?: readonly TestIrRecordField[];
-  };
-}
-
-interface TestIrDocument {
-  readonly programFingerprint: string;
-  readonly modules: readonly {
-    readonly declarations: readonly TestIrDeclaration[];
-  }[];
-}
-
-type IrRuntimeModule = typeof import("../../../runtime/typescript/dist/src/index.js");
-
-function irDeclaration(document: TestIrDocument, name: string): TestIrDeclaration {
-  const declaration = document.modules
-    .flatMap((module) => module.declarations)
-    .find((candidate) => candidate.reference.name === name);
-  if (declaration === undefined) {
+/** The declared type of `fieldName` in the record `name`, as the explained text spells it. */
+function irRecordFieldType(lines: readonly string[], name: string, fieldName: string): string {
+  const start = lines.findIndex((line) => line.startsWith(`record ${name}`));
+  if (start < 0) {
     throw new Error(`Expected IR declaration '${name}'.`);
   }
-
-  return declaration;
-}
-
-function irRecordFieldType(declaration: TestIrDeclaration, fieldName: string): TestIrTypeRef {
-  const field = (declaration.kind.fields ?? []).find((candidate) => candidate.name === fieldName);
-  if (field === undefined) {
-    throw new Error(`Expected IR record field '${fieldName}'.`);
+  for (let index = start + 1; index < lines.length && lines[index]!.startsWith("  "); index += 1) {
+    const match = /^  (\w+): (\S+)/.exec(lines[index]!);
+    if (match !== null && match[1] === fieldName) {
+      return match[2]!;
+    }
   }
-
-  return field.ty;
+  throw new Error(`Expected IR record field '${fieldName}'.`);
 }
+
+const corpusRoot = join(process.cwd(), "../../specs/ir-conformance");
 
 async function importIrRuntime(): Promise<IrRuntimeModule> {
-  const runtimeUrl = pathToFileURL(join(process.cwd(), "../../runtime/typescript/dist/src/index.js"));
-  return import(runtimeUrl.href) as Promise<IrRuntimeModule>;
+  return import("@nx-lang/ir-runtime");
 }
 
 describe("@nx-lang/sdk-node", () => {
@@ -133,6 +108,35 @@ let root(): int = { answer }`
       expect(diagnostics.every((diagnostic) => diagnostic.severity === "error")).toBe(true);
     } finally {
       invalid.dispose();
+      workspace.dispose();
+      buildContext.dispose();
+      registry.dispose();
+    }
+  });
+
+  it("resolves catalog controls through implicit imports without an import line", () => {
+    const { registry, buildContext } = createContext();
+    const workspace = new NxWorkspace([
+      { identity: "drawnui.nx", source: "export external component <SkiaLabel Text:string />" },
+      { identity: "input.nx", source: 'let root() = <SkiaLabel Text="hi" />' }
+    ]);
+
+    try {
+      expect(workspace.validate(buildContext, { implicitImports: ["drawnui.nx"] })).toEqual([]);
+      const artifact = NxProgramArtifact.buildWorkspace(workspace, {
+        buildContext,
+        entryIdentity: "input.nx",
+        implicitImports: ["drawnui.nx"]
+      });
+      try {
+        expect(artifact.evaluateJson()).toMatchObject({ $type: "SkiaLabel", Text: "hi" });
+      } finally {
+        artifact.dispose();
+      }
+
+      const missing = workspace.validate(buildContext, { implicitImports: ["missing.nx"] });
+      expect(missing.some((diagnostic) => diagnostic.code === "implicit-import-not-found")).toBe(true);
+    } finally {
       workspace.dispose();
       buildContext.dispose();
       registry.dispose();
@@ -279,34 +283,25 @@ let root() = { "ready" }`
 
       try {
         expect(artifact.evaluateJson()).toBe("ready");
-        const ir = artifact.generateNxIr();
-        const document = JSON.parse(ir.json) as TestIrDocument;
-        const config = irDeclaration(document, "ChatLinkConfig");
-        const questionFlow = irDeclaration(document, "QuestionFlow");
-        const questionFlowType = irRecordFieldType(config, "questionFlow");
-        const flowStepType = irRecordFieldType(questionFlow, "firstStep");
-        const inputType = irRecordFieldType(questionFlow, "input");
+        // Every module of the program, each as its own artifact.
+        const artifacts = artifact.generateNxIr({ modules: [] });
+        const byIdentity = new Map(artifacts.map((entry) => [entry.identity, explainedLines(entry.bytes)]));
+        expect(artifacts[0]!.identity).toBe("app/main.nx");
+        for (const entry of artifacts) {
+          expect(entry.metadata.identity).toBe(entry.identity);
+          expect(byIdentity.get(entry.identity)![0]).toBe(
+            `module ${entry.identity} fingerprint ${entry.metadata.fingerprint}`
+          );
+        }
 
-        expect(typeof ir.metadata.programFingerprint).toBe("string");
-        expect(ir.metadata.programFingerprint).toBe(document.programFingerprint);
-        expect(questionFlowType).toMatchObject({
-          kind: "nominal",
-          display: "QuestionFlow",
-          reference: { kind: "record", name: "QuestionFlow" }
-        });
-        expect(questionFlowType.reference?.module).not.toBe(config.reference.module);
-        expect(flowStepType).toMatchObject({
-          kind: "nominal",
-          display: "FlowStep",
-          reference: { kind: "record", name: "FlowStep" }
-        });
-        expect(flowStepType.reference?.module).not.toBe(questionFlow.reference.module);
-        expect(inputType).toMatchObject({
-          kind: "nominal",
-          display: "TextInput",
-          reference: { kind: "component", name: "TextInput" }
-        });
-        expect(inputType.reference?.module).not.toBe(questionFlow.reference.module);
+        const chatLink = [...byIdentity.entries()].find(([identity]) => identity.endsWith("ChatLinkConfig.nx"))!;
+        const questionFlow = [...byIdentity.entries()].find(([identity]) => identity.endsWith("QuestionFlow.nx"))!;
+
+        // Each nominal type names the module that declares it, so the reference survives a
+        // regeneration of that module.
+        expect(irRecordFieldType(chatLink[1], "ChatLinkConfig", "questionFlow")).toBe(`${questionFlow[0]}:QuestionFlow`);
+        expect(irRecordFieldType(questionFlow[1], "QuestionFlow", "firstStep")).toMatch(/FlowStep\.nx:FlowStep$/);
+        expect(irRecordFieldType(questionFlow[1], "QuestionFlow", "input")).toMatch(/TextInput\.nx:TextInput$/);
       } finally {
         artifact.dispose();
       }
@@ -358,8 +353,15 @@ let root(): QuestionFlow[] = { omitted() explicit() }`
 
       try {
         const irRuntime = await importIrRuntime();
-        const prepared = irRuntime.prepareNxIrProgram(JSON.parse(artifact.generateNxIr().json));
-        expect(irRuntime.evaluateFunction(prepared, "root")).toEqual(artifact.evaluateJson());
+        const modules = new Map(
+          artifact
+            .generateNxIr({ modules: [] })
+            .map((entry) => [entry.identity, irRuntime.prepareNxIrModule(entry.bytes)])
+        );
+        const program = irRuntime.linkNxIrProgram(modules.get("app/main.nx")!, {
+          resolve: (identity) => modules.get(identity)
+        });
+        expect(irRuntime.evaluateFunction(program, "root")).toEqual(artifact.evaluateJson());
       } finally {
         artifact.dispose();
       }
@@ -371,23 +373,83 @@ let root(): QuestionFlow[] = { omitted() explicit() }`
     }
   });
 
-  it("generates deterministic NX IR JSON and metadata", () => {
+  it("generates deterministic NX IR images and metadata", () => {
     const source = "let root() = { 42 }";
     const first = generateNxIrFromSource(source);
     const second = generateNxIrFromSource(Buffer.from(source));
 
-    expect(first.json).toBe(second.json);
-    expect(first.metadata.programFingerprint).toBe(second.metadata.programFingerprint);
-    expect(typeof first.metadata.programFingerprint).toBe("string");
+    expect(Buffer.isBuffer(first.bytes)).toBe(true);
+    expect(first.bytes.subarray(0, 4).toString("latin1")).toBe("NXIR");
+    expect(first.bytes.equals(second.bytes)).toBe(true);
+    expect(first.metadata.fingerprint).toBe(second.metadata.fingerprint);
+    expect(typeof first.metadata.fingerprint).toBe("string");
     expect(first.metadata.runtimeAbi).toContain("nx-ir-runtime");
-    expect(first.metadata.functionEntrypoints.some((entrypoint) => entrypoint.name === "root")).toBe(true);
+    expect(first.metadata.functionEntrypoints).toContain("root");
+  });
+
+  // `snippet` gives its catalog a version and imports it implicitly; `two-module` has neither.
+  it.each([
+    ["two-module", ["app/main.nx", "shared/model.nx"]],
+    ["snippet", ["drawnui.nx", "input.nx"]]
+  ])("emits the conformance corpus's %s images byte for byte", (program, identities) => {
+    const dir = join(corpusRoot, program);
+    const manifest = JSON.parse(readFileSync(join(dir, "program.json"), "utf8")) as {
+      entry: string;
+      implicitImports?: string[];
+      versions?: Record<string, string>;
+    };
+    const workspace = new NxWorkspace(
+      identities.map((identity) => ({
+        identity,
+        source: readFileSync(join(dir, identity), "utf8"),
+        ...(manifest.versions?.[identity] === undefined ? {} : { version: manifest.versions[identity] })
+      }))
+    );
+    const { registry, buildContext } = createContext();
+    try {
+      const artifact = NxProgramArtifact.buildWorkspace(workspace, {
+        buildContext,
+        entryIdentity: manifest.entry,
+        implicitImports: manifest.implicitImports ?? []
+      });
+      try {
+        for (const debug of [false, true]) {
+          for (const entry of artifact.generateNxIr({ modules: [], debug })) {
+            const file = `${entry.identity.replaceAll("/", "__")}${debug ? "" : ".stripped"}.nxir`;
+            const expected = readFileSync(join(dir, "expected", file));
+            expect(entry.bytes.equals(expected), `${file} differs`).toBe(true);
+          }
+        }
+      } finally {
+        artifact.dispose();
+      }
+    } finally {
+      workspace.dispose();
+      buildContext.dispose();
+      registry.dispose();
+    }
+  });
+
+  it("explains an image and refuses bytes that are not one", () => {
+    const generated = generateNxIrFromSource("let root() = { 42 }");
+    const text = explainNxIr(generated.bytes);
+    expect(text).toContain("function root() =\n  42\n");
+    expect(explainNxIr(new Uint8Array(generated.bytes))).toBe(text);
+
+    const corpus = join(corpusRoot, "snippet/expected");
+    expect(explainNxIr(readFileSync(join(corpus, "input.nx.nxir")))).toBe(
+      readFileSync(join(corpus, "input.nx.nxir.txt"), "utf8")
+    );
+
+    expect(() => explainNxIr(generated.bytes.subarray(0, 8))).toThrowError(NxEvaluationError);
+    expect(() => explainNxIr(Buffer.from("{}"))).toThrowError(/not an NX IR image/);
   });
 
   it("preserves source labels for IR generation diagnostics", () => {
+    // A conditional property fragment is a construct NX IR has no node for.
     const error = captureEvaluationError(() => {
-      generateNxIrFromSource(`external component <SearchBox emits { SearchRequested { query:string } } />
-action DoSearch = { query:string }
-let root() = { <SearchBox onSearchRequested=<DoSearch query={action.query} /> /> }`);
+      generateNxIrFromSource(`external component <Notice density:string />
+let root(compact:boolean) = { <Notice if compact { density="tight" } else { density="normal" } /> }`);
     });
     const diagnostic = error.diagnostics.find((item) => item.code === "codegen-unsupported-construct");
     if (diagnostic === undefined) {

@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
@@ -219,22 +220,29 @@ public class NxEndToEndTests
     }
 
     [Fact]
-    public void GenerateNxIr_WithProgramArtifact_ReturnsJsonAndMetadata()
+    public void GenerateNxIr_WithProgramArtifact_ReturnsImageAndMetadata()
     {
         using NxProgramArtifact artifact = NxProgramArtifact.Build("let root() = { 1 + 2 }");
 
         NxGeneratedNxIr ir = artifact.GenerateNxIr();
 
-        using JsonDocument document = JsonDocument.Parse(ir.Json);
-        Assert.Equal("nx-ir-json", document.RootElement.GetProperty("format").GetString());
-        Assert.DoesNotContain('\n', ir.Json);
-        Assert.Equal(2, ir.Metadata.SchemaVersion);
-        Assert.Equal("nx-ir-runtime-v1", ir.Metadata.RuntimeAbi);
-        Assert.True(ir.Metadata.ProgramFingerprint > 0);
-        NxIrEntrypointMetadata entrypoint = Assert.Single(ir.Metadata.FunctionEntrypoints);
-        Assert.Equal("root", entrypoint.Name);
-        Assert.Equal("function", entrypoint.Reference.Kind);
+        Assert.Equal("NXIR", Encoding.ASCII.GetString(ir.Bytes, 0, 4));
+        Assert.Equal(4u, BinaryPrimitives.ReadUInt32LittleEndian(ir.Bytes.AsSpan(4, 4)));
+        Assert.Equal((uint)ir.Bytes.Length, BinaryPrimitives.ReadUInt32LittleEndian(ir.Bytes.AsSpan(8, 4)));
+        Assert.Equal(0, ir.Bytes.Length % 4);
+        Assert.Equal(4, ir.Metadata.SchemaVersion);
+        Assert.Equal("nx-ir-runtime-v2", ir.Metadata.RuntimeAbi);
+        Assert.Equal("input.nx", ir.Identity);
+        Assert.Equal("root", Assert.Single(ir.Metadata.FunctionEntrypoints));
         Assert.Empty(ir.Metadata.ComponentEntrypoints);
+
+        string text = NxRuntime.ExplainNxIr(ir.Bytes);
+        Assert.StartsWith($"module input.nx fingerprint {ir.Metadata.Fingerprint}", text, StringComparison.Ordinal);
+        Assert.Contains("function root() =\n  (1 add 2)\n", text, StringComparison.Ordinal);
+
+        NxGeneratedNxIr withDebug = Assert.Single(artifact.GenerateNxIr(new NxIrEmitOptions { Debug = true }));
+        Assert.True(withDebug.Bytes.Length > ir.Bytes.Length);
+        Assert.Contains("function root() @1:1-1:23 =", NxRuntime.ExplainNxIr(withDebug.Bytes), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -245,13 +253,87 @@ public class NxEndToEndTests
 
         NxGeneratedNxIr ir = NxRuntime.GenerateNxIr("let root() = { 42 }", buildContext);
 
-        using JsonDocument document = JsonDocument.Parse(ir.Json);
-        Assert.True(document.RootElement.TryGetProperty("programFingerprint", out _));
-        Assert.Equal("root", Assert.Single(ir.Metadata.FunctionEntrypoints).Name);
+        Assert.Equal("NXIR", Encoding.ASCII.GetString(ir.Bytes, 0, 4));
+        Assert.Equal("root", Assert.Single(ir.Metadata.FunctionEntrypoints));
+    }
+
+    [Fact]
+    public void GenerateNxIr_EmitsTheConformanceCorpusImagesByteForByte()
+    {
+        string dir = Path.Combine(FindRepositoryRoot(), "specs", "ir-conformance", "two-module");
+        using NxLibraryRegistry registry = new();
+        using NxProgramBuildContext buildContext = registry.CreateBuildContext();
+        NxWorkspace workspace = new(
+        [
+            NxWorkspaceModule.FromSourceText("app/main.nx", File.ReadAllText(Path.Combine(dir, "app", "main.nx"))),
+            NxWorkspaceModule.FromSourceText("shared/model.nx", File.ReadAllText(Path.Combine(dir, "shared", "model.nx"))),
+        ]);
+        using NxProgramArtifact artifact = NxProgramArtifact.BuildWorkspace(workspace, "app/main.nx", buildContext);
+
+        foreach (bool debug in new[] { false, true })
+        {
+            IReadOnlyList<NxGeneratedNxIr> artifacts = artifact.GenerateNxIr(
+                new NxIrEmitOptions { Modules = Array.Empty<string>(), Debug = debug });
+            Assert.Equal(2, artifacts.Count);
+            foreach (NxGeneratedNxIr entry in artifacts)
+            {
+                string file = entry.Identity.Replace("/", "__", StringComparison.Ordinal) + (debug ? ".nxir" : ".stripped.nxir");
+                byte[] expected = File.ReadAllBytes(Path.Combine(dir, "expected", file));
+                Assert.True(expected.AsSpan().SequenceEqual(entry.Bytes), $"{file} differs");
+            }
+        }
+    }
+
+    [Fact]
+    public void ExplainNxIr_RefusesBytesThatAreNotAnImage()
+    {
+        NxGeneratedNxIr ir = NxRuntime.GenerateNxIr("let root() = { 42 }");
+
+        NxEvaluationException truncated = Assert.Throws<NxEvaluationException>(
+            () => NxRuntime.ExplainNxIr(ir.Bytes.AsSpan(0, 8).ToArray()));
+        Assert.Contains(truncated.Diagnostics, diagnostic => diagnostic.Code == "nx-ir-malformed");
+
+        NxEvaluationException notAnImage = Assert.Throws<NxEvaluationException>(
+            () => NxRuntime.ExplainNxIr(Encoding.UTF8.GetBytes("{}")));
+        Assert.Contains(notAnImage.Diagnostics, diagnostic => diagnostic.Message.Contains("not an NX IR image", StringComparison.Ordinal));
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        string? directory = AppContext.BaseDirectory;
+        while (directory is not null)
+        {
+            if (Directory.Exists(Path.Combine(directory, "specs", "ir-conformance")))
+            {
+                return directory;
+            }
+
+            directory = Path.GetDirectoryName(directory);
+        }
+
+        throw new InvalidOperationException("The repository root was not found above the test directory.");
     }
 
     [Fact]
     public void GenerateNxIr_WithIrDiagnostics_ThrowsEvaluationException()
+    {
+        // A conditional property fragment is a construct NX IR has no node for.
+        using NxProgramArtifact artifact = NxProgramArtifact.Build(
+            """
+            external component <Notice density:string />
+            let root(compact:boolean) = { <Notice if compact { density="tight" } else { density="normal" } /> }
+            """);
+
+        NxEvaluationException exception = Assert.Throws<NxEvaluationException>(
+            () => artifact.GenerateNxIr());
+
+        Assert.Contains(
+            exception.Diagnostics,
+            diagnostic => diagnostic.Code == "codegen-unsupported-construct");
+    }
+
+    [Fact]
+    public void GenerateNxIr_WithActionHandler_CarriesTheHandler()
     {
         using NxProgramArtifact artifact = NxProgramArtifact.Build(
             """
@@ -261,14 +343,13 @@ public class NxEndToEndTests
             let root() = { <SearchBox onSearchSubmitted=<DoSearch query={action.query} /> /> }
             """);
 
-        NxEvaluationException exception = Assert.Throws<NxEvaluationException>(
-            () => artifact.GenerateNxIr());
+        NxGeneratedNxIr ir = artifact.GenerateNxIr();
 
+        Assert.Equal(new[] { "action-handlers-v1" }, ir.Metadata.RequiredFeatures);
         Assert.Contains(
-            exception.Diagnostics,
-            diagnostic => diagnostic.Message.Contains(
-                "action-handler codegen is not supported",
-                StringComparison.Ordinal));
+            "onSearchSubmitted=handler SearchBox.SearchSubmitted action@0:SearchBox.SearchSubmitted =>",
+            NxRuntime.ExplainNxIr(ir.Bytes),
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -367,6 +448,46 @@ public class NxEndToEndTests
             () => NxRuntime.ValidateWorkspace(workspace, buildContext));
 
         Assert.Contains("interop arguments were invalid", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BuildWorkspace_WithImplicitImports_ResolvesCatalogControlsWithoutAnImportLine()
+    {
+        NxWorkspace workspace = new([
+            NxWorkspaceModule.FromSourceText("drawnui.nx", "export external component <SkiaLabel Text:string />"),
+            NxWorkspaceModule.FromSourceText("input.nx", "let root() = <SkiaLabel Text=\"hi\" />"),
+        ]);
+        using NxLibraryRegistry registry = new();
+        using NxProgramBuildContext buildContext = registry.CreateBuildContext();
+        string[] implicitImports = ["drawnui.nx"];
+
+        Assert.Empty(NxRuntime.ValidateWorkspace(workspace, buildContext, implicitImports));
+        using NxProgramArtifact artifact = NxProgramArtifact.BuildWorkspace(workspace, "input.nx", buildContext, implicitImports);
+        using JsonDocument document = JsonDocument.Parse(NxRuntime.EvaluateBytes(artifact, NxOutputFormat.Json));
+        Assert.Equal("SkiaLabel", document.RootElement.GetProperty("$type").GetString());
+
+        IReadOnlyList<NxDiagnostic> diagnostics = NxRuntime.ValidateWorkspace(workspace, buildContext, ["missing.nx"]);
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == "implicit-import-not-found");
+    }
+
+    [Fact]
+    public void GenerateNxIr_RecordsTheVersionTheWorkspaceGaveEachModule()
+    {
+        NxWorkspace workspace = new([
+            NxWorkspaceModule.FromSourceText(
+                "drawnui.nx",
+                "export external component <SkiaLabel Text:string />",
+                version: "9"),
+            NxWorkspaceModule.FromSourceText("input.nx", "let root() = <SkiaLabel Text=\"hi\" />"),
+        ]);
+        using NxLibraryRegistry registry = new();
+        using NxProgramBuildContext buildContext = registry.CreateBuildContext();
+
+        using NxProgramArtifact artifact = NxProgramArtifact.BuildWorkspace(workspace, "input.nx", buildContext, ["drawnui.nx"]);
+        NxGeneratedNxIr ir = Assert.Single(artifact.GenerateNxIr(new NxIrEmitOptions()));
+
+        string text = NxRuntime.ExplainNxIr(ir.Bytes);
+        Assert.Contains("links drawnui.nx version \"9\" fingerprint ", text, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -13,7 +13,7 @@
 #endif
 
 
-#define NX_FFI_ABI_VERSION 12
+#define NX_FFI_ABI_VERSION 13
 
 enum NxEvalStatus
 #ifdef __cplusplus
@@ -58,7 +58,20 @@ typedef struct NxWorkspaceModule {
   size_t identity_len;
   const uint8_t *source_utf8_ptr;
   size_t source_utf8_len;
+  /**
+   * The module's version string as UTF-8; a zero length is no version.
+   */
+  const uint8_t *version_ptr;
+  size_t version_len;
 } NxWorkspaceModule;
+
+/**
+ * One borrowed UTF-8 string, such as a workspace identity in an implicit-import list.
+ */
+typedef struct NxUtf8Slice {
+  const uint8_t *ptr;
+  size_t len;
+} NxUtf8Slice;
 
 #ifdef __cplusplus
 extern "C" {
@@ -89,6 +102,8 @@ NX_FFI_EXPORT
 NxEvalStatus nx_validate_workspace(const struct NxProgramBuildContextHandle *build_context_ptr,
                                    const struct NxWorkspaceModule *modules_ptr,
                                    size_t module_count,
+                                   const struct NxUtf8Slice *implicit_imports_ptr,
+                                   size_t implicit_import_count,
                                    struct NxBuffer *out_buffer);
 
 NX_FFI_EXPORT
@@ -97,6 +112,8 @@ NxEvalStatus nx_build_workspace_program_artifact(const struct NxProgramBuildCont
                                                  size_t module_count,
                                                  const uint8_t *entry_identity_ptr,
                                                  size_t entry_identity_len,
+                                                 const struct NxUtf8Slice *implicit_imports_ptr,
+                                                 size_t implicit_import_count,
                                                  struct NxProgramArtifactHandle **out_handle,
                                                  struct NxBuffer *out_buffer);
 
@@ -131,8 +148,36 @@ NxEvalStatus nx_codegen_js_program_module(const struct NxProgramArtifactHandle *
                                           size_t runtime_import_specifier_len,
                                           struct NxBuffer *out_buffer);
 
+/**
+ * Explains an NX IR image as text with every table index resolved.
+ *
+ * `image_ptr` and `image_len` describe the image. The payload is the UTF-8 text on success, or
+ * the JSON diagnostics with [`NxEvalStatus::Error`] when the image is malformed, truncated or of
+ * a schema version this build does not read. The image is validated before it is read, so no
+ * input traps.
+ */
+NX_FFI_EXPORT
+NxEvalStatus nx_ir_explain(const uint8_t *image_ptr,
+                           size_t image_len,
+                           struct NxBuffer *out_buffer);
+
+/**
+ * Emits NX IR artifacts from a program artifact.
+ *
+ * `options_ptr` and `options_len` describe the emit options as UTF-8 JSON, `{ "modules": [...],
+ * "debug": false }` with every key optional; an empty text is the default, which emits the entry
+ * module alone without its debug section. Each module's version comes from the workspace the
+ * program was built from.
+ *
+ * The payload is an NX IR bundle: a little-endian `u32` header length, a JSON header
+ * `[{ identity, metadata, offset, length }]`, zero padding to four bytes, then the images at the
+ * offsets the header gives, measured from the start of the payload. On error the payload is the
+ * JSON diagnostics.
+ */
 NX_FFI_EXPORT
 NxEvalStatus nx_codegen_nx_ir(const struct NxProgramArtifactHandle *program_artifact_ptr,
+                              const uint8_t *options_ptr,
+                              size_t options_len,
                               struct NxBuffer *out_buffer);
 
 NX_FFI_EXPORT

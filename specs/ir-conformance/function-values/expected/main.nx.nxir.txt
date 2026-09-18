@@ -1,0 +1,58 @@
+module main.nx fingerprint 4607496207041317752
+requires function-values-v1
+entrypoints functions [ContactRow Compact PlainRow double render invoke identical distinct exact subset called template root] components [List]
+
+record Contact @4:1-4:31
+  name: string required
+
+alias RowTemplate @5:1-5:63
+
+component List external @7:1-7:125
+  props
+    ItemsSource: object[]?
+    ItemTemplate: (<function Item:object Index:int />: string)?
+
+function ContactRow(Item: Contact, Index: int) @9:1-9:78 =
+  ((Item.name concat "#") concat text<int>(Index))
+
+function Compact(Item: Contact) @10:1-10:51 =
+  Item.name
+
+function PlainRow(Item: Contact, Index: int) @11:1-11:62 =
+  Item.name
+
+function double(n: int) @12:1-12:33 =
+  (n mul 2)
+
+function render(Row: <function Item:Contact Index:int />: string, Item: Contact, Index: int) @14:1-14:97 =
+  <Row Index=Index Item=Item />
+
+function invoke(f: <function n:int />: int, n: int) @15:1-15:65 =
+  <f n=n />
+
+value contacts @17:1-17:65 =
+  [<Contact name="Ada" />, <Contact name="Kai" />]
+
+value alias @19:1-19:38 =
+  ContactRow
+
+function identical() @21:1-21:40 =
+  (alias eq ContactRow)
+
+function distinct() @22:1-22:37 =
+  (alias eq PlainRow)
+
+function exact() @23:1-23:62 =
+  render(ContactRow, <Contact name="Ada" />, 1)
+
+function subset() @24:1-24:60 =
+  render(Compact, <Contact name="Kai" />, 7)
+
+function called() @25:1-25:36 =
+  invoke(double, 21)
+
+function template() @26:1-26:30 =
+  ContactRow
+
+function root() @27:1-27:85 =
+  <List ItemTemplate=ContactRow ItemsSource=contacts />

@@ -7,6 +7,7 @@ use std::sync::Arc;
 pub(crate) struct LogicalSourceModule {
     pub identity: String,
     pub source: Arc<str>,
+    pub version: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,6 +59,19 @@ impl LogicalModuleGraph {
             .map(|module| (module.identity.clone(), module.source.clone()))
             .collect()
     }
+
+    /// The version string of each module the host gave one, by identity.
+    pub fn version_map(&self) -> FxHashMap<String, String> {
+        self.modules
+            .iter()
+            .filter_map(|module| {
+                module
+                    .version
+                    .as_ref()
+                    .map(|version| (module.identity.clone(), version.clone()))
+            })
+            .collect()
+    }
 }
 
 pub(crate) trait SourceProvider {
@@ -100,6 +114,7 @@ impl SourceProvider for WorkspaceSourceProvider<'_> {
             modules.push(LogicalSourceModule {
                 identity: module.identity().to_string(),
                 source: module.source_arc(),
+                version: module.version().map(str::to_string),
             });
         }
 
@@ -169,10 +184,12 @@ mod tests {
                 LogicalSourceModule {
                     identity: "shared/config.nx".to_string(),
                     source: Arc::<str>::from("let root() = { 1 }"),
+                    version: None,
                 },
                 LogicalSourceModule {
                     identity: "shared/config.nx".to_string(),
                     source: Arc::<str>::from("let root() = { 2 }"),
+                    version: None,
                 },
             ]),
             Err(SourceProviderError::Identity(

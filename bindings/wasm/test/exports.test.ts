@@ -17,7 +17,7 @@ describe("the package's entry points", () => {
     const host = entry.createNxHost(await entry.loadNxModule());
     try {
       const artifact = host.buildProgramArtifact("let root() = { 42 }");
-      expect(artifact.generateNxIr().json).toContain("\"schemaVersion\"");
+      expect(artifact.generateNxIr()[0]!.metadata.schemaVersion).toBe(4);
       artifact.dispose();
     } finally {
       host.dispose();

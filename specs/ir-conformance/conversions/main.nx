@@ -1,0 +1,87 @@
+// Implicit primitive conversions: string `+` over each stringifiable primitive, the canonical text
+// form of each, a text body joined at a `string` content property, mixed numeric arithmetic and
+// comparison, and an integer widened at a `float64` site.
+type Item = { title:string }
+type Label = { content text:string }
+type Box = { width:float64 ratios:float64[] opacity:float64? }
+
+let count = 3
+let item = <Item title="Rust" />
+let tenth: float32 = 0.1
+
+// `+` concatenates when either operand is a string, and stays left-associative.
+let total() = { "Total: " + count }
+let onTheLeft() = { 1.5 + " px" }
+let enabled() = { "enabled: " + true }
+let leftAssociative() = { 1 + 2 + " items" }
+let stringFirst() = { "n=" + 1 + 2 }
+// A field access concatenates exactly as a literal does: the operand's type decides, not its form.
+let reorder() = { "Reorder " + item.title }
+
+// One text form per primitive. A float prints as ECMAScript's `Number::toString` does, and a
+// float32 prints the shortest digits that round-trip as a float32.
+let integralFloat() = { "" + 1.0 }
+let fractionalFloat() = { "" + 0.1 }
+let largeFloat() = { "" + 1.0e21 }
+let smallFloat() = { "" + 1.0e-7 }
+let negativeZero() = { "" + -0.0 }
+let negativeInt() = { "" + -42 }
+let float32Tenth() = { "" + tenth }
+// A computed float32 prints as a float32 too, though a JavaScript runtime computes it as a float64.
+let float32Scaled(w:float32) = { w * 3 + " px" }
+let float32Product() = { float32Scaled(2.3) }
+// Each float32 operation rounds its result to a float32, so a widened or compared result is the
+// value the interpreter computes, not the float64 a JavaScript runtime would otherwise carry.
+let scaled(v:float32): float64 = { v * 3 }
+let float32Widened() = { scaled(2.3) }
+let float32Compared() = { scaled(2.3) == 6.899999618530273 }
+let float32Steps(v:float32, d:float32): float64 = { (v + 0.1 - 0.2) / d }
+let float32StepsOf() = { float32Steps(2.3, 3) }
+
+// A text body at a `string` content property binds as one string.
+let label() = { <Label>Total: {count} of {tenth}</Label> }
+let named(first:string, last:string) = { <Label>{first} {last}</Label> }
+// A typed body keeps its line breaks for the host's text processor, minus the source's indentation.
+let note(count:int) =
+  <Label:markdown>
+    # Tasks
+
+    You have @{count} open.
+
+    - one
+  </Label>
+let markdownNote() = { note(3) }
+let fullName() = { named("Ada", "Lovelace") }
+
+// Mixed numeric operands take the narrowest type both widen to. The integer is recorded at its
+// own type: no conversion node, and `div` rather than `idiv` where the result is a float.
+let mixedSum(n:int, x:float64) = { n + x }
+let mixedSumOf() = { mixedSum(1, 1.5) }
+let mixedEqual() = { count == 3.0 }
+let mixedLess() = { count < 3.5 }
+let mixedDivision() = { count / 2.0 }
+let integerDivision(n:int32, m:int) = { n / m }
+let integerDivisionOf() = { integerDivision(7, 2) }
+
+// A join takes the narrowest type its branches widen to, and a narrower branch evaluates at it, so
+// each division below is a float division.
+let pick(b:boolean, n:int, x:float64) = { if b { n } else { x } }
+let joinedIf() = { pick(true, count, 1.5) / 2 }
+let arm(k:int, n:int, x:float64) = { if k is { 1 => n  else => x } }
+let joinedMatch() = { arm(1, count, 1.5) / 2 }
+let joinedList() = { count 1.5 }
+// A narrower branch computes at its own type, and only its result is widened: `7 / 2` is still
+// integer division, and a float32 product is still rounded to a float32.
+let halfOrX(b:boolean, n:int, x:float64) = { if b { n / 2 } else { x } }
+let joinedIntegerDivision() = { halfOrX(true, 7, 0.5) }
+let armHalf(k:int, n:int, x:float64) = { if k is { 1 => n / 2  else => x } }
+let joinedArmDivision() = { armHalf(1, 7, 0.5) }
+let listHalf(n:int, x:float64) = { (n / 2) x }
+let joinedListDivision() = { listHalf(7, 0.5) }
+let productOrX(b:boolean, v:float32, x:float64) = { if b { v * 3 } else { x } }
+let scaledJoin(v:float32) = { productOrX(true, v, 0.5) }
+let joinedFloat32Product() = { scaledJoin(2.3) }
+
+// An int widened at a float64 site, in a list, and at a nullable site.
+let widened() = { <Box width={count} ratios={count 2.5} opacity={count} /> }
+let root() = { total() }

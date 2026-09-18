@@ -99,6 +99,36 @@ const omissions = new Map();
 function omit(owner, property, reason) {
   omissions.set(`${owner}.${property}`, { owner, property, reason });
 }
+
+/** An event parameter with no NX type is dropped from the emit's payload, and recorded like a property. */
+function dropParameter(owner, event, parameter, reason) {
+  omissions.set(`${owner}.${event}(${parameter})`, { owner, property: event, parameter, reason });
+}
+
+/** Events by declaring class: each an emit name, its payload fields, and the parameter names in order. */
+const eventsByClass = new Map();
+
+/**
+ * A templated control binds an item collection and a cell recipe: `ItemsSource: readonly unknown[]`
+ * and `ItemTemplate: () => SkiaControl`, declared by one class. NX spells the pair as a type
+ * parameter `TItem`, the collection as `TItem[]`, and the recipe as a function type the renderer
+ * calls with the bound item and its index — DrawnUI's `BindingContext` and `ContextIndex`, named
+ * `Item` and `Index` here. The pair rule is class-based, so any class declaring both gets it.
+ */
+const TEMPLATE_ITEMS = "ItemsSource";
+const TEMPLATE_FACTORY = "ItemTemplate";
+const TEMPLATE_TYPE_PARAMETER = "TItem";
+const TEMPLATE_PARAMETERS = ["Item", "Index"];
+const templatedClasses = new Set();
+function templateProp(name) {
+  if (name === TEMPLATE_ITEMS) {
+    return { nx: `${TEMPLATE_TYPE_PARAMETER}[]`, meta: { kind: "list", element: { kind: "parameter" } } };
+  }
+  return {
+    nx: `(<function ${TEMPLATE_PARAMETERS[0]}:${TEMPLATE_TYPE_PARAMETER} ${TEMPLATE_PARAMETERS[1]}:int />: ${NODE_ROOT})`,
+    meta: { kind: "template" },
+  };
+}
 const synthesizedNames = new Map();
 const overrides = [];
 
@@ -140,6 +170,62 @@ function declaredName(property) {
     }
   }
   return undefined;
+}
+
+/**
+ * The one call signature of an event's function type: one returning `void`, or a union that
+ * includes it (`ContextMenu` returns `boolean | void`). Any other function member is not an
+ * event and has no NX expression.
+ */
+function eventSignature(checker, type) {
+  const signatures = checker.getSignaturesOfType(type, ts.SignatureKind.Call);
+  if (signatures.length !== 1) {
+    return null;
+  }
+  const returned = signatures[0].getReturnType();
+  const isVoid = (candidate) => (candidate.flags & ts.TypeFlags.Void) !== 0;
+  return isVoid(returned) || (returned.isUnion() && returned.types.some(isVoid)) ? signatures[0] : null;
+}
+
+/** The NX primitive a callback parameter's type maps to, or null: an emit's payload carries nothing richer. */
+function primitiveNx(type) {
+  if (type.flags & ts.TypeFlags.String) {
+    return "string";
+  }
+  if (type.flags & (ts.TypeFlags.Number | ts.TypeFlags.NumberLiteral)) {
+    return "float64";
+  }
+  if (type.flags & (ts.TypeFlags.Boolean | ts.TypeFlags.BooleanLiteral)) {
+    return "boolean";
+  }
+  return null;
+}
+
+/**
+ * Reads an event off its signature: the parameters after the leading sender become payload fields
+ * under their own names where their type is a primitive, and are dropped and recorded otherwise.
+ */
+function readEvent(checker, owner, name, signature) {
+  const fields = [];
+  const params = [];
+  let dropped = false;
+  for (const parameter of signature.parameters.slice(1)) {
+    const type = stripUndefined(checker, checker.getTypeOfSymbolAtLocation(parameter, parameter.valueDeclaration));
+    const nx = primitiveNx(type);
+    if (nx === null) {
+      dropParameter(owner, name, parameter.name, checker.typeToString(type));
+      dropped = true;
+      continue;
+    }
+    // The renderer fills payload fields from the callback's arguments by position, so a kept
+    // parameter after a dropped one would be filled from the dropped one's argument.
+    if (dropped) {
+      throw new Error(`${owner}.${name}: a dropped parameter precedes a kept one, which the metadata cannot express.`);
+    }
+    fields.push({ name: parameter.name, nx });
+    params.push(parameter.name);
+  }
+  return { name, fields, params };
 }
 
 function isStringLiteralUnion(type) {
@@ -315,24 +401,39 @@ function classChain(checker, tag, exportsByName) {
 
 function nxUnionDeclaration(union) {
   if (union.cases.length === 1) {
-    return `type ${union.name} = | ${union.cases[0]}\n`;
+    return `export type ${union.name} = | ${union.cases[0]}\n`;
   }
   if (union.cases.length <= 5) {
-    return `type ${union.name} = ${union.cases.join(" | ")}\n`;
+    return `export type ${union.name} = ${union.cases.join(" | ")}\n`;
   }
-  return `type ${union.name} =\n${union.cases.map((name) => `  | ${name}`).join("\n")}\n`;
+  return `export type ${union.name} =\n${union.cases.map((name) => `  | ${name}`).join("\n")}\n`;
 }
 
 function nxRecordDeclaration(record) {
   const fields = record.fields.map((field) => `  ${field.name}: ${field.nx}?`).join("\n");
-  return `type ${record.name} = {\n${fields}\n}\n`;
+  return `export type ${record.name} = {\n${fields}\n}\n`;
 }
 
-function nxComponent({ name, isAbstract, base, props, hasContent }) {
-  const header = `${isAbstract ? "abstract " : ""}external component`;
-  const lines = props.map((prop) => `  ${prop.name}: ${prop.nx}?`);
+function nxEmit(event) {
+  const fields = event.fields.map((field) => `${field.name}:${field.nx}`).join(" ");
+  return `    ${event.name} { ${fields}${fields.length > 0 ? " " : ""}}`;
+}
+
+function nxComponent({ name, isAbstract, base, typeParams = [], props, hasContent, emits = [] }) {
+  // Exported, because the catalog is its own module: the playground and the language service
+  // reach it through an implicit import, which sees only what a module exports.
+  const header = `export ${isAbstract ? "abstract " : ""}external component`;
+  // A type parameter comes first: the validator requires it ahead of every prop.
+  const lines = [
+    ...typeParams.map((param) => `  ${param}: type`),
+    ...props.map((prop) => `  ${prop.name}: ${prop.nx}?`),
+  ];
   if (hasContent) {
     lines.push(`  content ${CONTENT_PROPERTY}: ${NODE_ROOT}[]?`);
+  }
+  if (emits.length > 0) {
+    // Each emit declares its own record, so the action a handler receives is `<Component>.<Event>`.
+    lines.push("  emits {", ...emits.map(nxEmit), "  }");
   }
   const extendsClause = base === null ? "" : ` extends ${base}`;
   if (lines.length === 0) {
@@ -360,6 +461,18 @@ function main() {
       const symbol = exportsByName.get(`props_${tag}`);
       const propsType = checker.getTypeOfSymbolAtLocation(symbol, symbol.valueDeclaration);
       let hasContent = false;
+      // The classes declaring both halves of the template pair, so each half is mapped knowing
+      // the other is there.
+      const membersByOwner = new Map();
+      for (const property of checker.getPropertiesOfType(propsType)) {
+        const owner = ownerOf(property);
+        if (owner !== null) {
+          if (!membersByOwner.has(owner)) {
+            membersByOwner.set(owner, new Set());
+          }
+          membersByOwner.get(owner).add(property.name);
+        }
+      }
       for (const property of checker.getPropertiesOfType(propsType)) {
         if (property.name === "ref") {
           continue;
@@ -374,7 +487,30 @@ function main() {
         }
         const declaration = property.declarations[0];
         const type = stripUndefined(checker, checker.getTypeOfSymbolAtLocation(property, declaration));
-        const mapped = mapType(checker, type, `${owner}${property.name}`, declaredName(property));
+        // An event is an optional member: a required function member is something the control calls.
+        // The props type wraps every member in `Partial<>`, so the symbol is always optional; the
+        // class member's own declaration says whether DrawnUI declared it optional.
+        const optional = declaration.questionToken !== undefined;
+        const signature = optional ? eventSignature(checker, type) : null;
+        if (signature !== null) {
+          if (!eventsByClass.has(owner)) {
+            eventsByClass.set(owner, new Map());
+          }
+          if (!eventsByClass.get(owner).has(property.name)) {
+            eventsByClass.get(owner).set(property.name, readEvent(checker, owner, property.name, signature));
+          }
+          continue;
+        }
+        const isTemplateMember =
+          (property.name === TEMPLATE_ITEMS || property.name === TEMPLATE_FACTORY) &&
+          membersByOwner.get(owner).has(TEMPLATE_ITEMS) &&
+          membersByOwner.get(owner).has(TEMPLATE_FACTORY);
+        if (isTemplateMember) {
+          templatedClasses.add(owner);
+        }
+        const mapped = isTemplateMember
+          ? templateProp(property.name)
+          : mapType(checker, type, `${owner}${property.name}`, declaredName(property));
         if (mapped === null) {
           omit(owner, property.name, checker.typeToString(type));
           continue;
@@ -397,16 +533,26 @@ function main() {
         parentOf.set(chain[index], chain[index + 1]);
       }
     }
-    for (const [className, props] of byClass) {
-      for (let ancestor = parentOf.get(className); ancestor !== undefined; ancestor = parentOf.get(ancestor)) {
-        for (const name of byClass.get(ancestor)?.keys() ?? []) {
-          if (props.has(name)) {
-            overrides.push({ owner: className, property: name, inheritedFrom: ancestor });
-            props.delete(name);
+    for (const members of [byClass, eventsByClass]) {
+      for (const [className, own] of members) {
+        for (let ancestor = parentOf.get(className); ancestor !== undefined; ancestor = parentOf.get(ancestor)) {
+          for (const name of members.get(ancestor)?.keys() ?? []) {
+            if (own.has(name)) {
+              overrides.push({ owner: className, property: name, inheritedFrom: ancestor });
+              own.delete(name);
+              // A folded event's dropped parameters are the ancestor's to record, not this class's.
+              for (const [key, omission] of omissions) {
+                if (omission.owner === className && omission.property === name && omission.parameter !== undefined) {
+                  omissions.delete(key);
+                }
+              }
+            }
           }
         }
       }
     }
+    const emitsOf = (className) =>
+      [...(eventsByClass.get(className) ?? new Map()).values()].sort((left, right) => left.name.localeCompare(right.name));
 
     // A class that other registered tags extend needs an abstract twin, since only abstract
     // components may be extended.
@@ -441,9 +587,18 @@ function main() {
         .map(([name, mapped]) => ({ name, nx: mapped.nx }))
         .sort((left, right) => left.name.localeCompare(right.name));
       declarations.push(
-        nxComponent({ name: abstractNameFor(className), isAbstract: true, base, props, hasContent: false }),
+        nxComponent({
+          name: abstractNameFor(className),
+          isAbstract: true,
+          base,
+          typeParams: typeParamsOf(className),
+          props,
+          hasContent: false,
+          emits: emitsOf(className),
+        }),
       );
     };
+    const typeParamsOf = (className) => (templatedClasses.has(className) ? [TEMPLATE_TYPE_PARAMETER] : []);
 
     for (const [tag, { chain }] of tagInfo) {
       for (const className of chain) {
@@ -468,8 +623,28 @@ function main() {
         : [...(byClass.get(ownClass) ?? new Map()).entries()]
             .map(([name, mapped]) => ({ name, nx: mapped.nx }))
             .sort((left, right) => left.name.localeCompare(right.name));
-      declarations.push(nxComponent({ name: tag, isAbstract: false, base, props, hasContent }));
-      meta.components[tag] = { class: ownClass, content: hasContent ? CONTENT_PROPERTY : null };
+      const emits = isAlsoBase ? [] : emitsOf(ownClass);
+      const typeParams = isAlsoBase ? [] : typeParamsOf(ownClass);
+      declarations.push(nxComponent({ name: tag, isAbstract: false, base, typeParams, props, hasContent, emits }));
+      // Every event the control carries, inherited included, with the parameter names the
+      // renderer builds the action from; the action's name comes from the prepared declaration.
+      const events = {};
+      for (const className of [...chain].reverse()) {
+        for (const event of emitsOf(className)) {
+          events[event.name] = event.params;
+        }
+      }
+      meta.components[tag] = {
+        class: ownClass,
+        content: hasContent ? CONTENT_PROPERTY : null,
+        events: Object.fromEntries(Object.entries(events).sort(([left], [right]) => left.localeCompare(right))),
+      };
+      // A control that carries the template pair, itself or through a base, names the parameters
+      // the renderer calls the template with, in order, and the property the items come from.
+      if (chain.some((className) => templatedClasses.has(className))) {
+        meta.components[tag].templates = { [TEMPLATE_FACTORY]: TEMPLATE_PARAMETERS };
+        meta.components[tag].itemsSource = TEMPLATE_ITEMS;
+      }
     }
 
     for (const [name, union] of [...unions.entries()].sort()) {
@@ -509,15 +684,17 @@ function main() {
       join(appRoot, "catalog/omitted.json"),
       `${JSON.stringify(
         [...omissions.values()].sort((a, b) =>
-          `${a.owner}.${a.property}`.localeCompare(`${b.owner}.${b.property}`),
+          `${a.owner}.${a.property}.${a.parameter ?? ""}`.localeCompare(`${b.owner}.${b.property}.${b.parameter ?? ""}`),
         ),
         null,
         2,
       )}\n`,
     );
 
+    const emitCount = [...eventsByClass.values()].reduce((total, events) => total + events.size, 0);
+    const templatedCount = Object.values(meta.components).filter((component) => component.templates !== undefined).length;
     console.log(
-      `catalog: ${Object.keys(meta.components).length} components, ${unions.size} unions, ${records.size} records, ${omissions.size} properties omitted, ${overrides.length} overrides folded into their base`,
+      `catalog: ${Object.keys(meta.components).length} components, ${unions.size} unions, ${records.size} records, ${emitCount} emits, ${templatedCount} templated (${[...templatedClasses].sort().join(", ")}), ${omissions.size} members omitted, ${overrides.length} overrides folded into their base`,
     );
   } finally {
     rmSync(probePath, { force: true });

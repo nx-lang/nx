@@ -1,7 +1,8 @@
 use crate::model::{
-    expr_id_u32, CodegenComponent, CodegenComponentDescriptor, CodegenComponentField,
-    CodegenComponentTargetKind, CodegenDeclaration, CodegenDeclarationKind, CodegenElement,
-    CodegenEntrypoint, CodegenExpression, CodegenExpressionKind, CodegenMatchArm, CodegenModule,
+    expr_id_u32, CodegenActionHandler, CodegenComponent, CodegenComponentDescriptor,
+    CodegenComponentEmit, CodegenComponentField, CodegenComponentTargetKind, CodegenDeclaration,
+    CodegenDeclarationKind, CodegenElement, CodegenEntrypoint, CodegenExpression,
+    CodegenExpressionKind, CodegenFunctionParam, CodegenMatchArm, CodegenModule,
     CodegenModuleProvenance, CodegenParam, CodegenProgram, CodegenProperty, CodegenRecordField,
     CodegenReference, CodegenSourceEntry, CodegenStatement, CodegenTypeRef, CodegenUnionCase,
 };
@@ -90,11 +91,13 @@ pub fn build_codegen_program(artifact: &ProgramArtifact) -> Result<CodegenProgra
         .map(|entry| CodegenSourceEntry {
             identity: entry.identity.to_string(),
             source: entry.source.to_string(),
+            version: entry.version.map(str::to_string),
         })
         .collect();
 
     Ok(CodegenProgram {
         fingerprint: artifact.fingerprint,
+        entry_identity: artifact.entry_identity.clone(),
         modules,
         entrypoints,
         component_entrypoints,
@@ -586,6 +589,24 @@ fn build_component(
         None => None,
     };
 
+    let emits = contract
+        .emits
+        .iter()
+        .map(|emit| {
+            Some(CodegenComponentEmit {
+                name: emit.emit.name.as_str().to_string(),
+                action: resolve_reference_in_module_identity(
+                    artifact,
+                    resolved_module,
+                    &emit.module_identity,
+                    emit.emit.action_name.as_str(),
+                    emit.emit.span,
+                    diagnostics,
+                )?,
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+
     Some(CodegenComponent {
         is_abstract: component.is_abstract,
         is_external: component.is_external,
@@ -595,8 +616,41 @@ fn build_component(
             .collect(),
         props,
         state,
+        emits,
         body,
     })
+}
+
+/// Resolves `name` as the module with `module_identity` sees it: how an emit's action record is
+/// reached, since the emit names it in the module that wrote the `emits` clause.
+fn resolve_reference_in_module_identity(
+    artifact: &ProgramArtifact,
+    resolved_module: &ResolvedModule,
+    module_identity: &str,
+    name: &str,
+    span: TextSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<CodegenReference> {
+    let Some(declaring) = artifact
+        .resolved_program
+        .module_by_prepared_identity(module_identity)
+    else {
+        diagnostics.push(missing_semantic_data_diagnostic(
+            resolved_module,
+            &format!("declaring module '{module_identity}' of '{name}'"),
+            span,
+        ));
+        return None;
+    };
+    let Some(reference) = resolve_visible_reference(artifact, declaring.id, name) else {
+        diagnostics.push(missing_semantic_data_diagnostic(
+            declaring,
+            &format!("declaration '{name}'"),
+            span,
+        ));
+        return None;
+    };
+    Some(reference)
 }
 
 fn build_params(
@@ -996,6 +1050,7 @@ fn build_effective_record_fields(
             is_content: field.is_content,
             is_required: field.is_required,
             default,
+            owner_module_id: owner_module.id,
             span: field.span,
         });
         scope.insert(field.name.as_str());
@@ -1014,7 +1069,9 @@ fn build_expression(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<CodegenExpression> {
     let expr = lowered_module.expr(expr_id);
-    let span = expr.span();
+    // Literals and identifiers carry no span of their own; theirs live in the module's span map,
+    // which `expr_span` consults before falling back to the node.
+    let span = lowered_module.expr_span(expr_id);
     let ty = type_env.get_expr_type(expr_id).cloned();
     let kind = match expr {
         ast::Expr::Literal(literal) => CodegenExpressionKind::Literal(literal.clone()),
@@ -1142,6 +1199,63 @@ fn build_expression(
             CodegenExpressionKind::Unary {
                 op: *op,
                 expr: Box::new(expr),
+            }
+        }
+        ast::Expr::Concat { lhs, rhs, .. } => {
+            let lhs = build_expression(
+                artifact,
+                resolved_module,
+                prepared_cache,
+                lowered_module,
+                type_env,
+                *lhs,
+                scope,
+                diagnostics,
+            )?;
+            let rhs = build_expression(
+                artifact,
+                resolved_module,
+                prepared_cache,
+                lowered_module,
+                type_env,
+                *rhs,
+                scope,
+                diagnostics,
+            )?;
+            CodegenExpressionKind::Concat {
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            }
+        }
+        // A generated runtime carries every number the same way, so a widening emits nothing. The
+        // branch keeps its own type, which is what picks its operators: `n / 2` in a branch
+        // widened to `float64` is still integer division.
+        ast::Expr::Widen { expr, .. } => {
+            return build_expression(
+                artifact,
+                resolved_module,
+                prepared_cache,
+                lowered_module,
+                type_env,
+                *expr,
+                scope,
+                diagnostics,
+            );
+        }
+        ast::Expr::ToText { expr, ty, .. } => {
+            let expr = build_expression(
+                artifact,
+                resolved_module,
+                prepared_cache,
+                lowered_module,
+                type_env,
+                *expr,
+                scope,
+                diagnostics,
+            )?;
+            CodegenExpressionKind::ToText {
+                expr: Box::new(expr),
+                ty: *ty,
             }
         }
         ast::Expr::Call { func, args, .. } => {
@@ -1605,7 +1719,7 @@ fn build_expression(
                     span: property.span,
                 });
             }
-            let (record_name, fields, is_update) = record_literal_shape(
+            let shape = record_literal_shape(
                 artifact,
                 resolved_module.id,
                 prepared_cache,
@@ -1613,12 +1727,13 @@ fn build_expression(
                 diagnostics,
             )?;
             CodegenExpressionKind::Record {
-                name: record_name,
-                fields,
+                name: shape.name,
+                reference: shape.reference,
+                fields: shape.fields,
                 properties: mapped_properties,
                 content_field: None,
                 content: Vec::new(),
-                is_update,
+                is_update: shape.is_update,
             }
         }
         ast::Expr::Element { element, .. } => {
@@ -1636,11 +1751,13 @@ fn build_expression(
             };
             kind
         }
+        // A handler is always the value of an element property, which `build_element_expression`
+        // builds with the element's own component reference.
         ast::Expr::ActionHandler { span, .. } => {
             diagnostics.push(unsupported_diagnostic(
                 resolved_module,
                 *span,
-                "action-handler codegen is not supported by this non-reactive executable target",
+                "an action handler outside an element property cannot be emitted",
             ));
             return None;
         }
@@ -1672,6 +1789,89 @@ fn build_expression(
     })
 }
 
+/// Builds a handler bound as a property of an element whose tag resolves to `component`: the
+/// descriptor's own reference, so the handler names the component the descriptor does however the
+/// binding module spells it.
+#[allow(clippy::too_many_arguments)]
+fn build_action_handler(
+    artifact: &ProgramArtifact,
+    resolved_module: &ResolvedModule,
+    prepared_cache: &mut PreparedModuleCache,
+    lowered_module: &LoweredModule,
+    type_env: &TypeEnvironment,
+    expr_id: ExprId,
+    component: CodegenReference,
+    scope: &mut LexicalScope,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<CodegenExpression> {
+    let ast::Expr::ActionHandler {
+        emit,
+        action_name,
+        action_module_identity,
+        owner,
+        body,
+        span: handler_span,
+        ..
+    } = lowered_module.expr(expr_id)
+    else {
+        unreachable!("build_action_handler is called for handler expressions only");
+    };
+    // The action record is declared where the emit was written, which need not be the module
+    // binding the handler; `None` means the binding's own module.
+    let action_module_identity = action_module_identity
+        .clone()
+        .unwrap_or_else(|| resolved_module.prepared_module_identity());
+    let action = resolve_reference_in_module_identity(
+        artifact,
+        resolved_module,
+        &action_module_identity,
+        action_name.as_str(),
+        *handler_span,
+        diagnostics,
+    )?;
+    let owner_reference = match owner {
+        Some(owner) => {
+            let Some(reference) =
+                resolve_visible_reference(artifact, resolved_module.id, owner.as_str())
+            else {
+                diagnostics.push(missing_semantic_data_diagnostic(
+                    resolved_module,
+                    &format!("handler owner component '{}'", owner.as_str()),
+                    *handler_span,
+                ));
+                return None;
+            };
+            Some(reference)
+        }
+        None => None,
+    };
+    scope.push();
+    scope.insert("action");
+    let body = build_expression(
+        artifact,
+        resolved_module,
+        prepared_cache,
+        lowered_module,
+        type_env,
+        *body,
+        scope,
+        diagnostics,
+    );
+    scope.pop();
+    Some(CodegenExpression {
+        expr_id: expr_id_u32(expr_id),
+        span: lowered_module.expr_span(expr_id),
+        ty: type_env.get_expr_type(expr_id).cloned(),
+        kind: CodegenExpressionKind::ActionHandler(CodegenActionHandler {
+            component,
+            emit: emit.as_str().to_string(),
+            action,
+            owner: owner_reference,
+            body: Box::new(body?),
+        }),
+    })
+}
+
 fn build_element_expression(
     artifact: &ProgramArtifact,
     resolved_module: &ResolvedModule,
@@ -1686,20 +1886,53 @@ fn build_element_expression(
     let mut mapped = CodegenElement::from_id(element_id, &element.tag);
     for entry in element.property_entries() {
         match entry {
-            PropertyEntry::Value(property) => mapped.properties.push(CodegenProperty {
-                name: property.key.as_str().to_string(),
-                value: build_expression(
-                    artifact,
-                    resolved_module,
-                    prepared_cache,
-                    lowered_module,
-                    type_env,
-                    property.value,
-                    scope,
-                    diagnostics,
-                )?,
-                span: property.span,
-            }),
+            PropertyEntry::Value(property) => {
+                let value = if matches!(
+                    lowered_module.expr(property.value),
+                    ast::Expr::ActionHandler { .. }
+                ) {
+                    let Some(component) = resolve_visible_reference(
+                        artifact,
+                        resolved_module.id,
+                        element.tag.as_str(),
+                    )
+                    .filter(|reference| reference.kind == ResolvedItemKind::Component) else {
+                        diagnostics.push(missing_semantic_data_diagnostic(
+                            resolved_module,
+                            &format!("handler component '{}'", element.tag.as_str()),
+                            property.span,
+                        ));
+                        return None;
+                    };
+                    build_action_handler(
+                        artifact,
+                        resolved_module,
+                        prepared_cache,
+                        lowered_module,
+                        type_env,
+                        property.value,
+                        component,
+                        scope,
+                        diagnostics,
+                    )?
+                } else {
+                    build_expression(
+                        artifact,
+                        resolved_module,
+                        prepared_cache,
+                        lowered_module,
+                        type_env,
+                        property.value,
+                        scope,
+                        diagnostics,
+                    )?
+                };
+                mapped.properties.push(CodegenProperty {
+                    name: property.key.as_str().to_string(),
+                    value,
+                    span: property.span,
+                });
+            }
             PropertyEntry::If { span, .. }
             | PropertyEntry::ConditionList { span, .. }
             | PropertyEntry::Match { span, .. } => {
@@ -1724,6 +1957,59 @@ fn build_element_expression(
             diagnostics,
         )?);
     }
+    // A tag that analysis resolved to a function-typed value in scope is a call of that value by
+    // name, ahead of any declaration the name might also reach. Body content binds under the
+    // callee type's content parameter, which analysis recorded with the call.
+    if let Some(content_param) = module_artifact_for(artifact, resolved_module)
+        .and_then(|module_artifact| module_artifact.function_value_calls.get(&element_id))
+    {
+        // The callee is a lexical binding when the call sits inside the function or component that
+        // binds it, and a declaration reference when it names a top-level `let` of function type,
+        // exactly as a bare identifier in expression position resolves.
+        let in_scope = scope.contains(element.tag.as_str());
+        let callee_reference = if in_scope {
+            None
+        } else {
+            resolve_visible_reference(artifact, resolved_module.id, element.tag.as_str())
+        };
+        if !in_scope && callee_reference.is_none() {
+            diagnostics.push(missing_semantic_data_diagnostic(
+                resolved_module,
+                &format!("function-typed binding '{}'", element.tag.as_str()),
+                element.span,
+            ));
+            return None;
+        }
+        let mut args = mapped.properties;
+        if !mapped.content.is_empty() {
+            let Some(content_param) = content_param else {
+                diagnostics.push(missing_semantic_data_diagnostic(
+                    resolved_module,
+                    &format!("content parameter of '{}'", element.tag.as_str()),
+                    element.span,
+                ));
+                return None;
+            };
+            args.push(CodegenProperty {
+                name: content_param.as_str().to_string(),
+                value: content_expression(mapped.content, element.span),
+                span: element.span,
+            });
+        }
+        return Some(CodegenExpressionKind::NamedCall {
+            callee: Box::new(CodegenExpression {
+                expr_id: 0,
+                span: element.span,
+                ty: None,
+                kind: CodegenExpressionKind::Identifier {
+                    name: element.tag.as_str().to_string(),
+                    reference: callee_reference,
+                },
+            }),
+            args,
+        });
+    }
+
     mapped
         .properties
         .sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
@@ -1784,24 +2070,26 @@ fn build_element_expression(
                     diagnostics,
                 ),
                 ResolvedItemKind::Record => {
-                    let (record_name, fields, is_update) = record_literal_shape(
+                    let shape = record_literal_shape(
                         artifact,
                         resolved_module.id,
                         prepared_cache,
                         element.tag.as_str(),
                         diagnostics,
                     )?;
-                    let content_field = fields
+                    let content_field = shape
+                        .fields
                         .iter()
                         .find(|field| field.is_content)
                         .map(|field| field.name.clone());
                     Some(CodegenExpressionKind::Record {
-                        name: record_name,
-                        fields,
+                        name: shape.name,
+                        reference: shape.reference,
+                        fields: shape.fields,
                         properties: mapped.properties,
                         content_field,
                         content: mapped.content,
-                        is_update,
+                        is_update: shape.is_update,
                     })
                 }
                 _ => Some(CodegenExpressionKind::Element(mapped)),
@@ -2225,22 +2513,41 @@ fn build_union_case_from_reference(
     }
 }
 
+/// What a record construction site needs to know about the record it constructs.
+struct RecordLiteralShape {
+    name: String,
+    reference: Option<CodegenReference>,
+    fields: Vec<CodegenRecordField>,
+    is_update: bool,
+}
+
+impl RecordLiteralShape {
+    fn unresolved(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            reference: None,
+            fields: Vec::new(),
+            is_update: false,
+        }
+    }
+}
+
 fn record_literal_shape(
     artifact: &ProgramArtifact,
     module_id: RuntimeModuleId,
     prepared_cache: &mut PreparedModuleCache,
     record_name: &str,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Option<(String, Vec<CodegenRecordField>, bool)> {
+) -> Option<RecordLiteralShape> {
     let Some(reference) = resolve_visible_reference(artifact, module_id, record_name) else {
-        return Some((record_name.to_string(), Vec::new(), false));
+        return Some(RecordLiteralShape::unresolved(record_name));
     };
     if reference.kind != nx_interpreter::ResolvedItemKind::Record {
-        return Some((record_name.to_string(), Vec::new(), false));
+        return Some(RecordLiteralShape::unresolved(record_name));
     }
 
     let Some(target_module) = artifact.resolved_program.module(reference.module_id) else {
-        return Some((record_name.to_string(), Vec::new(), false));
+        return Some(RecordLiteralShape::unresolved(record_name));
     };
     let Some(module_artifact) = module_artifact_for(artifact, target_module) else {
         diagnostics.push(missing_semantic_data_diagnostic(
@@ -2260,7 +2567,7 @@ fn record_literal_shape(
     };
     let Some(Item::Record(record_def)) = lowered_module.item_by_definition(reference.definition_id)
     else {
-        return Some((record_name.to_string(), Vec::new(), false));
+        return Some(RecordLiteralShape::unresolved(record_name));
     };
     let shape = effective_record_shape_of(
         artifact,
@@ -2283,11 +2590,12 @@ fn record_literal_shape(
         &erase_effective_field_type_parameters(&shape.fields, &type_params),
         diagnostics,
     )?;
-    Some((
-        record_def.name.as_str().to_string(),
+    Some(RecordLiteralShape {
+        name: record_def.name.as_str().to_string(),
+        is_update: record_def.update_target().is_some(),
+        reference: Some(reference),
         fields,
-        record_def.update_target().is_some(),
-    ))
+    })
 }
 
 /// The type parameters of the component whose state `record` patches, when it is the derived
@@ -2490,14 +2798,18 @@ fn build_type_ref_resolving_aliases(
             params: {
                 let mut mapped = Vec::with_capacity(params.len());
                 for param in params {
-                    mapped.push(build_type_ref_resolving_aliases(
-                        artifact,
-                        resolved_module,
-                        prepared_cache,
-                        param,
-                        aliases,
-                        diagnostics,
-                    )?);
+                    mapped.push(CodegenFunctionParam {
+                        name: param.name.as_str().to_string(),
+                        ty: build_type_ref_resolving_aliases(
+                            artifact,
+                            resolved_module,
+                            prepared_cache,
+                            &param.ty,
+                            aliases,
+                            diagnostics,
+                        )?,
+                        is_content: param.is_content,
+                    });
                 }
                 mapped
             },

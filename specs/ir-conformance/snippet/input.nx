@@ -1,0 +1,10 @@
+// A snippet compiled against the catalog without an import line; the artifact names the catalog
+// and carries none of it.
+let title = "Conformance"
+let root() =
+  <SkiaLayout Type="Column" Spacing=8>
+    <SkiaLabel Text={title} FontSize=24 />
+    <SkiaLabel Text="A snippet links by name to a catalog the runtime already holds." />
+    <SkiaButton Text="Run" />
+    <SkiaButton Text="Share" Enabled={false} />
+  </SkiaLayout>

@@ -8,6 +8,8 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, PartialEq)]
 pub struct CodegenProgram {
     pub fingerprint: u64,
+    /// The workspace identity of the module the program was built for.
+    pub entry_identity: String,
     pub modules: Vec<CodegenModule>,
     pub entrypoints: Vec<CodegenEntrypoint>,
     pub component_entrypoints: Vec<CodegenEntrypoint>,
@@ -31,6 +33,8 @@ impl CodegenProgram {
 pub struct CodegenSourceEntry {
     pub identity: String,
     pub source: String,
+    /// The version string the host gave the module, if any.
+    pub version: Option<String>,
 }
 
 /// One lowered module prepared for target emission.
@@ -161,9 +165,17 @@ pub enum CodegenTypeRef {
         inner: Box<CodegenTypeRef>,
     },
     Function {
-        params: Vec<CodegenTypeRef>,
+        params: Vec<CodegenFunctionParam>,
         return_type: Box<CodegenTypeRef>,
     },
+}
+
+/// One parameter of a resolved function type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodegenFunctionParam {
+    pub name: String,
+    pub ty: CodegenTypeRef,
+    pub is_content: bool,
 }
 
 /// Record field metadata preserved for strongly typed target emission.
@@ -175,6 +187,8 @@ pub struct CodegenRecordField {
     pub is_content: bool,
     pub is_required: bool,
     pub default: Option<CodegenExpression>,
+    /// The module that declared the field, which is the module its default's spans belong to.
+    pub owner_module_id: RuntimeModuleId,
     pub span: TextSpan,
 }
 
@@ -188,7 +202,17 @@ pub struct CodegenComponent {
     pub type_params: Vec<String>,
     pub props: Vec<CodegenComponentField>,
     pub state: Vec<CodegenComponentField>,
+    /// The component's effective emits, inherited first, in declaration order.
+    pub emits: Vec<CodegenComponentEmit>,
     pub body: Option<CodegenExpression>,
+}
+
+/// One action a component emits: the local name a parent binds as `on<Name>`, and the action
+/// record the handler accepts, resolved in the module that declared the emit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodegenComponentEmit {
+    pub name: String,
+    pub action: CodegenReference,
 }
 
 /// Prop or state field metadata for component normalization.
@@ -244,9 +268,30 @@ pub enum CodegenExpressionKind {
         op: ast::UnOp,
         expr: Box<CodegenExpression>,
     },
+    /// String concatenation: a `+` type analysis found to have a string operand. Both operands
+    /// are strings, a non-string one having been wrapped in a [`CodegenExpressionKind::ToText`].
+    Concat {
+        lhs: Box<CodegenExpression>,
+        rhs: Box<CodegenExpression>,
+    },
+    /// The conversion of a primitive value to its canonical text form, naming the operand's
+    /// static type so a target that carries every number the same way can still print a
+    /// `float32` as one.
+    ToText {
+        expr: Box<CodegenExpression>,
+        ty: ast::PrimitiveType,
+    },
     Call {
         callee: Box<CodegenExpression>,
         args: Vec<CodegenExpression>,
+    },
+    /// A call of a function-typed value — a parameter, a prop or a local holding a function — with
+    /// its arguments by name, `<Row Item={c} Index={i} />`. The callee's declaration is known only
+    /// at run time, so the names travel with the call and the runtime binds them by the subset
+    /// rule: a name the declaration lacks is dropped, one it has must be present.
+    NamedCall {
+        callee: Box<CodegenExpression>,
+        args: Vec<CodegenProperty>,
     },
     /// A call to one of the update intrinsics, which has no callee declaration: the checker
     /// resolved the name before any binding, and a runtime supplies the operation.
@@ -309,6 +354,8 @@ pub enum CodegenExpressionKind {
     },
     Record {
         name: String,
+        /// The record declaration being constructed, when the name resolved to one.
+        reference: Option<CodegenReference>,
         fields: Vec<CodegenRecordField>,
         properties: Vec<CodegenProperty>,
         content_field: Option<String>,
@@ -321,7 +368,29 @@ pub enum CodegenExpressionKind {
     },
     ComponentDescriptor(CodegenComponentDescriptor),
     Element(CodegenElement),
+    /// An action-handler binding, `onTapped=<Update count={count + 1} />`.
+    ///
+    /// <para>Nothing here is evaluated when the binding is built: the body runs when a host
+    /// dispatches the action, against the locals captured where the binding was written.</para>
+    ActionHandler(CodegenActionHandler),
     Unsupported(CodegenUnsupportedConstruct),
+}
+
+/// The handler a parent binds to one of a component's emits.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CodegenActionHandler {
+    /// The component whose emit the handler answers.
+    pub component: CodegenReference,
+    /// The emit's local name: `Tapped` for `onTapped`.
+    pub emit: String,
+    /// The action record the handler accepts, resolved in the module that declared the emit.
+    /// Its declaration name is the public name a rendered handler reports.
+    pub action: CodegenReference,
+    /// The component whose declaration the binding was written in, whose state the body may
+    /// patch; `None` for a binding at the root.
+    pub owner: Option<CodegenReference>,
+    /// The body, with `action` bound as a local of the enclosing frame.
+    pub body: Box<CodegenExpression>,
 }
 
 /// One authored-order arm in a match-style `if is` expression.
