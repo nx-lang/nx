@@ -535,24 +535,88 @@ If this is revisited in the future:
 - Note that this closes the second half of "Findings not fixed" in the `resolve-editor-positions`
   review; the first half, literal spans, was fixed in that change.
 
-## String Literal Escapes Are Never Decoded
+## String Literal Quotes And Escapes: The Semantics Are Unconfirmed
 
-The grammar accepts a backslash escape inside a string literal (`seq('\\', /./)` in
-`crates/nx-syntax/grammar.js`), but lowering never decodes it: `unquote_string_literal`
-(`crates/nx-hir/src/lower.rs`) only strips the quotes. So `"\n"` evaluates to a backslash followed by
-`n`, `"\""` keeps its backslash, and no documentation says which escapes exist.
+**Observed.** A string literal is one opaque token. The grammar accepts a backslash before any
+character (`seq('\\', /./)` in `crates/nx-syntax/grammar.js`), and `unquote_string_literal`
+(`crates/nx-hir/src/lower.rs`) strips the outer quotes and does nothing else. Nothing inside is
+decoded: not backslash escapes, and not the character entities the scanner already recognizes
+everywhere else. Measured today:
 
-The gap shows up with text bodies. A joined `string` body reads a line break in its text as one space
-(see `implicit-primitive-conversions`), and a braced string is the way to put an exact line break in.
-Today that only works with a string literal that actually spans two lines, not with `{"\n"}`.
+| written | value |
+| --- | --- |
+| `"a\nb"` | `a\nb` — six characters, a literal backslash |
+| `"\""` | `\"` — a backslash and a quote |
+| `"say &quot;hi&quot;"` | `say &quot;hi&quot;` — kept as written |
+| `"a&#10;b"` | `a&#10;b` — kept as written |
+| `"Tom & Jerry"` | `Tom & Jerry` — a bare `&` is fine |
+| `'say "hi"'` | `L1: Syntax error` |
+| `let p = "C:\"` | `L1: Syntax error` — the literal never terminates |
+| a literal spanning two lines | a newline in the value |
 
-If this is revisited in the future:
-- Decide the escape set (at least `\n`, `\t`, `\r`, `\\` and `\"`, and possibly `\u{...}`) and
-  whether an unknown escape is an error. Document it in the expressions reference.
-- Decode in one place in lowering, so every backend sees the decoded value. Check that the TextMate
-  grammar and the formatter agree with the escape set.
-- Existing sources with a literal backslash in a string would change meaning, so search the examples
-  and the conformance corpus first.
+**The decision to confirm.** Which mechanism an NX string uses for a character that would otherwise
+be syntax has never been decided, and the current state is not a decision — it is a grammar that
+lexes escapes and a lowering that ignores them. Nothing in the reference documents an escape set.
+The four candidates are not exclusive:
+
+- **Backslash escapes** (`\n`, `\t`, `\r`, `\\`, `\"`, possibly `\u{...}`). What the grammar's
+  escape branch and the TextMate grammar already presume, and what the playground's examples
+  presume *against* — `sites/playground/src/examples/nx/text.nx` tells authors that "a backslash in
+  a string stays a backslash", which is true today.
+- **Character entities**, which is the answer this language already gives for text content:
+  `$.entity` is an external token admitted in `text_run` and `embed_text_run`, and
+  `crates/nx-syntax/src/scanner.c` scans named, decimal `&#DDDD;` and hex `&#xHHHH;` forms with a
+  bare `&` falling back to text, exactly HTML's rule. Extending it to string literals would make
+  the two consistent and reuse the scanner. It is not backward compatible for a string that happens
+  to contain a `&name;`-shaped run.
+- **Single-quoted literals**, which is how XML and HTML answer this in the first instance: delimit
+  with the quote the content does not use. This is purely additive — `'` has no token in the grammar
+  and there is no `char_literal` rule — and the corpus already reaches for it from the other side:
+  `sites/playground/src/examples/nx/svg.nx` writes its embedded SVG with single-quoted XML
+  attributes precisely so the NX string can keep its double quotes.
+- **No escapes at all**, making a backslash ordinary as it is in XML, which requires one of the two
+  mechanisms above to exist first or a `"` stays unwritable.
+
+These semantics want confirming deliberately before any of the bugs below are fixed, because each
+fix presumes an answer, and because two of the candidates change what existing sources mean.
+
+**Bugs in what is there today.** Each is a consequence of the above, and each should be fixed
+whichever mechanism is chosen:
+
+1. **A double quote cannot be written in a string at all.** `"\""` yields a backslash and a quote,
+   and there is no other spelling, since `'...'` does not parse. Found from the DrawnUI fiddle,
+   whose NX Welcome preset wants the `"Clicked 3 times!"` its C# and TSX twins put in a label and
+   omits the quotation marks instead.
+2. **A string cannot end with a backslash.** `let p = "C:\"` reports `L1: Syntax error`: the escape
+   branch consumes the closing quote, so the literal runs on to the next quote in the file or to the
+   end of it. A Windows path and a regex are both unwritable, and the diagnostic names neither the
+   string nor the backslash — it points at the line and says nothing else.
+3. **`"\n"` is not a line break.** A joined `string` body reads a line break in its text as one
+   space (see `implicit-primitive-conversions`), and a braced string is how an exact line break is
+   put back — but only a literal that really spans two lines does it, not `{"\n"}`.
+4. **The editor grammar paints three things the language does not have.**
+   `src/vscode/syntaxes/nx.tmLanguage.json` scopes `string.quoted.single.nx` for `'...'`, includes
+   `#entities` inside both string patterns, and matches `\\[\\"nrt]` as
+   `constant.character.escape.nx`. Single quotes are a syntax error and neither entities nor escapes
+   are decoded, so the highlighter is describing an intended language rather than the real one.
+   Whatever is chosen, that grammar and the formatter have to be brought into agreement with it.
+5. **Nothing tells an author any of this.** No reference page states the escape set, so every item
+   above is discovered by experiment. The playground recorded it as F11 in
+   `sites/playground/docs/FINDINGS.md` rather than in the language's own documentation.
+
+**What would settle it.** Confirm the mechanism, then decode in exactly one place in lowering so
+every backend sees the same value; decide whether an unknown escape or entity name is an error or
+is kept; document it in the expressions reference; and add conformance corpus cases for each form,
+beside the ones in `specs/ir-conformance/`. Search `examples/`, `specs/ir-conformance/` and
+`src/vscode/samples/` before changing any decoding, since a literal backslash or a `&name;`-shaped
+string changes meaning. If single-quoted literals are part of the answer they can land first and
+alone: they are additive, they need no decoding decision, and they close bug 1 by themselves.
+
+**Related.** "Entities in text content are kept as written" is this same question asked from the
+text side and shares the scanner — decide the two together, since whether a string carries entities
+and whether text decodes them is either one rule or two that have to be explained separately.
+"Typed Text Bodies: What A Text Type Means" turns on the same answer for a body handed to a second
+parser.
 
 ## Typed Text Bodies: What A Text Type Means
 

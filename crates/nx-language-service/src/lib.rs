@@ -1998,14 +1998,22 @@ fn declaration_from_item(item: &Item, source: &str, origin: DeclarationOrigin) -
                     .iter()
                     .map(|property| (property.name.as_str(), &property.ty)),
             ),
+            // An emit is bound at a use site as `on<Emit>`, checked like any other property of the
+            // component, so it is listed with them: after the props, in declaration order.
             properties: component
                 .props
                 .iter()
                 .map(|property| {
                     property_declaration(property.name.as_str(), &property.ty, &origin.0)
                 })
+                .chain(
+                    component
+                        .emits
+                        .iter()
+                        .map(|emit| handler_property_declaration(emit, &origin.0)),
+                )
                 .collect(),
-            own_properties: component.props.len(),
+            own_properties: component.props.len() + component.emits.len(),
             base: component
                 .base
                 .as_ref()
@@ -2076,6 +2084,23 @@ fn property_declaration(name: &str, ty: &TypeRef, declaring_module: &str) -> Pro
         name: name.to_string(),
         base_type: base_type_name(ty),
         display_type: type_ref_display(ty),
+        declaring_module: declaring_module.to_string(),
+    }
+}
+
+/// The `on<Emit>` property a component accepts for one of its emits.
+///
+/// <para>NX has no spelling for a handler's type, so the display names what the handler is for.
+/// The base type is the emitted action, which is what a lookup from this property should
+/// reach.</para>
+fn handler_property_declaration(
+    emit: &nx_hir::ComponentEmit,
+    declaring_module: &str,
+) -> PropertyDeclaration {
+    PropertyDeclaration {
+        name: format!("on{}", emit.name.as_str()),
+        base_type: emit.action_name.as_str().to_string(),
+        display_type: format!("handler of {}", emit.action_name.as_str()),
         declaring_module: declaring_module.to_string(),
     }
 }
@@ -3327,6 +3352,64 @@ component <SearchBox placeholder:string /> = {
         .expect("hover content");
 
         assert!(hover.contents.contains("int"), "got: {}", hover.contents);
+    }
+
+    /// An emit is bound at a use site as `on<Emit>`, which the compiler checks like any other
+    /// property of the component, so completion offers it and hover describes it: the component's
+    /// own emits and the ones it inherits, from whichever module declared them.
+    const BUTTONS: (&str, &str) = (
+        "nx://tenant/buttons.nx",
+        concat!(
+            "export abstract external component <Pressable emits { Tapped { } } />\n",
+            "export external component <Toggle extends Pressable on:boolean?\n",
+            "  emits { Toggled { value:boolean } } />\n",
+        ),
+    );
+    const USES_TOGGLE: &str = "import { Toggle } from \"./buttons.nx\"\n";
+
+    #[test]
+    fn property_completions_offer_a_handler_for_each_emit_own_and_inherited() {
+        let (source, position) =
+            position_for(&format!("{USES_TOGGLE}<Toggle ⟨cursor⟩/>\n"), CURSOR);
+        let snapshot = snapshot_of(&[("nx://tenant/form.nx", source.as_str()), BUTTONS]);
+
+        let labels = completion_labels(&snapshot, "nx://tenant/form.nx", position);
+
+        assert!(labels.contains(&"on".to_string()), "got: {labels:?}");
+        assert!(labels.contains(&"onToggled".to_string()), "got: {labels:?}");
+        assert!(labels.contains(&"onTapped".to_string()), "got: {labels:?}");
+    }
+
+    #[test]
+    fn property_completions_omit_a_handler_already_bound() {
+        let (source, position) = position_for(
+            &format!("{USES_TOGGLE}action Log = {{ }}\n<Toggle onTapped=<Log /> ⟨cursor⟩/>\n"),
+            CURSOR,
+        );
+        let snapshot = snapshot_of(&[("nx://tenant/form.nx", source.as_str()), BUTTONS]);
+
+        let labels = completion_labels(&snapshot, "nx://tenant/form.nx", position);
+
+        assert!(!labels.contains(&"onTapped".to_string()), "got: {labels:?}");
+        assert!(labels.contains(&"onToggled".to_string()), "got: {labels:?}");
+    }
+
+    #[test]
+    fn hover_over_a_handler_property_names_the_action_it_handles() {
+        let hover = hover_in(
+            &[BUTTONS],
+            "nx://tenant/form.nx",
+            &format!("{USES_TOGGLE}action Log = {{ }}\n<Toggle onTog⟨cursor⟩gled=<Log /> />\n"),
+        )
+        .expect("hover content");
+
+        assert!(
+            hover
+                .contents
+                .contains("Toggle.onToggled: handler of Toggle.Toggled"),
+            "got: {}",
+            hover.contents
+        );
     }
 
     fn snapshot_of(documents: &[(&str, &str)]) -> WorkspaceSnapshot {

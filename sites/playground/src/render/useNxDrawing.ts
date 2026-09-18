@@ -132,6 +132,10 @@ export function useNxDrawing(source: string, compile: Compile, debounceMs = 350)
       dispatch,
       reportUnknown: (type) => unknown.add(type),
       reportInert: (where) => inert.add(where),
+      // An event, not a property of the drawing, so it belongs in neither list the panel shows;
+      // the console is where it goes here, as it goes to the fiddle's console pane there.
+      reportStale: (where) =>
+        console.warn(`${where} fired on a drawing a dispatch had already replaced, so it did not run.`),
     });
     lastGood.current = node;
     return { node, unknownControls: [...unknown], inertHandlers: [...inert] };

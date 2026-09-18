@@ -30,7 +30,7 @@ describe("program artifacts", () => {
       expect(ir.bytes.byteLength % 4).toBe(0);
       expect(ir.identity).toBe("demo.nx");
       expect(ir.metadata.identity).toBe("demo.nx");
-      expect(ir.metadata.schemaVersion).toBe(3);
+      expect(ir.metadata.schemaVersion).toBe(4);
       expect(ir.metadata.fingerprint).toBeTypeOf("string");
       expect(ir.metadata.runtimeAbi).toBe("nx-ir-runtime-v2");
       expect(ir.metadata.functionEntrypoints).toEqual(["root"]);
@@ -135,7 +135,7 @@ describe("program artifacts", () => {
       host.buildWorkspaceArtifact({
         modules: [
           { identity: "drawnui.nx", source: catalog },
-          { identity: "input.nx", source: 'let root() =\n  <SkiaLabel Text={ 1 + "x" } />' }
+          { identity: "input.nx", source: 'let root() =\n  <SkiaLabel Text={ 1 - "x" } />' }
         ],
         entry: "input.nx",
         implicitImports: ["drawnui.nx"]

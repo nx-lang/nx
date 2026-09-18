@@ -2067,6 +2067,30 @@ mod tests {
         );
     }
 
+    /// The DrawnUI catalog the fiddle generates leans on this: an event declared on a base class is
+    /// stated once, on the component for that class, and never restated on the controls below it.
+    #[test]
+    fn redeclaring_an_inherited_emit_is_rejected() {
+        let prepared = prepared(
+            r#"
+            abstract component <ToggleBase emits { Toggled { value:boolean } } />
+            component <Bad extends ToggleBase emits { Toggled { value:boolean } } /> = { <Label /> }
+        "#,
+        );
+
+        let messages = validate_component_definitions(&prepared)
+            .into_iter()
+            .map(|error| error.message())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            messages,
+            vec![
+                "Component 'Bad' redeclares inherited emitted action 'Toggled' from 'ToggleBase'"
+                    .to_string(),
+            ]
+        );
+    }
+
     #[test]
     fn redeclaring_an_inherited_type_parameter_is_rejected() {
         let prepared = prepared(

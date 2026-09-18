@@ -31,6 +31,8 @@ export interface DrawContext {
   readonly reportUnknown: (type: string) => void;
   /** Reported once per handler no instance can run, as `SkiaButton.onTapped`. */
   readonly reportInert: (where: string) => void;
+  /** Reported every time an event reaches a drawing a dispatch has already replaced. */
+  readonly reportStale: (where: string) => void;
 }
 
 /**
@@ -89,6 +91,10 @@ export function drawValue(value: NxValue, key: string, context: DrawContext): Re
     const drawn = source.instance;
     return (_sender, ...args) => {
       if (source.instance !== drawn) {
+        // The dispatch that replaced the instance retired this token, so the event cannot run and
+        // is dropped. One gesture can fire two events on one drawing — a radio group toggles both
+        // buttons — so this is not only a sub-frame race, and it is said rather than swallowed.
+        context.reportStale(`${type}.on${event}`);
         return true;
       }
       // The event's arguments become the fields of the action the emit declares, by position;
