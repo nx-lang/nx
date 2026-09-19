@@ -495,8 +495,8 @@ mod tests {
 
     #[test]
     fn test_ordered_float_equality() {
-        let f1 = OrderedFloat(3.14);
-        let f2 = OrderedFloat(3.14);
+        let f1 = OrderedFloat(2.75);
+        let f2 = OrderedFloat(2.75);
         assert_eq!(f1, f2);
 
         let nan1 = OrderedFloat(f64::NAN);

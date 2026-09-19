@@ -1225,6 +1225,9 @@ impl<'a> ModuleEmitter<'a> {
             }
             CodegenDeclarationKind::Record {
                 fields,
+                // IR carries no type parameters: each field's resolved type already has them
+                // erased, which is what keeps the schema version unchanged.
+                type_params: _,
                 bases,
                 is_abstract,
                 update_target,

@@ -107,6 +107,13 @@ pub enum CodegenDeclarationKind {
     },
     Record {
         fields: Vec<CodegenRecordField>,
+        /// The record's own type parameters, in declaration order, for a plain generic record.
+        ///
+        /// <para>Empty for every other record, including a generic record's `<Target>.Update`
+        /// companion, which erases them. Each field's `ty` names these where it uses one, while
+        /// its `resolved_ty` has them erased to the top type — IR carries no type arguments, and
+        /// an emitter that declares the record generically reads `ty`.</para>
+        type_params: Vec<String>,
         /// The record's abstract bases, nearest first.
         ///
         /// A value of this record is acceptable wherever any of them is expected. The fields are

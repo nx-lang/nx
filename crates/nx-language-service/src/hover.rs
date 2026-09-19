@@ -253,6 +253,11 @@ pub(crate) fn property(qualifier: Option<&str>, name: &str, ty: &str) -> String 
     prefixed("property", format!("{}: {}", name, ty))
 }
 
+/// `(type parameter) Range.T`.
+pub(crate) fn type_parameter(owner: &str, name: &str) -> String {
+    prefixed("type parameter", format!("{}.{}", owner, name))
+}
+
 /// `(case) LoadState.failed`.
 pub(crate) fn union_case(union: &str, case: &str) -> String {
     prefixed("case", format!("{}.{}", union, case))

@@ -228,9 +228,15 @@ jobs:
       uses: ./.github/actions/setup-rust-node
     - name: 💅🏻 Verify formatted code
       run: cargo fmt --all --check
+    # Clippy is part of the pinned toolchain's components. `-D warnings` is what keeps the
+    # workspace clean: a new lint from a toolchain bump fails in the bump's own pull request
+    # rather than accumulating.
+    - name: 📎 Lint the Rust workspace
+      run: cargo clippy --workspace --all-targets --locked -- -D warnings
     # `--locked` fails the job if `Cargo.lock` is out of date with `Cargo.toml`, so a dependency
-    # change cannot land without the lockfile that goes with it. Cargo honors an existing lockfile
-    # everywhere else by default, so this one gate is enough.
+    # change cannot land without the lockfile that goes with it. It is on the lint step too because
+    # that is the first cargo command here, and a command without it would quietly write the
+    # lockfile this one is meant to check.
     - name: 🧪 Test the Rust workspace
       run: cargo test --workspace --locked
     # The wasm SDK's build produces the module and its tests compare it with the Node SDK's answers,

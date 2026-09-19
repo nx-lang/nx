@@ -333,8 +333,8 @@ mod tests {
 
     #[test]
     fn test_format_float() {
-        let value = Value::Float(3.14);
-        assert_eq!(formatted(&value), "3.14");
+        let value = Value::Float(2.75);
+        assert_eq!(formatted(&value), "2.75");
     }
 
     /// A whole-valued float is the case an integer literal at a float site could tempt one to

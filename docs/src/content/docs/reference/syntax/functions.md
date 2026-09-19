@@ -174,8 +174,11 @@ let contacts:Contact[] = {}
   primitive type name such as `string` or `object`, and the built-in `Element`, are rejected;
   any other name is allowed and shadows a same-named declared type inside the component.
 
-Type parameters are supported on component signatures only; a record, action, state group, or
-function parameter list cannot declare one.
+Type parameters are supported on component signatures and on plain `type` record declarations; an
+action, state group, function parameter list, function type, alias and union cannot declare one.
+A record's parameters differ from a component's in one way that matters: they are **not** erased,
+so `<Range T=int/>` and `<Range T=float64/>` are different types. See
+[Generic records](/reference/syntax/types#generic-records).
 
 ## Updating state
 

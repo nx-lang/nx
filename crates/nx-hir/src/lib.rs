@@ -163,20 +163,15 @@ impl std::fmt::Display for Name {
 }
 
 /// Visibility for top-level declarations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Visibility {
     /// Visible to the declaring file, peer library files, and consumers.
     Export,
     /// Visible only within the declaring library.
+    #[default]
     Internal,
     /// Visible only within the declaring source file.
     Private,
-}
-
-impl Default for Visibility {
-    fn default() -> Self {
-        Self::Internal
-    }
 }
 
 /// Unique identifier for a source file.
@@ -491,6 +486,12 @@ pub fn type_ref_names(ty: &ast::TypeRef) -> Vec<&Name> {
     fn collect<'a>(ty: &'a ast::TypeRef, names: &mut Vec<&'a Name>) {
         match ty {
             ast::TypeRef::Name(name) => names.push(name),
+            ast::TypeRef::Applied { name, args } => {
+                names.push(name);
+                for (_, arg) in args {
+                    collect(arg, names);
+                }
+            }
             ast::TypeRef::Array(inner) | ast::TypeRef::Nullable(inner) => collect(inner, names),
             ast::TypeRef::Function {
                 params,
@@ -722,6 +723,13 @@ pub struct RecordDef {
     pub is_abstract: bool,
     /// Optional abstract base record or alias name.
     pub base: Option<Name>,
+    /// Type parameters, in declaration order.
+    ///
+    /// <para>A generic record is named in a type position only as an applied type,
+    /// `<Range T=int/>`. Parameters are kept out of [`properties`](Self::properties) so that every
+    /// value-level surface — fields, the derived property union, a construction's bindings — is
+    /// free of them by construction.</para>
+    pub type_params: Vec<TypeParameter>,
     /// Property definitions
     pub properties: Vec<RecordField>,
     /// Source span

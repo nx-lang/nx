@@ -310,7 +310,7 @@ fn run_file(path: &PathBuf, format: OutputFormat, output: Option<&PathBuf>) -> E
 }
 
 fn generate_types(
-    path: &PathBuf,
+    path: &Path,
     language: GenLanguage,
     output: Option<&PathBuf>,
     editorconfig: Option<&PathBuf>,
@@ -367,7 +367,7 @@ fn generate_types(
 }
 
 fn generate_executable_source(
-    path: &PathBuf,
+    path: &Path,
     target: ExecutableTarget,
     format: ExecutableOutputFormat,
     output_root: &Path,
@@ -2651,7 +2651,7 @@ let z = {
         for import in &module.imports {
             let parent = path.parent().expect("main file has a parent");
             registry
-                .load_library_from_directory(&parent.join(&import.library_path))
+                .load_library_from_directory(parent.join(&import.library_path))
                 .map_err(|diagnostics| format!("{diagnostics:?}"))?;
         }
         let artifact =

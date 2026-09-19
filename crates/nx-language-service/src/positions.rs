@@ -9,7 +9,7 @@
 //! type annotation, and a tag name are not expressions and have no `ExprId`, while a type and the
 //! declaration a tag resolves to exist only in the analysis. See design D1.</para>
 
-use nx_syntax::{SyntaxKind, SyntaxNode, SyntaxTree};
+use nx_syntax::{property_definition_is_type_parameter, SyntaxKind, SyntaxNode, SyntaxTree};
 use rustc_hash::FxHashSet;
 use text_size::TextRange;
 
@@ -24,6 +24,11 @@ pub(crate) enum LocalDeclarationKind {
     Parameter,
     /// A field of a record type.
     RecordField,
+    /// A type parameter of a record or a component signature, declared `Name:type`.
+    ///
+    /// <para>Kept apart from a field and a property because it is neither: it never appears in the
+    /// owning declaration's value-level lists, so reading it as one finds nothing.</para>
+    TypeParameter,
     /// A case of a discriminated union.
     UnionCase,
     /// A field of one union case's payload.
@@ -507,13 +512,19 @@ fn local_declaration_context(chain: &[SyntaxNode<'_>]) -> Option<PositionContext
         {
             return None;
         }
-        let kind = match (definition.kind(), case) {
-            (SyntaxKind::RECORD_DEFINITION, _) => LocalDeclarationKind::RecordField,
-            (SyntaxKind::UNION_DEFINITION, Some(case)) => {
-                LocalDeclarationKind::UnionPayloadField { case }
+        // `Name:type` declares a type parameter wherever it is accepted, so it is that rather
+        // than whatever the enclosing declaration's value-level list is called.
+        let kind = if property_definition_is_type_parameter(property) {
+            LocalDeclarationKind::TypeParameter
+        } else {
+            match (definition.kind(), case) {
+                (SyntaxKind::RECORD_DEFINITION, _) => LocalDeclarationKind::RecordField,
+                (SyntaxKind::UNION_DEFINITION, Some(case)) => {
+                    LocalDeclarationKind::UnionPayloadField { case }
+                }
+                (SyntaxKind::UNION_DEFINITION, None) => return None,
+                _ => LocalDeclarationKind::Parameter,
             }
-            (SyntaxKind::UNION_DEFINITION, None) => return None,
-            _ => LocalDeclarationKind::Parameter,
         };
         return Some(PositionContext::LocalDeclaration {
             kind,

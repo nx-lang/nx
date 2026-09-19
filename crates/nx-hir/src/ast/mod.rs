@@ -13,6 +13,6 @@ pub use expr::{
 };
 pub use stmt::Stmt;
 pub use types::{
-    spell_function_type, spell_type_ref, spell_type_ref_under_suffix, FunctionParam, SpelledParam,
-    TypeRef,
+    spell_applied_type, spell_function_type, spell_type_ref, spell_type_ref_under_suffix,
+    FunctionParam, SpelledParam, TypeRef,
 };

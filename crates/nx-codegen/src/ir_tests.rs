@@ -1296,6 +1296,87 @@ fn an_update_record_of_a_generic_component_erases_the_parameter() {
 }
 
 // ------------------------------------------------------------------------------------------------
+// Record type parameters
+// ------------------------------------------------------------------------------------------------
+
+/// NX IR carries no record type parameters: a parameter-typed field is the top type, and the
+/// declaration has no entry for the parameter itself.
+#[test]
+fn a_record_type_parameter_is_erased_from_the_field_schema() {
+    let text = explain_source(
+        "type Range = { T:type start:T end:T endInclusive:boolean }\n\
+         let r = <Range T=int start={1} end={5} endInclusive={false} />\n\
+         let root() = { r }",
+    );
+    assert_line(&text, "  start: object required");
+    assert_line(&text, "  end: object required");
+    assert_line(&text, "  endInclusive: boolean required");
+    assert!(!text.contains("T:"), "{text}");
+}
+
+/// An applied type is the nominal reference to its record, under every wrapper.
+#[test]
+fn an_applied_type_is_a_nominal_reference() {
+    let text = explain_source(
+        "type Range = { T:type start:T end:T }\n\
+         type Slider = { range:<Range T=float64/> marks:<Range T=int/>[]? }\n\
+         let s = <Slider range={<Range T=float64 start={0} end={1} />} />\n\
+         let root() = { s }",
+    );
+    assert_line(&text, "  range: Range required");
+    assert_line(&text, "  marks: Range[]?");
+}
+
+/// A construction carries its fields and nothing for the type argument the source bound.
+#[test]
+fn a_generic_record_construction_omits_the_type_argument() {
+    let text = explain_source(
+        "type Range = { T:type start:T end:T }\n\
+         let r = <Range T=int start={1} end={5} />\n\
+         let root() = { r }",
+    );
+    assert_contains(&text, "start=");
+    assert_contains(&text, "end=");
+    assert!(!text.contains("T="), "{text}");
+}
+
+/// The update companion of a generic record erases the parameter the same way its record does.
+#[test]
+fn the_update_companion_of_a_generic_record_erases_the_parameter() {
+    let text = explain_source(
+        "type Range = { T:type start:T end:T }\n\
+         let u = <Range.Update T=int end={9} />\n\
+         let root() = { u }",
+    );
+    assert_line(&text, "record Range.Update update of Range");
+    assert_line(&text, "  end: object");
+    assert!(!text.contains("T="), "{text}");
+}
+
+/// Adding generic records does not change the schema version, and an image for a program with one
+/// is as deterministic as any other.
+#[test]
+fn a_program_with_generic_records_keeps_the_schema_version() {
+    let source = "type Range = { T:type start:T end:T }\n\
+         let r = <Range T=int start={1} end={5} />\n\
+         let root() = { r }";
+    let artifact = artifact_from_source(source);
+    let generated = emit_nx_ir(&artifact, &NxIrEmitOptions::entry_only()).expect("nx ir");
+    let image = NxIrImage::open(&generated[0].bytes).expect("a valid image");
+    assert_eq!(image.schema_version(), NX_IR_SCHEMA_VERSION);
+    assert_eq!(image.runtime_abi(), NX_IR_RUNTIME_ABI);
+    assert_eq!(
+        image.required_features().collect::<Vec<_>>(),
+        Vec::<&str>::new(),
+        "a generic record needs no feature an older consumer would not know"
+    );
+    assert_eq!(
+        image_bytes(&artifact_from_source(source)),
+        image_bytes(&artifact_from_source(source))
+    );
+}
+
+// ------------------------------------------------------------------------------------------------
 // Action handlers and component emits
 // ------------------------------------------------------------------------------------------------
 
@@ -1604,11 +1685,10 @@ fn a_type_parameter_inside_a_function_type_is_erased() {
 
 #[test]
 fn a_function_bound_to_a_prop_is_a_reference_and_needs_the_feature() {
-    let source = format!(
-        "let <Row Item:object />: string = \"r\"\n\
+    let source = "let <Row Item:object />: string = \"r\"\n\
          external component <List ItemTemplate:(<function Item:object />: string)? />\n\
-         let root() = <List ItemTemplate={{Row}} />"
-    );
+         let root() = <List ItemTemplate={Row} />"
+        .to_string();
     let model = entry_artifact(&artifact_from_source(&source));
     let text = explain(&model);
     // A same-module reference renders unqualified, as every reference does.

@@ -1,8 +1,8 @@
 use crate::typegen::model::{
-    erase_field_type_parameters, ExportedExternalState, ExportedFieldDefault,
-    ExportedLiteralDefault, ExportedModule, ExportedPolymorphicDescendant, ExportedRecord,
-    ExportedRecordField, ExportedType, ExportedTypeGraph, ExportedUnion, ExportedUnionCase,
-    ExportedUpdate, ImportedType, ImportedTypeKind,
+    erase_field_type_parameters, update_companion_type_params, ExportedExternalState,
+    ExportedFieldDefault, ExportedLiteralDefault, ExportedModule, ExportedPolymorphicDescendant,
+    ExportedRecord, ExportedRecordField, ExportedType, ExportedTypeGraph, ExportedUnion,
+    ExportedUnionCase, ExportedUpdate, ImportedType, ImportedTypeKind,
 };
 use crate::typegen::writer::CodeWriter;
 use crate::typegen::{GenerateTypesOptions, GeneratedFile};
@@ -196,9 +196,19 @@ fn render_module(
         .iter()
         .any(|declaration| matches!(&declaration.item, ExportedType::Update(_)));
 
+    // Only a generic companion declares a formatter of its own, and only that needs the formatter
+    // interface in scope.
+    let needs_formatter_interface = module.declarations.iter().any(|declaration| {
+        matches!(&declaration.item, ExportedType::Update(update)
+            if !update_companion_type_params(update, graph).is_empty())
+    });
+
     writer.line("using System;");
     writer.line("using System.Text.Json.Serialization;");
     writer.line("using MessagePack;");
+    if needs_formatter_interface {
+        writer.line("using MessagePack.Formatters;");
+    }
     if needs_update_helpers {
         writer.line("using NxLang.Nx;");
     }
@@ -269,21 +279,43 @@ fn emit_update(
     update: &ExportedUpdate,
     context: &CSharpRenderContext<'_>,
 ) {
-    // A state field typed by the component's type parameter erases to `object`: the host patches
-    // state as data and never names the instantiation, which an NX use site fixed.
+    // A generic record's companion declares the record's parameters and keeps its field types, so
+    // a `Range<long>` is patched by a `Range_update<long>` whose `Start` is a `long`. Everything
+    // else erases: a state field typed by the *component's* type parameter becomes `object`,
+    // because the host patches state as data and never names the instantiation an NX use site
+    // fixed. A companion with no plain target has no generic surface to declare parameters on, so
+    // it erases too.
+    let type_params = update_companion_type_params(update, context.graph);
+    let plain_target = update_plain_target(update, context, type_params);
+    let type_params: &[String] = if plain_target.is_some() {
+        type_params
+    } else {
+        &[]
+    };
     let erased;
-    let update = match erase_field_type_parameters(&update.fields, &update.type_params) {
-        Cow::Borrowed(_) => update,
-        Cow::Owned(fields) => {
-            erased = ExportedUpdate {
-                fields,
-                ..update.clone()
-            };
-            &erased
+    let update = if type_params.is_empty() {
+        match erase_field_type_parameters(&update.fields, &update.type_params) {
+            Cow::Borrowed(_) => update,
+            Cow::Owned(fields) => {
+                erased = ExportedUpdate {
+                    fields,
+                    ..update.clone()
+                };
+                &erased
+            }
         }
+    } else {
+        update
     };
     let class_name = sanitize_csharp_identifier(&update.name);
-    let plain_target = update_plain_target(update, context);
+    let generics = if type_params.is_empty() {
+        String::new()
+    } else {
+        format!("<{}>", type_params.join(", "))
+    };
+    // The companion's own instantiation, for the members that name it: its `Diff` return, and the
+    // formatter closed over it.
+    let class_type = format!("{class_name}{generics}");
     let property_enum = update_property_enum(update, context);
     let field_members = update
         .fields
@@ -310,18 +342,31 @@ fn emit_update(
     let diff_member = reserve_member("Diff");
     let discriminator = escape_csharp_string_literal(&update.discriminator);
 
-    writer.line(&format!(
-        "[JsonConverter(typeof(NxUpdateRecordJsonConverter<{class_name}>))]"
-    ));
-    writer.line(&format!(
-        "[MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<{class_name}>))]"
-    ));
+    // A generic companion cannot name its own converter or formatter in an attribute: an
+    // attribute argument cannot use type parameters (CS0416). It names the SDK's factory for JSON,
+    // and for MessagePack an open generic shim emitted below, which the attribute resolver closes
+    // over the same arguments the companion is closed over.
+    let formatter_name = format!("{class_name}Formatter");
+    if type_params.is_empty() {
+        writer.line(&format!(
+            "[JsonConverter(typeof(NxUpdateRecordJsonConverter<{class_name}>))]"
+        ));
+        writer.line(&format!(
+            "[MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<{class_name}>))]"
+        ));
+    } else {
+        writer.line("[JsonConverter(typeof(NxUpdateRecordJsonConverterFactory))]");
+        writer.line(&format!(
+            "[MessagePackFormatter(typeof({formatter_name}<{}>))]",
+            ",".repeat(type_params.len() - 1)
+        ));
+    }
     let base = match &plain_target {
         Some(target) => format!("NxUpdate<{}>", target.type_name),
         None => "NxUpdateRecord".to_string(),
     };
     writer.block(
-        &format!("public sealed class {class_name} : {base}"),
+        &format!("public sealed class {class_type} : {base}"),
         |writer| {
             let mut schema_entries = vec![format!("\"{discriminator}\"")];
             for field in &update.fields {
@@ -410,16 +455,70 @@ fn emit_update(
                 let target_type = &target.type_name;
                 writer.blank_line();
                 writer.line(&format!(
-                    "public static {class_name} {diff_member}({target_type} before, {target_type} after) => {base}.Diff<{class_name}>(before, after);"
+                    "public static {class_type} {diff_member}({target_type} before, {target_type} after) => {base}.Diff<{class_type}>(before, after);"
                 ));
             }
         },
     );
 
+    if !type_params.is_empty() {
+        writer.blank_line();
+        emit_update_formatter_shim(writer, &formatter_name, &class_type, &generics);
+    }
+
     if let Some(target) = &plain_target {
         writer.blank_line();
-        emit_property_table(writer, update, target, property_enum.as_ref(), context);
+        emit_property_table(
+            writer,
+            update,
+            target,
+            property_enum.as_ref(),
+            context,
+            &generics,
+        );
     }
+}
+
+/// Emits the open generic formatter a generic companion names in its `[MessagePackFormatter]`.
+///
+/// <para>The attribute resolver closes the formatter type over the annotated type's own arguments,
+/// so the shim must take the same parameters the companion does and close
+/// `NxUpdateRecordMessagePackFormatter` over the companion itself. Naming
+/// `NxUpdateRecordMessagePackFormatter<>` directly would close it over `long` rather than over
+/// `Range_update<long>`.</para>
+fn emit_update_formatter_shim(
+    writer: &mut CodeWriter,
+    formatter_name: &str,
+    class_type: &str,
+    generics: &str,
+) {
+    // Annotated nullable, which is what the analyzer asks of a formatter over a reference type and
+    // what the inner formatter actually does: it writes a null value as nil and reads nil back as
+    // null, through a signature that does not say so.
+    writer.block(
+        &format!(
+            "public sealed class {formatter_name}{generics} : IMessagePackFormatter<{class_type}?>"
+        ),
+        |writer| {
+            writer.line(&format!(
+                "private static readonly NxUpdateRecordMessagePackFormatter<{class_type}> Inner = new();"
+            ));
+            writer.blank_line();
+            writer.line(&format!(
+                "public void Serialize(ref MessagePackWriter writer, {class_type}? value, MessagePackSerializerOptions options) =>"
+            ));
+            writer.indent();
+            writer.line("Inner.Serialize(ref writer, value!, options);");
+            writer.dedent();
+            writer.blank_line();
+            writer.line(&format!(
+                "public {class_type}? Deserialize(ref MessagePackReader reader, MessagePackSerializerOptions options) =>"
+            ));
+            writer.indent();
+            writer.line("Inner.Deserialize(ref reader, options);");
+            writer.dedent();
+        },
+    );
 }
 
 /// The non-generic members of `NxUpdateRecord`, and the one `NxUpdate<TRecord>` adds. A field
@@ -431,11 +530,11 @@ const NX_UPDATE_MEMBERS: &[&str] = &["Apply"];
 
 /// The plain generated type an update companion patches, and the key table emitted beside it.
 struct UpdatePlainTarget {
-    /// The C# reference to the plain type.
+    /// The C# reference to the plain type, instantiated where the target is generic.
     type_name: String,
-    /// The C# reference to the key table.
+    /// The C# reference to the key table, instantiated where the target is generic.
     properties_table: String,
-    /// The key table's own identifier, for its declaration.
+    /// The key table's own identifier, for its declaration, without its parameter list.
     properties_table_identifier: String,
 }
 
@@ -488,6 +587,7 @@ fn update_plain_target_candidate(
 fn update_plain_target(
     update: &ExportedUpdate,
     context: &CSharpRenderContext<'_>,
+    type_params: &[String],
 ) -> Option<UpdatePlainTarget> {
     let candidate = update_plain_target_candidate(update, context.graph)?;
     if context
@@ -497,12 +597,28 @@ fn update_plain_target(
     {
         return None;
     }
+    // A generic record is emitted as `Range<T>` and its companion patches that same generic, under
+    // the companion's own parameters: `Range_update<T>` extends `NxUpdate<Range<T>>` and its key
+    // table is `RangeProperties<T>`. Where the companion declares no parameters — a component's
+    // state, or a target whose key table's name is taken — `type_params` is empty and the target
+    // is the plain name, as it always was.
+    let arguments = if type_params.is_empty() {
+        String::new()
+    } else {
+        format!("<{}>", type_params.join(", "))
+    };
     Some(UpdatePlainTarget {
-        type_name: csharp_type_name(&candidate.type_name, context).text,
-        properties_table: generated_type_name(
-            &candidate.properties_table,
-            context.namespace,
-            context.qualify_generated_types,
+        type_name: format!(
+            "{}{arguments}",
+            csharp_type_name(&candidate.type_name, context).text
+        ),
+        properties_table: format!(
+            "{}{arguments}",
+            generated_type_name(
+                &candidate.properties_table,
+                context.namespace,
+                context.qualify_generated_types,
+            )
         ),
         properties_table_identifier: sanitize_csharp_identifier(&candidate.properties_table),
     })
@@ -547,6 +663,7 @@ fn emit_property_table(
     target: &UpdatePlainTarget,
     property_enum: Option<&UpdatePropertyEnum>,
     context: &CSharpRenderContext<'_>,
+    generics: &str,
 ) {
     let table_name = &target.properties_table_identifier;
     let target_type = &target.type_name;
@@ -564,62 +681,65 @@ fn emit_property_table(
             .filter(|property_enum| property_enum.cases.iter().any(|case| case == field_name))
     };
 
-    writer.block(&format!("public static class {table_name}"), |writer| {
-        for (index, field) in update.fields.iter().enumerate() {
-            if index > 0 {
-                writer.blank_line();
+    writer.block(
+        &format!("public static class {table_name}{generics}"),
+        |writer| {
+            for (index, field) in update.fields.iter().enumerate() {
+                if index > 0 {
+                    writer.blank_line();
+                }
+                let member = sanitize_csharp_member_name(&field.name);
+                let field_type = csharp_type(&field.ty, context);
+                let wire_name = match enum_case(&field.name) {
+                    Some(property_enum) => format!(
+                        "{}.Format({}.{})",
+                        property_enum.wire_format, property_enum.type_name, member
+                    ),
+                    None => format!("\"{}\"", escape_csharp_string_literal(&field.name)),
+                };
+                writer.line(&format!(
+                    "public static readonly NxProperty<{target_type}, {}> {member} = new(",
+                    field_type.text
+                ));
+                writer.indent();
+                writer.line(&format!("{wire_name},"));
+                writer.line(&format!("record => record.{member},"));
+                writer.line(&format!("(record, value) => record.{member} = value);"));
+                writer.dedent();
             }
-            let member = sanitize_csharp_member_name(&field.name);
-            let field_type = csharp_type(&field.ty, context);
-            let wire_name = match enum_case(&field.name) {
-                Some(property_enum) => format!(
-                    "{}.Format({}.{})",
-                    property_enum.wire_format, property_enum.type_name, member
-                ),
-                None => format!("\"{}\"", escape_csharp_string_literal(&field.name)),
-            };
-            writer.line(&format!(
-                "public static readonly NxProperty<{target_type}, {}> {member} = new(",
-                field_type.text
-            ));
-            writer.indent();
-            writer.line(&format!("{wire_name},"));
-            writer.line(&format!("record => record.{member},"));
-            writer.line(&format!("(record, value) => record.{member} = value);"));
-            writer.dedent();
-        }
 
-        // A `switch` statement rather than a switch expression: the arms differ in nullability
-        // annotation (`NxProperty<User, string>` beside `NxProperty<User, string?>`), and the
-        // expression would infer one of them as its natural type and warn about the other.
-        if let Some(property_enum) = property_enum {
-            let enum_name = &property_enum.type_name;
-            writer.blank_line();
-            writer.block(
-                &format!(
-                    "public static NxProperty<{target_type}> {of_member}({enum_name} property)"
-                ),
-                |writer| {
-                    writer.block("switch (property)", |writer| {
-                        for field in &update.fields {
-                            if enum_case(&field.name).is_none() {
-                                continue;
+            // A `switch` statement rather than a switch expression: the arms differ in nullability
+            // annotation (`NxProperty<User, string>` beside `NxProperty<User, string?>`), and the
+            // expression would infer one of them as its natural type and warn about the other.
+            if let Some(property_enum) = property_enum {
+                let enum_name = &property_enum.type_name;
+                writer.blank_line();
+                writer.block(
+                    &format!(
+                        "public static NxProperty<{target_type}> {of_member}({enum_name} property)"
+                    ),
+                    |writer| {
+                        writer.block("switch (property)", |writer| {
+                            for field in &update.fields {
+                                if enum_case(&field.name).is_none() {
+                                    continue;
+                                }
+                                let member = sanitize_csharp_member_name(&field.name);
+                                writer.line(&format!("case {enum_name}.{member}:"));
+                                writer.indent();
+                                writer.line(&format!("return {member};"));
+                                writer.dedent();
                             }
-                            let member = sanitize_csharp_member_name(&field.name);
-                            writer.line(&format!("case {enum_name}.{member}:"));
+                            writer.line("default:");
                             writer.indent();
-                            writer.line(&format!("return {member};"));
+                            writer.line("throw new ArgumentOutOfRangeException(nameof(property));");
                             writer.dedent();
-                        }
-                        writer.line("default:");
-                        writer.indent();
-                        writer.line("throw new ArgumentOutOfRangeException(nameof(property));");
-                        writer.dedent();
-                    });
-                },
-            );
-        }
-    });
+                        });
+                    },
+                );
+            }
+        },
+    );
 }
 
 /// The operand `typeof` takes for a field type: a nullable reference type drops its `?`, which
@@ -669,19 +789,30 @@ fn emit_record(
     record: &ExportedRecord,
     context: &CSharpRenderContext<'_>,
 ) {
-    // A C# host receives a component value by its discriminator and cannot pick a generic
-    // instantiation from data, so a type parameter is erased to `object` and the record declares
-    // no generic parameter of its own.
+    // A C# host receives a *component* value by its discriminator and cannot pick a generic
+    // instantiation from data, so a component contract's type parameter is erased to `object` and
+    // the contract declares no generic parameter of its own. A declared generic record is the
+    // other way round: the host names the concrete instantiation at its own deserialization site,
+    // so it is emitted as a real generic.
     let erased;
-    let record = match erase_field_type_parameters(&record.fields, &record.type_params) {
-        Cow::Borrowed(_) => record,
-        Cow::Owned(fields) => {
-            erased = ExportedRecord {
-                fields,
-                ..record.clone()
-            };
-            &erased
+    let record = if record.is_component_contract {
+        match erase_field_type_parameters(&record.fields, &record.type_params) {
+            Cow::Borrowed(_) => record,
+            Cow::Owned(fields) => {
+                erased = ExportedRecord {
+                    fields,
+                    ..record.clone()
+                };
+                &erased
+            }
         }
+    } else {
+        record
+    };
+    let generics = if record.is_component_contract || record.type_params.is_empty() {
+        String::new()
+    } else {
+        format!("<{}>", record.type_params.join(", "))
     };
 
     emit_record_json_polymorphism_attributes(writer, record, context);
@@ -718,16 +849,18 @@ fn emit_record(
     };
     let header = if let Some(base) = &record.base {
         format!(
-            "{} {} : {}",
+            "{} {}{} : {}",
             class_modifier,
             sanitize_csharp_identifier(&record.name),
+            generics,
             csharp_type_name(base, context).text
         )
     } else {
         format!(
-            "{} {}",
+            "{} {}{}",
             class_modifier,
-            sanitize_csharp_identifier(&record.name)
+            sanitize_csharp_identifier(&record.name),
+            generics
         )
     };
 
@@ -1144,6 +1277,38 @@ fn csharp_type_inner(
             is_reference: true,
             is_nullable: false,
         },
+        // An applied type is the instantiation of its record, with arguments in the record's
+        // declaration order whatever order the source wrote them in. A generic record is
+        // concrete and outside every polymorphic hierarchy, so no union attribute applies to it.
+        TypeRef::Applied { name, args } => {
+            let base = csharp_type_name_inner(name.as_str(), context, seen_aliases);
+            let rendered = match context.graph.record_type_params(name.as_str()) {
+                Some(order) => order
+                    .iter()
+                    .filter_map(|param| {
+                        args.iter()
+                            .find(|(arg, _)| arg.as_str() == param)
+                            .map(|(_, ty)| csharp_type_inner(ty, context, seen_aliases).text)
+                    })
+                    .collect::<Vec<_>>(),
+                // The declaration could not be reached, so there is no order to sort into and the
+                // source order is the only one there is. It is still rendered: the bare name would
+                // be an open generic, which is CS0305, and a checked program wrote the arguments
+                // against a declaration that does exist.
+                None => args
+                    .iter()
+                    .map(|(_, ty)| csharp_type_inner(ty, context, seen_aliases).text)
+                    .collect(),
+            };
+            if rendered.is_empty() {
+                return base;
+            }
+            CSharpType {
+                text: format!("{}<{}>", base.text, rendered.join(", ")),
+                is_reference: true,
+                is_nullable: false,
+            }
+        }
         TypeRef::Name(name) => csharp_type_name_inner(name.as_str(), context, seen_aliases),
     }
 }
@@ -1280,7 +1445,12 @@ fn csharp_imported_type(
         ImportedTypeKind::Alias {
             target,
             target_is_reference,
-        } => csharp_imported_alias_target_type(target, &dependency_namespace, *target_is_reference),
+        } => csharp_imported_alias_target_type(
+            target,
+            &dependency_namespace,
+            *target_is_reference,
+            context,
+        ),
         _ => CSharpType {
             text: generated_type_name(&imported_type.exported_name, &dependency_namespace, true),
             is_reference: imported_type.kind.is_reference(),
@@ -1293,18 +1463,27 @@ fn csharp_imported_alias_target_type(
     ty: &TypeRef,
     dependency_namespace: &str,
     target_is_reference: bool,
+    context: &CSharpRenderContext<'_>,
 ) -> CSharpType {
     match ty {
         TypeRef::Nullable(inner) => {
-            let mut inner =
-                csharp_imported_alias_target_type(inner, dependency_namespace, target_is_reference);
+            let mut inner = csharp_imported_alias_target_type(
+                inner,
+                dependency_namespace,
+                target_is_reference,
+                context,
+            );
             inner.text = format!("{}?", inner.text);
             inner.is_nullable = true;
             inner
         }
         TypeRef::Array(inner) => {
-            let inner =
-                csharp_imported_alias_target_type(inner, dependency_namespace, target_is_reference);
+            let inner = csharp_imported_alias_target_type(
+                inner,
+                dependency_namespace,
+                target_is_reference,
+                context,
+            );
             CSharpType {
                 text: format!("{}[]", inner.text),
                 is_reference: true,
@@ -1316,6 +1495,43 @@ fn csharp_imported_alias_target_type(
             is_reference: true,
             is_nullable: false,
         },
+        // An imported alias whose target is an applied type is that instantiation: the alias
+        // itself is not generated, so dropping the arguments here would leave an open generic at
+        // every use of the alias. The arguments are names the dependency wrote, so they render in
+        // the dependency's namespace like the tag does.
+        TypeRef::Applied { name, args } => {
+            let base = csharp_imported_alias_target_name(
+                name.as_str(),
+                dependency_namespace,
+                target_is_reference,
+            );
+            let render = |ty: &TypeRef| {
+                csharp_imported_alias_target_type(ty, dependency_namespace, true, context).text
+            };
+            let rendered = match context.graph.record_type_params(name.as_str()) {
+                Some(order) => order
+                    .iter()
+                    .filter_map(|param| {
+                        args.iter()
+                            .find(|(arg, _)| arg.as_str() == param)
+                            .map(|(_, ty)| render(ty))
+                    })
+                    .collect::<Vec<_>>(),
+                // The dependency's own declaration of the tag is not reachable from here — the
+                // importing module named the alias, not the record. The source order is then the
+                // only ordering there is, and is still better than an open generic.
+                None => args.iter().map(|(_, ty)| render(ty)).collect(),
+            };
+            if rendered.is_empty() {
+                base
+            } else {
+                CSharpType {
+                    text: format!("{}<{}>", base.text, rendered.join(", ")),
+                    is_reference: true,
+                    is_nullable: false,
+                }
+            }
+        }
         TypeRef::Name(name) => csharp_imported_alias_target_name(
             name.as_str(),
             dependency_namespace,
@@ -1449,7 +1665,7 @@ fn imported_alias_target_uses_dependency_namespace(ty: &TypeRef) -> bool {
             imported_alias_target_uses_dependency_namespace(inner)
         }
         TypeRef::Function { .. } => false,
-        TypeRef::Name(name) => !matches!(
+        TypeRef::Applied { name, .. } | TypeRef::Name(name) => !matches!(
             name.as_str(),
             "string"
                 | "int"

@@ -694,23 +694,6 @@ Rename additionally needs the inverse direction — every reference to one decla
 currently indexes, and it needs to know which occurrences are the same name by identity rather than
 by spelling. Expect that to be the larger half of the work.
 
-## Lint And Format Gates Do Not Cover The Whole Workspace
-
-Two repo-wide gates pass in practice only because nobody runs them over everything. Both were found
-incidentally during the `resolve-editor-positions` review and neither was caused by it.
-
-- **`cargo clippy -p nx-hir --all-targets` does not compile.** `approx_constant` is denied
-  workspace-wide and `crates/nx-hir/src/ast/expr.rs:382` uses `3.14` in a test fixture. The failure
-  is in a test target, so a crate-level `cargo clippy -p nx-hir` without `--all-targets` passes and
-  hides it. The consequence is not the lint itself but that `nx-hir`'s test targets have never been
-  linted — whatever else is in them is unmeasured. Fix the fixture (`3.15`, or an `allow` with a
-  reason), then run `--all-targets` across the workspace once to see what else surfaces.
-- **`cargo fmt --check` reports pre-existing drift** in `crates/nx-hir/src/scope.rs`,
-  `crates/nx-codegen/src/builder.rs`, `crates/nx-syntax/tests/parser_tests.rs`, and
-  `crates/nx-types/tests/contextual_literals.rs`. Small and mechanical, but it means `cargo fmt
-  --check` cannot be used as a CI gate as it stands: a real regression would not be distinguishable
-  from the standing noise. Formatting those four files once makes the gate usable.
-
 ## Language Service Cost Per Request
 
 Two costs were accepted by design in `resolve-editor-positions` and are worth revisiting together

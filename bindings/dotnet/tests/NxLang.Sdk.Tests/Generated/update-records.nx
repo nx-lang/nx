@@ -11,3 +11,6 @@ export type Circle extends Shape = { }
 export type Square extends Shape = { }
 export type Doc = { shape:Shape }
 export external component <Ticker step:int /> = { state { count:int = 0 } }
+// A generic record, emitted as a real C# generic, and one instantiation of it.
+export type Range = { T:type start:T end:T endInclusive:boolean }
+export type Schedule = { week:<Range T=int/> spans:<Range T=float64/>[]? }

@@ -1,0 +1,49 @@
+module main.nx fingerprint 3828358598909838332
+requires update-records-v1 update-intrinsics-v1
+entrypoints functions [ints names startOf endOf first patch moved span plan root] components []
+
+record Range @2:1-2:45
+  start: object required
+  end: object required
+
+record Pair @3:1-3:67
+  key: object required
+  value: object required
+
+record Schedule @4:1-4:63
+  slots: Range[] required
+  label: string required
+
+function ints() @6:1-6:47 =
+  <Range end=5 start=1 />
+
+function names() @7:1-7:64 =
+  <Pair key="a" value=1 />
+
+function startOf(r: Range) @8:1-8:44 =
+  r.start
+
+function endOf(r: Range) @9:1-9:40 =
+  r.end
+
+function first() @10:1-10:34 =
+  startOf(ints())
+
+function patch() @11:1-11:45 =
+  <Range.Update end=9 />
+
+function moved() @12:1-12:41 =
+  apply(ints(), patch())
+
+function span() @13:1-13:51 =
+  (endOf(moved()) sub startOf(moved()))
+
+function plan() @14:1-14:56 =
+  <Schedule label="week" slots=ints() />
+
+function root() @15:1-15:24 =
+  ints()
+
+record Range.Update update of Range @2:1-2:45
+  start: object
+  end: object

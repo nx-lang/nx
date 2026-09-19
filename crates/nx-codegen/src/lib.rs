@@ -4,6 +4,13 @@
 //! rediscover imports during emission; all executable generation starts from the resolved,
 //! type-checked program model preserved by `nx-api`.
 
+// The builders and emitters thread a wide, consistent context — the program, the module, the
+// declaration, the emit options, the export policy and the output buffer — through one function
+// per construct rather than one method on a shared struct. Splitting a signature here would move
+// the arguments into a struct built at every call site and nothing else, so the lint is allowed
+// for the crate.
+#![allow(clippy::too_many_arguments)]
+
 mod builder;
 mod emit;
 mod ir;

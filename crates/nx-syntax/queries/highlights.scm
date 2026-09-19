@@ -64,6 +64,15 @@
   (property_definition
     name: (markup_identifier) @variable.parameter))
 
+;; Applied types: `<Range T=int/>` names one instantiation of a generic record. The tag is the
+;; record, the argument names are its type parameters.
+(applied_type
+  name: (qualified_name
+    (identifier) @type))
+
+(type_argument
+  name: (identifier) @type.parameter)
+
 (parenthesized_type
   [
     "("

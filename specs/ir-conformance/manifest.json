@@ -72,7 +72,8 @@
         "expressions"
       ],
       "sub": [
-        "expressions"
+        "expressions",
+        "generic-records"
       ]
     },
     "constants": {
@@ -88,6 +89,7 @@
         "conversions",
         "expressions",
         "function-values",
+        "generic-records",
         "handlers",
         "records",
         "snippet",
@@ -109,6 +111,7 @@
         "conversions",
         "expressions",
         "function-values",
+        "generic-records",
         "handlers",
         "records",
         "snippet",
@@ -118,6 +121,7 @@
       "record": [
         "conversions",
         "function-values",
+        "generic-records",
         "handlers",
         "records",
         "two-module"
@@ -142,6 +146,7 @@
     },
     "intrinsics": {
       "apply": [
+        "generic-records",
         "records"
       ],
       "changed": [
@@ -171,6 +176,7 @@
         "conversions",
         "expressions",
         "function-values",
+        "generic-records",
         "handlers",
         "two-module"
       ],
@@ -184,6 +190,7 @@
         "conversions",
         "expressions",
         "function-values",
+        "generic-records",
         "records",
         "two-module"
       ],
@@ -213,11 +220,13 @@
         "expressions"
       ],
       "intrinsic": [
+        "generic-records",
         "records"
       ],
       "member": [
         "conversions",
         "function-values",
+        "generic-records",
         "handlers",
         "records",
         "two-module"
@@ -234,6 +243,7 @@
         "conversions",
         "expressions",
         "function-values",
+        "generic-records",
         "handlers",
         "records",
         "snippet",
@@ -243,6 +253,7 @@
       "record": [
         "conversions",
         "function-values",
+        "generic-records",
         "handlers",
         "records",
         "two-module"
@@ -252,6 +263,7 @@
         "conversions",
         "expressions",
         "function-values",
+        "generic-records",
         "handlers",
         "records",
         "snippet",
@@ -262,6 +274,7 @@
         "conversions",
         "expressions",
         "function-values",
+        "generic-records",
         "handlers",
         "records",
         "two-module"
@@ -271,6 +284,7 @@
         "conversions",
         "expressions",
         "function-values",
+        "generic-records",
         "handlers",
         "records",
         "snippet",
@@ -295,6 +309,7 @@
         "components",
         "conversions",
         "function-values",
+        "generic-records",
         "handlers",
         "records",
         "snippet",
@@ -306,6 +321,7 @@
       "nominal": [
         "components",
         "function-values",
+        "generic-records",
         "handlers",
         "records",
         "snippet",
@@ -322,6 +338,7 @@
         "conversions",
         "expressions",
         "function-values",
+        "generic-records",
         "handlers",
         "records",
         "snippet",
@@ -343,6 +360,7 @@
     "conversions",
     "expressions",
     "function-values",
+    "generic-records",
     "handlers",
     "records",
     "snippet",

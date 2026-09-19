@@ -2464,6 +2464,7 @@ fn build_interface_item(
             kind: record_def.kind.clone(),
             is_abstract: record_def.is_abstract,
             base: record_def.base.clone(),
+            type_params: record_def.type_params.clone(),
             properties: record_def
                 .properties
                 .iter()
@@ -2527,15 +2528,26 @@ fn type_to_type_ref(ty: &Type) -> Option<TypeRef> {
                 .collect::<Option<Vec<_>>>()?,
             type_to_type_ref(ret)?,
         )),
-        Type::Named(named) => Some(TypeRef::name(named.name.clone())),
+        Type::Named(named) if named.args().is_empty() => Some(TypeRef::name(named.name.clone())),
+        // One instantiation of a generic record publishes as the applied type an importing module
+        // would write, so the consumer's checker resolves it to the same instantiation.
+        Type::Named(named) => Some(TypeRef::Applied {
+            name: named.name.clone(),
+            args: named
+                .args()
+                .iter()
+                .map(|(param, ty)| Some((param.clone(), type_to_type_ref(ty)?)))
+                .collect::<Option<Vec<_>>>()?,
+        }),
         Type::Union(union_type) => Some(TypeRef::name(union_type.name.clone())),
         Type::UnionCase(case_type) => {
             let qualified_name = format!("{}.{}", case_type.union, case_type.case);
             Some(TypeRef::name(qualified_name))
         }
-        // A type parameter is a type only inside its component, and nothing published crosses
-        // that boundary; a value typed by one has no interface type to publish.
-        Type::Parameter(_) => None,
+        // A type parameter is a type only inside the declaration that declares it, and it is
+        // published under its own name: an importing module reads a generic record's field types
+        // in the declaring module's namespace, where the parameter is in scope again.
+        Type::Parameter(param) => Some(TypeRef::name(param.name.clone())),
         // A pending contextual name is resolved (or reported) at its binding site, so it never
         // reaches a published artifact type.
         Type::ContextualName(_) | Type::Variable(_) | Type::Unknown | Type::Error => None,
@@ -2928,8 +2940,8 @@ mod tests {
                 .map(Vec::len),
             Some(1)
         );
-        assert!(artifact.exported_items.get("helper").is_none());
-        assert!(artifact.exports.get("helper").is_none());
+        assert!(!artifact.exported_items.contains_key("helper"));
+        assert!(!artifact.exports.contains_key("helper"));
         assert_eq!(artifact.exported_items.get("answer").map(Vec::len), Some(1));
     }
 
@@ -3150,6 +3162,56 @@ let patch = <User.Update nickname="x" />"#;
     }
 
     #[test]
+    fn library_artifact_interface_items_carry_record_type_parameters() {
+        let temp = TempDir::new().expect("temp dir");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+
+        fs::write(
+            ui_dir.join("generic.nx"),
+            "export type Pair = { TKey:type TValue:type key:TKey value:TValue }\n",
+        )
+        .expect("generic file");
+
+        let artifact =
+            build_library_artifact_from_directory(&ui_dir).expect("Expected library artifact");
+        assert!(
+            !has_error_diagnostics(&artifact.diagnostics),
+            "Expected generic record fixture to analyze without errors: {:?}",
+            artifact.diagnostics
+        );
+
+        let pair = artifact
+            .interface_items
+            .iter()
+            .find(|item| item.item_name == "Pair")
+            .expect("Expected exported record interface item");
+        match &pair.item {
+            LibraryInterfaceKind::Record {
+                type_params,
+                properties,
+                ..
+            } => {
+                assert_eq!(
+                    type_params
+                        .iter()
+                        .map(|param| param.name.as_str())
+                        .collect::<Vec<_>>(),
+                    vec!["TKey", "TValue"]
+                );
+                assert_eq!(
+                    properties
+                        .iter()
+                        .map(|field| field.name.as_str())
+                        .collect::<Vec<_>>(),
+                    vec!["key", "value"]
+                );
+            }
+            other => panic!("Expected record interface item, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn library_artifact_interface_items_preserve_content_metadata() {
         let temp = TempDir::new().expect("temp dir");
         let ui_dir = temp.path().join("ui");
@@ -3330,18 +3392,17 @@ private type HiddenState = | hidden"#,
             "Default-internal unions should be visible within the same library"
         );
         assert!(
-            artifact.exported_items.get("InternalState").is_none(),
+            !artifact.exported_items.contains_key("InternalState"),
             "Default-internal unions should not be externally exported"
         );
         assert!(
-            artifact
+            !artifact
                 .visible_to_library_items
-                .get("HiddenState")
-                .is_none(),
+                .contains_key("HiddenState"),
             "Private unions should stay file-local"
         );
         assert!(
-            artifact.exported_items.get("HiddenState").is_none(),
+            !artifact.exported_items.contains_key("HiddenState"),
             "Private unions should not be externally exported"
         );
 
@@ -3367,6 +3428,118 @@ private type HiddenState = | hidden"#,
                 assert!(cases[1].fields.is_empty());
             }
             other => panic!("Expected union interface item, got {other:?}"),
+        }
+    }
+
+    /// A generic record crosses a library boundary with its type parameters, so an importing
+    /// module can apply it, construct it, read a substituted field, and take one from a function.
+    #[test]
+    fn a_generic_record_is_applied_and_constructed_across_a_library_boundary() {
+        let temp = TempDir::new().expect("temp dir");
+        let app_dir = temp.path().join("app");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&app_dir).expect("app dir");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+
+        fs::write(
+            ui_dir.join("ranges.nx"),
+            "export type Range = { T:type start:T end:T }\n\
+             export let unit(): <Range T=int/> = {<Range T=int start={0} end={1} />}\n",
+        )
+        .expect("ranges file");
+
+        let registry = LibraryRegistry::new();
+        registry
+            .load_library_from_directory(&ui_dir)
+            .expect("Expected ui registry load");
+        let build_context = registry.build_context();
+
+        let main_path = app_dir.join("main.nx");
+        let source = "import \"../ui\"\n\
+             let r:<Range T=int/> = <Range T=int start={1} end={5} />\n\
+             let s:int = {r.start}\n\
+             let u:<Range T=int/> = {unit()}\n\
+             let root() = { s }";
+        fs::write(&main_path, source).expect("main file");
+
+        let artifact = build_program_artifact_from_source(
+            source,
+            &main_path.display().to_string(),
+            &build_context,
+        )
+        .expect("Expected program artifact");
+        assert!(
+            !has_error_diagnostics(&artifact.diagnostics),
+            "expected a clean build, got: {:?}",
+            artifact
+                .diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.message().to_string())
+                .collect::<Vec<_>>()
+        );
+        let EvalResult::Ok(value) = eval_program_artifact(&artifact) else {
+            panic!("Expected the program to evaluate");
+        };
+        assert_eq!(value, nx_value::NxValue::Int(1));
+    }
+
+    /// The instantiation is invariant across the boundary too: a different argument is a
+    /// different type, and the bare name is not a type at all.
+    #[test]
+    fn a_generic_record_from_a_library_keeps_its_identity() {
+        let temp = TempDir::new().expect("temp dir");
+        let app_dir = temp.path().join("app");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&app_dir).expect("app dir");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+
+        fs::write(
+            ui_dir.join("ranges.nx"),
+            "export type Range = { T:type start:T end:T }\n",
+        )
+        .expect("ranges file");
+
+        let registry = LibraryRegistry::new();
+        registry
+            .load_library_from_directory(&ui_dir)
+            .expect("Expected ui registry load");
+        let build_context = registry.build_context();
+
+        let cases = [
+            (
+                "let ints:<Range T=int/> = <Range T=int start={1} end={5} />\n\
+                 let bad:<Range T=string/> = {ints}",
+                "<Range T=string/>",
+            ),
+            (
+                "let bad:Range = <Range T=int start={1} end={5} />",
+                "was not specified",
+            ),
+            ("let bad = <Range start={1} end={5} />", "was not specified"),
+            (
+                "let bad = <Range T=int start=\"a\" end={5} />",
+                "expects int, found string",
+            ),
+        ];
+        for (index, (body, needle)) in cases.iter().enumerate() {
+            let main_path = app_dir.join(format!("main{index}.nx"));
+            let source = format!("import \"../ui\"\n{body}\nlet root() = {{ 1 }}");
+            fs::write(&main_path, &source).expect("main file");
+            let artifact = build_program_artifact_from_source(
+                &source,
+                &main_path.display().to_string(),
+                &build_context,
+            )
+            .expect("Expected program artifact");
+            let messages = artifact
+                .diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.message().to_string())
+                .collect::<Vec<_>>();
+            assert!(
+                messages.iter().any(|message| message.contains(needle)),
+                "expected {needle:?} for {body:?}, got: {messages:?}"
+            );
         }
     }
 

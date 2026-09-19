@@ -124,6 +124,12 @@ where
 {
     match type_ref {
         ast::TypeRef::Name(name) => builtin_type(name).unwrap_or_else(|| resolve_named(name, seen)),
+        // An applied type reads as its record here: this walk is the one below the type checker,
+        // where type arguments are erased. The checker resolves the arguments itself, in
+        // `InferenceContext`, because only it knows the record's parameters.
+        ast::TypeRef::Applied { name, .. } => {
+            builtin_type(name).unwrap_or_else(|| resolve_named(name, seen))
+        }
         ast::TypeRef::Array(inner) => {
             Type::array(resolve_type_ref_with_seen(inner, seen, resolve_named))
         }

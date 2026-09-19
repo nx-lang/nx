@@ -1,11 +1,13 @@
 use crate::typegen::model::{
-    erase_field_type_parameters, ExportedAlias, ExportedExternalState, ExportedModule,
-    ExportedPolymorphicDescendant, ExportedRecord, ExportedType, ExportedTypeGraph, ExportedUnion,
-    ExportedUnionCase, ExportedUpdate, ImportedType,
+    erase_field_type_parameters, update_companion_type_params, ExportedAlias,
+    ExportedExternalState, ExportedModule, ExportedPolymorphicDescendant, ExportedRecord,
+    ExportedType, ExportedTypeGraph, ExportedUnion, ExportedUnionCase, ExportedUpdate,
+    ImportedType,
 };
 use crate::typegen::writer::CodeWriter;
 use crate::typegen::{GenerateTypesOptions, GeneratedFile};
 use nx_hir::ast::TypeRef;
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -62,7 +64,7 @@ pub fn emit_library(
     opts: &GenerateTypesOptions,
 ) -> Result<Vec<GeneratedFile>, String> {
     let mut files = Vec::new();
-    let has_records = graph.modules.iter().any(|m| module_needs_nx_record(m));
+    let has_records = graph.modules.iter().any(module_needs_nx_record);
     let helper_module_path = has_records.then(|| nx_record_helper_module_path(graph));
 
     if let Some(helper_module_path) = &helper_module_path {
@@ -265,19 +267,19 @@ fn emit_declaration(
     graph: &ExportedTypeGraph,
 ) {
     match declaration {
-        ExportedType::Alias(alias) => emit_alias(writer, alias),
+        ExportedType::Alias(alias) => emit_alias(writer, alias, graph),
         ExportedType::Union(union_def) => emit_union(writer, union_def, graph),
         ExportedType::Record(record) => emit_record(writer, record, graph),
-        ExportedType::ExternalState(state) => emit_external_state(writer, state),
-        ExportedType::Update(update) => emit_update(writer, update),
+        ExportedType::ExternalState(state) => emit_external_state(writer, state, graph),
+        ExportedType::Update(update) => emit_update(writer, update, graph),
     }
 }
 
-fn emit_alias(writer: &mut CodeWriter, alias: &ExportedAlias) {
+fn emit_alias(writer: &mut CodeWriter, alias: &ExportedAlias, graph: &ExportedTypeGraph) {
     writer.line(&format!(
         "export type {} = {};",
         sanitize_ts_type_name(&alias.name),
-        ts_type(&alias.target)
+        ts_type(&alias.target, graph)
     ));
 }
 
@@ -299,12 +301,20 @@ fn ts_generic_declaration(record: &ExportedRecord) -> String {
     if record.type_params.is_empty() {
         return String::new();
     }
+    // A component contract defaults each parameter to `unknown`, so a caller that names nothing
+    // gets the erased contract. A plain generic record has no default: NX never leaves a record's
+    // type argument unspecified, so a TypeScript caller should not be able to either.
+    let default = if record.is_component_contract {
+        " = unknown"
+    } else {
+        ""
+    };
     format!(
         "<{}>",
         record
             .type_params
             .iter()
-            .map(|param| format!("{param} = unknown"))
+            .map(|param| format!("{param}{default}"))
             .collect::<Vec<_>>()
             .join(", ")
     )
@@ -339,7 +349,7 @@ fn emit_abstract_record(
     writer.block(&header, |writer| {
         for field in &record.fields {
             let key = ts_property_key(&field.name);
-            let ty = ts_type(&field.ty);
+            let ty = ts_type(&field.ty, graph);
             writer.line(&format!("{key}: {ty};"));
         }
     });
@@ -396,7 +406,7 @@ fn emit_concrete_record(
     writer.block(&header, |writer| {
         for field in &record.fields {
             let key = ts_property_key(&field.name);
-            let ty = ts_type(&field.ty);
+            let ty = ts_type(&field.ty, graph);
             writer.line(&format!("{key}: {ty};"));
         }
     });
@@ -490,7 +500,7 @@ fn emit_union_case(
     writer.block(&header, |writer| {
         for field in &case.fields {
             let key = ts_property_key(&field.name);
-            let ty = ts_type(&field.ty);
+            let ty = ts_type(&field.ty, graph);
             writer.line(&format!("{key}: {ty};"));
         }
     });
@@ -499,14 +509,18 @@ fn emit_union_case(
 /// Emits an external component's state record. A field typed by the component's type parameter
 /// erases to `unknown`: the host holds state as data and never names the instantiation, which an
 /// NX use site fixed.
-fn emit_external_state(writer: &mut CodeWriter, state: &ExportedExternalState) {
+fn emit_external_state(
+    writer: &mut CodeWriter,
+    state: &ExportedExternalState,
+    graph: &ExportedTypeGraph,
+) {
     let fields = erase_field_type_parameters(&state.fields, &state.type_params);
     writer.block(
         &format!("export interface {}", sanitize_ts_type_name(&state.name)),
         |writer| {
             for field in fields.iter() {
                 let key = ts_property_key(&field.name);
-                let ty = ts_type(&field.ty);
+                let ty = ts_type(&field.ty, graph);
                 writer.line(&format!("{key}: {ty};"));
             }
         },
@@ -514,12 +528,30 @@ fn emit_external_state(writer: &mut CodeWriter, state: &ExportedExternalState) {
 }
 
 /// Emits an update companion: every property optional, so an absent key means "unchanged", and a
-/// nullable field typed `| null`, so a present `null` means "set to null". A state-derived field
-/// typed by the component's type parameter erases to `unknown`, as on the state record.
-fn emit_update(writer: &mut CodeWriter, update: &ExportedUpdate) {
-    let fields = erase_field_type_parameters(&update.fields, &update.type_params);
+/// nullable field typed `| null`, so a present `null` means "set to null".
+///
+/// <para>A generic record's companion declares the record's parameters and types its fields by
+/// them, so a patch of a `Range<number>` reads as one. A state-derived field typed by the
+/// *component's* type parameter still erases to `unknown`, as on the state record.</para>
+fn emit_update(writer: &mut CodeWriter, update: &ExportedUpdate, graph: &ExportedTypeGraph) {
+    let type_params = update_companion_type_params(update, graph);
+    let fields = if type_params.is_empty() {
+        erase_field_type_parameters(&update.fields, &update.type_params)
+    } else {
+        Cow::Borrowed(update.fields.as_slice())
+    };
+    // No `= unknown` default, for the reason `ts_generic_declaration` gives: NX never leaves a
+    // record's type argument unspecified, and a patch of one names the same instantiation.
+    let generics = if type_params.is_empty() {
+        String::new()
+    } else {
+        format!("<{}>", type_params.join(", "))
+    };
     writer.block(
-        &format!("export interface {}", sanitize_ts_type_name(&update.name)),
+        &format!(
+            "export interface {}{generics}",
+            sanitize_ts_type_name(&update.name)
+        ),
         |writer| {
             writer.line(&format!(
                 "$type: \"{}\";",
@@ -527,7 +559,7 @@ fn emit_update(writer: &mut CodeWriter, update: &ExportedUpdate) {
             ));
             for field in fields.iter() {
                 let key = ts_property_key(&field.name);
-                let ty = ts_type(&field.ty);
+                let ty = ts_type(&field.ty, graph);
                 writer.line(&format!("{key}?: {ty};"));
             }
         },
@@ -734,11 +766,36 @@ fn ts_union_case_type_name(union_name: &str, case_name: &str) -> String {
     )
 }
 
-fn ts_type(ty: &TypeRef) -> String {
+fn ts_type(ty: &TypeRef, graph: &ExportedTypeGraph) -> String {
     match ty {
         TypeRef::Name(name) => ts_type_name(name.as_str()),
+        // An applied type is the instantiation of its record, with the arguments in the record's
+        // declaration order whatever order the source wrote them in.
+        TypeRef::Applied { name, args } => {
+            let base = ts_type_name(name.as_str());
+            let rendered = match graph.record_type_params(name.as_str()) {
+                Some(order) => order
+                    .iter()
+                    .filter_map(|param| {
+                        args.iter()
+                            .find(|(arg, _)| arg.as_str() == param)
+                            .map(|(_, ty)| ts_type(ty, graph))
+                    })
+                    .collect::<Vec<_>>(),
+                // The declaration could not be reached, so there is no order to sort into and the
+                // source order is the only one there is. It is still rendered: the bare name would
+                // be an open generic, which does not compile, and a checked program wrote the
+                // arguments against a declaration that does exist.
+                None => args.iter().map(|(_, ty)| ts_type(ty, graph)).collect(),
+            };
+            if rendered.is_empty() {
+                base
+            } else {
+                format!("{base}<{}>", rendered.join(", "))
+            }
+        }
         TypeRef::Array(inner) => {
-            let inner = ts_type(inner);
+            let inner = ts_type(inner, graph);
             let needs_parens = inner.contains('|') || inner.contains("=>");
             if needs_parens {
                 format!("({inner})[]")
@@ -747,7 +804,7 @@ fn ts_type(ty: &TypeRef) -> String {
             }
         }
         TypeRef::Nullable(inner) => {
-            let inner = ts_type(inner);
+            let inner = ts_type(inner, graph);
             // `(args) => string | null` would make the result nullable, not the function.
             if inner.contains("=>") {
                 format!("({inner}) | null")
@@ -761,14 +818,14 @@ fn ts_type(ty: &TypeRef) -> String {
             return_type,
         } => {
             if params.is_empty() {
-                return format!("() => {}", ts_type(return_type));
+                return format!("() => {}", ts_type(return_type, graph));
             }
             let params = params
                 .iter()
-                .map(|param| format!("{}: {}", param.name.as_str(), ts_type(&param.ty)))
+                .map(|param| format!("{}: {}", param.name.as_str(), ts_type(&param.ty, graph)))
                 .collect::<Vec<_>>()
                 .join("; ");
-            format!("(args: {{ {params} }}) => {}", ts_type(return_type))
+            format!("(args: {{ {params} }}) => {}", ts_type(return_type, graph))
         }
     }
 }

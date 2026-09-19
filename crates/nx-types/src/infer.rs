@@ -2,7 +2,6 @@
 
 use crate::{
     common_supertype as generic_common_supertype, is_object_type, numeric_literal_target,
-    resolve_type_ref_with, resolve_type_ref_with_seen,
     semantics::PRIMITIVE_TYPE_NAMES,
     ty::{
         check_function_satisfies, DeclaringOrigin, FunctionMismatch, FunctionParam, NamedType,
@@ -337,6 +336,13 @@ pub struct InferenceContext<'a> {
     /// Read when a type error is reported, to say which name is the item and which the index
     /// when the error reads like the two were swapped.
     indexed_loops: Vec<IndexedLoop>,
+    /// Where a diagnostic about a type *reference* is reported.
+    ///
+    /// <para>A `TypeRef` carries no span of its own, so a problem with one — an applied type that
+    /// omits an argument, a generic record's name written bare — is reported at the nearest
+    /// construct that does have one, which is the annotation or field that wrote it. Callers that
+    /// know the construct set it around the conversion.</para>
+    type_ref_span: TextSpan,
 }
 
 /// The names an indexed `for` binds, and where its body uses them.
@@ -377,6 +383,7 @@ impl<'a> InferenceContext<'a> {
             string_conversions: StringConversions::default(),
             widened_joins: FxHashMap::default(),
             type_parameter_scope: FxHashMap::default(),
+            type_ref_span: TextSpan::new(0.into(), 0.into()),
             consumed_type_arguments: FxHashSet::default(),
             function_value_calls: FxHashMap::default(),
             resolved_type_arguments: FxHashMap::default(),
@@ -747,16 +754,25 @@ impl<'a> InferenceContext<'a> {
         // — a function-typed parameter `Row` beside a declared function `Row` — shadows it for
         // the body and leaves it in place afterwards.
         self.env.push_scope();
+        // Each annotation is resolved once, here, where the parameter's span says where a
+        // problem with it was written; the signature below reuses these types rather than
+        // resolving them a second time.
+        let mut param_types = Vec::with_capacity(func.params.len());
         for param in &func.params {
-            let param_ty = self.type_from_type_ref(&param.ty);
-            self.env.bind(param.name.clone(), param_ty);
+            let param_ty = self.type_from_type_ref_at(param.span, &param.ty);
+            self.env.bind(param.name.clone(), param_ty.clone());
+            param_types.push(FunctionParam {
+                name: param.name.clone(),
+                ty: param_ty,
+                is_content: param.is_content,
+            });
         }
 
         let body_ty = self.infer_expr(func.body);
         self.env.pop_scope();
 
         let return_ty = if let Some(ty) = func.return_type.as_ref() {
-            let expected = self.type_from_type_ref(ty);
+            let expected = self.type_from_type_ref_at(func.span, ty);
             self.check_typed_binding_for(
                 Some(func.body),
                 &body_ty,
@@ -786,7 +802,10 @@ impl<'a> InferenceContext<'a> {
             body_ty.clone()
         };
 
-        self.bind_function_signature(func, return_ty.clone());
+        self.env.bind(
+            func.name.clone(),
+            Type::function(param_types, return_ty.clone()),
+        );
         if func.return_type.is_none() {
             self.function_return_placeholders.remove(&func.name);
         }
@@ -848,8 +867,25 @@ impl<'a> InferenceContext<'a> {
         match effective_props {
             Some(props) => {
                 for field in &props {
-                    let field_ty =
-                        self.type_from_type_ref_in(Some(&field.module_identity), &field.ty);
+                    // Only a prop *this* component declared is reported here, at the span it was
+                    // written at. An inherited one belongs to the base, whose own pass reports it
+                    // — in this module if the base is local, and in its own module's check if not,
+                    // where its span means something. Reporting it again here would be a second
+                    // copy of the same message, and for a base in another module it would land at
+                    // offset 0 of this file.
+                    let declared_here = component
+                        .props
+                        .iter()
+                        .any(|declared| declared.name == field.name);
+                    let field_ty = if declared_here {
+                        self.type_from_type_ref_in_at(
+                            field.span,
+                            Some(&field.module_identity),
+                            &field.ty,
+                        )
+                    } else {
+                        self.type_from_type_ref_in_quietly(Some(&field.module_identity), &field.ty)
+                    };
                     self.check_component_field_default(component, &field.name, &field_ty);
                     self.env.bind(field.name.clone(), field_ty);
                 }
@@ -858,7 +894,7 @@ impl<'a> InferenceContext<'a> {
             // the whole of what its body and its defaults can see.
             None => {
                 for field in &component.props {
-                    let field_ty = self.type_from_type_ref(&field.ty);
+                    let field_ty = self.type_from_type_ref_at(field.span, &field.ty);
                     self.check_component_field_default(component, &field.name, &field_ty);
                     self.env.bind(field.name.clone(), field_ty);
                 }
@@ -866,7 +902,7 @@ impl<'a> InferenceContext<'a> {
         }
 
         for field in &component.state {
-            let field_ty = self.type_from_type_ref(&field.ty);
+            let field_ty = self.type_from_type_ref_at(field.span, &field.ty);
             self.check_component_field_default(component, &field.name, &field_ty);
             self.env.bind(field.name.clone(), field_ty);
         }
@@ -1794,7 +1830,17 @@ impl<'a> InferenceContext<'a> {
                 };
                 let declaring_module = field.module_identity.clone();
                 let field_ty = field.ty.clone();
-                self.type_from_type_ref_in(Some(&declaring_module), &field_ty)
+                if named.args().is_empty() {
+                    return self.type_from_type_ref_in_quietly(Some(&declaring_module), &field_ty);
+                }
+                // Reading a field of an instantiation gives the field's declared type with each
+                // parameter replaced by its argument, which is what binding the parameters into
+                // the scope the annotation resolves in does in one step.
+                let scope: FxHashMap<Name, Type> = named.args().iter().cloned().collect();
+                let previous_scope = std::mem::replace(&mut self.type_parameter_scope, scope);
+                let ty = self.type_from_type_ref_in_quietly(Some(&declaring_module), &field_ty);
+                self.type_parameter_scope = previous_scope;
+                ty
             }
             Type::Error => Type::Error,
             other => {
@@ -1882,7 +1928,7 @@ impl<'a> InferenceContext<'a> {
         let field = shape.fields.iter().find(|field| field.name == *member)?;
         let field_module = field.module_identity.clone();
         let field_ty = field.ty.clone();
-        Some(self.type_from_type_ref_in(Some(&field_module), &field_ty))
+        Some(self.type_from_type_ref_in_quietly(Some(&field_module), &field_ty))
     }
 
     fn union_has_case_field(
@@ -1929,7 +1975,7 @@ impl<'a> InferenceContext<'a> {
             .find(|case| case.name == *case_name)?;
         let field = case.fields.iter().find(|field| field.name == *member)?;
         let field_ty = field.ty.clone();
-        Some(self.type_from_type_ref_in(declaring_module.as_deref(), &field_ty))
+        Some(self.type_from_type_ref_in_quietly(declaring_module.as_deref(), &field_ty))
     }
 
     fn infer_record_literal(
@@ -1948,15 +1994,55 @@ impl<'a> InferenceContext<'a> {
             }
 
             let effective_shape = self.effective_record_shape(record).ok().flatten();
+            let type_params: Vec<Name> = record_def
+                .type_params
+                .iter()
+                .map(|param| param.name.clone())
+                .collect();
+            let owner = self.record_origins.get(record).cloned();
+            let arguments = (!type_params.is_empty()).then(|| {
+                let bindings = properties
+                    .iter()
+                    .filter(|property| type_params.contains(&property.name))
+                    .map(|property| (property.name.clone(), property.value, property.span))
+                    .collect();
+                self.resolve_record_type_arguments(
+                    bindings,
+                    record,
+                    &type_params,
+                    owner.clone(),
+                    span,
+                )
+            });
+            let unspecified = arguments
+                .as_ref()
+                .map(|arguments| arguments.unspecified.clone())
+                .unwrap_or_default();
+            let is_unspecified = |param: &TypeParameterRef| {
+                param.owner == owner && unspecified.contains(&param.name)
+            };
+
             for property in properties {
+                // A type-argument binding is not a field; it was resolved above and is removed
+                // from the construction once analysis is done.
+                if type_params.contains(&property.name) {
+                    continue;
+                }
                 match self.record_field_type_ref(
                     &record_def,
                     effective_shape.as_ref(),
                     &property.name,
                 ) {
                     Some(field_ty) => {
+                        let expected = self.under_type_arguments(arguments.as_ref(), |this| {
+                            this.type_from_type_ref_in_quietly(None, &field_ty)
+                        });
                         let actual = self.infer_expr(property.value);
-                        let expected = self.type_from_type_ref(&field_ty);
+                        // A field typed by a parameter the construction left unbound is skipped:
+                        // the missing argument is the one real problem and is already reported.
+                        if expected.find_parameter(&is_unspecified).is_some() {
+                            continue;
+                        }
                         self.check_typed_binding_for(
                             Some(property.value),
                             &actual,
@@ -1976,7 +2062,14 @@ impl<'a> InferenceContext<'a> {
                 }
             }
 
-            self.nominal_named_type(record)
+            let resolved = arguments.map(|arguments| {
+                self.consumed_type_arguments.extend(arguments.consumed);
+                arguments.resolved
+            });
+            match (self.nominal_named_type(record), resolved) {
+                (Type::Named(named), Some(resolved)) => Type::Named(named.with_args(resolved)),
+                (ty, _) => ty,
+            }
         } else {
             self.nominal_named_type(record)
         }
@@ -2051,15 +2144,13 @@ impl<'a> InferenceContext<'a> {
                         span,
                         Some(declaring_module.as_str()),
                     );
-                    if let Some(func_ty) = self.env.lookup(&element.tag) {
-                        if let Type::Function { ret, .. } = func_ty {
-                            return (**ret).clone();
-                        }
+                    if let Some(Type::Function { ret, .. }) = self.env.lookup(&element.tag) {
+                        return (**ret).clone();
                     }
                     return function
                         .return_type
                         .as_ref()
-                        .map(|ty| self.type_from_type_ref(ty))
+                        .map(|ty| self.type_from_type_ref_in_quietly(None, ty))
                         .unwrap_or_else(|| self.nominal_named_type(&element.tag));
                 }
                 ResolvedPreparedItem::Imported { item, .. } => {
@@ -2074,7 +2165,7 @@ impl<'a> InferenceContext<'a> {
                                 .map(|param| (&param.name, &param.ty, param.is_content, true)),
                         );
                         self.check_element_bindings(element_id, element, span, &spec);
-                        return self.type_from_type_ref(&return_type);
+                        return self.type_from_type_ref_in_quietly(None, &return_type);
                     }
                 }
                 _ => {}
@@ -2140,14 +2231,13 @@ impl<'a> InferenceContext<'a> {
                     span,
                 );
             }
-            self.check_element_bindings_against_record(
+            return self.check_element_bindings_against_record(
                 element_id,
                 element,
                 &record_def,
                 span,
                 Some(declaring_module.as_str()),
             );
-            return self.nominal_named_type(&element.tag);
         }
 
         if let Some((entry, case)) = self.union_case_from_qualified_name(&element.tag) {
@@ -2365,13 +2455,19 @@ impl<'a> InferenceContext<'a> {
                 let (Some(record), Some((update, target))) = (record, update) else {
                     return Type::Error;
                 };
-                if !self.update_patches_record(&update, &target, &record) {
+                if !self.update_patches_record(&update, &target, &record)
+                    || update.args() != record.args()
+                {
+                    let expected = Type::Named(
+                        NamedType::new(nx_hir::update_record_name(record.name.as_str()), None)
+                            .with_args(record.args().to_vec()),
+                    );
                     self.error(
                         "intrinsic-target-mismatch",
                         format!(
                             "Intrinsic 'apply' takes a record and its own update record: '{}' is not '{}'",
-                            update.name,
-                            nx_hir::update_record_name(record.name.as_str())
+                            Type::Named(update.clone()),
+                            expected
                         ),
                         span,
                     );
@@ -2385,12 +2481,13 @@ impl<'a> InferenceContext<'a> {
                 let (Some((first, _)), Some((second, _))) = (first, second) else {
                     return Type::Error;
                 };
-                if !first.is_same_declaration_as(&second) {
+                if first != second {
                     self.error(
                         "intrinsic-target-mismatch",
                         format!(
                             "Intrinsic 'merge' takes two updates of one record: '{}' and '{}' target different records",
-                            first.name, second.name
+                            Type::Named(first.clone()),
+                            Type::Named(second.clone())
                         ),
                         span,
                     );
@@ -2404,12 +2501,13 @@ impl<'a> InferenceContext<'a> {
                 let (Some(before), Some(after)) = (before, after) else {
                     return Type::Error;
                 };
-                if !before.is_same_declaration_as(&after) {
+                if before != after {
                     self.error(
                         "intrinsic-target-mismatch",
                         format!(
                             "Intrinsic 'diff' takes two records of one type: '{}' is not '{}'",
-                            after.name, before.name
+                            Type::Named(after.clone()),
+                            Type::Named(before.clone())
                         ),
                         span,
                     );
@@ -2429,7 +2527,8 @@ impl<'a> InferenceContext<'a> {
                     );
                     return Type::Error;
                 }
-                self.derived_type_of(&before, nx_hir::update_record_name)
+                let update = self.derived_type_of(&before, nx_hir::update_record_name);
+                Self::carry_type_arguments(&before, update)
             }
             UpdateIntrinsic::Changed => {
                 let Some((update, target)) =
@@ -2552,6 +2651,19 @@ impl<'a> InferenceContext<'a> {
         self.resolve_named_type(&derived, &mut seen)
     }
 
+    /// Gives `derived` the type arguments `record` was instantiated with.
+    ///
+    /// <para>A generic record's update companion declares the same parameters, so `<Range T=int/>`
+    /// diffs to `<Range.Update T=int/>` by carrying the arguments across rather than resolving
+    /// them again. A non-generic record carries none and the type is unchanged.</para>
+    fn carry_type_arguments(record: &NamedType, derived: Type) -> Type {
+        match derived {
+            Type::Named(named) if record.args().is_empty() => Type::Named(named),
+            Type::Named(named) => Type::Named(named.with_args(record.args().to_vec())),
+            other => other,
+        }
+    }
+
     /// The property union of the declaration `update` patches, resolved in the update record's
     /// own module.
     fn property_union_of_update(&mut self, update: &NamedType, target: &Name) -> Type {
@@ -2627,33 +2739,30 @@ impl<'a> InferenceContext<'a> {
         let arguments = (!type_param_names.is_empty()).then(|| {
             self.resolve_type_arguments(element, &component.name, &type_param_names, owner.clone())
         });
-        let previous_scope = arguments.as_ref().map(|arguments| {
-            std::mem::replace(&mut self.type_parameter_scope, arguments.scope.clone())
+        let mut spec = self.under_type_arguments(arguments.as_ref(), |this| {
+            if let Some(contract) = effective_contract.as_ref() {
+                this.build_element_binding_spec_in(
+                    declaring_module,
+                    contract
+                        .props
+                        .iter()
+                        .map(|field| (&field.name, &field.ty, field.is_content, field.is_required)),
+                )
+            } else {
+                this.build_element_binding_spec_in(
+                    declaring_module,
+                    component.props.iter().map(|field| {
+                        (
+                            &field.name,
+                            &field.ty,
+                            field.is_content,
+                            field.default.is_none()
+                                && !matches!(field.ty, ast::TypeRef::Nullable(_)),
+                        )
+                    }),
+                )
+            }
         });
-        let mut spec = if let Some(contract) = effective_contract.as_ref() {
-            self.build_element_binding_spec_in(
-                declaring_module,
-                contract
-                    .props
-                    .iter()
-                    .map(|field| (&field.name, &field.ty, field.is_content, field.is_required)),
-            )
-        } else {
-            self.build_element_binding_spec_in(
-                declaring_module,
-                component.props.iter().map(|field| {
-                    (
-                        &field.name,
-                        &field.ty,
-                        field.is_content,
-                        field.default.is_none() && !matches!(field.ty, ast::TypeRef::Nullable(_)),
-                    )
-                }),
-            )
-        };
-        if let Some(previous_scope) = previous_scope {
-            self.type_parameter_scope = previous_scope;
-        }
         if let Some(arguments) = arguments {
             // A prop typed by a parameter the site left unbound is checked against a type no
             // value can be assumed to have, and remembers the parameter so a failure can be
@@ -2700,6 +2809,86 @@ impl<'a> InferenceContext<'a> {
         self.check_element_bindings(element_id, element, span, &spec);
     }
 
+    /// Runs `build` with each of the target's type parameters standing for the argument the use
+    /// site bound it to, then restores the scope.
+    ///
+    /// <para>This is the whole of what a generic use site shares: every field type of the target's
+    /// contract is resolved once, with the arguments already substituted, which is what makes a
+    /// binding check against the instantiated type rather than against the parameter.</para>
+    fn under_type_arguments<R>(
+        &mut self,
+        arguments: Option<&ResolvedTypeArguments>,
+        build: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let previous_scope = arguments.map(|arguments| {
+            std::mem::replace(&mut self.type_parameter_scope, arguments.scope.clone())
+        });
+        let result = build(self);
+        if let Some(previous_scope) = previous_scope {
+            self.type_parameter_scope = previous_scope;
+        }
+        result
+    }
+
+    /// Resolves the type arguments a record construction bound, reporting each parameter it left
+    /// unbound once, by name and in the form to write.
+    ///
+    /// <para>A record has no bottom-type fallback the way a component does: the constructed
+    /// value's own type is what the argument decides, so an unbound parameter is an error rather
+    /// than an erasure.</para>
+    fn resolve_record_type_arguments(
+        &mut self,
+        bindings: Vec<(Name, ExprId, TextSpan)>,
+        record_name: &Name,
+        type_params: &[Name],
+        owner: Option<DeclaringOrigin>,
+        span: TextSpan,
+    ) -> ResolvedTypeArguments {
+        let arguments =
+            self.resolve_type_argument_bindings(bindings, record_name, type_params, owner);
+        for param in type_params {
+            if arguments.unspecified.contains(param) {
+                self.error(
+                    "type-parameter-not-specified",
+                    format!(
+                        "Type parameter '{}' of record '{}' was not specified; write {}=<type>",
+                        param, record_name, param
+                    ),
+                    span,
+                );
+            }
+        }
+        arguments
+    }
+
+    /// Blanks out every field whose type mentions a parameter the site left unbound, and records
+    /// the arguments for removal from the construction.
+    ///
+    /// <para>The field is neither required nor checked: the author's one real problem is the
+    /// missing argument, already reported, and checking `start` against a type nothing satisfies
+    /// would bury it.</para>
+    fn apply_record_type_arguments(
+        &mut self,
+        spec: &mut ElementBindingSpec,
+        arguments: ResolvedTypeArguments,
+        type_params: &[Name],
+        owner: Option<&DeclaringOrigin>,
+    ) -> Vec<(Name, Type)> {
+        let unspecified = arguments.unspecified;
+        let is_unspecified = |param: &TypeParameterRef| {
+            param.owner.as_ref() == owner && unspecified.contains(&param.name)
+        };
+        for entry in spec.properties.values_mut() {
+            if entry.ty.find_parameter(&is_unspecified).is_some() {
+                entry.ty = Type::Error;
+                entry.is_required = false;
+            }
+        }
+        spec.type_parameters = type_params.iter().cloned().collect();
+        self.consumed_type_arguments.extend(arguments.consumed);
+        arguments.resolved
+    }
+
     /// Resolves the type arguments a use site binds for `type_params`, the target's effective
     /// type parameters, and reports every binding that is not a plain bare type name.
     fn resolve_type_arguments(
@@ -2709,28 +2898,44 @@ impl<'a> InferenceContext<'a> {
         type_params: &[Name],
         owner: Option<DeclaringOrigin>,
     ) -> ResolvedTypeArguments {
-        let mut bound: FxHashMap<Name, Type> = FxHashMap::default();
-        let mut consumed = Vec::new();
-
+        let mut bindings = Vec::new();
         for entry in element.property_entries() {
             match entry {
                 PropertyEntry::Value(property) if type_params.contains(&property.key) => {
-                    consumed.push(property.value);
-                    let Some(ty) = self.resolve_type_argument(
-                        property.value,
-                        &property.key,
-                        component_name,
-                        property.span,
-                    ) else {
-                        continue;
-                    };
-                    // A second binding of one parameter is reported as a duplicate property on the
-                    // same terms as any other; the first is the one that counts.
-                    bound.entry(property.key.clone()).or_insert(ty);
+                    bindings.push((property.key.clone(), property.value, property.span));
                 }
                 PropertyEntry::Value(_) => {}
                 entry => self.report_conditional_type_arguments(entry, component_name, type_params),
             }
+        }
+        self.resolve_type_argument_bindings(bindings, component_name, type_params, owner)
+    }
+
+    /// Resolves the type arguments a use site bound, whatever shape the site is.
+    ///
+    /// <para>A component element and a record element write their arguments as property entries; a
+    /// content-free same-module record construction lowers to a record literal and writes them as
+    /// literal properties. Both arrive here as `(parameter, value expression, span)`, so the rules
+    /// — bare name only, first binding wins, unbound parameters recorded — are one set.</para>
+    fn resolve_type_argument_bindings(
+        &mut self,
+        bindings: Vec<(Name, ExprId, TextSpan)>,
+        target_name: &Name,
+        type_params: &[Name],
+        owner: Option<DeclaringOrigin>,
+    ) -> ResolvedTypeArguments {
+        let component_name = target_name;
+        let mut bound: FxHashMap<Name, Type> = FxHashMap::default();
+        let mut consumed = Vec::new();
+
+        for (key, value, span) in bindings {
+            consumed.push(value);
+            let Some(ty) = self.resolve_type_argument(value, &key, component_name, span) else {
+                continue;
+            };
+            // A second binding of one parameter is reported as a duplicate property on the
+            // same terms as any other; the first is the one that counts.
+            bound.entry(key).or_insert(ty);
         }
 
         let mut scope = FxHashMap::default();
@@ -2793,7 +2998,10 @@ impl<'a> InferenceContext<'a> {
         };
 
         if self.is_visible_type_name(&name) {
-            return Some(self.type_from_type_ref(&ast::TypeRef::Name(name)));
+            // The argument is a name this use site wrote, not a declaration's, so a problem with
+            // it — a generic record named without its own arguments, say — is reported here, at
+            // the element that wrote it.
+            return Some(self.type_from_type_ref_at(span, &ast::TypeRef::Name(name)));
         }
 
         let candidates = self.visible_type_names();
@@ -2869,6 +3077,7 @@ impl<'a> InferenceContext<'a> {
             || self.union_defs.contains_key(name)
             || self.record_origins.contains_key(name)
             || self.component_origins.contains_key(name)
+            || nx_syntax::BUILTIN_TYPE_NAMES.contains(&name.as_str())
     }
 
     /// Every name `is_visible_type_name` answers for, for a did-you-mean.
@@ -2879,6 +3088,7 @@ impl<'a> InferenceContext<'a> {
         names.extend(self.union_defs.keys().cloned());
         names.extend(self.record_origins.keys().cloned());
         names.extend(self.component_origins.keys().cloned());
+        names.extend(nx_syntax::BUILTIN_TYPE_NAMES.into_iter().map(Name::new));
         names.sort_by(|a, b| a.as_str().cmp(b.as_str()));
         names.dedup();
         names
@@ -2891,30 +3101,70 @@ impl<'a> InferenceContext<'a> {
         record_def: &nx_hir::RecordDef,
         span: TextSpan,
         declaring_module: Option<&str>,
-    ) {
+    ) -> Type {
         let effective_shape = self.effective_record_shape(&record_def.name).ok().flatten();
-        let spec = if let Some(shape) = effective_shape.as_ref() {
-            self.build_element_binding_spec_in(
-                declaring_module,
-                shape
-                    .fields
-                    .iter()
-                    .map(|field| (&field.name, &field.ty, field.is_content, field.is_required)),
+        let type_params: Vec<Name> = record_def
+            .type_params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect();
+        let owner = self.record_origins.get(&element.tag).cloned();
+        let arguments = (!type_params.is_empty()).then(|| {
+            let bindings = element
+                .property_entries()
+                .iter()
+                .filter_map(|entry| match entry {
+                    PropertyEntry::Value(property) if type_params.contains(&property.key) => {
+                        Some((property.key.clone(), property.value, property.span))
+                    }
+                    _ => None,
+                })
+                .collect();
+            for entry in element.property_entries() {
+                if !matches!(entry, PropertyEntry::Value(_)) {
+                    self.report_conditional_type_arguments(entry, &element.tag, &type_params);
+                }
+            }
+            self.resolve_record_type_arguments(
+                bindings,
+                &element.tag,
+                &type_params,
+                owner.clone(),
+                span,
             )
-        } else {
-            self.build_element_binding_spec_in(
-                declaring_module,
-                record_def.properties.iter().map(|field| {
-                    (
-                        &field.name,
-                        &field.ty,
-                        field.is_content,
-                        field.default.is_none() && !matches!(field.ty, ast::TypeRef::Nullable(_)),
-                    )
-                }),
-            )
-        };
+        });
+        let mut spec = self.under_type_arguments(arguments.as_ref(), |this| {
+            if let Some(shape) = effective_shape.as_ref() {
+                this.build_element_binding_spec_in(
+                    declaring_module,
+                    shape
+                        .fields
+                        .iter()
+                        .map(|field| (&field.name, &field.ty, field.is_content, field.is_required)),
+                )
+            } else {
+                this.build_element_binding_spec_in(
+                    declaring_module,
+                    record_def.properties.iter().map(|field| {
+                        (
+                            &field.name,
+                            &field.ty,
+                            field.is_content,
+                            field.default.is_none()
+                                && !matches!(field.ty, ast::TypeRef::Nullable(_)),
+                        )
+                    }),
+                )
+            }
+        });
+        let resolved = arguments.map(|arguments| {
+            self.apply_record_type_arguments(&mut spec, arguments, &type_params, owner.as_ref())
+        });
         self.check_record_element_bindings(element_id, element, span, &spec);
+        match (self.nominal_named_type(&element.tag), resolved) {
+            (Type::Named(named), Some(resolved)) => Type::Named(named.with_args(resolved)),
+            (ty, _) => ty,
+        }
     }
 
     fn check_record_element_bindings(
@@ -3008,7 +3258,8 @@ impl<'a> InferenceContext<'a> {
             };
             if let Ok(Some(shape)) = shape {
                 for field in shape.fields {
-                    let ty = self.type_from_type_ref_in(Some(&field.module_identity), &field.ty);
+                    let ty =
+                        self.type_from_type_ref_in_quietly(Some(&field.module_identity), &field.ty);
                     if field.is_content {
                         content_property = Some(field.name.clone());
                     }
@@ -3018,7 +3269,7 @@ impl<'a> InferenceContext<'a> {
         }
 
         for field in &case.fields {
-            let ty = self.type_from_type_ref_in(declaring_module, &field.ty);
+            let ty = self.type_from_type_ref_in_quietly(declaring_module, &field.ty);
             let is_required =
                 field.default.is_none() && !matches!(field.ty, ast::TypeRef::Nullable(_));
             if field.is_content {
@@ -3183,7 +3434,8 @@ impl<'a> InferenceContext<'a> {
                     return Some(Type::Error);
                 }
                 let target = alias.ty.clone();
-                let ty = self.type_from_type_ref_in(Some(origin.module_identity()), &target);
+                let ty =
+                    self.type_from_type_ref_in_quietly(Some(origin.module_identity()), &target);
                 self.foreign_alias_stack.remove(&origin);
                 Some(ty)
             }
@@ -3200,19 +3452,50 @@ impl<'a> InferenceContext<'a> {
         declaring_module: Option<&str>,
         type_ref: &ast::TypeRef,
     ) -> Type {
-        if self.type_parameter_scope.is_empty() {
-            return self.type_from_type_ref_unscoped_in(declaring_module, type_ref);
-        }
+        let mut seen = FxHashSet::default();
+        self.type_from_type_ref_walk(declaring_module, type_ref, &mut seen, true)
+    }
+
+    /// Converts a type reference one layer at a time, so that an applied type is reached wherever
+    /// one can be written and resolved where the declarations it names are known.
+    ///
+    /// <para>`scoped` is whether a bare name may denote a type parameter currently in scope. A
+    /// declaration's own annotation may; the target of a module-level type alias may not, since
+    /// the alias was written outside the declaration whose parameters those are.</para>
+    fn type_from_type_ref_walk(
+        &mut self,
+        declaring_module: Option<&str>,
+        type_ref: &ast::TypeRef,
+        seen: &mut FxHashSet<Name>,
+        scoped: bool,
+    ) -> Type {
         match type_ref {
-            ast::TypeRef::Name(name) => match self.type_parameter_scope.get(name) {
-                Some(ty) => ty.clone(),
-                None => self.type_from_type_ref_unscoped_in(declaring_module, type_ref),
-            },
+            ast::TypeRef::Name(name) => {
+                if scoped {
+                    if let Some(ty) = self.type_parameter_scope.get(name) {
+                        return ty.clone();
+                    }
+                }
+                if let Some(ty) = crate::semantics::builtin_type(name) {
+                    return ty;
+                }
+                if let Some(module_identity) = declaring_module {
+                    let module_identity = module_identity.to_string();
+                    if let Some(ty) = self.nominal_type_in_module(&module_identity, name) {
+                        return self.require_type_arguments(name, ty);
+                    }
+                }
+                let ty = self.resolve_named_type(name, seen);
+                self.require_type_arguments(name, ty)
+            }
+            ast::TypeRef::Applied { name, args } => {
+                self.applied_type(declaring_module, name, args, seen, scoped)
+            }
             ast::TypeRef::Array(inner) => {
-                Type::array(self.type_from_type_ref_in(declaring_module, inner))
+                Type::array(self.type_from_type_ref_walk(declaring_module, inner, seen, scoped))
             }
             ast::TypeRef::Nullable(inner) => {
-                Type::nullable(self.type_from_type_ref_in(declaring_module, inner))
+                Type::nullable(self.type_from_type_ref_walk(declaring_module, inner, seen, scoped))
             }
             ast::TypeRef::Function {
                 params,
@@ -3222,13 +3505,205 @@ impl<'a> InferenceContext<'a> {
                     .iter()
                     .map(|param| FunctionParam {
                         name: param.name.clone(),
-                        ty: self.type_from_type_ref_in(declaring_module, &param.ty),
+                        ty: self.type_from_type_ref_walk(declaring_module, &param.ty, seen, scoped),
                         is_content: param.is_content,
                     })
                     .collect();
-                let ret = self.type_from_type_ref_in(declaring_module, return_type);
+                let ret = self.type_from_type_ref_walk(declaring_module, return_type, seen, scoped);
                 Type::function(params, ret)
             }
+        }
+    }
+
+    /// The type parameters of the record `ty` names, empty when it names no generic record.
+    fn record_type_params_of(&self, ty: &Type) -> Vec<Name> {
+        let Type::Named(named) = ty else {
+            return Vec::new();
+        };
+        let record = match named.origin() {
+            Some(origin) => nx_hir::resolve_record_definition_at(self.module, origin),
+            None => nx_hir::resolve_record_definition(self.module, &named.name),
+        };
+        record
+            .map(|record| {
+                record
+                    .type_params
+                    .iter()
+                    .map(|param| param.name.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Rejects a generic record's name written with no arguments: it is not a type on its own.
+    ///
+    /// <para>This is what keeps an argument-less instantiation from existing at all. `NamedType`
+    /// equality includes the arguments, so such a type would be unequal to every real one and
+    /// every later mismatch would be reported far from the annotation that caused it.</para>
+    fn require_type_arguments(&mut self, name: &Name, ty: Type) -> Type {
+        // An alias whose target is an applied type arrives already instantiated.
+        if matches!(&ty, Type::Named(named) if !named.args().is_empty()) {
+            return ty;
+        }
+        let params = self.record_type_params_of(&ty);
+        if params.is_empty() {
+            return ty;
+        }
+        let span = self.type_ref_span;
+        self.error(
+            "type-parameter-not-specified",
+            format!(
+                "Type parameter '{}' of record '{}' was not specified; write {}",
+                params[0],
+                name,
+                nx_hir::ast::spell_applied_type(
+                    name.as_str(),
+                    params
+                        .iter()
+                        .map(|param| (param.as_str(), "...".to_string()))
+                        .collect::<Vec<_>>(),
+                )
+            ),
+            span,
+        );
+        Type::Error
+    }
+
+    /// Resolves `<Range T=int/>`: the tag to a generic record, each argument to a type, and the
+    /// two into one instantiation whose arguments stand in the record's declaration order.
+    ///
+    /// <para>Every way of getting it wrong is reported by record and argument name, and every one
+    /// of them yields `Type::Error`, so one mistake is one diagnostic rather than a cascade from a
+    /// half-built type.</para>
+    fn applied_type(
+        &mut self,
+        declaring_module: Option<&str>,
+        name: &Name,
+        args: &[(Name, ast::TypeRef)],
+        seen: &mut FxHashSet<Name>,
+        scoped: bool,
+    ) -> Type {
+        let span = self.type_ref_span;
+        // The tag names a record, never a type parameter or a primitive, so it skips both.
+        let base = match declaring_module
+            .map(|module_identity| module_identity.to_string())
+            .and_then(|module_identity| self.nominal_type_in_module(&module_identity, name))
+        {
+            Some(ty) => ty,
+            None => self.resolve_named_type(name, seen),
+        };
+        let params = self.record_type_params_of(&base);
+        if params.is_empty() {
+            self.error(
+                "applied-type-not-generic",
+                match &base {
+                    Type::Named(named) if named.origin().is_some() => format!(
+                        "Record '{}' has no type parameters, so it cannot be applied",
+                        name
+                    ),
+                    _ => format!(
+                        "'{}' is not a generic record, so it cannot be applied",
+                        name
+                    ),
+                },
+                span,
+            );
+            return Type::Error;
+        }
+
+        let mut bound: FxHashMap<Name, Type> = FxHashMap::default();
+        let mut failed = false;
+        for (param, arg) in args {
+            if !params.contains(param) {
+                self.error(
+                    "unknown-type-argument",
+                    format!(
+                        "'{}' is not a type parameter of record '{}'; it declares {}",
+                        param,
+                        name,
+                        params
+                            .iter()
+                            .map(|param| param.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    span,
+                );
+                failed = true;
+                continue;
+            }
+            if bound.contains_key(param) {
+                self.error(
+                    "duplicate-type-argument",
+                    format!(
+                        "Type parameter '{}' of record '{}' is already bound",
+                        param, name
+                    ),
+                    span,
+                );
+                failed = true;
+                continue;
+            }
+            let ty = self.type_from_type_ref_walk(declaring_module, arg, seen, scoped);
+            if ty.is_error() {
+                failed = true;
+            }
+            // A bare name that reached no declaration is a misspelling, not a type. Nothing else
+            // reports it: an unresolved `Type::Named` is otherwise carried along unremarked.
+            if let ast::TypeRef::Name(arg_name) = arg {
+                if matches!(&ty, Type::Named(named) if named.origin().is_none())
+                    && !self.is_visible_type_name(arg_name)
+                {
+                    let candidates = self.visible_type_names();
+                    let suggestion = Self::closest_candidate(arg_name, &candidates)
+                        .map(|candidate| format!("; did you mean `{}`?", candidate))
+                        .unwrap_or_default();
+                    self.error(
+                        "unresolved-type-argument",
+                        format!(
+                            "Type parameter '{}' of record '{}' expects a type, and '{}' is not a visible type{}",
+                            param, name, arg_name, suggestion
+                        ),
+                        span,
+                    );
+                    failed = true;
+                }
+            }
+            bound.insert(param.clone(), ty);
+        }
+
+        let mut resolved = Vec::with_capacity(params.len());
+        for param in &params {
+            match bound.remove(param) {
+                Some(ty) => resolved.push((param.clone(), ty)),
+                None => {
+                    self.error(
+                        "type-parameter-not-specified",
+                        format!(
+                            "Type parameter '{}' of record '{}' was not specified; write {}",
+                            param,
+                            name,
+                            nx_hir::ast::spell_applied_type(
+                                name.as_str(),
+                                params
+                                    .iter()
+                                    .map(|param| (param.as_str(), "...".to_string()))
+                                    .collect::<Vec<_>>()
+                            )
+                        ),
+                        span,
+                    );
+                    failed = true;
+                }
+            }
+        }
+
+        if failed {
+            return Type::Error;
+        }
+        match base {
+            Type::Named(named) => Type::Named(named.with_args(resolved)),
+            other => other,
         }
     }
 
@@ -3244,7 +3719,7 @@ impl<'a> InferenceContext<'a> {
         let mut properties = FxHashMap::default();
 
         for (name, ty_ref, is_content, is_required) in bindings {
-            let ty = self.type_from_type_ref_in(declaring_module, ty_ref);
+            let ty = self.type_from_type_ref_in_quietly(declaring_module, ty_ref);
             if is_content {
                 content_property = Some(name.clone());
             }
@@ -3513,6 +3988,9 @@ impl<'a> InferenceContext<'a> {
         }
     }
 
+    // The three diagnostic codes are what make this long: the same walk reports for an element, a
+    // record literal and an update, and each names its own codes.
+    #[allow(clippy::too_many_arguments)]
     fn check_property_path_bindings(
         &mut self,
         paths: &[PropertyPath],
@@ -3642,7 +4120,7 @@ impl<'a> InferenceContext<'a> {
     ///
     /// Nullability first, then one list level, so `Fit?` and `Fit[]` both resolve against `Fit` and
     /// the existing scalar-to-list coercion applies to the resolved value.
-    fn contextual_target<'ty>(expected: &'ty Type) -> &'ty Type {
+    fn contextual_target(expected: &Type) -> &Type {
         let expected = match expected {
             Type::Nullable(inner) => inner.as_ref(),
             other => other,
@@ -4578,13 +5056,35 @@ impl<'a> InferenceContext<'a> {
         }
     }
 
+    /// Checks every locally declared record's own field types and defaults.
+    ///
+    /// <para>A generic record's fields are checked under a rigid scope, where each of its type
+    /// parameters denotes its own type and nothing else: that is what makes `value:T = "text"` a
+    /// mismatch and `items:T[]` fine. Resolving each field type, default or not, is also what
+    /// reports a malformed applied type where it was written.</para>
     fn validate_local_record_defaults(&mut self) {
         let local_items = self.module.raw_module().items().to_vec();
         for item in local_items {
             if let Item::Record(record_def) = item {
+                // A derived update record's fields are copies of its target's, with defaults
+                // stripped, so there is nothing here that the target's own pass does not already
+                // cover — and resolving them again would report each malformed field type twice.
+                if record_def.update_target().is_some() {
+                    continue;
+                }
+                let owner = self.record_origins.get(&record_def.name).cloned();
+                let type_param_names: Vec<Name> = record_def
+                    .type_params
+                    .iter()
+                    .map(|param| param.name.clone())
+                    .collect();
+                let previous_scope = std::mem::replace(
+                    &mut self.type_parameter_scope,
+                    Self::rigid_type_parameter_scope(&type_param_names, owner),
+                );
                 for prop in &record_def.properties {
+                    let expected = self.type_from_type_ref_at(prop.span, &prop.ty);
                     if let Some(default_expr) = prop.default {
-                        let expected = self.type_from_type_ref(&prop.ty);
                         let actual = self.infer_expr(default_expr);
                         self.check_typed_binding_for(
                             Some(default_expr),
@@ -4596,6 +5096,7 @@ impl<'a> InferenceContext<'a> {
                         );
                     }
                 }
+                self.type_parameter_scope = previous_scope;
             }
         }
     }
@@ -4606,8 +5107,11 @@ impl<'a> InferenceContext<'a> {
             if let Item::Union(union_def) = item {
                 for case in &union_def.cases {
                     for field in &case.fields {
+                        // Resolved whether or not it has a default, so a type reference that names
+                        // nothing usable — a generic record with no arguments, say — is reported
+                        // where it was written.
+                        let expected = self.type_from_type_ref_at(field.span, &field.ty);
                         if let Some(default_expr) = field.default {
-                            let expected = self.type_from_type_ref(&field.ty);
                             let actual = self.infer_expr(default_expr);
                             self.check_typed_binding_for(
                                 Some(default_expr),
@@ -4654,7 +5158,7 @@ impl<'a> InferenceContext<'a> {
                         self.reject_reserved_intrinsic_name(&func.name, "function", func.span);
                     }
                     let return_type = if let Some(ty) = func.return_type.as_ref() {
-                        self.type_from_type_ref_in(Some(&declaring_module), ty)
+                        self.type_from_type_ref_in_quietly(Some(&declaring_module), ty)
                     } else {
                         let placeholder = self.fresh_var();
                         if matches!(origin, PreparedBindingOrigin::Local) {
@@ -4679,12 +5183,15 @@ impl<'a> InferenceContext<'a> {
                             .iter()
                             .map(|param| FunctionParam {
                                 name: param.name.clone(),
-                                ty: self.type_from_type_ref_in(Some(&declaring_module), &param.ty),
+                                ty: self.type_from_type_ref_in_quietly(
+                                    Some(&declaring_module),
+                                    &param.ty,
+                                ),
                                 is_content: param.is_content,
                             })
                             .collect::<Vec<_>>();
-                        let return_type =
-                            self.type_from_type_ref_in(Some(&declaring_module), &return_type);
+                        let return_type = self
+                            .type_from_type_ref_in_quietly(Some(&declaring_module), &return_type);
                         self.env.bind(
                             binding.visible_name.clone(),
                             Type::function(param_types, return_type),
@@ -4747,7 +5254,7 @@ impl<'a> InferenceContext<'a> {
                         self.reject_reserved_intrinsic_name(&value.name, "value", value.span);
                         let actual = self.infer_expr(value.value);
                         if let Some(ty_ref) = value.ty.as_ref() {
-                            let expected = self.type_from_type_ref(ty_ref);
+                            let expected = self.type_from_type_ref_at(value.span, ty_ref);
                             self.check_typed_binding_for(
                                 Some(value.value),
                                 &actual,
@@ -4786,7 +5293,7 @@ impl<'a> InferenceContext<'a> {
                             .ty
                             .as_ref()
                             .map(|ty_ref| {
-                                self.type_from_type_ref_in(Some(&declaring_module), ty_ref)
+                                self.type_from_type_ref_in_quietly(Some(&declaring_module), ty_ref)
                             })
                             .unwrap_or(Type::Error)
                     };
@@ -4796,7 +5303,8 @@ impl<'a> InferenceContext<'a> {
                 ResolvedPreparedItem::Imported { item, .. } => {
                     if let InterfaceItemKind::Value { ty, .. } = &item.item {
                         let ty = ty.clone();
-                        let binding_ty = self.type_from_type_ref_in(Some(&declaring_module), &ty);
+                        let binding_ty =
+                            self.type_from_type_ref_in_quietly(Some(&declaring_module), &ty);
                         self.env.bind(binding.visible_name.clone(), binding_ty);
                     }
                 }
@@ -4950,8 +5458,45 @@ impl<'a> InferenceContext<'a> {
         Some((entry, case))
     }
 
-    fn type_from_type_ref(&mut self, type_ref: &ast::TypeRef) -> Type {
-        self.type_from_type_ref_in(None, type_ref)
+    /// Converts a type reference, reporting a problem with the reference itself at `span`.
+    ///
+    /// <para>Every caller that knows where the reference was written goes through this, so that an
+    /// applied type missing an argument or a bare generic record name underlines the annotation
+    /// rather than the start of the file. See [`Self::type_ref_span`].</para>
+    fn type_from_type_ref_at(&mut self, span: TextSpan, type_ref: &ast::TypeRef) -> Type {
+        self.type_from_type_ref_in_at(span, None, type_ref)
+    }
+
+    /// Converts a type reference without reporting a problem with the reference itself.
+    ///
+    /// <para>For the signature pre-pass, which resolves every function's annotations before any
+    /// body is inferred. A local function's annotations are resolved again by
+    /// [`Self::infer_function`], which knows each one's span, so only that pass reports and one
+    /// malformed annotation is one diagnostic underlined where it was written. An imported
+    /// declaration's annotations are diagnosed by the check of the module that wrote them, where
+    /// their spans mean something.</para>
+    fn type_from_type_ref_in_quietly(
+        &mut self,
+        declaring_module: Option<&str>,
+        type_ref: &ast::TypeRef,
+    ) -> Type {
+        let before = self.diagnostics.len();
+        let ty = self.type_from_type_ref_in(declaring_module, type_ref);
+        self.diagnostics.truncate(before);
+        ty
+    }
+
+    /// [`Self::type_from_type_ref_at`] for a reference written by `declaring_module`.
+    fn type_from_type_ref_in_at(
+        &mut self,
+        span: TextSpan,
+        declaring_module: Option<&str>,
+        type_ref: &ast::TypeRef,
+    ) -> Type {
+        let previous = std::mem::replace(&mut self.type_ref_span, span);
+        let ty = self.type_from_type_ref_in(declaring_module, type_ref);
+        self.type_ref_span = previous;
+        ty
     }
 
     /// Resolves a type reference's own names through the type-parameter scope first.
@@ -4959,25 +5504,6 @@ impl<'a> InferenceContext<'a> {
     /// <para>Only the names the reference spells directly are looked up there. Everything
     /// else — an alias's target, a foreign declaration's own signature — goes through the ordinary
     /// resolver, so a parameter shadows a type only where the author wrote the name.</para>
-    fn type_from_type_ref_unscoped_in(
-        &mut self,
-        declaring_module: Option<&str>,
-        type_ref: &ast::TypeRef,
-    ) -> Type {
-        let Some(module_identity) = declaring_module else {
-            return resolve_type_ref_with(type_ref, &mut |name, seen| {
-                self.resolve_named_type(name, seen)
-            });
-        };
-        let module_identity = module_identity.to_string();
-        resolve_type_ref_with(type_ref, &mut |name, seen| {
-            if let Some(ty) = self.nominal_type_in_module(&module_identity, name) {
-                return ty;
-            }
-            self.resolve_named_type(name, seen)
-        })
-    }
-
     fn resolve_named_type(&mut self, name: &Name, seen: &mut FxHashSet<Name>) -> Type {
         if let Some(alias) = self.type_aliases.get(name) {
             if !seen.insert(name.clone()) {
@@ -4989,10 +5515,10 @@ impl<'a> InferenceContext<'a> {
                 return Type::Error;
             }
 
+            // An alias target was written outside any declaration, so no type parameter is in
+            // scope for it; it may still be an applied type, which the walker resolves.
             let target = alias.target.clone();
-            let ty = resolve_type_ref_with_seen(&target, seen, &mut |nested_name, nested_seen| {
-                self.resolve_named_type(nested_name, nested_seen)
-            });
+            let ty = self.type_from_type_ref_walk(None, &target, seen, false);
             seen.remove(name);
             return ty;
         }
@@ -5017,10 +5543,6 @@ impl<'a> InferenceContext<'a> {
         Type::named_at(name.clone(), origin)
     }
 
-    fn bind_function_signature(&mut self, func: &nx_hir::Function, return_type: Type) {
-        self.bind_function_signature_from_parts(func.name.clone(), &func.params, return_type, None);
-    }
-
     /// Binds a function's type from its parts, resolving each parameter annotation in
     /// `declaring_module` — the module that wrote the signature, or `None` for this one.
     fn bind_function_signature_from_parts(
@@ -5034,7 +5556,7 @@ impl<'a> InferenceContext<'a> {
             .iter()
             .map(|param| FunctionParam {
                 name: param.name.clone(),
-                ty: self.type_from_type_ref_in(declaring_module, &param.ty),
+                ty: self.type_from_type_ref_in_quietly(declaring_module, &param.ty),
                 is_content: param.is_content,
             })
             .collect::<Vec<_>>();
@@ -5067,6 +5589,9 @@ impl<'a> InferenceContext<'a> {
         Some((name.clone(), params))
     }
 
+    // The `Err` is large for the reason `RecordResolutionError` records: it carries the spans its
+    // diagnostic prints.
+    #[allow(clippy::result_large_err)]
     fn effective_record_shape(
         &self,
         name: &Name,
@@ -5082,6 +5607,12 @@ impl<'a> InferenceContext<'a> {
     }
 
     fn record_type_satisfies_expected(&self, actual: &NamedType, expected: &NamedType) -> bool {
+        // Applied types are invariant: an instantiation satisfies an expectation only when both
+        // bind every parameter to the same type. A generic record has no ancestors, so the
+        // arguments and the declaration are the whole comparison.
+        if actual.args() != expected.args() {
+            return false;
+        }
         is_record_subtype(
             self.module,
             &actual.name,
@@ -5218,6 +5749,8 @@ impl<'a> InferenceContext<'a> {
     /// Checks a function's type against a function type by parameter name, under this checker's
     /// own relation, so a parameter typed by a record or a component subtype pairs the way any
     /// other binding does.
+    // The `Err` is large for the reason `check_function_satisfies` records.
+    #[allow(clippy::result_large_err)]
     fn function_satisfies_expected(
         &self,
         actual: &Type,
@@ -5369,6 +5902,8 @@ impl<'a> InferenceContext<'a> {
     ///
     /// A type that carries an origin is read from the declaration it names, so a foreign record
     /// resolves whether or not the asking module can spell it.
+    // The `Err` is large for the reason `RecordResolutionError` records.
+    #[allow(clippy::result_large_err)]
     fn record_shape_of(
         &self,
         named: &NamedType,

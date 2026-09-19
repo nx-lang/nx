@@ -1,0 +1,39 @@
+{
+  "main.nx::first": 1,
+  "main.nx::ints": {
+    "$type": "Range",
+    "end": 5,
+    "start": 1
+  },
+  "main.nx::moved": {
+    "$type": "Range",
+    "end": 9,
+    "start": 1
+  },
+  "main.nx::names": {
+    "$type": "Pair",
+    "key": "a",
+    "value": 1
+  },
+  "main.nx::patch": {
+    "$type": "Range.Update",
+    "end": 9
+  },
+  "main.nx::plan": {
+    "$type": "Schedule",
+    "label": "week",
+    "slots": [
+      {
+        "$type": "Range",
+        "end": 5,
+        "start": 1
+      }
+    ]
+  },
+  "main.nx::root": {
+    "$type": "Range",
+    "end": 5,
+    "start": 1
+  },
+  "main.nx::span": 8
+}

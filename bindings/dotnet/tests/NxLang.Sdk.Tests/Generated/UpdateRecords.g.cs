@@ -6,6 +6,7 @@
 using System;
 using System.Text.Json.Serialization;
 using MessagePack;
+using MessagePack.Formatters;
 using NxLang.Nx;
 using NxLang.Nx.Serialization;
 
@@ -114,6 +115,34 @@ namespace NxLang.Sdk.Tests.Generated
         [Key("count")]
         [JsonPropertyName("count")]
         public long Count { get; set; }
+    }
+
+    [MessagePackObject]
+    public sealed class Range<T>
+    {
+        [Key("start")]
+        [JsonPropertyName("start")]
+        public T Start { get; set; } = default!;
+
+        [Key("end")]
+        [JsonPropertyName("end")]
+        public T End { get; set; } = default!;
+
+        [Key("endInclusive")]
+        [JsonPropertyName("endInclusive")]
+        public bool EndInclusive { get; set; }
+    }
+
+    [MessagePackObject]
+    public sealed class Schedule
+    {
+        [Key("week")]
+        [JsonPropertyName("week")]
+        public Range<long> Week { get; set; } = default!;
+
+        [Key("spans")]
+        [JsonPropertyName("spans")]
+        public Range<double>[]? Spans { get; set; }
     }
 
     [JsonConverter(typeof(NxUpdateRecordJsonConverter<User_update>))]
@@ -641,6 +670,157 @@ namespace NxLang.Sdk.Tests.Generated
         }
     }
 
+    [JsonConverter(typeof(NxUpdateRecordJsonConverterFactory))]
+    [MessagePackFormatter(typeof(Range_updateFormatter<>))]
+    public sealed class Range_update<T> : NxUpdate<Range<T>>
+    {
+        private static readonly NxUpdateSchema FieldSchema = new(
+            "Range.Update",
+            RangeProperties<T>.Start,
+            RangeProperties<T>.End,
+            RangeProperties<T>.EndInclusive);
+
+        public Range_update()
+            : base(FieldSchema)
+        {
+        }
+
+        public string NxType => "Range.Update";
+
+        public NxOptional<T> Start
+        {
+            get => base.Get<T>("start");
+            set => base.Set("start", value);
+        }
+
+        public NxOptional<T> End
+        {
+            get => base.Get<T>("end");
+            set => base.Set("end", value);
+        }
+
+        public NxOptional<bool> EndInclusive
+        {
+            get => base.Get<bool>("endInclusive");
+            set => base.Set("endInclusive", value);
+        }
+
+        public bool IsSet(Range_property property) => base.IsSet(Range_propertyWireFormat.Format(property));
+
+        public void Unset(Range_property property) => base.Unset(Range_propertyWireFormat.Format(property));
+
+        public Range_property[] Changed() => Array.ConvertAll(base.ChangedNames(), Range_propertyWireFormat.Parse);
+
+        public static Range_update<T> Diff(Range<T> before, Range<T> after) => NxUpdate<Range<T>>.Diff<Range_update<T>>(before, after);
+    }
+
+    public sealed class Range_updateFormatter<T> : IMessagePackFormatter<Range_update<T>?>
+    {
+        private static readonly NxUpdateRecordMessagePackFormatter<Range_update<T>> Inner = new();
+
+        public void Serialize(ref MessagePackWriter writer, Range_update<T>? value, MessagePackSerializerOptions options) =>
+            Inner.Serialize(ref writer, value!, options);
+
+        public Range_update<T>? Deserialize(ref MessagePackReader reader, MessagePackSerializerOptions options) =>
+            Inner.Deserialize(ref reader, options);
+    }
+
+    public static class RangeProperties<T>
+    {
+        public static readonly NxProperty<Range<T>, T> Start = new(
+            Range_propertyWireFormat.Format(Range_property.Start),
+            record => record.Start,
+            (record, value) => record.Start = value);
+
+        public static readonly NxProperty<Range<T>, T> End = new(
+            Range_propertyWireFormat.Format(Range_property.End),
+            record => record.End,
+            (record, value) => record.End = value);
+
+        public static readonly NxProperty<Range<T>, bool> EndInclusive = new(
+            Range_propertyWireFormat.Format(Range_property.EndInclusive),
+            record => record.EndInclusive,
+            (record, value) => record.EndInclusive = value);
+
+        public static NxProperty<Range<T>> Of(Range_property property)
+        {
+            switch (property)
+            {
+                case Range_property.Start:
+                    return Start;
+                case Range_property.End:
+                    return End;
+                case Range_property.EndInclusive:
+                    return EndInclusive;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(property));
+            }
+        }
+    }
+
+    [JsonConverter(typeof(NxUpdateRecordJsonConverter<Schedule_update>))]
+    [MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<Schedule_update>))]
+    public sealed class Schedule_update : NxUpdate<Schedule>
+    {
+        private static readonly NxUpdateSchema FieldSchema = new(
+            "Schedule.Update",
+            ScheduleProperties.Week,
+            ScheduleProperties.Spans);
+
+        public Schedule_update()
+            : base(FieldSchema)
+        {
+        }
+
+        public string NxType => "Schedule.Update";
+
+        public NxOptional<Range<long>> Week
+        {
+            get => base.Get<Range<long>>("week");
+            set => base.Set("week", value);
+        }
+
+        public NxOptional<Range<double>[]?> Spans
+        {
+            get => base.Get<Range<double>[]?>("spans");
+            set => base.Set("spans", value);
+        }
+
+        public bool IsSet(Schedule_property property) => base.IsSet(Schedule_propertyWireFormat.Format(property));
+
+        public void Unset(Schedule_property property) => base.Unset(Schedule_propertyWireFormat.Format(property));
+
+        public Schedule_property[] Changed() => Array.ConvertAll(base.ChangedNames(), Schedule_propertyWireFormat.Parse);
+
+        public static Schedule_update Diff(Schedule before, Schedule after) => NxUpdate<Schedule>.Diff<Schedule_update>(before, after);
+    }
+
+    public static class ScheduleProperties
+    {
+        public static readonly NxProperty<Schedule, Range<long>> Week = new(
+            Schedule_propertyWireFormat.Format(Schedule_property.Week),
+            record => record.Week,
+            (record, value) => record.Week = value);
+
+        public static readonly NxProperty<Schedule, Range<double>[]?> Spans = new(
+            Schedule_propertyWireFormat.Format(Schedule_property.Spans),
+            record => record.Spans,
+            (record, value) => record.Spans = value);
+
+        public static NxProperty<Schedule> Of(Schedule_property property)
+        {
+            switch (property)
+            {
+                case Schedule_property.Week:
+                    return Week;
+                case Schedule_property.Spans:
+                    return Spans;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(property));
+            }
+        }
+    }
+
     [JsonConverter(typeof(NxEnumJsonConverter<User_property, User_propertyWireFormat>))]
     [MessagePackFormatter(typeof(NxEnumMessagePackFormatter<User_property, User_propertyWireFormat>))]
     public enum User_property
@@ -880,6 +1060,63 @@ namespace NxLang.Sdk.Tests.Generated
             value switch
             {
                 "count" => Ticker_property.Count,
+                _ => throw new FormatException("Unknown NX enum member."),
+            };
+    }
+
+    [JsonConverter(typeof(NxEnumJsonConverter<Range_property, Range_propertyWireFormat>))]
+    [MessagePackFormatter(typeof(NxEnumMessagePackFormatter<Range_property, Range_propertyWireFormat>))]
+    public enum Range_property
+    {
+        Start,
+        End,
+        EndInclusive
+    }
+
+    internal sealed class Range_propertyWireFormat : INxEnumWireFormat<Range_property>
+    {
+        public static string Format(Range_property value) =>
+            value switch
+            {
+                Range_property.Start => "start",
+                Range_property.End => "end",
+                Range_property.EndInclusive => "endInclusive",
+                _ => throw new FormatException("Unknown NX enum value."),
+            };
+
+        public static Range_property Parse(string value) =>
+            value switch
+            {
+                "start" => Range_property.Start,
+                "end" => Range_property.End,
+                "endInclusive" => Range_property.EndInclusive,
+                _ => throw new FormatException("Unknown NX enum member."),
+            };
+    }
+
+    [JsonConverter(typeof(NxEnumJsonConverter<Schedule_property, Schedule_propertyWireFormat>))]
+    [MessagePackFormatter(typeof(NxEnumMessagePackFormatter<Schedule_property, Schedule_propertyWireFormat>))]
+    public enum Schedule_property
+    {
+        Week,
+        Spans
+    }
+
+    internal sealed class Schedule_propertyWireFormat : INxEnumWireFormat<Schedule_property>
+    {
+        public static string Format(Schedule_property value) =>
+            value switch
+            {
+                Schedule_property.Week => "week",
+                Schedule_property.Spans => "spans",
+                _ => throw new FormatException("Unknown NX enum value."),
+            };
+
+        public static Schedule_property Parse(string value) =>
+            value switch
+            {
+                "week" => Schedule_property.Week,
+                "spans" => Schedule_property.Spans,
                 _ => throw new FormatException("Unknown NX enum member."),
             };
     }

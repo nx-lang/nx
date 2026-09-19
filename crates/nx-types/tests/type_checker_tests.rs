@@ -2055,6 +2055,22 @@ fn test_readme_example() {
 }
 
 #[test]
+fn test_generic_records_example_type_checks() {
+    let source = include_str!("../../../examples/nx/generic-records.nx");
+
+    let result = check_str(source, "generic-records.nx");
+    assert!(
+        result.errors().is_empty(),
+        "Expected examples/nx/generic-records.nx to type check, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn test_component_example_with_update_records() {
     let source = include_str!("../../../examples/nx/component.nx");
 

@@ -436,12 +436,8 @@ fn test_integer_overflow() {
     // This tests whatever the interpreter does with overflow
     // (wrap, saturate, or error)
     let large = i64::MAX / 2 + 1;
-    let result = execute_function(source, "overflow", vec![Value::Int(large)]);
     // Accept any behavior - just don't panic
-    match result {
-        Ok(_) => (),
-        Err(_) => (),
-    }
+    let _ = execute_function(source, "overflow", vec![Value::Int(large)]);
 }
 
 // ============================================================================
@@ -515,4 +511,94 @@ fn test_empty_record() {
         Value::Record { fields, .. } => assert!(fields.is_empty()),
         other => panic!("Expected empty Record, got {:?}", other),
     }
+}
+
+// ============================================================================
+// Top-level values and record field defaults
+// ============================================================================
+
+/// A top-level value whose construction omits a defaulted field evaluates.
+///
+/// <para>Filling the default binds the declaring module's top-level values so the default can name
+/// one, and the value being filled is one of them — which is a cycle unless the value in flight is
+/// left out. It used to be a stack overflow with no diagnostic.</para>
+#[test]
+fn test_top_level_value_omitting_a_defaulted_field_terminates() {
+    let result = execute_function(
+        "type R = { a:int b:boolean = false }\nlet r = <R a={1} />\nlet root() = { r }",
+        "root",
+        vec![],
+    )
+    .expect("the default should be filled without recursing");
+
+    let Value::Record { fields, .. } = result else {
+        panic!("expected a record, got {result:?}");
+    };
+    assert_eq!(fields.get("a"), Some(&Value::Int(1)));
+    assert_eq!(fields.get("b"), Some(&Value::Boolean(false)));
+}
+
+/// A default may still name another top-level value; only the one it is filling is out of scope.
+#[test]
+fn test_a_field_default_still_sees_the_other_top_level_values() {
+    let result = execute_function(
+        "let base = 7\ntype R = { a:int b:int = {base} }\nlet r = <R a={1} />\nlet root() = { r }",
+        "root",
+        vec![],
+    )
+    .expect("the default should read the other top-level value");
+
+    let Value::Record { fields, .. } = result else {
+        panic!("expected a record, got {result:?}");
+    };
+    assert_eq!(fields.get("b"), Some(&Value::Int(7)));
+}
+
+/// Another top-level value may depend on the one whose default is being filled. It is simply not
+/// bound while that default runs, and the outer pass binds it for real afterwards.
+#[test]
+fn test_a_value_depending_on_the_one_being_bound_is_still_bound_afterwards() {
+    let result = execute_function(
+        "type R = { a:int b:boolean = false }\n\
+         let r = <R a={1} />\n\
+         let doubled = {r.a + r.a}\n\
+         let root() = { doubled }",
+        "root",
+        vec![],
+    )
+    .expect("the dependent value should bind once the one it names is bound");
+    assert_eq!(result, Value::Int(2));
+}
+
+/// A default that names the very value it is filling is a cycle, and is reported as one rather
+/// than run forever.
+#[test]
+fn test_a_field_default_naming_the_value_it_fills_is_an_error() {
+    let error = execute_function(
+        "type R = { a:int b:int = {r.a} }\nlet r = <R a={1} />\nlet root() = { r }",
+        "root",
+        vec![],
+    )
+    .expect_err("the cycle should be reported");
+    assert!(error.contains("Undefined variable: r"), "got: {error}");
+}
+
+/// A genuine evaluation failure in a value bound during a nested pass still surfaces.
+///
+/// <para>A nested pass discards the error so the two passes cannot recurse forever, on the
+/// grounds that the outer pass binds every value for real and reports it there. That holds only
+/// because the outer pass visits every item, including the ones the nested pass reached first —
+/// which is what this pins down.</para>
+#[test]
+fn test_a_failure_in_a_value_bound_by_a_nested_pass_is_reported_by_the_outer_pass() {
+    let error = execute_function(
+        "type R = { a:int b:int = {2} }\n\
+         let r = <R a={1} />\n\
+         let bad = {r.a / (r.a - 1)}\n\
+         let root() = { r.a }",
+        "root",
+        vec![],
+    )
+    .expect_err("the division by zero should be reported");
+    assert!(error.to_lowercase().contains("zero"), "got: {error}");
 }

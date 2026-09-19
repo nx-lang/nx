@@ -302,7 +302,7 @@ fn cells_to_bytes(cells: &[u32]) -> Vec<u8> {
 }
 
 fn pad_to_four(bytes: &mut Vec<u8>) {
-    while bytes.len() % 4 != 0 {
+    while !bytes.len().is_multiple_of(4) {
         bytes.push(0);
     }
 }
@@ -547,7 +547,9 @@ impl<'a> Cells<'a> {
     /// Every cell, in order.
     pub fn iter(&self) -> impl Iterator<Item = u32> + 'a {
         self.0
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .map(|bytes| u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
     }
 
@@ -877,7 +879,7 @@ fn read_header(bytes: &[u8]) -> Result<(u32, Directory<'_>), NxIrImageError> {
         let kind = directory.get(entry * 3).unwrap();
         let offset = directory.get(entry * 3 + 1).unwrap() as usize;
         let length = directory.get(entry * 3 + 2).unwrap() as usize;
-        if offset % 4 != 0 || length % 4 != 0 {
+        if !offset.is_multiple_of(4) || !length.is_multiple_of(4) {
             return Err(malformed(format!(
                 "section {kind} is not four-byte aligned"
             )));

@@ -1443,22 +1443,50 @@ impl Interpreter {
         module: &LoweredModule,
         ctx: &mut ExecutionContext,
     ) -> Result<(), RuntimeError> {
+        let module_key = module.source_id.as_u32();
+        // A pass that runs while a value is already being bound exists only to furnish the
+        // environment of a field default that value's initializer needed. It leaves behind
+        // whatever it can evaluate and reports nothing: the value in flight is not evaluated
+        // again, which is what stops the two from recursing forever, and a value that cannot be
+        // evaluated without it is simply not in scope. Nothing is lost — a default that names
+        // either one reports an undefined variable, and a genuine failure is reported by the
+        // outer pass, which binds every value for real.
+        let nested = ctx.is_binding_values();
         for item in module.items() {
             if let Item::Value(value) = item {
-                let mut evaluated = self.eval_expr(module, ctx, value.value)?;
-                if let Some(ty) = value.ty.as_ref() {
-                    evaluated = self.coerce_value_to_type(
-                        module,
-                        evaluated,
-                        ty,
-                        &format!("initializer for '{}'", value.name.as_str()),
-                    )?;
+                if !ctx.begin_binding_value(module_key, value.name.as_str()) {
+                    continue;
                 }
-                ctx.define_variable(SmolStr::new(value.name.as_str()), evaluated);
+                let bound = self.eval_top_level_value(module, ctx, value);
+                ctx.end_binding_value(module_key, value.name.as_str());
+                match bound {
+                    Ok(bound) => ctx.define_variable(SmolStr::new(value.name.as_str()), bound),
+                    Err(_) if nested => continue,
+                    Err(error) => return Err(error),
+                }
             }
         }
 
         Ok(())
+    }
+
+    /// Evaluates one top-level value's initializer, coerced to its annotation where it has one.
+    fn eval_top_level_value(
+        &self,
+        module: &LoweredModule,
+        ctx: &mut ExecutionContext,
+        value: &nx_hir::ValueDef,
+    ) -> Result<Value, RuntimeError> {
+        let mut evaluated = self.eval_expr(module, ctx, value.value)?;
+        if let Some(ty) = value.ty.as_ref() {
+            evaluated = self.coerce_value_to_type(
+                module,
+                evaluated,
+                ty,
+                &format!("initializer for '{}'", value.name.as_str()),
+            )?;
+        }
+        Ok(evaluated)
     }
 
     fn unavailable_effective_field_default_error(
@@ -1568,6 +1596,9 @@ impl Interpreter {
         })
     }
 
+    // Long by design: the two field maps are threaded in and out separately, because an override
+    // is host input and a visible field is what a default may read.
+    #[allow(clippy::too_many_arguments)]
     fn materialize_component_fields(
         &self,
         module: &LoweredModule,
@@ -4164,11 +4195,36 @@ impl Interpreter {
         let shape = effective_record_shape_for_name(prepared.as_ref(), name)
             .map_err(|error| self.record_resolution_runtime_error(error))?;
 
-        shape.ok_or_else(|| {
+        let shape = shape.ok_or_else(|| {
             RuntimeError::new(RuntimeErrorKind::RecordTypeNotFound {
                 name: SmolStr::new(name.as_str()),
             })
-        })
+        })?;
+
+        Ok(Self::erase_record_type_parameters(shape))
+    }
+
+    /// The shape with every type parameter of the record replaced by `object` in its field types.
+    ///
+    /// <para>The runtime has no type arguments to bind — a value of a generic record is the one
+    /// record whatever it was constructed with — so a parameter-typed field coerces as the top
+    /// type, exactly as a component's parameter-typed prop does.</para>
+    fn erase_record_type_parameters(
+        mut shape: nx_hir::EffectiveRecordShape,
+    ) -> nx_hir::EffectiveRecordShape {
+        if shape.record.type_params.is_empty() {
+            return shape;
+        }
+        let params: Vec<Name> = shape
+            .record
+            .type_params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect();
+        for field in &mut shape.fields {
+            field.ty = nx_hir::erase_type_parameters(&field.ty, &params);
+        }
+        shape
     }
 
     fn record_resolution_runtime_error(
@@ -4578,6 +4634,9 @@ impl Interpreter {
         self.build_record_value(module, ctx, record.as_str(), overrides)
     }
 
+    // Long by design: a union case is built from its own declaration, its union's base shape and
+    // the three pieces of the construction — overrides, content and origin.
+    #[allow(clippy::too_many_arguments)]
     fn build_union_case_value(
         &self,
         module: &LoweredModule,
@@ -5608,7 +5667,7 @@ mod tests {
         let actions = interpreter
             .invoke_action_handler(
                 module.as_ref(),
-                &handler,
+                handler,
                 Value::Record {
                     type_name: Name::new("SearchBox.ValueChanged"),
                     fields: input_fields,

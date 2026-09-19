@@ -30,6 +30,8 @@ pub enum SyntaxKind {
     PRIMITIVE_TYPE,
     USER_DEFINED_TYPE,
     FUNCTION_TYPE,
+    APPLIED_TYPE,
+    TYPE_ARGUMENT,
     PARENTHESIZED_TYPE,
 
     // === Functions ===
@@ -373,6 +375,8 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "primitive_type" => SyntaxKind::PRIMITIVE_TYPE,
         "user_defined_type" => SyntaxKind::USER_DEFINED_TYPE,
         "function_type" => SyntaxKind::FUNCTION_TYPE,
+        "applied_type" => SyntaxKind::APPLIED_TYPE,
+        "type_argument" => SyntaxKind::TYPE_ARGUMENT,
         "parenthesized_type" => SyntaxKind::PARENTHESIZED_TYPE,
         "function_definition" => SyntaxKind::FUNCTION_DEFINITION,
         "component_definition" => SyntaxKind::COMPONENT_DEFINITION,

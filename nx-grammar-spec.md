@@ -228,8 +228,8 @@ UnionCasePayloadOpt
 - UnionCasePayloadOpt → ε
 
 RecordPropertyDefinition (AST: RecordPropertyDefinitionSyntax)
-- RecordPropertyDefinition → CONTENT? MARKUP_IDENTIFIER COLON Type RecordPropertyDefaultOpt
-  - fields: modifier?: "content", name: string, type: TypeSyntax, default?: ExpressionSyntax
+- RecordPropertyDefinition → CONTENT? MARKUP_IDENTIFIER COLON PropertyType RecordPropertyDefaultOpt
+  - fields: modifier?: "content", name: string, type: TypeSyntax | "type", default?: ExpressionSyntax
 
 RecordPropertyDefaultOpt
 - RecordPropertyDefaultOpt → EQ RhsExpression
@@ -251,8 +251,9 @@ Type (AST: TypeSyntax)
 - Type → PrimitiveType TypeSuffix*
 - Type → UserDefinedType TypeSuffix*
 - Type → FunctionType TypeSuffix*
+- Type → AppliedType TypeSuffix*
 - Type → ParenthesizedType TypeSuffix*
-  - fields: kind: "primitive"|"user"|"function", name?: string (qualified), params?: FunctionTypeParamSyntax[], result?: TypeSyntax, suffixes: ("nullable"|"sequence")[]
+  - fields: kind: "primitive"|"user"|"function"|"applied", name?: string (qualified), params?: FunctionTypeParamSyntax[], result?: TypeSyntax, args?: TypeArgumentSyntax[], suffixes: ("nullable"|"sequence")[]
 
 TypeSuffix
 - TypeSuffix → QMARK
@@ -264,6 +265,23 @@ FunctionType (AST: FunctionTypeSyntax)
   - `FUNCTION` is the contextual keyword `function`, a keyword only after `LT` in type position; the
     identifier `function` keeps its meaning everywhere else.
   - The trailing `Type` takes suffixes greedily: a suffix after the result binds to the result.
+
+AppliedType (AST: AppliedTypeSyntax)
+- AppliedType → LT QualifiedName TypeArgument* SLASH GT
+  - fields: name: QualifiedNameSyntax, args: TypeArgumentSyntax[]
+  - Names one instantiation of a generic record, spelled as the element that constructs it with
+    only its type arguments: `<Range T=int/>`, `<Range.Update T=int/>`.
+  - `FUNCTION` is a keyword only in the name slot, so an applied type and a `FunctionType` split on
+    the first token after `LT` and never collide; a record named `function` cannot be applied.
+  - `TypeArgument*`, not `+`: `<Range/>` parses, so a missing argument is reported by parameter
+    name rather than as a parse error.
+  - `SLASH GT` closes it, so a `TypeSuffix` after it needs no parentheses.
+
+TypeArgument (AST: TypeArgumentSyntax)
+- TypeArgument → IDENTIFIER EQ Type
+  - fields: name: string, type: TypeSyntax
+  - Arguments bind parameters by name and may be written in any order; semantic analysis reorders
+    them into the record's declaration order and reports an unknown, duplicate or missing one.
 
 ParenthesizedType
 - ParenthesizedType → LPAREN Type RPAREN
@@ -349,8 +367,16 @@ FunctionReturnTypeOpt
 - FunctionReturnTypeOpt → ε
 
 PropertyDefinition (AST: PropertyDefinitionSyntax)
-- PropertyDefinition → CONTENT? MARKUP_IDENTIFIER COLON Type [EQ RhsExpression]
-  - fields: modifier?: "content", name: string, type: TypeSyntax, default?: ExpressionSyntax
+- PropertyDefinition → CONTENT? MARKUP_IDENTIFIER COLON PropertyType [EQ RhsExpression]
+  - fields: modifier?: "content", name: string, type: TypeSyntax | "type", default?: ExpressionSyntax
+
+PropertyType
+- PropertyType → Type
+- PropertyType → TYPE
+  - The `type` keyword declares a **type parameter** rather than a value. The grammar admits it in
+    every property list; post-parse validation restricts it to the leading definitions of a
+    ComponentSignature or a plain RecordDefinition, and rejects a default, a modifier, a suffix on
+    `type`, a primitive or built-in name, and a duplicate.
 
 
 
@@ -719,7 +745,9 @@ This section lists the AST node types with fields for implementers.
 - ElementFunctionDefinitionSyntax: visibility?: "private"|"export", elementName: QualifiedMarkupNameSyntax, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
 - ParenFunctionDefinitionSyntax: visibility?: "private"|"export", name: string, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
 - ComponentDefinitionSyntax: visibility?: "private"|"export", signature: ComponentSignatureSyntax, body: ComponentBodySyntax
-- PropertyDefinitionSyntax: modifier?: "content", name: string, type: TypeSyntax, default?: ExpressionSyntax
+- PropertyDefinitionSyntax: modifier?: "content", name: string, type: TypeSyntax | "type", default?: ExpressionSyntax
+- AppliedTypeSyntax: name: QualifiedNameSyntax, args: TypeArgumentSyntax[]
+- TypeArgumentSyntax: name: string, type: TypeSyntax
 - ExpressionSyntax: union of MarkupElementSyntax | ValuesBracedExpressionSyntax | LiteralExpressionSyntax | IdentifierNameSyntax | ValueIfSimpleExpressionSyntax | ValueIfMatchExpressionSyntax | ValueIfConditionListExpressionSyntax | ValueForExpressionSyntax | ConditionalExpressionSyntax | ParenFunctionCallExpressionSyntax | MemberAccessExpressionSyntax | BinaryExpressionSyntax | PrefixUnaryExpressionSyntax | ParenthesizedExpressionSyntax | UnitLiteralSyntax
  - ParenFunctionCallExpressionSyntax: callee: ExpressionSyntax, args: ExpressionSyntax[]
  - MemberAccessExpressionSyntax: target: ExpressionSyntax, name: string (includes both property access and union case access; distinguished during semantic analysis)

@@ -1097,6 +1097,14 @@ pub fn erase_type_parameters(ty: &ast::TypeRef, params: &[Name]) -> ast::TypeRef
             ast::TypeRef::name("object")
         }
         ast::TypeRef::Name(_) => ty.clone(),
+        // The tag names a record, never a parameter; only its arguments can mention one.
+        ast::TypeRef::Applied { name, args } => ast::TypeRef::Applied {
+            name: name.clone(),
+            args: args
+                .iter()
+                .map(|(arg, ty)| (arg.clone(), erase_type_parameters(ty, params)))
+                .collect(),
+        },
         ast::TypeRef::Array(inner) => ast::TypeRef::array(erase_type_parameters(inner, params)),
         ast::TypeRef::Nullable(inner) => {
             ast::TypeRef::nullable(erase_type_parameters(inner, params))
@@ -1139,6 +1147,24 @@ pub fn remove_property_entries(module: &mut PreparedModule, consumed: &FxHashSet
         element.property_entries.retain(|entry| {
             !matches!(entry, PropertyEntry::Value(property) if consumed.contains(&property.value))
         });
+    }
+
+    // A same-module, content-free record construction lowers to a record literal rather than an
+    // element, so a generic record's `T=int` is one of these instead of a property entry.
+    let literals: Vec<ExprId> = raw_module
+        .exprs()
+        .filter_map(|(id, expr)| match expr {
+            ast::Expr::RecordLiteral { properties, .. } => properties
+                .iter()
+                .any(|property| consumed.contains(&property.value))
+                .then_some(id),
+            _ => None,
+        })
+        .collect();
+    for id in literals {
+        if let ast::Expr::RecordLiteral { properties, .. } = raw_module.expr_mut(id) {
+            properties.retain(|property| !consumed.contains(&property.value));
+        }
     }
 }
 
@@ -2162,6 +2188,65 @@ mod tests {
         assert_eq!(
             erase_type_parameters(&template("TItem"), &params),
             template("object")
+        );
+    }
+
+    #[test]
+    fn erase_type_parameters_reaches_inside_an_applied_type() {
+        let params = [Name::new("TItem")];
+        let applied = |arg: &str| {
+            ast::TypeRef::array(ast::TypeRef::applied(
+                "Range",
+                vec![(Name::new("T"), ast::TypeRef::name(arg))],
+            ))
+        };
+        assert_eq!(
+            erase_type_parameters(&applied("TItem"), &params),
+            applied("object")
+        );
+        // The tag names a record, so it is never erased even when it matches a parameter name.
+        assert_eq!(
+            erase_type_parameters(
+                &ast::TypeRef::applied("TItem", vec![(Name::new("T"), ast::TypeRef::name("int"))]),
+                &params
+            ),
+            ast::TypeRef::applied("TItem", vec![(Name::new("T"), ast::TypeRef::name("int"))])
+        );
+    }
+
+    #[test]
+    fn remove_property_entries_drops_record_literal_properties_by_value_expression() {
+        let mut prepared = prepared(
+            r#"
+            type Range = { T:type start:int end:int }
+            let r = <Range T=int start={1} end={5} />
+        "#,
+        );
+
+        let (literal_id, argument) = prepared
+            .raw_module()
+            .exprs()
+            .find_map(|(id, expr)| match expr {
+                ast::Expr::RecordLiteral { properties, .. } => properties
+                    .iter()
+                    .find(|property| property.name.as_str() == "T")
+                    .map(|property| (id, property.value)),
+                _ => None,
+            })
+            .expect("a content-free same-module construction lowers to a record literal");
+
+        remove_property_entries(&mut prepared, &FxHashSet::from_iter([argument]));
+
+        let ast::Expr::RecordLiteral { properties, .. } = prepared.raw_module().expr(literal_id)
+        else {
+            panic!("expected a record literal");
+        };
+        assert_eq!(
+            properties
+                .iter()
+                .map(|property| property.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["start", "end"]
         );
     }
 

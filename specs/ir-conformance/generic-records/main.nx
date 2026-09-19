@@ -1,0 +1,15 @@
+// Generic records: a type argument decides the type and leaves no trace below the checker.
+export type Range = { T:type start:T end:T }
+export type Pair = { TKey:type TValue:type key:TKey value:TValue }
+export type Schedule = { slots:<Range T=int/>[] label:string }
+
+let ints() = <Range T=int start={1} end={5} />
+let names() = <Pair TKey=string TValue=int key="a" value={1} />
+let startOf(r:<Range T=int/>) = { r.start }
+let endOf(r:<Range T=int/>) = { r.end }
+let first() = { startOf(ints()) }
+let patch() = <Range.Update T=int end={9} />
+let moved() = { apply(ints(), patch()) }
+let span() = { endOf(moved()) - startOf(moved()) }
+let plan() = <Schedule slots={ ints() } label="week" />
+let root() = { ints() }

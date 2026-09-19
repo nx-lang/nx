@@ -57,10 +57,22 @@ pub struct ExportedRecord {
     pub is_abstract: bool,
     pub base: Option<String>,
     pub fields: Vec<ExportedRecordField>,
-    /// The type parameters of the external component this record is the contract of, inherited
-    /// first. Field types are kept as written and may name them; the C# emitter erases each to
-    /// `object`, the TypeScript emitter declares each as a generic parameter. Empty for a record.
+    /// The type parameters this exported record declares, in declaration order.
+    ///
+    /// <para>For an external component's props contract these are the component's effective type
+    /// parameters, inherited first: field types keep them as written, the C# emitter erases each
+    /// to `object` and the TypeScript emitter declares each as a generic parameter defaulting to
+    /// `unknown`. For a plain generic record they are the record's own, and both emitters declare
+    /// a real generic — a host names the concrete instantiation at its own deserialization
+    /// site.</para>
     pub type_params: Vec<String>,
+    /// Whether this record is an external component's props contract rather than a declared
+    /// record.
+    ///
+    /// <para>The two are the same shape and differ only in what their type parameters mean: a
+    /// contract's are erased in C#, because the host receives the component dynamically and has
+    /// nothing to bind them to, while a generic record's are a real generic the host names.</para>
+    pub is_component_contract: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -134,10 +146,37 @@ pub struct ExportedUpdate {
     pub name: String,
     pub discriminator: String,
     pub fields: Vec<ExportedRecordField>,
-    /// The effective type parameters of the component the companion patches, inherited first;
-    /// empty for a record or action target. A state-derived field may name one, and both emitters
-    /// erase it: the instantiation was fixed at an NX use site the host never sees.
+    /// The effective type parameters of the declaration the companion patches — a component's,
+    /// inherited first, or a generic record's own; empty for anything else. A field may name one,
+    /// and both emitters erase it: a patch carries no type argument on the wire, and a component's
+    /// instantiation was fixed at an NX use site the host never sees.
     pub type_params: Vec<String>,
+}
+
+/// The type parameters an update companion declares: a plain generic record's own, and none for
+/// anything else.
+///
+/// <para>A generic record is emitted as a real generic in both languages, and its companion follows
+/// it — the host names `Range_update<long>` where it names `Range<long>`, and the patch's fields
+/// are typed by the same argument the record's fields are. Erasing here would not merely lose
+/// precision: a C# patch whose `start` is `object` cannot be applied to a `Range<long>`, because
+/// the schema deserializes the field as `object` and the record's field is `T`.</para>
+///
+/// <para>A component's state companion still erases. There the analogy that produced the erasure
+/// rule does hold: the patched type (`Ticker_state`) is concrete, its parameter-typed fields are
+/// `object` on both sides of the patch, and the instantiation was fixed at an NX use site the host
+/// never sees.</para>
+pub fn update_companion_type_params<'a>(
+    update: &'a ExportedUpdate,
+    graph: &ExportedTypeGraph,
+) -> &'a [String] {
+    if update.target_is_component || update.type_params.is_empty() {
+        return &[];
+    }
+    match graph.record(&update.target_name) {
+        Some(record) if !record.is_component_contract && !record.is_abstract => &update.type_params,
+        _ => &[],
+    }
 }
 
 /// `fields` with every reference to one of `type_params` replaced by `object`, which each emitter
@@ -174,7 +213,11 @@ pub enum ImportedTypeKind {
         /// Whether every case of this union is constant, which decides its host mapping.
         is_constant: bool,
     },
-    Record,
+    Record {
+        /// Type parameters, in declaration order, so an applied type over this record renders as
+        /// the same instantiation a same-library record does. Empty for a non-generic record.
+        type_params: Vec<String>,
+    },
     Component,
 }
 
@@ -186,7 +229,7 @@ impl ImportedTypeKind {
                 ..
             } => *target_is_reference,
             Self::Union { is_constant } => !is_constant,
-            Self::Record | Self::Component => true,
+            Self::Record { .. } | Self::Component => true,
         }
     }
 }
@@ -307,6 +350,9 @@ struct CachedImportedLibrary {
     /// Exported names whose union declares no base and no case fields.
     constant_unions: FxHashSet<String>,
     alias_targets: FxHashMap<String, TypeRef>,
+    /// The type parameters each exported record declares, in declaration order, keyed by exported
+    /// name. Only a generic record has an entry.
+    record_type_params: FxHashMap<String, Vec<String>>,
     wildcard_importable_export_names: Vec<String>,
     /// The namespace each of the library's modules resolves type names in, keyed by module
     /// identity.
@@ -498,6 +544,30 @@ impl ExportedTypeGraph {
             ExportedType::Record(record) => Some(record),
             _ => None,
         }
+    }
+
+    /// The type parameters `type_name` declares, in declaration order, wherever the declaration
+    /// lives.
+    ///
+    /// <para>A record this library declares is found through the export graph; one imported from a
+    /// dependency is not in that graph at all, so its parameters come from the imported entry
+    /// instead. Both have to answer, because an applied type that renders without its arguments is
+    /// an open generic and compiles in neither target language.</para>
+    ///
+    /// <para>`None` means the declaration could not be reached; an empty list means it was reached
+    /// and declares no parameters.</para>
+    pub fn record_type_params(&self, type_name: &str) -> Option<Vec<String>> {
+        if let Some(record) = self.resolve_record(type_name) {
+            return Some(record.type_params.clone());
+        }
+        self.modules
+            .iter()
+            .flat_map(|module| module.imported_types.iter())
+            .find(|imported| imported.visible_name == type_name)
+            .and_then(|imported| match &imported.kind {
+                ImportedTypeKind::Record { type_params } => Some(type_params.clone()),
+                _ => None,
+            })
     }
 
     pub fn resolved_record_base<'a>(
@@ -1359,7 +1429,13 @@ impl CachedImportedLibrary {
             PreparedItemKind::Union => ImportedTypeKind::Union {
                 is_constant: self.constant_unions.contains(exported_name),
             },
-            PreparedItemKind::Record => ImportedTypeKind::Record,
+            PreparedItemKind::Record => ImportedTypeKind::Record {
+                type_params: self
+                    .record_type_params
+                    .get(exported_name)
+                    .cloned()
+                    .unwrap_or_default(),
+            },
             PreparedItemKind::Component => ImportedTypeKind::Component,
             _ => return None,
         };
@@ -1381,7 +1457,14 @@ impl CachedImportedLibrary {
         suffix: &str,
     ) -> Option<ImportedType> {
         let (companion_suffix, kind) = match suffix {
-            nx_hir::UPDATE_RECORD_SUFFIX => ("_update", ImportedTypeKind::Record),
+            // The update companion is erased in both languages, so it is never applied and
+            // carries no parameters of its own.
+            nx_hir::UPDATE_RECORD_SUFFIX => (
+                "_update",
+                ImportedTypeKind::Record {
+                    type_params: Vec::new(),
+                },
+            ),
             nx_hir::PROPERTY_UNION_SUFFIX => {
                 ("_property", ImportedTypeKind::Union { is_constant: true })
             }
@@ -1430,7 +1513,10 @@ impl CachedImportedLibrary {
         match ty {
             TypeRef::Nullable(inner) => self.type_ref_is_reference(inner, seen_aliases),
             TypeRef::Array(_) | TypeRef::Function { .. } => true,
-            TypeRef::Name(name) => self.type_name_is_reference(name.as_str(), seen_aliases),
+            // An applied type is its record: a record is always a reference type.
+            TypeRef::Applied { name, .. } | TypeRef::Name(name) => {
+                self.type_name_is_reference(name.as_str(), seen_aliases)
+            }
         }
     }
 
@@ -1504,6 +1590,7 @@ fn build_cached_imported_library(
     let mut derived_exports = FxHashSet::default();
     let mut constant_unions = FxHashSet::default();
     let mut alias_targets = FxHashMap::default();
+    let mut record_type_params: FxHashMap<String, Vec<String>> = FxHashMap::default();
     let mut wildcard_importable_export_names = Vec::new();
     let items_by_origin = dependency
         .interface_items
@@ -1560,6 +1647,17 @@ fn build_cached_imported_library(
         if let InterfaceItemKind::TypeAlias { ty, .. } = &interface_item.item {
             alias_targets.insert(exported_name.clone(), ty.clone());
         }
+        if let InterfaceItemKind::Record { type_params, .. } = &interface_item.item {
+            if !type_params.is_empty() {
+                record_type_params.insert(
+                    exported_name.clone(),
+                    type_params
+                        .iter()
+                        .map(|param| param.name.as_str().to_string())
+                        .collect(),
+                );
+            }
+        }
         if let InterfaceItemKind::Union { base, cases, .. } = &interface_item.item {
             if base.is_none()
                 && !cases.is_empty()
@@ -1579,6 +1677,7 @@ fn build_cached_imported_library(
         derived_exports,
         constant_unions,
         alias_targets,
+        record_type_params,
         wildcard_importable_export_names,
         namespaces: dependency.namespaces.clone(),
         items_by_origin,
@@ -1594,7 +1693,12 @@ fn export_alias(def: &TypeAlias) -> ExportedAlias {
 
 fn export_record(module: &LoweredModule, def: &RecordDef) -> ExportedRecord {
     ExportedRecord {
-        type_params: Vec::new(),
+        is_component_contract: false,
+        type_params: def
+            .type_params
+            .iter()
+            .map(|param| param.name.as_str().to_string())
+            .collect(),
         name: def.name.as_str().to_string(),
         kind: def.kind.clone(),
         is_abstract: def.is_abstract,
@@ -1659,6 +1763,7 @@ fn export_external_component_contract(
     }
 
     Some(ExportedRecord {
+        is_component_contract: true,
         name: component.name.as_str().to_string(),
         kind: RecordKind::Plain,
         is_abstract: component.is_abstract,
@@ -1740,6 +1845,16 @@ fn rewrite_type_ref_names(ty: &mut TypeRef, rename: &mut impl FnMut(&str) -> Opt
                 *name = nx_hir::Name::new(&renamed);
             }
         }
+        // The tag is a type name like any other; the argument names bind the record's parameters
+        // and are not renamed with it.
+        TypeRef::Applied { name, args } => {
+            if let Some(renamed) = rename(name.as_str()) {
+                *name = nx_hir::Name::new(&renamed);
+            }
+            for (_, arg) in args {
+                rewrite_type_ref_names(arg, rename);
+            }
+        }
         TypeRef::Array(inner) | TypeRef::Nullable(inner) => rewrite_type_ref_names(inner, rename),
         TypeRef::Function {
             params,
@@ -1801,15 +1916,23 @@ fn export_update(
         Some(Item::Component(component)) => Some(component),
         _ => None,
     };
+    // A generic record's companion declares the same parameters, and both emitters erase them:
+    // the wire carries no type argument for a patch.
+    let type_params = match target_component {
+        Some(component) => effective_component_type_params(module, prepared, component),
+        None => record
+            .type_params
+            .iter()
+            .map(|param| param.name.as_str().to_string())
+            .collect(),
+    };
     ExportedUpdate {
         target_name: target.as_str().to_string(),
         target_is_component: target_component.is_some(),
         name: format!("{}_update", target.as_str()),
         discriminator: record.name.as_str().to_string(),
         fields,
-        type_params: target_component
-            .map(|component| effective_component_type_params(module, prepared, component))
-            .unwrap_or_default(),
+        type_params,
     }
 }
 
@@ -2512,7 +2635,9 @@ export type User extends Named = { email:string }
                     visible_name: "Named".to_string(),
                     exported_name: "Named".to_string(),
                     library_name: "named".to_string(),
-                    kind: ImportedTypeKind::Record,
+                    kind: ImportedTypeKind::Record {
+                        type_params: Vec::new(),
+                    },
                 },
                 ImportedType {
                     visible_name: "Tag".to_string(),

@@ -663,6 +663,46 @@ bare string. Generated C# enums and unions rely on shared helpers from `NxLang.S
 output emits the `enum` itself plus an explicit wire-format mapping type; the JSON converter and
 MessagePack formatter implementation comes from the shared SDK assembly.
 
+A record that declares NX type parameters — `type Range = { T:type start:T end:T }` — generates a
+real C# generic, `Range<T>`, and an applied type generates the instantiation, so
+`week:<Range T=int/>` is a `Range<long>`. Unlike a component contract, nothing is erased: the host
+names the concrete instantiation at its own deserialization site.
+
+The record's `<Name>_update` companion follows it, so a patch is usable at the instantiation the
+host holds:
+
+```csharp
+Range<long> before = new() { Start = 1, End = 5 };
+Range<long> after = new() { Start = 1, End = 9 };
+
+Range_update<long> patch = Range_update<long>.Diff(before, after);
+long end = patch.End.Value;              // typed as the record's field, not object
+Range<long> applied = patch.Apply(before);
+```
+
+`Range_update<T>` derives from `NxUpdate<Range<T>>`, its key table is `RangeProperties<T>`, and its
+`Start` and `End` are `NxOptional<T>`. The wire is unaffected by the parameter: a patch serializes
+as `{"$type":"Range.Update","end":9}` in either format, with no type argument. A *component's*
+state companion still erases the component's type parameters, because the type it patches
+(`<Name>_state`) is already concrete.
+
+Because a generic type cannot name its own converter in an attribute — an attribute argument cannot
+use type parameters (CS0416) — a generic companion names `NxUpdateRecordJsonConverterFactory` from
+the SDK for JSON, and for MessagePack a generated `<Name>_updateFormatter<T>` shim beside it. Both
+are wired up by generation; nothing is needed at the call site, and a non-generic companion is
+unchanged.
+
+**AOT note.** Closed instantiations round-trip with the reflection-based resolvers of both
+serializers, which is what `JsonSerializer` and `MessagePackSerializer` use by default. A
+source-generated or otherwise AOT-safe resolver has no open generic to generate from, so each
+instantiation the host actually serializes must be named to it — a `[JsonSerializable(typeof(...))]`
+entry per instantiation for `System.Text.Json`, and a generated formatter per instantiation for
+MessagePack. This covers the update companions too: `Range_update<long>` is its own instantiation
+and needs its own entry, separately from `Range<long>`. `NxUpdateRecordJsonConverterFactory` also
+closes its converter through `MakeGenericType` and `Activator.CreateInstance`, which a trimmed or
+AOT publish cannot see, so a host publishing that way should keep the companion instantiations it
+uses rooted.
+
 ## Troubleshooting
 
 ### Native SDK library could not be found

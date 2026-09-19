@@ -39,7 +39,7 @@ fn artifact_from_workspace(files: &[(&str, &str)], entry: &str) -> ProgramArtifa
         .expect("workspace artifact")
 }
 
-fn generated_file<'a>(artifact: &'a ProgramArtifact, target: CodegenTarget, name: &str) -> String {
+fn generated_file(artifact: &ProgramArtifact, target: CodegenTarget, name: &str) -> String {
     let options = match target {
         CodegenTarget::TypeScript => CodegenOptions::typescript(),
         CodegenTarget::JavaScript => CodegenOptions::javascript(),
@@ -76,7 +76,7 @@ fn execute_generated_javascript_artifact_script(
     artifact: &ProgramArtifact,
     script_body: &str,
 ) -> String {
-    let output = emit_program(&artifact, &CodegenOptions::javascript()).expect("js output");
+    let output = emit_program(artifact, &CodegenOptions::javascript()).expect("js output");
     let dir = TempDir::new().expect("temp dir");
     fs::write(dir.path().join("package.json"), r#"{ "type": "module" }"#).expect("package file");
     for file in output.files {
@@ -291,7 +291,7 @@ fn interpreter_json_root(source: &str) -> String {
 }
 
 fn interpreter_json_artifact_root(artifact: &ProgramArtifact) -> String {
-    match eval_program_artifact(&artifact) {
+    match eval_program_artifact(artifact) {
         EvalResult::Ok(value) => value.to_json_string().expect("interpreter json"),
         EvalResult::Err(diagnostics) => panic!("interpreter diagnostics: {:?}", diagnostics),
     }
@@ -2273,6 +2273,41 @@ fn generated_typescript_carries_a_type_parameter_generically_and_erases_it_on_th
             .lines()
             .any(|line| line.contains("TItem:") || line.contains("TItem?:")),
         "neither type may have a member for the parameter:\n{module}"
+    );
+
+    assert_generated_typescript_artifact_type_checks(&artifact);
+}
+
+/// A declared generic record is a real generic in the executable TypeScript, and an applied type
+/// is its instantiation. Unlike a component, nothing about it is erased here: the record's own
+/// values are NX values the generated module builds and reads.
+#[test]
+fn generated_typescript_emits_a_generic_record_and_its_instantiation() {
+    let artifact = artifact_from_source(
+        "type Range = { T:type start:T end:T }\n\
+         type Slider = { range:<Range T=float64/> marks:<Range T=int/>[]? }\n\
+         let s = <Slider range={<Range T=float64 start={0} end={1} />} />\n\
+         let root() = { s }",
+    );
+    let module = generated_file(&artifact, CodegenTarget::TypeScript, "m0_main.ts");
+
+    assert!(
+        module.contains(
+            "type Range<T> = {\n  readonly $type: \"Range\";\n  readonly start: T;\n  readonly end: T;\n};"
+        ),
+        "{module}"
+    );
+    assert!(
+        module.contains("readonly range: Range<number>;"),
+        "{module}"
+    );
+    assert!(
+        module.contains("readonly marks?: readonly Range<number>[] | null;"),
+        "{module}"
+    );
+    assert!(
+        !module.lines().any(|line| line.contains("readonly T:")),
+        "the record must have no member for its parameter:\n{module}"
     );
 
     assert_generated_typescript_artifact_type_checks(&artifact);

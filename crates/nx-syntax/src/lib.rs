@@ -455,7 +455,7 @@ mod tests {
             }
 
             let mut cursor = node.walk();
-            for (_, child) in node.children(&mut cursor).enumerate() {
+            for child in node.children(&mut cursor) {
                 let child_path = format!("{}/{}", path, child.kind());
                 find_errors(child, &child_path, errors);
             }

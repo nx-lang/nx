@@ -109,6 +109,9 @@ pub struct NativeNxLibraryRegistry {
 
 #[napi]
 impl NativeNxLibraryRegistry {
+    // `new` is the JavaScript constructor this class is exported with, not a Rust convenience, so
+    // there is no `Default` to go with it.
+    #[allow(clippy::new_without_default)]
     #[napi(constructor)]
     pub fn new() -> Self {
         Self {

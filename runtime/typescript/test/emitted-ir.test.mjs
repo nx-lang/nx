@@ -308,6 +308,41 @@ console.log(JSON.stringify({
 
 withSource(
   `
+type Range = { T:type start:T end:T }
+let ints(): <Range T=int/> = { <Range T=int start={1} end={5} /> }
+let first(): int = { ints().start }
+let moved(): <Range T=int/> = { apply(ints(), <Range.Update T=int end={9} />) }
+let root() = { moved() }
+`,
+  (dir, sourcePath) => {
+    // A type argument leaves no trace below the checker, so all three backends see one `Range`
+    // with the fields `start` and `end` and agree on every value it takes part in.
+    const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
+    const generatedPath = join(dir, "js");
+    runNxCli(["codegen", sourcePath, "--target", "javascript", "--output", generatedPath]);
+    const indexUrl = pathToFileURL(join(generatedPath, "index.js")).href;
+    const generated = generatedJsJson(
+      generatedPath,
+      `
+import { ints, first, moved } from ${JSON.stringify(indexUrl)};
+console.log(JSON.stringify({ ints: ints(), first: first(), moved: moved() }));
+`,
+    );
+
+    const fromIr = {
+      ints: evaluateFunction(prepared, "ints"),
+      first: evaluateFunction(prepared, "first"),
+      moved: evaluateFunction(prepared, "moved"),
+    };
+    assertEqual(fromIr, generated);
+    assertEqual(fromIr.ints, { $type: "Range", start: 1, end: 5 });
+    assertEqual(fromIr.moved, nativeJson(sourcePath));
+    console.log("ok - a generic record agrees across the interpreter, generated code and the IR runtime");
+  },
+);
+
+withSource(
+  `
 type User = { name:string email:string? age:int? }
 let key(): User.Property = { User.Property.email }
 let root(): User = { apply(<User name="Ada" email="x@y" />, <User.Update email={null} />) }

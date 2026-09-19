@@ -11,7 +11,7 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use tree_helpers::{contains_kind, contains_missing, count_kind, find_first_kind};
+use tree_helpers::{collect_kinds, contains_kind, contains_missing, count_kind, find_first_kind};
 
 /// Helper to resolve test fixture paths (works from both crate and workspace root)
 fn fixture_path(relative: &str) -> PathBuf {
@@ -1796,21 +1796,15 @@ fn test_parse_module_with_definitions_and_element() {
 
     let kinds: Vec<SyntaxKind> = root.children().map(|child| child.kind()).collect();
     assert!(
-        kinds
-            .iter()
-            .any(|kind| *kind == SyntaxKind::TYPE_DEFINITION),
+        kinds.contains(&SyntaxKind::TYPE_DEFINITION),
         "Expected at least one type definition"
     );
     assert!(
-        kinds
-            .iter()
-            .any(|kind| *kind == SyntaxKind::VALUE_DEFINITION),
+        kinds.contains(&SyntaxKind::VALUE_DEFINITION),
         "Expected at least one value definition"
     );
     assert!(
-        kinds
-            .iter()
-            .any(|kind| *kind == SyntaxKind::FUNCTION_DEFINITION),
+        kinds.contains(&SyntaxKind::FUNCTION_DEFINITION),
         "Expected at least one function definition"
     );
 
@@ -2527,7 +2521,7 @@ fn test_parse_multiple_errors() {
     let result = parse_file(&path).unwrap();
 
     assert!(!result.is_ok(), "Should detect multiple errors");
-    assert!(result.errors.len() >= 1, "Should have parse errors");
+    assert!(!result.errors.is_empty(), "Should have parse errors");
 }
 
 #[test]
@@ -2565,7 +2559,7 @@ fn test_error_recovery_within_scope() {
     let result = parse_str(source, "test.nx");
 
     // Should collect all errors within the scope
-    assert!(result.errors.len() >= 1, "Should detect errors");
+    assert!(!result.errors.is_empty(), "Should detect errors");
 
     // Should still produce a tree (best-effort recovery)
     assert!(result.tree.is_some(), "Should produce tree with errors");
@@ -2738,7 +2732,7 @@ fn test_snapshot_error_diagnostics() {
     let errors: Vec<_> = result
         .errors
         .iter()
-        .map(|d| format!("{}", d.message()))
+        .map(|d| d.message().to_string())
         .collect();
 
     insta::assert_debug_snapshot!(errors);
@@ -3572,10 +3566,6 @@ fn test_validate_type_parameter_with_modifier_is_rejected() {
 fn test_validate_type_parameter_outside_component_signature_is_rejected() {
     for (source, expected) in [
         (
-            "type Box = { T:type value:T }",
-            "Type parameter 'T' is not supported in a record",
-        ),
-        (
             "action Select = { T:type }",
             "Type parameter 'T' is not supported in an action",
         ),
@@ -3591,10 +3581,206 @@ fn test_validate_type_parameter_outside_component_signature_is_rejected() {
             "let f(T:type) = 1",
             "Type parameter 'T' is not supported in a function parameter list",
         ),
+        (
+            "type F = <function T:type />: string",
+            "Type parameter 'T' is not supported in a function type",
+        ),
     ] {
         let errors = type_parameter_errors(source);
         assert_eq!(errors, vec![expected.to_string()], "for source: {source}");
     }
+}
+
+#[test]
+fn test_validate_record_type_parameter_is_accepted() {
+    for source in [
+        "type Range = { T:type start:T end:T endInclusive:boolean }",
+        "type Pair = { TKey:type TValue:type key:TKey value:TValue }",
+        "type Page = { T:type items:T[] next:T? render:(<function item:T />: string)? }",
+    ] {
+        let errors = type_parameter_errors(source);
+        assert!(errors.is_empty(), "for source: {source}: {errors:?}");
+    }
+}
+
+#[test]
+fn test_validate_record_type_parameter_misuse_is_rejected() {
+    for (source, expected) in [
+        (
+            "type Bad = { start:int T:type }",
+            "Type parameter 'T' must be declared before every field",
+        ),
+        (
+            "type A = { T:type = int }",
+            "Type parameter 'T' cannot have a default value",
+        ),
+        (
+            "type B = { content T:type }",
+            "Type parameter 'T' cannot have the 'content' modifier",
+        ),
+        (
+            "type C = { string:type }",
+            "Type parameter 'string' cannot take the name of a primitive type",
+        ),
+        (
+            "type D = { Element:type }",
+            "Type parameter 'Element' cannot take the name of the built-in type 'Element'",
+        ),
+    ] {
+        let errors = type_parameter_errors(source);
+        assert_eq!(errors, vec![expected.to_string()], "for source: {source}");
+    }
+}
+
+// ============================================================================
+// Applied types
+// ============================================================================
+
+/// Every `applied_type` in `source`, in document order, as its tag and its `name=type` arguments.
+fn applied_types(source: &str) -> Vec<(String, Vec<(String, String)>)> {
+    let result = parse_str(source, "test.nx");
+    assert!(
+        result.is_ok(),
+        "expected a clean parse, got: {}",
+        render_diagnostics_cli(&result.errors, &HashMap::new())
+    );
+    let root = result.root().expect("Should have root node");
+    let mut nodes = Vec::new();
+    collect_kinds(&root, SyntaxKind::APPLIED_TYPE, &mut nodes);
+    nodes
+        .iter()
+        .map(|applied| {
+            let name = applied
+                .child_by_field("name")
+                .expect("applied type exposes a name field")
+                .text()
+                .to_string();
+            let arguments = applied
+                .children()
+                .filter(|child| child.kind() == SyntaxKind::TYPE_ARGUMENT)
+                .map(|argument| {
+                    (
+                        argument
+                            .child_by_field("name")
+                            .expect("argument name")
+                            .text()
+                            .to_string(),
+                        argument
+                            .child_by_field("type")
+                            .expect("argument type")
+                            .text()
+                            .to_string(),
+                    )
+                })
+                .collect();
+            (name, arguments)
+        })
+        .collect()
+}
+
+/// One applied type with one `T=int` argument, the shape most of these cases expect.
+fn int_range() -> Vec<(String, Vec<(String, String)>)> {
+    vec![(
+        "Range".to_string(),
+        vec![("T".to_string(), "int".to_string())],
+    )]
+}
+
+#[test]
+fn test_parse_applied_type_as_a_field_type() {
+    assert_eq!(
+        applied_types("type Slider = { range:<Range T=int/> }"),
+        int_range()
+    );
+}
+
+#[test]
+fn test_parse_applied_type_as_a_let_annotation() {
+    assert_eq!(
+        applied_types("let r:<Range T=int/> = <Range T=int start={1} end={5} />"),
+        int_range(),
+        "only the type annotation is an applied type; the construction is an element"
+    );
+}
+
+#[test]
+fn test_parse_applied_type_as_an_alias_target() {
+    assert_eq!(applied_types("type IntRange = <Range T=int/>"), int_range());
+}
+
+#[test]
+fn test_parse_applied_type_under_suffixes() {
+    // The suffixes belong to the enclosing `type`, so the applied type itself is unchanged.
+    assert_eq!(
+        applied_types("type Schedule = { slots:<Range T=int/>[] override:<Range T=int/>? }"),
+        [int_range(), int_range()].concat()
+    );
+    let result = parse_str("type S = { both:<Range T=int/>[]? }", "test.nx");
+    assert!(result.is_ok(), "{:?}", result.errors);
+}
+
+#[test]
+fn test_parse_applied_type_nests() {
+    assert_eq!(
+        applied_types("type Nested = { b:<Box T=<Box T=int/>/> }"),
+        vec![
+            (
+                "Box".to_string(),
+                vec![("T".to_string(), "<Box T=int/>".to_string())]
+            ),
+            (
+                "Box".to_string(),
+                vec![("T".to_string(), "int".to_string())]
+            ),
+        ]
+    );
+}
+
+#[test]
+fn test_parse_applied_type_with_a_suffixed_argument() {
+    assert_eq!(
+        applied_types("type Ints = { b:<Box T=int[]?/> }"),
+        vec![(
+            "Box".to_string(),
+            vec![("T".to_string(), "int[]?".to_string())]
+        )]
+    );
+}
+
+#[test]
+fn test_parse_applied_type_with_zero_arguments() {
+    // `<Range/>` parses so the missing argument is named by a diagnostic, not a parse error.
+    assert_eq!(
+        applied_types("type Bad = { r:<Range/> }"),
+        vec![("Range".to_string(), Vec::new())]
+    );
+}
+
+#[test]
+fn test_parse_applied_type_with_a_qualified_tag() {
+    assert_eq!(
+        applied_types("let u:<Range.Update T=int/> = <Range.Update T=int end={9} />"),
+        vec![(
+            "Range.Update".to_string(),
+            vec![("T".to_string(), "int".to_string())]
+        )]
+    );
+}
+
+#[test]
+fn test_parse_applied_type_beside_a_function_type() {
+    // `function` is a keyword only in the name slot, so the two element-shaped types never collide.
+    let source = "type Page = { T:type render:(<function item:<Box T=int/> />: T)? }";
+    assert_eq!(
+        applied_types(source),
+        vec![(
+            "Box".to_string(),
+            vec![("T".to_string(), "int".to_string())]
+        )]
+    );
+    let result = parse_str(source, "test.nx");
+    let root = result.root().expect("Should have root node");
+    assert_eq!(count_kind(&root, SyntaxKind::FUNCTION_TYPE), 1);
 }
 
 // ============================================================================
@@ -3756,17 +3942,13 @@ fn test_duplicate_nullable_across_a_parenthesis_is_rejected() {
 }
 
 #[test]
-fn test_misspelled_function_keyword_yields_one_error_node() {
-    let (result, rendered) = invalid_fixture_diagnostics("invalid/function-type-misspelled.nx");
-    assert!(!result.is_ok());
+fn test_misspelled_function_keyword_parses_as_an_applied_type() {
+    // `<Name .../>` in a type position is an applied type, so a misspelled `function` keyword is a
+    // well-formed parse that names a record; the rejection belongs to name resolution.
+    let result = parse_str("external component <List Name: <functon /> />", "test.nx");
+    assert!(result.is_ok(), "{:?}", result.errors);
     let root = result.root().unwrap();
-    assert_eq!(
-        count_kind(&root, SyntaxKind::ERROR),
-        1,
-        "{}",
-        root.raw().to_sexp()
-    );
-    assert_eq!(result.errors.len(), 1, "{rendered}");
+    assert_eq!(count_kind(&root, SyntaxKind::APPLIED_TYPE), 1);
 }
 
 #[test]
