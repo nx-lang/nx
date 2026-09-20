@@ -23,35 +23,28 @@ component <Card extends DrawnNode Title:string content Children:DrawnNode[] /> =
   </SkiaShape>
 }
 
-// The original cycles an eight-color palette by index. NX has neither a range to loop over nor
-// list indexing to cycle with, so each list length the page needs is written out as its colors,
-// and a loop over one yields that many numbered rows.
-let colors10 = {
-  "#0F3460" "#533483" "#1B4332" "#7B2D26" "#495057" "#0D6EFD" "#D63384" "#2D6A4F"
-  "#0F3460" "#533483"
+// The original cycles an eight-color palette by index. A range counts the rows, but NX still has
+// no list indexing to cycle a palette with, so the palette is a function over the index and `%`
+// does the cycling.
+let color(index:int): string = {
+  if index % 8 is {
+    0 => "#0F3460"
+    1 => "#533483"
+    2 => "#1B4332"
+    3 => "#7B2D26"
+    4 => "#495057"
+    5 => "#0D6EFD"
+    6 => "#D63384"
+    else => "#2D6A4F"
+  }
 }
 
-let colors12 = {
-  "#0F3460" "#533483" "#1B4332" "#7B2D26" "#495057" "#0D6EFD" "#D63384" "#2D6A4F"
-  "#0F3460" "#533483" "#1B4332" "#7B2D26"
-}
-
-let colors14 = {
-  "#0F3460" "#533483" "#1B4332" "#7B2D26" "#495057" "#0D6EFD" "#D63384" "#2D6A4F"
-  "#0F3460" "#533483" "#1B4332" "#7B2D26" "#495057" "#0D6EFD"
-}
-
-let colors16 = {
-  "#0F3460" "#533483" "#1B4332" "#7B2D26" "#495057" "#0D6EFD" "#D63384" "#2D6A4F"
-  "#0F3460" "#533483" "#1B4332" "#7B2D26" "#495057" "#0D6EFD" "#D63384" "#2D6A4F"
-}
-
-// One numbered row per color, as the original's Rows helper: "Row 1", "Row 2", … The row number
+// One numbered row per index, as the original's Rows helper: "Row 1", "Row 2", … The row number
 // is an int, and `+` converts it to text where it joins the prefix.
-component <Rows extends DrawnNode Colors:string[] Prefix:string /> = {
+component <Rows extends DrawnNode Count:int Prefix:string /> = {
   <SkiaStack Spacing=6 Padding=<Thickness Left=8 Top=8 Right=8 Bottom=8 />>
-    for color, index in Colors {
-      <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> BackgroundColor={color}
+    for index in 0..Count {
+      <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> BackgroundColor={color(index)}
         HorizontalOptions=Fill HeightRequest=40 UseCache=Operations>
         <SkiaLabel Text={Prefix + " " + (index + 1)} FontSize=13 TextColor="#FFFFFF"
           VerticalOptions=Center Margin=<Thickness Left=12 Right=12 /> />
@@ -77,7 +70,7 @@ component <Page /> = {
             <SkiaLabel Text="Header (70 pt) · scrolls away" FontSize=16 TextColor="#FFFFFF"
               HorizontalOptions=Center VerticalOptions=Center />
           </SkiaLayer>
-          <Rows Colors={colors14} Prefix="Row" />
+          <Rows Count=14 Prefix="Row" />
           <SkiaLayer Tag="Footer" HeightRequest=50 BackgroundColor="#533483">
             <SkiaLabel Text="Footer (50 pt) · after the content" FontSize=14 TextColor="#FFFFFF"
               HorizontalOptions=Center VerticalOptions=Center />
@@ -91,7 +84,7 @@ component <Page /> = {
             <SkiaLabel Text="Sticky header" FontSize=15 TextColor="#FFFFFF"
               HorizontalOptions=Center VerticalOptions=Center />
           </SkiaLayer>
-          <Rows Colors={colors14} Prefix="Under sticky" />
+          <Rows Count=14 Prefix="Under sticky" />
         </SkiaScroll>
       </Card>
 
@@ -105,7 +98,7 @@ component <Page /> = {
           </SkiaLayer>
           <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=24 TopRight=24 BottomLeft=0 BottomRight=0 />
             BackgroundColor="#2B3035" HorizontalOptions=Fill>
-            <Rows Colors={colors12} Prefix="Content over the cover" />
+            <Rows Count=12 Prefix="Content over the cover" />
           </SkiaShape>
         </SkiaScroll>
       </Card>
@@ -113,14 +106,14 @@ component <Page /> = {
       <Card Title="ScrollBarsVisibility='Vertical' + ScrollBarThumbColor · default SkiaScrollBar, auto-hides 1 s after scrolling">
         <SkiaScroll HeightRequest=200 BackgroundColor="#212529" ScrollBarsVisibility=Vertical
           ScrollBarThumbColor="#6EA8FE" ScrollBarTrackColor="#FFFFFF22" IgnoreWrongDirection=true>
-          <Rows Colors={colors16} Prefix="Scrollbar row" />
+          <Rows Count=16 Prefix="Scrollbar row" />
         </SkiaScroll>
         <SkiaScroll Orientation=Horizontal HeightRequest=70 BackgroundColor="#212529"
           ScrollBarsVisibility=Horizontal ScrollBarThumbColor="#FFC107">
           <SkiaRow Spacing=8 Padding=<Thickness Left=8 Top=8 Right=8 Bottom=8 />>
-            for color, index in colors14 {
+            for index in 0..14 {
               <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=120
-                HeightRequest=50 BackgroundColor={color} UseCache=Operations>
+                HeightRequest=50 BackgroundColor={color(index)} UseCache=Operations>
                 <SkiaLabel Text={"H " + (index + 1)} FontSize=13 TextColor="#FFFFFF"
                   HorizontalOptions=Center VerticalOptions=Center />
               </SkiaShape>
@@ -141,7 +134,7 @@ component <Page /> = {
                 TextColor="#FFFFFF" HorizontalOptions=Center VerticalOptions=Center />
             </SkiaShape>
           </RefreshIndicator>
-          <Rows Colors={colors12} Prefix="Pull down" />
+          <Rows Count=12 Prefix="Pull down" />
         </SkiaScroll>
       </Card>
 
@@ -151,9 +144,9 @@ component <Page /> = {
           SnapToChildren=Center TrackIndexPosition=Center
           onCurrentIndexChanged=<Update snapIndex={action.index} />>
           <SkiaRow Spacing=12 Padding=<Thickness Left=8 Top=8 Right=8 Bottom=8 />>
-            for color, index in colors10 {
+            for index in 0..10 {
               <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=10 /> WidthRequest=200
-                HeightRequest=100 BackgroundColor={color} UseCache=Operations>
+                HeightRequest=100 BackgroundColor={color(index)} UseCache=Operations>
                 <SkiaLabel Text={"Snap " + index} FontSize=18 TextColor="#FFFFFF"
                   HorizontalOptions=Center VerticalOptions=Center />
               </SkiaShape>
@@ -165,7 +158,7 @@ component <Page /> = {
       <Card Title={"TrackIndexPosition='Start' (vertical) · CurrentIndex " + trackIndex + " · SnapToChildren='Side'"}>
         <SkiaScroll HeightRequest=180 BackgroundColor="#212529" TrackIndexPosition=Start SnapToChildren=Side
           IgnoreWrongDirection=true onCurrentIndexChanged=<Update trackIndex={action.index} />>
-          <Rows Colors={colors16} Prefix="Tracked" />
+          <Rows Count=16 Prefix="Tracked" />
         </SkiaScroll>
       </Card>
     </SkiaStack>
