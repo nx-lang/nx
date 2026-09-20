@@ -172,16 +172,24 @@ fn record_signature(record: &RecordDef) -> String {
         head.push_str(base.as_str());
     }
 
-    if record.properties.is_empty() {
+    // A generic record's parameters are declared before every field, and reading the declaration
+    // without them would leave an applied type's argument unexplained.
+    let mut lines = record
+        .type_params
+        .iter()
+        .map(|param| format!("  {}:type", param.name.as_str()))
+        .collect::<Vec<_>>();
+    lines.extend(
+        record
+            .properties
+            .iter()
+            .map(|field| format!("  {}", field_signature(field))),
+    );
+
+    if lines.is_empty() {
         return format!("{} = {{ }}", head);
     }
-    let fields = record
-        .properties
-        .iter()
-        .map(|field| format!("  {}", field_signature(field)))
-        .collect::<Vec<_>>()
-        .join("\n");
-    format!("{} = {{\n{}\n}}", head, fields)
+    format!("{} = {{\n{}\n}}", head, lines.join("\n"))
 }
 
 /// One record field's name and declared type: `name: string`.
@@ -253,6 +261,11 @@ pub(crate) fn property(qualifier: Option<&str>, name: &str, ty: &str) -> String 
     prefixed("property", format!("{}: {}", name, ty))
 }
 
+/// `(type parameter) Range.T`.
+pub(crate) fn type_parameter(owner: &str, name: &str) -> String {
+    prefixed("type parameter", format!("{}.{}", owner, name))
+}
+
 /// `(case) LoadState.failed`.
 pub(crate) fn union_case(union: &str, case: &str) -> String {
     prefixed("case", format!("{}.{}", union, case))
@@ -261,4 +274,9 @@ pub(crate) fn union_case(union: &str, case: &str) -> String {
 /// `(primitive type) int` and `(built-in type) Element`.
 pub(crate) fn builtin_type(kind: &str, name: &str) -> String {
     prefixed(kind, name)
+}
+
+/// The bare `(built-in type)` label, for a built-in that does have a declaration to show beneath it.
+pub(crate) fn builtin_type_label(kind: &str) -> String {
+    format!("({})", kind)
 }

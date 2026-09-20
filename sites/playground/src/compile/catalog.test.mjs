@@ -11,7 +11,14 @@ import { readFileSync } from "node:fs";
 import { after, test } from "node:test";
 import { prepareNxIrModule } from "@nx-lang/ir-runtime";
 import { createNxHost, loadNxModule } from "@nx-lang/sdk-wasm";
-import { CATALOG_IDENTITY, MAX_SOURCE_BYTES, compileWithCatalog, emitCatalogArtifact } from "./catalog.ts";
+import {
+  CATALOG_IDENTITY,
+  MAX_SOURCE_BYTES,
+  PRELUDE_IDENTITY,
+  classifyDiagnostic,
+  compileWithCatalog,
+  emitCatalogArtifact,
+} from "./catalog.ts";
 
 const catalog = readFileSync(new URL("../../catalog/skia.nx", import.meta.url), "utf8");
 const module = await loadNxModule();
@@ -134,4 +141,56 @@ component <Page /> = { <SkiaButton Text="Tap" onNope=<Log /> /> }
 let root() = { <Page /> }`);
   assert.equal(result.ir, null);
   assert.ok(result.diagnostics.some((d) => d.message.includes("onNope")), result.diagnostics.map((d) => d.message).join("\n"));
+});
+
+// ------------------------------------------------------------------------------------------------
+// The prelude and range expressions
+// ------------------------------------------------------------------------------------------------
+
+test("a label inside the prelude is not handed to the editor as the visitor's own span", () => {
+  const classified = classifyDiagnostic({
+    severity: "error",
+    code: "some-code",
+    message: "points at a built-in's declaration",
+    labels: [
+      {
+        file: PRELUDE_IDENTITY,
+        primary: true,
+        span: { startByte: 0, endByte: 5, startLine: 3, startColumn: 3, endLine: 3, endColumn: 8 },
+      },
+    ],
+  });
+
+  assert.equal(classified.origin, "program");
+  assert.equal(classified.span, null);
+});
+
+test("compiles a range loop against the site's own catalog, with the resolver unchanged", () => {
+  const result = compile("let root() = { for i in 0..5 { <SkiaLabel Text=\"star\" /> } }");
+  assert.deepEqual(result.diagnostics, []);
+  assert.ok(result.ir instanceof Uint8Array);
+  // The prelude is in the module table; the renderer's resolver never has to know about it, since
+  // the IR runtime supplies the prelude itself.
+  const ir = opened(result.ir);
+  assert.ok(
+    ir.modules.some((module) => module.identity === PRELUDE_IDENTITY),
+    `expected the prelude in ${JSON.stringify(ir.modules.map((module) => module.identity))}`,
+  );
+});
+
+test("a catalog property typed as a range accepts a range expression", () => {
+  const withRange = 'export external component <SkiaSlider range:<Range T=float64/> />\n';
+  const result = compileWithCatalog(host, withRange, "let root() = { <SkiaSlider range={0..1} /> }");
+
+  assert.deepEqual(result.diagnostics, []);
+  assert.ok(result.ir instanceof Uint8Array);
+});
+
+test("an incomplete range reports a diagnostic at the visitor's own position", () => {
+  const result = compile("let root() = {\n  1..\n}");
+
+  assert.equal(result.ir, null);
+  assert.ok(result.diagnostics.length > 0);
+  assert.equal(result.diagnostics[0].origin, "source");
+  assert.equal(result.diagnostics[0].span.startLine, 2);
 });

@@ -133,6 +133,7 @@ reader that evaluates by index never needs to look ahead and no node reaches its
 | 19 | actionHandler | `[19, ref, str, ref, slot, ref?, node]` | An action handler, `onTapped=<Update count={count + 1} />`: the component and the name of the emit it answers, the action record it accepts, the slot of its `action` binding, the owner component whose body bound it (absent at the root), and the body. Evaluating the node captures the frame; the body runs when a host dispatches the action. See *Action handlers*. |
 | 20 | text | `[20, node, str]` | The canonical text form of a primitive value: the operand, and the name of its static type, one of `int`, `int32`, `int64`, `float32`, `float64` or `boolean`. See *Text conversion*. |
 | 21 | namedCall | `[21, node, [[str, node]...]]` | A call of a function-typed value by name, `<Row Item={c} Index={i} />` where `Row` is a parameter, a prop or a `let`: the callee, which evaluates to a function value, then each argument as a name and a node, sorted by name like any property list. The runtime binds the arguments to the callee's own parameters by name — a name the declaration lacks is dropped, a parameter it declares must be present. See *Function values*. |
+| 22 | forRange | `[22, slot, str, slot?, str?, node, node]` | A `for` whose iterable evaluates to a `Range` record, with the layout of a `for`. The body runs once per integer from the range's `start` upward, stopping before `end` or after it when `endInclusive` is true, with the item bound to that integer and the index, when present, to its position from zero. An empty or reversed range runs the body no times. Yields the list of body values. Requires `ranges-v1`. |
 
 A `{ expression }` block in NX source is its expression; it has no node of its own. NX has no
 syntax for a local `let` binding or an index expression, so neither has a node kind. A function
@@ -299,8 +300,61 @@ deterministic.
   identity's UTF-8 bytes, a zero byte, and the source's UTF-8 bytes, so the same module fingerprints
   the same whatever emitted it. A JavaScript reader holds it as a `BigInt`, or as its decimal string.
 
+One identity is reserved: `@nx/prelude.nx`, the NX prelude. It is a module the compiler carries
+rather than one a workspace supplies — a workspace that supplies a module under that identity is
+refused — and it holds the declarations every NX module sees without an import, starting with
+`Range`. It is otherwise an ordinary module: an image that constructs a `Range`, names it as a type,
+or derives from it lists the prelude in its table and reaches the declaration through that slot, and
+no prelude declaration is ever copied into another module's image. Unlike a library module, whose
+table entry carries an empty version, the prelude's entry carries the compiler's prelude version —
+`1` today. No host supplies the prelude, so that version is the only thing a runtime can compare its
+own built-in copy against. It names the prelude's contract rather than its text: it is bumped when a
+declaration's shape changes and left alone for an edit that changes no declaration, so a reworded
+comment does not reject images already in the wild. Linking is then decided by that version, through
+the same check every library goes through — a mismatch is `nx-ir-link-version` — and by which
+declarations the resolved prelude holds, where a gap is `nx-ir-link-missing-declaration`, naming the
+prelude and the declaration.
+
+An emit request produces the prelude's image when it names the prelude's identity, and a request for
+every module includes it exactly when some module of the program references it — so a program that
+uses no prelude declaration emits what it emitted before the prelude existed, byte for byte. The
+image is written under a file name derived from the identity like any module's, which is a legal path
+on every supported platform.
+
 A host asking for a function or component by name looks it up through the entrypoint lists; the
 declaration's own entry gives the name.
+
+### Recognizing a range
+
+A `forRange` node's iterable evaluates to a value, and a consumer recognizes a range by that value's
+shape: the `$type` `Range` and the fields `start`, `end` and `endInclusive`. It has nothing else to
+go on. A canonical value carries `$type` as a bare declaration name with no module — two modules that
+each declare a `Card` produce values a consumer cannot tell apart, which is why a program answers
+`nominalShapesFor` with every shape of a name rather than a guess — and a record's type arguments are
+erased: a nominal type is a slot and a name with no arguments, so the prelude's `Range` has `start`
+and `end` typed `object`, and `<Range T=int/>` and `<Range T=float64/>` are one declaration with one
+shape in the image.
+
+Provenance is decided where the image does carry it. A `forRange` node is emitted only for an
+iterable whose declaration is the prelude's, so a `Range` a module declares for itself never reaches
+one; a value a host supplies is normalized against the site's nominal type, which names its module by
+slot. What neither catches is a host handing a record of the right name and shape to a range-typed
+site, and that is the exposure every record of a shared name has rather than one of ranges.
+
+Erasure also settles what an item's carrier is. NX's `int`, `int32` and `int64` are a distinction the
+checker draws; below it, a backend binds items with whatever numeric types it has. An engine with a
+separate 32-bit integer and a separate float, such as the NX interpreter, can bind a narrow item and
+will refuse a range whose bounds are floats. JavaScript has one number type, so an `int32` item is an
+`int` — as every `int32` is in that backend, not only a range's — and a range of `float64` whose
+bounds happen to be integral iterates, because `4.0` and `4` are one value.
+
+Of those two, only the float range is out of reach from checked NX, because `range-not-iterable`
+refuses a non-integer range iterable outright; it takes a host value or a hand-built image. The
+carrier is reachable, and it is observable, because the interpreter wraps `int32` arithmetic where a
+JavaScript backend widens: `for i in lo..hi { i * 2 }` over an `int32` range at the top of the range
+yields `-294967296` under the interpreter and `4000000000` under both JavaScript backends. That
+divergence is not the range's — `let a:int32 = 2000000000` with `a + a` divides the backends the
+same way — but a range is one of the places a program meets it.
 
 ### Debug section
 
@@ -363,7 +417,9 @@ A module that declares a derived update record lists `update-records-v1`; one th
 derived property union lists `property-unions-v1`; one that calls an update intrinsic lists
 `update-intrinsics-v1`; one that binds an action handler lists `action-handlers-v1`; one whose type
 table holds a function type, whose node table references a function anywhere but as a `call`'s
-callee, or which contains a `namedCall` lists `function-values-v1`. A runtime that does not know a
+callee, or which contains a `namedCall` lists `function-values-v1`; one that contains a `forRange`
+lists `ranges-v1`. Constructing a range needs no feature: that is an ordinary record construction,
+and only iterating one is a node a runtime may not know. A runtime that does not know a
 listed feature refuses the image rather than guessing, which is what makes the list safe to grow.
 An image does not record its evaluation semantics here. The schema version and the runtime ABI
 carry that, and an intentional change to how a runtime evaluates an image bumps the ABI.
@@ -451,6 +507,18 @@ against prepared modules a host resolver supplies by identity. Linking checks th
 module's version equals the version recorded in the entry's table, unless the host opts into
 linking across versions, and that every declaration the entry references is present. A module whose
 table holds only itself is a program on its own.
+
+The prelude is the one module no host has to supply. The `@nx-lang/ir-runtime` package ships the
+compiled image of the prelude its release was built with, and linking serves it for the prelude's
+reserved identity whenever the host's resolver returns nothing for that identity — at any depth of
+the link, including for a module the resolver did supply. The built-in prelude is prepared at most
+once and reused across linked programs, so a self-contained program is one whose only other module
+is the prelude. Because the prelude's table entry carries a version, a package whose built-in prelude
+is a different contract from the one the image was compiled against is reported as
+`nx-ir-link-version` rather than misbehaving at evaluation — and a host that supplies its own prelude
+is checked the same way. A host that wants its own prelude returns a prepared module for that
+identity, and linking uses it instead. Another runtime gets the image by naming the prelude's
+identity in an emit request.
 
 ## Worked example
 

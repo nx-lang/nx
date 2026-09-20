@@ -44,11 +44,15 @@ export function createLanguageService(
   host: NxHost,
   options: NxLanguageServiceOptions = {}
 ): SnapshotLanguageService {
-  const hostDocuments = Array.from(options.documents ?? []);
-  const implicitImports = Array.from(options.implicitImports ?? []);
+  // The host's documents and implicit imports are the core's own host context, so joining the sets
+  // and refusing a query that would replace a context document happen in one place.
   return createSnapshotLanguageService({
-    createSnapshot: (documents: readonly LanguageDocument[]) =>
-      host.createLanguageSnapshot([...hostDocuments, ...documents], { implicitImports }),
+    createSnapshot: (documents: readonly LanguageDocument[], snapshotOptions) =>
+      host.createLanguageSnapshot(documents, { implicitImports: snapshotOptions.implicitImports }),
+    context: {
+      documents: Array.from(options.documents ?? []) as readonly LanguageDocument[],
+      implicitImports: Array.from(options.implicitImports ?? [])
+    },
     ...(options.cacheSize === undefined ? {} : { cacheSize: options.cacheSize })
   });
 }

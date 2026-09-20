@@ -1,0 +1,5 @@
+// A module that builds ranges. Nothing here iterates one, so this module needs no feature.
+export let half(): <Range T=int/> = { 1..5 }
+export let closed(): <Range T=int/> = { 1..=5 }
+export let sameBounds(): boolean = { half() == closed() }
+export let fractional(): <Range T=float64/> = { 0.0..1.5 }

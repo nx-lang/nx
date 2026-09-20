@@ -19,8 +19,14 @@ const service = createLanguageService(host, {
   documents: [{ uri: catalogUri, identity: "catalog.nx", source: catalog }],
   implicitImports: ["catalog.nx"]
 });
-// The HTTP handler still serves its context as a prelude; its answers are the reference.
-const handler = createNxLanguageHandler({ prelude: { source: catalog } });
+// The HTTP handler over the same mechanism — a context document named as an implicit import — so the
+// two transports are compared over one feature rather than two.
+const handler = createNxLanguageHandler({
+  context: {
+    documents: [{ uri: catalogUri, identity: "catalog.nx", source: catalog }],
+    implicitImports: ["catalog.nx"]
+  }
+});
 
 async function overHttp<T>(query: string, body: unknown): Promise<T> {
   const response = await handler(
@@ -44,7 +50,7 @@ describe("the wasm SDK's in-process language service", () => {
     expect(hover!.range.start).toEqual({ line: 0, character: 1 });
     expect(hover!.version).toBe(5);
 
-    // The same query through the HTTP handler, which reaches the same declaration as a prelude.
+    // The same query through the HTTP handler, which reaches the declaration the same way.
     expect(hover).toEqual(await overHttp<Hover | null>("hover", { documents, uri, position }));
   });
 

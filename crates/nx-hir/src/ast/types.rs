@@ -27,6 +27,20 @@ pub enum TypeRef {
     /// Example: `int?`, `string?`
     Nullable(Box<TypeRef>),
 
+    /// Applied type: one instantiation of a generic record, spelled as the element that
+    /// constructs it with only its type arguments.
+    ///
+    /// <para>Arguments are kept in source order and matched to the record's type parameters by
+    /// name; the checker reorders them.</para>
+    ///
+    /// Example: `<Range T=int/>`, `<Range.Update T=int/>`
+    Applied {
+        /// The generic record's name, possibly qualified.
+        name: Name,
+        /// Type arguments as source wrote them, each binding a parameter name to a type.
+        args: Vec<(Name, TypeRef)>,
+    },
+
     /// Function type: an element function's signature with `function` in the name slot.
     ///
     /// Example: `<function Item:Contact Index:int />: DrawnNode`
@@ -86,6 +100,14 @@ impl TypeRef {
         Self::Nullable(Box::new(inner_type))
     }
 
+    /// Create an applied type reference.
+    pub fn applied(name: impl Into<Name>, args: Vec<(Name, TypeRef)>) -> Self {
+        Self::Applied {
+            name: name.into(),
+            args,
+        }
+    }
+
     /// Create a function type reference.
     pub fn function(params: Vec<FunctionParam>, return_type: TypeRef) -> Self {
         Self::Function {
@@ -136,6 +158,12 @@ pub fn spell_function_type<'a>(
 pub fn spell_type_ref(ty: &TypeRef) -> String {
     match ty {
         TypeRef::Name(name) => name.as_str().to_string(),
+        TypeRef::Applied { name, args } => spell_applied_type(
+            name.as_str(),
+            args.iter()
+                .map(|(arg, ty)| (arg.as_str(), spell_type_ref(ty)))
+                .collect::<Vec<_>>(),
+        ),
         TypeRef::Array(inner) => format!("{}[]", spell_type_ref_under_suffix(inner)),
         TypeRef::Nullable(inner) => format!("{}?", spell_type_ref_under_suffix(inner)),
         TypeRef::Function {
@@ -156,6 +184,26 @@ pub fn spell_type_ref(ty: &TypeRef) -> String {
             )
         }
     }
+}
+
+/// Spells an applied type as source does, `<Range T=int/>`.
+///
+/// <para>A checked type, a `TypeRef` and a diagnostic that names a missing argument all show one,
+/// so the spelling lives here beside `spell_function_type` rather than in each of them.</para>
+pub fn spell_applied_type<'a>(
+    name: &str,
+    args: impl IntoIterator<Item = (&'a str, String)>,
+) -> String {
+    let mut out = String::from("<");
+    out.push_str(name);
+    for (arg, ty) in args {
+        out.push(' ');
+        out.push_str(arg);
+        out.push('=');
+        out.push_str(&ty);
+    }
+    out.push_str("/>");
+    out
 }
 
 /// A type reference under a `[]` or `?` suffix: a function type is parenthesized, anything else
@@ -191,6 +239,38 @@ mod tests {
         assert_eq!(
             spell_type_ref(&TypeRef::array(TypeRef::nullable(TypeRef::name("int")))),
             "int?[]"
+        );
+    }
+
+    #[test]
+    fn an_applied_type_is_spelled_as_source_writes_it() {
+        let range = TypeRef::applied("Range", vec![(Name::new("T"), TypeRef::name("int"))]);
+        assert_eq!(spell_type_ref(&range), "<Range T=int/>");
+        // `/>` closes the applied type, so a suffix after it needs no parentheses.
+        assert_eq!(
+            spell_type_ref(&TypeRef::nullable(TypeRef::array(range.clone()))),
+            "<Range T=int/>[]?"
+        );
+        assert_eq!(
+            spell_type_ref(&TypeRef::applied(
+                "Box",
+                vec![(Name::new("T"), TypeRef::array(range))]
+            )),
+            "<Box T=<Range T=int/>[]/>"
+        );
+        assert_eq!(
+            spell_type_ref(&TypeRef::applied(
+                "Pair",
+                vec![
+                    (Name::new("TKey"), TypeRef::name("string")),
+                    (Name::new("TValue"), TypeRef::name("int")),
+                ]
+            )),
+            "<Pair TKey=string TValue=int/>"
+        );
+        assert_eq!(
+            spell_type_ref(&TypeRef::applied("Range", Vec::new())),
+            "<Range/>"
         );
     }
 

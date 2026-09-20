@@ -1,3 +1,9 @@
+// Every `Err` in this module is a `RecordResolutionError`, which carries the names, kinds and
+// spans its diagnostic prints; that is what makes the variant large. Boxing it would shrink the
+// `Result` on the paths that succeed at the cost of an allocation on every path that does not, and
+// these functions run once per record rather than once per expression.
+#![allow(clippy::result_large_err)]
+
 use crate::{
     ast, interface_record, interface_type_alias, same_declaration, DeclarationKey, DeclaringOrigin,
     EffectiveField, InterfaceField, InterfaceItem, InterfaceItemKind, Item, LocalDefinitionId,
@@ -87,6 +93,21 @@ pub enum RecordResolutionError {
         field: Name,
         span: TextSpan,
     },
+    /// A record that declares type parameters took part in inheritance.
+    GenericInheritance {
+        record: Name,
+        span: TextSpan,
+        reason: GenericInheritanceReason,
+    },
+}
+
+/// The way a generic record was asked to take part in inheritance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GenericInheritanceReason {
+    /// The record carries the `abstract` modifier.
+    Abstract,
+    /// The record has an `extends` clause.
+    Extends,
 }
 
 impl RecordResolutionError {
@@ -108,6 +129,7 @@ impl RecordResolutionError {
             RecordResolutionError::DuplicateContentProperty { .. } => {
                 "record-duplicate-content-property"
             }
+            RecordResolutionError::GenericInheritance { .. } => "record-generic-inheritance",
         }
     }
 
@@ -193,6 +215,16 @@ impl RecordResolutionError {
                     )
                 }
             }
+            RecordResolutionError::GenericInheritance { record, reason, .. } => match reason {
+                GenericInheritanceReason::Abstract => format!(
+                    "Record '{}' declares type parameters and cannot be abstract: generic records do not take part in inheritance",
+                    record
+                ),
+                GenericInheritanceReason::Extends => format!(
+                    "Record '{}' declares type parameters and cannot extend a base: generic records do not take part in inheritance",
+                    record
+                ),
+            },
         }
     }
 
@@ -201,7 +233,8 @@ impl RecordResolutionError {
             RecordResolutionError::InvalidBase { span, .. }
             | RecordResolutionError::InheritanceCycle { span, .. }
             | RecordResolutionError::DuplicateInheritedField { span, .. }
-            | RecordResolutionError::DuplicateContentProperty { span, .. } => *span,
+            | RecordResolutionError::DuplicateContentProperty { span, .. }
+            | RecordResolutionError::GenericInheritance { span, .. } => *span,
         }
     }
 }
@@ -561,6 +594,30 @@ fn validate_record_definition(
     let key = record.key();
     if let Some(status) = statuses.get(&key) {
         return *status;
+    }
+
+    // Generic records stay outside every hierarchy: inheritance would need parameter merging and
+    // subtyping with arguments, neither of which this design has.
+    if !record.record.type_params.is_empty() {
+        let reason = if record.record.is_abstract {
+            Some(GenericInheritanceReason::Abstract)
+        } else if record.record.base.is_some() {
+            Some(GenericInheritanceReason::Extends)
+        } else {
+            None
+        };
+        if let Some(reason) = reason {
+            push_unique_record_error(
+                errors,
+                RecordResolutionError::GenericInheritance {
+                    record: record.record.name.clone(),
+                    span: record.record.span,
+                    reason,
+                },
+            );
+            statuses.insert(key, RecordValidationStatus::Invalid);
+            return RecordValidationStatus::Invalid;
+        }
     }
 
     if let Some(index) = stack.iter().position(|(seen, _)| *seen == key) {
@@ -930,4 +987,54 @@ fn validate_base_record(
     }
 
     Ok(base_record.clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{lower, SourceId};
+    use nx_syntax::parse_str;
+
+    fn prepared(source: &str) -> PreparedModule {
+        let parse_result = parse_str(source, "records.nx");
+        let tree = parse_result.tree.expect("Expected source to parse");
+        let lowered = lower(tree.root(), SourceId::new(0));
+        PreparedModule::standalone("records.nx", lowered)
+    }
+
+    fn messages(source: &str) -> Vec<String> {
+        validate_record_definitions(&prepared(source))
+            .iter()
+            .map(|error| error.message())
+            .collect()
+    }
+
+    #[test]
+    fn a_generic_record_cannot_be_abstract() {
+        assert_eq!(
+            messages("abstract type Base = { T:type value:T }"),
+            vec![
+                "Record 'Base' declares type parameters and cannot be abstract: generic records do not take part in inheritance"
+                    .to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn a_generic_record_cannot_extend_a_base() {
+        assert_eq!(
+            messages(
+                "abstract type Shape = { name:string }\ntype Tagged extends Shape = { T:type tag:T }"
+            ),
+            vec![
+                "Record 'Tagged' declares type parameters and cannot extend a base: generic records do not take part in inheritance"
+                    .to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn a_generic_record_outside_inheritance_is_accepted() {
+        assert!(messages("type Range = { T:type start:T end:T }").is_empty());
+    }
 }

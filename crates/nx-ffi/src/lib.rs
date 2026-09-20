@@ -170,8 +170,14 @@ pub extern "C" fn nx_ffi_abi_version() -> u32 {
     NX_FFI_ABI_VERSION
 }
 
+/// Releases a buffer this library wrote.
+///
+/// # Safety
+///
+/// `buffer` must be a buffer one of this library's entry points wrote and has not yet released, or
+/// a null buffer. It must not be used again afterwards.
 #[no_mangle]
-pub extern "C" fn nx_free_buffer(buffer: NxBuffer) {
+pub unsafe extern "C" fn nx_free_buffer(buffer: NxBuffer) {
     if buffer.ptr.is_null() {
         return;
     }
@@ -261,10 +267,11 @@ fn prepare_out_build_context_handle(
     Ok(())
 }
 
-fn finish_msgpack_entry(
-    out_buffer: *mut NxBuffer,
-    result: Result<Result<(NxEvalStatus, Vec<u8>), String>, Box<dyn Any + Send>>,
-) -> NxEvalStatus {
+/// What `panic::catch_unwind` hands back from an entry point's body: the payload it produced, the
+/// message it failed with, which is reported as diagnostics, or the panic it did not survive.
+type CaughtEntry<T> = Result<Result<(NxEvalStatus, T), String>, Box<dyn Any + Send>>;
+
+fn finish_msgpack_entry(out_buffer: *mut NxBuffer, result: CaughtEntry<Vec<u8>>) -> NxEvalStatus {
     match result {
         Ok(Ok((status, payload))) => {
             write_msgpack_payload(out_buffer, payload);
@@ -283,7 +290,7 @@ fn finish_msgpack_entry(
 fn finish_output_entry(
     out_buffer: *mut NxBuffer,
     output_format: NxOutputFormat,
-    result: Result<Result<(NxEvalStatus, FfiPayload), String>, Box<dyn Any + Send>>,
+    result: CaughtEntry<FfiPayload>,
 ) -> NxEvalStatus {
     match result {
         Ok(Ok((status, payload))) => {
@@ -556,8 +563,15 @@ impl From<GeneratedJsProgramModuleComponentExport> for JsonGeneratedJsProgramMod
     }
 }
 
+/// # Safety
+///
+/// `source_ptr`/`source_len` and `file_name_ptr`/`file_name_len` must each describe one readable
+/// region of that many bytes.
+///
+/// `out_buffer` must point to a writable `NxBuffer` the caller owns; the payload written to it
+/// is released with [`nx_free_buffer`].
 #[no_mangle]
-pub extern "C" fn nx_eval_source(
+pub unsafe extern "C" fn nx_eval_source(
     source_ptr: *const u8,
     source_len: usize,
     file_name_ptr: *const u8,
@@ -596,8 +610,20 @@ pub extern "C" fn nx_eval_source(
     finish_output_entry(out_buffer, output_format, result)
 }
 
+/// # Safety
+///
+/// `build_context_ptr` must be a build context this library returned and has not yet freed.
+///
+/// `source_ptr`/`source_len` and `file_name_ptr`/`file_name_len` must each describe one readable
+/// region of that many bytes.
+///
+/// `out_handle` must point to a writable slot; a handle written to it is released with
+/// [`nx_free_program_artifact`].
+///
+/// `out_buffer` must point to a writable `NxBuffer` the caller owns; the payload written to it
+/// is released with [`nx_free_buffer`].
 #[no_mangle]
-pub extern "C" fn nx_build_program_artifact(
+pub unsafe extern "C" fn nx_build_program_artifact(
     build_context_ptr: *const NxProgramBuildContextHandle,
     source_ptr: *const u8,
     source_len: usize,
@@ -643,8 +669,18 @@ pub extern "C" fn nx_build_program_artifact(
     finish_msgpack_entry(out_buffer, result)
 }
 
+/// # Safety
+///
+/// `build_context_ptr` must be a build context this library returned and has not yet freed.
+///
+/// `modules_ptr` must point to `module_count` readable `NxWorkspaceModule` values, and each one's
+/// own pointer/length pairs must describe readable regions; `implicit_imports_ptr` must likewise
+/// point to `implicit_import_count` readable `NxUtf8Slice` values.
+///
+/// `out_buffer` must point to a writable `NxBuffer` the caller owns; the payload written to it
+/// is released with [`nx_free_buffer`].
 #[no_mangle]
-pub extern "C" fn nx_validate_workspace(
+pub unsafe extern "C" fn nx_validate_workspace(
     build_context_ptr: *const NxProgramBuildContextHandle,
     modules_ptr: *const NxWorkspaceModule,
     module_count: usize,
@@ -681,8 +717,23 @@ pub extern "C" fn nx_validate_workspace(
     finish_msgpack_entry(out_buffer, result)
 }
 
+/// # Safety
+///
+/// `build_context_ptr` must be a build context this library returned and has not yet freed.
+///
+/// `modules_ptr` must point to `module_count` readable `NxWorkspaceModule` values, and each one's
+/// own pointer/length pairs must describe readable regions; `implicit_imports_ptr` must likewise
+/// point to `implicit_import_count` readable `NxUtf8Slice` values.
+///
+/// `entry_identity_ptr`/`entry_identity_len` must describe one readable region of that many bytes.
+///
+/// `out_handle` must point to a writable slot; a handle written to it is released with
+/// [`nx_free_program_artifact`].
+///
+/// `out_buffer` must point to a writable `NxBuffer` the caller owns; the payload written to it
+/// is released with [`nx_free_buffer`].
 #[no_mangle]
-pub extern "C" fn nx_build_workspace_program_artifact(
+pub unsafe extern "C" fn nx_build_workspace_program_artifact(
     build_context_ptr: *const NxProgramBuildContextHandle,
     modules_ptr: *const NxWorkspaceModule,
     module_count: usize,
@@ -740,8 +791,12 @@ pub extern "C" fn nx_build_workspace_program_artifact(
     finish_msgpack_entry(out_buffer, result)
 }
 
+/// # Safety
+///
+/// `out_handle` must point to a writable slot; a handle written to it is released with
+/// [`nx_free_library_registry`].
 #[no_mangle]
-pub extern "C" fn nx_create_library_registry(
+pub unsafe extern "C" fn nx_create_library_registry(
     out_handle: *mut *mut NxLibraryRegistryHandle,
 ) -> NxEvalStatus {
     if let Err(status) = prepare_out_library_registry_handle(out_handle) {
@@ -757,8 +812,12 @@ pub extern "C" fn nx_create_library_registry(
     NxEvalStatus::Ok
 }
 
+/// # Safety
+///
+/// `handle` must be a registry this library returned and has not yet freed, or null. It must not
+/// be used again afterwards.
 #[no_mangle]
-pub extern "C" fn nx_free_library_registry(handle: *mut NxLibraryRegistryHandle) {
+pub unsafe extern "C" fn nx_free_library_registry(handle: *mut NxLibraryRegistryHandle) {
     if handle.is_null() {
         return;
     }
@@ -768,8 +827,16 @@ pub extern "C" fn nx_free_library_registry(handle: *mut NxLibraryRegistryHandle)
     }
 }
 
+/// # Safety
+///
+/// `registry_ptr` must be a registry this library returned and has not yet freed.
+///
+/// `root_path_ptr`/`root_path_len` must describe one readable region of that many bytes.
+///
+/// `out_buffer` must point to a writable `NxBuffer` the caller owns; the payload written to it
+/// is released with [`nx_free_buffer`].
 #[no_mangle]
-pub extern "C" fn nx_load_library_into_registry(
+pub unsafe extern "C" fn nx_load_library_into_registry(
     registry_ptr: *const NxLibraryRegistryHandle,
     root_path_ptr: *const u8,
     root_path_len: usize,
@@ -806,8 +873,15 @@ pub extern "C" fn nx_load_library_into_registry(
     finish_msgpack_entry(out_buffer, result)
 }
 
+/// # Safety
+///
+/// `registry_ptr` must be a registry this library returned and has not yet freed; it must outlive
+/// the build context.
+///
+/// `out_handle` must point to a writable slot; a handle written to it is released with
+/// [`nx_free_program_build_context`].
 #[no_mangle]
-pub extern "C" fn nx_create_program_build_context(
+pub unsafe extern "C" fn nx_create_program_build_context(
     registry_ptr: *const NxLibraryRegistryHandle,
     out_handle: *mut *mut NxProgramBuildContextHandle,
 ) -> NxEvalStatus {
@@ -836,8 +910,12 @@ pub extern "C" fn nx_create_program_build_context(
     }
 }
 
+/// # Safety
+///
+/// `handle` must be a build context this library returned and has not yet freed, or null. It must
+/// not be used again afterwards.
 #[no_mangle]
-pub extern "C" fn nx_free_program_build_context(handle: *mut NxProgramBuildContextHandle) {
+pub unsafe extern "C" fn nx_free_program_build_context(handle: *mut NxProgramBuildContextHandle) {
     if handle.is_null() {
         return;
     }
@@ -847,8 +925,12 @@ pub extern "C" fn nx_free_program_build_context(handle: *mut NxProgramBuildConte
     }
 }
 
+/// # Safety
+///
+/// `handle` must be a program artifact this library returned and has not yet freed, or null. It
+/// must not be used again afterwards.
 #[no_mangle]
-pub extern "C" fn nx_free_program_artifact(handle: *mut NxProgramArtifactHandle) {
+pub unsafe extern "C" fn nx_free_program_artifact(handle: *mut NxProgramArtifactHandle) {
     if handle.is_null() {
         return;
     }
@@ -858,8 +940,14 @@ pub extern "C" fn nx_free_program_artifact(handle: *mut NxProgramArtifactHandle)
     }
 }
 
+/// # Safety
+///
+/// `program_artifact_ptr` must be a program artifact this library returned and has not yet freed.
+///
+/// `out_buffer` must point to a writable `NxBuffer` the caller owns; the payload written to it
+/// is released with [`nx_free_buffer`].
 #[no_mangle]
-pub extern "C" fn nx_eval_program_artifact(
+pub unsafe extern "C" fn nx_eval_program_artifact(
     program_artifact_ptr: *const NxProgramArtifactHandle,
     output_format: u32,
     out_buffer: *mut NxBuffer,
@@ -897,8 +985,18 @@ pub extern "C" fn nx_eval_program_artifact(
     finish_output_entry(out_buffer, output_format, result)
 }
 
+/// # Safety
+///
+/// `program_artifact_ptr` must be a program artifact this library returned and has not yet freed.
+///
+/// `logical_module_name_ptr`/`logical_module_name_len` and
+/// `runtime_import_specifier_ptr`/`runtime_import_specifier_len` must each describe one readable
+/// region of that many bytes.
+///
+/// `out_buffer` must point to a writable `NxBuffer` the caller owns; the payload written to it
+/// is released with [`nx_free_buffer`].
 #[no_mangle]
-pub extern "C" fn nx_codegen_js_program_module(
+pub unsafe extern "C" fn nx_codegen_js_program_module(
     program_artifact_ptr: *const NxProgramArtifactHandle,
     logical_module_name_ptr: *const u8,
     logical_module_name_len: usize,
@@ -967,8 +1065,15 @@ pub extern "C" fn nx_codegen_js_program_module(
 /// the JSON diagnostics with [`NxEvalStatus::Error`] when the image is malformed, truncated or of
 /// a schema version this build does not read. The image is validated before it is read, so no
 /// input traps.
+///
+/// # Safety
+///
+/// `image_ptr`/`image_len` must describe one readable region of that many bytes.
+///
+/// `out_buffer` must point to a writable `NxBuffer` the caller owns; the payload written to it
+/// is released with [`nx_free_buffer`].
 #[no_mangle]
-pub extern "C" fn nx_ir_explain(
+pub unsafe extern "C" fn nx_ir_explain(
     image_ptr: *const u8,
     image_len: usize,
     out_buffer: *mut NxBuffer,
@@ -1022,8 +1127,17 @@ pub extern "C" fn nx_ir_explain(
 /// `[{ identity, metadata, offset, length }]`, zero padding to four bytes, then the images at the
 /// offsets the header gives, measured from the start of the payload. On error the payload is the
 /// JSON diagnostics.
+///
+/// # Safety
+///
+/// `program_artifact_ptr` must be a program artifact this library returned and has not yet freed.
+///
+/// `options_ptr`/`options_len` must describe one readable region of that many bytes.
+///
+/// `out_buffer` must point to a writable `NxBuffer` the caller owns; the payload written to it
+/// is released with [`nx_free_buffer`].
 #[no_mangle]
-pub extern "C" fn nx_codegen_nx_ir(
+pub unsafe extern "C" fn nx_codegen_nx_ir(
     program_artifact_ptr: *const NxProgramArtifactHandle,
     options_ptr: *const u8,
     options_len: usize,
@@ -1087,8 +1201,17 @@ pub extern "C" fn nx_codegen_nx_ir(
     finish_output_entry(out_buffer, output_format, result)
 }
 
+/// # Safety
+///
+/// `program_artifact_ptr` must be a program artifact this library returned and has not yet freed.
+///
+/// `component_name_ptr`/`component_name_len` and `props_ptr`/`props_len` must each describe one
+/// readable region of that many bytes.
+///
+/// `out_buffer` must point to a writable `NxBuffer` the caller owns; the payload written to it
+/// is released with [`nx_free_buffer`].
 #[no_mangle]
-pub extern "C" fn nx_component_init_program_artifact(
+pub unsafe extern "C" fn nx_component_init_program_artifact(
     program_artifact_ptr: *const NxProgramArtifactHandle,
     component_name_ptr: *const u8,
     component_name_len: usize,
@@ -1146,8 +1269,18 @@ pub extern "C" fn nx_component_init_program_artifact(
 ///
 /// Successful output is the rendered value directly in the selected format, without lifecycle
 /// state snapshot, effects, or wrapper fields.
+///
+/// # Safety
+///
+/// `program_artifact_ptr` must be a program artifact this library returned and has not yet freed.
+///
+/// `component_name_ptr`/`component_name_len`, `props_ptr`/`props_len` and `state_ptr`/`state_len`
+/// must each describe one readable region of that many bytes.
+///
+/// `out_buffer` must point to a writable `NxBuffer` the caller owns; the payload written to it
+/// is released with [`nx_free_buffer`].
 #[no_mangle]
-pub extern "C" fn nx_component_evaluate_program_artifact(
+pub unsafe extern "C" fn nx_component_evaluate_program_artifact(
     program_artifact_ptr: *const NxProgramArtifactHandle,
     component_name_ptr: *const u8,
     component_name_len: usize,
@@ -1219,8 +1352,18 @@ pub extern "C" fn nx_component_evaluate_program_artifact(
 ///
 /// Successful output carries `rendered` (the body re-rendered against the final state, with fresh
 /// handler tokens), `effects`, and `state_snapshot` in the selected format.
+///
+/// # Safety
+///
+/// `program_artifact_ptr` must be a program artifact this library returned and has not yet freed.
+///
+/// `state_snapshot_ptr`/`state_snapshot_len` and `actions_ptr`/`actions_len` must each describe one
+/// readable region of that many bytes.
+///
+/// `out_buffer` must point to a writable `NxBuffer` the caller owns; the payload written to it
+/// is released with [`nx_free_buffer`].
 #[no_mangle]
-pub extern "C" fn nx_component_dispatch_actions_program_artifact(
+pub unsafe extern "C" fn nx_component_dispatch_actions_program_artifact(
     program_artifact_ptr: *const NxProgramArtifactHandle,
     state_snapshot_ptr: *const u8,
     state_snapshot_len: usize,

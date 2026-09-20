@@ -231,6 +231,7 @@ module.exports = grammar({
         $.primitive_type,
         $.user_defined_type,
         $.function_type,
+        $.applied_type,
         $.parenthesized_type,
       ),
       repeat(choice(
@@ -258,6 +259,26 @@ module.exports = grammar({
       '(',
       field('type', $.type),
       ')',
+    ),
+
+    // An applied type names one instantiation of a generic record, spelled as the element that
+    // constructs it with only its type arguments: `<Range T=int/>`. The tag may be qualified, so
+    // the update companion is named `<Range.Update T=int/>`. `repeat`, not `repeat1`, so a missing
+    // argument is a type-checker diagnostic naming the parameter rather than a parse error.
+    applied_type: $ => seq(
+      '<',
+      field('name', $.qualified_name),
+      repeat(field('arguments', $.type_argument)),
+      '/',
+      '>',
+    ),
+
+    // A type argument binds a parameter by name to any type. A construction site writes the same
+    // binding through `property_value`, where only a bare name reads unambiguously as a type.
+    type_argument: $ => seq(
+      field('name', $.identifier),
+      '=',
+      field('type', $.type),
     ),
 
     primitive_type: $ => choice(
@@ -518,6 +539,10 @@ module.exports = grammar({
         [prec.left, 120, '%'],
         [prec.left, 110, '+'],
         [prec.left, 110, '-'],
+        // The range operators sit between the additive and relational levels, so an arithmetic
+        // operand needs no parentheses and a comparison of two ranges reads left to right.
+        [prec.left, 100, '..='],
+        [prec.left, 100, '..'],
         [prec.left, 90, '<'],
         [prec.left, 90, '>'],
         [prec.left, 90, '<='],

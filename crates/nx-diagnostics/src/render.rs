@@ -84,9 +84,7 @@ pub fn render_diagnostic(diagnostic: &Diagnostic, source_map: &HashMap<String, S
     // Build a cache of sources for ariadne, ensuring every labeled file has an entry.
     let mut cache_inputs: HashMap<String, String> = source_map.clone();
     for label in diagnostic.labels() {
-        cache_inputs
-            .entry(label.file.clone())
-            .or_insert_with(String::new);
+        cache_inputs.entry(label.file.clone()).or_default();
     }
 
     let cache = sources(cache_inputs);

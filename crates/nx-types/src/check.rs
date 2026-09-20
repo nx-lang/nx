@@ -7,7 +7,7 @@ use nx_hir::{
     PreparedModule, PreparedNamespace, SourceId,
 };
 use nx_syntax::{parse_file as syntax_parse_file, parse_str as syntax_parse_str};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::io;
 use std::path::Path;
 use std::sync::Arc;
@@ -45,6 +45,12 @@ pub struct ModuleArtifact {
     /// element is a call of that value with arguments bound by name, not a declared element. Each
     /// maps to the name of the callee type's content parameter, which body content binds to.
     pub function_value_calls: FxHashMap<ElementId, Option<Name>>,
+    /// The `for` expressions whose iterable is a range rather than a list.
+    ///
+    /// <para>After checking, a range expression is an ordinary record construction, so the iterable
+    /// alone no longer says which loop counts and which walks a list. NX IR encodes the two as
+    /// different nodes, so the checker's answer is carried here.</para>
+    pub range_for_expressions: FxHashSet<ExprId>,
     /// The prepared module analysis ran against, with its imports resolved, if parsing succeeded.
     ///
     /// <para>A consumer that needs a declaration's effective shape across modules — a record's
@@ -241,6 +247,7 @@ pub fn analyze_prepared_module(
         .filter_map(|(expr, primitive)| Some((*expr, primitive.hir_type()?)))
         .collect();
     let consumed_type_arguments = ctx.consumed_type_arguments().clone();
+    let range_for_expressions = ctx.range_for_expressions().clone();
     let element_type_arguments = ctx.resolved_type_arguments().clone();
     let function_value_calls = ctx.function_value_calls().clone();
     let (mut type_env, type_diagnostics) = ctx.finish();
@@ -314,6 +321,14 @@ pub fn analyze_prepared_module(
     // the two rewrites above: below here, an element carries value bindings and nothing else.
     nx_hir::remove_property_entries(&mut prepared_module, &consumed_type_arguments);
 
+    // A range expression becomes the record construction it always meant. Below here the operators
+    // leave no trace, so nothing but the checker knows the prelude's `Range` by name. The one node
+    // the pass creates is the `endInclusive` literal, typed so the IR builder sees a type for it
+    // like for every other expression.
+    for created in nx_hir::apply_range_constructions(&mut prepared_module) {
+        type_env.set_expr_type(created, Type::boolean());
+    }
+
     let prepared_bindings = collect_prepared_bindings(&prepared_module);
     let preserved_module = prepared_module.raw_module().clone();
     let source_id = prepared_module.source_id();
@@ -330,6 +345,7 @@ pub fn analyze_prepared_module(
         prepared_bindings,
         element_type_arguments,
         function_value_calls,
+        range_for_expressions,
         prepared_module: Some(Arc::new(prepared_module)),
     }
 }
@@ -445,6 +461,7 @@ fn module_artifact(
         prepared_bindings: Vec::new(),
         element_type_arguments: FxHashMap::default(),
         function_value_calls: FxHashMap::default(),
+        range_for_expressions: FxHashSet::default(),
         prepared_module: None,
     }
 }

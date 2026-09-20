@@ -1,0 +1,40 @@
+{
+  "entry": "main.nx",
+  "emit": [
+    "main.nx"
+  ],
+  "entrypoints": [
+    {
+      "module": "main.nx",
+      "function": "ints"
+    },
+    {
+      "module": "main.nx",
+      "function": "names"
+    },
+    {
+      "module": "main.nx",
+      "function": "first"
+    },
+    {
+      "module": "main.nx",
+      "function": "patch"
+    },
+    {
+      "module": "main.nx",
+      "function": "moved"
+    },
+    {
+      "module": "main.nx",
+      "function": "span"
+    },
+    {
+      "module": "main.nx",
+      "function": "plan"
+    },
+    {
+      "module": "main.nx",
+      "function": "root"
+    }
+  ]
+}

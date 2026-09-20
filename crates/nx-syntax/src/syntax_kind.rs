@@ -30,6 +30,8 @@ pub enum SyntaxKind {
     PRIMITIVE_TYPE,
     USER_DEFINED_TYPE,
     FUNCTION_TYPE,
+    APPLIED_TYPE,
+    TYPE_ARGUMENT,
     PARENTHESIZED_TYPE,
 
     // === Functions ===
@@ -192,6 +194,8 @@ pub enum SyntaxKind {
     GT,
     LT_EQ,
     GT_EQ,
+    DOT_DOT,
+    DOT_DOT_EQ,
     AMP_AMP,
     PIPE_PIPE,
     PIPE,
@@ -267,6 +271,8 @@ impl SyntaxKind {
                 | SyntaxKind::GT
                 | SyntaxKind::LT_EQ
                 | SyntaxKind::GT_EQ
+                | SyntaxKind::DOT_DOT
+                | SyntaxKind::DOT_DOT_EQ
                 | SyntaxKind::AMP_AMP
                 | SyntaxKind::PIPE_PIPE
                 | SyntaxKind::PIPE
@@ -373,6 +379,8 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "primitive_type" => SyntaxKind::PRIMITIVE_TYPE,
         "user_defined_type" => SyntaxKind::USER_DEFINED_TYPE,
         "function_type" => SyntaxKind::FUNCTION_TYPE,
+        "applied_type" => SyntaxKind::APPLIED_TYPE,
+        "type_argument" => SyntaxKind::TYPE_ARGUMENT,
         "parenthesized_type" => SyntaxKind::PARENTHESIZED_TYPE,
         "function_definition" => SyntaxKind::FUNCTION_DEFINITION,
         "component_definition" => SyntaxKind::COMPONENT_DEFINITION,
@@ -514,6 +522,8 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         ">" => SyntaxKind::GT,
         "<=" => SyntaxKind::LT_EQ,
         ">=" => SyntaxKind::GT_EQ,
+        ".." => SyntaxKind::DOT_DOT,
+        "..=" => SyntaxKind::DOT_DOT_EQ,
         "&&" => SyntaxKind::AMP_AMP,
         "||" => SyntaxKind::PIPE_PIPE,
         "|" => SyntaxKind::PIPE,

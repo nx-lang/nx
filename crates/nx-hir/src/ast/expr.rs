@@ -237,6 +237,19 @@ pub enum Expr {
         span: TextSpan,
     },
 
+    /// A range expression: `a..b` or `a..=b`.
+    ///
+    /// <para>Sugar for constructing the prelude's `Range`, and no more than that: the checker types
+    /// it, and a post-check rewrite replaces it with the record construction it means, so nothing
+    /// below the checker — the interpreter, NX IR, generated code — ever sees this node.</para>
+    Range {
+        start: ExprId,
+        end: ExprId,
+        /// `true` for `..=`, whose end is part of the range, and `false` for `..`.
+        inclusive: bool,
+        span: TextSpan,
+    },
+
     /// Unary operation.
     ///
     /// Example: `-x`, `!flag`
@@ -445,6 +458,7 @@ impl Expr {
             Expr::ContextualName { span, .. } => *span,
             Expr::ResolvedUnionCase { span, .. } => *span,
             Expr::BinaryOp { span, .. } => *span,
+            Expr::Range { span, .. } => *span,
             Expr::UnaryOp { span, .. } => *span,
             Expr::Concat { span, .. } => *span,
             Expr::ToText { span, .. } => *span,
@@ -495,8 +509,8 @@ mod tests {
 
     #[test]
     fn test_ordered_float_equality() {
-        let f1 = OrderedFloat(3.14);
-        let f2 = OrderedFloat(3.14);
+        let f1 = OrderedFloat(2.75);
+        let f2 = OrderedFloat(2.75);
         assert_eq!(f1, f2);
 
         let nan1 = OrderedFloat(f64::NAN);

@@ -7,9 +7,9 @@
  * the request body alone, so instances behind a load balancer need no affinity; a small
  * content-keyed cache makes a burst of queries over unchanged text cost one analysis.</para>
  *
- * <para>Everything above the transport — the prelude arithmetic, the cache and the query
- * dispatcher — is `@nx-lang/language-core`, which the in-browser service uses too. What is left
- * here is request parsing, body limits, error responses and the Node listener.</para>
+ * <para>Everything above the transport — the host context, the cache and the query dispatcher — is
+ * `@nx-lang/language-core`, which the in-browser service uses too. What is left here is request
+ * parsing, body limits, error responses and the Node listener.</para>
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
@@ -25,22 +25,18 @@ import {
 import {
   SnapshotCache,
   answerQuery,
+  contextCollision,
+  contextCollisionMessage,
   documentSetKey,
-  preludeOffsets,
-  type PreludeOffsets,
+  type HostContext,
   type SnapshotLike,
 } from "@nx-lang/language-core";
 import { NxLanguageSnapshot, type NxProgramBuildContext } from "@nx-lang/sdk-node";
 
 export {
-  PRELUDE_ORIGIN,
   SnapshotCache,
   documentSetKey,
-  preludeOffsets,
-  shiftPositionIn,
-  shiftRangeOut,
-  withPrelude,
-  type PreludeOffsets,
+  type HostContext,
   type SnapshotLike,
 } from "@nx-lang/language-core";
 
@@ -49,11 +45,15 @@ export interface NxLanguageHandlerOptions {
   /** Libraries every query can see. Without one, names declared only in a library are unresolved. */
   buildContext?: NxProgramBuildContext;
   /**
-   * NX source placed ahead of the queried document before analysis, for hosts whose context
-   * declarations cannot yet be imported without loss. Positions and ranges are shifted so the
-   * client sees only its own coordinates.
+   * The host's own declarations, served with every query: documents that join every query's set, and
+   * the identities every queried document imports implicitly.
+   *
+   * <para>The queried document's text is analyzed exactly as the client sent it, so every position in
+   * a query and every range in an answer is in the document's own coordinates. A diagnostic located
+   * in a context document is reported under that document's URI. A request whose documents include
+   * one with a context document's identity is refused as malformed.</para>
    */
-  prelude?: { source: string };
+  context?: HostContext;
   /** Largest request body accepted, in bytes. Default 1 MiB. */
   maxBodyBytes?: number;
   /** How many analyzed document sets to keep. Default 8. */
@@ -66,7 +66,7 @@ export interface NxLanguageHandlerOptions {
    */
   createSnapshot?: (
     documents: readonly LanguageDocument[],
-    options: { buildContext?: NxProgramBuildContext },
+    options: { buildContext?: NxProgramBuildContext; implicitImports?: readonly string[] },
   ) => SnapshotLike;
 }
 
@@ -80,12 +80,19 @@ const DEFAULT_CACHE_SIZE = 8;
 export function createNxLanguageHandler(options: NxLanguageHandlerOptions = {}): NxLanguageHandler {
   const maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
   const cache = new SnapshotCache<SnapshotLike>(options.cacheSize ?? DEFAULT_CACHE_SIZE);
-  const prelude = options.prelude === undefined ? undefined : preludeOffsets(options.prelude.source);
+  if ("prelude" in options) {
+    throw new TypeError(
+      "createNxLanguageHandler no longer accepts `prelude`. Pass `context: { documents, implicitImports }` instead: the host's declarations join every query's document set and are named as implicit imports, and no position is shifted.",
+    );
+  }
+  const context = options.context;
   const createSnapshot =
     options.createSnapshot ??
     ((documents, snapshotOptions) => new NxLanguageSnapshot(documents, snapshotOptions));
-  const snapshotOptions: { buildContext?: NxProgramBuildContext } =
-    options.buildContext === undefined ? {} : { buildContext: options.buildContext };
+  const snapshotOptions: { buildContext?: NxProgramBuildContext; implicitImports?: readonly string[] } = {
+    ...(options.buildContext === undefined ? {} : { buildContext: options.buildContext }),
+    ...(context?.implicitImports === undefined ? {} : { implicitImports: Array.from(context.implicitImports) }),
+  };
 
   return async (request: Request): Promise<Response> => {
     const query = lastPathSegment(request.url);
@@ -117,9 +124,18 @@ export function createNxLanguageHandler(options: NxLanguageHandlerOptions = {}):
       return errorResponse(400, "invalid-request", validated.problem, query);
     }
     const { documents, uri, position } = validated;
+    const collision = contextCollision(documents, context);
+    if (collision !== undefined) {
+      return errorResponse(
+        400,
+        "invalid-request",
+        contextCollisionMessage(collision, "request"),
+        query,
+      );
+    }
 
     try {
-      const answer = answerQuery(query, { documents, uri, position }, prelude, (analyzed) =>
+      const answer = answerQuery(query, { documents, uri, position }, context, (analyzed) =>
         cache.getOrCreate(documentSetKey(analyzed), () => createSnapshot(analyzed, snapshotOptions)),
       );
       return jsonResponse(200, answer);

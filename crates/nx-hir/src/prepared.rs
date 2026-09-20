@@ -133,6 +133,8 @@ pub enum InterfaceItemKind {
         kind: RecordKind,
         is_abstract: bool,
         base: Option<Name>,
+        /// Type parameters, in declaration order, so an importing module can apply the record.
+        type_params: Vec<TypeParameter>,
         properties: Vec<InterfaceField>,
         span: TextSpan,
     },
@@ -741,6 +743,7 @@ pub fn interface_record(item: &InterfaceItem) -> Option<crate::RecordDef> {
             kind,
             is_abstract,
             base,
+            type_params,
             properties,
             span,
         } => Some(crate::RecordDef {
@@ -749,6 +752,7 @@ pub fn interface_record(item: &InterfaceItem) -> Option<crate::RecordDef> {
             kind: kind.clone(),
             is_abstract: *is_abstract,
             base: base.clone(),
+            type_params: type_params.clone(),
             properties: properties
                 .iter()
                 .map(|field| RecordField {

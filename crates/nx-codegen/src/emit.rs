@@ -50,6 +50,7 @@ const JS_PROGRAM_MODULE_RESERVED_RUNTIME_NAMES: &[&str] = &[
     "nxNullableSchema",
     "nxNumberSchema",
     "nxRejectUnknownFields",
+    "nxRangeMap",
     "nxRecordSchema",
     "nxRuntimeError",
     "nxStringSchema",
@@ -565,6 +566,21 @@ impl EmitContext {
                 CodegenDeclarationKind::Component(component) => Some(component),
                 _ => None,
             })
+    }
+
+    /// The type parameters of the record `reference` names, in declaration order.
+    fn record_type_params(&self, reference: &CodegenReference) -> Vec<String> {
+        self.module(reference.module_id)
+            .and_then(|module| {
+                module.declarations.iter().find(|declaration| {
+                    ReferenceKey::new(&declaration.reference) == ReferenceKey::new(reference)
+                })
+            })
+            .and_then(|declaration| match &declaration.kind {
+                CodegenDeclarationKind::Record { type_params, .. } => Some(type_params.clone()),
+                _ => None,
+            })
+            .unwrap_or_default()
     }
 
     fn type_reference(
@@ -1163,11 +1179,18 @@ fn emit_declaration(
                 ));
             }
         }
-        CodegenDeclarationKind::Record { fields, .. } => {
+        CodegenDeclarationKind::Record {
+            fields,
+            type_params,
+            ..
+        } => {
             if target.is_typescript() {
                 emit_record_type(
-                    &name,
-                    &declaration.reference.name,
+                    RecordTypeHeader {
+                        name: &name,
+                        runtime_name: &declaration.reference.name,
+                        type_params,
+                    },
                     fields,
                     module,
                     context,
@@ -1248,19 +1271,40 @@ fn emit_declaration(
     }
 }
 
+/// How a record type is named where it is declared: the generated name, the `$type` the runtime
+/// stamps, and the type parameters it declares.
+struct RecordTypeHeader<'a> {
+    name: &'a str,
+    runtime_name: &'a str,
+    /// Empty for a union case and for a non-generic record.
+    type_params: &'a [String],
+}
+
 fn emit_record_type(
-    name: &str,
-    runtime_name: &str,
+    header: RecordTypeHeader<'_>,
     fields: &[CodegenRecordField],
     module: &CodegenModule,
     context: &EmitContext,
     export_policy: ExportPolicy<'_>,
     out: &mut String,
 ) {
+    let RecordTypeHeader {
+        name,
+        runtime_name,
+        type_params,
+    } = header;
+    // A generic record is a real generic here, with no default: NX never leaves a record's type
+    // argument unspecified, so a TypeScript caller should not be able to either.
+    let generics = if type_params.is_empty() {
+        String::new()
+    } else {
+        format!("<{}>", type_params.join(", "))
+    };
     out.push_str(&format!(
-        "{}type {} = {{\n",
+        "{}type {}{} = {{\n",
         export_policy.prefix(name),
-        name
+        name,
+        generics
     ));
     out.push_str(&format!("  readonly $type: {};\n", js_string(runtime_name)));
     for field in fields {
@@ -1269,10 +1313,65 @@ fn emit_record_type(
             "  readonly {}{}: {};\n",
             safe_object_key(&field.name),
             optional,
-            emit_type_ref(module.id, &field.ty, module, context)
+            emit_record_field_type(module, &field.ty, type_params, context)
         ));
     }
     out.push_str("};\n");
+}
+
+/// A record field's type with the record's own type parameters spelled as themselves.
+fn emit_record_field_type(
+    module: &CodegenModule,
+    ty: &TypeRef,
+    type_params: &[String],
+    context: &EmitContext,
+) -> String {
+    match ty {
+        TypeRef::Name(name) if type_params.iter().any(|param| param == name.as_str()) => {
+            name.as_str().to_string()
+        }
+        TypeRef::Array(inner) => {
+            emit_array_type(emit_record_field_type(module, inner, type_params, context))
+        }
+        TypeRef::Nullable(inner) => format!(
+            "{} | null",
+            emit_record_field_type(module, inner, type_params, context)
+        ),
+        TypeRef::Applied { name, args } => {
+            emit_applied_type(module, name.as_str(), args, context, &|inner| {
+                emit_record_field_type(module, inner, type_params, context)
+            })
+        }
+        _ => emit_type_ref(module.id, ty, module, context),
+    }
+}
+
+/// Emits an applied type as the instantiation of its record, with arguments in the record's
+/// declaration order whatever order the source wrote them in.
+fn emit_applied_type(
+    module: &CodegenModule,
+    name: &str,
+    args: &[(nx_hir::Name, TypeRef)],
+    context: &EmitContext,
+    emit_argument: &dyn Fn(&TypeRef) -> String,
+) -> String {
+    let base = emit_named_type(module.id, name, module, context);
+    let order = context
+        .type_reference(module.id, name)
+        .map(|reference| context.record_type_params(&reference))
+        .unwrap_or_default();
+    let rendered: Vec<String> = order
+        .iter()
+        .filter_map(|param| {
+            args.iter()
+                .find(|(arg, _)| arg.as_str() == param)
+                .map(|(_, ty)| emit_argument(ty))
+        })
+        .collect();
+    if rendered.is_empty() {
+        return base;
+    }
+    format!("{}<{}>", base, rendered.join(", "))
 }
 
 fn emit_union_type(
@@ -1301,8 +1400,12 @@ fn emit_union_type(
             continue;
         }
         emit_record_type(
-            case_type_name,
-            &format!("{}.{}", runtime_name, case.name),
+            RecordTypeHeader {
+                name: case_type_name,
+                runtime_name: &format!("{}.{}", runtime_name, case.name),
+                // A union case takes no type parameters.
+                type_params: &[],
+            },
             &case.fields,
             module,
             context,
@@ -1496,6 +1599,13 @@ fn emit_generic_prop_type(
             "{} | null",
             emit_generic_prop_type(module, inner, component, context)
         ),
+        // An applied type's arguments follow the same rule as the prop itself, so a component
+        // parameter used as one keeps its name.
+        TypeRef::Applied { name, args } => {
+            emit_applied_type(module, name.as_str(), args, context, &|inner| {
+                emit_generic_prop_type(module, inner, component, context)
+            })
+        }
         TypeRef::Function { .. } => emit_type_ref(module.id, ty, module, context),
     }
 }
@@ -1527,6 +1637,11 @@ fn emit_erased_field_type(
             "{} | null",
             emit_erased_field_type(module, inner, component, context)
         ),
+        TypeRef::Applied { name, args } => {
+            emit_applied_type(module, name.as_str(), args, context, &|inner| {
+                emit_erased_field_type(module, inner, component, context)
+            })
+        }
         TypeRef::Function { .. } => emit_type_ref(module.id, ty, module, context),
     }
 }
@@ -1664,9 +1779,11 @@ fn emit_component_props_resolver(
     out: &mut String,
 ) {
     let names = context.component_names(reference);
-    let default_value = component_props_can_default(component)
-        .then_some(" = {}")
-        .unwrap_or("");
+    let default_value = if component_props_can_default(component) {
+        " = {}"
+    } else {
+        ""
+    };
     if target.is_typescript() {
         let generics = component_generics(component);
         out.push_str(&format!(
@@ -1710,9 +1827,11 @@ fn emit_component_descriptor_factory(
     out: &mut String,
 ) {
     let names = context.component_names(reference);
-    let default_value = component_props_can_default(component)
-        .then_some(" = {}")
-        .unwrap_or("");
+    let default_value = if component_props_can_default(component) {
+        " = {}"
+    } else {
+        ""
+    };
     let export_prefix = export_policy.prefix(name);
     if target.is_typescript() {
         let generics = component_generics(component);
@@ -1763,9 +1882,11 @@ fn emit_component_initial_state(
         .initial_state_function
         .as_deref()
         .expect("stateful component should have an initial state helper");
-    let default_value = component_props_can_default(component)
-        .then_some(" = {}")
-        .unwrap_or("");
+    let default_value = if component_props_can_default(component) {
+        " = {}"
+    } else {
+        ""
+    };
     let export_prefix = export_policy.prefix(function_name);
     if target.is_typescript() {
         out.push_str(&format!(
@@ -2319,7 +2440,7 @@ fn emit_field_object_return(fields: &[CodegenComponentField], indent: &str, out:
     out.push_str("return {");
     for (index, field) in fields.iter().enumerate() {
         if index > 0 {
-            out.push_str(",");
+            out.push(',');
         }
         out.push_str(&format!(
             " {}: __nx_field_{}",
@@ -2378,7 +2499,9 @@ fn emit_type_schema_inner(
     seen: &mut FxHashSet<ReferenceKey>,
 ) -> String {
     match ty {
-        TypeRef::Name(name) => emit_named_type_schema(
+        // A schema validates a host value against the erased shape, so an applied type is its
+        // record and its arguments contribute nothing.
+        TypeRef::Name(name) | TypeRef::Applied { name, .. } => emit_named_type_schema(
             current_module_id,
             schema_module_id,
             name.as_str(),
@@ -2728,6 +2851,11 @@ fn emit_type_ref(
 ) -> String {
     match ty {
         TypeRef::Name(name) => emit_named_type(current_module_id, name.as_str(), module, context),
+        TypeRef::Applied { name, args } => {
+            emit_applied_type(module, name.as_str(), args, context, &|inner| {
+                emit_type_ref(current_module_id, inner, module, context)
+            })
+        }
         TypeRef::Array(inner) => {
             emit_array_type(emit_type_ref(current_module_id, inner, module, context))
         }
@@ -3029,11 +3157,22 @@ fn emit_expression(
             index,
             iterable,
             body,
+            over_range,
         } => {
             let index_name = index.as_deref().unwrap_or("_index");
+            // A range is not a JavaScript iterable, so counting it is a helper that takes the
+            // callback rather than an array that is then mapped. Only the call around the callback
+            // differs, so the body is emitted once either way.
+            let (open, close) = if *over_range {
+                ("nxRangeMap(", ", ")
+            } else {
+                ("Array.from(", ").map(")
+            };
             format!(
-                "Array.from({}).map(({}, {}) => {})",
+                "{}{}{}({}, {}) => {})",
+                open,
                 emit_expression(current_module_id, iterable, context),
+                close,
                 safe_identifier(item),
                 safe_identifier(index_name),
                 emit_expression(current_module_id, body, context)
@@ -3689,6 +3828,13 @@ fn collect_type_ref_schema_value_references(
                 output.push(reference.clone());
             }
         }
+        TypeRef::Applied { name, .. } => {
+            if let Some(reference) = module.imports.iter().find(|reference| {
+                reference.name == name.as_str() && reference.kind == ResolvedItemKind::Component
+            }) {
+                output.push(reference.clone());
+            }
+        }
         TypeRef::Array(inner) | TypeRef::Nullable(inner) => {
             collect_type_ref_schema_value_references(module, inner, output);
         }
@@ -3711,6 +3857,12 @@ fn collect_type_ref_references(
 ) {
     match ty {
         TypeRef::Name(name) => collect_named_type_reference(module, name.as_str(), output),
+        TypeRef::Applied { name, args } => {
+            collect_named_type_reference(module, name.as_str(), output);
+            for (_, arg) in args {
+                collect_type_ref_references(module, arg, output);
+            }
+        }
         TypeRef::Array(inner) | TypeRef::Nullable(inner) => {
             collect_type_ref_references(module, inner, output);
         }
@@ -4021,7 +4173,7 @@ fn collect_module_runtime_helpers(
         collect_declaration_runtime_helpers(declaration, target, &mut helpers);
     }
     let mut output = JS_PROGRAM_MODULE_RESERVED_RUNTIME_NAMES
-        .into_iter()
+        .iter()
         .copied()
         .filter(|helper| target.is_typescript() || !matches!(*helper, "NxResult" | "NxValue"))
         .filter(|helper| helpers.contains(*helper))
@@ -4104,7 +4256,8 @@ fn collect_component_schema_runtime_helpers(
 
 fn collect_type_ref_schema_runtime_helpers(ty: &TypeRef, output: &mut FxHashSet<&'static str>) {
     match ty {
-        TypeRef::Name(name) => match name.as_str() {
+        // An applied type's schema is its record's, so it needs the helpers a nominal name needs.
+        TypeRef::Name(name) | TypeRef::Applied { name, .. } => match name.as_str() {
             "int" | "int32" | "int64" | "float64" => {
                 output.insert("nxNumberSchema");
             }
@@ -4154,7 +4307,15 @@ fn collect_expression_runtime_helpers(
                 collect_expression_runtime_helpers(element, output);
             }
         }
-        CodegenExpressionKind::For { iterable, body, .. } => {
+        CodegenExpressionKind::For {
+            iterable,
+            body,
+            over_range,
+            ..
+        } => {
+            if *over_range {
+                output.insert("nxRangeMap");
+            }
             collect_expression_runtime_helpers(iterable, output);
             collect_expression_runtime_helpers(body, output);
         }

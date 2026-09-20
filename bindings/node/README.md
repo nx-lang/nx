@@ -151,6 +151,24 @@ const snapshot = new NxLanguageSnapshot(documents, { buildContext });
 Without one, a name that only a library declares is unresolved — hover says nothing about it and
 diagnostics report the import as missing, exactly as the compiler would without that context.
 
+**Implicit imports.** A host whose own declarations live in documents of its own can have every
+queried document import them without an import line:
+
+```ts
+const snapshot = new NxLanguageSnapshot(
+  [
+    { uri: "nx://host/catalog.nx", source: catalog },
+    { uri: "nx://tenant/form.nx", source }
+  ],
+  { implicitImports: ["host/catalog.nx"] }
+);
+```
+
+Each identity must name a document of the snapshot. Nothing is prepended and no position is moved:
+every diagnostic and every range is in its own document's coordinates, and a diagnostic in the host's
+document is reported under that document's URI. An empty list leaves a build context's own implicit
+imports as they are.
+
 ## Program Artifacts
 
 ```ts

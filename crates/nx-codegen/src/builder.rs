@@ -35,15 +35,14 @@ pub fn build_codegen_program(artifact: &ProgramArtifact) -> Result<CodegenProgra
     let mut prepared_cache = PreparedModuleCache::default();
     let referenced_updates = referenced_derived_declarations(artifact);
     for module in artifact.resolved_program.modules() {
-        match build_module(
+        if let Some(module) = build_module(
             artifact,
             module,
             &mut prepared_cache,
             &referenced_updates,
             &mut diagnostics,
         ) {
-            Some(module) => modules.push(module),
-            None => {}
+            modules.push(module)
         }
     }
 
@@ -243,10 +242,19 @@ fn build_module(
         return None;
     };
 
+    // The prelude's image is the one a runtime ships, so it carries every declaration a using
+    // image could reference, derived ones included, rather than only those this program reached.
+    let is_prelude = matches!(
+        &module.source,
+        ResolvedModuleSource::Library { module_path, .. }
+            if module_path == std::path::Path::new(nx_hir::PRELUDE_MODULE_IDENTITY)
+    );
+
     let mut declarations = Vec::new();
     for (index, item) in lowered_module.items().iter().enumerate() {
         let definition_id = LocalDefinitionId::new(index as u32);
         if is_derived_item(item)
+            && !is_prelude
             && !referenced_updates.contains(&(module.id.as_u32(), definition_id))
         {
             continue;
@@ -345,10 +353,9 @@ impl PreparedModuleCache {
         module: &ResolvedModule,
     ) -> &'a PreparedModule {
         let key = module.id.as_u32();
-        if !self.modules.contains_key(&key) {
-            let prepared = build_prepared_module_for(artifact, module);
-            self.modules.insert(key, prepared);
-        }
+        self.modules
+            .entry(key)
+            .or_insert_with(|| build_prepared_module_for(artifact, module));
 
         self.modules
             .get(&key)
@@ -373,7 +380,7 @@ fn build_declaration(
             for param in &function.params {
                 scope.insert(param.name.as_str());
             }
-            let Some(body) = build_expression(
+            let body = build_expression(
                 artifact,
                 resolved_module,
                 prepared_cache,
@@ -382,9 +389,7 @@ fn build_declaration(
                 function.body,
                 &mut scope,
                 diagnostics,
-            ) else {
-                return None;
-            };
+            )?;
             CodegenDeclarationKind::Function {
                 params: build_params(
                     artifact,
@@ -399,7 +404,7 @@ fn build_declaration(
         }
         Item::Value(value) => {
             let mut scope = LexicalScope::new();
-            let Some(expr) = build_expression(
+            let expr = build_expression(
                 artifact,
                 resolved_module,
                 prepared_cache,
@@ -408,9 +413,7 @@ fn build_declaration(
                 value.value,
                 &mut scope,
                 diagnostics,
-            ) else {
-                return None;
-            };
+            )?;
             CodegenDeclarationKind::Value {
                 value: expr,
                 ty: type_env.get_expr_type(value.value).cloned(),
@@ -424,21 +427,37 @@ fn build_declaration(
                 record,
                 diagnostics,
             )?;
-            let type_params = update_record_type_params(
+            let erased_params = erased_record_type_params(
                 artifact,
                 resolved_module,
                 prepared_cache,
                 lowered_module,
                 record,
             );
+            let mut fields = build_effective_record_fields(
+                artifact,
+                resolved_module,
+                prepared_cache,
+                &erase_effective_field_type_parameters(&shape.fields, &erased_params),
+                diagnostics,
+            )?;
+            // A plain generic record is emitted as a real generic, so each field keeps the type
+            // reference as written; only `resolved_ty`, which IR reads, is erased.
+            let own_params: Vec<String> = if record.update_target().is_none() {
+                for (field, source) in fields.iter_mut().zip(&shape.fields) {
+                    field.ty = source.ty.clone();
+                }
+                record
+                    .type_params
+                    .iter()
+                    .map(|param| param.name.as_str().to_string())
+                    .collect()
+            } else {
+                Vec::new()
+            };
             CodegenDeclarationKind::Record {
-                fields: build_effective_record_fields(
-                    artifact,
-                    resolved_module,
-                    prepared_cache,
-                    &erase_effective_field_type_parameters(&shape.fields, &type_params),
-                    diagnostics,
-                )?,
+                fields,
+                type_params: own_params,
                 bases: record_ancestor_references(
                     artifact,
                     resolved_module,
@@ -521,7 +540,7 @@ fn build_component(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<CodegenComponent> {
     let prepared = prepared_cache.get(artifact, resolved_module);
-    let contract = match nx_hir::effective_component_contract(&prepared, component) {
+    let contract = match nx_hir::effective_component_contract(prepared, component) {
         Ok(contract) => contract,
         Err(error) => {
             diagnostics.push(component_resolution_diagnostic(resolved_module, &error));
@@ -1581,11 +1600,17 @@ fn build_expression(
             );
             scope.pop();
             let body = body?;
+            // Whether this loop counts over a range is the checker's answer, carried in the
+            // module's analysis: below the checker the iterable is a record construction like any
+            // other.
+            let over_range = module_artifact_for(artifact, resolved_module)
+                .is_some_and(|module| module.range_for_expressions.contains(&expr_id));
             CodegenExpressionKind::For {
                 item: item.as_str().to_string(),
                 index: index.as_ref().map(|name| name.as_str().to_string()),
                 iterable: Box::new(iterable),
                 body: Box::new(body),
+                over_range,
             }
         }
         ast::Expr::Index { base, index, .. } => {
@@ -1736,21 +1761,16 @@ fn build_expression(
                 is_update: shape.is_update,
             }
         }
-        ast::Expr::Element { element, .. } => {
-            let Some(kind) = build_element_expression(
-                artifact,
-                resolved_module,
-                lowered_module,
-                type_env,
-                *element,
-                prepared_cache,
-                scope,
-                diagnostics,
-            ) else {
-                return None;
-            };
-            kind
-        }
+        ast::Expr::Element { element, .. } => build_element_expression(
+            artifact,
+            resolved_module,
+            lowered_module,
+            type_env,
+            *element,
+            prepared_cache,
+            scope,
+            diagnostics,
+        )?,
         // A handler is always the value of an element property, which `build_element_expression`
         // builds with the element's own component reference.
         ast::Expr::ActionHandler { span, .. } => {
@@ -1776,6 +1796,16 @@ fn build_expression(
                 resolved_module,
                 *span,
                 "unresolved contextual name cannot be emitted",
+            ));
+            return None;
+        }
+        // A range expression is rewritten into a record construction after checking, so one
+        // reaching here means analysis was skipped.
+        ast::Expr::Range { span, .. } => {
+            diagnostics.push(unsupported_diagnostic(
+                resolved_module,
+                *span,
+                "a range expression must be rewritten into a record construction before emission",
             ));
             return None;
         }
@@ -2108,15 +2138,13 @@ fn build_function_element_call(
     content: Vec<CodegenExpression>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<CodegenExpressionKind> {
-    let Some(params) = function_params_from_reference(
+    let params = function_params_from_reference(
         artifact,
         resolved_module,
         prepared_cache,
         &function_reference,
         diagnostics,
-    ) else {
-        return None;
-    };
+    )?;
 
     let mut consumed = FxHashSet::default();
     let mut args = Vec::with_capacity(params.len());
@@ -2215,7 +2243,7 @@ fn build_component_descriptor_expression(
     }
 
     let prepared = prepared_cache.get(artifact, target_module);
-    let contract = match nx_hir::effective_component_contract(&prepared, component) {
+    let contract = match nx_hir::effective_component_contract(prepared, component) {
         Ok(contract) => contract,
         Err(error) => {
             diagnostics.push(component_resolution_diagnostic(target_module, &error));
@@ -2268,27 +2296,25 @@ fn function_params_from_reference(
         return None;
     };
 
-    Some(
-        function
-            .params
-            .iter()
-            .map(|param| {
-                Some(CodegenParam {
-                    name: param.name.as_str().to_string(),
-                    ty: param.ty.clone(),
-                    resolved_ty: build_type_ref(
-                        artifact,
-                        target_module,
-                        prepared_cache,
-                        &param.ty,
-                        diagnostics,
-                    )?,
-                    is_content: param.is_content,
-                    span: param.span,
-                })
+    function
+        .params
+        .iter()
+        .map(|param| {
+            Some(CodegenParam {
+                name: param.name.as_str().to_string(),
+                ty: param.ty.clone(),
+                resolved_ty: build_type_ref(
+                    artifact,
+                    target_module,
+                    prepared_cache,
+                    &param.ty,
+                    diagnostics,
+                )?,
+                is_content: param.is_content,
+                span: param.span,
             })
-            .collect::<Option<Vec<_>>>()?,
-    )
+        })
+        .collect::<Option<Vec<_>>>()
 }
 
 fn content_expression(content: Vec<CodegenExpression>, span: TextSpan) -> CodegenExpression {
@@ -2486,7 +2512,7 @@ fn build_union_case_from_reference(
         artifact,
         target_module,
         prepared_cache,
-        &union_def,
+        union_def,
         case_def,
         diagnostics,
     ) else {
@@ -2573,10 +2599,10 @@ fn record_literal_shape(
         artifact,
         target_module,
         prepared_cache,
-        &record_def,
+        record_def,
         diagnostics,
     )?;
-    let type_params = update_record_type_params(
+    let type_params = erased_record_type_params(
         artifact,
         target_module,
         prepared_cache,
@@ -2605,13 +2631,22 @@ fn record_literal_shape(
 /// by a type parameter. Outside the component that parameter is not a type, and no host names the
 /// instantiation of an update — it was fixed at an NX use site — so the record's fields erase it
 /// the way the component's own state schema does.</para>
-fn update_record_type_params(
+fn erased_record_type_params(
     artifact: &ProgramArtifact,
     resolved_module: &ResolvedModule,
     prepared_cache: &mut PreparedModuleCache,
     lowered_module: &LoweredModule,
     record: &nx_hir::RecordDef,
 ) -> Vec<Name> {
+    // A generic record's own parameters are erased in the IR field schema, and so are its update
+    // companion's, which declares the same ones.
+    if !record.type_params.is_empty() {
+        return record
+            .type_params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect();
+    }
     let Some(target) = record.update_target() else {
         return Vec::new();
     };
@@ -2771,6 +2806,17 @@ fn build_type_ref_resolving_aliases(
                 display: name.as_str().to_string(),
             })
         }
+        // IR carries no type arguments: an applied type is the nominal reference to its record,
+        // and a field typed by one of that record's parameters is `object`. Reading the tag alone
+        // is the whole of it, so the type table keeps the kinds it had and the schema is unchanged.
+        ast::TypeRef::Applied { name, .. } => build_type_ref_resolving_aliases(
+            artifact,
+            resolved_module,
+            prepared_cache,
+            &ast::TypeRef::Name(name.clone()),
+            aliases,
+            diagnostics,
+        ),
         ast::TypeRef::Array(element) => Some(CodegenTypeRef::Array {
             element: Box::new(build_type_ref_resolving_aliases(
                 artifact,

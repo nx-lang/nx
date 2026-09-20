@@ -388,9 +388,7 @@ impl LoweringContext {
         let qualifier = node.child_by_field("alias").and_then(|alias_node| {
             let alias_text = alias_node.text();
             let mut parts = alias_text.split('.');
-            let Some(prefix) = parts.next() else {
-                return None;
-            };
+            let prefix = parts.next()?;
             let Some(imported_suffix) = parts.next() else {
                 self.add_diagnostic(
                     format!(
@@ -700,6 +698,28 @@ impl LoweringContext {
             .collect()
     }
 
+    /// The type parameters `node` declares, without diagnostics.
+    ///
+    /// <para>The mirror of [`Self::lower_field_signatures`]: predeclaration runs before the
+    /// declaration itself is lowered, and a duplicate should be reported once, by the lowering.</para>
+    fn type_parameter_signatures(&self, node: SyntaxNode) -> Vec<TypeParameter> {
+        let mut params: Vec<TypeParameter> = Vec::new();
+        for prop in node
+            .children()
+            .filter(|child| property_definition_is_type_parameter(child))
+        {
+            let name = Self::property_definition_name(prop);
+            if params.iter().any(|param| param.name == name) {
+                continue;
+            }
+            params.push(TypeParameter {
+                name,
+                span: prop.span(),
+            });
+        }
+        params
+    }
+
     /// Synthesizes and registers the derived update record and property union for one
     /// record-shaped declaration.
     ///
@@ -711,6 +731,7 @@ impl LoweringContext {
         &mut self,
         target: &Name,
         visibility: Visibility,
+        type_params: &[TypeParameter],
         fields: &[RecordField],
         span: TextSpan,
     ) {
@@ -722,6 +743,9 @@ impl LoweringContext {
             },
             is_abstract: false,
             base: None,
+            // The update record mirrors its target's fields, so it carries the same parameters and
+            // is named the same way: `<Range.Update T=int/>`.
+            type_params: type_params.to_vec(),
             properties: fields
                 .iter()
                 .map(|field| RecordField {
@@ -765,10 +789,16 @@ impl LoweringContext {
             let Some(name) = child.child_by_field("name").map(|n| Name::new(n.text())) else {
                 continue;
             };
+            let type_params = if child.kind() == SyntaxKind::RECORD_DEFINITION {
+                self.type_parameter_signatures(child)
+            } else {
+                Vec::new()
+            };
             let fields = self.lower_field_signatures(child);
             self.predeclare_update_record(
                 &name,
                 Self::lower_visibility(child),
+                &type_params,
                 &fields,
                 child.span(),
             );
@@ -931,7 +961,8 @@ impl LoweringContext {
             .map(|state| self.lower_field_signatures(state))
             .unwrap_or_default();
         if !state_fields.is_empty() {
-            self.predeclare_update_record(&name, visibility, &state_fields, node.span());
+            // A component's update record derives from its state, which is not generic.
+            self.predeclare_update_record(&name, visibility, &[], &state_fields, node.span());
         }
 
         let type_params = self.lower_type_parameters(signature);
@@ -991,6 +1022,7 @@ impl LoweringContext {
                             base: emit_node
                                 .child_by_field("base")
                                 .map(|base| Name::new(base.text())),
+                            type_params: Vec::new(),
                             properties: self.lower_record_fields_from_node(emit_node, false),
                             span: emit_node.span(),
                         };
@@ -999,6 +1031,7 @@ impl LoweringContext {
                         self.predeclare_update_record(
                             &action_name,
                             visibility,
+                            &record.type_params,
                             &record.properties,
                             record.span,
                         );
@@ -1261,6 +1294,22 @@ impl LoweringContext {
                     .child_by_field("right")
                     .map(|n| self.lower_expr(n))
                     .unwrap_or_else(|| self.error_expr(node.span()));
+
+                // A range operator lowers to its own node rather than a `BinOp`: every consumer
+                // of a binary operation assumes a primitive result, and a range is a record.
+                let inclusive = node.children_with_tokens().find_map(|n| match n.kind() {
+                    SyntaxKind::DOT_DOT => Some(false),
+                    SyntaxKind::DOT_DOT_EQ => Some(true),
+                    _ => None,
+                });
+                if let Some(inclusive) = inclusive {
+                    return self.alloc_expr(Expr::Range {
+                        start: lhs,
+                        end: rhs,
+                        inclusive,
+                        span: node.span(),
+                    });
+                }
 
                 // Find operator
                 let op = node.children_with_tokens().find_map(|n| match n.kind() {
@@ -1795,6 +1844,36 @@ impl LoweringContext {
                     .unwrap_or_else(|| TypeRef::name("unknown"));
                 TypeRef::function(params, return_type)
             }
+            SyntaxKind::APPLIED_TYPE => {
+                // The tag goes through the same bare-name resolution a written type name does,
+                // which inside a component rewrites a bare `Property` to that component's
+                // property union. A bare `Update` tag is not rewritten here: that is
+                // `resolve_bare_update_tag`, which belongs to element lowering, and a component's
+                // update record has no type parameters to apply in the first place.
+                let name = match node
+                    .child_by_field("name")
+                    .map(|name| self.resolve_bare_property_type(name.text()))
+                {
+                    Some(TypeRef::Name(name)) => name,
+                    _ => Name::new("unknown"),
+                };
+                let args = node
+                    .children()
+                    .filter(|child| child.kind() == SyntaxKind::TYPE_ARGUMENT)
+                    .map(|argument| {
+                        let arg_name = argument
+                            .child_by_field("name")
+                            .map(|name| Name::new(name.text()))
+                            .unwrap_or_else(|| Name::new("unknown"));
+                        let ty = argument
+                            .child_by_field("type")
+                            .map(|ty| self.lower_type(ty))
+                            .unwrap_or_else(|| TypeRef::name("unknown"));
+                        (arg_name, ty)
+                    })
+                    .collect();
+                TypeRef::Applied { name, args }
+            }
             SyntaxKind::IDENTIFIER => self.resolve_bare_property_type(node.text()),
             SyntaxKind::USER_DEFINED_TYPE => node
                 .children()
@@ -1869,6 +1948,28 @@ impl LoweringContext {
             .map(|n| Name::new(n.text()))
             .unwrap_or_else(|| Name::new("unknown"));
 
+        // Only a `type` record takes type parameters; validation has already rejected a
+        // `Name:type` definition in an `action`, so lowering leaves one out of both lists.
+        let type_params = if kind == RecordKind::Plain {
+            self.lower_type_parameters(node)
+        } else {
+            Vec::new()
+        };
+        let properties = self.lower_record_fields_from_node(node, false);
+        for field in &properties {
+            if let Some(param) = type_params.iter().find(|param| param.name == field.name) {
+                self.add_diagnostic(
+                    format!(
+                        "Field '{}' has the same name as type parameter '{}' of record '{}'",
+                        field.name.as_str(),
+                        param.name.as_str(),
+                        name.as_str()
+                    ),
+                    field.span,
+                );
+            }
+        }
+
         RecordDef {
             name,
             visibility: Self::lower_visibility(node),
@@ -1877,7 +1978,8 @@ impl LoweringContext {
             base: node
                 .child_by_field("base")
                 .map(|base| Name::new(base.text())),
-            properties: self.lower_record_fields_from_node(node, false),
+            type_params,
+            properties,
             span: node.span(),
         }
     }
@@ -5463,6 +5565,45 @@ type Mode = light | dark"#;
         );
     }
 
+    /// Both range operators lower to `Expr::Range`, which is the one node the checker types and
+    /// then rewrites away.
+    #[test]
+    fn range_operators_lower_to_a_range_expression() {
+        for (source, expected_inclusive) in [("let r = {1..5}", false), ("let r = {1..=5}", true)] {
+            let module = lower_source(source, "ranges.nx");
+            assert!(
+                module.diagnostics().is_empty(),
+                "{source}: {:?}",
+                module.diagnostics()
+            );
+
+            let range = module
+                .exprs()
+                .find_map(|(_, expr)| match expr {
+                    Expr::Range {
+                        start,
+                        end,
+                        inclusive,
+                        ..
+                    } => Some((*start, *end, *inclusive)),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{source} lowers to a range expression"));
+
+            assert_eq!(range.2, expected_inclusive, "{source}");
+            assert!(
+                matches!(module.expr(range.0), Expr::Literal(Literal::Int(1))),
+                "{source}: start is the literal 1, got {:?}",
+                module.expr(range.0)
+            );
+            assert!(
+                matches!(module.expr(range.1), Expr::Literal(Literal::Int(5))),
+                "{source}: end is the literal 5, got {:?}",
+                module.expr(range.1)
+            );
+        }
+    }
+
     fn lower_source(source: &str, file_name: &str) -> LoweredModule {
         let parse_result = parse_str(source, file_name);
         let tree = parse_result.tree.expect("Source should parse");
@@ -6072,6 +6213,118 @@ type Mode = light | dark"#;
         assert_eq!(
             component.props[0].ty,
             TypeRef::nullable(TypeRef::array(TypeRef::name("TItem")))
+        );
+    }
+
+    #[test]
+    fn test_lower_applied_type_round_trips_through_spelling() {
+        for source in [
+            "type Slider = { range:<Range T=int/> }",
+            "type Slider = { range:<Range T=int/>[]? }",
+            "type Slider = { range:<Box T=<Range T=int/>/> }",
+            "type Slider = { range:<Range.Update T=int/> }",
+            "type Slider = { range:<Pair TKey=string TValue=int/> }",
+        ] {
+            let module = lower_source(source, "applied.nx");
+            let record = match module.find_item("Slider") {
+                Some(Item::Record(record)) => record,
+                other => panic!("Expected record, got {:?}", other),
+            };
+            let spelled = crate::ast::spell_type_ref(&record.properties[0].ty);
+            let expected = source
+                .trim_start_matches("type Slider = { range:")
+                .trim_end_matches(" }");
+            assert_eq!(spelled, expected, "for source: {source}");
+        }
+    }
+
+    #[test]
+    fn test_lower_record_type_parameters_are_separate_from_fields() {
+        let module = lower_source(
+            "type Range = { T:type start:T end:T endInclusive:boolean }",
+            "generic-record.nx",
+        );
+        assert!(
+            module.diagnostics.is_empty(),
+            "Expected no lowering diagnostics, got {:?}",
+            module.diagnostics
+        );
+        let record = find_record(&module, "Range");
+        assert_eq!(
+            record
+                .type_params
+                .iter()
+                .map(|param| param.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["T"]
+        );
+        assert_eq!(
+            field_names(&record.properties),
+            vec!["start", "end", "endInclusive"]
+        );
+
+        let pair = lower_source(
+            "type Pair = { TKey:type TValue:type key:TKey value:TValue }",
+            "generic-record.nx",
+        );
+        assert_eq!(
+            find_record(&pair, "Pair")
+                .type_params
+                .iter()
+                .map(|param| param.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["TKey", "TValue"]
+        );
+    }
+
+    #[test]
+    fn test_lower_record_rejects_a_field_named_after_a_type_parameter() {
+        let module = lower_source("type A = { T:type T:string }", "generic-record.nx");
+        assert_eq!(
+            module
+                .diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.message.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Field 'T' has the same name as type parameter 'T' of record 'A'"]
+        );
+
+        let module = lower_source("type A = { T:type T:type }", "generic-record.nx");
+        assert_eq!(
+            module
+                .diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.message.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Type parameter 'T' is declared more than once"]
+        );
+    }
+
+    #[test]
+    fn test_lower_generic_record_companions_follow_its_type_parameters() {
+        let module = lower_source("type Range = { T:type start:T end:T }", "companions.nx");
+        let update = find_record(&module, "Range.Update");
+        assert_eq!(
+            update
+                .type_params
+                .iter()
+                .map(|param| param.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["T"]
+        );
+        assert_eq!(field_names(&update.properties), vec!["start", "end"]);
+
+        let union = match module.find_item("Range.Property") {
+            Some(Item::Union(union)) => union,
+            other => panic!("Expected union, got {:?}", other),
+        };
+        assert_eq!(
+            union
+                .cases
+                .iter()
+                .map(|case| case.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["start", "end"]
         );
     }
 

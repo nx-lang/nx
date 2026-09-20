@@ -339,7 +339,7 @@ fn test_deep_recursion_within_limit() {
 
     // Test with 50 (within limit)
     let result = interpreter
-        .execute_function_with_limits(&module, "countdown", vec![Value::Int(50)], limits.clone())
+        .execute_function_with_limits(&module, "countdown", vec![Value::Int(50)], limits)
         .unwrap();
     assert_eq!(result, Value::Int(0));
 

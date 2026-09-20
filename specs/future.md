@@ -43,10 +43,28 @@ specified as checked rather than wrapping. Neither is enforced yet:
 currently a documentation-level guarantee.
 
 Enforcing it is deliberately deferred. It most likely wants to be implemented
-together with user-declared integer ranges (`1..10`), since both need the same
-`check_range(value, lo, hi)` primitive and the same runtime error — one bounds-check
-mechanism, not two. Whether the two actually land as a single change is undecided;
-the implementation notes below apply either way.
+together with user-declared integer range *types* (`type Rating = 1..=5`), since both
+need the same `check_range(value, lo, hi)` primitive and the same runtime error — one
+bounds-check mechanism, not two. Whether the two actually land as a single change is
+undecided; the implementation notes below apply either way.
+
+Note that `1..=5` is already an *expression*: it builds the built-in `Range` record, and
+`for` counts over one. A range type is the separate feature of using that spelling in a
+type position, where it would name a subrange of an integer type rather than a value.
+
+### Range follow-ups
+
+The `Range` record and its two operators landed without these, none of which is blocked
+by the design:
+
+- **Membership**: `x in r`, which needs `in` as an expression operator.
+- **Clamping**: a way to bring a value into a range, which a float range needs to be
+  useful beyond carrying bounds.
+- **Step**: a third bound, `0..10 by 2`, and with it a descending form. `for` over a
+  range deliberately has neither today rather than guessing.
+- **Open-ended ranges**: `2..` and `..5`, which want a separate type or a nullable bound.
+- **Range patterns**: `if n is { 1..=5 => … }`, which is the pattern-position counterpart
+  of the range type above.
 
 Measured cost on Node v24 for the JavaScript backend: an unchecked add is ~0.74 ns/op
 and a `Number.isSafeInteger`-guarded add is ~2.51 ns/op. `Number.isSafeInteger` is a
@@ -694,23 +712,6 @@ Rename additionally needs the inverse direction — every reference to one decla
 currently indexes, and it needs to know which occurrences are the same name by identity rather than
 by spelling. Expect that to be the larger half of the work.
 
-## Lint And Format Gates Do Not Cover The Whole Workspace
-
-Two repo-wide gates pass in practice only because nobody runs them over everything. Both were found
-incidentally during the `resolve-editor-positions` review and neither was caused by it.
-
-- **`cargo clippy -p nx-hir --all-targets` does not compile.** `approx_constant` is denied
-  workspace-wide and `crates/nx-hir/src/ast/expr.rs:382` uses `3.14` in a test fixture. The failure
-  is in a test target, so a crate-level `cargo clippy -p nx-hir` without `--all-targets` passes and
-  hides it. The consequence is not the lint itself but that `nx-hir`'s test targets have never been
-  linted — whatever else is in them is unmeasured. Fix the fixture (`3.15`, or an `allow` with a
-  reason), then run `--all-targets` across the workspace once to see what else surfaces.
-- **`cargo fmt --check` reports pre-existing drift** in `crates/nx-hir/src/scope.rs`,
-  `crates/nx-codegen/src/builder.rs`, `crates/nx-syntax/tests/parser_tests.rs`, and
-  `crates/nx-types/tests/contextual_literals.rs`. Small and mechanical, but it means `cargo fmt
-  --check` cannot be used as a CI gate as it stands: a real regression would not be distinguishable
-  from the standing noise. Formatting those four files once makes the gate usable.
-
 ## Language Service Cost Per Request
 
 Two costs were accepted by design in `resolve-editor-positions` and are worth revisiting together
@@ -783,15 +784,6 @@ callback and its authorization header through `@nx-lang/language-client`; mount
 build context it already validates with; rename the `nx-language` `file:` link to
 `@nx-lang/language`; and remove the submodule once every package it consumed is on the registry.
 
-### Deleting the prelude
-
-`@nx-lang/language-http`'s `prelude` option exists because an imported external component loses
-its defaults and inherited properties (NXE12/NXE13), which forces the DrawnUI playground to analyze the
-catalog and the visitor's text as one module. Fixing NXE12/NXE13 is the condition for deleting the
-option, its shift helpers, and `server/compile.mjs`'s use of them: the catalog becomes a library
-loaded through a `LibraryRegistry` and passed as the handler's `buildContext`, which the handler
-already supports.
-
 ## Playground: What `add-playground-site` Left For Later
 
 The playground at `nxlang.org/playground` (`sites/playground`, spec `openspec/specs/playground`)
@@ -821,12 +813,12 @@ declarations on every compile. Neither changes a seam.
 
 ### The catalog as a library artifact
 
-The catalog is prepended to the visitor's source as a prelude, so every compile reanalyzes ~600
-lines of external component declarations that never change. It is a prelude rather than an import
-because an imported external component loses its defaults and its inherited properties
-(NXE12/NXE13). Once that is fixed, the catalog can be a library artifact analyzed once per worker
-and shared by every compile — the win is proportional to how much of each compile is the catalog,
-which today is most of it. The prelude arithmetic in `@nx-lang/language-core` would go with it.
+The catalog is a second source module the visitor's document names as an implicit import, so every
+compile reanalyzes ~600 lines of external component declarations that never change. It is a source
+module rather than a dependency because an imported external component loses its defaults and its
+inherited properties (NXE12/NXE13). Once that is fixed, the catalog can be a library artifact
+analyzed once per worker and shared by every compile — the win is proportional to how much of each
+compile is the catalog, which today is most of it.
 
 ### A static host, without the Node server
 
@@ -855,7 +847,7 @@ drawfiddle.com): the fiddle compiles NX in the visitor's browser with `@nx-lang/
 DrawnUI catalog it generates from the `drawnui-react` package it ships, evaluates `root` with
 `@nx-lang/ir-runtime`, and draws the result with DrawnUi.React. Its shares carry the compiled NX IR
 and play without the compiler. Nothing DrawnUI-specific entered this repository for it; what did was
-the prelude-aware build in the wasm SDK, compact IR, the Monaco peer range, and the npm release
+the host-context build in the wasm SDK, compact IR, the Monaco peer range, and the npm release
 track for the workspace packages. The items below were deliberately left out.
 
 ### Removing DrawnUI from the playground
@@ -923,12 +915,31 @@ The TypeScript IR runtime and generated JavaScript carry an `int32` as a `number
 and dividing it by `-1` hit the same edge, and the interpreter's `a / b` on `i32` panics on the
 second.
 
+Measured three ways on one program, since the divergence had only ever been reasoned about:
+
+```nx
+let lo:int32 = 2000000000
+let hi:int32 = 2000000002
+let root() = { for i in lo..hi { i * 2 } }
+```
+
+The interpreter yields `-294967296 -294967294`; generated JavaScript and the NX IR runtime both
+yield `4000000000 4000000002`. The range is incidental — `let a:int32 = 2000000000` with `a + a`
+divides the backends the same way — but `for` over an `int32` range is a new place to meet it, and
+one an author reaches without writing an operator that looks like it could overflow.
+
+For contrast, `float32` agrees today: the emitters wrap every narrow operation in `Math.fround` and
+the IR carries the `fadd32` family, so `let a:float32 = 0.1` with `a + b` produces the same f32
+value under the interpreter and under generated JavaScript (verified; they differ only in how
+`console.log` renders it). There is no `iadd32` and no narrowing wrapper on the integer side.
+
 **Why it might matter.** It is the one remaining way a narrow numeric type can compute a different
-value on different backends. `float32` arithmetic was made to agree by giving the IR `float32`
-operators (`fadd32` and siblings, `implicit-primitive-conversions` RF14). Integer arithmetic was
-not changed, because the `primitive-type-names` spec already says arithmetic should be checked
-rather than wrapping, and leaves that enforcement to a later change that also covers `int`'s
-±(2^53−1) range and user-declared ranges.
+value on different backends, and it is reachable from ordinary checked NX — no host value, no
+hand-built image. `float32` arithmetic was made to agree by giving the IR `float32` operators
+(`fadd32` and siblings, `implicit-primitive-conversions` RF14). Integer arithmetic was not changed,
+because the `primitive-type-names` spec already says arithmetic should be checked rather than
+wrapping, and leaves that enforcement to a later change that also covers `int`'s ±(2^53−1) range and
+user-declared ranges.
 
 **What would settle it.** The range-enforcement change: make integer overflow an error in the
 interpreter (`checked_add` and siblings, including `MIN / -1`), and have the JS targets check the
@@ -938,7 +949,8 @@ mean `int32` IR operators like the `float32` ones, or a range check the runtime 
 operator's checked type. Add conformance corpus cases for overflow on each operator.
 
 **Related.** `int` has the same shape at a larger scale: the interpreter wraps an `i64`, and
-JavaScript loses precision beyond 2^53.
+JavaScript loses precision beyond 2^53. RF21 in the `add-range-type-and-operators` review records
+the range path to this section. "Range follow-ups" above lists what else `Range` landed without.
 
 ## Entities in text content are kept as written
 
@@ -967,3 +979,91 @@ reword it.
 
 **Related.** The same function decodes the escapes. `\{` in a plain body does not parse today,
 although the `text_run` grammar lists `escaped_lbrace`.
+
+## A dependency's generic record can be named but not patched
+
+**Observed.** An imported generic record can be applied; its derived update companion cannot. With a
+`boxes` library exporting `export type Box = { T:type item:T }`, a consuming module that writes
+`import { Box } from "../boxes"` may type a field `<Box T=int/>` — which generates
+`global::Test.Boxes.Box<long>` in C# — but the same module writing `<Box.Update T=int/>` is refused
+by the checker:
+
+```
+error: 'Box.Update' is not a generic record, so it cannot be applied
+```
+
+The block is in `applied_type` (`crates/nx-types/src/infer.rs`), which asks
+`record_type_params_of` for the tag's parameters and reports `applied-type-not-generic` when the
+list is empty. For an imported companion the list is empty: the companion is derived from its
+target rather than declared, and `resolve_record_definition` reaches an imported record's
+declaration but not the parameters of the companion derived from it. Aliasing does not get around
+it — a dependency that exports `export type IntBoxPatch = <Box.Update T=int/>` (legal in the
+library that declares `Box`) is refused at the *consumer's* use of `IntBoxPatch`, with the same
+diagnostic. A *non-generic* record's companion crosses an import fine: `Thing.Update` over an
+imported `Thing` generates `global::Test.Boxes.Thing_update`.
+
+This is not new; it reproduces unchanged at `a3882f3`, the `record-type-parameters` commit that
+added generic records.
+
+**Why it might matter.** Patching is how NX changes a record, so a generic record a library exports
+is one its consumers can hold and pass but never patch — the generic case is the only one with that
+hole. It also decides a question the `add-range-type-and-operators` review left open (RF24): C#
+typegen detects a generic update companion through the export graph or the prelude, and a
+dependency's is in neither, so a member typed by one would get no closed formatter *and* no
+warning. That branch is unreachable only because the checker refuses the shape first. Lifting this
+limitation without giving typegen a dependency arm would turn it into silently uncompilable C#, the
+failure RF6, RF22 and RF23 each closed for the other suppliers.
+
+**What would settle it.** Make a derived companion carry its target's type parameters across an
+import, so `record_type_params_of` answers for `Box.Update` wherever `Box` is nameable — the same
+answer `ModuleTypes::record_type_params` already gives typegen for an imported record's own
+parameters (`crates/nx-cli/src/typegen/model.rs`). Then add the dependency arm to
+`generic_update_companion` and `closed_update_formatter_for`
+(`crates/nx-cli/src/typegen/languages/csharp.rs`) and compile the result: a closed formatter over a
+dependency's companion is the case the shared `_NxFormatters.g.cs` already collects dependency
+`using`s for, which is untested today because nothing can reach it.
+
+**Related.** RF24 in `openspec/changes/add-range-type-and-operators/review.md` records the typegen
+half and why it was left. The `cli-code-generation` requirement says a closed formatter applies to
+"a companion another assembly declares — the prelude's, or a dependency's"; only the prelude's half
+is reachable.
+
+## `typegen` emits C# for a type error `nxlang run` rejects
+
+**Observed.** A field typed by a generic record's update companion *without* type arguments is
+rejected by the checker but accepted by `nxlang typegen`, which then emits C# that does not
+compile. For:
+
+```nx
+export type Box = { T:type item:T }
+export type P = { patch:Box.Update }
+```
+
+`nxlang run` reports `Type parameter 'T' of record 'Box.Update' was not specified; write
+<Box.Update T=.../>`, from `require_type_arguments` in `crates/nx-types/src/infer.rs`. `nxlang
+typegen --language csharp` on the same file exits 0, prints nothing, and writes
+`public Box_update Patch { get; set; }` beside the `Box_update<T>` it declares, which is
+`error CS0305: Using the generic type 'Box_update<T>' requires 1 type arguments` — three times in
+the one file, since the member, the update companion and the property table all name it. The
+unapplied *record* is caught in both (`item:Box` reports `type-parameter-not-specified` from
+typegen as well), so it is the companion spelling alone that slips through. An imported companion
+behaves the same way.
+
+Pre-existing: it reproduces unchanged at `a3882f3`.
+
+**Why it might matter.** `typegen` does surface checker errors — the same command reports
+`applied-type-not-generic` for a dependency's companion — so this is a gap in which diagnostics
+reach it rather than a deliberate boundary. A contract author gets a clean run and a build failure
+in the host language, which is the failure mode the C# emitter's companion warnings exist to
+prevent.
+
+**What would settle it.** Find why `type-parameter-not-specified` does not reach typegen's
+diagnostic set for the companion spelling while `applied-type-not-generic` does, and close it. The
+likely cause is that `require_type_arguments` runs where typegen's shallower type resolution does
+not reach, in which case the fix is to have typegen fail on the checker's diagnostics rather than
+re-derive them. A regression test belongs beside
+`a_generic_update_companion_csharp_cannot_format_is_reported` in `crates/nx-cli/src/typegen.rs`:
+generating this source should report, not produce a file.
+
+**Related.** "A dependency's generic record can be named but not patched" above is the other half of
+what a probe of generic companions across library boundaries turned up.

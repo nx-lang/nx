@@ -1,11 +1,13 @@
 use crate::typegen::model::{
-    erase_field_type_parameters, ExportedAlias, ExportedExternalState, ExportedModule,
-    ExportedPolymorphicDescendant, ExportedRecord, ExportedType, ExportedTypeGraph, ExportedUnion,
-    ExportedUnionCase, ExportedUpdate, ImportedType,
+    erase_field_type_parameters, update_companion_type_params, ExportedAlias,
+    ExportedExternalState, ExportedModule, ExportedPolymorphicDescendant, ExportedRecord,
+    ExportedType, ExportedTypeDecl, ExportedTypeGraph, ExportedUnion, ExportedUnionCase,
+    ExportedUpdate, ImportedType, ModuleTypes,
 };
 use crate::typegen::writer::CodeWriter;
 use crate::typegen::{GenerateTypesOptions, GeneratedFile};
 use nx_hir::ast::TypeRef;
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -62,13 +64,20 @@ pub fn emit_library(
     opts: &GenerateTypesOptions,
 ) -> Result<Vec<GeneratedFile>, String> {
     let mut files = Vec::new();
-    let has_records = graph.modules.iter().any(|m| module_needs_nx_record(m));
-    let helper_module_path = has_records.then(|| nx_record_helper_module_path(graph));
+    // The prelude's declarations join `NxRecord` in the shared helper module: each is generated once
+    // per generation, whichever modules refer to it.
+    let prelude_declarations = all_referenced_prelude_declarations(graph);
+    // A prelude record is generated as a concrete record, so it carries `extends NxRecord<"Range">`
+    // and needs that type declared even where no module of this library declares a record itself.
+    let needs_nx_record = graph.modules.iter().any(module_needs_nx_record)
+        || prelude_declarations_need_nx_record(&prelude_declarations);
+    let needs_helper_module = needs_nx_record || !prelude_declarations.is_empty();
+    let helper_module_path = needs_helper_module.then(|| nx_record_helper_module_path(graph));
 
     if let Some(helper_module_path) = &helper_module_path {
         files.push(GeneratedFile {
             relative_path: helper_module_path.with_extension("ts"),
-            content: render_nx_record_module(opts),
+            content: render_nx_record_module(graph, opts, needs_nx_record, &prelude_declarations),
         });
     }
 
@@ -89,7 +98,13 @@ pub fn emit_library(
     if !graph.modules.is_empty() {
         files.push(GeneratedFile {
             relative_path: PathBuf::from("index.ts"),
-            content: render_index(graph, opts, helper_module_path.as_deref()),
+            content: render_index(
+                graph,
+                opts,
+                helper_module_path.as_deref(),
+                needs_nx_record,
+                &prelude_declarations,
+            ),
         });
     }
 
@@ -153,13 +168,30 @@ fn render_module(
         package_prefix: opts.typescript_package_prefix.as_deref(),
     };
 
+    let types = ModuleTypes::for_module(graph, module);
+    let prelude_declarations = referenced_prelude_declarations(types, module);
+
     let mut wrote_import = false;
     if include_imports {
+        let mut helper_names = Vec::new();
         if module_needs_nx_record(module) && nx_record_mode == NxRecordMode::Import {
+            helper_names.push("NxRecord".to_string());
+        }
+        if nx_record_mode == NxRecordMode::Import {
+            helper_names.extend(
+                prelude_declarations
+                    .iter()
+                    .map(|declaration| ts_type_name(declaration.name())),
+            );
+        }
+        if !helper_names.is_empty() {
             let helper_module_path = helper_module_path
-                .expect("record-bearing library modules require an NxRecord helper module");
+                .expect("a module that needs a shared type requires the helper module");
             let specifier = relative_module_specifier(&module.module_path, helper_module_path);
-            writer.line(&format!("import type {{ NxRecord }} from \"{specifier}\";"));
+            writer.line(&format!(
+                "import type {{ {} }} from \"{specifier}\";",
+                helper_names.join(", ")
+            ));
             wrote_import = true;
         }
 
@@ -179,13 +211,24 @@ fn render_module(
         }
     }
 
-    if module_needs_nx_record(module) && nx_record_mode == NxRecordMode::Inline {
-        emit_nx_record(&mut writer);
-        writer.blank_line();
+    if nx_record_mode == NxRecordMode::Inline {
+        // A referenced prelude record needs `NxRecord` as much as one of the module's own does.
+        if module_needs_nx_record(module)
+            || prelude_declarations_need_nx_record(&prelude_declarations)
+        {
+            emit_nx_record(&mut writer);
+            writer.blank_line();
+        }
+        // Single-file output has nowhere to import a shared type from, so a referenced prelude
+        // declaration is generated here, ahead of the declarations that use it.
+        for declaration in &prelude_declarations {
+            emit_declaration(&mut writer, &declaration.item, types);
+            writer.blank_line();
+        }
     }
 
     for (index, declaration) in module.declarations.iter().enumerate() {
-        emit_declaration(&mut writer, &declaration.item, graph);
+        emit_declaration(&mut writer, &declaration.item, types);
         if index + 1 != module.declarations.len() {
             writer.blank_line();
         }
@@ -194,10 +237,30 @@ fn render_module(
     writer.finish()
 }
 
-fn render_nx_record_module(opts: &GenerateTypesOptions) -> String {
+fn render_nx_record_module(
+    graph: &ExportedTypeGraph,
+    opts: &GenerateTypesOptions,
+    include_nx_record: bool,
+    prelude_declarations: &[&ExportedTypeDecl],
+) -> String {
     let mut writer = CodeWriter::new(opts.format.clone());
     write_header(&mut writer);
-    emit_nx_record(&mut writer);
+    let mut wrote_any = false;
+    if include_nx_record {
+        emit_nx_record(&mut writer);
+        wrote_any = true;
+    }
+    for declaration in prelude_declarations {
+        if wrote_any {
+            writer.blank_line();
+        }
+        emit_declaration(
+            &mut writer,
+            &declaration.item,
+            ModuleTypes::without_imports(graph),
+        );
+        wrote_any = true;
+    }
     writer.finish()
 }
 
@@ -225,15 +288,29 @@ fn render_index(
     graph: &ExportedTypeGraph,
     opts: &GenerateTypesOptions,
     helper_module_path: Option<&Path>,
+    include_nx_record: bool,
+    prelude_declarations: &[&ExportedTypeDecl],
 ) -> String {
     let mut writer = CodeWriter::new(opts.format.clone());
     write_header(&mut writer);
 
     if let Some(helper_module_path) = helper_module_path {
-        writer.line(&format!(
-            "export type {{ NxRecord }} from \"{}\";",
-            module_path_specifier(helper_module_path)
-        ));
+        let mut exported = Vec::new();
+        if include_nx_record {
+            exported.push("NxRecord".to_string());
+        }
+        exported.extend(
+            prelude_declarations
+                .iter()
+                .map(|declaration| ts_type_name(declaration.name())),
+        );
+        if !exported.is_empty() {
+            writer.line(&format!(
+                "export type {{ {} }} from \"{}\";",
+                exported.join(", "),
+                module_path_specifier(helper_module_path)
+            ));
+        }
     }
 
     for module in &graph.modules {
@@ -259,33 +336,29 @@ fn emit_nx_record(writer: &mut CodeWriter) {
     );
 }
 
-fn emit_declaration(
-    writer: &mut CodeWriter,
-    declaration: &ExportedType,
-    graph: &ExportedTypeGraph,
-) {
+fn emit_declaration(writer: &mut CodeWriter, declaration: &ExportedType, types: ModuleTypes<'_>) {
     match declaration {
-        ExportedType::Alias(alias) => emit_alias(writer, alias),
-        ExportedType::Union(union_def) => emit_union(writer, union_def, graph),
-        ExportedType::Record(record) => emit_record(writer, record, graph),
-        ExportedType::ExternalState(state) => emit_external_state(writer, state),
-        ExportedType::Update(update) => emit_update(writer, update),
+        ExportedType::Alias(alias) => emit_alias(writer, alias, types),
+        ExportedType::Union(union_def) => emit_union(writer, union_def, types),
+        ExportedType::Record(record) => emit_record(writer, record, types),
+        ExportedType::ExternalState(state) => emit_external_state(writer, state, types),
+        ExportedType::Update(update) => emit_update(writer, update, types),
     }
 }
 
-fn emit_alias(writer: &mut CodeWriter, alias: &ExportedAlias) {
+fn emit_alias(writer: &mut CodeWriter, alias: &ExportedAlias, types: ModuleTypes<'_>) {
     writer.line(&format!(
         "export type {} = {};",
         sanitize_ts_type_name(&alias.name),
-        ts_type(&alias.target)
+        ts_type(&alias.target, types)
     ));
 }
 
-fn emit_record(writer: &mut CodeWriter, record: &ExportedRecord, graph: &ExportedTypeGraph) {
+fn emit_record(writer: &mut CodeWriter, record: &ExportedRecord, types: ModuleTypes<'_>) {
     if record.is_abstract {
-        emit_abstract_record(writer, record, graph);
+        emit_abstract_record(writer, record, types);
     } else {
-        emit_concrete_record(writer, record, graph);
+        emit_concrete_record(writer, record, types);
     }
 }
 
@@ -299,12 +372,20 @@ fn ts_generic_declaration(record: &ExportedRecord) -> String {
     if record.type_params.is_empty() {
         return String::new();
     }
+    // A component contract defaults each parameter to `unknown`, so a caller that names nothing
+    // gets the erased contract. A plain generic record has no default: NX never leaves a record's
+    // type argument unspecified, so a TypeScript caller should not be able to either.
+    let default = if record.is_component_contract {
+        " = unknown"
+    } else {
+        ""
+    };
     format!(
         "<{}>",
         record
             .type_params
             .iter()
-            .map(|param| format!("{param} = unknown"))
+            .map(|param| format!("{param}{default}"))
             .collect::<Vec<_>>()
             .join(", ")
     )
@@ -317,14 +398,10 @@ fn ts_generic_arguments(record: &ExportedRecord) -> String {
     format!("<{}>", record.type_params.join(", "))
 }
 
-fn emit_abstract_record(
-    writer: &mut CodeWriter,
-    record: &ExportedRecord,
-    graph: &ExportedTypeGraph,
-) {
+fn emit_abstract_record(writer: &mut CodeWriter, record: &ExportedRecord, types: ModuleTypes<'_>) {
     let base_contract_name = ts_base_contract_name(&record.name);
     let generics = ts_generic_declaration(record);
-    let header = if let Some(base_record) = graph.resolved_record_base(record) {
+    let header = if let Some(base_record) = types.graph().resolved_record_base(record) {
         format!(
             "export interface {}{} extends {}{}",
             base_contract_name,
@@ -339,14 +416,14 @@ fn emit_abstract_record(
     writer.block(&header, |writer| {
         for field in &record.fields {
             let key = ts_property_key(&field.name);
-            let ty = ts_type(&field.ty);
+            let ty = ts_type(&field.ty, types);
             writer.line(&format!("{key}: {ty};"));
         }
     });
 
     writer.blank_line();
 
-    let descendants = graph.polymorphic_descendants(&record.name);
+    let descendants = types.graph().polymorphic_descendants(&record.name);
     let runtime_surface = if descendants.is_empty() {
         base_contract_name
     } else {
@@ -371,13 +448,9 @@ fn emit_abstract_record(
     ));
 }
 
-fn emit_concrete_record(
-    writer: &mut CodeWriter,
-    record: &ExportedRecord,
-    graph: &ExportedTypeGraph,
-) {
+fn emit_concrete_record(writer: &mut CodeWriter, record: &ExportedRecord, types: ModuleTypes<'_>) {
     let mut bases = Vec::new();
-    if let Some(base_record) = graph.resolved_record_base(record) {
+    if let Some(base_record) = types.graph().resolved_record_base(record) {
         bases.push(format!(
             "{}{}",
             ts_base_contract_name(&base_record.name),
@@ -396,13 +469,13 @@ fn emit_concrete_record(
     writer.block(&header, |writer| {
         for field in &record.fields {
             let key = ts_property_key(&field.name);
-            let ty = ts_type(&field.ty);
+            let ty = ts_type(&field.ty, types);
             writer.line(&format!("{key}: {ty};"));
         }
     });
 }
 
-fn emit_union(writer: &mut CodeWriter, union_def: &ExportedUnion, graph: &ExportedTypeGraph) {
+fn emit_union(writer: &mut CodeWriter, union_def: &ExportedUnion, types: ModuleTypes<'_>) {
     // A constant union is a closed set of authored strings, which TypeScript expresses natively
     // as a union of string literals — what an `enum` generated (design D4).
     if union_def.is_constant() {
@@ -426,7 +499,7 @@ fn emit_union(writer: &mut CodeWriter, union_def: &ExportedUnion, graph: &Export
         .filter(|case| !union_def.is_constant_case(case))
         .collect::<Vec<_>>();
     for (index, case) in payload_cases.iter().enumerate() {
-        emit_union_case(writer, union_def, case, graph);
+        emit_union_case(writer, union_def, case, types);
         if index + 1 != payload_cases.len() {
             writer.blank_line();
         }
@@ -465,11 +538,11 @@ fn emit_union_case(
     writer: &mut CodeWriter,
     union_def: &ExportedUnion,
     case: &ExportedUnionCase,
-    graph: &ExportedTypeGraph,
+    types: ModuleTypes<'_>,
 ) {
     let mut bases = Vec::new();
     if let Some(base_name) = union_def.base.as_deref() {
-        if let Some(base_record) = graph.resolve_record(base_name) {
+        if let Some(base_record) = types.graph().resolve_record(base_name) {
             bases.push(ts_base_contract_name(&base_record.name));
         } else {
             bases.push(ts_type_name(base_name));
@@ -490,7 +563,7 @@ fn emit_union_case(
     writer.block(&header, |writer| {
         for field in &case.fields {
             let key = ts_property_key(&field.name);
-            let ty = ts_type(&field.ty);
+            let ty = ts_type(&field.ty, types);
             writer.line(&format!("{key}: {ty};"));
         }
     });
@@ -499,14 +572,18 @@ fn emit_union_case(
 /// Emits an external component's state record. A field typed by the component's type parameter
 /// erases to `unknown`: the host holds state as data and never names the instantiation, which an
 /// NX use site fixed.
-fn emit_external_state(writer: &mut CodeWriter, state: &ExportedExternalState) {
+fn emit_external_state(
+    writer: &mut CodeWriter,
+    state: &ExportedExternalState,
+    types: ModuleTypes<'_>,
+) {
     let fields = erase_field_type_parameters(&state.fields, &state.type_params);
     writer.block(
         &format!("export interface {}", sanitize_ts_type_name(&state.name)),
         |writer| {
             for field in fields.iter() {
                 let key = ts_property_key(&field.name);
-                let ty = ts_type(&field.ty);
+                let ty = ts_type(&field.ty, types);
                 writer.line(&format!("{key}: {ty};"));
             }
         },
@@ -514,12 +591,30 @@ fn emit_external_state(writer: &mut CodeWriter, state: &ExportedExternalState) {
 }
 
 /// Emits an update companion: every property optional, so an absent key means "unchanged", and a
-/// nullable field typed `| null`, so a present `null` means "set to null". A state-derived field
-/// typed by the component's type parameter erases to `unknown`, as on the state record.
-fn emit_update(writer: &mut CodeWriter, update: &ExportedUpdate) {
-    let fields = erase_field_type_parameters(&update.fields, &update.type_params);
+/// nullable field typed `| null`, so a present `null` means "set to null".
+///
+/// <para>A generic record's companion declares the record's parameters and types its fields by
+/// them, so a patch of a `Range<number>` reads as one. A state-derived field typed by the
+/// *component's* type parameter still erases to `unknown`, as on the state record.</para>
+fn emit_update(writer: &mut CodeWriter, update: &ExportedUpdate, types: ModuleTypes<'_>) {
+    let type_params = update_companion_type_params(update, types);
+    let fields = if type_params.is_empty() {
+        erase_field_type_parameters(&update.fields, &update.type_params)
+    } else {
+        Cow::Borrowed(update.fields.as_slice())
+    };
+    // No `= unknown` default, for the reason `ts_generic_declaration` gives: NX never leaves a
+    // record's type argument unspecified, and a patch of one names the same instantiation.
+    let generics = if type_params.is_empty() {
+        String::new()
+    } else {
+        format!("<{}>", type_params.join(", "))
+    };
     writer.block(
-        &format!("export interface {}", sanitize_ts_type_name(&update.name)),
+        &format!(
+            "export interface {}{generics}",
+            sanitize_ts_type_name(&update.name)
+        ),
         |writer| {
             writer.line(&format!(
                 "$type: \"{}\";",
@@ -527,7 +622,7 @@ fn emit_update(writer: &mut CodeWriter, update: &ExportedUpdate) {
             ));
             for field in fields.iter() {
                 let key = ts_property_key(&field.name);
-                let ty = ts_type(&field.ty);
+                let ty = ts_type(&field.ty, types);
                 writer.line(&format!("{key}?: {ty};"));
             }
         },
@@ -544,6 +639,115 @@ fn module_needs_nx_record(module: &ExportedModule) -> bool {
             ExportedType::Record(record) => !record.is_abstract,
             _ => false,
         })
+}
+
+/// Every prelude declaration a module's own declarations refer to, transitively, in a stable order.
+///
+/// <para>A prelude declaration is generated from itself through the ordinary emitters, so generated
+/// TypeScript keeps having no package dependency, and its derived companions are generated the same
+/// way: a field typed `Range.Update` resolves to `Range_update`, which has to be declared
+/// somewhere. A module that declares its own type under a prelude name refers to that one, which
+/// `prelude_declaration` already answers for. The closure is transitive because one prelude
+/// declaration may name another.</para>
+fn referenced_prelude_declarations(
+    types: ModuleTypes<'_>,
+    module: &ExportedModule,
+) -> Vec<&'static ExportedTypeDecl> {
+    let mut names = BTreeSet::new();
+    for declaration in &module.declarations {
+        collect_prelude_names(types, &declaration.item, &mut names);
+    }
+
+    let mut reached = Vec::new();
+    while let Some(name) = names.pop_first() {
+        let Some(declaration) = types.prelude_declaration(&name) else {
+            continue;
+        };
+        if reached
+            .iter()
+            .any(|existing: &&ExportedTypeDecl| existing.name() == declaration.name())
+        {
+            continue;
+        }
+        reached.push(declaration);
+        collect_prelude_names(types, &declaration.item, &mut names);
+    }
+
+    reached.sort_by_key(|declaration| declaration.name());
+    reached
+}
+
+/// Adds every prelude name `item`'s field types refer to.
+fn collect_prelude_names(
+    types: ModuleTypes<'_>,
+    item: &ExportedType,
+    names: &mut BTreeSet<String>,
+) {
+    let mut visit = |ty: &TypeRef| {
+        for name in nx_hir::type_ref_names(ty) {
+            if types.prelude_declaration(name.as_str()).is_some() {
+                names.insert(name.as_str().to_string());
+            }
+        }
+    };
+
+    match item {
+        ExportedType::Alias(alias) => visit(&alias.target),
+        ExportedType::Union(union_def) => {
+            for case in &union_def.cases {
+                for field in &case.fields {
+                    visit(&field.ty);
+                }
+            }
+        }
+        ExportedType::Record(record) => {
+            for field in &record.fields {
+                visit(&field.ty);
+            }
+        }
+        ExportedType::Update(update) => {
+            for field in &update.fields {
+                visit(&field.ty);
+            }
+        }
+        ExportedType::ExternalState(state) => {
+            for field in &state.fields {
+                visit(&field.ty);
+            }
+        }
+    }
+}
+
+/// Every prelude declaration any module of the graph refers to, each as that module resolves it.
+fn all_referenced_prelude_declarations(
+    graph: &ExportedTypeGraph,
+) -> Vec<&'static ExportedTypeDecl> {
+    let mut declarations: Vec<&'static ExportedTypeDecl> = Vec::new();
+    for module in &graph.modules {
+        for declaration in
+            referenced_prelude_declarations(ModuleTypes::for_module(graph, module), module)
+        {
+            if !declarations
+                .iter()
+                .any(|existing| existing.name() == declaration.name())
+            {
+                declarations.push(declaration);
+            }
+        }
+    }
+    declarations.sort_by_key(|declaration| declaration.name());
+    declarations
+}
+
+/// Whether a generated file holding `declarations` needs the `NxRecord` marker.
+///
+/// <para>A concrete prelude record extends it, as a module's own does. An update companion and a
+/// property union do not: one is a bag of optional fields, the other a union of string
+/// literals.</para>
+fn prelude_declarations_need_nx_record(declarations: &[&ExportedTypeDecl]) -> bool {
+    declarations.iter().any(|declaration| {
+        matches!(&declaration.item, ExportedType::Record(record) if !record.is_abstract)
+    })
 }
 
 fn collect_module_imports(
@@ -734,11 +938,36 @@ fn ts_union_case_type_name(union_name: &str, case_name: &str) -> String {
     )
 }
 
-fn ts_type(ty: &TypeRef) -> String {
+fn ts_type(ty: &TypeRef, types: ModuleTypes<'_>) -> String {
     match ty {
         TypeRef::Name(name) => ts_type_name(name.as_str()),
+        // An applied type is the instantiation of its record, with the arguments in the record's
+        // declaration order whatever order the source wrote them in.
+        TypeRef::Applied { name, args } => {
+            let base = ts_type_name(name.as_str());
+            let rendered = match types.record_type_params(name.as_str()) {
+                Some(order) => order
+                    .iter()
+                    .filter_map(|param| {
+                        args.iter()
+                            .find(|(arg, _)| arg.as_str() == param)
+                            .map(|(_, ty)| ts_type(ty, types))
+                    })
+                    .collect::<Vec<_>>(),
+                // The declaration could not be reached, so there is no order to sort into and the
+                // source order is the only one there is. It is still rendered: the bare name would
+                // be an open generic, which does not compile, and a checked program wrote the
+                // arguments against a declaration that does exist.
+                None => args.iter().map(|(_, ty)| ts_type(ty, types)).collect(),
+            };
+            if rendered.is_empty() {
+                base
+            } else {
+                format!("{base}<{}>", rendered.join(", "))
+            }
+        }
         TypeRef::Array(inner) => {
-            let inner = ts_type(inner);
+            let inner = ts_type(inner, types);
             let needs_parens = inner.contains('|') || inner.contains("=>");
             if needs_parens {
                 format!("({inner})[]")
@@ -747,7 +976,7 @@ fn ts_type(ty: &TypeRef) -> String {
             }
         }
         TypeRef::Nullable(inner) => {
-            let inner = ts_type(inner);
+            let inner = ts_type(inner, types);
             // `(args) => string | null` would make the result nullable, not the function.
             if inner.contains("=>") {
                 format!("({inner}) | null")
@@ -761,14 +990,14 @@ fn ts_type(ty: &TypeRef) -> String {
             return_type,
         } => {
             if params.is_empty() {
-                return format!("() => {}", ts_type(return_type));
+                return format!("() => {}", ts_type(return_type, types));
             }
             let params = params
                 .iter()
-                .map(|param| format!("{}: {}", param.name.as_str(), ts_type(&param.ty)))
+                .map(|param| format!("{}: {}", param.name.as_str(), ts_type(&param.ty, types)))
                 .collect::<Vec<_>>()
                 .join("; ");
-            format!("(args: {{ {params} }}) => {}", ts_type(return_type))
+            format!("(args: {{ {params} }}) => {}", ts_type(return_type, types))
         }
     }
 }

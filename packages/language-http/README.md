@@ -62,7 +62,7 @@ route; the handler itself trusts every request it receives.
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `buildContext` | none | An `NxProgramBuildContext` from `@nx-lang/sdk-node`. Every query sees the libraries it makes visible, with the visibility rules the compiler applies. Without one, names declared only in a library are unresolved — hover says nothing about them and diagnostics report the import as missing, exactly as the compiler would. |
-| `prelude` | none | `{ source }`: NX text placed ahead of the queried document before analysis. See below. |
+| `context` | none | `{ documents, implicitImports }`: the host's own declarations, served with every query. See below. |
 | `maxBodyBytes` | 1 MiB | Requests with a larger body are refused with `413`. |
 | `cacheSize` | 8 | How many analyzed document sets are kept. |
 | `onError` | none | Called with the error whenever the handler answers `500`, so the host can log it. |
@@ -83,29 +83,53 @@ const handler = createNxLanguageHandler({ buildContext });
 A host that already validates configurations against a registry-backed context passes the same
 context here, and hover, completions and diagnostics know the same modules validation does.
 
-### Prelude
+### Host context
 
-Some hosts have context declarations that the compiler cannot yet import as a separate module
-without loss (NXE12/NXE13: an imported external component loses its defaults and inherited
-properties). Such a host concatenates its declarations ahead of the author's text. The `prelude`
-option does that inside the handler, once, with the arithmetic tested:
+A host with declarations of its own — a catalog of external components, say — serves them with every
+query through `context`:
 
-- The prelude is applied to the document named by the query's `uri`; other documents in the set are
-  untouched.
-- The prelude always ends in a newline and is followed by one blank line, so the document's first
-  line is its own line whatever the prelude ended with.
-- Every incoming position is shifted into the combined text and every outgoing range shifted back.
-  Only lines and bytes move; a column is relative to its line start and the prelude contributes whole
-  lines. A related location that points into the queried document is shifted wherever it appears,
-  including in a sibling document's diagnostics.
-- A diagnostic whose range lies inside the prelude is the host's fault, not the author's. It is
-  reported in the answer's `workspace` list, labelled with identity `prelude` and no range, rather
-  than positioned on a line the author cannot see.
-- Document symbols declared by the prelude are omitted from the document's symbols.
+```ts
+const handler = createNxLanguageHandler({
+  context: {
+    documents: [{ uri: "nx://host/catalog.nx", identity: "catalog.nx", source: catalogSource }],
+    implicitImports: ["catalog.nx"]
+  }
+});
+```
 
-The helpers the handler uses — `preludeOffsets(source)`, `withPrelude`, `shiftPositionIn`,
-`shiftRangeOut` — are exported so a host that also compiles the same combined text can share one
-implementation of the shift.
+- The context documents join every query's document set without the client sending them, and the
+  identities in `implicitImports` are in scope in every queried document as if it began with a
+  wildcard import of each.
+- The queried document's text is analyzed **exactly as the client sent it**. Every position in a
+  query and every range in an answer is in that document's own lines, columns and byte offsets, with
+  nothing prepended and nothing shifted.
+- A diagnostic located in a context document is reported under **that document's** URI, in its own
+  coordinates, so a fault in the host's declarations is never shown on a line the author wrote.
+- Document symbols are the queried document's own, since only its text is queried.
+- A request whose `documents` include one with a context document's URI or identity is refused with
+  `400 invalid-request` naming the identity: the client cannot replace the host's context.
+
+#### Migrating from `prelude`
+
+The `prelude` option prepended the host's text to the queried document and shifted every position. It
+is removed, and a handler constructed with it fails immediately with a message naming `context`:
+
+```ts
+// Before
+createNxLanguageHandler({ prelude: { source: catalogSource } });
+
+// After
+createNxLanguageHandler({
+  context: {
+    documents: [{ uri: "nx://host/catalog.nx", identity: "catalog.nx", source: catalogSource }],
+    implicitImports: ["catalog.nx"]
+  }
+});
+```
+
+The shift helpers (`preludeOffsets`, `withPrelude`, `shiftPositionIn`, `shiftRangeOut`) and
+`PRELUDE_ORIGIN` are removed with it. Nothing shifts any more, so a host that compiles the same
+documents needs no shared arithmetic: it compiles the same set it queries.
 
 ## Behavior
 

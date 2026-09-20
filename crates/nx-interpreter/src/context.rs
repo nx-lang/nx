@@ -2,7 +2,7 @@
 
 use crate::error::{CallFrame, RuntimeError, RuntimeErrorKind};
 use crate::value::Value;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use smol_str::SmolStr;
 
 /// Resource limits for execution
@@ -97,6 +97,13 @@ pub struct ExecutionContext {
     operation_count: usize,
     /// Resource limits
     limits: ResourceLimits,
+    /// The top-level values whose initializers are being evaluated, as `(module, name)`.
+    ///
+    /// <para>A field default is evaluated in an environment that first binds its module's
+    /// top-level values, and a top-level value's own initializer may be what needs that default.
+    /// Recording the value in flight is what stops the two from calling each other forever; the
+    /// value is simply not in scope inside the default it is waiting on.</para>
+    binding_values: FxHashSet<(u32, SmolStr)>,
 }
 
 impl ExecutionContext {
@@ -112,7 +119,29 @@ impl ExecutionContext {
             call_stack: Vec::new(),
             operation_count: 0,
             limits,
+            binding_values: FxHashSet::default(),
         }
+    }
+
+    /// Marks the top-level value `name` of module `module` as being bound, if it is not already.
+    ///
+    /// <para>Returns false when it already is, which is the caller's signal to leave it unbound
+    /// rather than evaluate its initializer a second time.</para>
+    pub fn begin_binding_value(&mut self, module: u32, name: &str) -> bool {
+        self.binding_values.insert((module, SmolStr::new(name)))
+    }
+
+    /// Releases the mark [`begin_binding_value`](Self::begin_binding_value) took.
+    pub fn end_binding_value(&mut self, module: u32, name: &str) {
+        self.binding_values.remove(&(module, SmolStr::new(name)));
+    }
+
+    /// True while some top-level value's initializer is being evaluated.
+    ///
+    /// <para>A binding pass that runs inside one is a *nested* pass: it exists only to furnish the
+    /// environment of a field default, and the outer pass will bind every value for real.</para>
+    pub fn is_binding_values(&self) -> bool {
+        !self.binding_values.is_empty()
     }
 
     /// Push a new scope onto the scope stack
@@ -185,6 +214,9 @@ impl ExecutionContext {
             call_stack: self.call_stack.clone(),
             operation_count: self.operation_count,
             limits: self.limits,
+            // Carried, not reset: the fork is where a field default runs, and the value waiting
+            // on that default is exactly the one it must not evaluate again.
+            binding_values: self.binding_values.clone(),
         }
     }
 

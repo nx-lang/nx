@@ -306,7 +306,7 @@ mod tests {
             ("false", NxValue::Bool(false)),
             ("0", NxValue::Int(0)),
             ("-1", NxValue::Int(-1)),
-            ("3.14", NxValue::Float(3.14)),
+            ("2.75", NxValue::Float(2.75)),
             ("\"hello\"", NxValue::String("hello".to_string())),
             ("[]", NxValue::Array(vec![])),
             (
@@ -516,7 +516,7 @@ mod tests {
 
     #[test]
     fn float32_serializes_to_json() {
-        let value = NxValue::Float32(3.14);
+        let value = NxValue::Float32(2.75);
         let json = value.to_json_string().unwrap();
         // JSON serializes f32 as a number
         let decoded = NxValue::from_json_str(&json).unwrap();

@@ -104,6 +104,7 @@ TypeDeclaration ::=
     PrimitiveType {TypeSuffix}
     | UserDefinedType {TypeSuffix}
     | FunctionType {TypeSuffix}
+    | AppliedType {TypeSuffix}
     | ParenthesizedType {TypeSuffix}
 
 TypeSuffix ::=
@@ -114,6 +115,14 @@ TypeSuffix ::=
    here; elsewhere it is an identifier. *)
 FunctionType ::=
     "<" "function" {PropertyDefinition} "/>" ":" TypeDeclaration
+
+(* One instantiation of a generic record, spelled as the element that constructs it with only its
+   type arguments. A missing argument parses and is reported by name, so "{" not "+". *)
+AppliedType ::=
+    "<" QualifiedName {TypeArgument} "/>"
+
+TypeArgument ::=
+    Identifier "=" TypeDeclaration
 
 ParenthesizedType ::=
     "(" TypeDeclaration ")"
@@ -144,6 +153,20 @@ result (`<function Count:int />: string?` returns a nullable string), so a nulla
 function type is written with parentheses: `(<function Item:Contact />: DrawnNode)?`. A function
 satisfies a function type by parameter name, and may declare fewer parameters than the type
 supplies; see the language reference on functions.
+
+A type parameter is a property definition whose declared type is the keyword `type`:
+`type Range = { T:type start:T end:T }`, `external component <List TItem:type items:TItem[]? />`.
+Every such definition must precede every other property definition of the declaration, carry no
+default and no modifier, and take a name that is neither a primitive nor the built-in `Element`;
+post-parse validation reports each violation, and rejects the form outright anywhere but a
+component signature and a plain `type` record.
+
+An applied type names one instantiation of a generic record: `<Range T=int/>`, or
+`<Range.Update T=int/>` for its derived update companion. The tag is a qualified name and each
+argument binds a parameter by name to any type, in any order. `/>` closes it, so a suffix written
+after it needs no parentheses: `<Range T=int/>[]?` is a nullable list of `<Range T=int/>`. In a
+type position `function` after `<` is the keyword, so a function type and an applied type split on
+the first token after `<` and never collide.
 
 A closed set of scalar choices is a union whose cases all carry no payload — a *constant union*.
 Discriminated unions use `type Name =` followed by the case list. A union may contain fieldless
@@ -195,7 +218,14 @@ ParenFunctionDefinition ::=
     [VisibilityModifier] "let" Identifier "(" [PropertyDefinition {"," PropertyDefinition}] ")" [":" TypeDeclaration] "=" RhsExpression
 
 PropertyDefinition ::=
-    ["content"] MarkupIdentifier ":" TypeDeclaration ["=" RhsExpression]
+    ["content"] MarkupIdentifier ":" PropertyType ["=" RhsExpression]
+
+(* The "type" keyword declares a type parameter rather than a value. The grammar admits it in
+   every property list; post-parse validation restricts it to the leading definitions of a
+   component signature or a plain record declaration. *)
+PropertyType ::=
+    TypeDeclaration
+    | "type"
 ```
 
 ## Components
@@ -348,7 +378,9 @@ ValueForExpression ::=
 PrefixUnaryExpression ::=
     ( "-" | "!" ) ValueExpression
 BinaryExpression ::=
-    ValueExpression ( "+" | "-" | "*" | "/" | "%" | ">" | "<" | ">=" | "<=" | "==" | "!=" | "&&" | "||" ) ValueExpression
+    ValueExpression ( "+" | "-" | "*" | "/" | "%" | ".." | "..=" | ">" | "<" | ">=" | "<=" | "==" | "!=" | "&&" | "||" ) ValueExpression
+    (* ".." and "..=" build the built-in Range record; they bind looser than "+"/"-" and tighter
+       than the comparisons, so `0..n + 1` is `0..(n + 1)`. *)
 MemberAccess ::=
     ValueExpression "." Identifier  (* includes property/field access and union case shorthand; semantic analysis distinguishes *)
 (* An argument may be a braced value, so a function takes a list the same way a property is bound

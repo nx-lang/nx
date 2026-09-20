@@ -145,6 +145,83 @@ fn bare_name_at_a_string_typed_property_is_rejected() {
     );
 }
 
+/// The fix the message names has to be one the site accepts. An author who writes `let span = 1..=5`
+/// meets this diagnostic first, and being sent to `"span"` at a numeric site only produces a second
+/// error.
+#[test]
+fn a_visible_binding_is_offered_in_its_braced_form() {
+    let messages = errors("let r = 5\nlet x:int = r\n");
+    assert!(
+        messages.iter().any(|message| message.contains("write {r}")),
+        "expected the braced form to be suggested, got: {messages:?}"
+    );
+    assert!(
+        !messages.iter().any(|message| message.contains("\"r\"")),
+        "an int site does not take a string, so the quoted form must not be offered: {messages:?}"
+    );
+}
+
+#[test]
+fn the_quoted_form_is_offered_only_where_a_string_fits() {
+    assert_reports(
+        "let x:string = hello\n",
+        "for a string value write \"hello\"",
+    );
+
+    let numeric = errors("let x:int = hello\n");
+    assert!(
+        !numeric
+            .iter()
+            .any(|message| message.contains("for a string value")),
+        "a string does not satisfy an int site: {numeric:?}"
+    );
+
+    let record = errors("type P = { a:int }\nlet p = <P a={1} />\nlet q:P = p\n");
+    assert!(
+        record.iter().any(|message| message.contains("write {p}")),
+        "a record site with a visible binding should name the braced form: {record:?}"
+    );
+    assert!(
+        !record
+            .iter()
+            .any(|message| message.contains("for a string value")),
+        "a record site does not take a string: {record:?}"
+    );
+}
+
+/// A binding is only a fix where its own type fits: `let r = 5` does not make `r` a string, so a
+/// `string` site is sent to the quoted form rather than to `{r}`, which it would reject in turn.
+#[test]
+fn a_visible_binding_of_the_wrong_type_is_not_offered() {
+    let messages = errors("let r = 5\nlet x:string = r\n");
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("for a string value write \"r\"")),
+        "a string site should be offered the quoted form, got: {messages:?}"
+    );
+    assert!(
+        !messages.iter().any(|message| message.contains("write {r}")),
+        "an int binding does not satisfy a string site, so the braced form must not be offered: {messages:?}"
+    );
+
+    let function = errors("let f() = 5\nlet x:int = f\n");
+    assert!(
+        !function.iter().any(|message| message.contains("write {f}")),
+        "a function value does not satisfy an int site: {function:?}"
+    );
+}
+
+/// Neither form fits and no binding is visible, and the message still names what the site takes:
+/// stopping at "a bare name resolves only against a union's cases" leaves the author nowhere.
+#[test]
+fn a_site_with_nothing_to_point_at_still_names_the_accepted_form() {
+    assert_reports(
+        "let x:int = nosuch\n",
+        "a value here is written as a literal, or in braces as `{...}`",
+    );
+}
+
 #[test]
 fn unknown_member_suggests_a_near_match() {
     assert_reports(

@@ -15,25 +15,13 @@ type Contact = {
   Subtitle: string
 }
 
-// NX has no range, so the collection is built by tenfolds: a seed of ten contacts, shifted ten
-// times per step. Element content splices list-valued children, which is what concatenates them.
-let digits = { 0 1 2 3 4 5 6 7 8 9 }
-let <Contacts content Items:Contact[] />: Contact[] = {Items}
-let <Shift Items:Contact[] By:int />: Contact[] = {
-  for c in Items {
-    <Contact Id={c.Id + By} Initials={"" + (c.Id + By) % 100} Title={"Contact " + (c.Id + By)}
-      Subtitle={"Recycled drawn cell #" + (c.Id + By) + " — scroll me fast"} />
+// The collection the original binds: a hundred thousand contacts, counted out by a range.
+let contacts = {
+  for id in 1..=100000 {
+    <Contact Id={id} Initials={"" + id % 100} Title={"Contact " + id}
+      Subtitle={"Recycled drawn cell #" + id + " — scroll me fast"} />
   }
 }
-let <Tenfold Items:Contact[] Step:int />: Contact[] =
-  <Contacts>
-    <Shift Items={Items} By=0 /> <Shift Items={Items} By={Step} /> <Shift Items={Items} By={Step * 2} />
-    <Shift Items={Items} By={Step * 3} /> <Shift Items={Items} By={Step * 4} /> <Shift Items={Items} By={Step * 5} />
-    <Shift Items={Items} By={Step * 6} /> <Shift Items={Items} By={Step * 7} /> <Shift Items={Items} By={Step * 8} />
-    <Shift Items={Items} By={Step * 9} />
-  </Contacts>
-let seed = { for d in digits { <Contact Id={d + 1} Initials={"" + (d + 1)} Title={"Contact " + (d + 1)} Subtitle={"Recycled drawn cell #" + (d + 1) + " — scroll me fast"} /> } }
-let contacts = <Tenfold Items=<Tenfold Items=<Tenfold Items=<Tenfold Items={seed} Step=10 /> Step=100 /> Step=1000 /> Step=10000 />
 
 // The cell the original builds imperatively in ContactCell: an absolute layout with the avatar at
 // the start and the text column filling the remaining width, cached as one bitmap. An element

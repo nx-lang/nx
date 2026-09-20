@@ -6,6 +6,7 @@
         "conversions",
         "expressions",
         "handlers",
+        "ranges",
         "two-module"
       ],
       "and": [
@@ -24,7 +25,8 @@
       "eq": [
         "conversions",
         "expressions",
-        "function-values"
+        "function-values",
+        "ranges"
       ],
       "fadd32": [
         "conversions"
@@ -63,7 +65,8 @@
       ],
       "mul": [
         "expressions",
-        "function-values"
+        "function-values",
+        "ranges"
       ],
       "ne": [
         "expressions"
@@ -72,7 +75,8 @@
         "expressions"
       ],
       "sub": [
-        "expressions"
+        "expressions",
+        "generic-records"
       ]
     },
     "constants": {
@@ -81,14 +85,17 @@
       ],
       "float": [
         "conversions",
-        "expressions"
+        "expressions",
+        "ranges"
       ],
       "int": [
         "components",
         "conversions",
         "expressions",
         "function-values",
+        "generic-records",
         "handlers",
+        "ranges",
         "records",
         "snippet",
         "trailing-element",
@@ -109,7 +116,9 @@
         "conversions",
         "expressions",
         "function-values",
+        "generic-records",
         "handlers",
+        "ranges",
         "records",
         "snippet",
         "trailing-element",
@@ -118,6 +127,7 @@
       "record": [
         "conversions",
         "function-values",
+        "generic-records",
         "handlers",
         "records",
         "two-module"
@@ -142,6 +152,7 @@
     },
     "intrinsics": {
       "apply": [
+        "generic-records",
         "records"
       ],
       "changed": [
@@ -171,12 +182,15 @@
         "conversions",
         "expressions",
         "function-values",
+        "generic-records",
         "handlers",
+        "ranges",
         "two-module"
       ],
       "bool": [
         "conversions",
         "expressions",
+        "ranges",
         "snippet",
         "trailing-element"
       ],
@@ -184,6 +198,8 @@
         "conversions",
         "expressions",
         "function-values",
+        "generic-records",
+        "ranges",
         "records",
         "two-module"
       ],
@@ -204,6 +220,9 @@
         "expressions",
         "handlers"
       ],
+      "forRange": [
+        "ranges"
+      ],
       "if": [
         "conversions",
         "expressions"
@@ -213,11 +232,13 @@
         "expressions"
       ],
       "intrinsic": [
+        "generic-records",
         "records"
       ],
       "member": [
         "conversions",
         "function-values",
+        "generic-records",
         "handlers",
         "records",
         "two-module"
@@ -234,7 +255,9 @@
         "conversions",
         "expressions",
         "function-values",
+        "generic-records",
         "handlers",
+        "ranges",
         "records",
         "snippet",
         "trailing-element",
@@ -243,7 +266,9 @@
       "record": [
         "conversions",
         "function-values",
+        "generic-records",
         "handlers",
+        "ranges",
         "records",
         "two-module"
       ],
@@ -252,7 +277,9 @@
         "conversions",
         "expressions",
         "function-values",
+        "generic-records",
         "handlers",
+        "ranges",
         "records",
         "snippet",
         "two-module"
@@ -262,7 +289,9 @@
         "conversions",
         "expressions",
         "function-values",
+        "generic-records",
         "handlers",
+        "ranges",
         "records",
         "two-module"
       ],
@@ -271,6 +300,7 @@
         "conversions",
         "expressions",
         "function-values",
+        "generic-records",
         "handlers",
         "records",
         "snippet",
@@ -295,6 +325,7 @@
         "components",
         "conversions",
         "function-values",
+        "generic-records",
         "handlers",
         "records",
         "snippet",
@@ -306,6 +337,7 @@
       "nominal": [
         "components",
         "function-values",
+        "generic-records",
         "handlers",
         "records",
         "snippet",
@@ -322,6 +354,7 @@
         "conversions",
         "expressions",
         "function-values",
+        "generic-records",
         "handlers",
         "records",
         "snippet",
@@ -343,7 +376,9 @@
     "conversions",
     "expressions",
     "function-values",
+    "generic-records",
     "handlers",
+    "ranges",
     "records",
     "snippet",
     "trailing-element",

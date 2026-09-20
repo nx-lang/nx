@@ -119,3 +119,38 @@ fn highlights_do_not_treat_the_identifier_function_as_a_keyword() {
         "{captures:?}"
     );
 }
+
+#[test]
+fn highlights_capture_the_parts_of_an_applied_type() {
+    let captures = highlight_captures("type Slots = { s:<Range.Update T=int/>[] }");
+    let has = |name: &str, text: &str| captures.iter().any(|(n, t)| n == name && t == text);
+    assert!(has("type", "Range"), "{captures:?}");
+    assert!(has("type", "Update"), "{captures:?}");
+    assert!(has("type.parameter", "T"), "{captures:?}");
+    assert!(has("type.builtin", "int"), "{captures:?}");
+}
+
+#[test]
+fn highlights_capture_the_range_operators() {
+    let captures = highlight_captures("let xs = {for i in 0..count {i}}\nlet r = {1..=5}");
+    let has = |name: &str, text: &str| captures.iter().any(|(n, t)| n == name && t == text);
+    assert!(has("operator", ".."), "{captures:?}");
+    assert!(has("operator", "..="), "{captures:?}");
+    assert!(has("number", "0"), "{captures:?}");
+    assert!(has("number", "1"), "{captures:?}");
+    assert!(has("number", "5"), "{captures:?}");
+    assert!(
+        !captures
+            .iter()
+            .any(|(name, text)| name == "punctuation.delimiter" && text == ".."),
+        "a range operator is not a member-access dot: {captures:?}"
+    );
+}
+
+#[test]
+fn highlights_keep_member_access_dots_beside_a_range() {
+    let captures = highlight_captures("let r = {page.first..page.last}");
+    let has = |name: &str, text: &str| captures.iter().any(|(n, t)| n == name && t == text);
+    assert!(has("operator", ".."), "{captures:?}");
+    assert!(has("punctuation.delimiter", "."), "{captures:?}");
+}

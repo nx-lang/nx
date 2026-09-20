@@ -20,23 +20,38 @@ import type {
   NxLanguageService
 } from "@nx-lang/language-protocol";
 
-import { answerQuery, type AnswerRequest } from "./answer.js";
+import {
+  answerQuery,
+  contextCollision,
+  contextCollisionMessage,
+  type AnswerRequest,
+  type HostContext
+} from "./answer.js";
 import { SnapshotCache, documentSetKey, type SnapshotLike } from "./cache.js";
-import { preludeOffsets, type PreludeOffsets } from "./prelude.js";
 
 /** How many analyzed document sets a service keeps by default. */
 export const DEFAULT_CACHE_SIZE = 8;
 
 /** What `createSnapshotLanguageService` accepts. */
 export interface SnapshotLanguageServiceOptions {
-  /** Analyzes a document set. Called once per distinct set, and its result is cached and disposed. */
-  createSnapshot: (documents: readonly LanguageDocument[]) => SnapshotLike;
   /**
-   * NX source placed ahead of the queried document before analysis, for hosts whose context
-   * declarations cannot yet be imported without loss. Positions and ranges are shifted so the
-   * caller sees only its own coordinates.
+   * Analyzes a document set. Called once per distinct set, and its result is cached and disposed.
+   *
+   * <para>The identities of `context.implicitImports` are passed as `implicitImports`, so the factory
+   * hands them to whichever SDK's snapshot it builds.</para>
    */
-  prelude?: { source: string };
+  createSnapshot: (
+    documents: readonly LanguageDocument[],
+    options: { implicitImports: readonly string[] }
+  ) => SnapshotLike;
+  /**
+   * The host's own declarations, served with every query: documents that join every query's set, and
+   * the identities every queried document imports implicitly.
+   *
+   * <para>Nothing is prepended and no position is rewritten, so every position in a query and every
+   * range in an answer is in the queried document's own coordinates.</para>
+   */
+  context?: HostContext;
   /** How many analyzed document sets to keep. Default 8. */
   cacheSize?: number;
 }
@@ -56,9 +71,14 @@ export interface SnapshotLanguageService extends NxLanguageService {
 export function createSnapshotLanguageService(
   options: SnapshotLanguageServiceOptions
 ): SnapshotLanguageService {
+  if ("prelude" in options) {
+    throw new TypeError(
+      "createSnapshotLanguageService no longer accepts `prelude`. Pass `context: { documents, implicitImports }` instead: the host's declarations join every query's document set and are named as implicit imports, and no position is shifted."
+    );
+  }
   const cache = new SnapshotCache<SnapshotLike>(options.cacheSize ?? DEFAULT_CACHE_SIZE);
-  const prelude: PreludeOffsets | undefined =
-    options.prelude === undefined ? undefined : preludeOffsets(options.prelude.source);
+  const context = options.context;
+  const implicitImports = Array.from(context?.implicitImports ?? []);
 
   function answer<T>(
     query: LanguageQueryName,
@@ -73,10 +93,17 @@ export function createSnapshotLanguageService(
       return Promise.reject(abortError());
     }
 
+    const collision = contextCollision(request.documents, context);
+    if (collision !== undefined) {
+      return Promise.reject(new TypeError(contextCollisionMessage(collision, "query")));
+    }
+
     try {
       return Promise.resolve(
-        answerQuery(query, request, prelude, (documents) =>
-          cache.getOrCreate(documentSetKey(documents), () => options.createSnapshot(documents))
+        answerQuery(query, request, context, (documents) =>
+          cache.getOrCreate(documentSetKey(documents), () =>
+            options.createSnapshot(documents, { implicitImports })
+          )
         ) as T
       );
     } catch (error) {

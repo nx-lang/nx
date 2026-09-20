@@ -4,6 +4,13 @@
 //! rediscover imports during emission; all executable generation starts from the resolved,
 //! type-checked program model preserved by `nx-api`.
 
+// The builders and emitters thread a wide, consistent context — the program, the module, the
+// declaration, the emit options, the export policy and the output buffer — through one function
+// per construct rather than one method on a shared struct. Splitting a signature here would move
+// the arguments into a struct built at every call site and nothing else, so the lint is allowed
+// for the crate.
+#![allow(clippy::too_many_arguments)]
+
 mod builder;
 mod emit;
 mod ir;
@@ -23,8 +30,8 @@ pub use ir::{
     IrItem, NxIrArtifact, NxIrDebug, NxIrDebugSpans, NxIrEmitOptions, NxIrMetadata,
     NxIrModuleEntry, NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1,
     NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1, NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1,
-    NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1, NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
-    NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
+    NX_IR_REQUIRED_FEATURE_RANGES_V1, NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1,
+    NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1, NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
 };
 pub use ir_bundle::{read_nx_ir_bundle, write_nx_ir_bundle, NxIrBundleEntry};
 pub use ir_explain::{explain_nx_ir, explain_nx_ir_image, ExplainError};
@@ -52,5 +59,7 @@ pub use runtime::{javascript_runtime_abi, javascript_runtime_helper_source};
 mod ir_corpus_tests;
 #[cfg(test)]
 mod ir_tests;
+#[cfg(test)]
+mod prelude_image_tests;
 #[cfg(test)]
 mod tests;

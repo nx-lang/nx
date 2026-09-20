@@ -39,18 +39,8 @@ let color(id:int): string = {
 }
 let post(id:int): Post = <Post Id={id} Title={"Post " + id} Body={body(id)} Footer={"#" + id + " · uneven row"} Color={color(id)} />
 
-// NX has no range, so the collection is built by tens: a seed of ten posts, shifted ten times per
-// step. Element content splices list-valued children, which is what concatenates them.
-let digits = { 0 1 2 3 4 5 6 7 8 9 }
-let <Posts content Items:Post[] />: Post[] = {Items}
-let <Shift Items:Post[] By:int />: Post[] = { for p in Items { post(p.Id + By) } }
-let seed = { for d in digits { post(d + 1) } }
-let hundred = <Posts>
-  <Shift Items={seed} By=0 /> <Shift Items={seed} By=10 /> <Shift Items={seed} By=20 /> <Shift Items={seed} By=30 />
-  <Shift Items={seed} By=40 /> <Shift Items={seed} By=50 /> <Shift Items={seed} By=60 /> <Shift Items={seed} By=70 />
-  <Shift Items={seed} By=80 /> <Shift Items={seed} By=90 />
-</Posts>
-let posts = <Posts> <Shift Items={hundred} By=0 /> <Shift Items={hundred} By=100 /> </Posts>
+// The feed: the original's first 200 posts, counted out by a range.
+let posts = { for id in 1..=200 { post(id) } }
 
 // The cell the original builds imperatively in FeedCell: a colored stripe beside a column whose
 // body text wraps to as many lines as it needs, so no two rows are the same height. An element

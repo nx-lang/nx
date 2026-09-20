@@ -178,39 +178,6 @@ fn diagnostic_to_api(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use nx_diagnostics::Label;
-    use tempfile::TempDir;
-    use text_size::{TextRange, TextSize};
-
-    #[test]
-    fn source_map_takes_precedence_over_file_backed_fallback() {
-        let temp = TempDir::new().expect("temp dir");
-        let source_path = temp.path().join("config.nx");
-        fs::write(&source_path, "disk line 1\nsecond line").expect("disk source");
-
-        let source_file = source_path.display().to_string();
-        let diagnostic = Diagnostic::error("test")
-            .with_message("uses provider source")
-            .with_label(Label::primary(
-                &source_file,
-                TextRange::new(TextSize::from(10), TextSize::from(14)),
-            ))
-            .build();
-        let mut sources = FxHashMap::default();
-        sources.insert(source_file, Arc::<str>::from("provider source text"));
-
-        let diagnostics = diagnostics_to_api_with_sources(&[diagnostic], "", &sources);
-
-        assert_eq!(diagnostics[0].labels[0].span.start_line, 1);
-        assert_eq!(diagnostics[0].labels[0].span.start_column, 11);
-        assert_eq!(diagnostics[0].labels[0].span.end_line, 1);
-        assert_eq!(diagnostics[0].labels[0].span.end_column, 15);
-    }
-}
-
 fn text_range_to_span(range: TextRange, source: &str, index: &LineIndex) -> NxTextSpan {
     let start: usize = range.start().into();
     let end: usize = range.end().into();
@@ -267,5 +234,38 @@ impl LineIndex {
                 "NX source size should be validated before converting diagnostics to the API model",
             ),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nx_diagnostics::Label;
+    use tempfile::TempDir;
+    use text_size::{TextRange, TextSize};
+
+    #[test]
+    fn source_map_takes_precedence_over_file_backed_fallback() {
+        let temp = TempDir::new().expect("temp dir");
+        let source_path = temp.path().join("config.nx");
+        fs::write(&source_path, "disk line 1\nsecond line").expect("disk source");
+
+        let source_file = source_path.display().to_string();
+        let diagnostic = Diagnostic::error("test")
+            .with_message("uses provider source")
+            .with_label(Label::primary(
+                &source_file,
+                TextRange::new(TextSize::from(10), TextSize::from(14)),
+            ))
+            .build();
+        let mut sources = FxHashMap::default();
+        sources.insert(source_file, Arc::<str>::from("provider source text"));
+
+        let diagnostics = diagnostics_to_api_with_sources(&[diagnostic], "", &sources);
+
+        assert_eq!(diagnostics[0].labels[0].span.start_line, 1);
+        assert_eq!(diagnostics[0].labels[0].span.start_column, 11);
+        assert_eq!(diagnostics[0].labels[0].span.end_line, 1);
+        assert_eq!(diagnostics[0].labels[0].span.end_column, 15);
     }
 }

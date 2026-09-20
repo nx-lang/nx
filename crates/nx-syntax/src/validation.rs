@@ -26,9 +26,9 @@ const DUPLICATE_NULLABLE_SUFFIX_NOTE: &str =
     "A nullable suffix can only be applied once per type layer. `string?[]?` is valid because \
      `[]` creates a new outer list layer.";
 const TYPE_PARAMETER_SYNTAX: &str =
-    "A type parameter is declared as `Name:type` at the start of a component signature, after \
-     `extends` and before every prop, with no default value, no modifier, and a name that is not \
-     a primitive or built-in type";
+    "A type parameter is declared as `Name:type` at the start of a component signature or a record \
+     declaration, after `extends` and before every other property, with no default value, no \
+     modifier, and a name that is not a primitive or built-in type";
 const UNION_DEFINITION_SYNTAX: &str =
     "Expected: type UnionName [extends AbstractRecord] = caseName | payloadCase { prop:type } \
      (a single-case union keeps its leading `|`)";
@@ -523,22 +523,27 @@ fn validate_type_parameter_definition(
         );
     };
 
-    if parent_kind != Some(SyntaxKind::COMPONENT_SIGNATURE) {
-        let context = match parent_kind {
-            Some(SyntaxKind::RECORD_DEFINITION) => "a record",
-            Some(SyntaxKind::ACTION_DEFINITION) => "an action",
-            Some(SyntaxKind::EMIT_DEFINITION) => "an emitted action",
-            Some(SyntaxKind::STATE_GROUP) => "a state group",
-            Some(SyntaxKind::FUNCTION_DEFINITION) => "a function parameter list",
-            Some(SyntaxKind::FUNCTION_TYPE) => "a function type",
-            _ => "this position",
-        };
-        reject(
-            format!("Type parameter '{name}' is not supported in {context}"),
-            "type parameters are only supported on component signatures",
-        );
-        return;
-    }
+    // A component signature and a plain record declaration both take type parameters; every other
+    // property list refuses them. The two differ only in what they call the properties that follow.
+    let member = match parent_kind {
+        Some(SyntaxKind::COMPONENT_SIGNATURE) => "prop",
+        Some(SyntaxKind::RECORD_DEFINITION) => "field",
+        _ => {
+            let context = match parent_kind {
+                Some(SyntaxKind::ACTION_DEFINITION) => "an action",
+                Some(SyntaxKind::EMIT_DEFINITION) => "an emitted action",
+                Some(SyntaxKind::STATE_GROUP) => "a state group",
+                Some(SyntaxKind::FUNCTION_DEFINITION) => "a function parameter list",
+                Some(SyntaxKind::FUNCTION_TYPE) => "a function type",
+                _ => "this position",
+            };
+            reject(
+                format!("Type parameter '{name}' is not supported in {context}"),
+                "type parameters are only supported on component signatures and record declarations",
+            );
+            return;
+        }
+    };
 
     if let Some(parent) = parent.as_ref() {
         let follows_prop = parent
@@ -548,8 +553,8 @@ fn validate_type_parameter_definition(
             .any(|child| !property_definition_is_type_parameter(&child));
         if follows_prop {
             reject(
-                format!("Type parameter '{name}' must be declared before every prop"),
-                "move this type parameter ahead of the props",
+                format!("Type parameter '{name}' must be declared before every {member}"),
+                format!("move this type parameter ahead of the {member}s").as_str(),
             );
         }
     }
@@ -1426,7 +1431,7 @@ mod tests {
         let result = parse_str(source, "test.nx");
 
         // Should have multiple errors
-        assert!(result.errors.len() >= 1, "Should detect syntax errors");
+        assert!(!result.errors.is_empty(), "Should detect syntax errors");
     }
 
     #[test]

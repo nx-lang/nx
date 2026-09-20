@@ -16,9 +16,6 @@ import type {
 import { NxLibraryRegistry } from "@nx-lang/sdk-node";
 import {
   createNxLanguageHandler,
-  preludeOffsets,
-  shiftPositionIn,
-  shiftRangeOut,
   toNodeListener,
   type NxLanguageHandlerOptions,
   type SnapshotLike,
@@ -276,39 +273,28 @@ test("a build context makes library components visible; no context leaves them u
 });
 
 // ---------------------------------------------------------------------------------------------
-// Prelude
+// Host context
 // ---------------------------------------------------------------------------------------------
 
-test("prelude offsets add a separating line and shift only lines and bytes", () => {
-  const withNewline = preludeOffsets("let a = 1\n");
-  assert.equal(withNewline.text, "let a = 1\n\n");
-  assert.equal(withNewline.lines, 2);
-  assert.equal(withNewline.bytes, 11);
+const CATALOG = "nx://tenant/catalog.nx";
 
-  const withoutNewline = preludeOffsets("let a = 1");
-  assert.deepEqual(withoutNewline, withNewline);
+/** The host's own declarations, exported so an implicit import binds them. */
+const CATALOG_SOURCE = "export type Mode = light | dark\nexport let <Panel mode:Mode title:string /> = <div />\n";
 
-  const emoji = preludeOffsets('let s = "😀"');
-  assert.equal(emoji.lines, 2);
-  assert.equal(emoji.bytes, Buffer.byteLength('let s = "😀"\n\n'));
-
-  assert.deepEqual(shiftPositionIn({ line: 3, character: 7 }, withNewline), { line: 5, character: 7 });
-  assert.deepEqual(
-    shiftRangeOut({ start: { line: 2, character: 4 }, end: { line: 2, character: 9 }, startByte: 15, endByte: 20 }, withNewline),
-    { start: { line: 0, character: 4 }, end: { line: 0, character: 9 }, startByte: 4, endByte: 9 },
-  );
-  assert.equal(
-    shiftRangeOut({ start: { line: 0, character: 4 }, end: { line: 0, character: 5 }, startByte: 4, endByte: 5 }, withNewline),
-    null,
-  );
+/** A handler whose host context declares `Panel`, served with every query. */
+const contextHandler = createNxLanguageHandler({
+  context: {
+    documents: [{ uri: CATALOG, source: CATALOG_SOURCE }],
+    implicitImports: ["tenant/catalog.nx"],
+  },
 });
 
-const preludeHandler = createNxLanguageHandler({ prelude: { source: PANEL.trimEnd() } });
-
-test("hover through a prelude answers in the document's own coordinates", async () => {
+test("hover through host context answers in the queried document's own coordinates", async () => {
   const source = '<Panel mode=light title="x" />\n';
   const position = positionOf(source, "Panel");
-  const hover = await json<Hover | null>(await preludeHandler(post("hover", { documents: [{ uri: FORM, source, version: 5 }], uri: FORM, position })));
+  const hover = await json<Hover | null>(
+    await contextHandler(post("hover", { documents: [{ uri: FORM, source, version: 5 }], uri: FORM, position })),
+  );
   assert.ok(hover !== null, "hover content");
   assert.ok(hover.contents.includes("<Panel"), hover.contents);
   assert.equal(hover.version, 5);
@@ -318,17 +304,22 @@ test("hover through a prelude answers in the document's own coordinates", async 
   assert.equal(hover.range.endByte, 6);
 });
 
-test("completions inside a prelude component's tag offer its properties", async () => {
+test("completions inside a context component's tag offer its properties", async () => {
   const source = "<Panel  />\n";
   const completions = await json<CompletionList>(
-    await preludeHandler(post("completions", { documents: [{ uri: FORM, source }], uri: FORM, position: { line: 0, character: 7 } })),
+    await contextHandler(post("completions", { documents: [{ uri: FORM, source }], uri: FORM, position: { line: 0, character: 7 } })),
   );
   const labels = completions.items.map((item) => item.label);
   assert.ok(labels.includes("mode") && labels.includes("title"), labels.join(","));
 });
 
-test("prelude-internal diagnostics are reported with a prelude origin and no range", async () => {
-  const broken = createNxLanguageHandler({ prelude: { source: `${PANEL}let wrong: string = 1` } });
+test("a context document's own error is reported under its URI, not the queried document's", async () => {
+  const broken = createNxLanguageHandler({
+    context: {
+      documents: [{ uri: CATALOG, source: `${CATALOG_SOURCE}export let wrong: string = 1\n` }],
+      implicitImports: ["tenant/catalog.nx"],
+    },
+  });
   const source = 'let alsoWrong: string = 2\n<Panel mode=light title="x" />\n';
   const report = await json<DiagnosticReport>(await broken(post("diagnostics", { documents: [{ uri: FORM, source }], uri: FORM })));
 
@@ -337,35 +328,63 @@ test("prelude-internal diagnostics are reported with a prelude origin and no ran
   assert.equal(positioned[0]!.range.start.line, 0);
   assert.match(positioned[0]!.message, /alsoWrong/);
 
-  const preludeOrigin = report.workspace.filter((diagnostic) => diagnostic.labels.some((label) => label.identity === "prelude"));
-  assert.equal(preludeOrigin.length, 1, JSON.stringify(report.workspace));
-  assert.equal(preludeOrigin[0]!.severity, "Error");
+  const context = report.documents.find((document) => document.uri === CATALOG);
+  assert.ok(context !== undefined, JSON.stringify(report.documents.map((document) => document.uri)));
+  assert.equal(context.diagnostics.length, 1, JSON.stringify(context.diagnostics));
+  assert.match(context.diagnostics[0]!.message, /wrong/);
+  // Nothing was moved, so nothing became a workspace diagnostic.
+  assert.deepEqual(report.workspace, []);
 });
 
-test("document symbols through a prelude are the document's own, shifted", async () => {
+test("document symbols through host context are the document's own", async () => {
   const source = "let mine = 1\n";
-  const symbols = await json<DocumentSymbol[]>(await preludeHandler(post("documentSymbols", { documents: [{ uri: FORM, source }], uri: FORM })));
+  const symbols = await json<DocumentSymbol[]>(
+    await contextHandler(post("documentSymbols", { documents: [{ uri: FORM, source }], uri: FORM })),
+  );
   assert.deepEqual(symbols.map((symbol) => symbol.name), ["mine"]);
   assert.equal(symbols[0]!.range.start.line, 0);
   assert.equal(symbols[0]!.range.startByte, 0);
 });
 
-test("a prelude without a trailing newline still keeps the document's first line its own", async () => {
-  const source = "let first = 1\n";
-  const report = await json<DiagnosticReport>(await preludeHandler(post("diagnostics", { documents: [{ uri: FORM, source }], uri: FORM })));
-  assert.deepEqual(report.documents[0]!.diagnostics, []);
-  const symbols = await json<DocumentSymbol[]>(await preludeHandler(post("documentSymbols", { documents: [{ uri: FORM, source }], uri: FORM })));
-  assert.deepEqual(symbols[0]!.range.start, { line: 0, character: 0 });
+test("a request cannot replace a context document, and says what collided", async () => {
+  const response = await contextHandler(
+    post("diagnostics", { documents: [{ uri: CATALOG, source: "let mine = 1\n" }], uri: CATALOG }),
+  );
+  assert.equal(response.status, 400);
+  const body = await json<LanguageServiceErrorBody>(response);
+  assert.equal(body.error.code, "invalid-request");
+  assert.match(body.error.message, new RegExp(`A document with the uri '${CATALOG}' is part of the host's context`));
 });
 
-test("a sibling's related location that points into the queried document is shifted too", async () => {
+// The context document carries no identity of its own, so the identity a client would have to name
+// to replace it is the one derived from its URI.
+test("a request cannot replace a context document by naming its derived identity", async () => {
+  const response = await contextHandler(
+    post("diagnostics", {
+      documents: [{ uri: "nx://tenant/mine.nx", identity: "tenant/catalog.nx", source: "let mine = 1\n" }],
+      uri: "nx://tenant/mine.nx",
+    }),
+  );
+  assert.equal(response.status, 400);
+  const body = await json<LanguageServiceErrorBody>(response);
+  assert.equal(body.error.code, "invalid-request");
+  assert.match(body.error.message, /A document with the identity 'tenant\/catalog\.nx' is part of the host's context/);
+});
+
+test("passing the removed prelude option fails at construction, naming context", () => {
+  assert.throws(
+    // @ts-expect-error the option was removed; a host still passing it must be told so.
+    () => createNxLanguageHandler({ prelude: { source: PANEL } }),
+    /context/,
+  );
+});
+
+test("a sibling's related location keeps the coordinates the analysis gave it", async () => {
   const SIBLING = "nx://tenant/sibling.nx";
-  const offsets = preludeOffsets(PANEL);
-  const inCombined = { start: { line: offsets.lines + 1, character: 4 }, end: { line: offsets.lines + 1, character: 9 }, startByte: offsets.bytes + 14, endByte: offsets.bytes + 19 };
+  const ownRange = { start: { line: 1, character: 4 }, end: { line: 1, character: 9 }, startByte: 14, endByte: 19 };
   const siblingRange = { start: { line: 0, character: 0 }, end: { line: 0, character: 5 }, startByte: 0, endByte: 5 };
-  const related = (uri: string, range: typeof inCombined) => ({ uri, identity: uri.slice("nx://".length), range, message: null });
+  const related = (uri: string, range: typeof ownRange) => ({ uri, identity: uri.slice("nx://".length), range, message: null });
   const handler = createNxLanguageHandler({
-    prelude: { source: PANEL },
     createSnapshot: (): SnapshotLike => ({
       hover: () => null,
       completions: () => ({ uri: FORM, identity: "tenant/form.nx", version: null, items: [] }),
@@ -376,14 +395,14 @@ test("a sibling's related location that points into the queried document is shif
             identity: "tenant/sibling.nx",
             version: null,
             diagnostics: [
-              { severity: "Error", code: "NXE1", message: "conflicts", range: siblingRange, related: [related(FORM, inCombined), related(SIBLING, siblingRange)] },
+              { severity: "Error", code: "NXE1", message: "conflicts", range: siblingRange, related: [related(FORM, ownRange), related(SIBLING, siblingRange)] },
             ],
           },
           {
             uri: FORM,
             identity: "tenant/form.nx",
             version: null,
-            diagnostics: [{ severity: "Error", code: "NXE1", message: "conflicts", range: inCombined, related: [related(SIBLING, siblingRange)] }],
+            diagnostics: [{ severity: "Error", code: "NXE1", message: "conflicts", range: ownRange, related: [related(SIBLING, siblingRange)] }],
           },
         ],
         workspace: [],
@@ -396,12 +415,11 @@ test("a sibling's related location that points into the queried document is shif
   const report = await json<DiagnosticReport>(
     await handler(post("diagnostics", { documents: [{ uri: FORM, source: "let x = 1\nlet x = 2\n" }, { uri: SIBLING, source: "let x = 3\n" }], uri: FORM })),
   );
-  const own = shiftRangeOut(inCombined, offsets);
   const sibling = report.documents.find((document) => document.uri === SIBLING)!;
-  assert.deepEqual(sibling.diagnostics[0]!.range, siblingRange, "the sibling's own range is untouched");
-  assert.deepEqual(sibling.diagnostics[0]!.related.map((location) => location.range), [own, siblingRange]);
+  assert.deepEqual(sibling.diagnostics[0]!.range, siblingRange);
+  assert.deepEqual(sibling.diagnostics[0]!.related.map((location) => location.range), [ownRange, siblingRange]);
   const form = report.documents.find((document) => document.uri === FORM)!;
-  assert.deepEqual(form.diagnostics[0]!.range, own);
+  assert.deepEqual(form.diagnostics[0]!.range, ownRange);
   assert.deepEqual(form.diagnostics[0]!.related.map((location) => location.range), [siblingRange]);
 });
 

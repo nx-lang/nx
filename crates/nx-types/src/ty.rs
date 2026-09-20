@@ -355,6 +355,9 @@ impl fmt::Display for FunctionMismatch {
 /// function declares must be one the type supplies, under the same name and the same `content`
 /// marking; the function may leave parameters of the type undeclared, and a caller supplying them
 /// is what makes that safe. Parameter order is not compared.</para>
+// `FunctionMismatch` carries the two types its message prints, so the `Err` is large by design.
+// The caller turns it straight into a diagnostic and there is one per mismatched binding.
+#[allow(clippy::result_large_err)]
 pub fn check_function_satisfies(
     actual_params: &[FunctionParam],
     actual_ret: &Type,
@@ -474,6 +477,10 @@ impl Type {
     ) -> Option<&TypeParameterRef> {
         match self {
             Type::Parameter(param) if matches(param) => Some(param),
+            Type::Named(named) => named
+                .args()
+                .iter()
+                .find_map(|(_, arg)| arg.find_parameter(matches)),
             Type::Array(inner) | Type::Nullable(inner) => inner.find_parameter(matches),
             Type::Function { params, ret } => params
                 .iter()
@@ -491,6 +498,15 @@ impl Type {
     ) -> Type {
         match self {
             Type::Parameter(param) => substitute(param).unwrap_or_else(|| self.clone()),
+            Type::Named(named) if !named.args().is_empty() => Type::Named(
+                named.with_args(
+                    named
+                        .args()
+                        .iter()
+                        .map(|(param, ty)| (param.clone(), ty.substitute_parameters(substitute)))
+                        .collect(),
+                ),
+            ),
             Type::Array(inner) => Type::array(inner.substitute_parameters(substitute)),
             Type::Nullable(inner) => Type::nullable(inner.substitute_parameters(substitute)),
             Type::Function { params, ret } => Type::function(
@@ -519,6 +535,22 @@ impl Type {
     ) -> Type {
         match self {
             Type::Parameter(param) => substitute(param, covariant).unwrap_or_else(|| self.clone()),
+            // A type argument is invariant, so it is neither produced nor consumed by the
+            // instantiation; it keeps the polarity of the position the applied type stands in.
+            Type::Named(named) if !named.args().is_empty() => Type::Named(
+                named.with_args(
+                    named
+                        .args()
+                        .iter()
+                        .map(|(param, ty)| {
+                            (
+                                param.clone(),
+                                ty.substitute_parameters_by_variance(covariant, substitute),
+                            )
+                        })
+                        .collect(),
+                ),
+            ),
             Type::Array(inner) => {
                 Type::array(inner.substitute_parameters_by_variance(covariant, substitute))
             }
@@ -756,7 +788,12 @@ impl fmt::Display for Type {
                     ty.to_string()
                 }))
             }
-            Type::Named(named) => write!(f, "{}", named.name),
+            Type::Named(named) if named.args().is_empty() => write!(f, "{}", named.name),
+            Type::Named(named) => f.write_str(&format_applied_type(
+                &named.name,
+                named.args(),
+                &|ty: &Type| ty.to_string(),
+            )),
             Type::Union(union_ty) => write!(f, "{}", union_ty.name),
             Type::UnionCase(case_ty) => write!(f, "{}.{}", case_ty.union, case_ty.case),
             Type::Parameter(param) => write!(f, "{}", param.name),
@@ -806,7 +843,12 @@ fn collect_nominal_parts<'ty>(
     parts: &mut Vec<(&'ty Name, Option<&'ty DeclaringOrigin>)>,
 ) {
     match ty {
-        Type::Named(named) => parts.push((&named.name, named.origin())),
+        Type::Named(named) => {
+            parts.push((&named.name, named.origin()));
+            for (_, arg) in named.args() {
+                collect_nominal_parts(arg, parts);
+            }
+        }
         Type::Union(union_ty) => parts.push((&union_ty.name, union_ty.origin())),
         Type::UnionCase(case_ty) => parts.push((&case_ty.union, case_ty.origin())),
         Type::Array(inner) | Type::Nullable(inner) => collect_nominal_parts(inner, parts),
@@ -836,10 +878,17 @@ fn qualified_display(ty: &Type) -> String {
             ),
             None => format!("{}.{}", case_ty.union, case_ty.case),
         },
-        Type::Named(named) => match named.origin() {
-            Some(origin) => format!("{}:{}", origin.module_identity(), named.name),
-            None => named.name.to_string(),
-        },
+        Type::Named(named) => {
+            let name = match named.origin() {
+                Some(origin) => Name::new(&format!("{}:{}", origin.module_identity(), named.name)),
+                None => named.name.clone(),
+            };
+            if named.args().is_empty() {
+                name.to_string()
+            } else {
+                format_applied_type(&name, named.args(), &qualified_display)
+            }
+        }
         Type::Array(inner) => qualified_postfix_display(inner, "[]"),
         Type::Nullable(inner) => qualified_postfix_display(inner, "?"),
         Type::Function { params, ret } => format_function_type(params, ret, &qualified_display),
@@ -892,12 +941,30 @@ pub struct NamedType {
     pub name: Name,
     /// The declaration this name reached, where the resolving context reached one.
     origin: Option<DeclaringOrigin>,
+    /// Type arguments in the declaration's parameter order, empty for a non-generic type.
+    ///
+    /// <para>Each argument carries the parameter name it binds, because NX names type arguments
+    /// and every rendering of an applied type — a mismatch diagnostic, a hover, an explained IR
+    /// artifact — spells `<Range T=int/>` rather than a positional form.</para>
+    args: Vec<(Name, Type)>,
 }
 
 impl NamedType {
     /// Creates a named type for the declaration at `origin`.
     pub fn new(name: Name, origin: Option<DeclaringOrigin>) -> Self {
-        Self { name, origin }
+        Self {
+            name,
+            origin,
+            args: Vec::new(),
+        }
+    }
+
+    /// Creates one instantiation of the generic declaration at `origin`.
+    ///
+    /// <para>`args` are in the declaration's parameter order, each paired with the parameter it
+    /// binds.</para>
+    pub fn applied(name: Name, origin: Option<DeclaringOrigin>, args: Vec<(Name, Type)>) -> Self {
+        Self { name, origin, args }
     }
 
     /// Returns the declaration this name reached, if the building context reached one.
@@ -905,7 +972,21 @@ impl NamedType {
         self.origin.as_ref()
     }
 
-    /// Returns true when both names reached the same declaration.
+    /// Returns the type arguments, in the declaration's parameter order.
+    pub fn args(&self) -> &[(Name, Type)] {
+        &self.args
+    }
+
+    /// Returns the same declaration with `args` as its type arguments.
+    pub fn with_args(&self, args: Vec<(Name, Type)>) -> Self {
+        Self {
+            name: self.name.clone(),
+            origin: self.origin.clone(),
+            args,
+        }
+    }
+
+    /// Returns true when both names reached the same declaration, whatever they apply it to.
     pub fn is_same_declaration_as(&self, other: &NamedType) -> bool {
         same_declaration(
             self.origin.as_ref(),
@@ -917,8 +998,11 @@ impl NamedType {
 }
 
 impl PartialEq for NamedType {
+    /// Two applied types are one type exactly when they apply one declaration to equal arguments.
+    /// This is what makes an instantiation distinct per argument and invariant: there is no arm
+    /// anywhere that widens an argument, because equality never offered one.
     fn eq(&self, other: &Self) -> bool {
-        self.is_same_declaration_as(other)
+        self.is_same_declaration_as(other) && self.args == other.args
     }
 }
 
@@ -927,7 +1011,22 @@ impl Eq for NamedType {}
 impl Hash for NamedType {
     fn hash<H: Hasher>(&self, state: &mut H) {
         hash_declaration(self.origin.as_ref(), &self.name, state);
+        self.args.hash(state);
     }
+}
+
+/// Spells an applied type as source writes one, with each argument rendered by `render`.
+fn format_applied_type(
+    name: &Name,
+    args: &[(Name, Type)],
+    render: &impl Fn(&Type) -> String,
+) -> String {
+    nx_hir::ast::spell_applied_type(
+        name.as_str(),
+        args.iter()
+            .map(|(param, ty)| (param.as_str(), render(ty)))
+            .collect::<Vec<_>>(),
+    )
 }
 
 /// Describes a discriminated union type with its cases.
@@ -1566,5 +1665,56 @@ mod tests {
         assert_eq!(substituted, Type::nullable(Type::array(Type::string())));
         let untouched = ty.substitute_parameters(&|_| None);
         assert_eq!(untouched, ty);
+    }
+
+    #[test]
+    fn two_instantiations_of_one_record_are_different_types() {
+        let range = |arg: Type| {
+            Type::Named(NamedType::applied(
+                Name::new("Range"),
+                None,
+                vec![(Name::new("T"), arg)],
+            ))
+        };
+        let ints = range(Type::int());
+        let strings = range(Type::string());
+
+        assert_eq!(ints, range(Type::int()));
+        assert_ne!(ints, strings);
+        assert!(!ints.is_compatible_with(&strings));
+        assert!(!strings.is_compatible_with(&ints));
+        // Neither is the argument-less type, which is what makes a bare `Range` unusable.
+        assert_ne!(ints, Type::named("Range"));
+
+        assert_eq!(ints.to_string(), "<Range T=int/>");
+        assert_eq!(
+            Type::nullable(Type::array(ints.clone())).to_string(),
+            "<Range T=int/>[]?"
+        );
+    }
+
+    #[test]
+    fn a_type_argument_substitutes_and_is_found_inside_an_instantiation() {
+        let param = Type::parameter("TItem", None, 0);
+        let ty = Type::array(Type::Named(NamedType::applied(
+            Name::new("Range"),
+            None,
+            vec![(Name::new("T"), param)],
+        )));
+
+        let found = ty.find_parameter(&|candidate| candidate.name.as_str() == "TItem");
+        assert_eq!(found.map(|candidate| candidate.ordinal), Some(0));
+
+        let substituted = ty.substitute_parameters(&|candidate| {
+            (candidate.name.as_str() == "TItem").then(Type::int)
+        });
+        assert_eq!(
+            substituted,
+            Type::array(Type::Named(NamedType::applied(
+                Name::new("Range"),
+                None,
+                vec![(Name::new("T"), Type::int())]
+            )))
+        );
     }
 }

@@ -1443,22 +1443,50 @@ impl Interpreter {
         module: &LoweredModule,
         ctx: &mut ExecutionContext,
     ) -> Result<(), RuntimeError> {
+        let module_key = module.source_id.as_u32();
+        // A pass that runs while a value is already being bound exists only to furnish the
+        // environment of a field default that value's initializer needed. It leaves behind
+        // whatever it can evaluate and reports nothing: the value in flight is not evaluated
+        // again, which is what stops the two from recursing forever, and a value that cannot be
+        // evaluated without it is simply not in scope. Nothing is lost — a default that names
+        // either one reports an undefined variable, and a genuine failure is reported by the
+        // outer pass, which binds every value for real.
+        let nested = ctx.is_binding_values();
         for item in module.items() {
             if let Item::Value(value) = item {
-                let mut evaluated = self.eval_expr(module, ctx, value.value)?;
-                if let Some(ty) = value.ty.as_ref() {
-                    evaluated = self.coerce_value_to_type(
-                        module,
-                        evaluated,
-                        ty,
-                        &format!("initializer for '{}'", value.name.as_str()),
-                    )?;
+                if !ctx.begin_binding_value(module_key, value.name.as_str()) {
+                    continue;
                 }
-                ctx.define_variable(SmolStr::new(value.name.as_str()), evaluated);
+                let bound = self.eval_top_level_value(module, ctx, value);
+                ctx.end_binding_value(module_key, value.name.as_str());
+                match bound {
+                    Ok(bound) => ctx.define_variable(SmolStr::new(value.name.as_str()), bound),
+                    Err(_) if nested => continue,
+                    Err(error) => return Err(error),
+                }
             }
         }
 
         Ok(())
+    }
+
+    /// Evaluates one top-level value's initializer, coerced to its annotation where it has one.
+    fn eval_top_level_value(
+        &self,
+        module: &LoweredModule,
+        ctx: &mut ExecutionContext,
+        value: &nx_hir::ValueDef,
+    ) -> Result<Value, RuntimeError> {
+        let mut evaluated = self.eval_expr(module, ctx, value.value)?;
+        if let Some(ty) = value.ty.as_ref() {
+            evaluated = self.coerce_value_to_type(
+                module,
+                evaluated,
+                ty,
+                &format!("initializer for '{}'", value.name.as_str()),
+            )?;
+        }
+        Ok(evaluated)
     }
 
     fn unavailable_effective_field_default_error(
@@ -1568,6 +1596,9 @@ impl Interpreter {
         })
     }
 
+    // Long by design: the two field maps are threaded in and out separately, because an override
+    // is host input and a visible field is what a default may read.
+    #[allow(clippy::too_many_arguments)]
     fn materialize_component_fields(
         &self,
         module: &LoweredModule,
@@ -3991,6 +4022,13 @@ impl Interpreter {
         // Evaluate the iterable expression
         let iterable_value = self.eval_expr(module, ctx, iterable_expr)?;
 
+        // A range is dispatched on the value, because the interpreter runs on HIR with no types:
+        // the checker rejects a `for` over any record named `Range` that is not the prelude's, and
+        // over a range whose bounds are not integers, so a range reaching here counts.
+        if let Some(range) = integer_range(&iterable_value) {
+            return self.eval_for_range(module, ctx, item, index, range, body_expr);
+        }
+
         // Extract array elements
         let elements = match iterable_value {
             Value::Array(ref arr) => arr.clone(),
@@ -4028,6 +4066,44 @@ impl Interpreter {
         }
 
         // Return array of results
+        Ok(Value::Array(results))
+    }
+
+    /// Runs a `for` body once per integer in `range`, without building the list of integers.
+    ///
+    /// <para>The count is computed once, so a closed range ending at the carrier's maximum does not
+    /// overflow on its way to the loop condition, and an empty or reversed range runs the body no
+    /// times. Each item keeps the carrier the start had, so a range of `int32` binds `int32`
+    /// items.</para>
+    fn eval_for_range(
+        &self,
+        module: &LoweredModule,
+        ctx: &mut ExecutionContext,
+        item: &Name,
+        index: Option<&Name>,
+        range: IntegerRange,
+        body_expr: ExprId,
+    ) -> Result<Value, RuntimeError> {
+        let count = range.count();
+        // The count is a bound the source can state in one token, so it is not a size to reserve:
+        // the operation budget is what stops a range that is merely large, and reserving first
+        // would exhaust memory before the budget was consulted.
+        let mut results = Vec::with_capacity(usize::try_from(count).unwrap_or(0).min(1024));
+
+        for offset in 0..count {
+            ctx.push_scope();
+            ctx.define_variable(SmolStr::new(item.as_str()), range.value_at(offset));
+            if let Some(index_name) = index {
+                ctx.define_variable(SmolStr::new(index_name.as_str()), Value::Int(offset as i64));
+            }
+
+            // As for a list: the body is one more evaluation, and so one more operation against
+            // the budget, which is what stops a range that is merely large.
+            let result = self.eval_expr(module, ctx, body_expr)?;
+            results.push(result);
+            ctx.pop_scope();
+        }
+
         Ok(Value::Array(results))
     }
 
@@ -4164,11 +4240,36 @@ impl Interpreter {
         let shape = effective_record_shape_for_name(prepared.as_ref(), name)
             .map_err(|error| self.record_resolution_runtime_error(error))?;
 
-        shape.ok_or_else(|| {
+        let shape = shape.ok_or_else(|| {
             RuntimeError::new(RuntimeErrorKind::RecordTypeNotFound {
                 name: SmolStr::new(name.as_str()),
             })
-        })
+        })?;
+
+        Ok(Self::erase_record_type_parameters(shape))
+    }
+
+    /// The shape with every type parameter of the record replaced by `object` in its field types.
+    ///
+    /// <para>The runtime has no type arguments to bind — a value of a generic record is the one
+    /// record whatever it was constructed with — so a parameter-typed field coerces as the top
+    /// type, exactly as a component's parameter-typed prop does.</para>
+    fn erase_record_type_parameters(
+        mut shape: nx_hir::EffectiveRecordShape,
+    ) -> nx_hir::EffectiveRecordShape {
+        if shape.record.type_params.is_empty() {
+            return shape;
+        }
+        let params: Vec<Name> = shape
+            .record
+            .type_params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect();
+        for field in &mut shape.fields {
+            field.ty = nx_hir::erase_type_parameters(&field.ty, &params);
+        }
+        shape
     }
 
     fn record_resolution_runtime_error(
@@ -4578,6 +4679,9 @@ impl Interpreter {
         self.build_record_value(module, ctx, record.as_str(), overrides)
     }
 
+    // Long by design: a union case is built from its own declaration, its union's base shape and
+    // the three pieces of the construction — overrides, content and origin.
+    #[allow(clippy::too_many_arguments)]
     fn build_union_case_value(
         &self,
         module: &LoweredModule,
@@ -4910,6 +5014,84 @@ impl Default for Interpreter {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// The bounds of a `Range` record whose start and end are integers.
+///
+/// <para>The start's carrier is kept, so an `int32` range binds `int32` items: the two are one
+/// record at runtime, and which one it is is what the start says.</para>
+struct IntegerRange {
+    start: i64,
+    end: i64,
+    end_inclusive: bool,
+    narrow: bool,
+}
+
+impl IntegerRange {
+    /// How many integers the range holds, computed once so a closed range ending at the carrier's
+    /// maximum does not overflow on the way to a loop condition.
+    ///
+    /// <para>The count saturates rather than wrapping: a closed `i64::MIN..=i64::MAX`, which only a
+    /// host can build, spans `u64::MAX` and has one more integer than a `u64` can name. Saturating
+    /// keeps it an enormous count, which the operation budget refuses, where wrapping would make it
+    /// zero and silently yield nothing.</para>
+    fn count(&self) -> u64 {
+        if self.end > self.start {
+            let span = self.end.wrapping_sub(self.start) as u64;
+            span.saturating_add(u64::from(self.end_inclusive))
+        } else if self.end == self.start && self.end_inclusive {
+            1
+        } else {
+            0
+        }
+    }
+
+    /// The `offset`th integer of the range, in the start's carrier.
+    fn value_at(&self, offset: u64) -> Value {
+        let value = self.start.wrapping_add(offset as i64);
+        if self.narrow {
+            Value::Int32(value as i32)
+        } else {
+            Value::Int(value)
+        }
+    }
+}
+
+/// The integer bounds of `value`, when it is a `Range` record holding them.
+///
+/// <para>A `Range` whose bounds are not integers — a `<Range T=float64/>`, or one a host passed with
+/// a field missing — is not a range to count over, and is left to the list path to reject as any
+/// other non-list iterable.</para>
+fn integer_range(value: &Value) -> Option<IntegerRange> {
+    let Value::Record { type_name, fields } = value else {
+        return None;
+    };
+    if type_name.as_str() != nx_hir::PRELUDE_RANGE_NAME {
+        return None;
+    }
+
+    let bound = |field: &str| match fields.get(field) {
+        Some(Value::Int(value)) => Some((*value, false)),
+        Some(Value::Int32(value)) => Some((i64::from(*value), true)),
+        _ => None,
+    };
+    let (start, start_is_narrow) = bound(nx_hir::PRELUDE_RANGE_START)?;
+    let (end, end_is_narrow) = bound(nx_hir::PRELUDE_RANGE_END)?;
+    // Both bounds decide the item's carrier. A checked range has one carrier for both, so this only
+    // arises for a host-built record; taking it from the start alone would truncate every item of a
+    // range whose end is wider than its start.
+    let narrow = start_is_narrow && end_is_narrow;
+    let end_inclusive = match fields.get(nx_hir::PRELUDE_RANGE_END_INCLUSIVE) {
+        Some(Value::Boolean(inclusive)) => *inclusive,
+        _ => return None,
+    };
+
+    Some(IntegerRange {
+        start,
+        end,
+        end_inclusive,
+        narrow,
+    })
 }
 
 #[cfg(test)]
@@ -5608,7 +5790,7 @@ mod tests {
         let actions = interpreter
             .invoke_action_handler(
                 module.as_ref(),
-                &handler,
+                handler,
                 Value::Record {
                     type_name: Name::new("SearchBox.ValueChanged"),
                     fields: input_fields,

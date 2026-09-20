@@ -90,9 +90,9 @@ pub fn generate_types_with_warnings(
     let graph = &build.graph;
 
     let value = match opts.language {
-        TargetLanguage::TypeScript => languages::typescript::emit_single_file(&graph, opts),
+        TargetLanguage::TypeScript => languages::typescript::emit_single_file(graph, opts),
         TargetLanguage::CSharp => {
-            languages::csharp::emit_single_file(&graph, opts.csharp_namespace_or_default(), opts)
+            languages::csharp::emit_single_file(graph, opts.csharp_namespace_or_default(), opts)
         }
     }?;
 
@@ -118,9 +118,9 @@ pub fn generate_library_types_with_warnings(
     let graph = &build.graph;
 
     let value = match opts.language {
-        TargetLanguage::TypeScript => languages::typescript::emit_library(&graph, opts),
+        TargetLanguage::TypeScript => languages::typescript::emit_library(graph, opts),
         TargetLanguage::CSharp => {
-            languages::csharp::emit_library(&graph, opts.csharp_namespace_or_default(), opts)
+            languages::csharp::emit_library(graph, opts.csharp_namespace_or_default(), opts)
         }
     }?;
 
@@ -169,6 +169,20 @@ mod tests {
             format: options::FormatOptions::defaults_for(language),
         };
         generate_types(&module, Path::new("types.nx"), &opts).unwrap()
+    }
+
+    fn generate_with_warnings_for(
+        source: &str,
+        language: TargetLanguage,
+    ) -> GeneratedOutput<String> {
+        let module = source_module(source, "types.nx");
+        let opts = GenerateTypesOptions {
+            language,
+            csharp_namespace: None,
+            typescript_package_prefix: None,
+            format: options::FormatOptions::defaults_for(language),
+        };
+        generate_types_with_warnings(&module, Path::new("types.nx"), &opts).unwrap()
     }
 
     /// `void` is no longer a primitive, so a user may declare a type with that name. The
@@ -249,6 +263,208 @@ mod tests {
         );
     }
 
+    /// A declared generic record is a real generic in both languages: the host names the concrete
+    /// instantiation at its own deserialization site, so there is nothing to erase.
+    #[test]
+    fn a_generic_record_is_a_real_generic_in_both_languages() {
+        let source = "export type Range = { T:type start:T end:T endInclusive:boolean }\n";
+
+        let csharp = generate_for(source, TargetLanguage::CSharp);
+        assert!(
+            csharp.contains("class Range<T>"),
+            "the record should declare its parameter:\n{csharp}"
+        );
+        assert!(
+            csharp.contains("public T Start") && csharp.contains("public T End"),
+            "the parameter-typed fields should keep it:\n{csharp}"
+        );
+        assert!(
+            csharp.contains("public bool EndInclusive"),
+            "an ordinary field is unchanged:\n{csharp}"
+        );
+        assert!(
+            !csharp.lines().any(|line| line.contains("public T T")),
+            "no member for the parameter:\n{csharp}"
+        );
+
+        let typescript = generate_for(source, TargetLanguage::TypeScript);
+        assert!(
+            typescript.contains("export interface Range<T> extends NxRecord<\"Range\">"),
+            "the record should be generic with no default:\n{typescript}"
+        );
+        assert!(
+            typescript.contains("start: T;") && typescript.contains("end: T;"),
+            "the parameter-typed fields should keep it:\n{typescript}"
+        );
+        assert!(
+            !typescript
+                .lines()
+                .any(|line| line.contains("T: ") || line.contains("T?: ")),
+            "no member for the parameter:\n{typescript}"
+        );
+    }
+
+    /// An applied type is the instantiation, with the arguments in the record's declaration order
+    /// whatever order the source wrote them in.
+    #[test]
+    fn an_applied_type_is_rendered_as_the_instantiation() {
+        let source = "export type Range = { T:type start:T end:T }\n\
+                      export type Slider = { range:<Range T=float64/> marks:<Range T=int/>[]? }\n";
+
+        let csharp = generate_for(source, TargetLanguage::CSharp);
+        assert!(
+            csharp.contains("public Range<double> Range { get; set; }"),
+            "{csharp}"
+        );
+        assert!(
+            csharp.contains("public Range<long>[]? Marks { get; set; }"),
+            "{csharp}"
+        );
+
+        let typescript = generate_for(source, TargetLanguage::TypeScript);
+        assert!(typescript.contains("range: Range<number>;"), "{typescript}");
+        assert!(
+            typescript.contains("marks: Range<number>[] | null;"),
+            "{typescript}"
+        );
+    }
+
+    /// Arguments are emitted in the record's declaration order, not the order the source wrote.
+    #[test]
+    fn type_arguments_are_emitted_in_declaration_order() {
+        let source = "export type Pair = { TKey:type TValue:type key:TKey value:TValue }\n\
+                      export type Entry = { p:<Pair TValue=int TKey=string/> }\n";
+
+        let csharp = generate_for(source, TargetLanguage::CSharp);
+        assert!(csharp.contains("Pair<string, long>"), "{csharp}");
+        let typescript = generate_for(source, TargetLanguage::TypeScript);
+        assert!(
+            typescript.contains("p: Pair<string, number>;"),
+            "{typescript}"
+        );
+    }
+
+    /// A component type parameter used as a type argument follows the component's rule, so C#
+    /// erases it to `object` and TypeScript keeps the generic parameter.
+    #[test]
+    fn a_component_type_parameter_as_an_argument_follows_the_component_rule() {
+        let source = "export type Range = { T:type start:T end:T }\n\
+                      export external component <Slider TValue:type range:<Range T=TValue/>? />\n";
+
+        let csharp = generate_for(source, TargetLanguage::CSharp);
+        assert!(
+            csharp.contains("public Range<object>? Range { get; set; }"),
+            "{csharp}"
+        );
+
+        let typescript = generate_for(source, TargetLanguage::TypeScript);
+        assert!(
+            typescript.contains("export interface Slider<TValue = unknown>"),
+            "{typescript}"
+        );
+        assert!(
+            typescript.contains("range: Range<TValue> | null;"),
+            "{typescript}"
+        );
+    }
+
+    /// The update companion of a generic record carries the record's parameters, so a patch of a
+    /// `Range<long>` is a `Range_update<long>` whose fields have the record's field types. The
+    /// wire is unaffected: the discriminator is still `Range.Update` and no type argument is
+    /// written.
+    #[test]
+    fn the_update_companion_of_a_generic_record_carries_the_parameter() {
+        let source = "export type Range = { T:type start:T end:T }\n";
+
+        let typescript = generate_for(source, TargetLanguage::TypeScript);
+        let update = typescript
+            .split("export interface Range_update<T> {")
+            .nth(1)
+            .and_then(|tail| tail.split('}').next())
+            .unwrap_or_else(|| panic!("Range_update block:\n{typescript}"));
+        assert!(update.contains("$type: \"Range.Update\";"), "{update}");
+        assert!(update.contains("start?: T;"), "{update}");
+        assert!(update.contains("end?: T;"), "{update}");
+
+        let csharp = generate_for(source, TargetLanguage::CSharp);
+        assert!(
+            csharp.contains("public sealed class Range_update<T> : NxUpdate<Range<T>>"),
+            "{csharp}"
+        );
+        let update = csharp_companion_body(&csharp, "Range_update<T>");
+        assert!(update.contains("NxOptional<T> Start"), "{update}");
+        assert!(
+            update.contains(
+                "public static Range_update<T> Diff(Range<T> before, Range<T> after) => \
+                 NxUpdate<Range<T>>.Diff<Range_update<T>>(before, after);"
+            ),
+            "{update}"
+        );
+        // The key table follows the companion, so its accessors read the record's own fields.
+        assert!(
+            csharp.contains("public static class RangeProperties<T>"),
+            "{csharp}"
+        );
+        assert!(
+            csharp.contains("public static readonly NxProperty<Range<T>, T> Start = new("),
+            "{csharp}"
+        );
+    }
+
+    /// A generic companion cannot name its own converter or formatter in an attribute — CS0416,
+    /// an attribute argument cannot use type parameters — so it names the SDK's JSON factory and
+    /// an open generic formatter shim whose arity matches its own.
+    #[test]
+    fn a_generic_update_companion_names_a_converter_factory_and_a_formatter_shim() {
+        let csharp = generate_for(
+            "export type Pair = { TKey:type TValue:type key:TKey value:TValue }\n",
+            TargetLanguage::CSharp,
+        );
+
+        assert!(
+            csharp.contains("[JsonConverter(typeof(NxUpdateRecordJsonConverterFactory))]"),
+            "{csharp}"
+        );
+        assert!(
+            csharp.contains("[MessagePackFormatter(typeof(Pair_updateFormatter<,>))]"),
+            "{csharp}"
+        );
+        assert!(
+            csharp.contains(
+                "public sealed class Pair_updateFormatter<TKey, TValue> : \
+                 IMessagePackFormatter<Pair_update<TKey, TValue>?>"
+            ),
+            "{csharp}"
+        );
+        assert!(csharp.contains("using MessagePack.Formatters;"), "{csharp}");
+    }
+
+    /// A non-generic record's companion is untouched: it names its converter and formatter
+    /// directly, as it always did, and the formatter interface is not brought into scope.
+    #[test]
+    fn a_non_generic_update_companion_keeps_naming_its_converter_directly() {
+        let csharp = generate_for(
+            "export type User = { name:string }\n",
+            TargetLanguage::CSharp,
+        );
+
+        assert!(
+            csharp.contains("[JsonConverter(typeof(NxUpdateRecordJsonConverter<User_update>))]"),
+            "{csharp}"
+        );
+        assert!(
+            csharp.contains(
+                "[MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<User_update>))]"
+            ),
+            "{csharp}"
+        );
+        assert!(
+            !csharp.contains("using MessagePack.Formatters;"),
+            "{csharp}"
+        );
+        assert!(!csharp.contains("User_updateFormatter"), "{csharp}");
+    }
+
     /// An inherited parameter is the base's, so a derived contract passes it through to the base
     /// contract it extends and declares it alongside its own.
     #[test]
@@ -301,6 +517,167 @@ mod tests {
         assert!(state.contains("public object? Sel"), "{state}");
         let update = csharp_companion_body(&csharp, "Picker_update");
         assert!(update.contains("NxOptional<object?> Sel"), "{update}");
+    }
+
+    /// An applied type over a record imported from a *dependency* library renders as the same
+    /// instantiation a same-library one does.
+    ///
+    /// <para>The importing library's export graph does not contain the dependency's records at
+    /// all, so the parameter order has to come from the imported entry. Without it both emitters
+    /// dropped the arguments and emitted the bare name, which is an open generic: CS0305 in C# and
+    /// TS2314 in TypeScript. An imported alias whose target is an applied type has the same
+    /// problem, because the alias itself is not generated and every use of it renders the
+    /// target.</para>
+    #[test]
+    fn an_applied_type_over_a_record_imported_from_a_dependency_keeps_its_arguments() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let ranges_dir = temp_dir.path().join("ranges");
+        let app_dir = temp_dir.path().join("app");
+        write_library(
+            &ranges_dir,
+            &[(
+                "range.nx",
+                "export type Range = { T:type start:T end:T }\n\
+                 export type IntRange = <Range T=int/>",
+            )],
+        );
+        write_library(
+            &app_dir,
+            &[(
+                "slider.nx",
+                "import { Range, IntRange } from \"../ranges\"\n\
+                 export type Slider = { week:<Range T=int/> alias:IntRange }",
+            )],
+        );
+        let artifact = build_library_artifact_from_directory(&app_dir).expect("library build");
+
+        let typescript = generate_library_types_with_warnings(
+            &artifact,
+            &library_options(TargetLanguage::TypeScript),
+        )
+        .unwrap();
+        let slider = generated_file(&typescript, "slider.ts");
+        assert!(slider.contains("week: Range<number>;"), "{slider}");
+        // TypeScript has type aliases, so the dependency's `IntRange` is imported and used as
+        // written; it is the dependency's own file that resolves it to `Range<number>`.
+        assert!(slider.contains("alias: IntRange;"), "{slider}");
+
+        let csharp = generate_library_types_with_warnings(
+            &artifact,
+            &library_options(TargetLanguage::CSharp),
+        )
+        .unwrap();
+        let slider = generated_file(&csharp, "slider.g.cs");
+        let week = slider
+            .lines()
+            .find(|line| line.contains("Week"))
+            .unwrap_or_else(|| panic!("expected a Week property:\n{slider}"));
+        assert!(week.contains("Range<long>"), "{week}");
+        let alias = slider
+            .lines()
+            .find(|line| line.contains("Alias"))
+            .unwrap_or_else(|| panic!("expected an Alias property:\n{slider}"));
+        assert!(alias.contains("Range<long>"), "{alias}");
+    }
+
+    /// A dependency's alias over the *prelude's* `Range` resolves to the SDK type on the importing
+    /// side too. The dependency never generates a `Range` of its own, so naming one in its namespace
+    /// would be a reference to a type that does not exist.
+    #[test]
+    fn an_imported_alias_over_a_prelude_record_resolves_to_the_sdk_type() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let bounds_dir = temp_dir.path().join("bounds");
+        let app_dir = temp_dir.path().join("app");
+        write_library(
+            &bounds_dir,
+            &[("bounds.nx", "export type IntRange = <Range T=int/>")],
+        );
+        write_library(
+            &app_dir,
+            &[(
+                "slider.nx",
+                "import { IntRange } from \"../bounds\"\n\
+                 export type Slider = { span:IntRange }",
+            )],
+        );
+        let artifact = build_library_artifact_from_directory(&app_dir).expect("library build");
+
+        let csharp = generate_library_types_with_warnings(
+            &artifact,
+            &library_options(TargetLanguage::CSharp),
+        )
+        .unwrap();
+        let slider = generated_file(&csharp, "slider.g.cs");
+        let span = slider
+            .lines()
+            .find(|line| line.contains("Span"))
+            .unwrap_or_else(|| panic!("expected a Span property:\n{slider}"));
+        assert!(
+            span.contains("global::NxLang.Nx.NxRange<long>"),
+            "the alias resolves to the SDK type, not to a type the dependency never generates: {span}"
+        );
+    }
+
+    /// An `import` is written in one module and binds only there, so a sibling that writes `Range`
+    /// still means the prelude's.
+    ///
+    /// <para>Typegen used to answer the prelude question from the whole export graph, so one
+    /// module's import of a foreign `Range` suppressed the prelude's for every module of the
+    /// library — and the sibling then rendered a bare `Range`, which neither language declares.
+    /// A *declaration* is different and is still graph-wide: a same-library peer is visible
+    /// without an import, so it hides the prelude everywhere.</para>
+    #[test]
+    fn an_import_of_a_foreign_range_leaves_its_sibling_with_the_prelude_s() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let bounds_dir = temp_dir.path().join("bounds");
+        let app_dir = temp_dir.path().join("app");
+        write_library(
+            &bounds_dir,
+            &[("bounds.nx", "export type Range = { T:type lo:T hi:T }")],
+        );
+        write_library(
+            &app_dir,
+            &[
+                (
+                    "importer.nx",
+                    "import { Range } from \"../bounds\"\n\
+                     export type Imported = { span:<Range T=int/> }",
+                ),
+                (
+                    "sibling.nx",
+                    "export type Sibling = { span:<Range T=int/> }",
+                ),
+            ],
+        );
+        let artifact = build_library_artifact_from_directory(&app_dir).expect("library build");
+
+        let csharp = generate_library_types_with_warnings(
+            &artifact,
+            &library_options(TargetLanguage::CSharp),
+        )
+        .unwrap();
+        let importer = generated_file(&csharp, "importer.g.cs");
+        assert!(
+            importer.contains("global::Test.Bounds.Range<long>"),
+            "the importing module means the dependency's Range: {importer}"
+        );
+        let sibling = generated_file(&csharp, "sibling.g.cs");
+        assert!(
+            sibling.contains("global::NxLang.Nx.NxRange<long>"),
+            "the sibling wrote no import, so its Range is the prelude's: {sibling}"
+        );
+
+        let typescript = generate_library_types_with_warnings(
+            &artifact,
+            &library_options(TargetLanguage::TypeScript),
+        )
+        .unwrap();
+        let sibling = generated_file(&typescript, "sibling.ts");
+        assert!(sibling.contains("span: Range<number>;"), "{sibling}");
+        assert!(
+            sibling.contains("Range } from \"./_nx\""),
+            "the sibling's Range is the prelude's, which the helper module declares: {sibling}"
+        );
     }
 
     /// The base chain resolves through the prepared module, so a base declared in another module
@@ -896,7 +1273,7 @@ mod tests {
 
         let forms = files
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("forms.ts"))
+            .find(|file| file.relative_path == *"forms.ts")
             .expect("forms.ts");
         assert!(forms
             .content
@@ -905,7 +1282,7 @@ mod tests {
 
         let index = files
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("index.ts"))
+            .find(|file| file.relative_path == *"index.ts")
             .expect("index.ts");
         assert!(!index.content.contains("NxRecord"));
         assert!(index.content.contains("export * from \"./forms\";"));
@@ -939,7 +1316,7 @@ mod tests {
         let files = generate_library_types(&artifact, &opts).unwrap();
         let state = files
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("state.ts"))
+            .find(|file| file.relative_path == *"state.ts")
             .expect("state.ts");
 
         assert!(state
@@ -980,7 +1357,7 @@ mod tests {
         let files = generate_library_types(&artifact, &opts).unwrap();
         let search_box = files
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("search-box.ts"))
+            .find(|file| file.relative_path == *"search-box.ts")
             .expect("search-box.ts");
         assert!(search_box
             .content
@@ -1027,7 +1404,7 @@ mod tests {
         let files = generate_library_types(&artifact, &opts).unwrap();
         let search_box = files
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("search-box.g.cs"))
+            .find(|file| file.relative_path == *"search-box.g.cs")
             .expect("search-box.g.cs");
         assert!(search_box.content.contains("namespace Test.Models"));
         assert!(search_box
@@ -1046,7 +1423,7 @@ mod tests {
 
         let theme = files
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("theme.g.cs"))
+            .find(|file| file.relative_path == *"theme.g.cs")
             .expect("theme.g.cs");
         assert!(theme.content.contains("public enum ThemeMode"));
     }
@@ -1415,7 +1792,7 @@ mod tests {
         let files = generate_library_types(&artifact, &opts).unwrap();
         let button = files
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("components/button.ts"))
+            .find(|file| file.relative_path == *"components/button.ts")
             .expect("components/button.ts");
         assert!(button
             .content
@@ -1423,7 +1800,7 @@ mod tests {
 
         let index = files
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("index.ts"))
+            .find(|file| file.relative_path == *"index.ts")
             .expect("index.ts");
         assert!(!index.content.contains("NxRecord"));
         assert!(index
@@ -1459,7 +1836,7 @@ mod tests {
         let files = generate_library_types(&artifact, &opts).unwrap();
         let base = files
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("base.ts"))
+            .find(|file| file.relative_path == *"base.ts")
             .expect("base.ts");
         assert!(!base.content.contains("import type { NxRecord }"));
         assert!(base
@@ -1472,7 +1849,7 @@ mod tests {
 
         let short_text = files
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("short-text.ts"))
+            .find(|file| file.relative_path == *"short-text.ts")
             .expect("short-text.ts");
         assert!(short_text
             .content
@@ -1486,7 +1863,7 @@ mod tests {
 
         let index = files
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("index.ts"))
+            .find(|file| file.relative_path == *"index.ts")
             .expect("index.ts");
         assert!(index
             .content
@@ -1520,7 +1897,7 @@ mod tests {
         let files = generate_library_types(&artifact, &opts).unwrap();
         let base = files
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("base.ts"))
+            .find(|file| file.relative_path == *"base.ts")
             .expect("base.ts");
         assert!(!base.content.contains("import type { NxRecord }"));
         assert!(base
@@ -1533,7 +1910,7 @@ mod tests {
 
         let requested = files
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("requested.ts"))
+            .find(|file| file.relative_path == *"requested.ts")
             .expect("requested.ts");
         assert!(requested
             .content
@@ -1547,7 +1924,7 @@ mod tests {
 
         let index = files
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("index.ts"))
+            .find(|file| file.relative_path == *"index.ts")
             .expect("index.ts");
         assert!(index
             .content
@@ -1578,7 +1955,7 @@ mod tests {
 
         let payload_module = files
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("_nx.ts"))
+            .find(|file| file.relative_path == *"_nx.ts")
             .expect("_nx.ts source output");
         assert!(payload_module
             .content
@@ -1589,7 +1966,7 @@ mod tests {
 
         let helper_module = files
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("_nx1.ts"))
+            .find(|file| file.relative_path == *"_nx1.ts")
             .expect("_nx1.ts helper output");
         assert!(helper_module
             .content
@@ -1597,7 +1974,7 @@ mod tests {
 
         let index = files
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("index.ts"))
+            .find(|file| file.relative_path == *"index.ts")
             .expect("index.ts");
         assert!(index
             .content
@@ -1634,7 +2011,7 @@ mod tests {
 
         let first_payload_module = files
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("_nx.ts"))
+            .find(|file| file.relative_path == *"_nx.ts")
             .expect("_nx.ts source output");
         assert!(first_payload_module
             .content
@@ -1645,7 +2022,7 @@ mod tests {
 
         let second_payload_module = files
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("_nx1.ts"))
+            .find(|file| file.relative_path == *"_nx1.ts")
             .expect("_nx1.ts source output");
         assert!(second_payload_module
             .content
@@ -1656,7 +2033,7 @@ mod tests {
 
         let helper_module = files
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("_nx2.ts"))
+            .find(|file| file.relative_path == *"_nx2.ts")
             .expect("_nx2.ts helper output");
         assert!(helper_module
             .content
@@ -1664,7 +2041,7 @@ mod tests {
 
         let index = files
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("index.ts"))
+            .find(|file| file.relative_path == *"index.ts")
             .expect("index.ts");
         assert!(index
             .content
@@ -2083,7 +2460,7 @@ export type QuestionFlowInitialExperience = {
         let files = generate_library_types(&artifact, &opts).unwrap();
         let button = files
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("components/button.g.cs"))
+            .find(|file| file.relative_path == *"components/button.g.cs")
             .expect("components/button.g.cs");
         assert!(button.content.contains("namespace Test.Models"));
         assert!(button
@@ -2123,11 +2500,11 @@ export type QuestionFlowInitialExperience = {
         let files = generate_library_types(&artifact, &opts).unwrap();
         let aliases = files
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("aliases.g.cs"))
+            .find(|file| file.relative_path == *"aliases.g.cs")
             .expect("aliases.g.cs");
         let button = files
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("button.g.cs"))
+            .find(|file| file.relative_path == *"button.g.cs")
             .expect("button.g.cs");
 
         assert!(!aliases.content.contains("global using ThemeAlias"));
@@ -2173,7 +2550,7 @@ export type QuestionFlowInitialExperience = {
         let chat_link = output
             .value
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("ChatLinkConfig.g.cs"))
+            .find(|file| file.relative_path == *"ChatLinkConfig.g.cs")
             .expect("ChatLinkConfig.g.cs");
 
         assert_eq!(output.warnings.len(), 1);
@@ -2226,7 +2603,7 @@ export type QuestionFlowInitialExperience = {
         let chat_link = output
             .value
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("QuestionFlowInitialExperience.g.cs"))
+            .find(|file| file.relative_path == *"QuestionFlowInitialExperience.g.cs")
             .expect("QuestionFlowInitialExperience.g.cs");
 
         assert!(output.warnings.is_empty());
@@ -2277,7 +2654,7 @@ export type QuestionFlowInitialExperience = {
         let chat_link = output
             .value
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("QuestionFlowInitialExperience.g.cs"))
+            .find(|file| file.relative_path == *"QuestionFlowInitialExperience.g.cs")
             .expect("QuestionFlowInitialExperience.g.cs");
 
         assert_eq!(output.warnings.len(), 1);
@@ -2328,7 +2705,7 @@ export type QuestionFlowInitialExperience = {
         let chat_link = output
             .value
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("QuestionFlowInitialExperience.ts"))
+            .find(|file| file.relative_path == *"QuestionFlowInitialExperience.ts")
             .expect("QuestionFlowInitialExperience.ts");
 
         assert_eq!(output.warnings.len(), 1);
@@ -2377,7 +2754,7 @@ export type QuestionFlowInitialExperience = {
         let chat_link = output
             .value
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("QuestionFlowInitialExperience.ts"))
+            .find(|file| file.relative_path == *"QuestionFlowInitialExperience.ts")
             .expect("QuestionFlowInitialExperience.ts");
 
         assert_eq!(output.warnings.len(), 1);
@@ -2427,7 +2804,7 @@ export type QuestionFlowInitialExperience = {
         let chat_link = output
             .value
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("QuestionFlowInitialExperience.ts"))
+            .find(|file| file.relative_path == *"QuestionFlowInitialExperience.ts")
             .expect("QuestionFlowInitialExperience.ts");
 
         assert!(chat_link.content.contains(
@@ -2475,7 +2852,7 @@ export type QuestionFlowInitialExperience = {
         let chat_link = output
             .value
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("QuestionFlowInitialExperience.ts"))
+            .find(|file| file.relative_path == *"QuestionFlowInitialExperience.ts")
             .expect("QuestionFlowInitialExperience.ts");
 
         assert_eq!(output.warnings.len(), 1);
@@ -2523,7 +2900,7 @@ export type ChatLink = {
         let chat_link = output
             .value
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("ChatLink.ts"))
+            .find(|file| file.relative_path == *"ChatLink.ts")
             .expect("ChatLink.ts");
 
         assert!(
@@ -2575,7 +2952,7 @@ export type QuestionFlowInitialExperience = {
         let chat_link = output
             .value
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("ChatLinkConfig.g.cs"))
+            .find(|file| file.relative_path == *"ChatLinkConfig.g.cs")
             .expect("ChatLinkConfig.g.cs");
         let dependency_using = chat_link
             .content
@@ -2588,7 +2965,7 @@ export type QuestionFlowInitialExperience = {
             .expect("dependency namespace");
 
         assert_eq!(output.warnings.len(), 1);
-        assert!(output.warnings[0].contains(&expected_namespace));
+        assert!(output.warnings[0].contains(expected_namespace));
         assert!(chat_link.content.contains(&format!(
             "public global::{expected_namespace}.QuestionFlow QuestionFlow {{ get; set; }} = default!;"
         )));
@@ -3573,6 +3950,163 @@ export type User extends Named = { email:string }
         );
     }
 
+    /// A field typed by the prelude's `Range.Update` generates in both languages, and in C# names
+    /// a closed formatter beside the contract.
+    #[test]
+    fn a_field_typed_by_a_prelude_companion_generates_in_both_languages() {
+        let source = r#"
+            export type Patch = { span:<Range T=int/> change:<Range.Update T=int/> which:Range.Property }
+            "#;
+
+        let typescript = generate_for(source, TargetLanguage::TypeScript);
+        assert!(
+            typescript.contains("change: Range_update<number>;"),
+            "{typescript}"
+        );
+        assert!(
+            typescript.contains("which: Range_property;"),
+            "{typescript}"
+        );
+        // The companions are declared beside `Range`, generated from the prelude's own
+        // declarations rather than named in a package.
+        assert!(
+            typescript.contains("export interface Range_update<T>"),
+            "{typescript}"
+        );
+        assert!(
+            typescript
+                .contains(r#"export type Range_property = "start" | "end" | "endInclusive";"#),
+            "{typescript}"
+        );
+
+        let csharp = generate_for(source, TargetLanguage::CSharp);
+        assert!(
+            csharp.contains("global::NxLang.Nx.NxRange_update<long> Change"),
+            "{csharp}"
+        );
+        assert!(
+            csharp.contains("global::NxLang.Nx.NxRange_property Which"),
+            "{csharp}"
+        );
+        assert!(
+            csharp.contains("[MessagePackFormatter(typeof(NxRange_updateOfLongFormatter))]"),
+            "the member names the closed formatter MessagePack's generator can resolve: {csharp}"
+        );
+        assert!(
+            csharp.contains("public sealed class NxRange_updateOfLongFormatter"),
+            "{csharp}"
+        );
+    }
+
+    /// Two instantiations of one companion get a closed formatter each, and the header suppresses
+    /// the `MsgPack009` that counts them against the open generic they share.
+    #[test]
+    fn two_instantiations_of_one_companion_each_get_a_closed_formatter() {
+        let output = generate_with_warnings_for(
+            "export type Patch = { narrow:<Range.Update T=int/> wide:<Range.Update T=float64/> }",
+            TargetLanguage::CSharp,
+        );
+        let csharp = output.value;
+
+        assert!(
+            csharp.contains("#pragma warning disable MsgPack009"),
+            "MsgPack009 counts the two closed formatters against `NxRange_update<T>`: {csharp}"
+        );
+        for (member, formatter) in [
+            ("Narrow", "NxRange_updateOfLongFormatter"),
+            ("Wide", "NxRange_updateOfDoubleFormatter"),
+        ] {
+            assert!(
+                csharp.contains(&format!("public sealed class {formatter}")),
+                "{csharp}"
+            );
+            let member_declaration = csharp
+                .split_once(&format!("[MessagePackFormatter(typeof({formatter}))]"))
+                .map(|(_, rest)| rest)
+                .unwrap_or_else(|| panic!("{member} names {formatter} in {csharp}"));
+            assert!(
+                member_declaration.trim_start().starts_with(&format!(
+                    "public global::NxLang.Nx.NxRange_update<{}> {member}",
+                    if member == "Narrow" { "long" } else { "double" }
+                )),
+                "the attribute sits on {member}: {csharp}"
+            );
+        }
+        assert!(
+            output.warnings.is_empty(),
+            "both instantiations resolve: {:?}",
+            output.warnings
+        );
+    }
+
+    /// Only one shape of generic update companion has no formatter MessagePack can resolve: one from
+    /// another assembly reached *below* the member's own type. The other three resolve and generate.
+    #[test]
+    fn a_generic_update_companion_csharp_cannot_format_is_reported() {
+        let nested_foreign = generate_with_warnings_for(
+            "export type Patch = { many:<Range.Update T=int/>[] }",
+            TargetLanguage::CSharp,
+        );
+        assert!(
+            nested_foreign.warnings.iter().any(|warning| warning.contains(
+                "'Patch.many' reaches the generic update companion 'Range_update' below its own type"
+            )),
+            "{:?}",
+            nested_foreign.warnings
+        );
+
+        // A companion the generating library declares is in the compilation, so the source generator
+        // closes its own shim wherever in the member's type it sits — at the member and below it.
+        let own = generate_with_warnings_for(
+            "export type Bounds = { T:type start:T end:T }\n\
+             export type Patch = { change:<Bounds.Update T=int/> many:<Bounds.Update T=int/>[] }",
+            TargetLanguage::CSharp,
+        );
+        assert!(
+            own.warnings.is_empty(),
+            "a companion this library declares needs no member attribute: {:?}",
+            own.warnings
+        );
+
+        let direct = generate_with_warnings_for(
+            "export type Patch = { change:<Range.Update T=int/> }",
+            TargetLanguage::CSharp,
+        );
+        assert!(
+            direct.warnings.is_empty(),
+            "the prelude's companion resolves through a closed formatter: {:?}",
+            direct.warnings
+        );
+    }
+
+    /// A contract that names the prelude's `Range` and both of its derived companions, which the
+    /// .NET tests compile and round-trip against the SDK's hand-written copies.
+    ///
+    /// <para>`update-records.nx` declares a `Range` of its own, which hides the prelude's in every
+    /// module of that library, so the prelude case needs a source of its own.</para>
+    #[test]
+    fn checked_in_dotnet_prelude_companion_fixture_matches_typegen_output() {
+        let fixture_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../bindings/dotnet/tests/NxLang.Sdk.Tests/Generated");
+        let source_path = fixture_dir.join("prelude-companions.nx");
+        let source = fs::read_to_string(&source_path).expect("fixture source");
+        let module = source_module(&source, "prelude-companions.nx");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::CSharp,
+            csharp_namespace: Some("NxLang.Sdk.Tests.Generated".to_string()),
+            typescript_package_prefix: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
+        };
+        let generated = generate_types(&module, &source_path, &opts).unwrap();
+        let checked_in =
+            fs::read_to_string(fixture_dir.join("PreludeCompanions.g.cs")).expect("fixture output");
+
+        assert_eq!(
+            checked_in, generated,
+            "Regenerate PreludeCompanions.g.cs with the command in prelude-companions.nx"
+        );
+    }
+
     #[test]
     fn generates_typescript_property_companions_as_string_literal_unions() {
         let output = generate_for(
@@ -3714,7 +4248,7 @@ export external component <Table sortBy:User.Property? columns:User.Property[] p
         let table = output
             .value
             .iter()
-            .find(|file| file.relative_path == PathBuf::from("Table.ts"))
+            .find(|file| file.relative_path == *"Table.ts")
             .expect("Table.ts");
         assert!(
             !output
@@ -3747,5 +4281,279 @@ export external component <Table sortBy:User.Property? columns:User.Property[] p
             "{}",
             table.content
         );
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Prelude types
+    // ---------------------------------------------------------------------------------------------
+
+    /// C# names the hand-written SDK type: generated files open with `using System;`, so a generated
+    /// `Range` would be `System.Range`, and two generated libraries in one namespace would each
+    /// declare a copy.
+    #[test]
+    fn csharp_maps_a_prelude_range_to_the_sdk_type() {
+        let source = "export type Slider = { range:<Range T=float64/> marks:<Range T=int/>[]? }\n";
+        let csharp = generate_for(source, TargetLanguage::CSharp);
+
+        let range = csharp
+            .lines()
+            .find(|line| line.contains(" Range { get; set; }"))
+            .unwrap_or_else(|| panic!("expected a Range property:\n{csharp}"));
+        assert!(
+            range.contains("global::NxLang.Nx.NxRange<double>"),
+            "{range}"
+        );
+        let marks = csharp
+            .lines()
+            .find(|line| line.contains(" Marks { get; set; }"))
+            .unwrap_or_else(|| panic!("expected a Marks property:\n{csharp}"));
+        assert!(
+            marks.contains("global::NxLang.Nx.NxRange<long>[]?"),
+            "{marks}"
+        );
+        assert!(
+            !csharp.contains("class Range") && !csharp.contains("class NxRange"),
+            "the prelude type is not declared into the generated namespace:\n{csharp}"
+        );
+    }
+
+    #[test]
+    fn typescript_single_file_output_inlines_a_prelude_range() {
+        let source = "export type Slider = { range:<Range T=float64/> }\n";
+        let typescript = generate_for(source, TargetLanguage::TypeScript);
+
+        assert!(
+            typescript.contains("export interface Range<T> extends NxRecord<\"Range\"> {"),
+            "{typescript}"
+        );
+        assert!(typescript.contains("  start: T;"), "{typescript}");
+        assert!(typescript.contains("  end: T;"), "{typescript}");
+        assert!(
+            typescript.contains("  endInclusive: boolean;"),
+            "{typescript}"
+        );
+        assert!(typescript.contains("range: Range<number>;"), "{typescript}");
+    }
+
+    #[test]
+    fn typescript_library_output_declares_a_prelude_range_once_in_the_helper_module() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let library_dir = temp_dir.path().join("controls");
+        write_library(
+            &library_dir,
+            &[
+                ("slider.nx", "export type Slider = { range:<Range T=int/> }"),
+                ("gauge.nx", "export type Gauge = { bounds:<Range T=int/> }"),
+            ],
+        );
+        let artifact = build_library_artifact_from_directory(&library_dir).expect("library build");
+        let typescript = generate_library_types_with_warnings(
+            &artifact,
+            &library_options(TargetLanguage::TypeScript),
+        )
+        .unwrap();
+
+        let helper = generated_file(&typescript, "_nx.ts");
+        assert!(
+            helper.contains("export interface Range<T> extends NxRecord<\"Range\"> {"),
+            "{helper}"
+        );
+        assert!(helper.contains("  endInclusive: boolean;"), "{helper}");
+
+        for (file, field) in [("slider.ts", "range"), ("gauge.ts", "bounds")] {
+            let module = generated_file(&typescript, file);
+            assert!(
+                module.contains("import type { NxRecord, Range } from \"./_nx\";"),
+                "{module}"
+            );
+            assert!(
+                module.contains(&format!("{field}: Range<number>;")),
+                "{module}"
+            );
+            assert!(
+                !module.contains("export interface Range<T>"),
+                "the record is declared once, in the helper module:\n{module}"
+            );
+        }
+
+        let index = generated_file(&typescript, "index.ts");
+        assert!(
+            index.contains("export type { NxRecord, Range } from \"./_nx\";"),
+            "{index}"
+        );
+    }
+
+    /// C# library output puts every module in one namespace, so the closed formatter two modules
+    /// both name is declared once, in the shared formatter file, rather than once per module.
+    #[test]
+    fn csharp_library_output_declares_a_closed_prelude_formatter_once() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let library_dir = temp_dir.path().join("patches");
+        write_library(
+            &library_dir,
+            &[
+                (
+                    "a.nx",
+                    "export type PatchA = { change:<Range.Update T=int/> }",
+                ),
+                (
+                    "sub/b.nx",
+                    "export type PatchB = { change:<Range.Update T=int/> }",
+                ),
+            ],
+        );
+        let artifact = build_library_artifact_from_directory(&library_dir).expect("library build");
+        let csharp = generate_library_types_with_warnings(
+            &artifact,
+            &library_options(TargetLanguage::CSharp),
+        )
+        .unwrap();
+
+        let declarations: usize = csharp
+            .value
+            .iter()
+            .map(|file| {
+                file.content
+                    .matches("public sealed class NxRange_updateOfLongFormatter")
+                    .count()
+            })
+            .sum();
+        assert_eq!(
+            declarations, 1,
+            "two modules in one namespace declare the formatter once: {:?}",
+            csharp.value
+        );
+
+        let shared = generated_file(&csharp, "_NxFormatters.g.cs");
+        assert!(
+            shared.contains(
+                "public sealed class NxRange_updateOfLongFormatter : \
+                 IMessagePackFormatter<global::NxLang.Nx.NxRange_update<long>?>"
+            ),
+            "{shared}"
+        );
+
+        for file in ["a.g.cs", "sub/b.g.cs"] {
+            let module = generated_file(&csharp, file);
+            assert!(
+                module.contains("[MessagePackFormatter(typeof(NxRange_updateOfLongFormatter))]"),
+                "the member names the shared formatter across the namespace:\n{module}"
+            );
+            assert!(
+                !module.contains("public sealed class NxRange_updateOfLongFormatter"),
+                "the formatter is declared in the shared file, not here:\n{module}"
+            );
+        }
+
+        assert!(
+            csharp.warnings.is_empty(),
+            "the prelude's companion resolves: {:?}",
+            csharp.warnings
+        );
+    }
+
+    /// A prelude record is emitted as a concrete record, so it names `NxRecord` — and the output
+    /// must declare that even when the module declares no record of its own to bring it in.
+    #[test]
+    fn typescript_output_whose_only_record_is_the_prelude_s_still_declares_nx_record() {
+        let typescript = generate_for(
+            "export type Bounds = <Range T=int/>\n",
+            TargetLanguage::TypeScript,
+        );
+
+        assert!(
+            typescript.contains("export interface NxRecord<"),
+            "the referenced NxRecord is declared:\n{typescript}"
+        );
+        let nx_record = typescript
+            .find("export interface NxRecord<")
+            .expect("NxRecord declaration");
+        let range = typescript
+            .find("export interface Range<T> extends NxRecord<\"Range\">")
+            .unwrap_or_else(|| panic!("expected the prelude record:\n{typescript}"));
+        assert!(
+            nx_record < range,
+            "NxRecord is declared before the record that extends it:\n{typescript}"
+        );
+        assert!(
+            typescript.contains("export type Bounds = Range<number>;"),
+            "{typescript}"
+        );
+    }
+
+    /// The same for a library, where `NxRecord` lives in the shared helper module and the index
+    /// re-exports it.
+    #[test]
+    fn typescript_library_whose_only_record_is_the_prelude_s_still_declares_nx_record() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let library_dir = temp_dir.path().join("controls");
+        write_library(
+            &library_dir,
+            &[("bounds.nx", "export type Bounds = <Range T=int/>")],
+        );
+        let artifact = build_library_artifact_from_directory(&library_dir).expect("library build");
+        let typescript = generate_library_types_with_warnings(
+            &artifact,
+            &library_options(TargetLanguage::TypeScript),
+        )
+        .unwrap();
+
+        let helper = generated_file(&typescript, "_nx.ts");
+        assert!(
+            helper.contains("export interface NxRecord<"),
+            "the helper module declares NxRecord:\n{helper}"
+        );
+        assert!(
+            helper.contains("export interface Range<T> extends NxRecord<\"Range\">"),
+            "{helper}"
+        );
+
+        let module = generated_file(&typescript, "bounds.ts");
+        assert!(
+            module.contains("import type { Range } from \"./_nx\";"),
+            "{module}"
+        );
+
+        let index = generated_file(&typescript, "index.ts");
+        assert!(
+            index.contains("export type { NxRecord, Range } from \"./_nx\";"),
+            "{index}"
+        );
+    }
+
+    #[test]
+    fn output_that_uses_no_prelude_type_declares_none() {
+        let source = "export type User = { name:string age:int }\n";
+
+        let csharp = generate_for(source, TargetLanguage::CSharp);
+        assert!(!csharp.contains("NxRange"), "{csharp}");
+
+        let typescript = generate_for(source, TargetLanguage::TypeScript);
+        assert!(!typescript.contains("interface Range"), "{typescript}");
+    }
+
+    /// A module's own declaration under a prelude name is its own in both languages: the prelude's
+    /// names bind last here exactly as they do in NX source.
+    #[test]
+    fn a_modules_own_range_is_generated_as_its_own() {
+        let source = "export type Range = { low:int high:int }\n\
+                      export type Chart = { bounds:Range }\n";
+
+        let csharp = generate_for(source, TargetLanguage::CSharp);
+        assert!(csharp.contains("class Range"), "{csharp}");
+        assert!(!csharp.contains("NxRange"), "{csharp}");
+        let bounds = csharp
+            .lines()
+            .find(|line| line.contains(" Bounds { get; set; }"))
+            .unwrap_or_else(|| panic!("expected a Bounds property:\n{csharp}"));
+        assert!(bounds.contains("Range "), "{bounds}");
+
+        let typescript = generate_for(source, TargetLanguage::TypeScript);
+        assert!(
+            typescript.contains("export interface Range extends NxRecord<\"Range\"> {"),
+            "{typescript}"
+        );
+        assert!(typescript.contains("  low: number;"), "{typescript}");
+        assert!(typescript.contains("bounds: Range;"), "{typescript}");
     }
 }

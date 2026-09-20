@@ -38,10 +38,18 @@ component <Toggle extends DrawnNode Text:string On:boolean emits { Tapped { } } 
 
 let speeds:float64[] = { 0.5 1.0 2.0 }
 
-// The looped carousel's twelve slides, by color: the original cycles six colors by index.
-let loopColors = {
-  "#0D6EFD" "#6610F2" "#D63384" "#20C997" "#FD7E14" "#0DCAF0"
-  "#0D6EFD" "#6610F2" "#D63384" "#20C997" "#FD7E14" "#0DCAF0"
+// The looped carousel's twelve slides, by color: the original cycles six colors by index. A range
+// counts the slides below, but NX still has no list indexing to cycle a palette with, so the
+// palette is a function over the index and `%` does the cycling.
+let loopColor(index:int): string = {
+  if index % 6 is {
+    0 => "#0D6EFD"
+    1 => "#6610F2"
+    2 => "#D63384"
+    3 => "#20C997"
+    4 => "#FD7E14"
+    else => "#0DCAF0"
+  }
 }
 
 // The playground's big slides: a number filling a plain rectangle.
@@ -174,8 +182,8 @@ component <Page /> = {
           <SkiaCarousel HeightRequest=130 IsLooped=true SidesOffset=30 Spacing=10 LinearSpeedMs=350
             SelectedIndex={loopIndex} onSelectedIndexChanged=<Update loopIndex={action.index} />>
             // "Item 1" … "Item 12": the loop's position converts to text in the title and the footer.
-            for color, position in loopColors {
-              <SlideFace Item=<Slide Title={"Item " + (position + 1)} Color={color} Text="#FFFFFF" /> Size=22
+            for position in 0..12 {
+              <SlideFace Item=<Slide Title={"Item " + (position + 1)} Color={loopColor(position)} Text="#FFFFFF" /> Size=22
                 Sub={"static child · index " + position} />
             }
           </SkiaCarousel>

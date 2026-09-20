@@ -442,6 +442,10 @@ impl<'a> UndefinedIdentifierChecker<'a> {
                 self.check_expr(*lhs, scope);
                 self.check_expr(*rhs, scope);
             }
+            ast::Expr::Range { start, end, .. } => {
+                self.check_expr(*start, scope);
+                self.check_expr(*end, scope);
+            }
             ast::Expr::UnaryOp { expr, .. }
             | ast::Expr::ToText { expr, .. }
             | ast::Expr::Widen { expr, .. } => {

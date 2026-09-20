@@ -65,6 +65,11 @@ function withSource(source, runTest) {
   }
 }
 
+// Only the program's own image is read back. A source that reaches a prelude declaration also emits
+// `prelude.nxir` beside it, and deliberately nothing here loads it: `prepareNxIrProgram` links with
+// no resolver, so the runtime's built-in prelude supplies that slot — which is how a host runs one
+// of these images too. No case below reaches the prelude today; one that does gets the fallback for
+// free, so do not "fix" this by resolving `prelude.nxir` from disk.
 function emitIr(dir, sourcePath) {
   const outputPath = join(dir, "ir");
   runNxCli(["codegen", sourcePath, "--target", "nx-ir", "--output", outputPath]);
@@ -303,6 +308,41 @@ console.log(JSON.stringify({
       generated,
     );
     console.log("ok - emitted component IR matches generated JavaScript behavior");
+  },
+);
+
+withSource(
+  `
+type Range = { T:type start:T end:T }
+let ints(): <Range T=int/> = { <Range T=int start={1} end={5} /> }
+let first(): int = { ints().start }
+let moved(): <Range T=int/> = { apply(ints(), <Range.Update T=int end={9} />) }
+let root() = { moved() }
+`,
+  (dir, sourcePath) => {
+    // A type argument leaves no trace below the checker, so all three backends see one `Range`
+    // with the fields `start` and `end` and agree on every value it takes part in.
+    const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
+    const generatedPath = join(dir, "js");
+    runNxCli(["codegen", sourcePath, "--target", "javascript", "--output", generatedPath]);
+    const indexUrl = pathToFileURL(join(generatedPath, "index.js")).href;
+    const generated = generatedJsJson(
+      generatedPath,
+      `
+import { ints, first, moved } from ${JSON.stringify(indexUrl)};
+console.log(JSON.stringify({ ints: ints(), first: first(), moved: moved() }));
+`,
+    );
+
+    const fromIr = {
+      ints: evaluateFunction(prepared, "ints"),
+      first: evaluateFunction(prepared, "first"),
+      moved: evaluateFunction(prepared, "moved"),
+    };
+    assertEqual(fromIr, generated);
+    assertEqual(fromIr.ints, { $type: "Range", start: 1, end: 5 });
+    assertEqual(fromIr.moved, nativeJson(sourcePath));
+    console.log("ok - a generic record agrees across the interpreter, generated code and the IR runtime");
   },
 );
 

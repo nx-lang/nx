@@ -1,0 +1,18 @@
+{
+  "entry": "app/main.nx",
+  "emit": [
+    "app/main.nx",
+    "shared/bounds.nx"
+  ],
+  "entrypoints": [
+    { "module": "app/main.nx", "function": "squares" },
+    { "module": "app/main.nx", "function": "pages" },
+    { "module": "app/main.nx", "function": "none" },
+    { "module": "app/main.nx", "function": "imported" },
+    { "module": "app/main.nx", "function": "equal" },
+    { "module": "app/main.nx", "function": "passedAlong" },
+    { "module": "app/main.nx", "function": "root" },
+    { "module": "shared/bounds.nx", "function": "half" },
+    { "module": "shared/bounds.nx", "function": "closed" }
+  ]
+}

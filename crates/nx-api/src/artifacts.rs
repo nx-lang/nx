@@ -26,7 +26,7 @@ use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io;
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 
 /// Export metadata for one symbol provided by a library artifact.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -616,6 +616,22 @@ fn build_library_artifact_with_registry(
 ) -> io::Result<LibraryArtifact> {
     let root_path = fs::canonicalize(root_path)?;
     let source_files = read_library_source_files(&root_path)?;
+    Ok(build_library_artifact_from_sources(
+        root_path,
+        source_files,
+        registry,
+    ))
+}
+
+/// Builds a library artifact from sources already in memory.
+///
+/// <para>Split from [`build_library_artifact_with_registry`] so the prelude, whose source the
+/// compiler carries rather than reads, is built by the same code as a library on disk.</para>
+fn build_library_artifact_from_sources(
+    root_path: PathBuf,
+    source_files: Vec<LibrarySourceFile>,
+    registry: &LibraryRegistry,
+) -> LibraryArtifact {
     let mut hasher = DefaultHasher::new();
     root_path.hash(&mut hasher);
 
@@ -707,7 +723,7 @@ fn build_library_artifact_with_registry(
         })
         .collect();
 
-    Ok(LibraryArtifact {
+    LibraryArtifact {
         root_path,
         modules,
         exports,
@@ -719,7 +735,133 @@ fn build_library_artifact_with_registry(
         dependency_roots,
         diagnostics,
         fingerprint: hasher.finish(),
-    })
+    }
+}
+
+/// The NX prelude's source, carried inside the compiler.
+const PRELUDE_SOURCE: &str = include_str!("prelude.nx");
+
+static PRELUDE_LIBRARY: OnceLock<Arc<LibraryArtifact>> = OnceLock::new();
+
+/// The prelude, analyzed once per process.
+///
+/// <para>It is an ordinary [`LibraryArtifact`], built by the same code as a library on disk, so
+/// every consumer that already knows how to read a library — name binding, the resolved program,
+/// codegen, the language service — reads the prelude with no case of its own.</para>
+pub fn prelude_library() -> &'static Arc<LibraryArtifact> {
+    PRELUDE_LIBRARY.get_or_init(|| Arc::new(build_prelude_library()))
+}
+
+fn build_prelude_library() -> LibraryArtifact {
+    let file_name = nx_hir::PRELUDE_MODULE_IDENTITY.to_string();
+    let parse_result = syntax_parse_str(PRELUDE_SOURCE, &file_name);
+    let source_id = SourceId::new(parse_result.source_id.as_u32());
+    let diagnostics = normalize_diagnostics_file_name(parse_result.errors, &file_name);
+    let preserved_module = parse_result.tree.map(|tree| lower(tree.root(), source_id));
+
+    let source_file = LibrarySourceFile {
+        file_name: file_name.clone(),
+        path: PathBuf::from(&file_name),
+        source: PRELUDE_SOURCE.to_string(),
+        source_id,
+        diagnostics,
+        preserved_module,
+    };
+
+    // The prelude's root and its one module share the reserved identity: there is no directory to
+    // name, and every consumer that keys a library by its root gets a stable, reserved key.
+    build_library_artifact_from_sources(
+        PathBuf::from(&file_name),
+        vec![source_file],
+        &LibraryRegistry::new(),
+    )
+}
+
+/// Binds the prelude's exported declarations in `module`, under every name the module has not
+/// otherwise bound.
+///
+/// <para>This runs last on both pipelines — after the module's own declarations, its written
+/// imports, a host's implicit imports and its same-library peers — which is what "binds last and
+/// never conflicts" means. A name the module reached any other way keeps its meaning with no
+/// diagnostic, and the prelude takes no part in the ambiguity and duplicate-import checks a written
+/// import goes through: it is not something the author wrote, so it cannot be something the author
+/// wrote twice.</para>
+fn apply_prelude_bindings(module: &mut PreparedModule) {
+    // The prelude's own modules are skipped, and by their reserved root rather than by the one
+    // identity it has today: this runs inside `prelude_library()`'s initialization, so a second
+    // carried module reaching `prelude_library()` again from here would deadlock the `OnceLock`.
+    if module
+        .module_identity()
+        .starts_with(nx_hir::PRELUDE_ROOT_PREFIX)
+    {
+        return;
+    }
+
+    let prelude = prelude_library();
+
+    // A prelude declaration's own type references — a field typed by the record's type parameter —
+    // resolve in the prelude's namespace, so the module needs it as a peer exactly as it does for
+    // any imported library module.
+    for artifact in &prelude.modules {
+        if let Some(lowered_module) = artifact.lowered_module.as_ref() {
+            module.add_peer_module(artifact.file_name.clone(), lowered_module.clone());
+        }
+        if let Some(namespace) = prelude.namespaces.get(&artifact.file_name) {
+            module.add_peer_namespace(artifact.file_name.clone(), namespace.clone());
+        }
+    }
+
+    let mut export_names = prelude.exported_items.keys().cloned().collect::<Vec<_>>();
+    export_names.sort();
+
+    for export_name in export_names {
+        let Some(item_indices) = prelude.exported_items.get(&export_name) else {
+            continue;
+        };
+        // A prelude name that somehow resolved to two declarations would be a fault in the
+        // prelude's own source, which its build reports; binding neither is the quiet choice here.
+        let [item_index] = item_indices[..] else {
+            continue;
+        };
+        let interface_item = &prelude.interface_items[item_index];
+        let kind = interface_item.item.kind();
+        let visible_name = Name::new(&export_name);
+
+        // A name the module has otherwise bound takes the prelude's declaration in *every*
+        // namespace, not only in the ones that name occupies. A prelude record bound in the type
+        // namespace while the module's own `let Range = 5` holds the value namespace would make one
+        // name mean two things in one module, and everything below the checker — the record
+        // construction a range operator rewrites to, codegen's declaration lookup — resolves the
+        // name without a namespace and finds the module's own.
+        if [
+            PreparedNamespace::Value,
+            PreparedNamespace::Type,
+            PreparedNamespace::Element,
+        ]
+        .iter()
+        .any(|namespace| module.has_binding(*namespace, &visible_name))
+        {
+            continue;
+        }
+
+        for namespace in kind.namespaces() {
+            module.insert_binding(PreparedBinding {
+                visible_name: visible_name.clone(),
+                namespace: *namespace,
+                kind,
+                origin: PreparedBindingOrigin::Imported {
+                    module_identity: interface_item.module_identity.clone(),
+                },
+                target: PreparedBindingTarget::Imported {
+                    item: interface_item.clone(),
+                    raw: Some(ImportedRawRef {
+                        module_identity: interface_item.module_identity.clone(),
+                        definition_id: interface_item.definition_id,
+                    }),
+                },
+            });
+        }
+    }
 }
 
 fn discover_library_dependency_roots(root_path: &Path) -> io::Result<Vec<PathBuf>> {
@@ -801,6 +943,7 @@ fn prepare_library_source_file(
         source_files,
         current_file_index,
     );
+    apply_prelude_bindings(&mut prepared_module);
     PreparedSourceFile::Prepared {
         identity: source_file.file_name.clone(),
         module: Box::new(prepared_module),
@@ -920,7 +1063,14 @@ fn analyze_logical_module_graph(
     build_context: &ProgramBuildContext,
 ) -> LogicalProgramAnalysis {
     let source_files = parse_logical_source_files(graph);
-    let source_map = graph.source_map();
+    let mut source_map = graph.source_map();
+    // The prelude's source is always part of the program's, so rendering a position inside it
+    // quotes the compiler's own copy rather than probing the disk for a path that does not exist,
+    // and the image the prelude is emitted to carries its source like any module's.
+    source_map.insert(
+        nx_hir::PRELUDE_MODULE_IDENTITY.to_string(),
+        Arc::<str>::from(PRELUDE_SOURCE),
+    );
     let program_diagnostics = unknown_implicit_import_diagnostics(graph, build_context);
     let mut modules = Vec::with_capacity(source_files.len());
     let mut libraries_by_root = FxHashMap::<PathBuf, Arc<LibraryArtifact>>::default();
@@ -960,6 +1110,10 @@ fn analyze_logical_module_graph(
 
     let mut libraries = libraries_by_root.into_values().collect::<Vec<_>>();
     libraries.sort_by(|lhs, rhs| lhs.root_path.cmp(&rhs.root_path));
+    // The prelude is one of the program's libraries, so every consumer that already reads a
+    // library — the resolved program, codegen, the language service's visible libraries — reads it
+    // too, and its fingerprint is part of the program's.
+    libraries.insert(0, Arc::clone(prelude_library()));
 
     LogicalProgramAnalysis {
         modules,
@@ -1118,6 +1272,7 @@ fn prepare_logical_source_file(
         source_file.source.as_ref(),
         build_context,
     );
+    apply_prelude_bindings(&mut prepared_module);
 
     PreparedSourceFile::Prepared {
         identity: source_file.identity.clone(),
@@ -1659,6 +1814,7 @@ fn parse_failure_artifact(
         prepared_bindings: Vec::new(),
         element_type_arguments: FxHashMap::default(),
         function_value_calls: Default::default(),
+        range_for_expressions: Default::default(),
         prepared_module: None,
     }
 }
@@ -2265,6 +2421,43 @@ fn build_resolved_program(
             }
         }
 
+        // The prelude's exports are visible in every module, and bound last: a name the module
+        // declares itself, or reached through an import of its own, keeps its meaning.
+        if !artifact.file_name.starts_with(nx_hir::PRELUDE_ROOT_PREFIX) {
+            let declared_here = artifact
+                .lowered_module
+                .as_ref()
+                .map(|module| {
+                    module
+                        .items()
+                        .iter()
+                        .map(|item| item.name().as_str().to_string())
+                        .collect::<FxHashSet<_>>()
+                })
+                .unwrap_or_default();
+            let prelude = prelude_library();
+            let mut export_names = prelude.exports.keys().cloned().collect::<Vec<_>>();
+            export_names.sort();
+            for export_name in export_names {
+                if declared_here.contains(&export_name) {
+                    continue;
+                }
+                let Some(export) = prelude.exports.get(&export_name) else {
+                    continue;
+                };
+                let Some(&target_module_id) = module_ids.get(&export.module_file) else {
+                    continue;
+                };
+                visible_imports
+                    .entry(export_name)
+                    .or_insert(ModuleQualifiedItemRef {
+                        module_id: target_module_id,
+                        definition_id: export.definition_id,
+                        kind: export.kind,
+                    });
+            }
+        }
+
         if !visible_imports.is_empty() {
             imports.insert(module_id, visible_imports);
         }
@@ -2464,6 +2657,7 @@ fn build_interface_item(
             kind: record_def.kind.clone(),
             is_abstract: record_def.is_abstract,
             base: record_def.base.clone(),
+            type_params: record_def.type_params.clone(),
             properties: record_def
                 .properties
                 .iter()
@@ -2527,15 +2721,26 @@ fn type_to_type_ref(ty: &Type) -> Option<TypeRef> {
                 .collect::<Option<Vec<_>>>()?,
             type_to_type_ref(ret)?,
         )),
-        Type::Named(named) => Some(TypeRef::name(named.name.clone())),
+        Type::Named(named) if named.args().is_empty() => Some(TypeRef::name(named.name.clone())),
+        // One instantiation of a generic record publishes as the applied type an importing module
+        // would write, so the consumer's checker resolves it to the same instantiation.
+        Type::Named(named) => Some(TypeRef::Applied {
+            name: named.name.clone(),
+            args: named
+                .args()
+                .iter()
+                .map(|(param, ty)| Some((param.clone(), type_to_type_ref(ty)?)))
+                .collect::<Option<Vec<_>>>()?,
+        }),
         Type::Union(union_type) => Some(TypeRef::name(union_type.name.clone())),
         Type::UnionCase(case_type) => {
             let qualified_name = format!("{}.{}", case_type.union, case_type.case);
             Some(TypeRef::name(qualified_name))
         }
-        // A type parameter is a type only inside its component, and nothing published crosses
-        // that boundary; a value typed by one has no interface type to publish.
-        Type::Parameter(_) => None,
+        // A type parameter is a type only inside the declaration that declares it, and it is
+        // published under its own name: an importing module reads a generic record's field types
+        // in the declaring module's namespace, where the parameter is in scope again.
+        Type::Parameter(param) => Some(TypeRef::name(param.name.clone())),
         // A pending contextual name is resolved (or reported) at its binding site, so it never
         // reaches a published artifact type.
         Type::ContextualName(_) | Type::Variable(_) | Type::Unknown | Type::Error => None,
@@ -2851,6 +3056,15 @@ mod tests {
         NxWorkspace::new(modules).expect("workspace")
     }
 
+    /// The program's libraries other than the prelude, which is part of every program.
+    fn host_libraries(artifact: &ProgramArtifact) -> Vec<&Arc<LibraryArtifact>> {
+        artifact
+            .libraries
+            .iter()
+            .filter(|library| library.root_path != Path::new(nx_hir::PRELUDE_MODULE_IDENTITY))
+            .collect()
+    }
+
     #[test]
     fn logical_source_identity_normalizes_windows_paths_before_import_resolution() {
         let identity = logical_source_identity(
@@ -2928,8 +3142,8 @@ mod tests {
                 .map(Vec::len),
             Some(1)
         );
-        assert!(artifact.exported_items.get("helper").is_none());
-        assert!(artifact.exports.get("helper").is_none());
+        assert!(!artifact.exported_items.contains_key("helper"));
+        assert!(!artifact.exports.contains_key("helper"));
         assert_eq!(artifact.exported_items.get("answer").map(Vec::len), Some(1));
     }
 
@@ -3150,6 +3364,56 @@ let patch = <User.Update nickname="x" />"#;
     }
 
     #[test]
+    fn library_artifact_interface_items_carry_record_type_parameters() {
+        let temp = TempDir::new().expect("temp dir");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+
+        fs::write(
+            ui_dir.join("generic.nx"),
+            "export type Pair = { TKey:type TValue:type key:TKey value:TValue }\n",
+        )
+        .expect("generic file");
+
+        let artifact =
+            build_library_artifact_from_directory(&ui_dir).expect("Expected library artifact");
+        assert!(
+            !has_error_diagnostics(&artifact.diagnostics),
+            "Expected generic record fixture to analyze without errors: {:?}",
+            artifact.diagnostics
+        );
+
+        let pair = artifact
+            .interface_items
+            .iter()
+            .find(|item| item.item_name == "Pair")
+            .expect("Expected exported record interface item");
+        match &pair.item {
+            LibraryInterfaceKind::Record {
+                type_params,
+                properties,
+                ..
+            } => {
+                assert_eq!(
+                    type_params
+                        .iter()
+                        .map(|param| param.name.as_str())
+                        .collect::<Vec<_>>(),
+                    vec!["TKey", "TValue"]
+                );
+                assert_eq!(
+                    properties
+                        .iter()
+                        .map(|field| field.name.as_str())
+                        .collect::<Vec<_>>(),
+                    vec!["key", "value"]
+                );
+            }
+            other => panic!("Expected record interface item, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn library_artifact_interface_items_preserve_content_metadata() {
         let temp = TempDir::new().expect("temp dir");
         let ui_dir = temp.path().join("ui");
@@ -3330,18 +3594,17 @@ private type HiddenState = | hidden"#,
             "Default-internal unions should be visible within the same library"
         );
         assert!(
-            artifact.exported_items.get("InternalState").is_none(),
+            !artifact.exported_items.contains_key("InternalState"),
             "Default-internal unions should not be externally exported"
         );
         assert!(
-            artifact
+            !artifact
                 .visible_to_library_items
-                .get("HiddenState")
-                .is_none(),
+                .contains_key("HiddenState"),
             "Private unions should stay file-local"
         );
         assert!(
-            artifact.exported_items.get("HiddenState").is_none(),
+            !artifact.exported_items.contains_key("HiddenState"),
             "Private unions should not be externally exported"
         );
 
@@ -3367,6 +3630,118 @@ private type HiddenState = | hidden"#,
                 assert!(cases[1].fields.is_empty());
             }
             other => panic!("Expected union interface item, got {other:?}"),
+        }
+    }
+
+    /// A generic record crosses a library boundary with its type parameters, so an importing
+    /// module can apply it, construct it, read a substituted field, and take one from a function.
+    #[test]
+    fn a_generic_record_is_applied_and_constructed_across_a_library_boundary() {
+        let temp = TempDir::new().expect("temp dir");
+        let app_dir = temp.path().join("app");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&app_dir).expect("app dir");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+
+        fs::write(
+            ui_dir.join("ranges.nx"),
+            "export type Range = { T:type start:T end:T }\n\
+             export let unit(): <Range T=int/> = {<Range T=int start={0} end={1} />}\n",
+        )
+        .expect("ranges file");
+
+        let registry = LibraryRegistry::new();
+        registry
+            .load_library_from_directory(&ui_dir)
+            .expect("Expected ui registry load");
+        let build_context = registry.build_context();
+
+        let main_path = app_dir.join("main.nx");
+        let source = "import \"../ui\"\n\
+             let r:<Range T=int/> = <Range T=int start={1} end={5} />\n\
+             let s:int = {r.start}\n\
+             let u:<Range T=int/> = {unit()}\n\
+             let root() = { s }";
+        fs::write(&main_path, source).expect("main file");
+
+        let artifact = build_program_artifact_from_source(
+            source,
+            &main_path.display().to_string(),
+            &build_context,
+        )
+        .expect("Expected program artifact");
+        assert!(
+            !has_error_diagnostics(&artifact.diagnostics),
+            "expected a clean build, got: {:?}",
+            artifact
+                .diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.message().to_string())
+                .collect::<Vec<_>>()
+        );
+        let EvalResult::Ok(value) = eval_program_artifact(&artifact) else {
+            panic!("Expected the program to evaluate");
+        };
+        assert_eq!(value, nx_value::NxValue::Int(1));
+    }
+
+    /// The instantiation is invariant across the boundary too: a different argument is a
+    /// different type, and the bare name is not a type at all.
+    #[test]
+    fn a_generic_record_from_a_library_keeps_its_identity() {
+        let temp = TempDir::new().expect("temp dir");
+        let app_dir = temp.path().join("app");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&app_dir).expect("app dir");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+
+        fs::write(
+            ui_dir.join("ranges.nx"),
+            "export type Range = { T:type start:T end:T }\n",
+        )
+        .expect("ranges file");
+
+        let registry = LibraryRegistry::new();
+        registry
+            .load_library_from_directory(&ui_dir)
+            .expect("Expected ui registry load");
+        let build_context = registry.build_context();
+
+        let cases = [
+            (
+                "let ints:<Range T=int/> = <Range T=int start={1} end={5} />\n\
+                 let bad:<Range T=string/> = {ints}",
+                "<Range T=string/>",
+            ),
+            (
+                "let bad:Range = <Range T=int start={1} end={5} />",
+                "was not specified",
+            ),
+            ("let bad = <Range start={1} end={5} />", "was not specified"),
+            (
+                "let bad = <Range T=int start=\"a\" end={5} />",
+                "expects int, found string",
+            ),
+        ];
+        for (index, (body, needle)) in cases.iter().enumerate() {
+            let main_path = app_dir.join(format!("main{index}.nx"));
+            let source = format!("import \"../ui\"\n{body}\nlet root() = {{ 1 }}");
+            fs::write(&main_path, &source).expect("main file");
+            let artifact = build_program_artifact_from_source(
+                &source,
+                &main_path.display().to_string(),
+                &build_context,
+            )
+            .expect("Expected program artifact");
+            let messages = artifact
+                .diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.message().to_string())
+                .collect::<Vec<_>>();
+            assert!(
+                messages.iter().any(|message| message.contains(needle)),
+                "expected {needle:?} for {body:?}, got: {messages:?}"
+            );
         }
     }
 
@@ -3736,8 +4111,9 @@ let root() = { answer() }"#;
         )
         .expect("Expected program artifact");
 
-        assert_eq!(artifact.libraries.len(), 1);
-        assert!(Arc::ptr_eq(&artifact.libraries[0], &ui_snapshot));
+        let libraries = host_libraries(&artifact);
+        assert_eq!(libraries.len(), 1);
+        assert!(Arc::ptr_eq(libraries[0], &ui_snapshot));
         assert!(
             artifact.root_modules[0]
                 .lowered_module
@@ -4049,7 +4425,7 @@ let root() = { secret() }"#;
         .expect("Expected hidden program artifact with diagnostics");
 
         assert!(
-            hidden_artifact.libraries.is_empty(),
+            host_libraries(&hidden_artifact).is_empty(),
             "Expected hidden libraries to stay out of the selected program library set"
         );
         assert!(hidden_artifact
@@ -6022,5 +6398,416 @@ let root(): int = { answer() }"#
             build_workspace_program_artifact(&workspace, "input.nx", &implicit_context())
                 .expect("implicit artifact");
         assert_ne!(plain.fingerprint, implicit.fingerprint);
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // The prelude
+    // --------------------------------------------------------------------------------------------
+
+    #[test]
+    fn the_prelude_builds_clean_and_exports_range_with_its_companions() {
+        let prelude = prelude_library();
+
+        assert!(
+            prelude.diagnostics.is_empty(),
+            "the prelude must be free of diagnostics: {:?}",
+            prelude.diagnostics
+        );
+        for export in ["Range", "Range.Update", "Range.Property"] {
+            assert!(
+                prelude.exports.contains_key(export),
+                "the prelude exports '{export}': {:?}",
+                prelude.exports.keys().collect::<Vec<_>>()
+            );
+        }
+        assert_eq!(
+            prelude
+                .sources
+                .get(nx_hir::PRELUDE_MODULE_IDENTITY)
+                .map(|source| source.as_ref()),
+            Some(PRELUDE_SOURCE),
+            "the prelude carries its own source, so nothing re-reads it from disk"
+        );
+        assert_eq!(
+            prelude.root_path,
+            PathBuf::from(nx_hir::PRELUDE_MODULE_IDENTITY)
+        );
+    }
+
+    #[test]
+    fn the_prelude_is_analyzed_once_per_process() {
+        assert!(Arc::ptr_eq(prelude_library(), prelude_library()));
+    }
+
+    #[test]
+    fn a_single_source_uses_a_prelude_declaration_with_no_import() {
+        let source =
+            "let r:<Range T=int/> = <Range T=int start={1} end={5} endInclusive={false} />\n             let root() = { r }\n";
+        let artifact =
+            build_program_artifact_from_source(source, "main.nx", &ProgramBuildContext::empty())
+                .expect("program artifact");
+
+        assert!(
+            artifact.diagnostics.is_empty(),
+            "{:?}",
+            artifact.diagnostics
+        );
+    }
+
+    #[test]
+    fn every_workspace_module_sees_the_prelude() {
+        let workspace = workspace(vec![
+            workspace_module(
+                "left.nx",
+                b"export let left() = <Range T=int start={1} end={5} endInclusive={false} />\n"
+                    .to_vec(),
+            ),
+            workspace_module(
+                "right.nx",
+                b"let root() = <Range T=int start={2} end={4} endInclusive={true} />\n".to_vec(),
+            ),
+        ]);
+
+        let artifact =
+            build_workspace_program_artifact(&workspace, "right.nx", &ProgramBuildContext::empty())
+                .unwrap_or_else(|diagnostics| panic!("workspace artifact: {diagnostics:?}"));
+
+        assert!(
+            artifact.diagnostics.is_empty(),
+            "{:?}",
+            artifact.diagnostics
+        );
+    }
+
+    #[test]
+    fn a_library_module_sees_the_prelude() {
+        let temp = TempDir::new().expect("temp dir");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+        fs::write(
+            ui_dir.join("slider.nx"),
+            "export type Slider = { range:<Range T=float64/> }\n",
+        )
+        .expect("slider file");
+
+        let library = build_library_artifact_from_directory(&ui_dir).expect("library artifact");
+        assert!(library.diagnostics.is_empty(), "{:?}", library.diagnostics);
+
+        let registry = LibraryRegistry::new();
+        registry
+            .load_library_from_directory(&ui_dir)
+            .expect("registry library");
+        let build_context = registry.build_context();
+
+        let main_path = temp.path().join("main.nx");
+        let source = "import \"./ui\"\n                      let s = <Slider range={<Range T=float64 start={0.0} end={1.0} endInclusive={true} />} />\n                      let bounds:<Range T=float64/> = {s.range}\n                      let root() = { bounds }\n";
+        fs::write(&main_path, source).expect("main file");
+
+        let artifact = build_program_artifact_from_source(
+            source,
+            &main_path.display().to_string(),
+            &build_context,
+        )
+        .expect("program artifact");
+
+        assert!(
+            !has_error_diagnostics(&artifact.diagnostics),
+            "{:?}",
+            artifact.diagnostics
+        );
+    }
+
+    #[test]
+    fn a_local_declaration_hides_the_prelude_range() {
+        let source = "type Range = { low:int high:int }\n                      let r = <Range low={1} high={5} />\n                      let low:int = {r.low}\n                      let root() = { low }\n";
+        let artifact =
+            build_program_artifact_from_source(source, "main.nx", &ProgramBuildContext::empty())
+                .expect("program artifact");
+
+        assert!(
+            artifact.diagnostics.is_empty(),
+            "{:?}",
+            artifact.diagnostics
+        );
+    }
+
+    #[test]
+    fn a_wildcard_import_hides_the_prelude_range_without_ambiguity() {
+        let workspace = workspace(vec![
+            workspace_module(
+                "shapes.nx",
+                b"export type Range = { low:int high:int }\n".to_vec(),
+            ),
+            workspace_module(
+                "main.nx",
+                b"import \"./shapes.nx\"\nlet r = <Range low={1} high={5} />\nlet root() = { r.low }\n"
+                    .to_vec(),
+            ),
+        ]);
+
+        let artifact =
+            build_workspace_program_artifact(&workspace, "main.nx", &ProgramBuildContext::empty())
+                .unwrap_or_else(|diagnostics| panic!("workspace artifact: {diagnostics:?}"));
+
+        assert!(
+            artifact.diagnostics.is_empty(),
+            "{:?}",
+            artifact.diagnostics
+        );
+        assert!(
+            !artifact
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message().contains("provided by both")),
+            "the prelude takes no part in the duplicate-import check"
+        );
+    }
+
+    #[test]
+    fn a_host_implicit_import_hides_the_prelude_range() {
+        let workspace = workspace(vec![
+            workspace_module(
+                "drawnui.nx",
+                b"export type Range = { low:int high:int }\n".to_vec(),
+            ),
+            workspace_module(
+                "input.nx",
+                b"let root() = <Range low={1} high={5} />\n".to_vec(),
+            ),
+        ]);
+
+        let artifact =
+            build_workspace_program_artifact(&workspace, "input.nx", &implicit_context())
+                .unwrap_or_else(|diagnostics| panic!("workspace artifact: {diagnostics:?}"));
+
+        assert!(
+            artifact.diagnostics.is_empty(),
+            "{:?}",
+            artifact.diagnostics
+        );
+    }
+
+    #[test]
+    fn a_library_does_not_export_the_prelude() {
+        let temp = TempDir::new().expect("temp dir");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+        fs::write(
+            ui_dir.join("slider.nx"),
+            "export type Slider = { range:<Range T=int/> }\n",
+        )
+        .expect("slider file");
+
+        let library = build_library_artifact_from_directory(&ui_dir).expect("library artifact");
+
+        let mut exports = library.exports.keys().cloned().collect::<Vec<_>>();
+        exports.sort();
+        assert_eq!(
+            exports,
+            vec![
+                "Slider".to_string(),
+                "Slider.Property".to_string(),
+                "Slider.Update".to_string(),
+            ],
+            "a library's exports are its own declarations and their companions"
+        );
+        assert!(
+            !library
+                .interface_items
+                .iter()
+                .any(|item| item.item_name.starts_with("Range")),
+            "the prelude's declarations are not part of a library's interface"
+        );
+    }
+
+    /// The prelude adds no text to the document, so a fault on the third line is on the third line.
+    #[test]
+    fn positions_are_the_documents_own() {
+        let source =
+            "let root() =\n  <Range T=int\n    start=\"one\" end={5} endInclusive={false} />\n";
+        let diagnostics = validate_workspace(
+            &workspace(vec![workspace_module(
+                "main.nx",
+                source.as_bytes().to_vec(),
+            )]),
+            &ProgramBuildContext::empty(),
+        );
+
+        let label = diagnostics
+            .iter()
+            .flat_map(|diagnostic| diagnostic.labels.iter())
+            .find(|label| label.primary)
+            .expect("a primary label");
+        assert_eq!(label.file, "main.nx");
+        assert_eq!(label.span.start_line, 3);
+    }
+
+    /// A label inside the prelude names the prelude and renders from the compiler's own copy of its
+    /// source, with no path to probe on disk.
+    #[test]
+    fn a_label_inside_the_prelude_renders_the_prelude_source() {
+        let start_offset = PRELUDE_SOURCE
+            .find("start:T")
+            .expect("the prelude declares 'start'");
+        let span = TextSpan::new(
+            TextSize::from(u32::try_from(start_offset).expect("offset fits")),
+            TextSize::from(u32::try_from(start_offset + "start".len()).expect("offset fits")),
+        );
+        let diagnostic = Diagnostic::error("test")
+            .with_message("points at the prelude's own declaration")
+            .with_label(Label::secondary(nx_hir::PRELUDE_MODULE_IDENTITY, span))
+            .build();
+
+        // Rendered through a real program's source map, which always holds the prelude's source.
+        let artifact = build_program_artifact_from_source(
+            "let root() = 1\n",
+            "main.nx",
+            &ProgramBuildContext::empty(),
+        )
+        .expect("program artifact");
+        let entries = artifact.source_entries();
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.identity == nx_hir::PRELUDE_MODULE_IDENTITY),
+            "the prelude's source is part of every program's"
+        );
+        let rendered = crate::diagnostics::diagnostics_to_api_with_source_entries(
+            &[diagnostic],
+            "",
+            entries.iter().map(|entry| (entry.identity, entry.source)),
+        );
+
+        let label = &rendered[0].labels[0];
+        assert_eq!(label.file, nx_hir::PRELUDE_MODULE_IDENTITY);
+        let line = PRELUDE_SOURCE
+            .lines()
+            .nth(usize::try_from(label.span.start_line - 1).expect("line fits"))
+            .expect("the label's line");
+        assert!(
+            line.contains("start:T"),
+            "the rendered position is in the prelude's own source: {line:?}"
+        );
+        assert!(
+            !Path::new(nx_hir::PRELUDE_MODULE_IDENTITY).is_file(),
+            "the prelude's identity is not a path, so nothing can read it from disk"
+        );
+    }
+
+    #[test]
+    fn the_program_fingerprint_depends_on_the_prelude() {
+        let workspace = workspace(vec![workspace_module(
+            "main.nx",
+            b"let root() = 1\n".to_vec(),
+        )]);
+        let artifact =
+            build_workspace_program_artifact(&workspace, "main.nx", &ProgramBuildContext::empty())
+                .expect("program artifact");
+
+        assert!(
+            artifact
+                .libraries
+                .iter()
+                .any(|library| Arc::ptr_eq(library, prelude_library())),
+            "the prelude is one of the program's libraries"
+        );
+
+        // The same hash, computed over everything but the prelude's fingerprint.
+        let mut hasher = DefaultHasher::new();
+        "main.nx".hash(&mut hasher);
+        for module in workspace.modules() {
+            module.identity().hash(&mut hasher);
+            Arc::<str>::from(module.source()).hash(&mut hasher);
+            module.version().map(str::to_string).hash(&mut hasher);
+        }
+        assert_ne!(
+            hasher.finish(),
+            artifact.fingerprint,
+            "a compiler with another prelude must not share this program's cached artifact"
+        );
+    }
+
+    /// After checking, a range expression *is* the record construction it means, in every position
+    /// a construction can occupy.
+    #[test]
+    fn no_range_expression_survives_checking() {
+        let source = "type Slider = { range:<Range T=int/> }\n\
+                      let width(r:<Range T=int/>):int = { r.end - r.start }\n\
+                      let bound = {1..5}\n\
+                      let s = <Slider range={2..=6} />\n\
+                      let w:int = {width(0..3)}\n\
+                      let rs:<Range T=int/>[] = { (0..1) }\n\
+                      let counted = { for i in 0..4 { i } }\n\
+                      let root() = { counted }\n";
+        let artifact =
+            build_program_artifact_from_source(source, "main.nx", &ProgramBuildContext::empty())
+                .expect("program artifact");
+        assert!(
+            artifact.diagnostics.is_empty(),
+            "{:?}",
+            artifact.diagnostics
+        );
+
+        let module = artifact.root_modules[0]
+            .lowered_module
+            .as_ref()
+            .expect("a lowered module");
+
+        assert!(
+            !module
+                .exprs()
+                .any(|(_, expr)| matches!(expr, nx_hir::ast::Expr::Range { .. })),
+            "every range expression is rewritten before the module is snapshotted"
+        );
+
+        let constructions = module
+            .exprs()
+            .filter(|(_, expr)| {
+                matches!(
+                    expr,
+                    nx_hir::ast::Expr::RecordLiteral { record, .. }
+                        if record.as_str() == nx_hir::PRELUDE_RANGE_NAME
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            constructions.len(),
+            5,
+            "a range in a let, a property value, an argument, a list and a for header each rewrite"
+        );
+
+        // The one node the rewrite allocates is typed, so a consumer keyed by expression id — the
+        // IR builder above all — finds a type for it as it does for every other node.
+        let type_env = &artifact.root_modules[0].type_env;
+        for (_, expr) in &constructions {
+            let nx_hir::ast::Expr::RecordLiteral { properties, .. } = expr else {
+                continue;
+            };
+            let end_inclusive = properties
+                .iter()
+                .find(|property| property.name.as_str() == nx_hir::PRELUDE_RANGE_END_INCLUSIVE)
+                .expect("an endInclusive binding");
+            assert_eq!(
+                type_env.get_expr_type(end_inclusive.value),
+                Some(&Type::boolean()),
+                "the allocated boolean literal carries a recorded type"
+            );
+        }
+    }
+
+    /// The generic `Range` of `record-type-parameters`, which predates the prelude, still checks as
+    /// the file's own declaration.
+    #[test]
+    fn a_generic_record_declared_before_the_prelude_existed_still_checks() {
+        let source = "type Range = { T:type start:T end:T }\n                      let r:<Range T=int/> = <Range T=int start={1} end={5} />\n                      let root() = { r }\n";
+        let artifact =
+            build_program_artifact_from_source(source, "main.nx", &ProgramBuildContext::empty())
+                .expect("program artifact");
+
+        assert!(
+            artifact.diagnostics.is_empty(),
+            "{:?}",
+            artifact.diagnostics
+        );
     }
 }

@@ -503,11 +503,18 @@ impl WorkspaceSnapshot {
                 .map(|ty| ty.to_string()),
             _ => None,
         };
-        let mut content = hover::fenced(hover::item_signature(
-            item,
-            declaration.kind,
-            inferred.as_deref(),
-        ));
+        let signature = hover::item_signature(item, declaration.kind, inferred.as_deref());
+        // A prelude declaration is a built-in: the same label `Element` carries, over the real
+        // declaration, because an author meeting `Range` needs both — that it is the language's, and
+        // what it holds.
+        let mut content = if declaration.origin.0 == nx_hir::PRELUDE_MODULE_IDENTITY {
+            hover::fenced(format!(
+                "{}\n{signature}",
+                hover::builtin_type_label("built-in type")
+            ))
+        } else {
+            hover::fenced(signature)
+        };
         // What the declaration accepts beyond what it wrote: the chain it extends, and each
         // inherited property with its type, so the author can see the whole contract at the tag.
         let inherited = &declaration.properties[declaration.own_properties..];
@@ -864,7 +871,11 @@ impl WorkspaceSnapshot {
         // library, and the analysis above returns only the workspace's own modules. The
         // declarations those origins point at are read from the library snapshots the context
         // holds, so a library name resolves the way a peer module's name does.
-        for library in self.build_context.visible_libraries() {
+        // The prelude is one of the program's libraries, so its declarations are indexed like a
+        // library's: the bindings above already name them, and this is what those origins point at.
+        for library in std::iter::once(Arc::clone(nx_api::prelude_library()))
+            .chain(self.build_context.visible_libraries())
+        {
             for module in &library.modules {
                 if declarations.artifacts.contains_key(&module.file_name) {
                     continue;
@@ -1245,6 +1256,22 @@ fn local_declaration_hover(
                 .find(|property| property.name.as_str() == name)?;
             hover::property(Some(owner), name, &type_ref_display(&property.ty))
         }
+        // A type parameter is a type, not a value, so it renders the same way whichever kind of
+        // declaration declares it.
+        (positions::LocalDeclarationKind::TypeParameter, Item::Record(record)) => {
+            record
+                .type_params
+                .iter()
+                .find(|param| param.name.as_str() == name)?;
+            hover::type_parameter(owner, name)
+        }
+        (positions::LocalDeclarationKind::TypeParameter, Item::Component(component)) => {
+            component
+                .type_params
+                .iter()
+                .find(|param| param.name.as_str() == name)?;
+            hover::type_parameter(owner, name)
+        }
         (positions::LocalDeclarationKind::RecordField, Item::Record(record)) => {
             let field = record
                 .properties
@@ -1557,11 +1584,6 @@ impl DocumentScope {
             .lowered_module
             .as_deref()?
             .item_by_definition(declaration.origin.1)
-    }
-
-    /// The declaration a type name written by the module at `origin` denotes.
-    fn type_in_module(&self, origin: &DeclarationOrigin, name: &str) -> Option<&Declaration> {
-        self.type_declared_in(&origin.0, name)
     }
 
     /// The declaration a type name written by the module with identity `module` denotes.
@@ -2189,7 +2211,9 @@ fn function_signature(function: &nx_hir::Function) -> String {
 /// would accept a bare name.
 fn base_type_name(ty: &TypeRef) -> String {
     match ty {
-        TypeRef::Name(name) => name.as_str().to_string(),
+        // An applied type reaches its record: a bare name resolves against the record's members,
+        // which the type arguments do not change.
+        TypeRef::Name(name) | TypeRef::Applied { name, .. } => name.as_str().to_string(),
         TypeRef::Nullable(inner) | TypeRef::Array(inner) => base_type_name(inner),
         TypeRef::Function { .. } => String::new(),
     }
@@ -2284,7 +2308,7 @@ fn type_completion_items(scope: &DocumentScope) -> Vec<CompletionItem> {
         scope
             .visible_declarations()
             .into_iter()
-            .filter_map(|declaration| {
+            .filter(|&declaration| {
                 matches!(
                     declaration.kind,
                     DocumentSymbolKind::TypeAlias
@@ -2293,11 +2317,11 @@ fn type_completion_items(scope: &DocumentScope) -> Vec<CompletionItem> {
                         | DocumentSymbolKind::Union
                         | DocumentSymbolKind::Component
                 )
-                .then(|| CompletionItem {
-                    label: declaration.name.clone(),
-                    kind: CompletionItemKind::Type,
-                    detail: Some(declaration.detail.clone()),
-                })
+            })
+            .map(|declaration| CompletionItem {
+                label: declaration.name.clone(),
+                kind: CompletionItemKind::Type,
+                detail: Some(declaration.detail.clone()),
             }),
     );
 
@@ -3113,9 +3137,11 @@ component <SearchBox placeholder:string /> = {
     #[test]
     fn a_generic_component_does_not_regress_diagnostics_hover_or_completions() {
         const GENERIC: &str = "type Contact = { name:string }\n\
+            type Range = { T:type start:T end:T }\n\
             external component <SkiaLayout TItem:type itemsSource:TItem[]? />\n\
             component <Section TItem:type items:TItem[] /> = { <SkiaLayout TItem=TItem itemsSource={items} /> }\n\
             let contacts:Contact[] = {}\n\
+            let span:<Range T=int/> = <Range T=int start={1} end={5} />\n\
             <Section TItem=Contact items={contacts} />\n";
 
         let snapshot = snapshot_for("nx://tenant/form.nx", GENERIC, 1);
@@ -3131,10 +3157,42 @@ component <SearchBox placeholder:string /> = {
             .expect("hover over the prop name");
         assert!(hover.contents.contains("TItem"), "got: {}", hover.contents);
 
-        // Hover over the parameter's own declaration and over the argument must not panic; what
-        // they answer is a follow-up.
-        let _ = hover_at(&GENERIC.replace("<Section TItem:type", "<Section TI⟨cursor⟩tem:type"));
+        // A type parameter's own declaration hovers as one, whether a component or a record
+        // declares it.
+        let hover =
+            hover_at(&GENERIC.replace("<Section TItem:type", "<Section TI⟨cursor⟩tem:type"))
+                .expect("hover over the component's type parameter");
+        assert!(
+            hover.contents.contains("(type parameter) Section.TItem"),
+            "got: {}",
+            hover.contents
+        );
+        let hover =
+            hover_at(&GENERIC.replace("type Range = { T:type", "type Range = { ⟨cursor⟩T:type"))
+                .expect("hover over the record's type parameter");
+        assert!(
+            hover.contents.contains("(type parameter) Range.T"),
+            "got: {}",
+            hover.contents
+        );
         let _ = hover_at(&GENERIC.replace("TItem=Contact", "TItem=Con⟨cursor⟩tact"));
+
+        // Hovering inside an applied type must not panic.
+        let _ = hover_at(
+            &GENERIC.replace("let span:<Range T=int/>", "let span:<Ran⟨cursor⟩ge T=int/>"),
+        );
+        let _ = hover_at(
+            &GENERIC.replace("let span:<Range T=int/>", "let span:<Range ⟨cursor⟩T=int/>"),
+        );
+
+        // A type parameter is not a missing field at a construction site.
+        let labels = labels_at_incomplete(
+            &GENERIC.replace("<Range T=int start={1}", "<Range T=int ⟨cursor⟩start={1}"),
+        );
+        assert!(
+            !labels.contains(&"T".to_string()),
+            "a type parameter is not a field: {labels:?}"
+        );
 
         // Completions inside the body and at the use site must not panic.
         let _ = labels_at_incomplete(
@@ -4488,5 +4546,43 @@ component <SearchBox placeholder:string /> = {
 
         assert!(!labels.contains(&"title".to_string()), "got: {labels:?}");
         assert!(labels.contains(&"subtitle".to_string()), "got: {labels:?}");
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // The prelude
+    // ---------------------------------------------------------------------------------------------
+
+    /// The prelude is part of every snapshot, so a one-document editor session offers and describes
+    /// its declarations without the host supplying anything.
+    #[test]
+    fn a_one_document_snapshot_offers_the_prelude_in_a_type_position() {
+        let labels = labels_at_incomplete("type Slider = { range:⟨cursor⟩ }\n");
+        assert!(labels.contains(&"Range".to_string()), "{labels:?}");
+    }
+
+    #[test]
+    fn a_one_document_snapshot_offers_the_prelude_as_an_element_tag() {
+        let labels = labels_at_incomplete("let r = <⟨cursor⟩\n");
+        assert!(labels.contains(&"Range".to_string()), "{labels:?}");
+    }
+
+    #[test]
+    fn hover_on_a_prelude_declaration_labels_it_a_built_in_type() {
+        let hover =
+            hover_at("type Slider = { range:<Ran⟨cursor⟩ge T=int/> }\n").expect("hover on Range");
+        let contents = hover.contents;
+
+        assert!(
+            contents.contains("built-in type"),
+            "labelled as `Element` is: {contents}"
+        );
+        assert!(
+            contents.contains("Range") && contents.contains("T:type"),
+            "the real declaration, with its type parameter: {contents}"
+        );
+        assert!(
+            contents.contains("start") && contents.contains("endInclusive"),
+            "and its fields: {contents}"
+        );
     }
 }

@@ -1,0 +1,39 @@
+// Ranges: `Range` is a built-in type, `..` and `..=` construct it, and `for` counts over one.
+
+// The two operators are sugar for the built-in record: `1..5` excludes its end, `1..=5` includes it.
+let half:<Range T=int/> = {1..5}
+let closed:<Range T=int/> = {1..=5}
+
+// So the operator and the element form build the same value.
+let sameThing:boolean = {closed == <Range T=int start={1} end={5} endInclusive={true} />}
+
+// Arithmetic binds tighter than the operators, so a computed bound needs no parentheses.
+let n = 4
+let upTo:<Range T=int/> = {0..n + 1}
+
+// `T` is the bounds' common numeric type, or the type the site expects.
+let mixed:<Range T=float64/> = {0..2.5}
+type Slider = { range:<Range T=float64/> }
+let volume = <Slider range={0..1} />
+
+// A range of any type is constructible with the element form; only an integer range iterates.
+let letters = <Range T=string start="a" end="f" endInclusive={true} />
+
+// `for` counts over an integer range, with the optional index counting from zero.
+let squares:int[] = { for i in 0..4 { i * i } }
+let pages:int[] = { for page in 1..=3 { page } }
+let pairs:int[] = { for value, index in 5..8 { value * 10 + index } }
+
+// An empty or reversed range yields nothing, and constructing one never fails.
+let none:int[] = { for i in 5..2 { i } }
+let reversed:<Range T=int/> = {5..2}
+
+// A range value from anywhere iterates, not only one the operators wrote.
+let span:<Range T=int/> = <Range T=int start={2} end={4} endInclusive={true} />
+let counted:int[] = { for i in span { i } }
+
+// Reading a field and patching a range work as they do for any record.
+let first:int = {half.start}
+let widened:<Range T=int/> = {apply(half, <Range.Update T=int end={9} />)}
+
+let root() = { squares }

@@ -1,8 +1,8 @@
 use crate::typegen::model::{
-    erase_field_type_parameters, ExportedExternalState, ExportedFieldDefault,
-    ExportedLiteralDefault, ExportedModule, ExportedPolymorphicDescendant, ExportedRecord,
-    ExportedRecordField, ExportedType, ExportedTypeGraph, ExportedUnion, ExportedUnionCase,
-    ExportedUpdate, ImportedType, ImportedTypeKind,
+    erase_field_type_parameters, update_companion_type_params, ExportedExternalState,
+    ExportedFieldDefault, ExportedLiteralDefault, ExportedModule, ExportedPolymorphicDescendant,
+    ExportedRecord, ExportedRecordField, ExportedType, ExportedTypeGraph, ExportedUnion,
+    ExportedUnionCase, ExportedUpdate, ImportedType, ImportedTypeKind, ModuleTypes,
 };
 use crate::typegen::writer::CodeWriter;
 use crate::typegen::{GenerateTypesOptions, GeneratedFile};
@@ -11,6 +11,18 @@ use rustc_hash::FxHashMap;
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+
+/// The basename of the file a library's closed update formatters are declared in.
+const CLOSED_FORMATTER_FILE_BASENAME: &str = "_NxFormatters";
+
+/// Where the closed update formatters a module's members name are declared.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ClosedFormatterPlacement {
+    /// Single-file output: the one module declares the formatters its own members name.
+    Inline,
+    /// Library output: every formatter is declared once in the shared formatter file.
+    Shared,
+}
 
 pub fn emit_single_file(
     graph: &ExportedTypeGraph,
@@ -21,7 +33,13 @@ pub fn emit_single_file(
         .modules
         .first()
         .ok_or_else(|| "Single-file generation requires one source module".to_string())?;
-    Ok(render_module(graph, module, namespace, opts))
+    Ok(render_module(
+        graph,
+        module,
+        namespace,
+        opts,
+        ClosedFormatterPlacement::Inline,
+    ))
 }
 
 pub fn emit_library(
@@ -31,10 +49,28 @@ pub fn emit_library(
 ) -> Result<Vec<GeneratedFile>, String> {
     let mut files = Vec::new();
 
+    // Every module of a library is generated into the one namespace, whatever its directory, so a
+    // formatter declared per module is declared twice as soon as two modules type a member by the
+    // same instantiation. They go in a file of their own instead — the move TypeScript makes with
+    // its helper module — and each module names them across the namespace.
+    let shared_formatters = collect_library_closed_update_formatters(graph, namespace);
+    if !shared_formatters.formatters.is_empty() {
+        files.push(GeneratedFile {
+            relative_path: closed_formatter_file_path(graph),
+            content: render_closed_formatter_file(&shared_formatters, namespace, opts),
+        });
+    }
+
     for module in &graph.modules {
         files.push(GeneratedFile {
             relative_path: module_output_path(&module.module_path),
-            content: render_module(graph, module, namespace, opts),
+            content: render_module(
+                graph,
+                module,
+                namespace,
+                opts,
+                ClosedFormatterPlacement::Shared,
+            ),
         });
     }
 
@@ -81,6 +117,47 @@ pub(crate) fn collect_warnings(graph: &ExportedTypeGraph, namespace: &str) -> Ve
                 "Generated C# abstract type '{}' has no concrete exported descendants; omitting polymorphism metadata (JSON and MessagePack) because derived type registrations are required.",
                 record.name
             ));
+        }
+
+        // MessagePack's source generator cannot close the open generic a generic update companion
+        // carries, so a member typed by one needs the generator to reach a formatter some other way.
+        // A companion the generating library declares is reached through the declaration itself: the
+        // generator has it in the compilation and closes the companion's own shim per instantiation,
+        // wherever in the member's type it sits. A companion from another assembly is reached only
+        // through a closed formatter the *member* names, which needs the member's own type to be the
+        // instantiation — below that there is nowhere to put the attribute, and the open generic on
+        // the companion is `MsgPack006` from `CSC` itself, which no file-level pragma reaches. That
+        // last shape is the one named here rather than compiled into a file that does not build.
+        let imported_type_lookup = module
+            .imported_types
+            .iter()
+            .cloned()
+            .map(|imported_type| (imported_type.visible_name.clone(), imported_type))
+            .collect::<FxHashMap<_, _>>();
+        let context = CSharpRenderContext {
+            namespace,
+            types: ModuleTypes::for_module(graph, module),
+            imported_types_by_visible_name: &imported_type_lookup,
+            qualify_generated_types: false,
+        };
+        for declaration in &module.declarations {
+            for (owner, field) in declaration_fields(&declaration.item) {
+                if closed_update_formatter_for(&field.ty, &context).is_some() {
+                    continue;
+                }
+                for name in nx_hir::type_ref_names(&field.ty) {
+                    if !generic_update_companion(name.as_str(), &context) {
+                        continue;
+                    }
+                    if context.graph().declaration(name.as_str()).is_some() {
+                        continue;
+                    }
+                    warnings.push(format!(
+                        "Generated C# field '{}.{}' reaches the generic update companion '{}' below its own type, and that companion is declared in another assembly, so neither the member nor the companion can name a formatter MessagePack's source generator resolves. Type the member as '{}' itself, or patch '{}' in NX and expose the record across the host boundary instead.",
+                        owner, field.name, name, name, name
+                    ));
+                }
+            }
         }
 
         for declaration in &module.declarations {
@@ -142,6 +219,7 @@ fn render_module(
     module: &ExportedModule,
     namespace: &str,
     opts: &GenerateTypesOptions,
+    placement: ClosedFormatterPlacement,
 ) -> String {
     let mut writer = CodeWriter::new(opts.format.clone());
     write_header(&mut writer);
@@ -170,9 +248,19 @@ fn render_module(
 
     let namespace_context = CSharpRenderContext {
         namespace,
-        graph,
+        types: ModuleTypes::for_module(graph, module),
         imported_types_by_visible_name: &imported_type_lookup,
         qualify_generated_types: false,
+    };
+
+    // A member typed by one instantiation of a companion this file does not declare names a
+    // formatter of that closed type, which has to be declared where the member can see it: beside
+    // the contracts in single-file output, in the library's shared formatter file otherwise.
+    let closed_update_formatters = match placement {
+        ClosedFormatterPlacement::Inline => {
+            collect_closed_update_formatters(module, &namespace_context)
+        }
+        ClosedFormatterPlacement::Shared => Vec::new(),
     };
 
     let needs_enum_serialization_helpers = module
@@ -196,9 +284,20 @@ fn render_module(
         .iter()
         .any(|declaration| matches!(&declaration.item, ExportedType::Update(_)));
 
+    // Only a generic companion declares a formatter of its own, and only that needs the formatter
+    // interface in scope.
+    let needs_formatter_interface = !closed_update_formatters.is_empty()
+        || module.declarations.iter().any(|declaration| {
+            matches!(&declaration.item, ExportedType::Update(update)
+                if !update_companion_type_params(update, namespace_context.types).is_empty())
+        });
+
     writer.line("using System;");
     writer.line("using System.Text.Json.Serialization;");
     writer.line("using MessagePack;");
+    if needs_formatter_interface {
+        writer.line("using MessagePack.Formatters;");
+    }
     if needs_update_helpers {
         writer.line("using NxLang.Nx;");
     }
@@ -221,6 +320,12 @@ fn render_module(
     writer.block(
         &format!("namespace {}", sanitize_csharp_qualified_name(namespace)),
         |writer| {
+            for (index, formatter) in closed_update_formatters.iter().enumerate() {
+                emit_closed_update_formatter(writer, formatter);
+                if index + 1 != closed_update_formatters.len() || !body_items.is_empty() {
+                    writer.blank_line();
+                }
+            }
             for (index, declaration) in body_items.iter().enumerate() {
                 emit_declaration(writer, &declaration.item, &namespace_context);
                 if index + 1 != body_items.len() {
@@ -238,6 +343,19 @@ fn write_header(writer: &mut CodeWriter) {
     writer.line("// Generated by nxlang");
     writer.line("#nullable enable");
     writer.line("#pragma warning disable MsgPack005");
+    // MsgPack006 reads `[MessagePackFormatter(typeof(Foo_updateFormatter<>))]` — the open generic
+    // MessagePack documents for a generic type — as a formatter that implements no formatter
+    // interface, because an unbound generic implements none until it is closed. The generator
+    // closes it and the round trip works; the diagnostic only fires once some member is typed by a
+    // generic companion, which is exactly when a correct file would stop compiling.
+    writer.line("#pragma warning disable MsgPack006");
+    // MsgPack009 counts formatters against the *open* generic, so two closed formatters over two
+    // instantiations of one companion — `NxRange_update<long>` and `NxRange_update<double>` in one
+    // contract — read as two formatters for `NxRange_update<T>`. They are not: the source generator
+    // resolves a member by the closed type its attribute names, and each formatter serializes only
+    // the instantiation it is declared over. A generated file declares a formatter only where the
+    // emitter put one, so a genuine duplicate here would be a generator defect, not a source one.
+    writer.line("#pragma warning disable MsgPack009");
     writer.blank_line();
 }
 
@@ -269,21 +387,43 @@ fn emit_update(
     update: &ExportedUpdate,
     context: &CSharpRenderContext<'_>,
 ) {
-    // A state field typed by the component's type parameter erases to `object`: the host patches
-    // state as data and never names the instantiation, which an NX use site fixed.
+    // A generic record's companion declares the record's parameters and keeps its field types, so
+    // a `Range<long>` is patched by a `Range_update<long>` whose `Start` is a `long`. Everything
+    // else erases: a state field typed by the *component's* type parameter becomes `object`,
+    // because the host patches state as data and never names the instantiation an NX use site
+    // fixed. A companion with no plain target has no generic surface to declare parameters on, so
+    // it erases too.
+    let type_params = update_companion_type_params(update, context.types);
+    let plain_target = update_plain_target(update, context, type_params);
+    let type_params: &[String] = if plain_target.is_some() {
+        type_params
+    } else {
+        &[]
+    };
     let erased;
-    let update = match erase_field_type_parameters(&update.fields, &update.type_params) {
-        Cow::Borrowed(_) => update,
-        Cow::Owned(fields) => {
-            erased = ExportedUpdate {
-                fields,
-                ..update.clone()
-            };
-            &erased
+    let update = if type_params.is_empty() {
+        match erase_field_type_parameters(&update.fields, &update.type_params) {
+            Cow::Borrowed(_) => update,
+            Cow::Owned(fields) => {
+                erased = ExportedUpdate {
+                    fields,
+                    ..update.clone()
+                };
+                &erased
+            }
         }
+    } else {
+        update
     };
     let class_name = sanitize_csharp_identifier(&update.name);
-    let plain_target = update_plain_target(update, context);
+    let generics = if type_params.is_empty() {
+        String::new()
+    } else {
+        format!("<{}>", type_params.join(", "))
+    };
+    // The companion's own instantiation, for the members that name it: its `Diff` return, and the
+    // formatter closed over it.
+    let class_type = format!("{class_name}{generics}");
     let property_enum = update_property_enum(update, context);
     let field_members = update
         .fields
@@ -310,18 +450,32 @@ fn emit_update(
     let diff_member = reserve_member("Diff");
     let discriminator = escape_csharp_string_literal(&update.discriminator);
 
-    writer.line(&format!(
-        "[JsonConverter(typeof(NxUpdateRecordJsonConverter<{class_name}>))]"
-    ));
-    writer.line(&format!(
-        "[MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<{class_name}>))]"
-    ));
+    // A generic companion cannot name its own converter or formatter in an attribute: an
+    // attribute argument cannot use type parameters (CS0416). It names the SDK's factory for JSON,
+    // and for MessagePack an open generic shim emitted below, which the reflecting resolver closes
+    // over the same arguments the companion is closed over.
+    let formatter_name = format!("{class_name}Formatter");
+    let emit_open_formatter_shim = !type_params.is_empty();
+    if type_params.is_empty() {
+        writer.line(&format!(
+            "[JsonConverter(typeof(NxUpdateRecordJsonConverter<{class_name}>))]"
+        ));
+        writer.line(&format!(
+            "[MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<{class_name}>))]"
+        ));
+    } else {
+        writer.line("[JsonConverter(typeof(NxUpdateRecordJsonConverterFactory))]");
+        writer.line(&format!(
+            "[MessagePackFormatter(typeof({formatter_name}<{}>))]",
+            ",".repeat(type_params.len() - 1)
+        ));
+    }
     let base = match &plain_target {
         Some(target) => format!("NxUpdate<{}>", target.type_name),
         None => "NxUpdateRecord".to_string(),
     };
     writer.block(
-        &format!("public sealed class {class_name} : {base}"),
+        &format!("public sealed class {class_type} : {base}"),
         |writer| {
             let mut schema_entries = vec![format!("\"{discriminator}\"")];
             for field in &update.fields {
@@ -410,16 +564,70 @@ fn emit_update(
                 let target_type = &target.type_name;
                 writer.blank_line();
                 writer.line(&format!(
-                    "public static {class_name} {diff_member}({target_type} before, {target_type} after) => {base}.Diff<{class_name}>(before, after);"
+                    "public static {class_type} {diff_member}({target_type} before, {target_type} after) => {base}.Diff<{class_type}>(before, after);"
                 ));
             }
         },
     );
 
+    if emit_open_formatter_shim {
+        writer.blank_line();
+        emit_update_formatter_shim(writer, &formatter_name, &class_type, &generics);
+    }
+
     if let Some(target) = &plain_target {
         writer.blank_line();
-        emit_property_table(writer, update, target, property_enum.as_ref(), context);
+        emit_property_table(
+            writer,
+            update,
+            target,
+            property_enum.as_ref(),
+            context,
+            &generics,
+        );
     }
+}
+
+/// Emits the open generic formatter a generic companion names in its `[MessagePackFormatter]`.
+///
+/// <para>The attribute resolver closes the formatter type over the annotated type's own arguments,
+/// so the shim must take the same parameters the companion does and close
+/// `NxUpdateRecordMessagePackFormatter` over the companion itself. Naming
+/// `NxUpdateRecordMessagePackFormatter<>` directly would close it over `long` rather than over
+/// `Range_update<long>`.</para>
+fn emit_update_formatter_shim(
+    writer: &mut CodeWriter,
+    formatter_name: &str,
+    class_type: &str,
+    generics: &str,
+) {
+    // Annotated nullable, which is what the analyzer asks of a formatter over a reference type and
+    // what the inner formatter actually does: it writes a null value as nil and reads nil back as
+    // null, through a signature that does not say so.
+    writer.block(
+        &format!(
+            "public sealed class {formatter_name}{generics} : IMessagePackFormatter<{class_type}?>"
+        ),
+        |writer| {
+            writer.line(&format!(
+                "private static readonly NxUpdateRecordMessagePackFormatter<{class_type}> Inner = new();"
+            ));
+            writer.blank_line();
+            writer.line(&format!(
+                "public void Serialize(ref MessagePackWriter writer, {class_type}? value, MessagePackSerializerOptions options) =>"
+            ));
+            writer.indent();
+            writer.line("Inner.Serialize(ref writer, value!, options);");
+            writer.dedent();
+            writer.blank_line();
+            writer.line(&format!(
+                "public {class_type}? Deserialize(ref MessagePackReader reader, MessagePackSerializerOptions options) =>"
+            ));
+            writer.indent();
+            writer.line("Inner.Deserialize(ref reader, options);");
+            writer.dedent();
+        },
+    );
 }
 
 /// The non-generic members of `NxUpdateRecord`, and the one `NxUpdate<TRecord>` adds. A field
@@ -431,11 +639,11 @@ const NX_UPDATE_MEMBERS: &[&str] = &["Apply"];
 
 /// The plain generated type an update companion patches, and the key table emitted beside it.
 struct UpdatePlainTarget {
-    /// The C# reference to the plain type.
+    /// The C# reference to the plain type, instantiated where the target is generic.
     type_name: String,
-    /// The C# reference to the key table.
+    /// The C# reference to the key table, instantiated where the target is generic.
     properties_table: String,
-    /// The key table's own identifier, for its declaration.
+    /// The key table's own identifier, for its declaration, without its parameter list.
     properties_table_identifier: String,
 }
 
@@ -488,21 +696,38 @@ fn update_plain_target_candidate(
 fn update_plain_target(
     update: &ExportedUpdate,
     context: &CSharpRenderContext<'_>,
+    type_params: &[String],
 ) -> Option<UpdatePlainTarget> {
-    let candidate = update_plain_target_candidate(update, context.graph)?;
+    let candidate = update_plain_target_candidate(update, context.graph())?;
     if context
-        .graph
+        .graph()
         .declaration(&candidate.properties_table)
         .is_some()
     {
         return None;
     }
+    // A generic record is emitted as `Range<T>` and its companion patches that same generic, under
+    // the companion's own parameters: `Range_update<T>` extends `NxUpdate<Range<T>>` and its key
+    // table is `RangeProperties<T>`. Where the companion declares no parameters — a component's
+    // state, or a target whose key table's name is taken — `type_params` is empty and the target
+    // is the plain name, as it always was.
+    let arguments = if type_params.is_empty() {
+        String::new()
+    } else {
+        format!("<{}>", type_params.join(", "))
+    };
     Some(UpdatePlainTarget {
-        type_name: csharp_type_name(&candidate.type_name, context).text,
-        properties_table: generated_type_name(
-            &candidate.properties_table,
-            context.namespace,
-            context.qualify_generated_types,
+        type_name: format!(
+            "{}{arguments}",
+            csharp_type_name(&candidate.type_name, context).text
+        ),
+        properties_table: format!(
+            "{}{arguments}",
+            generated_type_name(
+                &candidate.properties_table,
+                context.namespace,
+                context.qualify_generated_types,
+            )
         ),
         properties_table_identifier: sanitize_csharp_identifier(&candidate.properties_table),
     })
@@ -515,7 +740,7 @@ fn update_property_enum(
     context: &CSharpRenderContext<'_>,
 ) -> Option<UpdatePropertyEnum> {
     let companion_name = format!("{}_property", update.target_name);
-    let ExportedType::Union(union_def) = &context.graph.declaration(&companion_name)?.item else {
+    let ExportedType::Union(union_def) = &context.graph().declaration(&companion_name)?.item else {
         return None;
     };
     if union_def.property_target.as_deref() != Some(update.target_name.as_str())
@@ -547,6 +772,7 @@ fn emit_property_table(
     target: &UpdatePlainTarget,
     property_enum: Option<&UpdatePropertyEnum>,
     context: &CSharpRenderContext<'_>,
+    generics: &str,
 ) {
     let table_name = &target.properties_table_identifier;
     let target_type = &target.type_name;
@@ -564,62 +790,65 @@ fn emit_property_table(
             .filter(|property_enum| property_enum.cases.iter().any(|case| case == field_name))
     };
 
-    writer.block(&format!("public static class {table_name}"), |writer| {
-        for (index, field) in update.fields.iter().enumerate() {
-            if index > 0 {
-                writer.blank_line();
+    writer.block(
+        &format!("public static class {table_name}{generics}"),
+        |writer| {
+            for (index, field) in update.fields.iter().enumerate() {
+                if index > 0 {
+                    writer.blank_line();
+                }
+                let member = sanitize_csharp_member_name(&field.name);
+                let field_type = csharp_type(&field.ty, context);
+                let wire_name = match enum_case(&field.name) {
+                    Some(property_enum) => format!(
+                        "{}.Format({}.{})",
+                        property_enum.wire_format, property_enum.type_name, member
+                    ),
+                    None => format!("\"{}\"", escape_csharp_string_literal(&field.name)),
+                };
+                writer.line(&format!(
+                    "public static readonly NxProperty<{target_type}, {}> {member} = new(",
+                    field_type.text
+                ));
+                writer.indent();
+                writer.line(&format!("{wire_name},"));
+                writer.line(&format!("record => record.{member},"));
+                writer.line(&format!("(record, value) => record.{member} = value);"));
+                writer.dedent();
             }
-            let member = sanitize_csharp_member_name(&field.name);
-            let field_type = csharp_type(&field.ty, context);
-            let wire_name = match enum_case(&field.name) {
-                Some(property_enum) => format!(
-                    "{}.Format({}.{})",
-                    property_enum.wire_format, property_enum.type_name, member
-                ),
-                None => format!("\"{}\"", escape_csharp_string_literal(&field.name)),
-            };
-            writer.line(&format!(
-                "public static readonly NxProperty<{target_type}, {}> {member} = new(",
-                field_type.text
-            ));
-            writer.indent();
-            writer.line(&format!("{wire_name},"));
-            writer.line(&format!("record => record.{member},"));
-            writer.line(&format!("(record, value) => record.{member} = value);"));
-            writer.dedent();
-        }
 
-        // A `switch` statement rather than a switch expression: the arms differ in nullability
-        // annotation (`NxProperty<User, string>` beside `NxProperty<User, string?>`), and the
-        // expression would infer one of them as its natural type and warn about the other.
-        if let Some(property_enum) = property_enum {
-            let enum_name = &property_enum.type_name;
-            writer.blank_line();
-            writer.block(
-                &format!(
-                    "public static NxProperty<{target_type}> {of_member}({enum_name} property)"
-                ),
-                |writer| {
-                    writer.block("switch (property)", |writer| {
-                        for field in &update.fields {
-                            if enum_case(&field.name).is_none() {
-                                continue;
+            // A `switch` statement rather than a switch expression: the arms differ in nullability
+            // annotation (`NxProperty<User, string>` beside `NxProperty<User, string?>`), and the
+            // expression would infer one of them as its natural type and warn about the other.
+            if let Some(property_enum) = property_enum {
+                let enum_name = &property_enum.type_name;
+                writer.blank_line();
+                writer.block(
+                    &format!(
+                        "public static NxProperty<{target_type}> {of_member}({enum_name} property)"
+                    ),
+                    |writer| {
+                        writer.block("switch (property)", |writer| {
+                            for field in &update.fields {
+                                if enum_case(&field.name).is_none() {
+                                    continue;
+                                }
+                                let member = sanitize_csharp_member_name(&field.name);
+                                writer.line(&format!("case {enum_name}.{member}:"));
+                                writer.indent();
+                                writer.line(&format!("return {member};"));
+                                writer.dedent();
                             }
-                            let member = sanitize_csharp_member_name(&field.name);
-                            writer.line(&format!("case {enum_name}.{member}:"));
+                            writer.line("default:");
                             writer.indent();
-                            writer.line(&format!("return {member};"));
+                            writer.line("throw new ArgumentOutOfRangeException(nameof(property));");
                             writer.dedent();
-                        }
-                        writer.line("default:");
-                        writer.indent();
-                        writer.line("throw new ArgumentOutOfRangeException(nameof(property));");
-                        writer.dedent();
-                    });
-                },
-            );
-        }
-    });
+                        });
+                    },
+                );
+            }
+        },
+    );
 }
 
 /// The operand `typeof` takes for a field type: a nullable reference type drops its `?`, which
@@ -669,19 +898,30 @@ fn emit_record(
     record: &ExportedRecord,
     context: &CSharpRenderContext<'_>,
 ) {
-    // A C# host receives a component value by its discriminator and cannot pick a generic
-    // instantiation from data, so a type parameter is erased to `object` and the record declares
-    // no generic parameter of its own.
+    // A C# host receives a *component* value by its discriminator and cannot pick a generic
+    // instantiation from data, so a component contract's type parameter is erased to `object` and
+    // the contract declares no generic parameter of its own. A declared generic record is the
+    // other way round: the host names the concrete instantiation at its own deserialization site,
+    // so it is emitted as a real generic.
     let erased;
-    let record = match erase_field_type_parameters(&record.fields, &record.type_params) {
-        Cow::Borrowed(_) => record,
-        Cow::Owned(fields) => {
-            erased = ExportedRecord {
-                fields,
-                ..record.clone()
-            };
-            &erased
+    let record = if record.is_component_contract {
+        match erase_field_type_parameters(&record.fields, &record.type_params) {
+            Cow::Borrowed(_) => record,
+            Cow::Owned(fields) => {
+                erased = ExportedRecord {
+                    fields,
+                    ..record.clone()
+                };
+                &erased
+            }
         }
+    } else {
+        record
+    };
+    let generics = if record.is_component_contract || record.type_params.is_empty() {
+        String::new()
+    } else {
+        format!("<{}>", record.type_params.join(", "))
     };
 
     emit_record_json_polymorphism_attributes(writer, record, context);
@@ -718,16 +958,18 @@ fn emit_record(
     };
     let header = if let Some(base) = &record.base {
         format!(
-            "{} {} : {}",
+            "{} {}{} : {}",
             class_modifier,
             sanitize_csharp_identifier(&record.name),
+            generics,
             csharp_type_name(base, context).text
         )
     } else {
         format!(
-            "{} {}",
+            "{} {}{}",
             class_modifier,
-            sanitize_csharp_identifier(&record.name)
+            sanitize_csharp_identifier(&record.name),
+            generics
         )
     };
 
@@ -867,7 +1109,7 @@ fn emit_record_json_polymorphism_attributes(
     }
 
     writer.line("[JsonPolymorphic(TypeDiscriminatorPropertyName = \"$type\")]");
-    for descendant in context.graph.polymorphic_descendants(&record.name) {
+    for descendant in context.graph().polymorphic_descendants(&record.name) {
         let (type_name, discriminator) = csharp_polymorphic_descendant_metadata(&descendant);
         writer.line(&format!(
             "[JsonDerivedType(typeof({}), \"{}\")]",
@@ -884,7 +1126,7 @@ fn should_emit_json_polymorphism_attributes(
     record.is_abstract
         && !graph_resolves_record_base(context, record)
         && !context
-            .graph
+            .graph()
             .polymorphic_descendants(&record.name)
             .is_empty()
 }
@@ -900,7 +1142,7 @@ fn polymorphic_message_pack_root_name(
         if should_emit_json_polymorphism_attributes(current, context) {
             return Some(current.name.clone());
         }
-        current = context.graph.resolved_record_base(current)?;
+        current = context.graph().resolved_record_base(current)?;
     }
 }
 
@@ -911,9 +1153,336 @@ fn should_emit_missing_polymorphism_hint(
     record.is_abstract
         && !graph_resolves_record_base(context, record)
         && context
-            .graph
+            .graph()
             .polymorphic_descendants(&record.name)
             .is_empty()
+}
+
+/// Every field a declaration puts on the wire, paired with the declaration's name.
+///
+/// <para>An update companion's fields are left out: they carry no `[Key]`, so MessagePack resolves
+/// them by their runtime type through the host's resolver rather than statically.</para>
+fn declaration_fields(item: &ExportedType) -> Vec<(&str, &ExportedRecordField)> {
+    match item {
+        ExportedType::Record(record) => record
+            .fields
+            .iter()
+            .map(|field| (record.name.as_str(), field))
+            .collect(),
+        ExportedType::ExternalState(state) => state
+            .fields
+            .iter()
+            .map(|field| (state.name.as_str(), field))
+            .collect(),
+        ExportedType::Union(union_def) => union_def
+            .cases
+            .iter()
+            .flat_map(|case| {
+                case.fields
+                    .iter()
+                    .map(|field| (union_def.name.as_str(), field))
+            })
+            .collect(),
+        ExportedType::Update(_) | ExportedType::Alias(_) => Vec::new(),
+    }
+}
+
+/// One closed formatter a module declares: the instantiation it formats and the class name.
+struct ClosedUpdateFormatter {
+    /// The rendered C# type, such as `global::NxLang.Nx.NxRange_update<long>`.
+    rendered_type: String,
+    /// The generated class, such as `NxRange_updateOfLongFormatter`.
+    class_name: String,
+}
+
+/// The closed formatters `module` needs: one per instantiation of a generic update companion that a
+/// member is typed by, in a stable order.
+///
+/// <para>A generic companion carries `[MessagePackFormatter(typeof(Foo_updateFormatter&lt;&gt;))]`,
+/// which is the form MessagePack documents and which its reflecting resolver closes at run time.
+/// MessagePack's source generator cannot: asked for a formatter of `Foo_update&lt;long&gt;` it
+/// rejects the unbound generic, so a member typed by one would not compile. A closed formatter
+/// beside the member, named by the member's own attribute, is what the generator can resolve.</para>
+///
+/// <para>This reaches only a companion another assembly declares — the prelude's, or a
+/// dependency's. A companion this file declares already carries its open generic shim, and a
+/// second formatter of the same type in one compilation is `MsgPack009`; there is no form that
+/// satisfies both, so such a field is reported by `collect_warnings` instead.</para>
+fn collect_closed_update_formatters(
+    module: &ExportedModule,
+    context: &CSharpRenderContext<'_>,
+) -> Vec<ClosedUpdateFormatter> {
+    let mut formatters: Vec<ClosedUpdateFormatter> = Vec::new();
+    let mut add = |ty: &TypeRef| {
+        let Some(formatter) = closed_update_formatter_for(ty, context) else {
+            return;
+        };
+        if !formatters
+            .iter()
+            .any(|existing| existing.class_name == formatter.class_name)
+        {
+            formatters.push(formatter);
+        }
+    };
+
+    for declaration in &module.declarations {
+        match &declaration.item {
+            ExportedType::Record(record) => {
+                for field in &record.fields {
+                    add(&field.ty);
+                }
+            }
+            ExportedType::ExternalState(state) => {
+                for field in &state.fields {
+                    add(&field.ty);
+                }
+            }
+            ExportedType::Union(union_def) => {
+                for case in &union_def.cases {
+                    for field in &case.fields {
+                        add(&field.ty);
+                    }
+                }
+            }
+            // An update companion's own fields are `NxOptional<…>` properties with no `[Key]`, so
+            // MessagePack never resolves a formatter for them statically: the update formatter
+            // serializes each set field by its runtime type through the host's resolver.
+            ExportedType::Update(_) | ExportedType::Alias(_) => {}
+        }
+    }
+
+    formatters.sort_by(|left, right| left.class_name.cmp(&right.class_name));
+    formatters
+}
+
+/// Every closed update formatter a library's modules name, with the dependency namespaces the
+/// modules that name them bring into scope.
+///
+/// <para>Deduplicated by class name across the whole generation: two modules that type a member by
+/// the same instantiation name one formatter, and the shared file declares it once.</para>
+struct LibraryClosedFormatters {
+    formatters: Vec<ClosedUpdateFormatter>,
+    dependency_namespaces: BTreeSet<String>,
+}
+
+fn collect_library_closed_update_formatters(
+    graph: &ExportedTypeGraph,
+    namespace: &str,
+) -> LibraryClosedFormatters {
+    let mut collected = LibraryClosedFormatters {
+        formatters: Vec::new(),
+        dependency_namespaces: BTreeSet::new(),
+    };
+
+    for module in &graph.modules {
+        let imported_type_lookup = module
+            .imported_types
+            .iter()
+            .cloned()
+            .map(|imported_type| (imported_type.visible_name.clone(), imported_type))
+            .collect::<FxHashMap<_, _>>();
+        let context = CSharpRenderContext {
+            namespace,
+            types: ModuleTypes::for_module(graph, module),
+            imported_types_by_visible_name: &imported_type_lookup,
+            qualify_generated_types: false,
+        };
+
+        let formatters = collect_closed_update_formatters(module, &context);
+        if formatters.is_empty() {
+            continue;
+        }
+
+        // A formatter over a dependency's companion renders that type unqualified, so the shared
+        // file needs the usings the module rendering it would have carried.
+        collected
+            .dependency_namespaces
+            .extend(collect_dependency_namespaces(
+                &module.imported_types,
+                namespace,
+            ));
+
+        for formatter in formatters {
+            if !collected
+                .formatters
+                .iter()
+                .any(|existing| existing.class_name == formatter.class_name)
+            {
+                collected.formatters.push(formatter);
+            }
+        }
+    }
+
+    collected
+        .formatters
+        .sort_by(|left, right| left.class_name.cmp(&right.class_name));
+    collected
+}
+
+/// The path of the shared formatter file: a name no module of the library takes.
+fn closed_formatter_file_path(graph: &ExportedTypeGraph) -> PathBuf {
+    for suffix in 0usize.. {
+        let stem = if suffix == 0 {
+            CLOSED_FORMATTER_FILE_BASENAME.to_string()
+        } else {
+            format!("{CLOSED_FORMATTER_FILE_BASENAME}{suffix}")
+        };
+        let candidate = PathBuf::from(stem);
+        if graph
+            .modules
+            .iter()
+            .all(|module| module.module_path != candidate)
+        {
+            return module_output_path(&candidate);
+        }
+    }
+
+    unreachable!("formatter file name search should always terminate")
+}
+
+/// Renders the library's shared formatter file: every closed formatter, once, in the one namespace.
+fn render_closed_formatter_file(
+    shared: &LibraryClosedFormatters,
+    namespace: &str,
+    opts: &GenerateTypesOptions,
+) -> String {
+    let mut writer = CodeWriter::new(opts.format.clone());
+    write_header(&mut writer);
+
+    writer.line("using MessagePack;");
+    writer.line("using MessagePack.Formatters;");
+    writer.line("using NxLang.Nx.Serialization;");
+    for dependency_namespace in &shared.dependency_namespaces {
+        writer.line(&format!(
+            "using {};",
+            sanitize_csharp_qualified_name(dependency_namespace)
+        ));
+    }
+    writer.blank_line();
+
+    writer.block(
+        &format!("namespace {}", sanitize_csharp_qualified_name(namespace)),
+        |writer| {
+            for (index, formatter) in shared.formatters.iter().enumerate() {
+                emit_closed_update_formatter(writer, formatter);
+                if index + 1 != shared.formatters.len() {
+                    writer.blank_line();
+                }
+            }
+        },
+    );
+
+    writer.finish()
+}
+
+/// The closed formatter a member typed `ty` names, or `None` when `ty` is not one instantiation of
+/// a generic update companion.
+///
+/// <para>A nullable one is the same CLR type, so it answers the same formatter. Any other position
+/// — a list of patches, say — is left alone and reported by `collect_warnings`, because the
+/// attribute a member carries cannot reach inside its own type.</para>
+fn closed_update_formatter_for(
+    ty: &TypeRef,
+    context: &CSharpRenderContext<'_>,
+) -> Option<ClosedUpdateFormatter> {
+    let inner = match ty {
+        TypeRef::Nullable(inner) => inner.as_ref(),
+        other => other,
+    };
+    let TypeRef::Applied { name, .. } = inner else {
+        return None;
+    };
+    if !generic_update_companion(name.as_str(), context)
+        || context.graph().declaration(name.as_str()).is_some()
+    {
+        return None;
+    }
+    let rendered = csharp_type(inner, context);
+    Some(ClosedUpdateFormatter {
+        class_name: closed_update_formatter_name(&rendered.text),
+        rendered_type: rendered.text,
+    })
+}
+
+/// Whether `type_name` is a generic update companion, wherever it is declared.
+fn generic_update_companion(type_name: &str, context: &CSharpRenderContext<'_>) -> bool {
+    let declaration = context
+        .graph()
+        .declaration(type_name)
+        .or_else(|| context.types.prelude_declaration(type_name));
+    match declaration.map(|declaration| &declaration.item) {
+        Some(ExportedType::Update(update)) => {
+            !update_companion_type_params(update, context.types).is_empty()
+        }
+        _ => false,
+    }
+}
+
+/// The class name of the closed formatter of `rendered`: the companion, `Of`, and the arguments.
+///
+/// <para>Built from the whole rendered type, so two instantiations of one companion cannot collide
+/// and neither can the prelude's `NxRange_update` with a library's own `Range_update`. Everything
+/// that is not a letter or a digit becomes a word boundary, so a qualified argument such as
+/// `global::Other.Thing` still reduces to one identifier.</para>
+fn closed_update_formatter_name(rendered: &str) -> String {
+    let (head, arguments) = rendered.split_once('<').unwrap_or((rendered, ""));
+    let companion = head.rsplit(['.', ':']).next().unwrap_or(head);
+    format!(
+        "{}Of{}Formatter",
+        companion,
+        pascal_case_identifier(arguments)
+    )
+}
+
+/// `text` reduced to one PascalCase identifier, with every run of other characters a word boundary.
+fn pascal_case_identifier(text: &str) -> String {
+    let mut identifier = String::new();
+    let mut at_boundary = true;
+    for character in text.chars() {
+        if character.is_ascii_alphanumeric() {
+            if at_boundary {
+                identifier.extend(character.to_uppercase());
+            } else {
+                identifier.push(character);
+            }
+            at_boundary = false;
+        } else {
+            at_boundary = true;
+        }
+    }
+    identifier
+}
+
+/// Emits one closed formatter, which delegates to the SDK's update-record formatter.
+fn emit_closed_update_formatter(writer: &mut CodeWriter, formatter: &ClosedUpdateFormatter) {
+    let ClosedUpdateFormatter {
+        rendered_type,
+        class_name,
+    } = formatter;
+    writer.block(
+        &format!(
+            "public sealed class {class_name} : IMessagePackFormatter<{rendered_type}?>"
+        ),
+        |writer| {
+            writer.line(&format!(
+                "private static readonly NxUpdateRecordMessagePackFormatter<{rendered_type}> Inner = new();"
+            ));
+            writer.blank_line();
+            writer.line(&format!(
+                "public void Serialize(ref MessagePackWriter writer, {rendered_type}? value, MessagePackSerializerOptions options) =>"
+            ));
+            writer.indent();
+            writer.line("Inner.Serialize(ref writer, value!, options);");
+            writer.dedent();
+            writer.blank_line();
+            writer.line(&format!(
+                "public {rendered_type}? Deserialize(ref MessagePackReader reader, MessagePackSerializerOptions options) =>"
+            ));
+            writer.indent();
+            writer.line("Inner.Deserialize(ref reader, options);");
+            writer.dedent();
+        },
+    );
 }
 
 fn emit_dual_wire_name_attributes(writer: &mut CodeWriter, name: &str) {
@@ -954,6 +1523,7 @@ fn emit_record_fields(
             &field.name,
             &property_declaration,
             needs_leading_blank_line,
+            closed_update_formatter_for(&field.ty, context).as_ref(),
         );
         needs_leading_blank_line = true;
     }
@@ -1037,12 +1607,21 @@ fn emit_dual_annotated_auto_property(
     wire_name: &str,
     declaration: &str,
     has_emitted_property: bool,
+    closed_update_formatter: Option<&ClosedUpdateFormatter>,
 ) {
     if has_emitted_property {
         writer.blank_line();
     }
 
     emit_dual_wire_name_attributes(writer, wire_name);
+    // A member typed by one instantiation of a generic companion names its formatter here, because
+    // the open generic on the companion itself is one MessagePack's source generator cannot close.
+    if let Some(formatter) = closed_update_formatter {
+        writer.line(&format!(
+            "[MessagePackFormatter(typeof({}))]",
+            formatter.class_name
+        ));
+    }
     writer.line(declaration);
 }
 
@@ -1101,13 +1680,21 @@ struct CSharpType {
 
 struct CSharpRenderContext<'a> {
     namespace: &'a str,
-    graph: &'a ExportedTypeGraph,
+    /// The graph as the module being rendered resolves names against it, so an import written in
+    /// one module does not hide the prelude's `Range` from its siblings.
+    types: ModuleTypes<'a>,
     imported_types_by_visible_name: &'a FxHashMap<String, ImportedType>,
     qualify_generated_types: bool,
 }
 
+impl<'a> CSharpRenderContext<'a> {
+    fn graph(&self) -> &'a ExportedTypeGraph {
+        self.types.graph()
+    }
+}
+
 fn graph_resolves_record_base(context: &CSharpRenderContext<'_>, record: &ExportedRecord) -> bool {
-    context.graph.resolved_record_base(record).is_some()
+    context.graph().resolved_record_base(record).is_some()
 }
 
 fn csharp_type(ty: &TypeRef, context: &CSharpRenderContext<'_>) -> CSharpType {
@@ -1144,6 +1731,38 @@ fn csharp_type_inner(
             is_reference: true,
             is_nullable: false,
         },
+        // An applied type is the instantiation of its record, with arguments in the record's
+        // declaration order whatever order the source wrote them in. A generic record is
+        // concrete and outside every polymorphic hierarchy, so no union attribute applies to it.
+        TypeRef::Applied { name, args } => {
+            let base = csharp_type_name_inner(name.as_str(), context, seen_aliases);
+            let rendered = match context.types.record_type_params(name.as_str()) {
+                Some(order) => order
+                    .iter()
+                    .filter_map(|param| {
+                        args.iter()
+                            .find(|(arg, _)| arg.as_str() == param)
+                            .map(|(_, ty)| csharp_type_inner(ty, context, seen_aliases).text)
+                    })
+                    .collect::<Vec<_>>(),
+                // The declaration could not be reached, so there is no order to sort into and the
+                // source order is the only one there is. It is still rendered: the bare name would
+                // be an open generic, which is CS0305, and a checked program wrote the arguments
+                // against a declaration that does exist.
+                None => args
+                    .iter()
+                    .map(|(_, ty)| csharp_type_inner(ty, context, seen_aliases).text)
+                    .collect(),
+            };
+            if rendered.is_empty() {
+                return base;
+            }
+            CSharpType {
+                text: format!("{}<{}>", base.text, rendered.join(", ")),
+                is_reference: true,
+                is_nullable: false,
+            }
+        }
         TypeRef::Name(name) => csharp_type_name_inner(name.as_str(), context, seen_aliases),
     }
 }
@@ -1204,7 +1823,20 @@ fn csharp_type_name_inner(
             is_nullable: false,
         },
         other => {
-            if let Some(declaration) = context.graph.declaration(other) {
+            // A prelude type is a hand-written SDK type, as a function value is `NxFunctionRef`:
+            // generated C# opens with `using System;`, so `Range` would be `System.Range`, and two
+            // generated libraries in one namespace would each declare their own copy. Its derived
+            // companions are SDK types for the same reason, under the same `Nx` prefix, so
+            // `Range_update` is `NxRange_update`. The module's own declarations answer first, so a
+            // module that declares its own `Range` generates it and its companions.
+            if context.types.prelude_declaration(other).is_some() {
+                return CSharpType {
+                    text: format!("global::NxLang.Nx.Nx{other}"),
+                    is_reference: true,
+                    is_nullable: false,
+                };
+            }
+            if let Some(declaration) = context.graph().declaration(other) {
                 match &declaration.item {
                     ExportedType::Alias(alias) => {
                         if !seen_aliases.insert(other.to_string()) {
@@ -1280,7 +1912,12 @@ fn csharp_imported_type(
         ImportedTypeKind::Alias {
             target,
             target_is_reference,
-        } => csharp_imported_alias_target_type(target, &dependency_namespace, *target_is_reference),
+        } => csharp_imported_alias_target_type(
+            target,
+            &dependency_namespace,
+            *target_is_reference,
+            context,
+        ),
         _ => CSharpType {
             text: generated_type_name(&imported_type.exported_name, &dependency_namespace, true),
             is_reference: imported_type.kind.is_reference(),
@@ -1293,18 +1930,27 @@ fn csharp_imported_alias_target_type(
     ty: &TypeRef,
     dependency_namespace: &str,
     target_is_reference: bool,
+    context: &CSharpRenderContext<'_>,
 ) -> CSharpType {
     match ty {
         TypeRef::Nullable(inner) => {
-            let mut inner =
-                csharp_imported_alias_target_type(inner, dependency_namespace, target_is_reference);
+            let mut inner = csharp_imported_alias_target_type(
+                inner,
+                dependency_namespace,
+                target_is_reference,
+                context,
+            );
             inner.text = format!("{}?", inner.text);
             inner.is_nullable = true;
             inner
         }
         TypeRef::Array(inner) => {
-            let inner =
-                csharp_imported_alias_target_type(inner, dependency_namespace, target_is_reference);
+            let inner = csharp_imported_alias_target_type(
+                inner,
+                dependency_namespace,
+                target_is_reference,
+                context,
+            );
             CSharpType {
                 text: format!("{}[]", inner.text),
                 is_reference: true,
@@ -1316,10 +1962,49 @@ fn csharp_imported_alias_target_type(
             is_reference: true,
             is_nullable: false,
         },
+        // An imported alias whose target is an applied type is that instantiation: the alias
+        // itself is not generated, so dropping the arguments here would leave an open generic at
+        // every use of the alias. The arguments are names the dependency wrote, so they render in
+        // the dependency's namespace like the tag does.
+        TypeRef::Applied { name, args } => {
+            let base = csharp_imported_alias_target_name(
+                name.as_str(),
+                dependency_namespace,
+                target_is_reference,
+                context,
+            );
+            let render = |ty: &TypeRef| {
+                csharp_imported_alias_target_type(ty, dependency_namespace, true, context).text
+            };
+            let rendered = match context.types.record_type_params(name.as_str()) {
+                Some(order) => order
+                    .iter()
+                    .filter_map(|param| {
+                        args.iter()
+                            .find(|(arg, _)| arg.as_str() == param)
+                            .map(|(_, ty)| render(ty))
+                    })
+                    .collect::<Vec<_>>(),
+                // The dependency's own declaration of the tag is not reachable from here — the
+                // importing module named the alias, not the record. The source order is then the
+                // only ordering there is, and is still better than an open generic.
+                None => args.iter().map(|(_, ty)| render(ty)).collect(),
+            };
+            if rendered.is_empty() {
+                base
+            } else {
+                CSharpType {
+                    text: format!("{}<{}>", base.text, rendered.join(", ")),
+                    is_reference: true,
+                    is_nullable: false,
+                }
+            }
+        }
         TypeRef::Name(name) => csharp_imported_alias_target_name(
             name.as_str(),
             dependency_namespace,
             target_is_reference,
+            context,
         ),
     }
 }
@@ -1328,6 +2013,7 @@ fn csharp_imported_alias_target_name(
     name: &str,
     dependency_namespace: &str,
     target_is_reference: bool,
+    context: &CSharpRenderContext<'_>,
 ) -> CSharpType {
     match name {
         "string" => CSharpType {
@@ -1374,11 +2060,24 @@ fn csharp_imported_alias_target_name(
             is_reference: true,
             is_nullable: false,
         },
-        other => CSharpType {
-            text: generated_type_name(other, dependency_namespace, true),
-            is_reference: target_is_reference,
-            is_nullable: false,
-        },
+        other => {
+            // A prelude name the dependency did not declare itself is the prelude's here too, and
+            // resolves to the SDK type: the dependency generates no `Range` of its own, so naming
+            // one in its namespace would reference a type that does not exist. A `Range` the
+            // dependency does declare is imported under that name, which `prelude_record` sees.
+            if context.types.prelude_declaration(other).is_some() {
+                return CSharpType {
+                    text: format!("global::NxLang.Nx.Nx{other}"),
+                    is_reference: true,
+                    is_nullable: false,
+                };
+            }
+            CSharpType {
+                text: generated_type_name(other, dependency_namespace, true),
+                is_reference: target_is_reference,
+                is_nullable: false,
+            }
+        }
     }
 }
 
@@ -1449,7 +2148,7 @@ fn imported_alias_target_uses_dependency_namespace(ty: &TypeRef) -> bool {
             imported_alias_target_uses_dependency_namespace(inner)
         }
         TypeRef::Function { .. } => false,
-        TypeRef::Name(name) => !matches!(
+        TypeRef::Applied { name, .. } | TypeRef::Name(name) => !matches!(
             name.as_str(),
             "string"
                 | "int"

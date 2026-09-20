@@ -51,10 +51,17 @@ applies, so a control the newer catalog dropped is reported by name rather than 
 through drawing. Linking never copies a prepared module, so one prepared catalog serves any number
 of programs.
 
-An artifact whose module table names only itself is a program on its own: `prepareNxIrProgram`
-prepares and links it in one call, and a prepared module of that shape can be passed to the
-evaluation APIs directly. A prepared module that names other modules must be linked first, and the
-evaluation APIs say so.
+One module never needs a resolver: the NX prelude, `@nx/prelude.nx`, which holds the declarations
+every NX module sees without an import — `Range` today. This package ships the compiled prelude of
+the compiler release it was built with, and linking serves it for that identity whenever the host's
+resolver returns nothing for it, at any depth of the link. A host that wants its own prelude returns
+a prepared module for that identity and linking uses that instead. The built-in prelude is prepared
+at most once and reused across programs, so nothing is decoded for a program that never reaches it.
+
+An artifact whose module table names only itself — or names only itself and the prelude — is a
+program on its own: `prepareNxIrProgram` prepares and links it in one call, and a prepared module of
+that shape can be passed to the evaluation APIs directly. A prepared module that names other modules
+must be linked first, and the evaluation APIs say so.
 
 `prepareNxIrModule` validates the whole image before it answers: the magic and schema version, the
 recorded length against the bytes given, every section, offset array and string range, the string
@@ -132,6 +139,25 @@ const kept = initializeComponent(program, "SearchBox", { placeholder: "Find" }, 
 The state is validated as a complete state for the component, as `evaluateComponent` validates
 its state argument, and the new instance's tokens start at generation 1 again.
 
+## Limits
+
+Every evaluation API takes runtime options:
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `maxCallDepth` | The runtime's own | The deepest chain of calls one evaluation may make. |
+| `maxRangeLength` | `1_000_000` | The most integers one range may hold when a `for` iterates it. |
+
+A range makes an enormous loop one token long — `for i in 0..2000000` is four tokens — so the count
+is checked before the body runs at all, and a range above the limit fails with
+`nx-ir-resource-limit` naming the limit. The default matches the NX interpreter's operation budget, so
+a program that runs under `nxlang` runs here. A host with a legitimately larger loop raises the
+limit:
+
+```ts
+evaluateFunction(program, "rows", [], { maxRangeLength: 5_000_000 });
+```
+
 ## Diagnostics
 
 A runtime diagnostic names the declaration the failing expression belongs to, as
@@ -154,7 +180,8 @@ runtime never reads a source file.
 | `applyUpdate`, `mergeUpdates`, `diffRecords`, `changedFields` | Record update arithmetic over host-held values. |
 | `float32Text` | The canonical text of a `float32` carried as a `number`: the shortest digits that round-trip as a `float32`, which is what a `text` node naming `float32` prints. |
 | `NX_IR_SCHEMA_VERSION`, `NX_IR_RUNTIME_ABI` | The schema and ABI this runtime accepts. |
-| `NX_IR_REQUIRED_FEATURE_*` | The required features this runtime knows. |
+| `NX_IR_REQUIRED_FEATURE_*` | The required features this runtime knows, including `ranges-v1` for iteration over a range. An image listing a feature this runtime does not know is refused by name. |
+| `NX_PRELUDE_MODULE_IDENTITY`, `NX_DEFAULT_MAX_RANGE_LENGTH` | The prelude's reserved identity, and the default range-length limit. |
 | `nodeKinds`, `typeKinds`, `constantKinds`, `declarationKinds` | The kind numbers of the schema. |
 | `NxIrRuntimeError` | Thrown for an artifact the runtime cannot run, with its diagnostics. |
 

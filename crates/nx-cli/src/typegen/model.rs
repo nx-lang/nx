@@ -13,7 +13,7 @@ use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExportedAlias {
@@ -57,10 +57,22 @@ pub struct ExportedRecord {
     pub is_abstract: bool,
     pub base: Option<String>,
     pub fields: Vec<ExportedRecordField>,
-    /// The type parameters of the external component this record is the contract of, inherited
-    /// first. Field types are kept as written and may name them; the C# emitter erases each to
-    /// `object`, the TypeScript emitter declares each as a generic parameter. Empty for a record.
+    /// The type parameters this exported record declares, in declaration order.
+    ///
+    /// <para>For an external component's props contract these are the component's effective type
+    /// parameters, inherited first: field types keep them as written, the C# emitter erases each
+    /// to `object` and the TypeScript emitter declares each as a generic parameter defaulting to
+    /// `unknown`. For a plain generic record they are the record's own, and both emitters declare
+    /// a real generic — a host names the concrete instantiation at its own deserialization
+    /// site.</para>
     pub type_params: Vec<String>,
+    /// Whether this record is an external component's props contract rather than a declared
+    /// record.
+    ///
+    /// <para>The two are the same shape and differ only in what their type parameters mean: a
+    /// contract's are erased in C#, because the host receives the component dynamically and has
+    /// nothing to bind them to, while a generic record's are a real generic the host names.</para>
+    pub is_component_contract: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -134,10 +146,43 @@ pub struct ExportedUpdate {
     pub name: String,
     pub discriminator: String,
     pub fields: Vec<ExportedRecordField>,
-    /// The effective type parameters of the component the companion patches, inherited first;
-    /// empty for a record or action target. A state-derived field may name one, and both emitters
-    /// erase it: the instantiation was fixed at an NX use site the host never sees.
+    /// The effective type parameters of the declaration the companion patches — a component's,
+    /// inherited first, or a generic record's own; empty for anything else. A field may name one,
+    /// and both emitters erase it: a patch carries no type argument on the wire, and a component's
+    /// instantiation was fixed at an NX use site the host never sees.
     pub type_params: Vec<String>,
+}
+
+/// The type parameters an update companion declares: a plain generic record's own, and none for
+/// anything else.
+///
+/// <para>A generic record is emitted as a real generic in both languages, and its companion follows
+/// it — the host names `Range_update<long>` where it names `Range<long>`, and the patch's fields
+/// are typed by the same argument the record's fields are. Erasing here would not merely lose
+/// precision: a C# patch whose `start` is `object` cannot be applied to a `Range<long>`, because
+/// the schema deserializes the field as `object` and the record's field is `T`.</para>
+///
+/// <para>A component's state companion still erases. There the analogy that produced the erasure
+/// rule does hold: the patched type (`Ticker_state`) is concrete, its parameter-typed fields are
+/// `object` on both sides of the patch, and the instantiation was fixed at an NX use site the host
+/// never sees.</para>
+pub fn update_companion_type_params<'a>(
+    update: &'a ExportedUpdate,
+    types: ModuleTypes<'_>,
+) -> &'a [String] {
+    if update.target_is_component || update.type_params.is_empty() {
+        return &[];
+    }
+    // The prelude's `Range` is not in the generating library's graph, but its companion is generic
+    // for the same reason a user record's is, so its target is resolved the way any other name is.
+    let target = types
+        .graph()
+        .record(&update.target_name)
+        .or_else(|| types.prelude_record(&update.target_name));
+    match target {
+        Some(record) if !record.is_component_contract && !record.is_abstract => &update.type_params,
+        _ => &[],
+    }
 }
 
 /// `fields` with every reference to one of `type_params` replaced by `object`, which each emitter
@@ -174,7 +219,11 @@ pub enum ImportedTypeKind {
         /// Whether every case of this union is constant, which decides its host mapping.
         is_constant: bool,
     },
-    Record,
+    Record {
+        /// Type parameters, in declaration order, so an applied type over this record renders as
+        /// the same instantiation a same-library record does. Empty for a non-generic record.
+        type_params: Vec<String>,
+    },
     Component,
 }
 
@@ -186,7 +235,7 @@ impl ImportedTypeKind {
                 ..
             } => *target_is_reference,
             Self::Union { is_constant } => !is_constant,
-            Self::Record | Self::Component => true,
+            Self::Record { .. } | Self::Component => true,
         }
     }
 }
@@ -307,6 +356,9 @@ struct CachedImportedLibrary {
     /// Exported names whose union declares no base and no case fields.
     constant_unions: FxHashSet<String>,
     alias_targets: FxHashMap<String, TypeRef>,
+    /// The type parameters each exported record declares, in declaration order, keyed by exported
+    /// name. Only a generic record has an entry.
+    record_type_params: FxHashMap<String, Vec<String>>,
     wildcard_importable_export_names: Vec<String>,
     /// The namespace each of the library's modules resolves type names in, keyed by module
     /// identity.
@@ -470,6 +522,35 @@ impl ExportedTypeGraph {
         let mut build = Self::build_from_exported_modules(modules)?;
         build.warnings.extend(warnings);
         Ok(build)
+    }
+
+    /// The prelude's exported declarations, built once per process.
+    ///
+    /// <para>The prelude is a library like any other, so its declarations are collected by the same
+    /// code as a dependency's — its record, and the update record and property union derived from
+    /// it. They answer a type name only after the module's own declarations, which is what lets a
+    /// module that declares its own `Range` generate its own.</para>
+    fn prelude_declarations() -> &'static [ExportedTypeDecl] {
+        static PRELUDE: OnceLock<Vec<ExportedTypeDecl>> = OnceLock::new();
+        PRELUDE.get_or_init(|| {
+            // Collected straight from the prelude's analyzed modules: its root is its reserved
+            // identity rather than a directory, so there is no relative module path to derive and
+            // nothing here needs one.
+            nx_api::prelude_library()
+                .modules
+                .iter()
+                .flat_map(collect_exported_declarations)
+                .collect()
+        })
+    }
+
+    /// Whether the generating library declares `type_name` itself, in any of its modules.
+    ///
+    /// <para>A library's declarations are visible in every one of its modules without an import, so
+    /// one module's `Range` hides the prelude's library-wide. That is why this is graph-wide where
+    /// [`ModuleTypes`]'s import check is not.</para>
+    fn declares_over_the_prelude(&self, type_name: &str) -> bool {
+        self.declaration(type_name).is_some()
     }
 
     pub fn owner_module(&self, type_name: &str) -> Option<&Path> {
@@ -683,32 +764,68 @@ impl ExportedTypeGraph {
                 _ => None,
             })
             .collect::<FxHashMap<_, _>>();
-        let imported = self
+        // The prelude's own companions, by the dotted name a field writes. `Range.Update` is a
+        // patch of a record the generating library does not declare, so it has no companion in the
+        // graph; the emitters render these to the one copy their language keeps of a prelude type.
+        let prelude_companions = Self::prelude_declarations()
+            .iter()
+            .filter_map(|declaration| {
+                let target = companion_target_name(&declaration.item)?;
+                let derived = match &declaration.item {
+                    ExportedType::Update(_) => nx_hir::update_record_name(target),
+                    _ => nx_hir::property_union_name(target),
+                };
+                Some((
+                    derived.as_str().to_string(),
+                    (declaration.name().to_string(), target.to_string()),
+                ))
+            })
+            .collect::<FxHashMap<_, _>>();
+        let declared_names = self
             .modules
             .iter()
-            .flat_map(|module| module.imported_types.iter())
-            .map(|imported_type| imported_type.visible_name.clone())
+            .flat_map(|module| module.declarations.iter())
+            .map(|declaration| declaration.name().to_string())
             .collect::<FxHashSet<_>>();
 
         let mut unresolved = BTreeSet::new();
-        let mut rename = |ty: &mut TypeRef| {
-            rewrite_type_ref_names(ty, &mut |name| {
-                if !nx_hir::is_update_record_name(name) && !nx_hir::is_property_union_name(name) {
-                    return None;
-                }
-                match companions.get(name) {
-                    Some(companion) => Some(companion.clone()),
-                    None if imported.contains(name) => None,
-                    None => {
-                        unresolved.insert(name.to_string());
-                        None
-                    }
-                }
-            });
-        };
-
         for module in &mut self.modules {
-            for declaration in &mut module.declarations {
+            // An `import` binds in the module that wrote it and nowhere else, so what a derived
+            // name reaches is decided per module.
+            let ExportedModule {
+                imported_types,
+                declarations,
+                ..
+            } = module;
+            let imported = imported_types
+                .iter()
+                .map(|imported_type| imported_type.visible_name.as_str())
+                .collect::<FxHashSet<_>>();
+            let mut rename = |ty: &mut TypeRef| {
+                rewrite_type_ref_names(ty, &mut |name| {
+                    if !nx_hir::is_update_record_name(name) && !nx_hir::is_property_union_name(name)
+                    {
+                        return None;
+                    }
+                    if let Some(companion) = companions.get(name) {
+                        return Some(companion.clone());
+                    }
+                    if imported.contains(name) {
+                        return None;
+                    }
+                    // The prelude answers last, and only while nothing hides its target — the
+                    // same order `ModuleTypes` resolves a plain prelude name in.
+                    if let Some((companion, target)) = prelude_companions.get(name) {
+                        if !declared_names.contains(target) && !imported.contains(target.as_str()) {
+                            return Some(companion.clone());
+                        }
+                    }
+                    unresolved.insert(name.to_string());
+                    None
+                });
+            };
+
+            for declaration in declarations {
                 match &mut declaration.item {
                     ExportedType::Alias(alias) => rename(&mut alias.target),
                     ExportedType::Union(union_def) => {
@@ -830,6 +947,124 @@ impl ExportedTypeGraph {
                 ExportedType::Union(union_def) => Some(union_def),
                 _ => None,
             })
+    }
+}
+
+/// The export graph as one module resolves type names against it.
+///
+/// <para>A library's declarations are visible in every one of its modules without an import, so a
+/// declaration of `Range` hides the prelude's in the whole library. An `import` is written in one
+/// module and binds only there, so a module that imports a dependency's `Range` leaves its siblings
+/// with the prelude's. The graph holds the library, which is why a lookup that has to tell those
+/// apart takes the module too; this is what pairs them, and both emitters build one per module they
+/// render.</para>
+#[derive(Clone, Copy)]
+pub struct ModuleTypes<'a> {
+    graph: &'a ExportedTypeGraph,
+    /// The imports written in the module being rendered.
+    imports: &'a [ImportedType],
+}
+
+impl<'a> ModuleTypes<'a> {
+    /// The view `module` resolves names in.
+    pub fn for_module(graph: &'a ExportedTypeGraph, module: &'a ExportedModule) -> Self {
+        Self {
+            graph,
+            imports: &module.imported_types,
+        }
+    }
+
+    /// The view for a generated file that is no module's, such as TypeScript's prelude helper.
+    ///
+    /// <para>Such a file holds declarations copied from elsewhere, so there is no module whose
+    /// imports could hide a name in it.</para>
+    pub fn without_imports(graph: &'a ExportedTypeGraph) -> Self {
+        Self {
+            graph,
+            imports: &[],
+        }
+    }
+
+    pub fn graph(&self) -> &'a ExportedTypeGraph {
+        self.graph
+    }
+
+    /// The import that binds `visible_name` in this module, if any.
+    fn import(&self, visible_name: &str) -> Option<&'a ImportedType> {
+        self.imports
+            .iter()
+            .find(|imported| imported.visible_name == visible_name)
+    }
+
+    /// Whether something this module sees before the prelude holds `type_name`.
+    fn hides_prelude_name(&self, type_name: &str) -> bool {
+        self.graph.declares_over_the_prelude(type_name) || self.import(type_name).is_some()
+    }
+
+    /// The prelude's declaration under `type_name`, when nothing this module sees first holds that
+    /// name.
+    ///
+    /// <para>A declaration of the generating library, or an import written in this module, hides
+    /// the prelude's exactly as it does in NX source, so the prelude is consulted last. A derived
+    /// companion is hidden by whatever hides its target as well: a module that imports a
+    /// dependency's `Range` means that library's `Range_update` by `Range.Update`, and reaching
+    /// past it to the prelude's would patch the wrong record.</para>
+    pub fn prelude_declaration(&self, type_name: &str) -> Option<&'static ExportedTypeDecl> {
+        let declaration = ExportedTypeGraph::prelude_declarations()
+            .iter()
+            .find(|declaration| declaration.name() == type_name)?;
+        if self.hides_prelude_name(type_name) {
+            return None;
+        }
+        match companion_target_name(&declaration.item) {
+            Some(target) if self.hides_prelude_name(target) => None,
+            _ => Some(declaration),
+        }
+    }
+
+    /// The prelude's record under `type_name`, when this module reaches the prelude for that name.
+    pub fn prelude_record(&self, type_name: &str) -> Option<&'static ExportedRecord> {
+        match &self.prelude_declaration(type_name)?.item {
+            ExportedType::Record(record) => Some(record),
+            _ => None,
+        }
+    }
+
+    /// The type parameters `type_name` declares, in declaration order, wherever the declaration
+    /// lives.
+    ///
+    /// <para>A record this library declares is found through the export graph; one imported from a
+    /// dependency is not in that graph at all, so its parameters come from this module's imported
+    /// entry instead; the prelude's answers last. All three have to, because an applied type that
+    /// renders without its arguments is an open generic and compiles in neither target
+    /// language.</para>
+    ///
+    /// <para>`None` means the declaration could not be reached; an empty list means it was reached
+    /// and declares no parameters.</para>
+    pub fn record_type_params(&self, type_name: &str) -> Option<Vec<String>> {
+        if let Some(record) = self.graph.resolve_record(type_name) {
+            return Some(record.type_params.clone());
+        }
+        if let Some(imported) = self.import(type_name) {
+            return match &imported.kind {
+                ImportedTypeKind::Record { type_params } => Some(type_params.clone()),
+                _ => None,
+            };
+        }
+        match &self.prelude_declaration(type_name)?.item {
+            ExportedType::Record(record) => Some(record.type_params.clone()),
+            ExportedType::Update(update) => Some(update.type_params.clone()),
+            _ => None,
+        }
+    }
+}
+
+/// The record a derived companion patches or names the fields of, or `None` for a declared item.
+fn companion_target_name(item: &ExportedType) -> Option<&str> {
+    match item {
+        ExportedType::Update(update) => Some(&update.target_name),
+        ExportedType::Union(union_def) => union_def.property_target.as_deref(),
+        _ => None,
     }
 }
 
@@ -1359,7 +1594,13 @@ impl CachedImportedLibrary {
             PreparedItemKind::Union => ImportedTypeKind::Union {
                 is_constant: self.constant_unions.contains(exported_name),
             },
-            PreparedItemKind::Record => ImportedTypeKind::Record,
+            PreparedItemKind::Record => ImportedTypeKind::Record {
+                type_params: self
+                    .record_type_params
+                    .get(exported_name)
+                    .cloned()
+                    .unwrap_or_default(),
+            },
             PreparedItemKind::Component => ImportedTypeKind::Component,
             _ => return None,
         };
@@ -1381,7 +1622,14 @@ impl CachedImportedLibrary {
         suffix: &str,
     ) -> Option<ImportedType> {
         let (companion_suffix, kind) = match suffix {
-            nx_hir::UPDATE_RECORD_SUFFIX => ("_update", ImportedTypeKind::Record),
+            // The update companion is erased in both languages, so it is never applied and
+            // carries no parameters of its own.
+            nx_hir::UPDATE_RECORD_SUFFIX => (
+                "_update",
+                ImportedTypeKind::Record {
+                    type_params: Vec::new(),
+                },
+            ),
             nx_hir::PROPERTY_UNION_SUFFIX => {
                 ("_property", ImportedTypeKind::Union { is_constant: true })
             }
@@ -1430,7 +1678,10 @@ impl CachedImportedLibrary {
         match ty {
             TypeRef::Nullable(inner) => self.type_ref_is_reference(inner, seen_aliases),
             TypeRef::Array(_) | TypeRef::Function { .. } => true,
-            TypeRef::Name(name) => self.type_name_is_reference(name.as_str(), seen_aliases),
+            // An applied type is its record: a record is always a reference type.
+            TypeRef::Applied { name, .. } | TypeRef::Name(name) => {
+                self.type_name_is_reference(name.as_str(), seen_aliases)
+            }
         }
     }
 
@@ -1504,6 +1755,7 @@ fn build_cached_imported_library(
     let mut derived_exports = FxHashSet::default();
     let mut constant_unions = FxHashSet::default();
     let mut alias_targets = FxHashMap::default();
+    let mut record_type_params: FxHashMap<String, Vec<String>> = FxHashMap::default();
     let mut wildcard_importable_export_names = Vec::new();
     let items_by_origin = dependency
         .interface_items
@@ -1560,6 +1812,17 @@ fn build_cached_imported_library(
         if let InterfaceItemKind::TypeAlias { ty, .. } = &interface_item.item {
             alias_targets.insert(exported_name.clone(), ty.clone());
         }
+        if let InterfaceItemKind::Record { type_params, .. } = &interface_item.item {
+            if !type_params.is_empty() {
+                record_type_params.insert(
+                    exported_name.clone(),
+                    type_params
+                        .iter()
+                        .map(|param| param.name.as_str().to_string())
+                        .collect(),
+                );
+            }
+        }
         if let InterfaceItemKind::Union { base, cases, .. } = &interface_item.item {
             if base.is_none()
                 && !cases.is_empty()
@@ -1579,6 +1842,7 @@ fn build_cached_imported_library(
         derived_exports,
         constant_unions,
         alias_targets,
+        record_type_params,
         wildcard_importable_export_names,
         namespaces: dependency.namespaces.clone(),
         items_by_origin,
@@ -1594,7 +1858,12 @@ fn export_alias(def: &TypeAlias) -> ExportedAlias {
 
 fn export_record(module: &LoweredModule, def: &RecordDef) -> ExportedRecord {
     ExportedRecord {
-        type_params: Vec::new(),
+        is_component_contract: false,
+        type_params: def
+            .type_params
+            .iter()
+            .map(|param| param.name.as_str().to_string())
+            .collect(),
         name: def.name.as_str().to_string(),
         kind: def.kind.clone(),
         is_abstract: def.is_abstract,
@@ -1659,6 +1928,7 @@ fn export_external_component_contract(
     }
 
     Some(ExportedRecord {
+        is_component_contract: true,
         name: component.name.as_str().to_string(),
         kind: RecordKind::Plain,
         is_abstract: component.is_abstract,
@@ -1740,6 +2010,16 @@ fn rewrite_type_ref_names(ty: &mut TypeRef, rename: &mut impl FnMut(&str) -> Opt
                 *name = nx_hir::Name::new(&renamed);
             }
         }
+        // The tag is a type name like any other; the argument names bind the record's parameters
+        // and are not renamed with it.
+        TypeRef::Applied { name, args } => {
+            if let Some(renamed) = rename(name.as_str()) {
+                *name = nx_hir::Name::new(&renamed);
+            }
+            for (_, arg) in args {
+                rewrite_type_ref_names(arg, rename);
+            }
+        }
         TypeRef::Array(inner) | TypeRef::Nullable(inner) => rewrite_type_ref_names(inner, rename),
         TypeRef::Function {
             params,
@@ -1801,15 +2081,23 @@ fn export_update(
         Some(Item::Component(component)) => Some(component),
         _ => None,
     };
+    // A generic record's companion declares the same parameters, and both emitters erase them:
+    // the wire carries no type argument for a patch.
+    let type_params = match target_component {
+        Some(component) => effective_component_type_params(module, prepared, component),
+        None => record
+            .type_params
+            .iter()
+            .map(|param| param.name.as_str().to_string())
+            .collect(),
+    };
     ExportedUpdate {
         target_name: target.as_str().to_string(),
         target_is_component: target_component.is_some(),
         name: format!("{}_update", target.as_str()),
         discriminator: record.name.as_str().to_string(),
         fields,
-        type_params: target_component
-            .map(|component| effective_component_type_params(module, prepared, component))
-            .unwrap_or_default(),
+        type_params,
     }
 }
 
@@ -2512,7 +2800,9 @@ export type User extends Named = { email:string }
                     visible_name: "Named".to_string(),
                     exported_name: "Named".to_string(),
                     library_name: "named".to_string(),
-                    kind: ImportedTypeKind::Record,
+                    kind: ImportedTypeKind::Record {
+                        type_params: Vec::new(),
+                    },
                 },
                 ImportedType {
                     visible_name: "Tag".to_string(),

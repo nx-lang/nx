@@ -155,8 +155,9 @@
           "match": "(?:0x|0X)[0-9A-Fa-f](?:_?[0-9A-Fa-f])*"
         },
         {
+          "comment": "The fraction's dot must not be the first dot of a range operator: `1..5` is two integers around `..`, as the lexer reads it.",
           "name": "constant.numeric.float.nx",
-          "match": "(?:[0-9](?:_?[0-9])*)(?:\\.(?:[0-9](?:_?[0-9])*)?)(?:[eE][+-]?(?:[0-9](?:_?[0-9])*))?"
+          "match": "(?:[0-9](?:_?[0-9])*)(?:\\.(?!\\.)(?:[0-9](?:_?[0-9])*)?)(?:[eE][+-]?(?:[0-9](?:_?[0-9])*))?"
         },
         {
           "name": "constant.numeric.float.nx",
@@ -293,6 +294,11 @@
         {
           "name": "punctuation.separator.conditional.nx",
           "match": ":"
+        },
+        {
+          "comment": "Ahead of the dot rule, so `..` and `..=` are one operator rather than two member-access dots or a dot and an assignment.",
+          "name": "keyword.operator.range.nx",
+          "match": "\\.\\.=?"
         },
         {
           "name": "punctuation.separator.dot.nx",

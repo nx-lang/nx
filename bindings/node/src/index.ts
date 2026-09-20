@@ -428,6 +428,14 @@ export interface NxLanguageSnapshotOptions {
    * Build context whose libraries every query can see. Without one, names declared only in a library are unresolved.
    */
   readonly buildContext?: NxProgramBuildContext;
+  /**
+   * Identities every other document imports implicitly, with the meaning `NxWorkspaceBuildOptions.implicitImports`
+   * gives them: the names those documents export are in scope for hover, completions and diagnostics without an import
+   * line, and each document's own text and positions are unchanged.
+   *
+   * An identity no document in the snapshot has is reported as a diagnostic naming it.
+   */
+  readonly implicitImports?: readonly string[];
 }
 
 /**
@@ -440,7 +448,8 @@ export interface NxLanguageSnapshotOptions {
  */
 export class NxLanguageSnapshot {
   /**
-   * Analyzes `documents`, optionally against the libraries `options.buildContext` makes visible.
+   * Analyzes `documents`, optionally against the libraries `options.buildContext` makes visible and with
+   * `options.implicitImports` in scope for every other document.
    *
    * @throws NxEvaluationError when a URI is unparseable, two documents share a URI or identity, or an identity is
    * invalid; the message names the offending URI or identity.
@@ -450,14 +459,19 @@ export class NxLanguageSnapshot {
   public constructor(documents: Iterable<NxLanguageDocumentInput>, options: NxLanguageSnapshotOptions = {}) {
     const nativeDocuments = Array.from(documents, normalizeLanguageDocument);
     const buildContext = options.buildContext;
-    const native = invokeNative(() =>
-      buildContext === undefined
+    const implicitImports = Array.from(options.implicitImports ?? []);
+    const native = invokeNative(() => {
+      if (buildContext !== undefined) {
+        return loadNativeBinding().NativeNxLanguageSnapshot.withBuildContext(
+          nativeDocuments,
+          getBuildContextNative(buildContext),
+          implicitImports
+        );
+      }
+      return implicitImports.length === 0
         ? new (loadNativeBinding().NativeNxLanguageSnapshot)(nativeDocuments)
-        : loadNativeBinding().NativeNxLanguageSnapshot.withBuildContext(
-            nativeDocuments,
-            getBuildContextNative(buildContext)
-          )
-    );
+        : loadNativeBinding().NativeNxLanguageSnapshot.withImplicitImports(nativeDocuments, implicitImports);
+    });
     languageSnapshotNatives.set(this, native);
   }
 
