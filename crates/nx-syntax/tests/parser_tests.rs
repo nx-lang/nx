@@ -3104,6 +3104,25 @@ mod range_operators {
         assert_eq!(operator(&ranges[0]), "..");
         assert_eq!(operator(&ranges[1]), "..=");
     }
+
+    /// An unbraced initializer is a literal, never an expression, so a range is rejected there for
+    /// the same reason a sum is. Pinned because the shorthand `let r = 1..5` reads so naturally
+    /// that it keeps being written, in specs and in examples alike.
+    #[test]
+    fn an_unbraced_range_is_rejected_like_any_other_expression() {
+        let range = parse_str("let r = 1..5\n", "test.nx");
+        let sum = parse_str("let n = 1 + 2\n", "test.nx");
+
+        assert!(!range.is_ok(), "an unbraced range should not parse");
+        assert!(
+            !range.errors.is_empty(),
+            "the rejection should carry a diagnostic"
+        );
+        assert!(
+            !sum.is_ok(),
+            "an unbraced sum should not parse either, which is the rule the range follows"
+        );
+    }
 }
 
 #[test]

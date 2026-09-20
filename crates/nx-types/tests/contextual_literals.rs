@@ -145,6 +145,43 @@ fn bare_name_at_a_string_typed_property_is_rejected() {
     );
 }
 
+/// The fix the message names has to be one the site accepts. An author who writes `let span = 1..=5`
+/// meets this diagnostic first, and being sent to `"span"` at a numeric site only produces a second
+/// error.
+#[test]
+fn a_visible_binding_is_offered_in_its_braced_form() {
+    let messages = errors("let r = 5\nlet x:int = r\n");
+    assert!(
+        messages.iter().any(|message| message.contains("write {r}")),
+        "expected the braced form to be suggested, got: {messages:?}"
+    );
+    assert!(
+        !messages.iter().any(|message| message.contains("\"r\"")),
+        "an int site does not take a string, so the quoted form must not be offered: {messages:?}"
+    );
+}
+
+#[test]
+fn the_quoted_form_is_offered_only_where_a_string_fits() {
+    assert_reports("let x:string = hello\n", "for a string value write \"hello\"");
+
+    let numeric = errors("let x:int = hello\n");
+    assert!(
+        !numeric.iter().any(|message| message.contains("for a string value")),
+        "a string does not satisfy an int site: {numeric:?}"
+    );
+
+    let record = errors("type P = { a:int }\nlet p = <P a={1} />\nlet q:P = p\n");
+    assert!(
+        record.iter().any(|message| message.contains("write {p}")),
+        "a record site with a visible binding should name the braced form: {record:?}"
+    );
+    assert!(
+        !record.iter().any(|message| message.contains("for a string value")),
+        "a record site does not take a string: {record:?}"
+    );
+}
+
 #[test]
 fn unknown_member_suggests_a_near_match() {
     assert_reports(

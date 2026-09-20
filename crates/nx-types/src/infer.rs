@@ -4547,13 +4547,25 @@ impl<'a> InferenceContext<'a> {
             return Some(Type::Error);
         }
 
-        // Not a nominal type: a bare name never falls back to being a string.
+        // Not a nominal type: a bare name never falls back to being a string. Whatever fix the
+        // message names has to be one this site would take — offering `"r"` at an `int` site sends
+        // the author to a second error — so a binding in scope is pointed at in its braced form
+        // first, and the quoted form is offered only where a string satisfies the site.
+        let fix = if self.env.lookup(name).is_some() {
+            format!("; to use the value bound to '{}' write {{{}}}", name, name)
+        } else if self.type_satisfies_expected_with_coercion(
+            &Type::Primitive(crate::ty::Primitive::String),
+            expected,
+        ) {
+            format!("; for a string value write \"{}\"", name)
+        } else {
+            String::new()
+        };
         self.error(
             "contextual-name-requires-nominal-type",
             format!(
-                "{} expects {}, and a bare name resolves only against a union's cases; \
-                 for a string value write \"{}\"",
-                context, expected, name
+                "{} expects {}, and a bare name resolves only against a union's cases{}",
+                context, expected, fix
             ),
             span,
         );
