@@ -72,7 +72,12 @@ export interface NativeNxLanguageSnapshotConstructor {
   new (documents: readonly NativeLanguageDocument[]): NativeNxLanguageSnapshot;
   withBuildContext(
     documents: readonly NativeLanguageDocument[],
-    buildContext: NativeNxProgramBuildContext
+    buildContext: NativeNxProgramBuildContext,
+    implicitImports?: readonly string[]
+  ): NativeNxLanguageSnapshot;
+  withImplicitImports(
+    documents: readonly NativeLanguageDocument[],
+    implicitImports: readonly string[]
   ): NativeNxLanguageSnapshot;
 }
 

@@ -2,7 +2,7 @@
 
 // A type parameter is declared `Name:type`, before every field, and is a type in the record's own
 // field types and nowhere else.
-type Range = {
+type Bounds = {
   T:type
   start:T
   end:T
@@ -16,37 +16,37 @@ type Page = { T:type items:T[] next:T? render:(<function item:T />: string)? }
 
 // A generic record's name alone is not a type. Every type position takes an applied type instead.
 type Schedule = {
-  week:<Range T=int/>
-  spans:<Range T=float64/>[]?
+  week:<Bounds T=int/>
+  spans:<Bounds T=float64/>[]?
 }
 
 // An alias names an instantiation, which is also how a construction site writes an argument that
 // is not a bare type name.
-type IntRange = <Range T=int/>
+type IntBounds = <Bounds T=int/>
 type Ints = int[]
 
-let week:<Range T=int/> = <Range T=int start={1} end={7} />
+let week:<Bounds T=int/> = <Bounds T=int start={1} end={7} />
 
 // Arguments are matched to parameters by name, in any order.
 let entry:<Pair TValue=int TKey=string/> = <Pair TKey=string TValue=int key="mon" value={1} />
 
 // An applied type nests, and an alias stands in for the argument at the construction site.
-let pages:<Page T=<Range T=int/>/> = <Page T=IntRange items={ week } next={null} render={null} />
+let pages:<Page T=<Bounds T=int/>/> = <Page T=IntBounds items={ week } next={null} render={null} />
 let counts:<Page T=int[]/> = <Page T=Ints items={ } next={null} render={null} />
 
 // Reading a field substitutes the argument: `week.start` is an `int`.
 let firstDay:int = {week.start}
 
 // Every applied type satisfies `object`, and two instantiations are different types:
-// `let wrong:<Range T=float64/> = {week}` would be rejected, even though `int` converts to
+// `let wrong:<Bounds T=float64/> = {week}` would be rejected, even though `int` converts to
 // `float64` everywhere else.
 let anything:object = {week}
 
 // The update companion carries the same parameters, and the intrinsics carry the argument across.
-let extended:<Range T=int/> = {apply(week, <Range.Update T=int end={9} />)}
-let moved:<Range.Update T=int/> = {diff(week, extended)}
+let extended:<Bounds T=int/> = {apply(week, <Bounds.Update T=int end={9} />)}
+let moved:<Bounds.Update T=int/> = {diff(week, extended)}
 
 // The property union is parameter-independent: one case per field, none for `T`.
-let field:Range.Property = {Range.Property.start}
+let field:Bounds.Property = {Bounds.Property.start}
 
 let root() = { extended }

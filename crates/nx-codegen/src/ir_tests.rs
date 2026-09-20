@@ -9,8 +9,9 @@ use crate::ir_image::{write_nx_ir_image, NxIrImage};
 use crate::{
     build_nx_ir_artifacts, emit_nx_ir, explain_nx_ir, explain_nx_ir_image, ExplainError,
     NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1, NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1,
-    NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1, NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1,
-    NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1, NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
+    NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1, NX_IR_REQUIRED_FEATURE_RANGES_V1,
+    NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1, NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
+    NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
 };
 use nx_api::{
     build_program_artifact_from_source, build_workspace_program_artifact, LibraryRegistry,
@@ -1782,4 +1783,219 @@ fn a_program_without_function_values_lists_no_new_feature() {
         "{:?}",
         model.required_features
     );
+}
+
+// ------------------------------------------------------------------------------------------------
+// The prelude as a linked module
+// ------------------------------------------------------------------------------------------------
+
+#[test]
+fn a_range_expression_links_against_the_prelude() {
+    let artifact = artifact_from_source("let r() = { 1..5 }\nlet root() = { r() }");
+    let entry = entry_artifact(&artifact);
+
+    assert_eq!(entry.modules[0].identity, "main.nx");
+    let prelude = entry
+        .modules
+        .iter()
+        .skip(1)
+        .find(|entry| entry.identity == nx_hir::PRELUDE_MODULE_IDENTITY)
+        .expect("the module table lists the prelude");
+    assert_eq!(
+        prelude.version,
+        nx_hir::PRELUDE_VERSION,
+        "the image records the prelude's contract version, so a runtime whose built-in prelude is \
+         another contract is rejected by the ordinary version check"
+    );
+
+    let text = explain_nx_ir(&entry).expect("explain");
+    assert_contains(
+        &text,
+        "<@nx/prelude.nx:Range end=5 endInclusive=false start=1 />",
+    );
+    assert!(
+        !text.contains("record Range"),
+        "the module's own declaration list does not include Range:\n{text}"
+    );
+}
+
+#[test]
+fn the_prelude_image_holds_the_declaration_once() {
+    let artifact = artifact_from_source("let r() = { 1..5 }\nlet root() = { r() }");
+    let program = crate::build_codegen_program(&artifact).expect("codegen program");
+    let mut images = build_nx_ir_artifacts(
+        &program,
+        &NxIrEmitOptions {
+            modules: Some(vec![nx_hir::PRELUDE_MODULE_IDENTITY.to_string()]),
+            ..NxIrEmitOptions::default()
+        },
+    )
+    .expect("nx ir");
+    assert_eq!(images.len(), 1);
+    let image = images.remove(0);
+    assert_eq!(image.modules[0].identity, nx_hir::PRELUDE_MODULE_IDENTITY);
+
+    let text = explain_nx_ir(&image).expect("explain");
+    assert_line(&text, "record Range");
+    assert_line(&text, "  start: object required");
+    assert_line(&text, "  end: object required");
+    assert_line(&text, "  endInclusive: boolean required");
+    assert_contains(&text, "record Range.Update update of Range");
+    assert_contains(&text, "union Range.Property property of Range");
+}
+
+#[test]
+fn every_module_emission_includes_the_prelude_only_when_used() {
+    let using = artifact_from_workspace(
+        &[
+            (
+                "app/main.nx",
+                "import { span } from \"../shared/value.nx\"\nlet root() = { span() }",
+            ),
+            ("shared/value.nx", "export let span() = { 1..5 }"),
+        ],
+        "app/main.nx",
+    );
+    assert!(
+        all_artifacts(&using).contains_key(nx_hir::PRELUDE_MODULE_IDENTITY),
+        "a program that reaches a prelude declaration emits the prelude"
+    );
+
+    let unused = artifact_from_workspace(
+        &[
+            (
+                "app/main.nx",
+                "import { answer } from \"../shared/value.nx\"\nlet root() = { answer() }",
+            ),
+            ("shared/value.nx", "export let answer() = { 42 }"),
+        ],
+        "app/main.nx",
+    );
+    let identities = all_artifacts(&unused).keys().cloned().collect::<Vec<_>>();
+    assert_eq!(
+        identities,
+        ["app/main.nx".to_string(), "shared/value.nx".to_string()],
+        "a program that reaches none leaves the prelude out"
+    );
+}
+
+/// An image that references no prelude declaration is what it was before the prelude existed, which
+/// is what the conformance corpus asserts byte for byte; here the check is that its module table
+/// names only the modules it links.
+#[test]
+fn an_unused_prelude_leaves_no_trace() {
+    let entry = entry_artifact(&artifact_from_source("let root() = { 42 }"));
+    let identities = entry
+        .modules
+        .iter()
+        .map(|entry| entry.identity.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(identities, ["main.nx"]);
+}
+
+/// The prelude's image is written under a name derived from its identity, and that name is legal on
+/// every platform NX supports.
+#[test]
+fn the_prelude_identity_is_a_valid_file_name_everywhere() {
+    for component in nx_hir::PRELUDE_MODULE_IDENTITY.split('/') {
+        assert!(!component.is_empty());
+        assert!(
+            !component.contains(['<', '>', ':', '"', '|', '?', '*', '\\']),
+            "'{component}' would not be a legal file name on Windows"
+        );
+        assert!(
+            !component.chars().any(|character| character.is_control()),
+            "'{component}' holds a control character"
+        );
+        assert!(
+            !component.ends_with('.') && !component.ends_with(' '),
+            "'{component}' would be rewritten by Windows"
+        );
+    }
+}
+
+// ------------------------------------------------------------------------------------------------
+// Iterating a range
+// ------------------------------------------------------------------------------------------------
+
+#[test]
+fn a_range_loop_is_a_for_range_node() {
+    let entry = entry_artifact(&artifact_from_source(
+        "let squares() = { for i, n in 0..4 { i * i + n } }\nlet root() = { squares() }",
+    ));
+
+    let text = explain_nx_ir(&entry).expect("explain");
+    assert_contains(
+        &text,
+        "for i, n in <@nx/prelude.nx:Range end=4 endInclusive=false start=0 /> yield",
+    );
+    assert!(
+        entry.nodes.iter().any(|node| {
+            node.as_list()
+                .and_then(|entry| entry.first())
+                .and_then(crate::ir::IrItem::as_int)
+                == Some(kinds::node::FOR_RANGE)
+        }),
+        "the body is a forRange node"
+    );
+    assert!(
+        entry
+            .required_features
+            .iter()
+            .any(|feature| feature == NX_IR_REQUIRED_FEATURE_RANGES_V1),
+        "{:?}",
+        entry.required_features
+    );
+}
+
+#[test]
+fn building_a_range_without_iterating_needs_no_feature() {
+    let entry = entry_artifact(&artifact_from_source(
+        "let r() = { 1..=5 }\nlet root() = { r() }",
+    ));
+    assert!(
+        !entry
+            .required_features
+            .iter()
+            .any(|feature| feature == NX_IR_REQUIRED_FEATURE_RANGES_V1),
+        "{:?}",
+        entry.required_features
+    );
+}
+
+#[test]
+fn a_list_loop_is_unchanged_by_ranges() {
+    let entry = entry_artifact(&artifact_from_source(
+        "let doubled(items:int[]) = { for item in items { item * 2 } }\n\
+         let root() = { doubled({ 1 2 }) }",
+    ));
+    assert!(
+        entry.nodes.iter().any(|node| {
+            node.as_list()
+                .and_then(|entry| entry.first())
+                .and_then(crate::ir::IrItem::as_int)
+                == Some(kinds::node::FOR)
+        }),
+        "a list loop stays a for node"
+    );
+    assert!(
+        !entry
+            .required_features
+            .iter()
+            .any(|feature| feature == NX_IR_REQUIRED_FEATURE_RANGES_V1),
+        "{:?}",
+        entry.required_features
+    );
+}
+
+#[test]
+fn iterating_a_range_does_not_change_the_schema_version() {
+    let with_range = entry_artifact(&artifact_from_source(
+        "let root() = { for i in 0..4 { i } }",
+    ));
+    let without = entry_artifact(&artifact_from_source("let root() = { 42 }"));
+
+    assert_eq!(with_range.schema_version, NX_IR_SCHEMA_VERSION);
+    assert_eq!(with_range.schema_version, without.schema_version);
+    assert_eq!(NX_IR_SCHEMA_VERSION, 4);
 }

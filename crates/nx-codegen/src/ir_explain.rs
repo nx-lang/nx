@@ -577,7 +577,9 @@ impl<'a> Explainer<'a> {
                 let elements = self.nodes(self.list_operand(entry, 1, "array")?)?;
                 join_inline(&elements, "[", ", ", "]")
             }
-            kinds::node::FOR => {
+            // A range loop reads as a `for` over a range, because that is what it is: the kind
+            // says what the iterable evaluates to, not how the loop is written.
+            kinds::node::FOR | kinds::node::FOR_RANGE => {
                 let item = self.string(self.int_operand(entry, 2, "for")?)?;
                 let index_name = self.int_operand(entry, 4, "for")?;
                 let binding = if index_name >= 0 {

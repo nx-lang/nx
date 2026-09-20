@@ -341,11 +341,11 @@ parameter**, with the same `Name:type` syntax a component signature uses and the
 rules — before every field, with no default, no modifier and no suffix:
 
 ```nx
-type Range = {
+type Bounds = {
   T:type
-  start:T
-  end:T
-  endInclusive:boolean = false
+  low:T
+  high:T
+  inclusive:boolean = false
 }
 ```
 
@@ -358,8 +358,11 @@ type Pair = { TKey:type TValue:type key:TKey value:TValue }
 type Page = { T:type items:T[] next:T? render:(<function item:T />: string)? }
 ```
 
-A type parameter is not a field: a constructed `Range` has `start`, `end` and `endInclusive` and
-nothing else, and `Range.Property` has one case per field and none for `T`.
+A type parameter is not a field: a constructed `Bounds` has `low`, `high` and `inclusive` and
+nothing else, and `Bounds.Property` has one case per field and none for `T`.
+
+The examples below use [`Range`](#ranges), the built-in generic record, which is an ordinary
+declaration of exactly this kind.
 
 ### Naming one instantiation
 A generic record's name alone is not a type. Every type position takes an **applied type**, written
@@ -371,7 +374,7 @@ type Schedule = {
   spans:<Range T=float64/>[]?
 }
 
-let week:<Range T=int/> = <Range T=int start={1} end={7} />
+let week:<Range T=int/> = <Range T=int start={1} end={7} endInclusive={true} />
 ```
 
 An applied type composes with `?` and `[]` in source order, nests (`<Page T=<Range T=int/>/>`), may
@@ -385,19 +388,27 @@ after aliases are resolved. An argument never widens or converts, even where the
 themselves convert:
 
 ```nx
-let ints:<Range T=int/> = <Range T=int start={1} end={5} />
+let ints:<Range T=int/> = <Range T=int start={1} end={5} endInclusive={false} />
 let wider:<Range T=float64/> = {ints}   // rejected: int does not convert inside the argument
 ```
 
 Reading a field gives its declared type with each parameter replaced by its argument, so
 `week.start` is `int`. Every applied type satisfies `object`.
 
+Invariance also decides what a list of them is. Two of one instantiation keep their arguments, and
+two that differ have nothing in common below `object`:
+
+```nx
+let same = { (0..5) (5..=9) }       // <Range T=int/>[]
+let mixed = { (0..5) (0.0..1.0) }   // object[]
+```
+
 ### Constructing one
 A construction binds each type parameter as a property, as a component use site does, and the
 argument is a bare type name:
 
 ```nx
-let r = <Range T=int start={1} end={5} />
+let r = <Range T=int start={1} end={5} endInclusive={false} />
 ```
 
 Every parameter must be bound — there is no inference and no fallback, because the value's own type
@@ -414,7 +425,7 @@ type Ints = int[]
 type IntRange = <Range T=int/>
 
 let boxedInts:<Box T=int[]/> = <Box T=Ints value={ 1 2 } />
-let nested:<Box T=<Range T=int/>/> = <Box T=IntRange value={<Range T=int start={1} end={5} />} />
+let nested:<Box T=<Range T=int/>/> = <Box T=IntRange value={<Range T=int start={1} end={5} endInclusive={false} />} />
 ```
 
 ### Companions
@@ -431,12 +442,71 @@ A record that declares type parameters cannot be `abstract` and cannot have an `
 Type arguments are a checking-time notion only. The interpreter, NX IR and the TypeScript IR
 runtime see an applied type as its record and a parameter-typed field as `object`, so two values
 built with different arguments and equal fields are equal values. `typegen` goes the other way and
-emits a real generic — `Range<T>` in both C# and TypeScript, with an applied type rendered as the
-instantiation (`Range<long>`, `Range<number>`) — because a host names the concrete instantiation at
-its own deserialization site. The update companion follows the record: `Range_update<T>` in both
-languages, so a patch of a `Range<long>` is typed as one and applies to it. The wire is unaffected —
-a patch is still `Range.Update` with its field names and no type argument. Only a *component's*
+emits a real generic — `Bounds<T>` in both C# and TypeScript, with an applied type rendered as the
+instantiation (`Bounds<long>`, `Bounds<number>`) — because a host names the concrete instantiation at
+its own deserialization site. The update companion follows the record: `Bounds_update<T>` in both
+languages, so a patch of a `Bounds<long>` is typed as one and applies to it. The wire is unaffected —
+a patch is still `Bounds.Update` with its field names and no type argument. Only a *component's*
 state companion erases its parameters, because the type it patches is already concrete.
+
+## Ranges
+`Range` is a **built-in type**: a generic record NX declares for every program, so it needs no import
+and no declaration of your own.
+
+```nx
+type Range = {
+  T:type
+  start:T
+  end:T
+  endInclusive:boolean
+}
+```
+
+It is an ordinary [generic record](#generic-records) in every respect — an applied type names one
+instantiation, it has the companions `Range.Update` and `Range.Property`, and its parameter is
+unconstrained, so `<Range T=string/>` is a type like any other:
+
+```nx
+type Slider = { range:<Range T=float64/> }
+let letters = <Range T=string start="a" end="f" endInclusive={true} />
+```
+
+### The operators are sugar for it
+`a..b` and `a..=b` construct it, and nothing more: `1..5` *is*
+`<Range T=int start={1} end={5} endInclusive={false} />`, and the two compare equal. `endInclusive`
+is `false` for `..` and `true` for `..=`.
+
+`T` is chosen by the site. Where the site expects a `<Range T=X/>`, each bound is checked against
+`X`, so a literal or a value that widens to `X` is accepted:
+
+```nx
+type Slider = { range:<Range T=float64/> }
+let s = <Slider range={0..1} />                  // a <Range T=float64/>
+```
+
+Otherwise `T` is the bounds' common numeric type under the rules in
+[Numeric Types and Conversions](#numeric-types-and-conversions):
+
+```nx
+let small:int32 = 3
+let a = {small..10}                              // <Range T=int/>
+let b = {0..2.5}                                 // <Range T=float64/>
+let bad:int64 = 3
+let rejected = {bad..2.5}                        // rejected: no common type
+```
+
+Both bounds must be numeric. For a range of any other type, write the element form. Building a range
+never fails: `5..2` is a valid, empty range.
+
+Because the operators mean the built-in `Range`, a module that declares its own type under that name
+cannot use them there — the declaration wins, as it does over any import, and the operator says so.
+The element form still works, and every other module is unaffected.
+
+### Only integer ranges iterate
+[`for`](/reference/syntax/for#counting-with-a-range) counts over a `Range` whose argument is `int`,
+`int32` or `int64`. A range of any other type is a value you can pass along, read fields from and
+compare, but not iterate: `for x in 0..2.5` is a type error rather than a guessed step. There is no
+step, no descending form and no open-ended range.
 
 ## Function Types
 A function type is an element function's signature with `function` in the name slot: take

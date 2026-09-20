@@ -30,8 +30,8 @@ pub use ir::{
     IrItem, NxIrArtifact, NxIrDebug, NxIrDebugSpans, NxIrEmitOptions, NxIrMetadata,
     NxIrModuleEntry, NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1,
     NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1, NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1,
-    NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1, NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
-    NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
+    NX_IR_REQUIRED_FEATURE_RANGES_V1, NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1,
+    NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1, NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
 };
 pub use ir_bundle::{read_nx_ir_bundle, write_nx_ir_bundle, NxIrBundleEntry};
 pub use ir_explain::{explain_nx_ir, explain_nx_ir_image, ExplainError};
@@ -59,5 +59,7 @@ pub use runtime::{javascript_runtime_abi, javascript_runtime_helper_source};
 mod ir_corpus_tests;
 #[cfg(test)]
 mod ir_tests;
+#[cfg(test)]
+mod prelude_image_tests;
 #[cfg(test)]
 mod tests;

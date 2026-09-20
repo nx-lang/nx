@@ -1,0 +1,45 @@
+{
+  "app/main.nx::equal": false,
+  "app/main.nx::imported": [
+    10,
+    20,
+    30,
+    40
+  ],
+  "app/main.nx::none": [],
+  "app/main.nx::pages": [
+    1,
+    2,
+    3
+  ],
+  "app/main.nx::passedAlong": {
+    "$type": "Range",
+    "end": 1.5,
+    "endInclusive": false,
+    "start": 0.0
+  },
+  "app/main.nx::root": [
+    0,
+    2,
+    6,
+    12
+  ],
+  "app/main.nx::squares": [
+    0,
+    2,
+    6,
+    12
+  ],
+  "shared/bounds.nx::closed": {
+    "$type": "Range",
+    "end": 5,
+    "endInclusive": true,
+    "start": 1
+  },
+  "shared/bounds.nx::half": {
+    "$type": "Range",
+    "end": 5,
+    "endInclusive": false,
+    "start": 1
+  }
+}

@@ -49,8 +49,8 @@ pub use prepared::{
 
 pub use components::{
     apply_constant_folds, apply_contextual_name_resolutions, apply_join_widenings,
-    apply_literal_conversions, apply_string_conversions, component_declaration_origin,
-    effective_component_contract, effective_component_contract_at,
+    apply_literal_conversions, apply_range_constructions, apply_string_conversions,
+    component_declaration_origin, effective_component_contract, effective_component_contract_at,
     effective_component_contract_for_name, erase_type_parameters, is_component_subtype,
     promote_component_handler_bindings, remove_property_entries, resolve_component_definition,
     validate_component_definitions, ComponentAncestor, ComponentResolutionError, ContextualRewrite,
@@ -76,6 +76,48 @@ pub use unions::{
     complete_property_unions, resolve_union_definition, validate_union_definitions,
     InvalidUnionBaseReason, UnionValidationError,
 };
+
+/// The reserved module identity of the NX prelude.
+///
+/// <para>The prelude is a module the compiler carries and every other module sees without an import.
+/// Its identity is reserved: a workspace may not supply a module under it, and the checker names it
+/// to tell the prelude's `Range` from a module's own declaration of that name.</para>
+///
+/// <para>It has to be a legal file name on every platform, because the prelude's image is written
+/// like any module's, with `/` replaced by `__`.</para>
+pub const PRELUDE_MODULE_IDENTITY: &str = "@nx/prelude.nx";
+
+/// The version of the prelude's contract, recorded in every image that links against it.
+///
+/// <para>The prelude is the one module a host never supplies, so a runtime carries its own copy and
+/// linking has to decide whether that copy is the one the image was compiled against. The module
+/// fingerprint cannot answer that: it hashes the source text, so a reworded comment would reject
+/// every image already in the wild. This is the semantic answer instead — bump it when a prelude
+/// declaration's shape changes, and leave it alone for an edit that changes no declaration. Linking
+/// then reports a mismatch as `nx-ir-link-version`, the same way it does for any other library.</para>
+///
+/// <para>`prelude_declaration_shape_is_pinned_to_the_prelude_version` fails when the shape changes
+/// without a bump, so this cannot silently fall behind.</para>
+pub const PRELUDE_VERSION: &str = "1";
+
+/// The reserved root that every module the compiler carries lives under.
+///
+/// <para>The prelude is one module today, and its identity is the only reserved one. This names the
+/// root so a check that means "this module is the compiler's own, not the author's" does not have to
+/// be a list of identities that a second carried module would silently fall out of.</para>
+pub const PRELUDE_ROOT_PREFIX: &str = "@nx/";
+
+/// The name of the prelude's range record, which the two range operators construct.
+pub const PRELUDE_RANGE_NAME: &str = "Range";
+
+/// The field of the prelude's `Range` that says where the range starts.
+pub const PRELUDE_RANGE_START: &str = "start";
+
+/// The field of the prelude's `Range` that says where the range stops.
+pub const PRELUDE_RANGE_END: &str = "end";
+
+/// The field of the prelude's `Range` that says whether `end` is part of the range.
+pub const PRELUDE_RANGE_END_INCLUSIVE: &str = "endInclusive";
 
 /// Parses, lowers, and validates a module from source text.
 ///
@@ -982,6 +1024,18 @@ impl Item {
             Item::TypeAlias(alias) => &alias.name,
             Item::Union(union_def) => &union_def.name,
             Item::Record(record_def) => &record_def.name,
+        }
+    }
+
+    /// Returns the span of the declaration.
+    pub fn span(&self) -> TextSpan {
+        match self {
+            Item::Function(func) => func.span,
+            Item::Value(value) => value.span,
+            Item::Component(component) => component.span,
+            Item::TypeAlias(alias) => alias.span,
+            Item::Union(union_def) => union_def.span,
+            Item::Record(record_def) => record_def.span,
         }
     }
 

@@ -11,6 +11,9 @@ export type Circle extends Shape = { }
 export type Square extends Shape = { }
 export type Doc = { shape:Shape }
 export external component <Ticker step:int /> = { state { count:int = 0 } }
-// A generic record, emitted as a real C# generic, and one instantiation of it.
+// A generic record, emitted as a real C# generic, and one instantiation of it. `patch` and `many`
+// are typed by its update companion, which this library declares, so they carry no member formatter
+// attribute: MessagePack's source generator closes the companion's own shim. This build and
+// `AppliedTypeFields_RoundTripAsTheirInstantiations` are what say that works.
 export type Range = { T:type start:T end:T endInclusive:boolean }
-export type Schedule = { week:<Range T=int/> spans:<Range T=float64/>[]? }
+export type Schedule = { week:<Range T=int/> spans:<Range T=float64/>[]? patch:<Range.Update T=int/> many:<Range.Update T=int/>[] }

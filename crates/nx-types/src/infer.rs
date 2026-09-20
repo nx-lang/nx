@@ -19,6 +19,16 @@ use nx_hir::{
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
+/// What the name `Range` means in the module being checked.
+enum PreludeRangeName {
+    /// The prelude's declaration, which is what the range operators construct.
+    Prelude(DeclaringOrigin),
+    /// Another declaration or import took the name; `by` is the module that declares it.
+    Hidden { by: String },
+    /// Nothing is visible under the name, which is a build with no prelude at all.
+    Absent,
+}
+
 /// One component's lineage, nearest first: the component itself, then each ancestor.
 fn component_lineage(
     contract: &nx_hir::EffectiveComponentContract,
@@ -331,6 +341,13 @@ pub struct InferenceContext<'a> {
     /// Nothing in analysis reads this back; it is kept in the analysis result so that carrying
     /// use-site arguments into generated output later is an additive change below the checker.
     resolved_type_arguments: FxHashMap<ElementId, Vec<(Name, Type)>>,
+    /// The `for` expressions whose iterable is a range rather than a list.
+    ///
+    /// <para>The two iterate differently below the checker — NX IR encodes a range loop as its own
+    /// node — and only the checker knows which is which, because the interpreter and the builder
+    /// see the iterable after the range expression has become an ordinary record
+    /// construction.</para>
+    range_for_expressions: FxHashSet<ExprId>,
     /// The `for` loops with an index whose body is being checked, innermost last.
     ///
     /// Read when a type error is reported, to say which name is the item and which the index
@@ -387,6 +404,7 @@ impl<'a> InferenceContext<'a> {
             consumed_type_arguments: FxHashSet::default(),
             function_value_calls: FxHashMap::default(),
             resolved_type_arguments: FxHashMap::default(),
+            range_for_expressions: FxHashSet::default(),
             indexed_loops: Vec::new(),
         };
         ctx.register_type_definitions();
@@ -458,6 +476,14 @@ impl<'a> InferenceContext<'a> {
             ast::Expr::BinaryOp { lhs, op, rhs, span } => {
                 self.infer_binop(expr_id, *op, *lhs, *rhs, *span)
             }
+
+            // A range expression means the prelude's `Range`, and nothing else.
+            ast::Expr::Range {
+                start,
+                end,
+                inclusive,
+                span,
+            } => self.infer_range(*start, *end, *inclusive, *span),
 
             // Only reached by re-inference: both are produced by the rewrite that runs after
             // analysis, from decisions this checker made.
@@ -680,19 +706,41 @@ impl<'a> InferenceContext<'a> {
                 body,
                 ..
             } => {
-                // Infer iterable type (should be array)
+                // Infer iterable type: a list, or a range of an integer type.
                 let iterable_ty = self.infer_expr(*iterable);
                 let item_ty = match iterable_ty.clone() {
                     Type::Array(inner) => *inner,
                     Type::Error => Type::Error,
-                    other => {
-                        self.error(
-                            "type-mismatch",
-                            format!("For iterable must be an array, found {}", other),
-                            expr.span(),
-                        );
-                        Type::Error
-                    }
+                    // An optional range is not accepted, exactly as an optional list is not:
+                    // `prelude_range_argument` matches the type as it stands.
+                    other => match self.prelude_range_argument(&other) {
+                        // A range of an integer type counts; the item is an integer of that type
+                        // and the index, as for a list, an `int`.
+                        Some(Type::Primitive(primitive)) if primitive.is_integer() => {
+                            self.range_for_expressions.insert(expr_id);
+                            Type::Primitive(primitive)
+                        }
+                        // Any other range is rejected rather than given a guessed step.
+                        Some(_) => {
+                            self.error(
+                                "range-not-iterable",
+                                format!(
+                                    "A for iterable must be a list or a range of an integer type, \
+                                     found {other}: only a range of an integer type iterates"
+                                ),
+                                expr.span(),
+                            );
+                            Type::Error
+                        }
+                        None => {
+                            self.error(
+                                "type-mismatch",
+                                format!("For iterable must be an array, found {}", other),
+                                expr.span(),
+                            );
+                            Type::Error
+                        }
+                    },
                 };
 
                 self.env.push_scope();
@@ -1429,6 +1477,210 @@ impl<'a> InferenceContext<'a> {
     /// <para>`+` with a string operand is concatenation. That is decided here, the one place both
     /// operand types are known, and recorded for the rewrite that makes it an `Expr::Concat` with
     /// each non-string operand wrapped in its text conversion.</para>
+    /// Types `a..b` and `a..=b`: the prelude's `Range` over the operands' common numeric type.
+    ///
+    /// <para>The operators are sugar for a construction of the prelude's `Range`, so they are only
+    /// meaningful where the name `Range` still means that declaration. `T` is the operands' common
+    /// numeric type here; a site that expects a `<Range T=X/>` binds the operands to `X` instead,
+    /// which the literal conversion of a binding site does.</para>
+    fn infer_range(&mut self, start: ExprId, end: ExprId, inclusive: bool, span: TextSpan) -> Type {
+        let origin = match self.prelude_range_name() {
+            PreludeRangeName::Prelude(origin) => origin,
+            PreludeRangeName::Hidden { by } => {
+                self.report_range_hidden(&by, span);
+                // The operands are still typed, so a fault inside one is reported too.
+                self.infer_expr(start);
+                self.infer_expr(end);
+                return Type::Error;
+            }
+            PreludeRangeName::Absent => {
+                self.error(
+                    "range-prelude-unavailable",
+                    format!(
+                        "The range operator builds the built-in '{}' record, and the prelude is \
+                         not available in this build",
+                        nx_hir::PRELUDE_RANGE_NAME
+                    ),
+                    span,
+                );
+                self.infer_expr(start);
+                self.infer_expr(end);
+                return Type::Error;
+            }
+        };
+
+        let start_ty = self.infer_expr(start);
+        let end_ty = self.infer_expr(end);
+        if start_ty.is_error() || end_ty.is_error() {
+            return Type::Error;
+        }
+
+        let argument = match (&start_ty, &end_ty) {
+            (Type::Primitive(lhs), Type::Primitive(rhs))
+                if lhs.is_numeric() && rhs.is_numeric() =>
+            {
+                match Primitive::numeric_promotion(*lhs, *rhs) {
+                    Some(promoted) => Type::Primitive(promoted),
+                    None => {
+                        self.error(
+                            "type-mismatch",
+                            format!(
+                                "Cannot build a range from {} and {}: neither converts to the \
+                                 other without loss, so the conversion is not implicit",
+                                start_ty, end_ty
+                            ),
+                            span,
+                        );
+                        return Type::Error;
+                    }
+                }
+            }
+            _ => {
+                let offender = if matches!(&start_ty, Type::Primitive(primitive) if primitive.is_numeric())
+                {
+                    &end_ty
+                } else {
+                    &start_ty
+                };
+                // The element form is the way to build a range of a non-numeric type, so it is the
+                // help to offer — except when the offender is itself a range, where naming it as
+                // `T` would advise a range of ranges rather than the mistake the author made.
+                let message = if self.prelude_range_argument(offender).is_some() {
+                    format!("A range operand must be numeric, found {offender}: a range is not a numeric bound")
+                } else {
+                    format!(
+                        "A range operand must be numeric, found {offender}; write the element form \
+                         <{} T={offender} start={{…}} end={{…}} endInclusive={{{inclusive}}} /> for \
+                         a range of another type",
+                        nx_hir::PRELUDE_RANGE_NAME
+                    )
+                };
+                self.error("range-operand-not-numeric", message, span);
+                return Type::Error;
+            }
+        };
+
+        Type::Named(NamedType::applied(
+            Name::new(nx_hir::PRELUDE_RANGE_NAME),
+            Some(origin),
+            vec![(Name::new("T"), argument)],
+        ))
+    }
+
+    /// What the name `Range` means in this module.
+    ///
+    /// <para>The module's bindings decide it, and every namespace counts: a declaration of the
+    /// module's own hides the prelude's whatever namespace it occupies, because the construction
+    /// this operator rewrites to resolves `Range` by name alone. Asking the record origins first
+    /// would miss a `let Range = 5`, which leaves the type namespace free.</para>
+    fn prelude_range_name(&self) -> PreludeRangeName {
+        let name = Name::new(nx_hir::PRELUDE_RANGE_NAME);
+
+        for namespace in [
+            PreparedNamespace::Type,
+            PreparedNamespace::Element,
+            PreparedNamespace::Value,
+        ] {
+            let Some(binding) = self.module.resolve_binding(namespace, &name) else {
+                continue;
+            };
+            let by = match &binding.origin {
+                PreparedBindingOrigin::Imported { module_identity }
+                | PreparedBindingOrigin::Peer { module_identity } => module_identity.clone(),
+                PreparedBindingOrigin::Local => self.module.module_identity().to_string(),
+            };
+            if by != nx_hir::PRELUDE_MODULE_IDENTITY {
+                return PreludeRangeName::Hidden { by };
+            }
+        }
+
+        // Every namespace holding the name holds the prelude's declaration. Its origin is the one
+        // the record bindings recorded; nothing under the name at all is a build with no prelude.
+        match self.record_origins.get(&name) {
+            Some(origin) if origin.module_identity() == nx_hir::PRELUDE_MODULE_IDENTITY => {
+                PreludeRangeName::Prelude(origin.clone())
+            }
+            Some(origin) => PreludeRangeName::Hidden {
+                by: origin.module_identity().to_string(),
+            },
+            None => PreludeRangeName::Absent,
+        }
+    }
+
+    /// Reports that the name `Range` in this module is not the prelude's, naming what took it.
+    fn report_range_hidden(&mut self, hiding_module: &str, span: TextSpan) {
+        let here = hiding_module == self.module.module_identity();
+        let declaration_span = here
+            .then(|| {
+                self.module
+                    .raw_module()
+                    .items()
+                    .iter()
+                    // Whatever kind of declaration took the name, pointing at it is the help the
+                    // author needs: a `let Range = 5` hides the prelude's record as surely as a
+                    // record of the module's own does.
+                    .find(|item| item.name().as_str() == nx_hir::PRELUDE_RANGE_NAME)
+                    .map(Item::span)
+            })
+            .flatten();
+
+        let message = if here {
+            format!(
+                "The range operator builds the built-in '{}' record, and this module declares its \
+                 own '{}'",
+                nx_hir::PRELUDE_RANGE_NAME,
+                nx_hir::PRELUDE_RANGE_NAME
+            )
+        } else {
+            format!(
+                "The range operator builds the built-in '{}' record, and '{}' here is the one \
+                 imported from '{hiding_module}'",
+                nx_hir::PRELUDE_RANGE_NAME,
+                nx_hir::PRELUDE_RANGE_NAME
+            )
+        };
+
+        let mut builder = Diagnostic::error("range-hidden")
+            .with_message(message)
+            .with_label(Label::primary(self.file_name.clone(), span))
+            .with_help(format!(
+                "Construct the module's own '{}' with the element form, or rename it to use the \
+                 range operator here",
+                nx_hir::PRELUDE_RANGE_NAME
+            ));
+        if let Some(declaration_span) = declaration_span {
+            builder = builder.with_label(
+                Label::secondary(self.file_name.clone(), declaration_span)
+                    .with_message(format!("'{}' is declared here", nx_hir::PRELUDE_RANGE_NAME)),
+            );
+        }
+        self.diagnostics.push(builder.build());
+    }
+
+    /// The type argument of a `<Range T=X/>` that is the prelude's, if `ty` is one.
+    ///
+    /// <para>`ty` is matched as it stands, so an optional `<Range T=X/>?` is not one: a caller that
+    /// accepts an optional range — a binding site, where `range={0..1}` at an optional field is
+    /// ordinary — strips the nullability itself.</para>
+    fn prelude_range_argument(&self, ty: &Type) -> Option<Type> {
+        let Type::Named(named) = ty else {
+            return None;
+        };
+        if named.name.as_str() != nx_hir::PRELUDE_RANGE_NAME {
+            return None;
+        }
+        if named.origin().map(DeclaringOrigin::module_identity)
+            != Some(nx_hir::PRELUDE_MODULE_IDENTITY)
+        {
+            return None;
+        }
+        named
+            .args()
+            .iter()
+            .find(|(parameter, _)| parameter.as_str() == "T")
+            .map(|(_, argument)| argument.clone())
+    }
+
     fn infer_binop(
         &mut self,
         expr_id: ExprId,
@@ -4648,6 +4900,21 @@ impl<'a> InferenceContext<'a> {
                 }
                 Some(converted)
             }
+            ast::Expr::Range { start, end, .. } => {
+                // The site's `T` is what the operands are checked against, so `range={0..1}` at a
+                // `<Range T=float64/>` field binds two `float64` bounds, exactly as `start={0}`
+                // would. The recorded type is rebuilt for the same reason a list's is: it was
+                // inferred from operands that were still integers.
+                let argument = self.prelude_range_argument(expected.strip_nullable())?;
+                if !self.convert_literals_in(&[start, end], &argument, span, context)? {
+                    return Some(false);
+                }
+                let Type::Named(named) = expected.strip_nullable() else {
+                    return None;
+                };
+                self.env.set_expr_type(expr, Type::Named(named.clone()));
+                Some(true)
+            }
             ast::Expr::Array { elements, .. } => {
                 let Type::Array(element_expected) = expected.strip_nullable() else {
                     return None;
@@ -4909,6 +5176,10 @@ impl<'a> InferenceContext<'a> {
     ///
     /// Read after analysis to remove each binding from its element, so nothing below the checker
     /// sees a type argument.
+    pub fn range_for_expressions(&self) -> &FxHashSet<ExprId> {
+        &self.range_for_expressions
+    }
+
     pub fn consumed_type_arguments(&self) -> &FxHashSet<ExprId> {
         &self.consumed_type_arguments
     }
@@ -5867,6 +6138,22 @@ impl<'a> InferenceContext<'a> {
             {
                 Type::Union(union.clone())
             }
+            // An applied type is invariant: two instantiations are one type exactly when they bind
+            // every parameter alike, and two that differ share nothing below `object`, which every
+            // applied type satisfies. Neither answer can come from the lineage walks below. A
+            // generic record takes no part in inheritance, so the only ancestor they could find is
+            // the declaration itself, and they name an ancestor by name alone — which for two
+            // `<Box T=int/>` would be a bare `Box`, a spelling NX does not accept as a type and
+            // whose fields still carry the declaration's own parameters.
+            (Type::Named(lhs_name), Type::Named(rhs_name))
+                if !lhs_name.args().is_empty() || !rhs_name.args().is_empty() =>
+            {
+                if lhs_name == rhs_name {
+                    lhs.clone()
+                } else {
+                    generic_common_supertype(lhs, rhs)
+                }
+            }
             (Type::Named(lhs_name), Type::Named(rhs_name)) => self
                 .common_record_supertype(lhs_name, rhs_name)
                 .or_else(|| self.common_component_supertype(lhs_name, rhs_name))
@@ -5876,6 +6163,11 @@ impl<'a> InferenceContext<'a> {
     }
 
     /// The nearest record both lineages share, compared by declaration rather than by spelling.
+    ///
+    /// <para>The ancestor is named by name and origin, with no type arguments, which is why the
+    /// caller answers a pair where either side is an applied type before reaching here: an
+    /// instantiation's ancestor could only be its own declaration, and naming that bare would lose
+    /// the arguments.</para>
     fn common_record_supertype(&self, lhs: &NamedType, rhs: &NamedType) -> Option<Type> {
         let lhs_shape = self.record_shape_of(lhs).ok().flatten()?;
         let rhs_shape = self.record_shape_of(rhs).ok().flatten()?;

@@ -1,11 +1,11 @@
 # @nx-lang/language-core
 
-The half of NX language serving that has nothing to do with a transport: the prelude coordinate
-arithmetic, the content-keyed snapshot cache, the query dispatcher, and an in-process implementation
-of [`@nx-lang/language-protocol`](../language-protocol)'s `NxLanguageService`.
+The half of NX language serving that has nothing to do with a transport: the host context, the
+content-keyed snapshot cache, the query dispatcher, and an in-process implementation of
+[`@nx-lang/language-protocol`](../language-protocol)'s `NxLanguageService`.
 
 Two things sit on top of it, and neither can disagree with the other about a line number, because
-there is only one copy of the shift:
+there is only one copy of the dispatcher and the queried text is analyzed exactly as it was sent:
 
 - [`@nx-lang/language-http`](../language-http) adds request parsing, body limits, error responses and
   a Node listener, over snapshots from [`@nx-lang/sdk-node`](../../bindings/node).
@@ -20,8 +20,12 @@ The package imports nothing from `node:`. It runs in a browser, a Web Worker and
 import { createSnapshotLanguageService } from "@nx-lang/language-core";
 
 const service = createSnapshotLanguageService({
-  createSnapshot: (documents) => host.createLanguageSnapshot(documents),
-  prelude: { source: catalogSource },
+  createSnapshot: (documents, { implicitImports }) =>
+    host.createLanguageSnapshot(documents, { implicitImports }),
+  context: {
+    documents: [{ uri: "nx://host/catalog.nx", identity: "catalog.nx", source: catalogSource }],
+    implicitImports: ["catalog.nx"]
+  },
   cacheSize: 8
 });
 
@@ -52,21 +56,48 @@ client that discards answers by version still sees its own.
 sends the same text many times a second; keeping the last few sets is what makes answering cheap on
 one thread.
 
-## Preludes
+## Host context
 
-A host that prepends context declarations to the queried document passes them as `prelude`. Every
-answer comes back in the document's own coordinates:
+A host with declarations of its own — a catalog of external components, say — passes them as
+`context`: `documents` that join every query's document set without the client sending them, and
+`implicitImports`, the identities every queried document imports as if it began with a wildcard
+import of each.
 
-- a queried position is shifted into the combined text before the snapshot sees it;
-- a hover range, a document symbol's ranges and a diagnostic's range are shifted back out;
-- a diagnostic whose range lies inside the prelude is the host's fault, not the author's, and is
-  reported as a workspace diagnostic labelled `prelude` with no range, rather than positioned on a
-  line the author cannot see;
-- a related location pointing into the queried document is shifted wherever it appears.
+Nothing is prepended and no position is ever rewritten:
 
-`preludeOffsets` normalizes the prelude to end with a newline and adds a blank line after it, so the
-document's first line is always its own whatever the prelude ended with. Offsets are counted in
-lines and in UTF-8 bytes.
+- a queried position is what the client sent, and the snapshot is asked exactly that;
+- a hover range, a document symbol's ranges and a diagnostic's range come back in the queried
+  document's own lines and columns;
+- a diagnostic located in a context document is reported under **that document's** URI, with its own
+  coordinates, so a fault in the host's declarations is never shown on a line the author wrote;
+- a related location needs no adjustment, wherever it points.
+
+A query whose documents include one with a context document's URI or identity is refused: the client
+cannot replace the host's context. `contextCollision(documents, context)` is the check, and the HTTP
+handler answers `400 invalid-request` naming the identity.
+
+### Migrating from `prelude`
+
+The `prelude` option prepended the host's text to the queried document and shifted every position.
+It is removed, and a call that still passes it fails at construction with a message naming `context`.
+The replacement is two lines:
+
+```ts
+// Before
+createSnapshotLanguageService({ createSnapshot, prelude: { source: catalogSource } });
+
+// After
+createSnapshotLanguageService({
+  createSnapshot,
+  context: {
+    documents: [{ uri: "nx://host/catalog.nx", identity: "catalog.nx", source: catalogSource }],
+    implicitImports: ["catalog.nx"]
+  }
+});
+```
+
+`preludeOffsets`, `withPrelude`, `shiftPositionIn`, `shiftRangeOut` and `PRELUDE_ORIGIN` are removed
+with it; nothing shifts any more, so there is nothing for them to do.
 
 ## Building and testing
 

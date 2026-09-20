@@ -50,6 +50,7 @@ const JS_PROGRAM_MODULE_RESERVED_RUNTIME_NAMES: &[&str] = &[
     "nxNullableSchema",
     "nxNumberSchema",
     "nxRejectUnknownFields",
+    "nxRangeMap",
     "nxRecordSchema",
     "nxRuntimeError",
     "nxStringSchema",
@@ -3156,11 +3157,22 @@ fn emit_expression(
             index,
             iterable,
             body,
+            over_range,
         } => {
             let index_name = index.as_deref().unwrap_or("_index");
+            // A range is not a JavaScript iterable, so counting it is a helper that takes the
+            // callback rather than an array that is then mapped. Only the call around the callback
+            // differs, so the body is emitted once either way.
+            let (open, close) = if *over_range {
+                ("nxRangeMap(", ", ")
+            } else {
+                ("Array.from(", ").map(")
+            };
             format!(
-                "Array.from({}).map(({}, {}) => {})",
+                "{}{}{}({}, {}) => {})",
+                open,
                 emit_expression(current_module_id, iterable, context),
+                close,
                 safe_identifier(item),
                 safe_identifier(index_name),
                 emit_expression(current_module_id, body, context)
@@ -4295,7 +4307,15 @@ fn collect_expression_runtime_helpers(
                 collect_expression_runtime_helpers(element, output);
             }
         }
-        CodegenExpressionKind::For { iterable, body, .. } => {
+        CodegenExpressionKind::For {
+            iterable,
+            body,
+            over_range,
+            ..
+        } => {
+            if *over_range {
+                output.insert("nxRangeMap");
+            }
             collect_expression_runtime_helpers(iterable, output);
             collect_expression_runtime_helpers(body, output);
         }

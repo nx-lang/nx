@@ -539,6 +539,10 @@ module.exports = grammar({
         [prec.left, 120, '%'],
         [prec.left, 110, '+'],
         [prec.left, 110, '-'],
+        // The range operators sit between the additive and relational levels, so an arithmetic
+        // operand needs no parentheses and a comparison of two ranges reads left to right.
+        [prec.left, 100, '..='],
+        [prec.left, 100, '..'],
         [prec.left, 90, '<'],
         [prec.left, 90, '>'],
         [prec.left, 90, '<='],

@@ -65,6 +65,11 @@ function withSource(source, runTest) {
   }
 }
 
+// Only the program's own image is read back. A source that reaches a prelude declaration also emits
+// `prelude.nxir` beside it, and deliberately nothing here loads it: `prepareNxIrProgram` links with
+// no resolver, so the runtime's built-in prelude supplies that slot — which is how a host runs one
+// of these images too. No case below reaches the prelude today; one that does gets the fallback for
+// free, so do not "fix" this by resolving `prelude.nxir` from disk.
 function emitIr(dir, sourcePath) {
   const outputPath = join(dir, "ir");
   runNxCli(["codegen", sourcePath, "--target", "nx-ir", "--output", outputPath]);

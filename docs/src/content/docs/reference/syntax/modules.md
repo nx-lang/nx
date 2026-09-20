@@ -47,6 +47,35 @@ export let accentName = "hello"
 - Declarations are internal by default, so helper bindings stay inside the library unless marked
   `export`.
 
+## Built-in declarations
+NX's built-in types are declared in the **NX prelude**, a module every file imports automatically.
+Nothing names it and nothing enables it: its exported declarations are simply in scope in every
+module, in every build — a single file, a workspace, a library, an editor session.
+
+- The prelude lives under the reserved `@nx/` root, as the module `@nx/prelude.nx`. A workspace may
+  not supply a module under that identity.
+- **Its names are shadowable.** A declaration of your own, or a name from any import you wrote, takes
+  the name silently, exactly as it would over a wildcard import. There is no diagnostic and no
+  ambiguity: a prelude name is bound last, and only where nothing else claimed it.
+- Shadowing a built-in disables the syntax that means it. A module that declares its own `Range`
+  cannot use `..` or `..=` there, because those operators construct *the prelude's* `Range`; the
+  element form still works, and every other module is unaffected.
+- A library's exports are its own declarations. The prelude is never re-exported.
+
+The prelude is one ordinary NX declaration:
+
+```nx
+export type Range = {
+  T:type
+  start:T
+  end:T
+  endInclusive:boolean
+}
+```
+
+See [Ranges](/reference/syntax/types#ranges) for what `Range` means and
+[`for`](/reference/syntax/for#counting-with-a-range) for counting over one.
+
 ## Root Elements
 - A root element at the end of the file behaves like `main`. Tooling can render it immediately or expose it as the module default.
 - Alternatively, export named bindings and let consumers choose what to render.

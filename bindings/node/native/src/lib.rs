@@ -238,13 +238,34 @@ impl NativeNxLanguageSnapshot {
         })
     }
 
-    /// Builds a snapshot that sees every library `build_context` makes visible.
+    /// Builds a snapshot whose documents each implicitly import `implicit_imports`.
+    #[napi(factory)]
+    pub fn with_implicit_imports(
+        documents: Vec<NativeLanguageDocument>,
+        implicit_imports: Vec<String>,
+    ) -> Result<Self> {
+        let build_context = ProgramBuildContext::empty().with_implicit_imports(implicit_imports);
+        let snapshot = language_snapshot(documents)?.with_build_context(build_context);
+        Ok(Self {
+            snapshot: Some(snapshot),
+        })
+    }
+
+    /// Builds a snapshot that sees every library `build_context` makes visible, and whose documents
+    /// each implicitly import `implicit_imports`.
     #[napi(factory)]
     pub fn with_build_context(
         documents: Vec<NativeLanguageDocument>,
         build_context: &NativeNxProgramBuildContext,
+        implicit_imports: Option<Vec<String>>,
     ) -> Result<Self> {
-        let build_context = build_context.build_context()?.clone();
+        let mut build_context = build_context.build_context()?.clone();
+        // An empty list leaves the context's own implicit imports alone, as a workspace call does:
+        // passing `[]` is how a caller says "nothing of mine", not "drop what the context carries".
+        if let Some(implicit_imports) = implicit_imports.filter(|identities| !identities.is_empty())
+        {
+            build_context = build_context.with_implicit_imports(implicit_imports);
+        }
         let snapshot = language_snapshot(documents)?.with_build_context(build_context);
         Ok(Self {
             snapshot: Some(snapshot),

@@ -7,8 +7,11 @@ import { fileURLToPath } from "node:url";
 
 import {
   NX_IR_NONE,
+  NX_IR_REQUIRED_FEATURE_RANGES_V1,
   NX_IR_RUNTIME_ABI,
   NX_IR_SCHEMA_VERSION,
+  NX_PRELUDE_MODULE_IDENTITY,
+  NX_PRELUDE_VERSION,
   NxIrRuntimeError,
   applyComponentStatePatch,
   applyUpdate,
@@ -1338,6 +1341,378 @@ test("a Function record from the host reaches a component prop and its body call
   });
   assertThrows(() => initializeComponent(program, "Section", { Row: { $type: "Function", module: "main.nx", name: "Nope" } }), "'Nope'");
   assertThrows(() => initializeComponent(program, "Section", { Row: "Row" }), "Expected Section props.Row to be a function value");
+});
+
+// ------------------------------------------------------------------------------------------------
+// The built-in prelude, and iterating a range
+// ------------------------------------------------------------------------------------------------
+
+/** A module that constructs `<Range start=… end=… endInclusive=… />` through the prelude's slot. */
+function rangeNode(b: ArtifactBuilder, start: number, end: number, endInclusive: boolean): number {
+  const inclusive = b.node([nodeKinds.bool, endInclusive ? 1 : 0]);
+  return b.node([
+    nodeKinds.record,
+    b.slot(NX_PRELUDE_MODULE_IDENTITY),
+    b.str("Range"),
+    ...b.list([b.property("start", b.int(start)), b.property("end", b.int(end)), b.property("endInclusive", inclusive)]),
+    ...b.content([]),
+  ]);
+}
+
+/** `let root() = { for item[, index] in <range> { body } }`, against the built-in prelude. */
+function rangeLoop(
+  start: number,
+  end: number,
+  endInclusive: boolean,
+  options: { withIndex?: boolean } = {},
+): Uint8Array {
+  const b = new ArtifactBuilder("main.nx", [{ identity: NX_PRELUDE_MODULE_IDENTITY, version: NX_PRELUDE_VERSION, fingerprint: "1" }]);
+  const iterable = rangeNode(b, start, end, endInclusive);
+  const item = b.node([nodeKinds.slot, 0, b.str("item")]);
+  const body =
+    options.withIndex === true
+      ? b.node([nodeKinds.binary, 0, item, b.node([nodeKinds.slot, 1, b.str("index")])])
+      : item;
+  b.fn(
+    "root",
+    b.node([
+      nodeKinds.forRange,
+      0,
+      b.str("item"),
+      options.withIndex === true ? 1 : NX_IR_NONE,
+      options.withIndex === true ? b.str("index") : NX_IR_NONE,
+      iterable,
+      body,
+    ]),
+  );
+  return b.build({ requiredFeatures: [NX_IR_REQUIRED_FEATURE_RANGES_V1] });
+}
+
+test("a self-contained program whose only other module is the prelude prepares with no resolver", () => {
+  const b = new ArtifactBuilder("main.nx", [{ identity: NX_PRELUDE_MODULE_IDENTITY, version: NX_PRELUDE_VERSION, fingerprint: "1" }]);
+  b.fn("root", rangeNode(b, 1, 5, false));
+
+  const program = prepareNxIrProgram(b.build());
+  assertEqual(evaluateFunction(program, "root"), { $type: "Range", start: 1, end: 5, endInclusive: false });
+});
+
+test("a host resolver that knows nothing of the prelude still links a snippet and a catalog", () => {
+  const catalogModule = prepareNxIrModule(catalog("9"));
+  const b = new ArtifactBuilder("input.nx", [
+    { identity: "drawnui.nx", version: "9", fingerprint: "7" },
+    { identity: NX_PRELUDE_MODULE_IDENTITY, version: NX_PRELUDE_VERSION, fingerprint: "1" },
+  ]);
+  const hi = b.string("hi");
+  b.fn(
+    "label",
+    b.node([nodeKinds.component, b.slot("drawnui.nx"), b.str("SkiaLabel"), ...b.list([b.property("Text", hi)]), ...b.content([])]),
+  );
+  b.fn("span", rangeNode(b, 0, 2, true));
+
+  // The host resolves its catalog and nothing else; the runtime serves the prelude.
+  const program = linkNxIrProgram(prepareNxIrModule(b.build()), {
+    resolve: (identity) => (identity === "drawnui.nx" ? catalogModule : undefined),
+  });
+  assertEqual(fields(evaluateFunction(program, "label"))["$type"], "SkiaLabel");
+  assertEqual(evaluateFunction(program, "span"), { $type: "Range", start: 0, end: 2, endInclusive: true });
+});
+
+test("a host that resolves the prelude itself overrides the built-in one", () => {
+  const own = new ArtifactBuilder(NX_PRELUDE_MODULE_IDENTITY, [], NX_PRELUDE_VERSION);
+  const object = own.primitive("object");
+  own.record("Range", [
+    own.field("start", object, { required: true }),
+    own.field("end", object, { required: true }),
+    own.field("endInclusive", own.primitive("boolean"), { required: true }),
+    // A field the built-in prelude does not have, so the module in use is unmistakable.
+    own.field("label", own.primitive("string"), { default: own.string("host") }),
+  ]);
+  const hostPrelude = prepareNxIrModule(own.build());
+
+  const b = new ArtifactBuilder("main.nx", [{ identity: NX_PRELUDE_MODULE_IDENTITY, version: NX_PRELUDE_VERSION, fingerprint: "1" }]);
+  b.fn("root", rangeNode(b, 1, 5, false));
+  const program = linkNxIrProgram(prepareNxIrModule(b.build()), {
+    resolve: (identity) => (identity === NX_PRELUDE_MODULE_IDENTITY ? hostPrelude : undefined),
+  });
+
+  assertEqual(fields(evaluateFunction(program, "root"))["label"], "host");
+});
+
+test("an image compiled against another prelude contract fails linking by version", () => {
+  // The declaration is one this runtime's prelude does hold, so only the version can catch it:
+  // an image built against a `Range` of another shape names `Range` just the same.
+  const b = new ArtifactBuilder("main.nx", [
+    { identity: NX_PRELUDE_MODULE_IDENTITY, version: `${NX_PRELUDE_VERSION}0`, fingerprint: "1" },
+  ]);
+  b.fn("root", rangeNode(b, 1, 5, false));
+
+  const linked = tryLinkNxIrProgram(prepareNxIrModule(b.build()), { resolve: () => undefined });
+  assertEqual(linked.ok, false);
+  if (!linked.ok) {
+    assertEqual(linked.diagnostics[0]!.code, "nx-ir-link-version");
+    assertEqual(linked.diagnostics[0]!.message.includes(NX_PRELUDE_MODULE_IDENTITY), true);
+  }
+});
+
+test("a host that opts into version mismatch links an image from another prelude contract", () => {
+  const b = new ArtifactBuilder("main.nx", [
+    { identity: NX_PRELUDE_MODULE_IDENTITY, version: `${NX_PRELUDE_VERSION}0`, fingerprint: "1" },
+  ]);
+  b.fn("root", rangeNode(b, 1, 5, false));
+
+  const program = linkNxIrProgram(prepareNxIrModule(b.build()), {
+    resolve: () => undefined,
+    allowVersionMismatch: true,
+  });
+  assertEqual(evaluateFunction(program, "root"), { $type: "Range", start: 1, end: 5, endInclusive: false });
+});
+
+test("a prelude declaration the runtime lacks fails linking by name", () => {
+  const b = new ArtifactBuilder("main.nx", [{ identity: NX_PRELUDE_MODULE_IDENTITY, version: NX_PRELUDE_VERSION, fingerprint: "1" }]);
+  b.fn(
+    "root",
+    b.node([
+      nodeKinds.record,
+      b.slot(NX_PRELUDE_MODULE_IDENTITY),
+      b.str("Interval"),
+      ...b.list([]),
+      ...b.content([]),
+    ]),
+  );
+
+  const linked = tryLinkNxIrProgram(prepareNxIrModule(b.build()), { resolve: () => undefined });
+  assertEqual(linked.ok, false);
+  if (!linked.ok) {
+    const message = linked.diagnostics[0]!.message;
+    assertEqual(message.includes(NX_PRELUDE_MODULE_IDENTITY), true);
+    assertEqual(message.includes("Interval"), true);
+  }
+});
+
+test("the range the runtime iterates is the prelude's declaration", () => {
+  // `integerRange` recognizes a range by shape: the name `Range` and three field names, written as
+  // literals. It has nothing else to go on — a canonical value carries `$type` as a bare name with
+  // no module, and the prelude's `T` is erased to `object` in the image, so neither the declaring
+  // module nor the element type is recoverable from the value. Nothing else ties those literals to
+  // `prelude.nx`, so this does: rename a field there and the runtime would stop recognizing ranges
+  // silently, unless this fails first.
+  const b = new ArtifactBuilder("main.nx", [{ identity: NX_PRELUDE_MODULE_IDENTITY, version: NX_PRELUDE_VERSION, fingerprint: "1" }]);
+  b.fn("root", rangeNode(b, 1, 5, false));
+  const program = linkNxIrProgram(prepareNxIrModule(b.build()), { resolve: () => undefined });
+
+  const prelude = program.modulesByIdentity.get(NX_PRELUDE_MODULE_IDENTITY);
+  const range = prelude?.module.declarationsByName.get("Range");
+  if (range === undefined || range.kind.tag !== "record") {
+    throw new Error("the built-in prelude declares Range as a record");
+  }
+  assertEqual(
+    range.kind.fields.map((field) => [field.name, field.ty]),
+    [
+      ["start", { kind: "primitive", name: "object" }],
+      ["end", { kind: "primitive", name: "object" }],
+      ["endInclusive", { kind: "primitive", name: "boolean" }],
+    ],
+  );
+});
+
+test("a half-open and a closed range iterate, and an empty one runs no body", () => {
+  assertEqual(evaluateFunction(prepareNxIrProgram(rangeLoop(0, 4, false)), "root"), [0, 1, 2, 3]);
+  assertEqual(evaluateFunction(prepareNxIrProgram(rangeLoop(1, 3, true)), "root"), [1, 2, 3]);
+  assertEqual(evaluateFunction(prepareNxIrProgram(rangeLoop(5, 2, false)), "root"), []);
+  assertEqual(evaluateFunction(prepareNxIrProgram(rangeLoop(1, 0, true)), "root"), []);
+  assertEqual(evaluateFunction(prepareNxIrProgram(rangeLoop(3, 3, true)), "root"), [3]);
+});
+
+test("the index of a range loop counts from zero", () => {
+  assertEqual(evaluateFunction(prepareNxIrProgram(rangeLoop(5, 8, false, { withIndex: true })), "root"), [5, 7, 9]);
+});
+
+test("a range a host supplied iterates", () => {
+  const b = new ArtifactBuilder("main.nx", [{ identity: NX_PRELUDE_MODULE_IDENTITY, version: NX_PRELUDE_VERSION, fingerprint: "1" }]);
+  const span = b.node([nodeKinds.slot, 0, b.str("span")]);
+  const item = b.node([nodeKinds.slot, 1, b.str("item")]);
+  b.fn(
+    "count",
+    b.node([nodeKinds.forRange, 1, b.str("item"), NX_IR_NONE, NX_IR_NONE, span, item]),
+    [[b.str("span"), b.nominal("Range", NX_PRELUDE_MODULE_IDENTITY), 0]],
+  );
+  const program = prepareNxIrProgram(b.build({ requiredFeatures: [NX_IR_REQUIRED_FEATURE_RANGES_V1] }));
+
+  assertEqual(
+    evaluateFunction(program, "count", [{ $type: "Range", start: 2, end: 4, endInclusive: true }]),
+    [2, 3, 4],
+  );
+});
+
+test("a forRange iterable that is not a range with integer bounds fails evaluation", () => {
+  const b = new ArtifactBuilder("main.nx");
+  const notARange = b.string("nope");
+  const item = b.node([nodeKinds.slot, 0, b.str("item")]);
+  b.fn("root", b.node([nodeKinds.forRange, 0, b.str("item"), NX_IR_NONE, NX_IR_NONE, notARange, item]));
+  const program = prepareNxIrProgram(b.build({ requiredFeatures: [NX_IR_REQUIRED_FEATURE_RANGES_V1] }));
+
+  assertThrows(() => evaluateFunction(program, "root"), "Range record with integer bounds");
+});
+
+/**
+ * Every way a value can fail `integerRange`, reached through an `object`-typed parameter so the
+ * value arrives at the loop exactly as the host wrote it. A `<Range T=…/>`-typed parameter would
+ * not do: nominal normalization rejects a wrong `$type` before the loop is reached, so the
+ * branches below would never run.
+ */
+test("every shape that is not a range with integer bounds fails the same way", () => {
+  const b = new ArtifactBuilder("main.nx");
+  const span = b.node([nodeKinds.slot, 0, b.str("span")]);
+  const item = b.node([nodeKinds.slot, 1, b.str("item")]);
+  b.fn(
+    "count",
+    b.node([nodeKinds.forRange, 1, b.str("item"), NX_IR_NONE, NX_IR_NONE, span, item]),
+    [[b.str("span"), b.primitive("object"), 0]],
+  );
+  const program = prepareNxIrProgram(b.build({ requiredFeatures: [NX_IR_REQUIRED_FEATURE_RANGES_V1] }));
+
+  const refused: readonly NxCanonicalValue[] = [
+    null,
+    42,
+    "nope",
+    [1, 2, 3],
+    // An object that is not a range, and one named as some other record.
+    { start: 0, end: 3, endInclusive: false },
+    { $type: "Interval", start: 0, end: 3, endInclusive: false },
+    // Bounds that are not integers, or are past the exactly-representable range.
+    { $type: "Range", start: 0.5, end: 3, endInclusive: false },
+    { $type: "Range", start: 0, end: 2.5, endInclusive: false },
+    { $type: "Range", start: 0, end: Number.MAX_SAFE_INTEGER + 10, endInclusive: false },
+    { $type: "Range", start: Number.NaN, end: 3, endInclusive: false },
+    { $type: "Range", start: 0, end: "3", endInclusive: false },
+    // `endInclusive` missing, null, or not a boolean.
+    { $type: "Range", start: 0, end: 3 },
+    { $type: "Range", start: 0, end: 3, endInclusive: null },
+    { $type: "Range", start: 0, end: 3, endInclusive: "yes" },
+  ];
+  for (const value of refused) {
+    const error = assertThrows(() => evaluateFunction(program, "count", [value]), "Range record with integer bounds");
+    assertEqual(error.diagnostics[0]!.code, "nx-ir-for");
+  }
+
+  // The shape that does work, so the refusals above are the value's doing and not the fixture's.
+  assertEqual(evaluateFunction(program, "count", [{ $type: "Range", start: 2, end: 4, endInclusive: true }]), [2, 3, 4]);
+});
+
+/**
+ * The count is computed once rather than compared against `end` each turn, which is what lets a
+ * closed range ending at the largest exact integer terminate — `i <= end` would never go false
+ * there, because `MAX_SAFE_INTEGER + 1` is `MAX_SAFE_INTEGER` as a double.
+ */
+test("a closed range ending at the largest exact integer terminates", () => {
+  const b = new ArtifactBuilder("main.nx");
+  const span = b.node([nodeKinds.slot, 0, b.str("span")]);
+  const item = b.node([nodeKinds.slot, 1, b.str("item")]);
+  b.fn(
+    "count",
+    b.node([nodeKinds.forRange, 1, b.str("item"), NX_IR_NONE, NX_IR_NONE, span, item]),
+    [[b.str("span"), b.primitive("object"), 0]],
+  );
+  const program = prepareNxIrProgram(b.build({ requiredFeatures: [NX_IR_REQUIRED_FEATURE_RANGES_V1] }));
+
+  const top = Number.MAX_SAFE_INTEGER;
+  assertEqual(evaluateFunction(program, "count", [{ $type: "Range", start: top - 2, end: top, endInclusive: true }]), [
+    top - 2,
+    top - 1,
+    top,
+  ]);
+});
+
+// The limit is a maximum, not a bound to stay under: `count > limit` refuses, so a range of exactly
+// the limit runs.
+test("a range of exactly the limit runs and one integer more is refused", () => {
+  assertEqual(
+    evaluateFunction(prepareNxIrProgram(rangeLoop(0, 10, false)), "root", [], { maxRangeLength: 10 }),
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+  );
+  const error = assertThrows(
+    () => evaluateFunction(prepareNxIrProgram(rangeLoop(0, 11, false)), "root", [], { maxRangeLength: 10 }),
+    "maxRangeLength",
+  );
+  assertEqual(error.diagnostics[0]!.code, "nx-ir-resource-limit");
+  assertEqual(error.diagnostics[0]!.message.includes("11 times"), true);
+});
+
+// The limit reaches a component's rendered body, not only a function call and a state default.
+test("a lowered range limit holds while a component body is evaluated", () => {
+  const b = new ArtifactBuilder("main.nx", [{ identity: NX_PRELUDE_MODULE_IDENTITY, version: NX_PRELUDE_VERSION, fingerprint: "1" }]);
+  const item = b.node([nodeKinds.slot, 0, b.str("item")]);
+  const body = b.node([
+    nodeKinds.forRange,
+    0,
+    b.str("item"),
+    NX_IR_NONE,
+    NX_IR_NONE,
+    rangeNode(b, 0, 50, false),
+    item,
+  ]);
+  b.component("Widget", [], [], body);
+  const program = prepareNxIrProgram(b.build({ requiredFeatures: [NX_IR_REQUIRED_FEATURE_RANGES_V1] }));
+
+  const error = assertThrows(() => evaluateComponent(program, "Widget", {}, {}, { maxRangeLength: 10 }), "maxRangeLength");
+  assertEqual(error.diagnostics[0]!.code, "nx-ir-resource-limit");
+  assertEqual(evaluateComponent(program, "Widget", {}, {}).rendered, Array.from({ length: 50 }, (_, index) => index));
+});
+
+// A default is program code like any other, so the host's limit holds while it is evaluated: a
+// `forRange` in a state default would otherwise run under the built-in million whatever the host
+// set to bound untrusted IR.
+test("a lowered range limit holds while a state default is evaluated", () => {
+  const b = new ArtifactBuilder("main.nx", [{ identity: NX_PRELUDE_MODULE_IDENTITY, version: NX_PRELUDE_VERSION, fingerprint: "1" }]);
+  const item = b.node([nodeKinds.slot, 0, b.str("item")]);
+  const items = b.node([
+    nodeKinds.forRange,
+    0,
+    b.str("item"),
+    NX_IR_NONE,
+    NX_IR_NONE,
+    rangeNode(b, 0, 50, false),
+    item,
+  ]);
+  const body = b.node([nodeKinds.element, 0, b.str("div"), ...b.list([]), ...b.content([])]);
+  b.component("Widget", [], [b.field("items", b.array(b.primitive("int")), { default: items })], body);
+  const program = prepareNxIrProgram(b.build({ requiredFeatures: [NX_IR_REQUIRED_FEATURE_RANGES_V1] }));
+
+  const error = assertThrows(
+    () => initializeComponent(program, "Widget", {}, { maxRangeLength: 10 }),
+    "maxRangeLength",
+  );
+  assertEqual(error.diagnostics[0]!.code, "nx-ir-resource-limit");
+  assertEqual(initializeComponent(program, "Widget", {}).state.items, Array.from({ length: 50 }, (_, index) => index));
+});
+
+test("an oversized range is refused before the body runs, and a raised limit admits it", () => {
+  const program = prepareNxIrProgram(rangeLoop(0, 2_000_000, false));
+
+  const error = assertThrows(() => evaluateFunction(program, "root"), "maxRangeLength");
+  assertEqual(error.diagnostics[0]!.code, "nx-ir-resource-limit");
+  assertEqual(error.diagnostics[0]!.message.includes("1000000"), true);
+
+  const raised = evaluateFunction(program, "root", [], { maxRangeLength: 2_500_000 });
+  assertEqual(Array.isArray(raised) && raised.length, 2_000_000);
+});
+
+/// A runtime that does not know a feature refuses the image by naming it. `knownFeatures` is private
+/// to the module — exporting a mutable set so a test could delete from it would weaken the API — so
+/// the two halves are checked separately: this runtime accepts `ranges-v1`, and the refusal path
+/// names the feature it does not know.
+test("a feature this runtime does not know is refused by name, and ranges-v1 is one it knows", () => {
+  const b = new ArtifactBuilder("main.nx");
+  b.fn("root", b.int(1));
+
+  assertEqual(tryPrepareNxIrProgram(b.build({ requiredFeatures: [NX_IR_REQUIRED_FEATURE_RANGES_V1] })).ok, true);
+
+  const future = tryPrepareNxIrProgram(b.build({ requiredFeatures: ["ranges-v2"] }));
+  assertEqual(future.ok, false);
+  if (!future.ok) {
+    assertEqual(future.diagnostics[0]!.code, "nx-ir-required-feature");
+    assertEqual(future.diagnostics[0]!.message, "Unsupported NX IR required feature 'ranges-v2'.");
+  }
 });
 
 let failures = 0;

@@ -456,6 +456,39 @@ export function nxDiffRecords(before: unknown, after: unknown): any {
 }
 
 /**
+ * Runs `body` once per integer in a range record, in order, and collects the results.
+ *
+ * The count is computed once, so a closed range ending at the largest exact integer terminates, and
+ * the integers themselves are never collected into a list. An empty or reversed range runs the body
+ * no times.
+ *
+ * The range is not checked against the prelude's `$type`, where the IR runtime checks it, because
+ * the emitter writes this call only at a site the checker proved to be a range of an integer type.
+ * The IR runtime evaluates images it did not emit, so it guards; generated code is its own output.
+ */
+export function nxRangeMap<T>(
+  range: {
+    readonly $type?: string;
+    readonly start: number;
+    readonly end: number;
+    readonly endInclusive: boolean;
+  },
+  body: (item: number, index: number) => T,
+): T[] {
+  const count =
+    range.end > range.start
+      ? range.end - range.start + (range.endInclusive ? 1 : 0)
+      : range.end === range.start && range.endInclusive
+        ? 1
+        : 0;
+  const results: T[] = [];
+  for (let offset = 0; offset < count; offset += 1) {
+    results.push(body(range.start + offset, offset));
+  }
+  return results;
+}
+
+/**
  * Integer division, which truncates toward zero as the interpreter and the IR runtime's `idiv` do.
  */
 export function nxIntDiv(dividend: number, divisor: number): number {
@@ -886,6 +919,31 @@ export function nxDiffRecords(before, after) {
     }
   }
   return output;
+}
+
+/**
+ * Runs `body` once per integer in a range record, in order, and collects the results.
+ *
+ * The count is computed once, so a closed range ending at the largest exact integer terminates, and
+ * the integers themselves are never collected into a list. An empty or reversed range runs the body
+ * no times.
+ *
+ * The range is not checked against the prelude's `$type`, where the IR runtime checks it, because
+ * the emitter writes this call only at a site the checker proved to be a range of an integer type.
+ * The IR runtime evaluates images it did not emit, so it guards; generated code is its own output.
+ */
+export function nxRangeMap(range, body) {
+  const count =
+    range.end > range.start
+      ? range.end - range.start + (range.endInclusive ? 1 : 0)
+      : range.end === range.start && range.endInclusive
+        ? 1
+        : 0;
+  const results = [];
+  for (let offset = 0; offset < count; offset += 1) {
+    results.push(body(range.start + offset, offset));
+  }
+  return results;
 }
 
 /**

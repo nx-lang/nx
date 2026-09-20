@@ -378,7 +378,9 @@ ValueForExpression ::=
 PrefixUnaryExpression ::=
     ( "-" | "!" ) ValueExpression
 BinaryExpression ::=
-    ValueExpression ( "+" | "-" | "*" | "/" | "%" | ">" | "<" | ">=" | "<=" | "==" | "!=" | "&&" | "||" ) ValueExpression
+    ValueExpression ( "+" | "-" | "*" | "/" | "%" | ".." | "..=" | ">" | "<" | ">=" | "<=" | "==" | "!=" | "&&" | "||" ) ValueExpression
+    (* ".." and "..=" build the built-in Range record; they bind looser than "+"/"-" and tighter
+       than the comparisons, so `0..n + 1` is `0..(n + 1)`. *)
 MemberAccess ::=
     ValueExpression "." Identifier  (* includes property/field access and union case shorthand; semantic analysis distinguishes *)
 (* An argument may be a braced value, so a function takes a list the same way a property is bound

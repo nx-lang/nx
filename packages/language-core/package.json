@@ -1,7 +1,7 @@
 {
   "name": "@nx-lang/language-core",
   "version": "0.1.0",
-  "description": "Transport-free NX language query answering: prelude coordinates, the snapshot cache, and an in-process NxLanguageService.",
+  "description": "Transport-free NX language query answering: host context, the snapshot cache, and an in-process NxLanguageService.",
   "license": "MIT",
   "homepage": "https://nx-lang.dev",
   "repository": {

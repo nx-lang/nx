@@ -87,29 +87,34 @@ a library registry gets hover, completions and diagnostics that know those modul
 - **THEN** names declared only in a library SHALL be treated as unresolved, as the compiler treats
   them
 
-### Requirement: A prelude document is prepended transparently
-The factory SHALL accept an optional prelude — NX source that is placed ahead of the queried
-document's text before analysis, for hosts whose context declarations cannot yet be imported without
-loss. When a prelude is configured, every position in a query SHALL be shifted into the combined
-text, every range in an answer SHALL be shifted back into the queried document's own coordinates, and
-a diagnostic whose range falls inside the prelude SHALL be reported as a prelude-origin diagnostic
-without a range rather than positioned in the queried document.
+### Requirement: Host context is served as implicitly imported documents
+The factory SHALL accept an optional host context: a list of documents, each with a URI and source,
+and a list of identities every queried document imports implicitly. The context documents SHALL be
+part of every query's document set without the client sending them, and a client document with the
+same identity as a context document SHALL be refused as a malformed request. The queried document's
+text SHALL be analyzed exactly as the client sent it, so every position in a query and every range
+in an answer is in the document's own coordinates with no shifting. A diagnostic located in a
+context document SHALL be reported under that document's URI and SHALL NOT be positioned in the
+queried document.
 
-#### Scenario: Hover through a prelude
-- **WHEN** a prelude declares a component and a hover query lands on a tag naming it in the queried
-  document
+#### Scenario: Hover through host context
+- **WHEN** a context document declares a component, its identity is implicitly imported, and a hover query lands on a tag naming it in the queried document
 - **THEN** the answer SHALL carry that component's signature
-- **AND** the answer's range SHALL be expressed in the queried document's own lines and columns
+- **AND** the answer's range SHALL be in the queried document's own lines and columns
 
-#### Scenario: Completions through a prelude
-- **WHEN** a completion query lands inside an opening tag of a prelude-declared component
+#### Scenario: Completions through host context
+- **WHEN** a completion query lands inside an opening tag of a component a context document declares
 - **THEN** the answer SHALL offer that component's properties
 
-#### Scenario: Prelude-internal diagnostics are not blamed on the document
-- **WHEN** a diagnostics query is answered and a diagnostic's range lies inside the prelude
-- **THEN** it SHALL be reported with a prelude origin and no range
-- **AND** diagnostics positioned in the queried document SHALL carry the document's own coordinates
+#### Scenario: A context document's own error is not blamed on the queried document
+- **WHEN** a context document contains a type error and a diagnostics query is answered for a client document
+- **THEN** the diagnostic SHALL be reported under the context document's URI
+- **AND** diagnostics in the queried document SHALL carry that document's own coordinates
 
-#### Scenario: A prelude with no trailing newline still separates cleanly
-- **WHEN** the prelude source does not end in a newline
-- **THEN** the first line of the queried document SHALL still be its own line in the combined text
+#### Scenario: A client cannot replace a context document
+- **WHEN** a request's documents include one whose URI equals a context document's
+- **THEN** the handler SHALL refuse the request as malformed, naming that URI
+
+#### Scenario: A client cannot replace a context document by naming its identity
+- **WHEN** a context document is declared with a URI and no identity of its own, and a request's documents include one under a different URI whose identity is the one that context document's URI derives to
+- **THEN** the handler SHALL refuse the request as malformed, naming that identity

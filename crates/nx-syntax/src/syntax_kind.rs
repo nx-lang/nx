@@ -194,6 +194,8 @@ pub enum SyntaxKind {
     GT,
     LT_EQ,
     GT_EQ,
+    DOT_DOT,
+    DOT_DOT_EQ,
     AMP_AMP,
     PIPE_PIPE,
     PIPE,
@@ -269,6 +271,8 @@ impl SyntaxKind {
                 | SyntaxKind::GT
                 | SyntaxKind::LT_EQ
                 | SyntaxKind::GT_EQ
+                | SyntaxKind::DOT_DOT
+                | SyntaxKind::DOT_DOT_EQ
                 | SyntaxKind::AMP_AMP
                 | SyntaxKind::PIPE_PIPE
                 | SyntaxKind::PIPE
@@ -518,6 +522,8 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         ">" => SyntaxKind::GT,
         "<=" => SyntaxKind::LT_EQ,
         ">=" => SyntaxKind::GT_EQ,
+        ".." => SyntaxKind::DOT_DOT,
+        "..=" => SyntaxKind::DOT_DOT_EQ,
         "&&" => SyntaxKind::AMP_AMP,
         "||" => SyntaxKind::PIPE_PIPE,
         "|" => SyntaxKind::PIPE,

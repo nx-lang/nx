@@ -242,10 +242,19 @@ fn build_module(
         return None;
     };
 
+    // The prelude's image is the one a runtime ships, so it carries every declaration a using
+    // image could reference, derived ones included, rather than only those this program reached.
+    let is_prelude = matches!(
+        &module.source,
+        ResolvedModuleSource::Library { module_path, .. }
+            if module_path == std::path::Path::new(nx_hir::PRELUDE_MODULE_IDENTITY)
+    );
+
     let mut declarations = Vec::new();
     for (index, item) in lowered_module.items().iter().enumerate() {
         let definition_id = LocalDefinitionId::new(index as u32);
         if is_derived_item(item)
+            && !is_prelude
             && !referenced_updates.contains(&(module.id.as_u32(), definition_id))
         {
             continue;
@@ -1591,11 +1600,17 @@ fn build_expression(
             );
             scope.pop();
             let body = body?;
+            // Whether this loop counts over a range is the checker's answer, carried in the
+            // module's analysis: below the checker the iterable is a record construction like any
+            // other.
+            let over_range = module_artifact_for(artifact, resolved_module)
+                .is_some_and(|module| module.range_for_expressions.contains(&expr_id));
             CodegenExpressionKind::For {
                 item: item.as_str().to_string(),
                 index: index.as_ref().map(|name| name.as_str().to_string()),
                 iterable: Box::new(iterable),
                 body: Box::new(body),
+                over_range,
             }
         }
         ast::Expr::Index { base, index, .. } => {
@@ -1781,6 +1796,16 @@ fn build_expression(
                 resolved_module,
                 *span,
                 "unresolved contextual name cannot be emitted",
+            ));
+            return None;
+        }
+        // A range expression is rewritten into a record construction after checking, so one
+        // reaching here means analysis was skipped.
+        ast::Expr::Range { span, .. } => {
+            diagnostics.push(unsupported_diagnostic(
+                resolved_module,
+                *span,
+                "a range expression must be rewritten into a record construction before emission",
             ));
             return None;
         }

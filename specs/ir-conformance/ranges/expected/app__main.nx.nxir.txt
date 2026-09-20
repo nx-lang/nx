@@ -1,0 +1,30 @@
+module app/main.nx fingerprint 8748983150417179035
+links @nx/prelude.nx version "1" fingerprint 16429037828798365428
+links shared/bounds.nx version "" fingerprint 9215827138459482051
+requires ranges-v1
+entrypoints functions [squares pages none imported equal passedAlong root] components []
+
+function squares() @4:1-4:51 =
+  for i, n in <@nx/prelude.nx:Range end=4 endInclusive=false start=0 /> yield
+    ((i mul i) add n)
+
+function pages() @5:1-5:45 =
+  for page in <@nx/prelude.nx:Range end=3 endInclusive=true start=1 /> yield
+    page
+
+function none() @6:1-6:37 =
+  for i in <@nx/prelude.nx:Range end=2 endInclusive=false start=5 /> yield
+    i
+
+function imported() @7:1-7:48 =
+  for i in shared/bounds.nx:half() yield
+    (i mul 10)
+
+function equal() @8:1-8:31 =
+  shared/bounds.nx:sameBounds()
+
+function passedAlong() @9:1-9:37 =
+  shared/bounds.nx:fractional()
+
+function root() @10:1-10:27 =
+  squares()

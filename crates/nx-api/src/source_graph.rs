@@ -22,6 +22,11 @@ impl LogicalModuleGraph {
         let mut seen = FxHashSet::default();
 
         for (index, module) in modules.iter().enumerate() {
+            if module.identity == nx_hir::PRELUDE_MODULE_IDENTITY {
+                return Err(SourceProviderError::Identity(
+                    WorkspaceIdentityError::ReservedPrelude,
+                ));
+            }
             if !seen.insert(module.identity.clone()) {
                 return Err(SourceProviderError::Identity(
                     WorkspaceIdentityError::Duplicate {
@@ -197,6 +202,25 @@ mod tests {
                     identity: "shared/config.nx".to_string(),
                 }
             ))
+        );
+    }
+
+    #[test]
+    fn graph_rejects_a_workspace_module_under_the_prelude_identity() {
+        let error = LogicalModuleGraph::from_modules(vec![LogicalSourceModule {
+            identity: nx_hir::PRELUDE_MODULE_IDENTITY.to_string(),
+            source: Arc::<str>::from("export type Range = { low:int high:int }"),
+            version: None,
+        }])
+        .expect_err("the prelude's identity is reserved");
+
+        assert_eq!(
+            error,
+            SourceProviderError::Identity(WorkspaceIdentityError::ReservedPrelude)
+        );
+        assert!(
+            error.to_string().contains(nx_hir::PRELUDE_MODULE_IDENTITY),
+            "the diagnostic names the reserved identity: {error}"
         );
     }
 

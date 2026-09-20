@@ -82,6 +82,8 @@ public class NxGenericRecordTests
         {
             Week = new Range<long> { Start = 1, End = 7, EndInclusive = true },
             Spans = [new Range<double> { Start = 0.0, End = 0.5, EndInclusive = false }],
+            Patch = new Range_update<long> { End = 9 },
+            Many = [new Range_update<long> { Start = 2 }],
         };
 
         string json = JsonSerializer.Serialize(schedule);
@@ -90,6 +92,8 @@ public class NxGenericRecordTests
         Assert.Equal(7, read!.Week.End);
         Assert.NotNull(read.Spans);
         Assert.Equal(0.5, read.Spans![0].End);
+        Assert.Equal(9, read.Patch.End.Value);
+        Assert.False(read.Patch.IsSet(Range_property.Start));
 
         byte[] bytes = MessagePackSerializer.Serialize(
             schedule,
@@ -99,6 +103,15 @@ public class NxGenericRecordTests
             cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(7, fromBytes.Week.End);
         Assert.Equal(0.5, fromBytes.Spans![0].End);
+
+        // `Patch` is typed by a generic update companion this module declares, so it carries no
+        // member attribute: MessagePack closes the companion's own `Range_updateFormatter<>` shim
+        // through the resolver. These two assertions are what say it does, and so what lets the
+        // emitter generate the field rather than warn about it.
+        Assert.Equal(9, fromBytes.Patch.End.Value);
+        Assert.False(fromBytes.Patch.IsSet(Range_property.Start));
+        Assert.Equal(2, fromBytes.Many[0].Start.Value);
+        Assert.Equal(2, read.Many[0].Start.Value);
     }
 
     /// <summary>

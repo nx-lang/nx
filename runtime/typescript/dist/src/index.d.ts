@@ -8,6 +8,7 @@
  * evaluation API then takes the linked program. A prepared module is never copied by linking, so
  * one prepared catalog serves any number of programs.
  */
+import { NX_PRELUDE_VERSION } from "./prelude-image.js";
 export declare const NX_IR_SCHEMA_VERSION = 4;
 export declare const NX_IR_RUNTIME_ABI = "nx-ir-runtime-v2";
 export declare const NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1 = "update-records-v1";
@@ -16,6 +17,20 @@ export declare const NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1 = "update-intri
 export declare const NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1 = "action-handlers-v1";
 /** Function types, function references as values, and calls of function-typed values by name. */
 export declare const NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1 = "function-values-v1";
+/** Iteration over a range: the `forRange` node. Building a range needs no feature. */
+export declare const NX_IR_REQUIRED_FEATURE_RANGES_V1 = "ranges-v1";
+/** The reserved identity of the NX prelude, the module every NX module sees without an import. */
+export declare const NX_PRELUDE_MODULE_IDENTITY = "@nx/prelude.nx";
+/**
+ * The prelude contract this release carries, which is what a module table that lists the prelude
+ * records for it.
+ *
+ * <para>It names the prelude's declarations rather than its text, so it is unchanged by an edit
+ * that changes no declaration. Linking compares it like any other module's version, which is how a
+ * package whose built-in prelude is a different contract from the one an image was compiled against
+ * is caught at the link rather than at evaluation.</para>
+ */
+export { NX_PRELUDE_VERSION };
 /** The cell value that spells an absent optional operand. */
 export declare const NX_IR_NONE = 4294967295;
 /** The tables whose entries are cells. */
@@ -89,6 +104,7 @@ export declare const nodeKinds: {
     readonly actionHandler: 19;
     readonly text: 20;
     readonly namedCall: 21;
+    readonly forRange: 22;
 };
 export declare const typeKinds: {
     readonly primitive: 0;
@@ -312,7 +328,17 @@ export interface NxLinkOptions {
 }
 export interface NxRuntimeOptions {
     readonly maxCallDepth?: number;
+    /**
+     * The most integers one range may hold when a `forRange` iterates it. One million by default,
+     * which is the interpreter's operation budget.
+     *
+     * <para>A range makes an enormous loop one token long, so the count is checked before the body
+     * runs at all rather than discovered part-way through.</para>
+     */
+    readonly maxRangeLength?: number;
 }
+/** The default of {@link NxRuntimeOptions.maxRangeLength}. */
+export declare const NX_DEFAULT_MAX_RANGE_LENGTH = 1000000;
 /**
  * A handler as the runtime holds it between the render that created it and the dispatch that
  * runs it. Opaque to hosts: it reaches them only as an `ActionHandler` record in canonical output,
@@ -404,7 +430,7 @@ export declare function tryPrepareNxIrProgram(input: Uint8Array | ArrayBuffer): 
 /** The key that identifies one declaration across a program: its module's identity and its name. */
 export declare function declarationKey(linked: LinkedModule, reference: NxIrReference): string;
 export declare function evaluateFunction(program: NxPreparedProgram | NxPreparedModule, name: string, args?: readonly NxCanonicalValue[], options?: NxRuntimeOptions): NxCanonicalValue;
-export declare function constructComponentDescriptor(program: NxPreparedProgram | NxPreparedModule, name: string, props?: Record<string, NxCanonicalValue>, content?: readonly NxCanonicalValue[]): NxCanonicalValue;
+export declare function constructComponentDescriptor(program: NxPreparedProgram | NxPreparedModule, name: string, props?: Record<string, NxCanonicalValue>, content?: readonly NxCanonicalValue[], options?: NxRuntimeOptions): NxCanonicalValue;
 export declare function initializeComponent(program: NxPreparedProgram | NxPreparedModule, name: string, props?: Record<string, NxCanonicalValue>, options?: ComponentInitOptions): ComponentInitResult;
 export declare function evaluateComponent(program: NxPreparedProgram | NxPreparedModule, name: string, props: Record<string, NxCanonicalValue>, state: Record<string, NxCanonicalValue>, options?: NxRuntimeOptions): ComponentEvaluateResult;
 /**
@@ -418,7 +444,7 @@ export declare function evaluateComponent(program: NxPreparedProgram | NxPrepare
  * throws before anything is returned, so the instance given stays the state of record.
  */
 export declare function dispatchComponentActions(program: NxPreparedProgram | NxPreparedModule, instance: NxComponentInstance, batch: readonly NxCanonicalValue[], options?: NxRuntimeOptions): ComponentDispatchResult;
-export declare function normalizeComponentState(program: NxPreparedProgram | NxPreparedModule, name: string, state: Record<string, NxCanonicalValue>): Record<string, NxCanonicalValue>;
+export declare function normalizeComponentState(program: NxPreparedProgram | NxPreparedModule, name: string, state: Record<string, NxCanonicalValue>, options?: NxRuntimeOptions): Record<string, NxCanonicalValue>;
 /**
  * Applies a patch to host-owned component state and returns the validated next state.
  *
@@ -426,7 +452,7 @@ export declare function normalizeComponentState(program: NxPreparedProgram | NxP
  * `{ $type: "<Component>.Update", ... }`. Either way a present field replaces the current value, an
  * absent one keeps it, and a present `null` sets a nullable field to `null`.
  */
-export declare function applyComponentStatePatch(program: NxPreparedProgram | NxPreparedModule, name: string, currentState: Record<string, NxCanonicalValue>, patch: Record<string, NxCanonicalValue>): Record<string, NxCanonicalValue>;
+export declare function applyComponentStatePatch(program: NxPreparedProgram | NxPreparedModule, name: string, currentState: Record<string, NxCanonicalValue>, patch: Record<string, NxCanonicalValue>, options?: NxRuntimeOptions): Record<string, NxCanonicalValue>;
 /**
  * Calls the function a canonical `Function` record names with arguments keyed by parameter name,
  * and returns the canonical result. An argument the function does not declare is dropped, as the

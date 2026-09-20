@@ -26,6 +26,7 @@ use nx_types::{Primitive, Type};
 use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
+use std::path::Path;
 
 pub const NX_IR_SCHEMA_VERSION: u32 = 4;
 pub const NX_IR_RUNTIME_ABI: &str = "nx-ir-runtime-v2";
@@ -45,6 +46,10 @@ pub const NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1: &str = "action-handlers-v1"
 /// A module carrying a function type, a function referenced as a value, or a call of a
 /// function-typed value by name, which a runtime that predates function values cannot run.
 pub const NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1: &str = "function-values-v1";
+
+/// Required by a module that iterates a range, so a runtime that predates ranges refuses the module
+/// by name rather than failing on an unknown node.
+pub const NX_IR_REQUIRED_FEATURE_RANGES_V1: &str = "ranges-v1";
 
 /// The kind numbers of schema 4. A number, once assigned, is never reused for anything else.
 pub mod kinds {
@@ -72,6 +77,7 @@ pub mod kinds {
         pub const ACTION_HANDLER: i64 = 19;
         pub const TEXT: i64 = 20;
         pub const NAMED_CALL: i64 = 21;
+        pub const FOR_RANGE: i64 = 22;
 
         pub const NAMES: &[(i64, &str)] = &[
             (NULL, "null"),
@@ -96,6 +102,7 @@ pub mod kinds {
             (ACTION_HANDLER, "actionHandler"),
             (TEXT, "text"),
             (NAMED_CALL, "namedCall"),
+            (FOR_RANGE, "forRange"),
         ];
     }
 
@@ -445,12 +452,33 @@ pub fn build_nx_ir_artifacts(
     options: &NxIrEmitOptions,
 ) -> Result<Vec<NxIrArtifact>, CodegenError> {
     validate_ir_program(program)?;
-    let modules = selected_modules(program, options)?;
-    let mut artifacts = Vec::with_capacity(modules.len());
-    for module in modules {
+    let selection = selected_modules(program, options)?;
+    let mut artifacts = Vec::with_capacity(selection.modules.len());
+    for module in selection.modules {
         artifacts.push(ModuleEmitter::new(program, module, options).emit()?);
     }
+    // An every-module request takes the prelude only when some module it emitted reached a prelude
+    // declaration, so a program that uses none emits exactly what it emitted before the prelude
+    // existed. A request that names the prelude gets it either way.
+    if let Some(prelude) = selection.prelude_when_referenced {
+        let referenced = artifacts.iter().any(|artifact| {
+            artifact
+                .modules
+                .iter()
+                .skip(1)
+                .any(|entry| entry.identity == nx_hir::PRELUDE_MODULE_IDENTITY)
+        });
+        if referenced {
+            artifacts.push(ModuleEmitter::new(program, prelude, options).emit()?);
+        }
+    }
     Ok(artifacts)
+}
+
+/// The modules an emit request selects, and the prelude when the request takes it conditionally.
+struct ModuleSelection<'a> {
+    modules: Vec<&'a CodegenModule>,
+    prelude_when_referenced: Option<&'a CodegenModule>,
 }
 
 impl NxIrArtifact {
@@ -488,16 +516,24 @@ impl NxIrArtifact {
 fn selected_modules<'a>(
     program: &'a CodegenProgram,
     options: &NxIrEmitOptions,
-) -> Result<Vec<&'a CodegenModule>, CodegenError> {
+) -> Result<ModuleSelection<'a>, CodegenError> {
     let by_identity = program
         .modules
         .iter()
         .map(|module| (module_identity(module), module))
         .collect::<BTreeMap<_, _>>();
+    let mut prelude_when_referenced = None;
     let identities = match &options.modules {
         None => vec![program.entry_identity.clone()],
         Some(identities) if identities.is_empty() => {
             let mut all = by_identity.keys().cloned().collect::<Vec<_>>();
+            prelude_when_referenced = by_identity
+                .get(nx_hir::PRELUDE_MODULE_IDENTITY)
+                .copied()
+                .filter(|_| program.entry_identity != nx_hir::PRELUDE_MODULE_IDENTITY);
+            if prelude_when_referenced.is_some() {
+                all.retain(|identity| identity != nx_hir::PRELUDE_MODULE_IDENTITY);
+            }
             // The entry module leads, so a caller reading the first artifact reads the program's.
             all.retain(|identity| identity != &program.entry_identity);
             all.insert(0, program.entry_identity.clone());
@@ -521,7 +557,10 @@ fn selected_modules<'a>(
         }
     }
     if diagnostics.is_empty() {
-        Ok(modules)
+        Ok(ModuleSelection {
+            modules,
+            prelude_when_referenced,
+        })
     } else {
         Err(CodegenError::new(diagnostics))
     }
@@ -530,6 +569,13 @@ fn selected_modules<'a>(
 fn module_identity(module: &CodegenModule) -> String {
     match &module.provenance {
         CodegenModuleProvenance::SourceProvider { identity } => identity.clone(),
+        // The prelude is a library whose root is its reserved identity rather than a directory, so
+        // it is named by that identity wherever a module is named, on every platform.
+        CodegenModuleProvenance::Library { module_path, .. }
+            if module_path == Path::new(nx_hir::PRELUDE_MODULE_IDENTITY) =>
+        {
+            nx_hir::PRELUDE_MODULE_IDENTITY.to_string()
+        }
         CodegenModuleProvenance::Library { module_path, .. } => module_path.display().to_string(),
     }
 }
@@ -550,7 +596,15 @@ fn module_source<'a>(program: &'a CodegenProgram, module: &CodegenModule) -> Opt
 }
 
 /// The version string the host gave a module; `""` for one it gave none, and for a library module.
+///
+/// <para>The prelude is the exception: no host supplies it, so it carries the compiler's
+/// [`nx_hir::PRELUDE_VERSION`] instead. That is what lets linking tell a runtime's built-in prelude
+/// from the one an image was compiled against, through the version check every library already
+/// goes through.</para>
 fn module_version(program: &CodegenProgram, module: &CodegenModule) -> String {
+    if module_identity(module) == nx_hir::PRELUDE_MODULE_IDENTITY {
+        return nx_hir::PRELUDE_VERSION.to_string();
+    }
     module_source_entry(program, module)
         .and_then(|entry| entry.version.clone())
         .unwrap_or_default()
@@ -629,6 +683,21 @@ fn required_features(module: &CodegenModule) -> Vec<String> {
         .any(declaration_uses_function_values)
     {
         features.push(NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1.to_string());
+    }
+    // Building a range needs no feature: that is an ordinary record construction. Iterating one
+    // does, because it is a node a runtime that predates ranges has never seen.
+    if module.declarations.iter().any(|declaration| {
+        declaration_contains(declaration, |expression| {
+            matches!(
+                expression.kind,
+                CodegenExpressionKind::For {
+                    over_range: true,
+                    ..
+                }
+            )
+        })
+    }) {
+        features.push(NX_IR_REQUIRED_FEATURE_RANGES_V1.to_string());
     }
     features
 }
@@ -1563,6 +1632,7 @@ impl<'a> ModuleEmitter<'a> {
                 index,
                 iterable,
                 body,
+                over_range,
             } => {
                 let iterable = self.expression(iterable);
                 self.frame.push();
@@ -1574,14 +1644,15 @@ impl<'a> ModuleEmitter<'a> {
                 };
                 let body = self.expression(body);
                 self.frame.pop();
+                // A range loop is its own kind, with a `for`'s layout: the format grows by a new
+                // kind behind a feature rather than by changing how a runtime reads an old one.
+                let kind = if *over_range {
+                    kinds::node::FOR_RANGE
+                } else {
+                    kinds::node::FOR
+                };
                 IrItem::ints([
-                    kinds::node::FOR,
-                    item_slot,
-                    item_name,
-                    index_slot,
-                    index_name,
-                    iterable,
-                    body,
+                    kind, item_slot, item_name, index_slot, index_name, iterable, body,
                 ])
             }
             // NX has no syntax for an index expression, so nothing reaches here.

@@ -244,6 +244,7 @@ pub(crate) enum WorkspaceIdentityError {
     EmptySegment,
     EscapesRoot,
     Duplicate { identity: String },
+    ReservedPrelude,
 }
 
 impl fmt::Display for WorkspaceIdentityError {
@@ -265,6 +266,13 @@ impl fmt::Display for WorkspaceIdentityError {
                     formatter,
                     "Duplicate workspace identity '{}' after normalization",
                     identity
+                )
+            }
+            Self::ReservedPrelude => {
+                write!(
+                    formatter,
+                    "Workspace identity '{}' is reserved for the NX prelude",
+                    nx_hir::PRELUDE_MODULE_IDENTITY
                 )
             }
         }
@@ -517,6 +525,14 @@ mod tests {
         assert_eq!(
             normalize_workspace_import_identity("app/main.nx", "../../outside.nx"),
             Err(WorkspaceIdentityError::EscapesRoot)
+        );
+    }
+
+    #[test]
+    fn normalization_leaves_the_prelude_identity_unchanged() {
+        assert_eq!(
+            normalize_workspace_identity(nx_hir::PRELUDE_MODULE_IDENTITY),
+            Ok(nx_hir::PRELUDE_MODULE_IDENTITY.to_string())
         );
     }
 }

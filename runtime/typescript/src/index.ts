@@ -9,6 +9,8 @@
  * one prepared catalog serves any number of programs.
  */
 
+import { NX_PRELUDE_IMAGE_BASE64, NX_PRELUDE_VERSION } from "./prelude-image.js";
+
 export const NX_IR_SCHEMA_VERSION = 4;
 export const NX_IR_RUNTIME_ABI = "nx-ir-runtime-v2";
 
@@ -18,6 +20,8 @@ export const NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1 = "update-intrinsics-v1
 export const NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1 = "action-handlers-v1";
 /** Function types, function references as values, and calls of function-typed values by name. */
 export const NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1 = "function-values-v1";
+/** Iteration over a range: the `forRange` node. Building a range needs no feature. */
+export const NX_IR_REQUIRED_FEATURE_RANGES_V1 = "ranges-v1";
 
 const knownFeatures = new Set([
   NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
@@ -25,7 +29,25 @@ const knownFeatures = new Set([
   NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1,
   NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1,
   NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1,
+  NX_IR_REQUIRED_FEATURE_RANGES_V1,
 ]);
+
+/** The reserved identity of the NX prelude, the module every NX module sees without an import. */
+export const NX_PRELUDE_MODULE_IDENTITY = "@nx/prelude.nx";
+
+/**
+ * The prelude contract this release carries, which is what a module table that lists the prelude
+ * records for it.
+ *
+ * <para>It names the prelude's declarations rather than its text, so it is unchanged by an edit
+ * that changes no declaration. Linking compares it like any other module's version, which is how a
+ * package whose built-in prelude is a different contract from the one an image was compiled against
+ * is caught at the link rather than at evaluation.</para>
+ */
+export { NX_PRELUDE_VERSION };
+
+/** The `$type` of the prelude's range record. Its field names are `integerRange`'s. */
+const rangeTypeName = "Range";
 
 /** The `$type` of a rendered handler, and of the batch entry that invokes one by token. */
 const actionHandlerTypeName = "ActionHandler";
@@ -522,7 +544,59 @@ export const nodeKinds = {
   actionHandler: 19,
   text: 20,
   namedCall: 21,
+  forRange: 22,
 } as const;
+
+/**
+ * The start and the number of integers of a `Range` record, or `undefined` when the value is not one.
+ *
+ * <para>The count is computed once, so a closed range ending at the largest exact integer terminates,
+ * and it is checked against the host's limit before the loop body runs at all. Bounds must be safe
+ * integers: a `Range` of another type is constructible in NX but does not iterate, and the checker
+ * has already refused one, so a non-integer range here came from a host.</para>
+ *
+ * <para>A range is recognized by shape, and that is the whole of what the value offers. A canonical
+ * value carries `$type` as a bare declaration name with no module — which is why
+ * `nominalShapesFor` can answer with more than one shape — and the prelude's `T` is erased to
+ * `object` in the image, so neither the declaring module nor the element type is recoverable here.
+ * Provenance is decided where it can be: the checker emits a `forRange` node only for a range whose
+ * declaration is the prelude's, and `normalizeNominalValue` resolves a host value's site through
+ * that module-qualified slot. What is left is a host handing a look-alike to a range-typed site,
+ * which is the same exposure every record of a shared name has. `the range the runtime iterates is
+ * the prelude's declaration` holds the names below to `prelude.nx`.</para>
+ *
+ * <para>One consequence is visible only in JavaScript: `4.0` and `4` are one value, so a
+ * `<Range T=float64/>` with integral bounds iterates here where the interpreter, which has a
+ * separate float, refuses it. Checked NX cannot reach that one — `range-not-iterable` refuses a
+ * non-integer range iterable outright — so it takes a host value or a hand-built image. The item's
+ * carrier is a separate matter and checked NX does reach it: items bind as plain numbers, so
+ * `int32` arithmetic over them widens here and wraps under the interpreter. That divergence belongs
+ * to `int32` rather than to ranges — it is the same for any `int32` in this backend — and
+ * `docs/nx-ir-format.md` records it.</para>
+ */
+function integerRange(value: NxCanonicalValue): { start: number; count: number } | undefined {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, NxCanonicalValue>;
+  if (record["$type"] !== rangeTypeName) {
+    return undefined;
+  }
+  const start = record["start"];
+  const end = record["end"];
+  const endInclusive = record["endInclusive"];
+  if (
+    typeof start !== "number" ||
+    typeof end !== "number" ||
+    typeof endInclusive !== "boolean" ||
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(end)
+  ) {
+    return undefined;
+  }
+  const count = end > start ? end - start + (endInclusive ? 1 : 0) : end === start && endInclusive ? 1 : 0;
+  return { start, count };
+}
 
 /** The primitive types a `text` node can name: the ones with a canonical text form. */
 const textTypes = ["int", "int32", "int64", "float32", "float64", "boolean"] as const;
@@ -787,7 +861,18 @@ export interface NxLinkOptions {
 
 export interface NxRuntimeOptions {
   readonly maxCallDepth?: number;
+  /**
+   * The most integers one range may hold when a `forRange` iterates it. One million by default,
+   * which is the interpreter's operation budget.
+   *
+   * <para>A range makes an enormous loop one token long, so the count is checked before the body
+   * runs at all rather than discovered part-way through.</para>
+   */
+  readonly maxRangeLength?: number;
 }
+
+/** The default of {@link NxRuntimeOptions.maxRangeLength}. */
+export const NX_DEFAULT_MAX_RANGE_LENGTH = 1_000_000;
 
 /**
  * A handler as the runtime holds it between the render that created it and the dispatch that
@@ -1081,6 +1166,8 @@ const layouts: Record<NxIrTable, readonly (readonly Op[])[]> = {
     ["ref", "str", "ref", "int", "optRef", "node"],
     ["node", "textType"],
     ["node", { list: PROPERTY }],
+    // A range loop has a `for`'s layout; only what its iterable evaluates to differs.
+    ["int", "str", "optSlot", "optStr", "node", "node"],
   ],
   declarations: [
     ["str", { list: PARAM }, "node"],
@@ -1407,6 +1494,59 @@ class TableReader {
 // Linking
 // ------------------------------------------------------------------------------------------------
 
+/**
+ * The prelude this release was built with, prepared at most once and reused across linked programs.
+ *
+ * <para>Prepared lazily rather than at module load, so a host that links no image that reaches the
+ * prelude never decodes it. A failure is a result rather than a throw, because every caller reaches
+ * it from a `try*` entry point, whose contract is to answer with diagnostics.</para>
+ */
+let preparedPrelude: NxPreparedModule | undefined;
+
+function builtInPrelude(): NxResult<NxPreparedModule> {
+  if (preparedPrelude !== undefined) {
+    return { ok: true, value: preparedPrelude };
+  }
+  const decoded = tryDecodeBase64(NX_PRELUDE_IMAGE_BASE64);
+  if (!decoded.ok) {
+    return decoded;
+  }
+  const prepared = tryPrepareNxIrModule(decoded.value);
+  if (prepared.ok) {
+    preparedPrelude = prepared.value;
+  }
+  return prepared;
+}
+
+/** Decodes standard base64 without assuming `atob` or `Buffer`. */
+function tryDecodeBase64(encoded: string): NxResult<Uint8Array> {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const body = encoded.replace(/=+$/u, "");
+  const bytes = new Uint8Array((body.length * 3) >> 2);
+  let written = 0;
+  let group = 0;
+  let held = 0;
+  for (const character of body) {
+    const value = alphabet.indexOf(character);
+    if (value < 0) {
+      return {
+        ok: false,
+        diagnostics: [
+          diagnostic("nx-ir-prelude-image", `The built-in prelude image is not valid base64: '${character}'.`),
+        ],
+      };
+    }
+    group = (group << 6) | value;
+    held += 6;
+    if (held >= 8) {
+      held -= 8;
+      bytes[written] = (group >> held) & 0xff;
+      written += 1;
+    }
+  }
+  return { ok: true, value: bytes.subarray(0, written) };
+}
+
 export function linkNxIrProgram(entry: NxPreparedModule, options: NxLinkOptions): NxPreparedProgram {
   const result = tryLinkNxIrProgram(entry, options);
   if (!result.ok) {
@@ -1418,6 +1558,29 @@ export function linkNxIrProgram(entry: NxPreparedModule, options: NxLinkOptions)
 export function tryLinkNxIrProgram(entry: NxPreparedModule, options: NxLinkOptions): NxResult<NxPreparedProgram> {
   const diagnostics: NxIrDiagnostic[] = [];
   const modulesByIdentity = new Map<string, LinkedModule>();
+  // The prelude is the one module no host has to supply: the host's resolver is asked first, and
+  // the built-in image answers for the prelude's identity when the host does not. This wraps the
+  // resolver rather than seeding a slot, so it answers at any depth of the link, including for a
+  // module the host did supply.
+  const resolve = (identity: string): NxPreparedModule | undefined => {
+    const supplied = options.resolve(identity);
+    if (supplied !== undefined || identity !== NX_PRELUDE_MODULE_IDENTITY) {
+      return supplied;
+    }
+    const prelude = builtInPrelude();
+    if (prelude.ok) {
+      return prelude.value;
+    }
+    diagnostics.push(
+      diagnostic(
+        "nx-ir-prelude-image",
+        `The built-in prelude could not be prepared: ${prelude.diagnostics
+          .map((reported) => reported.message)
+          .join(" ")}`,
+      ),
+    );
+    return undefined;
+  };
 
   const link = (module: NxPreparedModule): LinkedModule => {
     const existing = modulesByIdentity.get(module.identity);
@@ -1432,7 +1595,7 @@ export function tryLinkNxIrProgram(entry: NxPreparedModule, options: NxLinkOptio
     slots.push(linked);
     module.artifact.modules.slice(1).forEach((entryTable, offset) => {
       const slot = offset + 1;
-      const resolved = options.resolve(entryTable.identity);
+      const resolved = resolve(entryTable.identity);
       if (resolved === undefined) {
         diagnostics.push(
           diagnostic(
@@ -1583,6 +1746,7 @@ export function constructComponentDescriptor(
   name: string,
   props: Record<string, NxCanonicalValue> = {},
   content: readonly NxCanonicalValue[] = [],
+  options: NxRuntimeOptions = {},
 ): NxCanonicalValue {
   const linkedProgram = programOf(program);
   const { declaration, component } = componentDeclaration(linkedProgram, name);
@@ -1598,6 +1762,7 @@ export function constructComponentDescriptor(
     [],
     `${name} props`,
     false,
+      options,
   );
   return canonicalizeRendered({ $type: declaration.name, ...normalized, ...handlerObject(handlers) }).value;
 }
@@ -1617,11 +1782,11 @@ export function initializeComponent(
   const resolved = resolveParentHandlersInProps(props, options.parent, path);
   const { fields, handlers: handlerProps } = splitHandlerProperties(linkedProgram.entry, declaration, resolved, path);
   const frame: NxCanonicalValue[] = [];
-  const normalizedProps = normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.props, fields, frame, path, false);
+  const normalizedProps = normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.props, fields, frame, path, false, options);
   const state =
     options.state === undefined
-      ? normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.state, {}, frame, `${name} state`, false)
-      : normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.state, { ...options.state }, frame, `${name} state`, true);
+      ? normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.state, {}, frame, `${name} state`, false, options)
+      : normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.state, { ...options.state }, frame, `${name} state`, true, options);
   const { value: rendered, handlers } = canonicalizeRendered(
     evalNode(component.body, {
       program: linkedProgram,
@@ -1660,8 +1825,8 @@ export function evaluateComponent(
   const path = `${name} props`;
   const { fields } = splitHandlerProperties(linkedProgram.entry, declaration, props, path);
   const frame: NxCanonicalValue[] = [];
-  normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.props, fields, frame, path, false);
-  normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.state, state, frame, `${name} state`, true);
+  normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.props, fields, frame, path, false, options);
+  normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.state, state, frame, `${name} state`, true, options);
   return {
     rendered: canonicalizeRendered(
       evalNode(component.body, {
@@ -1724,7 +1889,7 @@ export function dispatchComponentActions(
       );
       for (const result of results) {
         if (owned && isUpdateRecordFor(result, linkedProgram, ownerKey)) {
-          working = patchComponentState(linkedProgram, linked, declaration, component, working, result as NxRecordObject);
+          working = patchComponentState(linkedProgram, linked, declaration, component, working, result as NxRecordObject, options);
         } else {
           effects.push(result);
         }
@@ -1741,7 +1906,7 @@ export function dispatchComponentActions(
     }
     // The entry is host input, so it is constructed against the emitted action before the handler
     // is looked up: a malformed payload fails whether or not the parent bound one.
-    const action = normalizeActionInput(linkedProgram, resolveReference(linked, emit.action.slot, emit.action.name), object, `${typeName} action`);
+    const action = normalizeActionInput(linkedProgram, resolveReference(linked, emit.action.slot, emit.action.name), object, `${typeName} action`, options);
     const handler = instance.handlerProps.get(handlerPropertyName(emit.name));
     if (handler !== undefined) {
       // The parent bound this handler, so everything it returns belongs to the parent, via the host.
@@ -1784,11 +1949,12 @@ export function normalizeComponentState(
   program: NxPreparedProgram | NxPreparedModule,
   name: string,
   state: Record<string, NxCanonicalValue>,
+  options: NxRuntimeOptions = {},
 ): Record<string, NxCanonicalValue> {
   const linkedProgram = programOf(program);
   const { declaration, component } = componentDeclaration(linkedProgram, name);
   const frame: NxCanonicalValue[] = new Array<NxCanonicalValue>(component.props.length).fill(null);
-  return normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.state, state, frame, `${name} state`, true);
+  return normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.state, state, frame, `${name} state`, true, options);
 }
 
 /**
@@ -1803,10 +1969,11 @@ export function applyComponentStatePatch(
   name: string,
   currentState: Record<string, NxCanonicalValue>,
   patch: Record<string, NxCanonicalValue>,
+  options: NxRuntimeOptions = {},
 ): Record<string, NxCanonicalValue> {
   const linkedProgram = programOf(program);
   const { declaration, component } = componentDeclaration(linkedProgram, name);
-  return patchComponentState(linkedProgram, linkedProgram.entry, declaration, component, currentState, patch);
+  return patchComponentState(linkedProgram, linkedProgram.entry, declaration, component, currentState, patch, options);
 }
 
 /** Applies a patch to a component's state with full validation: what `applyComponentStatePatch` and dispatch share. */
@@ -1817,6 +1984,7 @@ function patchComponentState(
   component: Extract<PreparedDeclarationKind, { tag: "component" }>,
   currentState: Readonly<Record<string, NxCanonicalValue>>,
   patch: Readonly<Record<string, NxCanonicalValue>>,
+  options: NxRuntimeOptions,
 ): Record<string, NxCanonicalValue> {
   const name = declaration.name;
   const { $type: discriminator, ...fields } = patch;
@@ -1831,7 +1999,7 @@ function patchComponentState(
     }
   }
   const frame: NxCanonicalValue[] = new Array<NxCanonicalValue>(component.props.length).fill(null);
-  return normalizeFields(program, linked, declaration, component.state, { ...currentState, ...fields }, frame, `${name} state`, true);
+  return normalizeFields(program, linked, declaration, component.state, { ...currentState, ...fields }, frame, `${name} state`, true, options);
 }
 
 function componentDeclaration(
@@ -2107,6 +2275,38 @@ function evalNode(index: number, context: EvalContext): NxCanonicalValue {
         return evalNode(entry[6]!, context);
       });
     }
+    case nodeKinds.forRange: {
+      const iterable = evalNode(entry[5]!, context);
+      const range = integerRange(iterable);
+      if (range === undefined) {
+        fail(
+          "nx-ir-for",
+          "For expression iterable must evaluate to a Range record with integer bounds.",
+          context,
+          index,
+        );
+      }
+      const limit = context.options.maxRangeLength ?? NX_DEFAULT_MAX_RANGE_LENGTH;
+      if (range.count > limit) {
+        fail(
+          "nx-ir-resource-limit",
+          `Iterating this range would run the loop body ${range.count} times, above the maxRangeLength limit of ${limit}.`,
+          context,
+          index,
+        );
+      }
+      const itemSlot = entry[1]!;
+      const indexSlot = entry[3]!;
+      const results: NxCanonicalValue[] = [];
+      for (let position = 0; position < range.count; position += 1) {
+        context.frame[itemSlot] = range.start + position;
+        if (indexSlot !== NX_IR_NONE) {
+          context.frame[indexSlot] = position;
+        }
+        results.push(evalNode(entry[6]!, context));
+      }
+      return results;
+    }
     case nodeKinds.member: {
       const base = evalNode(entry[1]!, context);
       const member = image.string(entry[2]!);
@@ -2293,7 +2493,7 @@ function evalRecord(context: EvalContext, nodeIndex: number, entry: Uint32Array)
   const normalized =
     record.updateTarget !== undefined
       ? normalizePatchFields(context, record.fields, properties, name)
-      : normalizeFields(context.program, linked, declaration, record.fields, properties, [], name, false);
+      : normalizeFields(context.program, linked, declaration, record.fields, properties, [], name, false, context.options);
   return { $type: name, ...normalized };
 }
 
@@ -2318,7 +2518,7 @@ function evalUnionCase(context: EvalContext, nodeIndex: number, entry: Uint32Arr
   const path = `${unionName}.${caseName}`;
   const contentField = unionCase.fields.find((field) => field.isContent)?.name;
   applyContentBinding(properties, contentField, unionCase.fields, content, path);
-  const normalized = normalizeFields(context.program, linked, declaration, unionCase.fields, properties, [], path, false);
+  const normalized = normalizeFields(context.program, linked, declaration, unionCase.fields, properties, [], path, false, context.options);
   return { $type: path, ...normalized };
 }
 
@@ -2335,7 +2535,7 @@ function evalComponentDescriptor(context: EvalContext, nodeIndex: number, entry:
   const { fields: props, handlers } = splitHandlerProperties(linked, declaration, properties, `${name} props`);
   const contentField = component.props.find((field) => field.isContent)?.name;
   applyContentBinding(props, contentField, component.props, content, name);
-  const normalized = normalizeFields(context.program, linked, declaration, component.props, props, [], `${name} props`, false);
+  const normalized = normalizeFields(context.program, linked, declaration, component.props, props, [], `${name} props`, false, context.options);
   return { $type: name, ...normalized, ...handlerObject(handlers) };
 }
 
@@ -2502,6 +2702,7 @@ function normalizeActionInput(
   action: { linked: LinkedModule; declaration: PreparedDeclaration },
   input: Readonly<Record<string, NxCanonicalValue>>,
   path: string,
+  options: NxRuntimeOptions,
 ): NxRecordObject {
   const expected = action.declaration.name;
   const kind = action.declaration.kind;
@@ -2512,7 +2713,7 @@ function normalizeActionInput(
   if (discriminator !== undefined && discriminator !== expected) {
     fail("nx-ir-type", `Expected ${path} to be a '${expected}' action, got '${String(discriminator)}'.`);
   }
-  return { $type: expected, ...normalizeFields(program, action.linked, action.declaration, kind.fields, rest, [], path, false) };
+  return { $type: expected, ...normalizeFields(program, action.linked, action.declaration, kind.fields, rest, [], path, false, options) };
 }
 
 /**
@@ -2536,7 +2737,7 @@ function invokeHandler(
   if (action.$type !== expected) {
     fail("nx-ir-type", `Expected an action of type '${expected}' for handler ${label}, got '${String(action.$type)}'.`);
   }
-  const normalizedAction = normalizeActionInput(program, handler.action, action, `${label} action`);
+  const normalizedAction = normalizeActionInput(program, handler.action, action, `${label} action`, options);
   const frame = handler.captured.slice();
   if (live !== undefined) {
     live.component.state.forEach((field, index) => {
@@ -2796,7 +2997,8 @@ function isListType(ty: PreparedType): boolean {
  * `frame` as it goes so a later field's default can read an earlier field.
  *
  * `linked` and `declaration` are where the fields were declared: defaults are node indices of that
- * module, and a nominal type resolves through that module's table.
+ * module, and a nominal type resolves through that module's table. `options` are the caller's own,
+ * so a default is evaluated under the host's limits.
  */
 function normalizeFields(
   program: NxPreparedProgram,
@@ -2807,6 +3009,7 @@ function normalizeFields(
   frame: NxCanonicalValue[],
   path: string,
   requireExplicit: boolean,
+  options: NxRuntimeOptions,
 ): Record<string, NxCanonicalValue> {
   const known = new Set(fields.map((field) => field.name));
   for (const key of Object.keys(input)) {
@@ -2814,7 +3017,10 @@ function normalizeFields(
       fail("nx-ir-boundary-field", `Unknown ${path} field '${key}'.`);
     }
   }
-  const context: EvalContext = { program, linked, declaration, frame, options: {}, depth: 0 };
+  // The host's limits hold while a default is evaluated too: a `forRange` in a field default is as
+  // much of a loop as one in a body, and a host that lowered the limit to bound untrusted IR means
+  // it everywhere.
+  const context: EvalContext = { program, linked, declaration, frame, options, depth: 0 };
   const firstSlot = frame.length;
   const output: Record<string, NxCanonicalValue> = {};
   fields.forEach((field, offset) => {
@@ -2993,6 +3199,7 @@ function normalizeNominalValue(
           [],
           path,
           false,
+          context.options,
         ),
       };
     }
@@ -3008,7 +3215,7 @@ function normalizeNominalValue(
     const { $type: _discard, ...rest } = object;
     return {
       $type: display,
-      ...normalizeFields(context.program, linked, declaration, kind.fields, rest, [], path, false),
+      ...normalizeFields(context.program, linked, declaration, kind.fields, rest, [], path, false, context.options),
     };
   }
   if (kind.tag === "union") {
@@ -3037,7 +3244,7 @@ function normalizeNominalValue(
     const { $type: _discard, ...rest } = object;
     return {
       $type: typeName,
-      ...normalizeFields(context.program, linked, declaration, unionCase.fields, rest, [], path, false),
+      ...normalizeFields(context.program, linked, declaration, unionCase.fields, rest, [], path, false, context.options),
     };
   }
   return value;

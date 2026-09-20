@@ -65,6 +65,10 @@ for (const program of loadCorpus()) {
     for (const [identity, image] of sources) {
       modules.set(identity, prepareNxIrModule(image));
     }
+    // A program's own emitted modules, and only those — no corpus program emits the prelude. So the
+    // `ranges` program, whose image links `@nx/prelude.nx`, resolves that slot through the runtime's
+    // built-in prelude on every run of this loop, in both variants: the fallback is covered here,
+    // incidentally but genuinely. Adding the prelude to `modules` would remove that silently.
     const resolve = (identity) => modules.get(identity);
     for (const entrypoint of program.manifest.entrypoints) {
       const label = `${program.name} (${variant}) ${entrypoint.module}::${entrypoint.function}`;

@@ -349,6 +349,54 @@ fn an_applied_type_satisfies_object() {
     ));
 }
 
+/// A list of two of one instantiation is a list of that instantiation, arguments and all.
+#[test]
+fn equal_instantiations_join_to_themselves() {
+    assert_reports(
+        &format!(
+            "{BOX}let a = <Box T=int value={{1}} />\n\
+             let b = <Box T=int value={{2}} />\n\
+             let bad:int = {{ a b }}"
+        ),
+        "found list <Box T=int/>[]",
+    );
+}
+
+/// Invariance decides the join as it decides assignment: two instantiations that differ are
+/// unrelated, so the only type above both is `object`. Naming the declaration alone would invent a
+/// bare `Box`, which is not a type NX accepts and whose fields still mention the record's own `T`.
+#[test]
+fn differing_instantiations_join_to_object() {
+    assert_reports(
+        &format!(
+            "{BOX}let a = <Box T=int value={{1}} />\n\
+             let b = <Box T=string value=\"x\" />\n\
+             let bad:int = {{ a b }}"
+        ),
+        "found list object[]",
+    );
+    assert_clean(&format!(
+        "{BOX}let a = <Box T=int value={{1}} />\n\
+         let b = <Box T=string value=\"x\" />\n\
+         let mixed:object[] = {{ a b }}"
+    ));
+}
+
+/// An instantiation and an unrelated record have nothing below `object` either, and the generic
+/// record's own parameter never escapes into the join.
+#[test]
+fn an_instantiation_joins_with_an_unrelated_record_at_object() {
+    assert_reports(
+        &format!(
+            "{BOX}type Contact = {{ name:string }}\n\
+             let a = <Box T=int value={{1}} />\n\
+             let c = <Contact name=\"a\" />\n\
+             let bad:int = {{ a c }}"
+        ),
+        "found list object[]",
+    );
+}
+
 // ---------------------------------------------------------------------------------------------
 // Constructing a generic record binds every type argument
 // ---------------------------------------------------------------------------------------------

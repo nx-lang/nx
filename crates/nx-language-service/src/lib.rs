@@ -503,11 +503,18 @@ impl WorkspaceSnapshot {
                 .map(|ty| ty.to_string()),
             _ => None,
         };
-        let mut content = hover::fenced(hover::item_signature(
-            item,
-            declaration.kind,
-            inferred.as_deref(),
-        ));
+        let signature = hover::item_signature(item, declaration.kind, inferred.as_deref());
+        // A prelude declaration is a built-in: the same label `Element` carries, over the real
+        // declaration, because an author meeting `Range` needs both — that it is the language's, and
+        // what it holds.
+        let mut content = if declaration.origin.0 == nx_hir::PRELUDE_MODULE_IDENTITY {
+            hover::fenced(format!(
+                "{}\n{signature}",
+                hover::builtin_type_label("built-in type")
+            ))
+        } else {
+            hover::fenced(signature)
+        };
         // What the declaration accepts beyond what it wrote: the chain it extends, and each
         // inherited property with its type, so the author can see the whole contract at the tag.
         let inherited = &declaration.properties[declaration.own_properties..];
@@ -864,7 +871,11 @@ impl WorkspaceSnapshot {
         // library, and the analysis above returns only the workspace's own modules. The
         // declarations those origins point at are read from the library snapshots the context
         // holds, so a library name resolves the way a peer module's name does.
-        for library in self.build_context.visible_libraries() {
+        // The prelude is one of the program's libraries, so its declarations are indexed like a
+        // library's: the bindings above already name them, and this is what those origins point at.
+        for library in std::iter::once(Arc::clone(nx_api::prelude_library()))
+            .chain(self.build_context.visible_libraries())
+        {
             for module in &library.modules {
                 if declarations.artifacts.contains_key(&module.file_name) {
                     continue;
@@ -4535,5 +4546,43 @@ component <SearchBox placeholder:string /> = {
 
         assert!(!labels.contains(&"title".to_string()), "got: {labels:?}");
         assert!(labels.contains(&"subtitle".to_string()), "got: {labels:?}");
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // The prelude
+    // ---------------------------------------------------------------------------------------------
+
+    /// The prelude is part of every snapshot, so a one-document editor session offers and describes
+    /// its declarations without the host supplying anything.
+    #[test]
+    fn a_one_document_snapshot_offers_the_prelude_in_a_type_position() {
+        let labels = labels_at_incomplete("type Slider = { range:⟨cursor⟩ }\n");
+        assert!(labels.contains(&"Range".to_string()), "{labels:?}");
+    }
+
+    #[test]
+    fn a_one_document_snapshot_offers_the_prelude_as_an_element_tag() {
+        let labels = labels_at_incomplete("let r = <⟨cursor⟩\n");
+        assert!(labels.contains(&"Range".to_string()), "{labels:?}");
+    }
+
+    #[test]
+    fn hover_on_a_prelude_declaration_labels_it_a_built_in_type() {
+        let hover =
+            hover_at("type Slider = { range:<Ran⟨cursor⟩ge T=int/> }\n").expect("hover on Range");
+        let contents = hover.contents;
+
+        assert!(
+            contents.contains("built-in type"),
+            "labelled as `Element` is: {contents}"
+        );
+        assert!(
+            contents.contains("Range") && contents.contains("T:type"),
+            "the real declaration, with its type parameter: {contents}"
+        );
+        assert!(
+            contents.contains("start") && contents.contains("endInclusive"),
+            "and its fields: {contents}"
+        );
     }
 }

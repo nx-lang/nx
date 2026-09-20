@@ -1,0 +1,10 @@
+// Iterating ranges, including one another module built.
+import { half, closed, sameBounds, fractional } from "../shared/bounds.nx"
+
+let squares() = { for i, n in 0..4 { i * i + n } }
+let pages() = { for page in 1..=3 { page } }
+let none() = { for i in 5..2 { i } }
+let imported() = { for i in half() { i * 10 } }
+let equal() = { sameBounds() }
+let passedAlong() = { fractional() }
+let root() = { squares() }

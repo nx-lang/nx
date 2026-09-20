@@ -38,6 +38,14 @@ export const FILE_NAME = "playground.nx";
 export const CATALOG_IDENTITY = "skia.nx";
 
 /**
+ * The reserved identity of the NX prelude, the module every NX module sees without an import.
+ *
+ * A diagnostic label can point into it — at the declaration of a built-in's field, say — and that
+ * position is not a span in the visitor's document, so it must not be handed to the editor as one.
+ */
+export const PRELUDE_IDENTITY = "@nx/prelude.nx";
+
+/**
  * Compiles `source` against `catalog` through `host`.
  *
  * Returns `{ ir, diagnostics }`. `ir` is the visitor's module as an NX IR artifact, or null when
@@ -75,7 +83,7 @@ export function compileWithCatalog(host: NxHost, catalog: string, source: string
     }
   } catch (error) {
     if (error instanceof NxEvaluationError) {
-      return { ir: null, diagnostics: error.diagnostics.map(classify) };
+      return { ir: null, diagnostics: error.diagnostics.map(classifyDiagnostic) };
     }
     throw error;
   }
@@ -105,14 +113,18 @@ export function emitCatalogArtifact(host: NxHost, catalog: string): CompiledArti
 }
 
 /** Classifies an SDK diagnostic by the module its primary label names. */
-function classify(diagnostic: SdkDiagnostic): Diagnostic {
+export function classifyDiagnostic(diagnostic: SdkDiagnostic): Diagnostic {
   const label = diagnostic.labels.find((candidate) => candidate.primary) ?? diagnostic.labels[0];
   const origin: DiagnosticOrigin =
     label === undefined || label.file === ""
       ? "program"
       : label.file === CATALOG_IDENTITY
         ? "catalog"
-        : "source";
+        // A label inside the prelude is the compiler's own text, not the visitor's, so it belongs to
+        // the program rather than to a position in the editor.
+        : label.file === PRELUDE_IDENTITY
+          ? "program"
+          : "source";
   return {
     severity: diagnostic.severity,
     ...(diagnostic.code === undefined ? {} : { code: diagnostic.code }),

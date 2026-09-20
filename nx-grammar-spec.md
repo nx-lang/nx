@@ -61,9 +61,9 @@ Literals
 - EQ (=)
 - QMARK (?)
 - PIPE (|)
- - ELLIPSIS (...)
  - PLUS (+), MINUS (-), STAR (*), SLASH (/), PERCENT (%)
  - BANG (!)
+ - DOT_DOT (..), DOT_DOT_EQ (..=)
  - LT_EQ (<=), GT_EQ (>=), EQ_EQ (==), BANG_EQ (!=)
  - AMP_AMP (&&), PIPE_PIPE (||)
 
@@ -118,6 +118,14 @@ Conventional expressions (non-markup) use a Pratt parser with the following prec
 
 110: Additive, left-associative
 - PLUS (+), MINUS (-)
+
+100: Range, left-associative
+- DOT_DOT (..), DOT_DOT_EQ (..=)
+  - form: left (DOT_DOT | DOT_DOT_EQ) Expr → BinaryExpression, lowered to a range expression
+  - Between additive and relational, so an arithmetic bound needs no parentheses (`0..n + 1` is
+    `0..(n + 1)`) and a comparison of two ranges reads left to right (`1..5 == 1..=4`).
+  - Left-associative, so `1..5..9` parses and is rejected by the checker — a Range is not a numeric
+    bound — which reads better than a parse error.
 
 90: Relational, left-associative
 - LT (<), GT (>), LT_EQ (<=), GT_EQ (>=)
@@ -818,6 +826,11 @@ This section lists the AST node types with fields for implementers.
   - After IF, parse a required ValueExpression before IS as the scrutinee
   - Condition-list form begins directly with LBRACE and never has a scrutinee
 - Element is left-factored: after LT ElementName, COLON selects the text branch; otherwise parse PropertyList and choose SLASH GT (self-closing) or GT … LT SLASH ElementName GT using lookahead at SLASH vs GT.
+- The range operators need no lexer lookahead:
+  - REAL_LITERAL requires a digit after the dot, so `1..5` lexes as INT_LITERAL DOT_DOT INT_LITERAL
+    rather than REAL_LITERAL followed by `.5`. `1.5..2.5` lexes as two REAL_LITERALs around DOT_DOT.
+  - DOT_DOT_EQ and DOT_DOT win over DOT and over EQ by longest match, so `..=` is one token and
+    `page.first..page.last` is a member access, DOT_DOT, a member access.
 - MemberAccess handles property/field access and fieldless union case shorthand:
   - All `target.name` expressions parse uniformly as MemberAccessExpressionSyntax
   - Semantic analysis resolves the target expression to determine interpretation:

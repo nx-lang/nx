@@ -7,6 +7,10 @@ use std::path::Path;
 pub(crate) fn write_library(root: &Path, files: &[(&str, &str)]) {
     fs::create_dir_all(root).expect("library dir");
     for (name, source) in files {
-        fs::write(root.join(name), source).expect("library file");
+        let path = root.join(name);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("library subdirectory");
+        }
+        fs::write(&path, source).expect("library file");
     }
 }

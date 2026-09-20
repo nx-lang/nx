@@ -200,7 +200,9 @@ impl Table {
                 node::IF => &[Op::Node, Op::Node, Op::OptNode],
                 node::IF_IS => &[Op::Node, Op::List(ARM), Op::OptNode],
                 node::ARRAY => &[Op::List(NODES)],
-                node::FOR => &[
+                // A range loop has a `for`'s layout; only the kind, and so what a runtime does
+                // with the iterable, differs.
+                node::FOR | node::FOR_RANGE => &[
                     Op::Int,
                     Op::Str,
                     Op::OptSlot,

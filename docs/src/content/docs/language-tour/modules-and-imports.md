@@ -48,6 +48,20 @@ let <Footer text:string = footerText/> =
 | default | Yes | Yes | No |
 | `export` | Yes | Yes | Yes |
 
+## Built-in declarations
+
+NX's built-in types are declared in the **NX prelude**, a module every file imports automatically.
+You never name it or enable it — `Range` is simply there:
+
+```nx
+let squares = { for i in 0..4 { i * i } }
+let bounds:<Range T=int/> = {1..=5}
+```
+
+The prelude sits under the reserved `@nx/` root. Its names are shadowable: declare your own `Range`
+and yours wins, silently, with no ambiguity — though `..` and `..=` then stop working in that file,
+because they construct the built-in one.
+
 ## Root element
 
 ```nx
@@ -61,5 +75,6 @@ If present, the final element is the module’s rendered output or default expor
 
 ## See also (Reference/Grammar)
 - Reference: [Modules](/reference/syntax/modules)
+- Reference: [Ranges](/reference/syntax/types#ranges)
 - Reference: [Functions & Components](/reference/syntax/functions)
 - Grammar: [nx-grammar.md – Module Definition](https://github.com/nx-lang/nx/blob/main/nx-grammar.md#module-definition)

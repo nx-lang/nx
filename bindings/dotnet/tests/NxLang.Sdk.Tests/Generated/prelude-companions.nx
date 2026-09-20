@@ -1,0 +1,17 @@
+// Source for PreludeCompanions.g.cs, which `nxlang typegen` generates from this file:
+//   nxlang typegen prelude-companions.nx --language csharp --csharp-namespace NxLang.Sdk.Tests.Generated --output PreludeCompanions.g.cs
+// The nx-cli typegen tests regenerate it and fail if the checked-in file drifts.
+//
+// This file declares no `Range` of its own, so every `Range` below is the prelude's and resolves to
+// the SDK's hand-written copy rather than to a type generated here. `update-records.nx` declares
+// one, which is why the two cases live in separate files.
+//
+// `change` and `wide` are two instantiations of the one companion, so the file holds two closed
+// formatters over `NxRange_update<T>`. MessagePack's MsgPack009 counts those against the open
+// generic; the generated header suppresses it, and this build is what says the suppression is right.
+export type Patch = {
+  span:<Range T=int/>
+  change:<Range.Update T=int/>
+  which:Range.Property
+  wide:<Range.Update T=float64/>
+}

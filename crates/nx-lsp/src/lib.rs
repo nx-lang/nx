@@ -968,4 +968,63 @@ component <Card title:string subtitle:string /> = {
             .iter()
             .any(|completion| completion.label == "subtitle"));
     }
+
+    /// The LSP builds its snapshot from the open documents and no build context at all, and still
+    /// sees the prelude: it is part of every build rather than part of a host's context.
+    #[tokio::test]
+    async fn the_lsp_offers_and_describes_the_prelude_with_no_build_context() {
+        let (server, _) = test_server(Duration::from_millis(1));
+        let uri = Url::parse("nx://tenant/form.nx").expect("uri");
+        let source = "type Slider = { range:<Range T=int/> }\n";
+
+        server
+            .did_open(did_open_params(uri.clone(), "nx", 1, source))
+            .await;
+
+        let hover = server
+            .hover(HoverParams {
+                text_document_position_params: document_position(uri.clone(), 0, 24),
+                work_done_progress_params: Default::default(),
+            })
+            .await
+            .expect("hover")
+            .expect("hover response");
+        let HoverContents::Markup(markup) = &hover.contents else {
+            panic!("expected markup hover contents");
+        };
+        assert!(
+            markup.value.contains("built-in type"),
+            "got: {}",
+            markup.value
+        );
+        assert!(
+            markup.value.contains("T:type") && markup.value.contains("endInclusive"),
+            "got: {}",
+            markup.value
+        );
+
+        let completions = server
+            .completion(CompletionParams {
+                text_document_position: document_position(uri, 0, 22),
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+                context: None,
+            })
+            .await
+            .expect("completion")
+            .expect("completion response");
+        let CompletionResponse::Array(completions) = completions else {
+            panic!("expected completion array");
+        };
+        assert!(
+            completions
+                .iter()
+                .any(|completion| completion.label == "Range"),
+            "got: {:?}",
+            completions
+                .iter()
+                .map(|completion| completion.label.clone())
+                .collect::<Vec<_>>()
+        );
+    }
 }

@@ -16,15 +16,35 @@ let empty: string[] = []
 ```
 
 ## Operators
+The table is in precedence order, tightest first.
+
 | Operators | Operands | Result |
 | --- | --- | --- |
-| `+` `-` `*` `/` `%` | two numbers | the narrowest numeric type both operands widen to |
+| `-` (prefix) `!` | a number; a `boolean` | the operand's type |
+| `*` `/` `%` | two numbers | the narrowest numeric type both operands widen to |
+| `+` `-` | two numbers | the narrowest numeric type both operands widen to |
 | `+` | a `string` and a `string`, number or `boolean` | `string` |
-| `==` `!=` | two values of compatible types | `boolean` |
+| `..` `..=` | two numbers | a [`Range`](/reference/syntax/types#ranges) of the operands' common numeric type |
 | `<` `<=` `>` `>=` | two numbers, or two strings | `boolean` |
-| `&&` `\|\|` | two `boolean`s | `boolean`; the right operand runs only when the left does not decide |
-| `-` (prefix) | a number | the operand's type |
-| `!` | a `boolean` | `boolean` |
+| `==` `!=` | two values of compatible types | `boolean` |
+| `&&` | two `boolean`s | `boolean`; the right operand runs only when the left does not decide |
+| `\|\|` | two `boolean`s | `boolean`; the right operand runs only when the left does not decide |
+
+So `*` `/` `%` bind tighter than `+` `-`, which bind tighter than `..` `..=`, which bind tighter than
+the comparisons, which bind tighter than `&&`, then `||`. `0..n + 1` is `0..(n + 1)` and needs no
+parentheses, and `1..5 == 1..=4` compares the two ranges. Every binary operator is
+left-associative, so `1..5..9` parses — and is then rejected, because a `Range` is not a numeric
+bound.
+
+### Ranges
+`a..b` is the range from `a` up to but excluding `b`; `a..=b` includes `b`. Both are sugar for
+constructing the built-in [`Range`](/reference/syntax/types#ranges) record, so `1..5` is exactly
+`<Range T=int start={1} end={5} endInclusive={false} />`, and the two compare equal. Building one
+never fails: `5..2` is a valid, empty range.
+
+An integer range is what [`for`](/reference/syntax/for#counting-with-a-range) counts over. A range
+is a binary expression, so `{1..5}` is one braced value; a braced list of several takes each range in
+parentheses: `{ (0..5) (5..=9) }`.
 
 ### Arithmetic and comparison
 Operands of different numeric types are widened to the narrowest type both widen to, as described

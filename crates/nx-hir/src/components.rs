@@ -712,6 +712,66 @@ pub fn apply_literal_conversions(
     }
 }
 
+/// Replaces every range expression with the record construction it means.
+///
+/// <para>`a..b` and `a..=b` are sugar for `<Range start={a} end={b} endInclusive={…} />`, so after
+/// checking they *are* that construction: the interpreter, the codegen builder and every emitter
+/// see a record literal and nothing else. Each node keeps its own [`ExprId`], and so its recorded
+/// type, which is the applied `Range` the checker gave it.</para>
+///
+/// <para>Returns the boolean literal allocated for each rewritten range, so the caller can record a
+/// type for the one node the pass creates.</para>
+pub fn apply_range_constructions(module: &mut PreparedModule) -> Vec<ExprId> {
+    let mut created = Vec::new();
+    let raw_module = module.raw_module_mut();
+
+    let ranges = raw_module
+        .exprs()
+        .filter_map(|(expr_id, expr)| match expr {
+            ast::Expr::Range {
+                start,
+                end,
+                inclusive,
+                span,
+            } => Some((expr_id, *start, *end, *inclusive, *span)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    for (expr_id, start, end, inclusive, span) in ranges {
+        let end_inclusive =
+            raw_module.alloc_expr(ast::Expr::Literal(ast::Literal::Boolean(inclusive)));
+        raw_module.set_expr_span(end_inclusive, span);
+        created.push(end_inclusive);
+
+        // No `T=` argument is written: type arguments are consumed by the checker, so a
+        // construction below it carries value bindings only.
+        *raw_module.expr_mut(expr_id) = ast::Expr::RecordLiteral {
+            record: Name::new(crate::PRELUDE_RANGE_NAME),
+            properties: vec![
+                ast::RecordLiteralProperty {
+                    name: Name::new(crate::PRELUDE_RANGE_START),
+                    value: start,
+                    span: raw_module.expr_span(start),
+                },
+                ast::RecordLiteralProperty {
+                    name: Name::new(crate::PRELUDE_RANGE_END),
+                    value: end,
+                    span: raw_module.expr_span(end),
+                },
+                ast::RecordLiteralProperty {
+                    name: Name::new(crate::PRELUDE_RANGE_END_INCLUSIVE),
+                    value: end_inclusive,
+                    span,
+                },
+            ],
+            span,
+        };
+    }
+
+    created
+}
+
 /// Wraps each branch of a join that type analysis found to widen in an [`ast::Expr::Widen`].
 ///
 /// <para>Runs on the same terms as [`apply_string_conversions`]. `widened` maps a branch of an
@@ -1278,6 +1338,10 @@ fn collect_handler_rewrites_in_expr(
         ast::Expr::BinaryOp { lhs, rhs, .. } | ast::Expr::Concat { lhs, rhs, .. } => {
             collect_handler_rewrites_in_expr(module, *lhs, owner, rewrites);
             collect_handler_rewrites_in_expr(module, *rhs, owner, rewrites);
+        }
+        ast::Expr::Range { start, end, .. } => {
+            collect_handler_rewrites_in_expr(module, *start, owner, rewrites);
+            collect_handler_rewrites_in_expr(module, *end, owner, rewrites);
         }
         ast::Expr::UnaryOp { expr, .. }
         | ast::Expr::ToText { expr, .. }

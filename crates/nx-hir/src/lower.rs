@@ -1295,6 +1295,22 @@ impl LoweringContext {
                     .map(|n| self.lower_expr(n))
                     .unwrap_or_else(|| self.error_expr(node.span()));
 
+                // A range operator lowers to its own node rather than a `BinOp`: every consumer
+                // of a binary operation assumes a primitive result, and a range is a record.
+                let inclusive = node.children_with_tokens().find_map(|n| match n.kind() {
+                    SyntaxKind::DOT_DOT => Some(false),
+                    SyntaxKind::DOT_DOT_EQ => Some(true),
+                    _ => None,
+                });
+                if let Some(inclusive) = inclusive {
+                    return self.alloc_expr(Expr::Range {
+                        start: lhs,
+                        end: rhs,
+                        inclusive,
+                        span: node.span(),
+                    });
+                }
+
                 // Find operator
                 let op = node.children_with_tokens().find_map(|n| match n.kind() {
                     SyntaxKind::PLUS => Some(BinOp::Add),
@@ -5547,6 +5563,45 @@ type Mode = light | dark"#;
             !matches!(module.expr(property.value), Expr::ActionHandler { .. }),
             "Expected onClick to remain a normal prop"
         );
+    }
+
+    /// Both range operators lower to `Expr::Range`, which is the one node the checker types and
+    /// then rewrites away.
+    #[test]
+    fn range_operators_lower_to_a_range_expression() {
+        for (source, expected_inclusive) in [("let r = {1..5}", false), ("let r = {1..=5}", true)] {
+            let module = lower_source(source, "ranges.nx");
+            assert!(
+                module.diagnostics().is_empty(),
+                "{source}: {:?}",
+                module.diagnostics()
+            );
+
+            let range = module
+                .exprs()
+                .find_map(|(_, expr)| match expr {
+                    Expr::Range {
+                        start,
+                        end,
+                        inclusive,
+                        ..
+                    } => Some((*start, *end, *inclusive)),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{source} lowers to a range expression"));
+
+            assert_eq!(range.2, expected_inclusive, "{source}");
+            assert!(
+                matches!(module.expr(range.0), Expr::Literal(Literal::Int(1))),
+                "{source}: start is the literal 1, got {:?}",
+                module.expr(range.0)
+            );
+            assert!(
+                matches!(module.expr(range.1), Expr::Literal(Literal::Int(5))),
+                "{source}: end is the literal 5, got {:?}",
+                module.expr(range.1)
+            );
+        }
     }
 
     fn lower_source(source: &str, file_name: &str) -> LoweredModule {

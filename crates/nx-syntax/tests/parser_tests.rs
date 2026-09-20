@@ -2901,6 +2901,211 @@ fn test_binary_expressions_arithmetic() {
     assert!(result.is_ok());
 }
 
+/// The range operators: one binary expression per operator, between the additive and relational
+/// levels, with the tokens lexing as written.
+mod range_operators {
+    use super::*;
+    use nx_syntax::SyntaxNode;
+
+    /// The one binary expression a source's value holds, with its operator and operands.
+    fn binary<'tree>(root: &SyntaxNode<'tree>) -> SyntaxNode<'tree> {
+        find_first_kind(root, SyntaxKind::BINARY_EXPRESSION).expect("a binary expression")
+    }
+
+    fn operator<'tree>(node: &SyntaxNode<'tree>) -> &'tree str {
+        node.child_by_field("operator")
+            .expect("an operator field")
+            .text()
+    }
+
+    /// An operand, past the `value_expression` wrapper the grammar puts around one.
+    fn operand<'tree>(node: &SyntaxNode<'tree>, field: &str) -> SyntaxNode<'tree> {
+        let operand = node
+            .child_by_field(field)
+            .unwrap_or_else(|| panic!("a {field} field"));
+        if operand.kind() == SyntaxKind::VALUE_EXPRESSION {
+            operand.children().next().unwrap_or(operand)
+        } else {
+            operand
+        }
+    }
+
+    /// A binary expression is not a `let`'s right-hand side on its own, so every case is braced,
+    /// as `{x + y}` is.
+    fn parse_value(expression: &str) -> nx_syntax::ParseResult {
+        let source = format!("let r = {{{expression}}}\n");
+        let result = parse_str(&source, "test.nx");
+        assert!(
+            result.is_ok(),
+            "expected {expression:?} to parse: {:?}",
+            result.errors
+        );
+        result
+    }
+
+    #[test]
+    fn a_half_open_range_holds_two_integer_literals() {
+        let result = parse_value("1..5");
+        let root = result.root().expect("root");
+        let range = binary(&root);
+
+        assert_eq!(operator(&range), "..");
+        assert_eq!(operand(&range, "left").text(), "1");
+        assert_eq!(operand(&range, "right").text(), "5");
+        assert_eq!(
+            count_kind(&range, SyntaxKind::INT_LITERAL),
+            2,
+            "an integer literal before `..` stays an integer literal"
+        );
+        assert_eq!(count_kind(&range, SyntaxKind::REAL_LITERAL), 0);
+    }
+
+    #[test]
+    fn the_inclusive_operator_is_one_token() {
+        let result = parse_value("1..=5");
+        let root = result.root().expect("root");
+        let range = binary(&root);
+
+        assert_eq!(operator(&range), "..=");
+        assert_eq!(count_kind(&range, SyntaxKind::INT_LITERAL), 2);
+    }
+
+    #[test]
+    fn arithmetic_binds_tighter_than_a_range() {
+        let source = "let n = 4\nlet r = {0..n + 1}\n";
+        let result = parse_str(source, "test.nx");
+        assert!(result.is_ok(), "{:?}", result.errors);
+        let root = result.root().expect("root");
+        let range = binary(&root);
+
+        assert_eq!(operator(&range), "..");
+        assert_eq!(operand(&range, "left").text(), "0");
+        let right = operand(&range, "right");
+        assert_eq!(right.kind(), SyntaxKind::BINARY_EXPRESSION);
+        assert_eq!(operator(&right), "+", "`0..n + 1` is `0..(n + 1)`");
+    }
+
+    /// The other half of the precedence claim both grammar documents make: a range binds tighter
+    /// than a comparison, so `a..b < c` compares the range rather than ranging over `a..(b < c)`.
+    #[test]
+    fn a_range_binds_tighter_than_a_comparison() {
+        let result = parse_value("0..5 < 9");
+        let root = result.root().expect("root");
+        let comparison = binary(&root);
+
+        assert_eq!(operator(&comparison), "<");
+        let left = operand(&comparison, "left");
+        assert_eq!(left.kind(), SyntaxKind::BINARY_EXPRESSION);
+        assert_eq!(operator(&left), "..", "`0..5 < 9` is `(0..5) < 9`");
+        assert_eq!(operand(&comparison, "right").text(), "9");
+    }
+
+    /// Equality is looser still, so a comparison of two ranges reads left to right.
+    #[test]
+    fn a_range_binds_tighter_than_equality() {
+        let result = parse_value("1..5 == 1..=4");
+        let root = result.root().expect("root");
+        let equality = binary(&root);
+
+        assert_eq!(operator(&equality), "==");
+        assert_eq!(operator(&operand(&equality, "left")), "..");
+        assert_eq!(operator(&operand(&equality, "right")), "..=");
+    }
+
+    #[test]
+    fn a_prefix_minus_is_an_operand() {
+        let result = parse_value("-5..-1");
+        let root = result.root().expect("root");
+        let range = binary(&root);
+
+        assert_eq!(operator(&range), "..");
+        assert_eq!(operand(&range, "left").text(), "-5");
+        assert_eq!(operand(&range, "right").text(), "-1");
+    }
+
+    #[test]
+    fn a_member_access_binds_before_the_operator() {
+        let source = "type Page = { first:int last:int }\n\
+                      let p = <Page first={1} last={5} />\n\
+                      let r = {p.first..=p.last}\n";
+        let result = parse_str(source, "test.nx");
+        assert!(result.is_ok(), "{:?}", result.errors);
+        let root = result.root().expect("root");
+        let range = find_first_kind(&root, SyntaxKind::BINARY_EXPRESSION).expect("a range");
+
+        assert_eq!(operator(&range), "..=");
+        assert_eq!(operand(&range, "left").text(), "p.first");
+        assert_eq!(operand(&range, "right").text(), "p.last");
+    }
+
+    #[test]
+    fn real_literals_are_operands() {
+        let result = parse_value("1.5..2.5");
+        let root = result.root().expect("root");
+        let range = binary(&root);
+
+        assert_eq!(operator(&range), "..");
+        assert_eq!(count_kind(&range, SyntaxKind::REAL_LITERAL), 2);
+    }
+
+    /// Left associativity means `1..5..9` parses, and the checker gives the better message.
+    #[test]
+    fn a_range_of_a_range_parses_left_associatively() {
+        let result = parse_value("1..5..9");
+        let root = result.root().expect("root");
+        let range = binary(&root);
+
+        assert_eq!(operator(&range), "..");
+        let left = operand(&range, "left");
+        assert_eq!(left.kind(), SyntaxKind::BINARY_EXPRESSION);
+        assert_eq!(operator(&left), "..");
+        assert_eq!(operand(&range, "right").text(), "9");
+    }
+
+    #[test]
+    fn a_range_is_a_for_iterable_in_both_forms() {
+        let source = "let values = { for i in 0..4 { i } }\n\
+                      let <Stars count:int /> = <div>for i in 1..=count { <Star /> }</div>\n";
+        let result = parse_str(source, "test.nx");
+        assert!(result.is_ok(), "{:?}", result.errors);
+        let root = result.root().expect("root");
+
+        let value_for =
+            find_first_kind(&root, SyntaxKind::VALUE_FOR_EXPRESSION).expect("a value for");
+        let value_range = binary(&value_for);
+        assert_eq!(operator(&value_range), "..");
+
+        let elements_for =
+            find_first_kind(&root, SyntaxKind::ELEMENTS_FOR_EXPRESSION).expect("an elements for");
+        let elements_range = binary(&elements_for);
+        assert_eq!(operator(&elements_range), "..=");
+    }
+
+    #[test]
+    fn a_range_is_a_property_value() {
+        let source = "let s = <Slider range={0..1} />\n";
+        let result = parse_str(source, "test.nx");
+        assert!(result.is_ok(), "{:?}", result.errors);
+        let root = result.root().expect("root");
+        let range = binary(&root);
+
+        assert_eq!(operator(&range), "..");
+    }
+
+    /// A range is a binary expression, so a braced value list takes it only in parentheses.
+    #[test]
+    fn a_range_in_a_braced_list_is_parenthesized() {
+        let result = parse_str("let rs = { (0..5) (5..=9) }\n", "test.nx");
+        assert!(result.is_ok(), "{:?}", result.errors);
+        let root = result.root().expect("root");
+        let mut ranges = Vec::new();
+        collect_kinds(&root, SyntaxKind::BINARY_EXPRESSION, &mut ranges);
+        assert_eq!(ranges.len(), 2);
+        assert_eq!(operator(&ranges[0]), "..");
+        assert_eq!(operator(&ranges[1]), "..=");
+    }
+}
+
 #[test]
 fn test_binary_expressions_comparison() {
     let result = parse_str("let <Test x: int y: int /> = {x < y}", "test.nx");

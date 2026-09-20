@@ -171,6 +171,20 @@ mod tests {
         generate_types(&module, Path::new("types.nx"), &opts).unwrap()
     }
 
+    fn generate_with_warnings_for(
+        source: &str,
+        language: TargetLanguage,
+    ) -> GeneratedOutput<String> {
+        let module = source_module(source, "types.nx");
+        let opts = GenerateTypesOptions {
+            language,
+            csharp_namespace: None,
+            typescript_package_prefix: None,
+            format: options::FormatOptions::defaults_for(language),
+        };
+        generate_types_with_warnings(&module, Path::new("types.nx"), &opts).unwrap()
+    }
+
     /// `void` is no longer a primitive, so a user may declare a type with that name. The
     /// primitive-name-to-host-type maps must not intercept it: the reference has to resolve to the
     /// declaration, as it does for every other user type name.
@@ -564,6 +578,106 @@ mod tests {
             .find(|line| line.contains("Alias"))
             .unwrap_or_else(|| panic!("expected an Alias property:\n{slider}"));
         assert!(alias.contains("Range<long>"), "{alias}");
+    }
+
+    /// A dependency's alias over the *prelude's* `Range` resolves to the SDK type on the importing
+    /// side too. The dependency never generates a `Range` of its own, so naming one in its namespace
+    /// would be a reference to a type that does not exist.
+    #[test]
+    fn an_imported_alias_over_a_prelude_record_resolves_to_the_sdk_type() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let bounds_dir = temp_dir.path().join("bounds");
+        let app_dir = temp_dir.path().join("app");
+        write_library(
+            &bounds_dir,
+            &[("bounds.nx", "export type IntRange = <Range T=int/>")],
+        );
+        write_library(
+            &app_dir,
+            &[(
+                "slider.nx",
+                "import { IntRange } from \"../bounds\"\n\
+                 export type Slider = { span:IntRange }",
+            )],
+        );
+        let artifact = build_library_artifact_from_directory(&app_dir).expect("library build");
+
+        let csharp = generate_library_types_with_warnings(
+            &artifact,
+            &library_options(TargetLanguage::CSharp),
+        )
+        .unwrap();
+        let slider = generated_file(&csharp, "slider.g.cs");
+        let span = slider
+            .lines()
+            .find(|line| line.contains("Span"))
+            .unwrap_or_else(|| panic!("expected a Span property:\n{slider}"));
+        assert!(
+            span.contains("global::NxLang.Nx.NxRange<long>"),
+            "the alias resolves to the SDK type, not to a type the dependency never generates: {span}"
+        );
+    }
+
+    /// An `import` is written in one module and binds only there, so a sibling that writes `Range`
+    /// still means the prelude's.
+    ///
+    /// <para>Typegen used to answer the prelude question from the whole export graph, so one
+    /// module's import of a foreign `Range` suppressed the prelude's for every module of the
+    /// library — and the sibling then rendered a bare `Range`, which neither language declares.
+    /// A *declaration* is different and is still graph-wide: a same-library peer is visible
+    /// without an import, so it hides the prelude everywhere.</para>
+    #[test]
+    fn an_import_of_a_foreign_range_leaves_its_sibling_with_the_prelude_s() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let bounds_dir = temp_dir.path().join("bounds");
+        let app_dir = temp_dir.path().join("app");
+        write_library(
+            &bounds_dir,
+            &[("bounds.nx", "export type Range = { T:type lo:T hi:T }")],
+        );
+        write_library(
+            &app_dir,
+            &[
+                (
+                    "importer.nx",
+                    "import { Range } from \"../bounds\"\n\
+                     export type Imported = { span:<Range T=int/> }",
+                ),
+                (
+                    "sibling.nx",
+                    "export type Sibling = { span:<Range T=int/> }",
+                ),
+            ],
+        );
+        let artifact = build_library_artifact_from_directory(&app_dir).expect("library build");
+
+        let csharp = generate_library_types_with_warnings(
+            &artifact,
+            &library_options(TargetLanguage::CSharp),
+        )
+        .unwrap();
+        let importer = generated_file(&csharp, "importer.g.cs");
+        assert!(
+            importer.contains("global::Test.Bounds.Range<long>"),
+            "the importing module means the dependency's Range: {importer}"
+        );
+        let sibling = generated_file(&csharp, "sibling.g.cs");
+        assert!(
+            sibling.contains("global::NxLang.Nx.NxRange<long>"),
+            "the sibling wrote no import, so its Range is the prelude's: {sibling}"
+        );
+
+        let typescript = generate_library_types_with_warnings(
+            &artifact,
+            &library_options(TargetLanguage::TypeScript),
+        )
+        .unwrap();
+        let sibling = generated_file(&typescript, "sibling.ts");
+        assert!(sibling.contains("span: Range<number>;"), "{sibling}");
+        assert!(
+            sibling.contains("Range } from \"./_nx\""),
+            "the sibling's Range is the prelude's, which the helper module declares: {sibling}"
+        );
     }
 
     /// The base chain resolves through the prepared module, so a base declared in another module
@@ -3836,6 +3950,163 @@ export type User extends Named = { email:string }
         );
     }
 
+    /// A field typed by the prelude's `Range.Update` generates in both languages, and in C# names
+    /// a closed formatter beside the contract.
+    #[test]
+    fn a_field_typed_by_a_prelude_companion_generates_in_both_languages() {
+        let source = r#"
+            export type Patch = { span:<Range T=int/> change:<Range.Update T=int/> which:Range.Property }
+            "#;
+
+        let typescript = generate_for(source, TargetLanguage::TypeScript);
+        assert!(
+            typescript.contains("change: Range_update<number>;"),
+            "{typescript}"
+        );
+        assert!(
+            typescript.contains("which: Range_property;"),
+            "{typescript}"
+        );
+        // The companions are declared beside `Range`, generated from the prelude's own
+        // declarations rather than named in a package.
+        assert!(
+            typescript.contains("export interface Range_update<T>"),
+            "{typescript}"
+        );
+        assert!(
+            typescript
+                .contains(r#"export type Range_property = "start" | "end" | "endInclusive";"#),
+            "{typescript}"
+        );
+
+        let csharp = generate_for(source, TargetLanguage::CSharp);
+        assert!(
+            csharp.contains("global::NxLang.Nx.NxRange_update<long> Change"),
+            "{csharp}"
+        );
+        assert!(
+            csharp.contains("global::NxLang.Nx.NxRange_property Which"),
+            "{csharp}"
+        );
+        assert!(
+            csharp.contains("[MessagePackFormatter(typeof(NxRange_updateOfLongFormatter))]"),
+            "the member names the closed formatter MessagePack's generator can resolve: {csharp}"
+        );
+        assert!(
+            csharp.contains("public sealed class NxRange_updateOfLongFormatter"),
+            "{csharp}"
+        );
+    }
+
+    /// Two instantiations of one companion get a closed formatter each, and the header suppresses
+    /// the `MsgPack009` that counts them against the open generic they share.
+    #[test]
+    fn two_instantiations_of_one_companion_each_get_a_closed_formatter() {
+        let output = generate_with_warnings_for(
+            "export type Patch = { narrow:<Range.Update T=int/> wide:<Range.Update T=float64/> }",
+            TargetLanguage::CSharp,
+        );
+        let csharp = output.value;
+
+        assert!(
+            csharp.contains("#pragma warning disable MsgPack009"),
+            "MsgPack009 counts the two closed formatters against `NxRange_update<T>`: {csharp}"
+        );
+        for (member, formatter) in [
+            ("Narrow", "NxRange_updateOfLongFormatter"),
+            ("Wide", "NxRange_updateOfDoubleFormatter"),
+        ] {
+            assert!(
+                csharp.contains(&format!("public sealed class {formatter}")),
+                "{csharp}"
+            );
+            let member_declaration = csharp
+                .split_once(&format!("[MessagePackFormatter(typeof({formatter}))]"))
+                .map(|(_, rest)| rest)
+                .unwrap_or_else(|| panic!("{member} names {formatter} in {csharp}"));
+            assert!(
+                member_declaration.trim_start().starts_with(&format!(
+                    "public global::NxLang.Nx.NxRange_update<{}> {member}",
+                    if member == "Narrow" { "long" } else { "double" }
+                )),
+                "the attribute sits on {member}: {csharp}"
+            );
+        }
+        assert!(
+            output.warnings.is_empty(),
+            "both instantiations resolve: {:?}",
+            output.warnings
+        );
+    }
+
+    /// Only one shape of generic update companion has no formatter MessagePack can resolve: one from
+    /// another assembly reached *below* the member's own type. The other three resolve and generate.
+    #[test]
+    fn a_generic_update_companion_csharp_cannot_format_is_reported() {
+        let nested_foreign = generate_with_warnings_for(
+            "export type Patch = { many:<Range.Update T=int/>[] }",
+            TargetLanguage::CSharp,
+        );
+        assert!(
+            nested_foreign.warnings.iter().any(|warning| warning.contains(
+                "'Patch.many' reaches the generic update companion 'Range_update' below its own type"
+            )),
+            "{:?}",
+            nested_foreign.warnings
+        );
+
+        // A companion the generating library declares is in the compilation, so the source generator
+        // closes its own shim wherever in the member's type it sits — at the member and below it.
+        let own = generate_with_warnings_for(
+            "export type Bounds = { T:type start:T end:T }\n\
+             export type Patch = { change:<Bounds.Update T=int/> many:<Bounds.Update T=int/>[] }",
+            TargetLanguage::CSharp,
+        );
+        assert!(
+            own.warnings.is_empty(),
+            "a companion this library declares needs no member attribute: {:?}",
+            own.warnings
+        );
+
+        let direct = generate_with_warnings_for(
+            "export type Patch = { change:<Range.Update T=int/> }",
+            TargetLanguage::CSharp,
+        );
+        assert!(
+            direct.warnings.is_empty(),
+            "the prelude's companion resolves through a closed formatter: {:?}",
+            direct.warnings
+        );
+    }
+
+    /// A contract that names the prelude's `Range` and both of its derived companions, which the
+    /// .NET tests compile and round-trip against the SDK's hand-written copies.
+    ///
+    /// <para>`update-records.nx` declares a `Range` of its own, which hides the prelude's in every
+    /// module of that library, so the prelude case needs a source of its own.</para>
+    #[test]
+    fn checked_in_dotnet_prelude_companion_fixture_matches_typegen_output() {
+        let fixture_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../bindings/dotnet/tests/NxLang.Sdk.Tests/Generated");
+        let source_path = fixture_dir.join("prelude-companions.nx");
+        let source = fs::read_to_string(&source_path).expect("fixture source");
+        let module = source_module(&source, "prelude-companions.nx");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::CSharp,
+            csharp_namespace: Some("NxLang.Sdk.Tests.Generated".to_string()),
+            typescript_package_prefix: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
+        };
+        let generated = generate_types(&module, &source_path, &opts).unwrap();
+        let checked_in =
+            fs::read_to_string(fixture_dir.join("PreludeCompanions.g.cs")).expect("fixture output");
+
+        assert_eq!(
+            checked_in, generated,
+            "Regenerate PreludeCompanions.g.cs with the command in prelude-companions.nx"
+        );
+    }
+
     #[test]
     fn generates_typescript_property_companions_as_string_literal_unions() {
         let output = generate_for(
@@ -4010,5 +4281,279 @@ export external component <Table sortBy:User.Property? columns:User.Property[] p
             "{}",
             table.content
         );
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Prelude types
+    // ---------------------------------------------------------------------------------------------
+
+    /// C# names the hand-written SDK type: generated files open with `using System;`, so a generated
+    /// `Range` would be `System.Range`, and two generated libraries in one namespace would each
+    /// declare a copy.
+    #[test]
+    fn csharp_maps_a_prelude_range_to_the_sdk_type() {
+        let source = "export type Slider = { range:<Range T=float64/> marks:<Range T=int/>[]? }\n";
+        let csharp = generate_for(source, TargetLanguage::CSharp);
+
+        let range = csharp
+            .lines()
+            .find(|line| line.contains(" Range { get; set; }"))
+            .unwrap_or_else(|| panic!("expected a Range property:\n{csharp}"));
+        assert!(
+            range.contains("global::NxLang.Nx.NxRange<double>"),
+            "{range}"
+        );
+        let marks = csharp
+            .lines()
+            .find(|line| line.contains(" Marks { get; set; }"))
+            .unwrap_or_else(|| panic!("expected a Marks property:\n{csharp}"));
+        assert!(
+            marks.contains("global::NxLang.Nx.NxRange<long>[]?"),
+            "{marks}"
+        );
+        assert!(
+            !csharp.contains("class Range") && !csharp.contains("class NxRange"),
+            "the prelude type is not declared into the generated namespace:\n{csharp}"
+        );
+    }
+
+    #[test]
+    fn typescript_single_file_output_inlines_a_prelude_range() {
+        let source = "export type Slider = { range:<Range T=float64/> }\n";
+        let typescript = generate_for(source, TargetLanguage::TypeScript);
+
+        assert!(
+            typescript.contains("export interface Range<T> extends NxRecord<\"Range\"> {"),
+            "{typescript}"
+        );
+        assert!(typescript.contains("  start: T;"), "{typescript}");
+        assert!(typescript.contains("  end: T;"), "{typescript}");
+        assert!(
+            typescript.contains("  endInclusive: boolean;"),
+            "{typescript}"
+        );
+        assert!(typescript.contains("range: Range<number>;"), "{typescript}");
+    }
+
+    #[test]
+    fn typescript_library_output_declares_a_prelude_range_once_in_the_helper_module() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let library_dir = temp_dir.path().join("controls");
+        write_library(
+            &library_dir,
+            &[
+                ("slider.nx", "export type Slider = { range:<Range T=int/> }"),
+                ("gauge.nx", "export type Gauge = { bounds:<Range T=int/> }"),
+            ],
+        );
+        let artifact = build_library_artifact_from_directory(&library_dir).expect("library build");
+        let typescript = generate_library_types_with_warnings(
+            &artifact,
+            &library_options(TargetLanguage::TypeScript),
+        )
+        .unwrap();
+
+        let helper = generated_file(&typescript, "_nx.ts");
+        assert!(
+            helper.contains("export interface Range<T> extends NxRecord<\"Range\"> {"),
+            "{helper}"
+        );
+        assert!(helper.contains("  endInclusive: boolean;"), "{helper}");
+
+        for (file, field) in [("slider.ts", "range"), ("gauge.ts", "bounds")] {
+            let module = generated_file(&typescript, file);
+            assert!(
+                module.contains("import type { NxRecord, Range } from \"./_nx\";"),
+                "{module}"
+            );
+            assert!(
+                module.contains(&format!("{field}: Range<number>;")),
+                "{module}"
+            );
+            assert!(
+                !module.contains("export interface Range<T>"),
+                "the record is declared once, in the helper module:\n{module}"
+            );
+        }
+
+        let index = generated_file(&typescript, "index.ts");
+        assert!(
+            index.contains("export type { NxRecord, Range } from \"./_nx\";"),
+            "{index}"
+        );
+    }
+
+    /// C# library output puts every module in one namespace, so the closed formatter two modules
+    /// both name is declared once, in the shared formatter file, rather than once per module.
+    #[test]
+    fn csharp_library_output_declares_a_closed_prelude_formatter_once() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let library_dir = temp_dir.path().join("patches");
+        write_library(
+            &library_dir,
+            &[
+                (
+                    "a.nx",
+                    "export type PatchA = { change:<Range.Update T=int/> }",
+                ),
+                (
+                    "sub/b.nx",
+                    "export type PatchB = { change:<Range.Update T=int/> }",
+                ),
+            ],
+        );
+        let artifact = build_library_artifact_from_directory(&library_dir).expect("library build");
+        let csharp = generate_library_types_with_warnings(
+            &artifact,
+            &library_options(TargetLanguage::CSharp),
+        )
+        .unwrap();
+
+        let declarations: usize = csharp
+            .value
+            .iter()
+            .map(|file| {
+                file.content
+                    .matches("public sealed class NxRange_updateOfLongFormatter")
+                    .count()
+            })
+            .sum();
+        assert_eq!(
+            declarations, 1,
+            "two modules in one namespace declare the formatter once: {:?}",
+            csharp.value
+        );
+
+        let shared = generated_file(&csharp, "_NxFormatters.g.cs");
+        assert!(
+            shared.contains(
+                "public sealed class NxRange_updateOfLongFormatter : \
+                 IMessagePackFormatter<global::NxLang.Nx.NxRange_update<long>?>"
+            ),
+            "{shared}"
+        );
+
+        for file in ["a.g.cs", "sub/b.g.cs"] {
+            let module = generated_file(&csharp, file);
+            assert!(
+                module.contains("[MessagePackFormatter(typeof(NxRange_updateOfLongFormatter))]"),
+                "the member names the shared formatter across the namespace:\n{module}"
+            );
+            assert!(
+                !module.contains("public sealed class NxRange_updateOfLongFormatter"),
+                "the formatter is declared in the shared file, not here:\n{module}"
+            );
+        }
+
+        assert!(
+            csharp.warnings.is_empty(),
+            "the prelude's companion resolves: {:?}",
+            csharp.warnings
+        );
+    }
+
+    /// A prelude record is emitted as a concrete record, so it names `NxRecord` — and the output
+    /// must declare that even when the module declares no record of its own to bring it in.
+    #[test]
+    fn typescript_output_whose_only_record_is_the_prelude_s_still_declares_nx_record() {
+        let typescript = generate_for(
+            "export type Bounds = <Range T=int/>\n",
+            TargetLanguage::TypeScript,
+        );
+
+        assert!(
+            typescript.contains("export interface NxRecord<"),
+            "the referenced NxRecord is declared:\n{typescript}"
+        );
+        let nx_record = typescript
+            .find("export interface NxRecord<")
+            .expect("NxRecord declaration");
+        let range = typescript
+            .find("export interface Range<T> extends NxRecord<\"Range\">")
+            .unwrap_or_else(|| panic!("expected the prelude record:\n{typescript}"));
+        assert!(
+            nx_record < range,
+            "NxRecord is declared before the record that extends it:\n{typescript}"
+        );
+        assert!(
+            typescript.contains("export type Bounds = Range<number>;"),
+            "{typescript}"
+        );
+    }
+
+    /// The same for a library, where `NxRecord` lives in the shared helper module and the index
+    /// re-exports it.
+    #[test]
+    fn typescript_library_whose_only_record_is_the_prelude_s_still_declares_nx_record() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let library_dir = temp_dir.path().join("controls");
+        write_library(
+            &library_dir,
+            &[("bounds.nx", "export type Bounds = <Range T=int/>")],
+        );
+        let artifact = build_library_artifact_from_directory(&library_dir).expect("library build");
+        let typescript = generate_library_types_with_warnings(
+            &artifact,
+            &library_options(TargetLanguage::TypeScript),
+        )
+        .unwrap();
+
+        let helper = generated_file(&typescript, "_nx.ts");
+        assert!(
+            helper.contains("export interface NxRecord<"),
+            "the helper module declares NxRecord:\n{helper}"
+        );
+        assert!(
+            helper.contains("export interface Range<T> extends NxRecord<\"Range\">"),
+            "{helper}"
+        );
+
+        let module = generated_file(&typescript, "bounds.ts");
+        assert!(
+            module.contains("import type { Range } from \"./_nx\";"),
+            "{module}"
+        );
+
+        let index = generated_file(&typescript, "index.ts");
+        assert!(
+            index.contains("export type { NxRecord, Range } from \"./_nx\";"),
+            "{index}"
+        );
+    }
+
+    #[test]
+    fn output_that_uses_no_prelude_type_declares_none() {
+        let source = "export type User = { name:string age:int }\n";
+
+        let csharp = generate_for(source, TargetLanguage::CSharp);
+        assert!(!csharp.contains("NxRange"), "{csharp}");
+
+        let typescript = generate_for(source, TargetLanguage::TypeScript);
+        assert!(!typescript.contains("interface Range"), "{typescript}");
+    }
+
+    /// A module's own declaration under a prelude name is its own in both languages: the prelude's
+    /// names bind last here exactly as they do in NX source.
+    #[test]
+    fn a_modules_own_range_is_generated_as_its_own() {
+        let source = "export type Range = { low:int high:int }\n\
+                      export type Chart = { bounds:Range }\n";
+
+        let csharp = generate_for(source, TargetLanguage::CSharp);
+        assert!(csharp.contains("class Range"), "{csharp}");
+        assert!(!csharp.contains("NxRange"), "{csharp}");
+        let bounds = csharp
+            .lines()
+            .find(|line| line.contains(" Bounds { get; set; }"))
+            .unwrap_or_else(|| panic!("expected a Bounds property:\n{csharp}"));
+        assert!(bounds.contains("Range "), "{bounds}");
+
+        let typescript = generate_for(source, TargetLanguage::TypeScript);
+        assert!(
+            typescript.contains("export interface Range extends NxRecord<\"Range\"> {"),
+            "{typescript}"
+        );
+        assert!(typescript.contains("  low: number;"), "{typescript}");
+        assert!(typescript.contains("bounds: Range;"), "{typescript}");
     }
 }

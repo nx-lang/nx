@@ -334,6 +334,11 @@ pub enum CodegenExpressionKind {
         index: Option<String>,
         iterable: Box<CodegenExpression>,
         body: Box<CodegenExpression>,
+        /// True when the iterable is a range rather than a list, which type analysis decided.
+        ///
+        /// <para>The iterable is an ordinary record construction by the time it reaches here, so the
+        /// expression alone no longer says which loop counts and which walks a list.</para>
+        over_range: bool,
     },
     Index {
         base: Box<CodegenExpression>,

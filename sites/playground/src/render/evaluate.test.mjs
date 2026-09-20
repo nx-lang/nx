@@ -43,3 +43,23 @@ test("a catalog that lacks a control the snippet names refuses to link, naming t
   const without = prepareCatalog(emitCatalogArtifact(host, "export abstract external component <DrawnNode />\n"));
   assert.throws(() => prepare(snippet, without), /SkiaLabel/);
 });
+
+/// A range loop renders one item per integer, and the renderer's resolver is unchanged: it answers
+/// for the catalog alone, and the IR runtime supplies the prelude the snippet links against.
+test("a range loop renders one item per integer with the resolver unchanged", () => {
+  const prepared = prepareCatalog(emitCatalogArtifact(host, catalog));
+  const stars = compileWithCatalog(
+    host,
+    catalog,
+    'let root() = { <SkiaLayer>for i in 0..5 { <SkiaLabel Text="star" /> }</SkiaLayer> }',
+  );
+  assert.deepEqual(stars.diagnostics, []);
+
+  const root = evaluateRoot(prepare(stars.ir, prepared));
+  assert.equal(root.$type, "SkiaLayer");
+  assert.equal(root.Children.length, 5);
+  assert.deepEqual(
+    root.Children.map((child) => child.$type),
+    ["SkiaLabel", "SkiaLabel", "SkiaLabel", "SkiaLabel", "SkiaLabel"],
+  );
+});

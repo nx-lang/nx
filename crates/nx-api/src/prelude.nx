@@ -1,0 +1,15 @@
+// The NX prelude: declarations every module sees without an import.
+//
+// This module is carried inside the compiler and analyzed as an ordinary NX library, so a
+// declaration here is an ordinary declaration — constructed, applied, emitted and generated
+// through the same code as a user's own. Its names bind last, so a module that declares one of
+// them keeps its own.
+
+// The bounds of a range. `a..b` and `a..=b` construct it; `for` iterates one whose `T` is an
+// integer type.
+export type Range = {
+  T:type
+  start:T
+  end:T
+  endInclusive:boolean
+}

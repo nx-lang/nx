@@ -1,30 +1,35 @@
 /**
- * Answering one language query against a snapshot, with the prelude arithmetic that keeps every
- * position in the document's own coordinates.
+ * Answering one language query against a snapshot.
  *
  * <para>This is the half of NX language serving that has nothing to do with a transport. The HTTP
  * handler calls it after parsing a request; the in-process service calls it directly. Neither can
- * disagree with the other about a line number, because there is only one copy of the shift.</para>
+ * disagree with the other about a line number, because the queried text is analyzed exactly as the
+ * caller sent it: a host's own declarations join the document set as context documents and are named
+ * as implicit imports, so nothing is prepended and no position is ever rewritten.</para>
  */
 import type {
   CompletionList,
   DiagnosticReport,
-  DocumentDiagnostics,
   DocumentSymbol,
-  EditorDiagnostic,
   Hover,
   LanguageDocument,
   LanguageQueryName,
-  RelatedLocation,
-  TextPosition,
-  WorkspaceDiagnostic
+  TextPosition
 } from "@nx-lang/language-protocol";
 
 import type { SnapshotLike } from "./cache.js";
-import { shiftPositionIn, shiftRangeOut, withPrelude, type PreludeOffsets } from "./prelude.js";
 
-/** The label identity a diagnostic carries when it lies inside the prelude rather than the document. */
-export const PRELUDE_ORIGIN = "prelude";
+/**
+ * A host's own declarations, served with every query.
+ *
+ * <para>`documents` join every query's document set without the client sending them, and
+ * `implicitImports` are the identities every queried document imports without writing an import
+ * line. A diagnostic located in a context document is reported under that document's own URI.</para>
+ */
+export interface HostContext {
+  readonly documents?: readonly LanguageDocument[];
+  readonly implicitImports?: readonly string[];
+}
 
 /** What one query needs to be answered: the set it is asked over, and where in it. */
 export interface AnswerRequest {
@@ -33,116 +38,110 @@ export interface AnswerRequest {
   position: TextPosition | undefined;
 }
 
-/** Answers one validated query, applying the prelude around the snapshot when there is one. */
+/**
+ * The document set one query is analyzed over: the client's documents and the host's context.
+ *
+ * <para>A client document whose identity equals a context document's is a malformed request — the
+ * client cannot replace the host's context — and is reported by the caller that validated it. This
+ * returns the identity of such a collision, so one check serves both callers.</para>
+ */
+export function contextCollision(
+  documents: readonly LanguageDocument[],
+  context: HostContext | undefined
+): ContextCollision | undefined {
+  const contextUris = new Set((context?.documents ?? []).map((document) => document.uri));
+  const contextIdentities = new Set(
+    (context?.documents ?? [])
+      .map(documentIdentity)
+      .filter((identity): identity is string => identity !== undefined)
+  );
+  for (const document of documents) {
+    if (contextUris.has(document.uri)) {
+      return { kind: "uri", value: document.uri };
+    }
+    const identity = documentIdentity(document);
+    if (identity !== undefined && contextIdentities.has(identity)) {
+      return { kind: "identity", value: identity };
+    }
+  }
+  return undefined;
+}
+
+/** What a client document and a context document collided on. */
+export interface ContextCollision {
+  readonly kind: "uri" | "identity";
+  readonly value: string;
+}
+
+/** How a caller names a collision in a refusal, as a query or as a request. */
+export function contextCollisionMessage(
+  collision: ContextCollision,
+  supplied: "query" | "request"
+): string {
+  return `A document with the ${collision.kind} '${collision.value}' is part of the host's context and cannot be supplied by a ${supplied}.`;
+}
+
+/**
+ * A document's NX identity: the one it declares, or the one the SDK would derive from its URI.
+ *
+ * <para>The derivation is the SDK's, for the case a context document is declared the way both
+ * READMEs declare one — a URI and a source, with no identity of its own. Without it a client could
+ * replace a context document by naming its identity under a URI of the client's own. There is no
+ * workspace root here, so a `file:` URI keeps its file name, exactly as a snapshot built without a
+ * root does.</para>
+ */
+function documentIdentity(document: LanguageDocument): string | undefined {
+  if (document.identity !== undefined) {
+    return document.identity;
+  }
+  let url: URL;
+  try {
+    url = new URL(document.uri);
+  } catch {
+    // An unparseable URI is the SDK's to refuse, with its own message naming the URI.
+    return undefined;
+  }
+  const pathSegments = url.pathname.split("/").filter((segment) => segment !== "");
+  if (url.protocol === "file:") {
+    return pathSegments.at(-1);
+  }
+  const segments = url.hostname === "" ? pathSegments : [url.hostname, ...pathSegments];
+  return segments.length === 0 ? url.protocol.replace(":", "") : segments.join("/");
+}
+
+/** Answers one validated query, over the client's documents and the host's context. */
 export function answerQuery(
   query: LanguageQueryName,
   request: AnswerRequest,
-  prelude: PreludeOffsets | undefined,
+  context: HostContext | undefined,
   snapshotFor: (documents: LanguageDocument[]) => SnapshotLike
 ): unknown {
+  const contextDocuments = context?.documents ?? [];
   const documents =
-    prelude === undefined
-      ? request.documents
-      : request.documents.map((document) =>
-          document.uri === request.uri ? { ...document, source: withPrelude(prelude, document.source) } : document,
-        );
-  const position =
-    request.position === undefined || prelude === undefined
-      ? request.position
-      : shiftPositionIn(request.position, prelude);
+    contextDocuments.length === 0 ? request.documents : [...contextDocuments, ...request.documents];
   const snapshot = snapshotFor(documents);
   // The snapshot may have been built by an earlier request over the same text; its answers carry
   // that request's versions. The client discards answers by version, so it gets this request's.
   const versions = new Map(request.documents.map((document) => [document.uri, document.version ?? null]));
-  const withVersion = <T extends { uri: string; version: number | null }>(answer: T): T => ({
-    ...answer,
-    version: versions.get(answer.uri) ?? null,
-  });
+  // A document the request did not carry is a context document, whose version is the host's and not
+  // this request's, so it is left as the snapshot reported it.
+  const withVersion = <T extends { uri: string; version: number | null }>(answer: T): T =>
+    versions.has(answer.uri) ? { ...answer, version: versions.get(answer.uri) ?? null } : answer;
 
   switch (query) {
     case "hover": {
-      const hover = snapshot.hover(request.uri, position as TextPosition) as Hover | null;
-      if (hover === null) {
-        return null;
-      }
-      if (prelude === undefined) {
-        return withVersion(hover);
-      }
-      const range = shiftRangeOut(hover.range, prelude);
-      return range === null ? null : withVersion({ ...hover, range });
+      const hover = snapshot.hover(request.uri, request.position as TextPosition) as Hover | null;
+      return hover === null ? null : withVersion(hover);
     }
     case "completions":
-      return withVersion(snapshot.completions(request.uri, position as TextPosition) as CompletionList);
+      return withVersion(snapshot.completions(request.uri, request.position as TextPosition) as CompletionList);
     case "diagnostics": {
       const report = snapshot.diagnostics() as DiagnosticReport;
-      const shifted = prelude === undefined ? report : shiftReport(report, request.uri, prelude);
-      return { ...shifted, documents: shifted.documents.map(withVersion) };
+      // Every document's diagnostics are in its own coordinates, a context document's included, so
+      // there is nothing to move: only the client's own documents take this request's versions.
+      return { ...report, documents: report.documents.map(withVersion) };
     }
-    case "documentSymbols": {
-      const symbols = snapshot.documentSymbols(request.uri) as DocumentSymbol[];
-      if (prelude === undefined) {
-        return symbols;
-      }
-      return symbols.flatMap((symbol) => {
-        const range = shiftRangeOut(symbol.range, prelude);
-        const selectionRange = shiftRangeOut(symbol.selectionRange, prelude);
-        return range === null || selectionRange === null ? [] : [{ ...symbol, range, selectionRange }];
-      });
-    }
+    case "documentSymbols":
+      return snapshot.documentSymbols(request.uri) as DocumentSymbol[];
   }
-}
-
-/**
- * Moves the queried document's diagnostics back into its own coordinates.
- *
- * A diagnostic inside the prelude is the host's fault, not the author's: it is reported as a
- * workspace diagnostic labelled with the prelude origin and no range, rather than positioned on a
- * line the author cannot see. A related location that points into the queried document is shifted
- * wherever it appears, since a sibling's diagnostic names the same combined text.
- */
-export function shiftReport(report: DiagnosticReport, uri: string, prelude: PreludeOffsets): DiagnosticReport {
-  const workspace: WorkspaceDiagnostic[] = [...report.workspace];
-  const documents: DocumentDiagnostics[] = report.documents.map((document) => {
-    if (document.uri !== uri) {
-      return {
-        ...document,
-        diagnostics: document.diagnostics.map((diagnostic) => ({
-          ...diagnostic,
-          related: shiftRelated(diagnostic.related, uri, prelude),
-        })),
-      };
-    }
-    const diagnostics: EditorDiagnostic[] = [];
-    for (const diagnostic of document.diagnostics) {
-      const range = shiftRangeOut(diagnostic.range, prelude);
-      if (range === null) {
-        workspace.push({
-          severity: diagnostic.severity,
-          code: diagnostic.code,
-          message: diagnostic.message,
-          labels: [{ identity: PRELUDE_ORIGIN, message: null }],
-        });
-        continue;
-      }
-      diagnostics.push({ ...diagnostic, range, related: shiftRelated(diagnostic.related, uri, prelude) });
-    }
-    return { ...document, diagnostics };
-  });
-  return { documents, workspace };
-}
-
-/** Related locations with those in the queried document shifted; one inside the prelude is dropped. */
-function shiftRelated(related: readonly RelatedLocation[], uri: string, prelude: PreludeOffsets): RelatedLocation[] {
-  const shifted: RelatedLocation[] = [];
-  for (const location of related) {
-    if (location.uri !== uri) {
-      shifted.push(location);
-      continue;
-    }
-    const range = shiftRangeOut(location.range, prelude);
-    if (range !== null) {
-      shifted.push({ ...location, range });
-    }
-  }
-  return shifted;
 }

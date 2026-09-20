@@ -198,6 +198,41 @@ describe("protocol parity", () => {
 
   const sortedKeys = (value: object): string[] => Object.keys(value).sort();
 
+  it("puts an implicitly imported document's declarations in scope for hover", () => {
+    const author = '<Panel mode=light title="Hello" />\n';
+    const snapshot = new NxLanguageSnapshot(
+      [
+        { uri: "nx://tenant/catalog.nx", source: 'export let <Panel mode:Mode title:string /> = <div />\nexport type Mode = light | dark\n' },
+        { uri: FORM, source: author, version: 1 }
+      ],
+      { implicitImports: ["tenant/catalog.nx"] }
+    );
+    try {
+      const hover = snapshot.hover(FORM, positionOf(author, "Panel"));
+      expect(hover).not.toBeNull();
+      expect((hover as Hover).contents).toContain("Panel");
+      expect((hover as Hover).contents).toContain("title");
+    } finally {
+      snapshot.dispose();
+    }
+  });
+
+  it("reports an implicit import no document in the snapshot has", () => {
+    const snapshot = new NxLanguageSnapshot([{ uri: FORM, source: "let root() = 1\n", version: 1 }], {
+      implicitImports: ["tenant/missing.nx"]
+    });
+    try {
+      const report: DiagnosticReport = snapshot.diagnostics();
+      const messages = [
+        ...report.workspace.map((diagnostic) => diagnostic.message),
+        ...report.documents.flatMap((document) => document.diagnostics.map((diagnostic) => diagnostic.message))
+      ];
+      expect(messages.some((message) => message.includes("tenant/missing.nx"))).toBe(true);
+    } finally {
+      snapshot.dispose();
+    }
+  });
+
   it("serializes every result kind with exactly the protocol's keys", () => {
     const source = "type Mode = light | dark\nlet <Panel mode:Mode title:string /> = <div />\n<Panel  />\nlet bad: string = 1\n";
     const snapshot = new NxLanguageSnapshot([{ uri: FORM, source, version: 1 }]);

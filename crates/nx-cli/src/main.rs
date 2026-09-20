@@ -1609,6 +1609,55 @@ let root() = { Ui.title() }"#,
         assert!(output_path.join("main.nxir").exists());
     }
 
+    /// The prelude is written like any module and read back like any module: its identity is a
+    /// legal path on every platform, and `ir explain` renders the image the compiler wrote.
+    #[test]
+    fn test_cli_codegen_nx_ir_writes_and_re_reads_the_prelude_image() {
+        let (dir, workspace_path) =
+            create_temp_library(&[("app/main.nx", "let root() = { for i in 0..3 { i } }")]);
+        let output_path = dir.path().join("codegen-prelude");
+
+        let output = run_cli(&[
+            "codegen",
+            workspace_path.to_str().unwrap(),
+            "--target",
+            "nx-ir",
+            "--entry",
+            "app/main.nx",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+        assert!(
+            output.status.success(),
+            "CLI should write NX IR output: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let prelude_path = output_path.join("@nx").join("prelude.nxir");
+        assert!(
+            prelude_path.exists(),
+            "the prelude's image is written beside a program that needs it"
+        );
+        let bytes = fs::read(&prelude_path).unwrap();
+        let image = NxIrImage::open(&bytes).unwrap();
+        assert_eq!(
+            image.modules().next().unwrap().identity,
+            nx_hir::PRELUDE_MODULE_IDENTITY
+        );
+
+        let explained = run_cli(&["ir", "explain", prelude_path.to_str().unwrap()]);
+        assert!(
+            explained.status.success(),
+            "ir explain should re-read the prelude image: {}",
+            String::from_utf8_lossy(&explained.stderr)
+        );
+        let text = String::from_utf8_lossy(&explained.stdout);
+        assert!(
+            text.contains(nx_hir::PRELUDE_MODULE_IDENTITY) && text.contains("record Range"),
+            "{text}"
+        );
+    }
+
     #[test]
     fn test_cli_codegen_workspace_nx_ir_writes_one_artifact_per_module() {
         let (dir, workspace_path) = create_temp_library(&[
