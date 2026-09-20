@@ -4550,8 +4550,14 @@ impl<'a> InferenceContext<'a> {
         // Not a nominal type: a bare name never falls back to being a string. Whatever fix the
         // message names has to be one this site would take — offering `"r"` at an `int` site sends
         // the author to a second error — so a binding in scope is pointed at in its braced form
-        // first, and the quoted form is offered only where a string satisfies the site.
-        let fix = if self.env.lookup(name).is_some() {
+        // only when its own type satisfies the site, the quoted form is offered only where a
+        // string satisfies the site, and neither being true still leaves the accepted shape to
+        // name.
+        let binding_fits = self
+            .env
+            .lookup(name)
+            .is_some_and(|bound| self.type_satisfies_expected_with_coercion(bound, expected));
+        let fix = if binding_fits {
             format!("; to use the value bound to '{}' write {{{}}}", name, name)
         } else if self.type_satisfies_expected_with_coercion(
             &Type::Primitive(crate::ty::Primitive::String),
@@ -4559,7 +4565,9 @@ impl<'a> InferenceContext<'a> {
         ) {
             format!("; for a string value write \"{}\"", name)
         } else {
-            String::new()
+            // Nothing can be pointed at by this name, but the form the site takes is still worth
+            // saying: a value that is not a literal reaches a site in braces.
+            "; a value here is written as a literal, or in braces as `{...}`".to_string()
         };
         self.error(
             "contextual-name-requires-nominal-type",

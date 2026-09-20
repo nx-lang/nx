@@ -15,9 +15,8 @@ more tightly than `<`, `>`, `<=`, `>=`, `==` and `!=`, so an arithmetic operand 
 parentheses. A range expression is a binary expression: inside a braced value list it MUST be
 parenthesized, as every binary expression must, and at a site where an unbraced value is a literal —
 a binding initializer, a property value — it MUST be braced, as every binary expression must. The
-tokens SHALL lex so that an integer literal
-directly before `..` stays an integer literal, and a member access on either side binds before the
-operator.
+tokens SHALL lex so that an integer literal directly before `..` stays an integer literal, and a
+member access on either side binds before the operator.
 
 #### Scenario: Arithmetic operands need no parentheses
 - **WHEN** a file contains `let n = 4` and `let r = {0..n + 1}`

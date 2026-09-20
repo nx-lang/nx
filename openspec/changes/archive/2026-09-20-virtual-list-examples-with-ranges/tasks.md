@@ -12,7 +12,12 @@ fiddle commit below carries those hunks as well.
 - [x] 1.1 Correct `nx:openspec/specs/range-expressions/spec.md` per the delta: every scenario that
   writes a range as an unbraced binding initializer takes the braced form, and the new scenario
   pinning `let r = 1..5` as a parse error is added; verify each corrected snippet by running it
-  through `cargo run -p nx-cli -- run` and seeing the behavior the scenario states
+  through `cargo run -p nx-cli -- run` and seeing the behavior the scenario states.
+  This one capability is written through to the main spec ahead of the archive, unlike the other
+  three deltas, because its scenarios are what an example author reads while writing the rewritten
+  examples below — a spec that tells them to write `let r = 1..5` is wrong for the whole of this
+  change, not only after it. The delta and the main spec are kept byte-identical over these
+  requirements so the archive's diff stays empty here
 - [x] 1.2 Add the parser or checker test that `let r = 1..5` is rejected the way `let n = 1 + 2` is,
   alongside the existing range tests in `nx:crates/nx-syntax/tests/parser_tests.rs`; verify it fails
   before the assertion is written correctly and passes after
@@ -134,7 +139,20 @@ fiddle commit below carries those hunks as well.
   fix, and verify `cargo test` and `pnpm -r test` stay green — both were; both are
 - [x] 6.3 For anything larger, write a one-paragraph problem statement naming the reproducer and add
   it here as a deferred item rather than fixing it; verify each deferred item names the capability it
-  belongs to — nothing was deferred
+  belongs to
+
+  One, met while reviewing the diagnostic of 6.2 rather than while porting, and deferred because the
+  fix is a language-design decision rather than a contained change:
+
+  1. **A module-level binding that refers forward type-checks and then fails at run time.**
+     `let x:int = {later}` / `let later = 5` / `<div />` compiles with no diagnostic and then stops
+     with `Runtime error: Undefined variable: later` (reproduced from `cargo run -p nx-cli -- run`).
+     Analysis resolves a top-level name against the whole module, while evaluation binds the
+     module's values in source order, so the two disagree about what is visible. Either evaluation
+     orders the bindings by their dependencies, or analysis rejects a forward reference between
+     module-level values — choosing between them is what makes this a proposal of its own. It
+     belongs to `symbol-resolution-model`, whose visible-namespace contract is what analysis follows
+     here, with `resolved-program-runtime` on the other side of the disagreement.
 - [x] 6.4 If any fix changed compiler behavior, rerun `pnpm run check-examples` in
   `nx:sites/playground` and `npm run test:nx -- --nx ../nx` in the fiddle, and verify both are green
 
