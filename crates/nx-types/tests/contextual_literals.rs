@@ -163,11 +163,16 @@ fn a_visible_binding_is_offered_in_its_braced_form() {
 
 #[test]
 fn the_quoted_form_is_offered_only_where_a_string_fits() {
-    assert_reports("let x:string = hello\n", "for a string value write \"hello\"");
+    assert_reports(
+        "let x:string = hello\n",
+        "for a string value write \"hello\"",
+    );
 
     let numeric = errors("let x:int = hello\n");
     assert!(
-        !numeric.iter().any(|message| message.contains("for a string value")),
+        !numeric
+            .iter()
+            .any(|message| message.contains("for a string value")),
         "a string does not satisfy an int site: {numeric:?}"
     );
 
@@ -177,7 +182,9 @@ fn the_quoted_form_is_offered_only_where_a_string_fits() {
         "a record site with a visible binding should name the braced form: {record:?}"
     );
     assert!(
-        !record.iter().any(|message| message.contains("for a string value")),
+        !record
+            .iter()
+            .any(|message| message.contains("for a string value")),
         "a record site does not take a string: {record:?}"
     );
 }
