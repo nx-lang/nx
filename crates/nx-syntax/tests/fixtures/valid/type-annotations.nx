@@ -3,13 +3,13 @@ type UserId = int
 type Username = string
 type MaybeUser = User?
 type UserList = User[]
-type UserGrid = User[][]
+type UserAliasList = Username?[]
 type MaybeUserList = User[]?
 type MaybeUserAliases = Username?[]
 
 type User = object
 
-let loadUsers(users: User[][]): User[][] = {users}
+let loadUsers(users: User?[]): User[]? = {users}
 let maybeUsers(): User[]? = null
 
 let <UserCard
@@ -18,7 +18,7 @@ let <UserCard
   email:string?
   previousNames:string?[]
   relatedUsers:User[]?
-  groupedUsers:User[][]
+  groupedUsers:User[]?
   age:int
 /> =
   <div class="user-card">

@@ -155,6 +155,75 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
+    /// A cycle between two modules' aliases is reported in each file that wrote one of them.
+    ///
+    /// <para>A type alias is registered under the name the module reaches it by, and one a peer
+    /// module declared carries that peer's span. Reporting a cycle at that span underlines an
+    /// offset in another file -- here `b.nx` is two lines and `a.nx`'s alias is on line 26, so
+    /// such a span does not merely mislead, it falls outside the file the diagnostic is attributed
+    /// to. This is the only harness here that links modules; `check_str` is single-module, so the
+    /// `nx-types` tests cannot reach this at all.</para>
+    #[test]
+    fn a_type_alias_cycle_across_modules_is_reported_where_each_alias_was_written() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let lib_dir = temp_dir.path().join("lib");
+        let filler = "// filler\n".repeat(25);
+        let a_source = format!("{filler}export type A = B\n");
+        let b_source = "export type B = A\n// second line\n";
+        write_library(&lib_dir, &[("a.nx", &a_source), ("b.nx", b_source)]);
+
+        let artifact =
+            build_library_artifact_from_directory(&lib_dir).expect("the library should load");
+
+        let mut reported = Vec::new();
+        for module in &artifact.modules {
+            let file = Path::new(&module.file_name)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .expect("module file name")
+                .to_string();
+            let length = if file == "a.nx" {
+                a_source.len()
+            } else {
+                b_source.len()
+            };
+            for diagnostic in &module.diagnostics {
+                for label in diagnostic.labels() {
+                    let end = usize::from(label.range.end());
+                    assert!(
+                        end <= length,
+                        "{file}: span {:?} runs past the {length} bytes of the file it underlines",
+                        label.range
+                    );
+                    reported.push((
+                        file.clone(),
+                        diagnostic.message().to_string(),
+                        usize::from(label.range.start()),
+                    ));
+                }
+            }
+        }
+        reported.sort();
+
+        // Each file reports its own alias, at its own declaration: `a.nx`'s begins after 25
+        // filler lines of ten bytes each, and `b.nx`'s is the first thing in the file.
+        assert_eq!(
+            reported,
+            vec![
+                (
+                    "a.nx".to_string(),
+                    "Type alias 'A' forms a cycle".to_string(),
+                    filler.len()
+                ),
+                (
+                    "b.nx".to_string(),
+                    "Type alias 'B' forms a cycle".to_string(),
+                    0
+                ),
+            ]
+        );
+    }
+
     /// The source a test generates from; generation lowers and analyzes it itself.
     fn source_module(source: &str, _file_name: &str) -> String {
         source.to_string()
@@ -879,12 +948,13 @@ mod tests {
     #[test]
     fn generates_typescript_composed_list_and_nullable_types() {
         let source = r#"
-            export type Matrix = string[][]
+            export type Names = string[]
             export type MaybeNames = string[]?
+            export type Aliases = string?[]
             export type Payload = {
+              names:string[]
               aliases:string?[]
               maybeNames:string[]?
-              matrix:string[][]
             }
         "#;
         let module = source_module(source, "types.nx");
@@ -897,11 +967,12 @@ mod tests {
 
         let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
 
-        assert!(output.contains("export type Matrix = string[][];"));
+        assert!(output.contains("export type Names = string[];"));
         assert!(output.contains("export type MaybeNames = string[] | null;"));
+        assert!(output.contains("export type Aliases = (string | null)[];"));
+        assert!(output.contains("names: string[];"));
         assert!(output.contains("aliases: (string | null)[];"));
         assert!(output.contains("maybeNames: string[] | null;"));
-        assert!(output.contains("matrix: string[][];"));
     }
 
     /// NX arguments bind by name, so a function type is a function of one object of named
@@ -2360,7 +2431,7 @@ export type QuestionFlowInitialExperience = {
     fn generates_csharp_composed_list_and_nullable_field_types() {
         let source = r#"
             export type Payload = {
-              matrix:string[][]
+              names:string[]
               maybeNames:string[]?
               aliases:string?[]
             }
@@ -2375,7 +2446,7 @@ export type QuestionFlowInitialExperience = {
 
         let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
 
-        assert!(output.contains("public string[][] Matrix { get; set; } = default!;"));
+        assert!(output.contains("public string[] Names { get; set; } = default!;"));
         assert!(output.contains("public string[]? MaybeNames { get; set; }"));
         assert!(output.contains("public string?[] Aliases { get; set; } = default!;"));
     }

@@ -82,6 +82,59 @@ let banner = if {
 - Arms are evaluated in order; the first true condition wins.
 - `else` is optional but recommended for clarity.
 
+## When there is no `else`
+
+An `if` with no `else`, in any of the forms above, behaves as though its `else` were `{}` — the
+empty sequence. So it produces the branch it takes, or nothing at all, and its type is a sequence
+of what its branches produce:
+
+```nx
+let c = true
+let tags:string[] = { if c { "new" } }
+
+let root() = { tags }
+```
+
+`tags` holds one string when `c` is true and none when it is false. Because the missing branch is
+an empty sequence rather than a null, the same conditional works wherever items are collected — an
+element body, a content property, a braced sequence, the body of a `for` — and contributes nothing
+there when no branch is taken:
+
+```nx
+type Item = { label:string }
+type List = { content items:Item[] }
+
+let showExtra = false
+
+let root() = {
+  <List>
+    <Item label="always" />
+    if showExtra { <Item label="sometimes" /> }
+  </List>
+}
+```
+
+The list holds one item when `showExtra` is false: the conditional never contributes a null item,
+and never widens the element type the other children determine. The same rule is what makes
+`for n in ns { if (n % 2 == 0) { n } }` a filter, and it holds at any depth — a conditional nested
+in one is still a sequence of items, never a sequence of sequences.
+
+An `if` written as a child needs no braces around it. `{if showExtra { ... }}` means the same thing,
+but the bare form is preferred. A property value is different: there the braces are required, as in
+`className={if ... }` above.
+
+Where you want a nullable value instead, write the `else`:
+
+```nx
+let hasErrors = false
+let hint:string? = { if hasErrors { "Fix the errors above" } else { null } }
+
+let root() = { hint }
+```
+
+An `if` with no `else` is a sequence, not a nullable, so without the `else { null }` that binding is
+rejected as `expects string?, found string[]`.
+
 ## Property-list form
 
 Inside an element opening tag, `if` can select property groups instead of a single value.

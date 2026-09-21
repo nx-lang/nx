@@ -51,9 +51,15 @@ fn record_lineage(shape: &nx_hir::EffectiveRecordShape) -> Vec<nx_hir::RecordAnc
     lineage
 }
 
+/// One type alias's target, under whatever name this module reaches the alias by.
+///
+/// <para>There is deliberately no span here. An alias in this map may have been declared by
+/// another module, and that declaration's span cannot underline anything in this file -- it can
+/// run past the end of it. A diagnostic raised while resolving an alias target takes its span
+/// from `local_type_alias_spans` when this module wrote the alias, and from the reference that
+/// reached it otherwise.</para>
 struct TypeAliasInfo {
     target: ast::TypeRef,
-    span: TextSpan,
 }
 
 /// One discriminated union definition together with the declaration it came from.
@@ -315,6 +321,30 @@ pub struct InferenceContext<'a> {
     /// `Expr::Widen`, on the same terms as `converted_literals`, so a runtime that tells the two
     /// apart produces the value the join's type says.
     widened_joins: FxHashMap<ExprId, Primitive>,
+    /// The branches of an `if` or match that the join lifted from an item to a sequence.
+    ///
+    /// <para>The join types a branch producing `T` beside a sequence as `T[]`, and the lifting is
+    /// only a claim about the type until the branch's value follows it. Each branch recorded here
+    /// is wrapped as a one-item sequence after analysis, beside the widenings, so every engine
+    /// evaluates a taken `if c { 1 }` to `[1]` — the value its `int[]` type promises — rather
+    /// than to a bare `1` that iterating would reject or, in generated JavaScript, misread.</para>
+    lifted_joins: FxHashSet<ExprId>,
+    /// What each local type alias's target resolved to, so each target is walked once.
+    ///
+    /// <para>An alias's target used to be walked again at every use, which reported whatever was
+    /// wrong with it once per use as well as once at the alias -- `type Rows = Names[]` used
+    /// twice was three diagnostics, two of them pointing at a line that names neither `Names` nor
+    /// a `[]`. Resolving once is also what keeps the eager alias pass from doubling every report
+    /// it was added to make. `Type::Error` is cached like any other answer, because it is the
+    /// answer.</para>
+    resolved_type_aliases: FxHashMap<Name, Type>,
+    /// Where each alias *this* module declares was written.
+    ///
+    /// <para>`type_aliases` holds imported aliases too, under the name this module reaches them
+    /// by and with the span the declaring module wrote them at. A span from another file cannot
+    /// underline anything in this one, so only the aliases here are ones a diagnostic raised
+    /// while resolving a target may be moved onto.</para>
+    local_type_alias_spans: FxHashMap<Name, TextSpan>,
     /// The type parameters a type annotation can currently name, and what each one denotes.
     ///
     /// <para>While a component's signature, defaults, and body are checked, each of its effective
@@ -399,6 +429,9 @@ impl<'a> InferenceContext<'a> {
             folded_constants: FxHashMap::default(),
             string_conversions: StringConversions::default(),
             widened_joins: FxHashMap::default(),
+            lifted_joins: FxHashSet::default(),
+            resolved_type_aliases: FxHashMap::default(),
+            local_type_alias_spans: FxHashMap::default(),
             type_parameter_scope: FxHashMap::default(),
             type_ref_span: TextSpan::new(0.into(), 0.into()),
             consumed_type_arguments: FxHashSet::default(),
@@ -408,6 +441,10 @@ impl<'a> InferenceContext<'a> {
             indexed_loops: Vec::new(),
         };
         ctx.register_type_definitions();
+        // Aliases before anything that can resolve one, so a target that nests a sequence is
+        // reported at the alias itself rather than at whichever signature, binding or field
+        // happens to reach it first.
+        ctx.validate_local_type_aliases();
         ctx.register_function_signatures();
         ctx.register_value_bindings();
         ctx.validate_local_record_defaults();
@@ -558,18 +595,27 @@ impl<'a> InferenceContext<'a> {
 
                 let then_ty = self.infer_expr(*then_branch);
 
-                if let Some(else_id) = else_branch {
-                    let else_ty = self.infer_expr(*else_id);
-
-                    let joined = self.common_supertype(&then_ty, &else_ty);
-                    self.record_join_widenings(
-                        &[(*then_branch, then_ty), (*else_id, else_ty)],
-                        &joined,
-                    );
-                    joined
-                } else {
-                    // No else branch - type is void
-                    Type::void()
+                // A missing `else` is an `else { }`. Joining with the empty sequence is the whole
+                // of the rule: the join lifts an item to a sequence, so a branch producing `T`
+                // gives `T[]`, and a branch that is already a sequence gives that sequence back
+                // -- including a branch that is itself a conditional with no `else`, which is why
+                // nesting needs nothing of its own. Only branches that exist can be widened.
+                match else_branch {
+                    Some(else_id) => {
+                        let else_ty = self.infer_expr(*else_id);
+                        let joined = self.common_supertype(&then_ty, &else_ty);
+                        let members = [(*then_branch, then_ty), (*else_id, else_ty)];
+                        self.record_join_lifts(&members, &joined);
+                        self.record_join_widenings(&members, &joined);
+                        joined
+                    }
+                    None => {
+                        let joined = self.common_supertype(&then_ty, &Self::implicit_empty_else());
+                        let members = [(*then_branch, then_ty)];
+                        self.record_join_lifts(&members, &joined);
+                        self.record_join_widenings(&members, &joined);
+                        joined
+                    }
                 }
             }
 
@@ -589,9 +635,27 @@ impl<'a> InferenceContext<'a> {
                     // list-typed site without anything having to be resolved later.
                     Type::array(Type::never())
                 } else {
-                    let elem_tys: Vec<_> = elements.iter().map(|e| self.infer_expr(*e)).collect();
-                    let item_ty = self.common_sequence_item_type(&elem_tys, *span);
-                    let members = elements.iter().copied().zip(elem_tys).collect::<Vec<_>>();
+                    // Items splice: what each contributes is its element type when it is itself a
+                    // sequence -- a conditional with no `else` among them, since its type is one --
+                    // and the item's own type otherwise. The join is over contributions, and so is
+                    // the widening that follows it: what `{ns 1.5}` has to widen to `float64` is
+                    // the `int` inside `ns`, not `ns` itself, and an `int[]` measured against a
+                    // `float64` widens to nothing. The widening is still recorded against the
+                    // item, because the item is what a widening wraps -- and wrapping a sequence
+                    // widens it element by element.
+                    let contributions: Vec<_> = elements
+                        .iter()
+                        .map(|e| {
+                            self.infer_expr(*e);
+                            self.item_contribution_of(*e)
+                        })
+                        .collect();
+                    let item_ty = self.common_sequence_item_type(&contributions, *span);
+                    let members = elements
+                        .iter()
+                        .copied()
+                        .zip(contributions)
+                        .collect::<Vec<_>>();
                     self.record_join_widenings(&members, &item_ty);
                     Type::array(item_ty)
                 }
@@ -694,7 +758,11 @@ impl<'a> InferenceContext<'a> {
                 if let Some(expr_id) = expr {
                     self.infer_expr(*expr_id)
                 } else {
-                    Type::void()
+                    // Unreachable from source: lowering builds no `Block`, so a block with no
+                    // trailing expression exists only in hand-written HIR. The bottom type is the
+                    // honest answer for an expression that produces no value, and it keeps every
+                    // inferred type one an author could be shown.
+                    Type::never()
                 }
             }
 
@@ -756,13 +824,17 @@ impl<'a> InferenceContext<'a> {
                         index_uses: Vec::new(),
                     });
                 }
-                let body_ty = self.infer_expr(*body);
+                // A `for` concatenates what its body yields, so the result is a sequence of
+                // what one iteration contributes: the element type of a sequence-valued body, no
+                // items at all where a conditional was not taken, and the body's own type
+                // otherwise.
+                let item_contribution = self.item_contribution(*body);
                 if index.is_some() {
                     self.indexed_loops.pop();
                 }
                 self.env.pop_scope();
 
-                Type::array(body_ty)
+                Type::array(item_contribution)
             }
 
             // Let expressions (used for match lowering)
@@ -1300,6 +1372,10 @@ impl<'a> InferenceContext<'a> {
                 .all(|case| covered_cases.contains(case))
         });
 
+        // A path no arm covers is the match's own absent `else`: the arms that are there decide
+        // the type, and the uncovered path contributes nothing where items are collected and null
+        // where one value is expected.
+        let mut uncovered = false;
         if let Some(else_id) = else_branch {
             let else_ty = self.infer_expr(else_id);
             result_members.push((else_id, else_ty.clone()));
@@ -1321,13 +1397,19 @@ impl<'a> InferenceContext<'a> {
                     ),
                     span,
                 );
-                result_tys.push(Type::void());
+                uncovered = true;
             }
         } else {
-            result_tys.push(Type::void());
+            uncovered = true;
         }
 
+        // A path no arm covers is this match's missing `else`, and is read as an `else { }` --
+        // the same rule an `if` without one follows, joined over arms rather than over a branch.
+        if uncovered && !result_tys.is_empty() {
+            result_tys.push(Self::implicit_empty_else());
+        }
         let joined = self.common_result_type(&result_tys);
+        self.record_join_lifts(&result_members, &joined);
         self.record_join_widenings(&result_members, &joined);
         joined
     }
@@ -1437,6 +1519,30 @@ impl<'a> InferenceContext<'a> {
         }
     }
 
+    /// Records each branch of a join that the join lifted from an item to a sequence.
+    ///
+    /// <para>Each one is wrapped as a one-item sequence after analysis, so the branch's value is
+    /// what the join's type says: a taken `if c { 1 }` evaluates to `[1]`.</para>
+    fn record_join_lifts(&mut self, members: &[(ExprId, Type)], joined: &Type) {
+        // A branch is lifted when the join is a sequence and the branch is not: the join made a
+        // sequence of it. A branch that is already a sequence, and one of type `never` or an
+        // error, contributes nothing of its own to lift. Forgotten otherwise, since inference can
+        // visit a join more than once.
+        let joined_is_sequence = Self::is_sequence_shaped(joined);
+        for (expr, ty) in members {
+            let lifted = joined_is_sequence
+                && !Self::is_sequence_shaped(ty)
+                && !Self::is_null_literal_type(ty)
+                && !ty.is_error()
+                && !matches!(ty, Type::Primitive(Primitive::Never));
+            if lifted {
+                self.lifted_joins.insert(*expr);
+            } else {
+                self.lifted_joins.remove(expr);
+            }
+        }
+    }
+
     /// Records each branch of a join whose numeric type is narrower than the join's.
     ///
     /// <para>A branch is recorded against the join's numeric type, which is also what it widens
@@ -1457,7 +1563,8 @@ impl<'a> InferenceContext<'a> {
     }
 
     fn common_result_type(&self, result_tys: &[Type]) -> Type {
-        let mut current = result_tys.first().cloned().unwrap_or_else(Type::void);
+        // Nothing to join is the bottom type, the identity of the join.
+        let mut current = result_tys.first().cloned().unwrap_or_else(Type::never);
 
         for ty in result_tys.iter().skip(1) {
             current = self.common_supertype(&current, ty);
@@ -3253,7 +3360,11 @@ impl<'a> InferenceContext<'a> {
             // The argument is a name this use site wrote, not a declaration's, so a problem with
             // it — a generic record named without its own arguments, say — is reported here, at
             // the element that wrote it.
-            return Some(self.type_from_type_ref_at(span, &ast::TypeRef::Name(name)));
+            let ty = self.type_from_type_ref_at(span, &ast::TypeRef::Name(name.clone()));
+            if self.reject_sequence_type_argument(&ty, Some(&name), span) {
+                return None;
+            }
+            return Some(ty);
         }
 
         let candidates = self.visible_type_names();
@@ -3708,6 +3819,35 @@ impl<'a> InferenceContext<'a> {
         self.type_from_type_ref_walk(declaring_module, type_ref, &mut seen, true)
     }
 
+    /// Reports a `[]` applied to something that is already a sequence, once per name.
+    ///
+    /// <para>A `[]` written directly on a spelled sequence -- `string[][]`, `(string[])[]` -- is
+    /// post-parse validation's to reject, at the `[]` itself. Saying it again from here would say
+    /// the same thing twice, in vaguer words and at a whole declaration's span, so only nesting
+    /// the parser cannot see is reported: a name that resolves to a sequence.</para>
+    fn report_nested_sequence_type(&mut self, inner: &ast::TypeRef) {
+        if Self::type_ref_spells_a_sequence(inner) {
+            return;
+        }
+        let span = self.type_ref_span;
+        let message = match inner {
+            ast::TypeRef::Name(name) => {
+                format!("A sequence cannot contain sequences; '{name}' is already a sequence")
+            }
+            _ => "A sequence cannot contain sequences".to_string(),
+        };
+        self.error("nested-sequence-type", message, span);
+    }
+
+    /// Whether a type reference has a `[]` of its own written on it, through any number of `?`.
+    fn type_ref_spells_a_sequence(type_ref: &ast::TypeRef) -> bool {
+        match type_ref {
+            ast::TypeRef::Array(_) => true,
+            ast::TypeRef::Nullable(inner) => Self::type_ref_spells_a_sequence(inner),
+            _ => false,
+        }
+    }
+
     /// Converts a type reference one layer at a time, so that an applied type is reached wherever
     /// one can be written and resolved where the declarations it names are known.
     ///
@@ -3744,10 +3884,28 @@ impl<'a> InferenceContext<'a> {
                 self.applied_type(declaring_module, name, args, seen, scoped)
             }
             ast::TypeRef::Array(inner) => {
-                Type::array(self.type_from_type_ref_walk(declaring_module, inner, seen, scoped))
+                let element = self.type_from_type_ref_walk(declaring_module, inner, seen, scoped);
+                // A sequence of nothing usable is nothing usable, not a sequence. Wrapping the
+                // error would make an enclosing `[]` believe the inner reference named a
+                // sequence, so `type A = A[]` would report its cycle and then claim `A` is
+                // already a sequence -- on top of a name that is not a type at all.
+                if element.is_error() {
+                    return Type::Error;
+                }
+                if matches!(element.strip_nullable(), Type::Array(_)) {
+                    self.report_nested_sequence_type(inner);
+                    return Type::Error;
+                }
+                Type::array(element)
             }
             ast::TypeRef::Nullable(inner) => {
-                Type::nullable(self.type_from_type_ref_walk(declaring_module, inner, seen, scoped))
+                let inner = self.type_from_type_ref_walk(declaring_module, inner, seen, scoped);
+                // As for `[]`: nothing usable stays nothing usable rather than becoming a
+                // nullable of it, so an enclosing suffix reads the error for what it is.
+                if inner.is_error() {
+                    return Type::Error;
+                }
+                Type::nullable(inner)
             }
             ast::TypeRef::Function {
                 params,
@@ -3819,6 +3977,35 @@ impl<'a> InferenceContext<'a> {
             span,
         );
         Type::Error
+    }
+
+    /// Rejects a type argument that is a sequence, naming the alias when one was written.
+    ///
+    /// <para>A type parameter stands where an item type stands: a record declaring `items:T[]`
+    /// instantiated with `T=int[]` would have a field that is a sequence of sequences, which no
+    /// NX type is. Checking the resolved argument covers `T=int[]`, `T=Ints` and a parameter
+    /// forwarded from an enclosing declaration alike, since all three arrive here as a
+    /// `Type`.</para>
+    fn reject_sequence_type_argument(
+        &mut self,
+        ty: &Type,
+        written: Option<&Name>,
+        span: TextSpan,
+    ) -> bool {
+        if !matches!(ty.strip_nullable(), Type::Array(_)) {
+            return false;
+        }
+        self.error(
+            "sequence-type-argument",
+            match written {
+                Some(name) => {
+                    format!("A type argument must not be a sequence; '{name}' is a sequence")
+                }
+                None => "A type argument must not be a sequence".to_string(),
+            },
+            span,
+        );
+        true
     }
 
     /// Resolves `<Range T=int/>`: the tag to a generic record, each argument to a type, and the
@@ -3898,6 +4085,13 @@ impl<'a> InferenceContext<'a> {
             }
             let ty = self.type_from_type_ref_walk(declaring_module, arg, seen, scoped);
             if ty.is_error() {
+                failed = true;
+            }
+            let written = match arg {
+                ast::TypeRef::Name(arg_name) => Some(arg_name.clone()),
+                _ => None,
+            };
+            if self.reject_sequence_type_argument(&ty, written.as_ref(), span) {
                 failed = true;
             }
             // A bare name that reached no declaration is a misspelling, not a type. Nothing else
@@ -4346,13 +4540,62 @@ impl<'a> InferenceContext<'a> {
         // of nothing but empty lists stays a `never[]`, which is what it is.
         let item_types: Vec<_> = exprs
             .iter()
-            .map(|expr_id| match self.infer_expr(*expr_id) {
-                Type::Array(inner) => *inner,
-                other => other,
-            })
+            .map(|expr_id| self.item_contribution(*expr_id))
             .collect();
 
         Type::array(self.common_sequence_item_type(&item_types, span))
+    }
+
+    /// The type of the `else { }` that a conditional without one is read as having.
+    ///
+    /// <para>An empty sequence, which is a `never[]`: `never` is the join's identity, so joining
+    /// with it takes the element type from the branches that are there and adds nothing of its
+    /// own. What it does add is the sequence layer, which is the point -- a conditional that can
+    /// take no branch produces zero or one of what its branches produce.</para>
+    fn implicit_empty_else() -> Type {
+        Type::array(Type::never())
+    }
+
+    /// What an item contributes to the sequence it sits in, typing the item first.
+    ///
+    /// <para>A sequence-typed item contributes its elements and every other item contributes
+    /// itself. An `object` item contributes `object`: it may hold a sequence, but it is one item to
+    /// the type system. A conditional with no `else` is not a case of this: its type is already a
+    /// sequence, so it contributes its elements like any other sequence-typed item.</para>
+    fn item_contribution(&mut self, expr_id: ExprId) -> Type {
+        self.infer_expr(expr_id);
+        self.item_contribution_of(expr_id)
+    }
+
+    /// The contribution of an item whose type has already been inferred.
+    fn item_contribution_of(&self, expr_id: ExprId) -> Type {
+        // One rule, and it reads only the item's own type: a sequence contributes its elements,
+        // anything else contributes itself. A conditional with no `else` needs no arm here
+        // because its type is already a sequence.
+        //
+        // A nullable sequence is still a sequence when it is present, and is one null item when it
+        // is not -- which is what every engine does with it, splicing a present value and pushing
+        // an absent one. So it contributes its element type made nullable: `string[]?` contributes
+        // `string?`. Contributing itself would build `string[]?[]`, a sequence of sequences that
+        // no type can spell and no binding can accept.
+        match self
+            .env
+            .get_expr_type(expr_id)
+            .cloned()
+            .unwrap_or(Type::Error)
+        {
+            Type::Array(inner) => *inner,
+            Type::Nullable(inner) if matches!(inner.as_ref(), Type::Array(_)) => {
+                let Type::Array(element) = *inner else {
+                    unreachable!("matched a nullable sequence");
+                };
+                match *element {
+                    already_nullable @ Type::Nullable(_) => already_nullable,
+                    element => Type::nullable(element),
+                }
+            }
+            other => other,
+        }
     }
 
     fn common_sequence_item_type(&self, item_types: &[Type], _span: TextSpan) -> Type {
@@ -4806,12 +5049,16 @@ impl<'a> InferenceContext<'a> {
         if let Some(rendered) = Self::empty_list_display(actual) {
             actual_display = rendered;
         }
+        // A sequence where something else was expected gets the plain message and none of the
+        // hints below, which are about scalars: a bare-form hint, a function signature's reason,
+        // and a lossy numeric conversion are all beside the point when the mismatch is a sequence.
+        // The `[]` in the type already says it is a sequence, so the message does not repeat it.
         let message = if matches!(actual, Type::Array(_))
             && !Self::is_empty_list_type(actual)
             && !matches!(expected, Type::Array(_))
         {
             format!(
-                "{} expects {}, found list {}",
+                "{} expects {}, found {}",
                 context, expected_display, actual_display
             )
         } else {
@@ -5234,6 +5481,10 @@ impl<'a> InferenceContext<'a> {
     }
 
     /// The branches of a join that widen, and the numeric type each widens to.
+    pub fn lifted_joins(&self) -> &FxHashSet<ExprId> {
+        &self.lifted_joins
+    }
+
     pub fn widened_joins(&self) -> &FxHashMap<ExprId, Primitive> {
         &self.widened_joins
     }
@@ -5277,7 +5528,6 @@ impl<'a> InferenceContext<'a> {
                         binding.visible_name.clone(),
                         TypeAliasInfo {
                             target: alias.ty.clone(),
-                            span: alias.span,
                         },
                     );
                 }
@@ -5285,10 +5535,7 @@ impl<'a> InferenceContext<'a> {
                     if let Some(alias) = interface_type_alias(item) {
                         self.type_aliases.insert(
                             binding.visible_name.clone(),
-                            TypeAliasInfo {
-                                target: alias.ty,
-                                span: alias.span,
-                            },
+                            TypeAliasInfo { target: alias.ty },
                         );
                     } else if let Some(mut union_def) = interface_union(item) {
                         union_def.name = binding.visible_name.clone();
@@ -5390,6 +5637,62 @@ impl<'a> InferenceContext<'a> {
                 self.type_parameter_scope = previous_scope;
             }
         }
+    }
+
+    /// Resolves each local type alias's target, so a target that is not a type is reported where
+    /// the alias was written rather than at whichever use site reaches it first.
+    ///
+    /// <para>`type Rows = Names[]` where `Names` is already a sequence is the case this exists
+    /// for: the parse validator sees no `[]` to object to, and an alias nobody uses would
+    /// otherwise never be resolved at all.</para>
+    fn validate_local_type_aliases(&mut self) {
+        let local_items = self.module.raw_module().items().to_vec();
+        // Recorded before any of them is resolved, because resolving one alias can reach another
+        // declared after it, and that one's report belongs on its own declaration too.
+        for item in &local_items {
+            if let Item::TypeAlias(alias) = item {
+                self.local_type_alias_spans
+                    .insert(alias.name.clone(), alias.span);
+            }
+        }
+        for item in local_items {
+            if let Item::TypeAlias(alias) = item {
+                // An alias an earlier one already reached is resolved and reported already: this
+                // loop walks declarations in source order, and an alias may name one declared
+                // after it. Walking it again here would report whatever is wrong with its target
+                // a second time, and whether that happened would depend on declaration order.
+                if self.resolved_type_aliases.contains_key(&alias.name) {
+                    continue;
+                }
+                // The answer is cached under the alias's name, so this is the resolution every
+                // use of the alias reads. Resolving the target here and again at the first use
+                // would report whatever is wrong with it twice, once at each span.
+                let ty = self.resolve_local_alias_target(&alias.name, alias.span, &alias.ty);
+                self.resolved_type_aliases.insert(alias.name.clone(), ty);
+            }
+        }
+    }
+
+    /// Resolves one local alias's target exactly as a use site reaching that alias would.
+    ///
+    /// <para>`seen` starts with the alias's own name and the target resolves unscoped, which is
+    /// what [`Self::resolve_named_type`] does, so the eager pass and a use site cannot disagree
+    /// about the answer they cache. It matters most for a cycle: entering the walk at the target
+    /// instead of at the alias leaves the alias out of `seen` until the loop comes back round, so
+    /// the cycle closes on whichever name completes it -- which may be one another module
+    /// declared, leaving the report naming that alias while underlining this one.</para>
+    fn resolve_local_alias_target(
+        &mut self,
+        name: &Name,
+        span: TextSpan,
+        target: &ast::TypeRef,
+    ) -> Type {
+        let mut seen = FxHashSet::default();
+        seen.insert(name.clone());
+        let enclosing_span = std::mem::replace(&mut self.type_ref_span, span);
+        let ty = self.type_from_type_ref_walk(None, target, &mut seen, false);
+        self.type_ref_span = enclosing_span;
+        ty
     }
 
     fn validate_local_union_defaults(&mut self) {
@@ -5772,8 +6075,13 @@ impl<'a> InferenceContext<'a> {
         type_ref: &ast::TypeRef,
     ) -> Type {
         let before = self.diagnostics.len();
+        // A quiet resolution has to leave no trace: an alias it resolved for the first time would
+        // otherwise answer every later use from the cache, with the diagnostics that resolution
+        // produced already thrown away. So the cache is rolled back with them.
+        let resolved_before = self.resolved_type_aliases.clone();
         let ty = self.type_from_type_ref_in(declaring_module, type_ref);
         self.diagnostics.truncate(before);
+        self.resolved_type_aliases = resolved_before;
         ty
     }
 
@@ -5797,20 +6105,48 @@ impl<'a> InferenceContext<'a> {
     /// resolver, so a parameter shadows a type only where the author wrote the name.</para>
     fn resolve_named_type(&mut self, name: &Name, seen: &mut FxHashSet<Name>) -> Type {
         if let Some(alias) = self.type_aliases.get(name) {
+            if let Some(resolved) = self.resolved_type_aliases.get(name) {
+                return resolved.clone();
+            }
             if !seen.insert(name.clone()) {
+                // The alias a cycle closes on is not always one this module wrote: the eager
+                // alias pass enters the cycle from a local alias, so it closes on whichever name
+                // completes the loop, which may be an imported one. That alias's span belongs to
+                // the file that declared it and cannot underline anything here -- it can even run
+                // past the end of this one. Where the name is not local, the reference that
+                // reached it is the best span this file has.
+                let span = self
+                    .local_type_alias_spans
+                    .get(name)
+                    .copied()
+                    .unwrap_or(self.type_ref_span);
                 self.error(
                     "type-alias-cycle",
                     format!("Type alias '{}' forms a cycle", name),
-                    alias.span,
+                    span,
                 );
                 return Type::Error;
             }
 
             // An alias target was written outside any declaration, so no type parameter is in
             // scope for it; it may still be an applied type, which the walker resolves.
+            //
+            // A problem with the target belongs to the alias that wrote it, not to whatever
+            // reference reached the alias first — which may be another alias, or a binding on a
+            // line that names neither the target nor what is wrong with it. So the span is the
+            // alias's for the length of the walk, and the caller's is put back afterwards.
             let target = alias.target.clone();
+            let enclosing_span = self
+                .local_type_alias_spans
+                .get(name)
+                .copied()
+                .map(|alias_span| std::mem::replace(&mut self.type_ref_span, alias_span));
             let ty = self.type_from_type_ref_walk(None, &target, seen, false);
+            if let Some(enclosing_span) = enclosing_span {
+                self.type_ref_span = enclosing_span;
+            }
             seen.remove(name);
+            self.resolved_type_aliases.insert(name.clone(), ty.clone());
             return ty;
         }
 
@@ -6128,6 +6464,14 @@ impl<'a> InferenceContext<'a> {
         }
     }
 
+    /// Whether a type is a sequence, looking through nullability.
+    ///
+    /// <para>`string[]` and `string[]?` both are; `string?` is not. The question the join asks is
+    /// whether a value of this type holds items, which a `?` does not change.</para>
+    fn is_sequence_shaped(ty: &Type) -> bool {
+        matches!(ty.strip_nullable(), Type::Array(_))
+    }
+
     fn common_supertype(&self, lhs: &Type, rhs: &Type) -> Type {
         match (lhs, rhs) {
             // The bottom type is the identity of the join: it is below the other side already, so
@@ -6136,9 +6480,54 @@ impl<'a> InferenceContext<'a> {
             (Type::Primitive(Primitive::Never), other) => other.clone(),
             (other, Type::Primitive(Primitive::Never)) => other.clone(),
 
+            // Two sequence-valued branches of an `if` or arms of a match join here: a value
+            // position joins whole sequences, where a collecting position never reaches this arm
+            // because each item contributes its element type before the join. What the arm is for
+            // is the recursion into `self`: joining `Admin[]` with `User[]` at `Person[]` takes
+            // the record lineage, which only the inference context knows. Dropping it would leave
+            // the pair to the structural join in `semantics`, which answers `object` for two
+            // element types that are not equal.
             (Type::Array(lhs_inner), Type::Array(rhs_inner)) => {
                 Type::array(self.common_supertype(lhs_inner, rhs_inner))
             }
+
+            // An item is a sequence of one, so joining an item type with a sequence type gives a
+            // sequence. This is what types a conditional with no `else`: `if c { 1 }` joins `int`
+            // with the `never[]` of its implicit `else { }` and is an `int[]`, and `if c { xs }`
+            // joins `string[]` with it through the arm above and stays `string[]`.
+            //
+            // Exactly one side may be sequence-shaped. Two sequences joined element-wise are the
+            // arm above, and a nullable sequence beside a sequence is a nullable sequence -- the
+            // nullable arm below -- not a sequence of sequences.
+            //
+            // A written `null` is not an item to lift either. `if c { xs } else { null }` is the
+            // spelling of a nullable sequence, so `null` beside `string[]` is `string[]?` by the
+            // nullable arm, not `string?[]` holding a null item. Only the untyped null literal is
+            // excluded: a branch typed `int?` is a real item and lifts to `int?[]`.
+            (lhs, rhs)
+                if Self::is_sequence_shaped(lhs) != Self::is_sequence_shaped(rhs)
+                    && !Self::is_null_literal_type(lhs)
+                    && !Self::is_null_literal_type(rhs) =>
+            {
+                let (sequence, item) = if Self::is_sequence_shaped(lhs) {
+                    (lhs, rhs)
+                } else {
+                    (rhs, lhs)
+                };
+                let Type::Array(element) = sequence.strip_nullable() else {
+                    unreachable!("one side is sequence-shaped");
+                };
+                let lifted = Type::array(self.common_supertype(element, item));
+                // A nullable sequence may still be absent after the other side is lifted beside
+                // it, so the `?` it came with stays on the result: `string[]?` joined with
+                // `string` is `string[]?`, not a `string[]` that a null value would then violate.
+                if matches!(sequence, Type::Nullable(_)) {
+                    Type::nullable(lifted)
+                } else {
+                    lifted
+                }
+            }
+
             (Type::Nullable(_), _) | (_, Type::Nullable(_)) => {
                 crate::semantics::nullable_join(lhs, rhs, |lhs, rhs| {
                     self.common_supertype(lhs, rhs)
@@ -6296,6 +6685,9 @@ fn join_widening(member: &Type, joined: &Type) -> Option<Primitive> {
         (Type::Array(member), Type::Array(joined))
         | (Type::Nullable(member), Type::Nullable(joined)) => join_widening(member, joined),
         (member, Type::Nullable(joined)) => join_widening(member, joined),
+        // An item the join lifted to a sequence widens to that sequence's element type: in
+        // `if c { 1 } else { floats }` the `1` becomes the one-item `float64[]` `[1.0]`.
+        (member, Type::Array(joined)) => join_widening(member, joined),
         _ => None,
     }
 }

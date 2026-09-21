@@ -3,48 +3,146 @@ title: 'Sequences & Object Duality'
 description: 'How NX treats sequences as the core collection type and keeps objects in sync with components.'
 ---
 
-Sequences are the primary collection type in NX. They underpin iteration, comprehensions, and list rendering. See [nx-grammar.md](https://github.com/nx-lang/nx/blob/main/nx-grammar.md#expressions) for formal rules.
+Sequences are the primary collection type in NX. They underpin iteration, list rendering, and body
+content. Three sentences describe all of it:
 
-## Working with Sequences
+- **An item is a sequence of one.** Wherever a sequence is expected, a single item will do.
+- **A sequence never contains a sequence.** `T[]` is defined for an item type `T`, and no sequence
+  is an item type.
+- **An item in a collecting position contributes its items.** A sequence written where items are
+  being collected contributes its items in order, not itself.
 
-```nx
-let numbers: int[] = [1, 2, 3, 4, 5]
-let names: string[] = ["Alice", "Bob", "Carol"]
-let users: User[] = [user1, user2, user3]
+See [nx-grammar.md](https://github.com/nx-lang/nx/blob/main/nx-grammar.md#expressions) for formal
+rules.
 
-let empty: string[] = []
+## Writing a sequence
 
-let squares = for n in numbers { n * n }
-let evens = for n in numbers { if (n % 2 == 0) { n } }
-```
-
-- Sequences may be eager or lazy depending on the host runtime; syntax is unchanged.
-- Nested sequences are straightforward: `int[][]` represents a matrix, and `(string, User[])[]` models grouped buckets.
-- Nullable lists and lists of nullable elements remain distinct: `string[]?` is a nullable list of
-  strings, while `string?[]` is a list whose items may be null.
-- Non-null list values can bind to nullable list targets, so a braced list such as
-  `{ <Link /> <Link /> }` can populate a `Link[]?` field or annotated `let`.
-- Nullability does not stack on the same layer: `string?[]?` is valid, but `string?[]??` is
-  rejected because the outer list is already nullable.
+A sequence is written with braces, with no delimiter between items, exactly as elements are written
+side by side in markup. `{}` is the empty sequence, and a `for` yields one.
 
 ```nx
-let matrix: int[][] = [[1, 2], [3, 4], [5, 6]]
-let maybeNames: string[]? = getCachedNames()
-let inlineLinks: ChatBrandLink[]? = { <ChatBrandLink /> <ChatBrandLink /> }
-let aliases: string?[] = ["ali", null, "alice"]
-let grouped: (string, User[])[] = [
-  ("admins", [admin1, admin2]),
-  ("users", [user1, user2, user3])
-]
+let numbers:int[] = { 1 2 3 4 5 }
+let names:string[] = { "Alice" "Bob" "Carol" }
+let none:string[] = { }
+
+let squares:int[] = { for n in numbers { n * n } }
+let evens:int[] = { for n in numbers { if (n % 2 == 0) { n } } }
+
+let root() = { squares }
 ```
+
+The last two are worth reading twice. A `for` concatenates what its body yields, so a body that
+yields one item per iteration gives one item per iteration, and a body that yields nothing on an
+iteration contributes nothing at all. An `if` with no `else` is read as having an `else { }`, so
+when it is not taken it yields the empty sequence — which is nothing. That is the filter idiom, and
+it needs no operator of its own.
+
+## Items splice
+
+Where items are collected — a braced sequence, a call argument, body content, the yields of a `for`
+— an item whose own type is a sequence contributes its items.
+
+```nx
+let xs:string[] = { "a" "b" }
+let ys:string[] = { "c" }
+
+// One sequence of three strings, not a sequence of two sequences.
+let all:string[] = { xs ys }
+// The rule does not care whether the neighbours are sequences or items.
+let more:string[] = { xs "d" }
+
+let root() = { all }
+```
+
+Body content follows the same rule, which is what lets a helper that returns several children sit
+beside a single one:
+
+```nx
+type Badge = { n:int = 1 }
+type Row = { content items:Badge[] }
+
+let some:Badge[] = { <Badge/> <Badge n=2 /> }
+
+let root() = { <Row>{some}<Badge n=3 /></Row> }
+```
+
+`items` holds three badges. The same three arrive through a property binding, `<Row items={some
+<Badge n=3 />} />`, because a property is a collecting position too.
+
+A conditional child that does not fire contributes nothing, for the same reason — its missing
+`else` is an empty sequence:
+
+```nx
+type Item = { label:string }
+type List = { content items:Item[] }
+
+let showExtra = false
+
+let root() = {
+  <List>
+    <Item label="always" />
+    if showExtra { <Item label="sometimes" /> }
+  </List>
+}
+```
+
+`items` holds one item. An untaken conditional contributes no items — never a null item, and never a
+widening of the element type. It is not a special case: the conditional's type is a sequence, so it
+splices like any other sequence-valued item, alone or beside others. As a child it needs no braces
+of its own, though `{if showExtra { ... }}` means the same thing. The same holds in
+a position that supplies one value: `{if showExtra { "yes" }}` has type `string[]`, one string or
+none. Where a nullable is wanted, write the `else` — `{if showExtra { "yes" } else { null }}` is a
+`string?`.
+
+## Suffixes
+
+`[]` and `?` compose in source order, and the two orders mean different things:
+
+```nx
+type SearchState = {
+  queries:string[]?
+  aliases:string?[]
+}
+
+let root() = { <SearchState queries={ } aliases={ "ali" null } /> }
+```
+
+`queries` is a nullable sequence of strings; `aliases` is a sequence whose items may be null. A
+non-null sequence binds to a nullable sequence site, so `{ "a" "b" }` populates a `string[]?` field.
+Neither suffix stacks on its own layer: `string?[]?` is valid, `string?[]??` is rejected because the
+outer layer is already nullable, and `string[][]` is rejected because a sequence cannot contain
+sequences. The rejection follows an alias too — given `type Names = string[]`, `Names[]` is not a
+type — and a type argument must be an item type, so `<Page T=int[]/>` is rejected where
+`<Page T=int/>` is fine.
+
+## Nesting data
+
+A record is how data nests. Where a matrix or a bucket list is wanted, name the row:
+
+```nx
+type Row = { cells:int[] }
+
+let grid:Row[] = { <Row cells={ 1 2 } /> <Row cells={ 3 4 } /> }
+
+let root() = { grid }
+```
+
+The row type is a name worth having: `Row` says what a row is, where `int[][]` says only that
+something is nested. Iterating `grid` gives rows, and iterating a row gives cells.
+
+There is one place the static and dynamic views differ. A value of type `object` may hold anything,
+including a sequence, and it is opaque: it counts as one item where it is typed as one, and it
+contributes its own items where it is collected. Data arriving from outside NX with genuinely nested
+arrays has no NX type to land in today; a record around each level is the answer, and a distinct
+array type for external data — as XPath added one for JSON — is the likely answer later.
 
 ## Objects and Components Share Syntax
-NX reuses element syntax for object definitions and instantiation so that data and UI stay aligned.
+NX reuses element syntax for record definitions and construction so that data and UI stay aligned.
 
 ```nx
-type <User id:string name:string email:string avatarUrl:string?/>
-type <Point x:int y:int/>
-type <Color r:int g:int b:int a:float64 = 1.0/>
+type User = { id:string name:string email:string avatarUrl:string? }
+type Point = { x:int y:int }
+type Color = { r:int g:int b:int a:float64 = 1.0 }
 
 let user =
   <User
@@ -54,50 +152,30 @@ let user =
     avatarUrl="/avatars/john.jpg"
   />
 
-let origin = <Point x=0 y=0/>
-let red = <Color r=255 g=0 b=0/>
-let transparentBlue = <Color r=0 g=0 b=255 a=0.5/>
+let origin = <Point x=0 y=0 />
+let red = <Color r=255 g=0 b=0 />
+let transparentBlue = <Color r=0 g=0 b=255 a=0.5 />
+
+let root() = { user }
 ```
 
-Because the syntax aligns, assembling objects from components (and vice versa) feels natural.
+Because the syntax aligns, assembling records from components (and vice versa) feels natural, and a
+sequence of records is written the way a sequence of children is:
 
 ```nx
-let <UserProfile userId:string/> = {
-  let user = <User
-    id={userId}
-    name="John Doe"
-    email="john@example.com"
-  />
+type User = { id:string name:string email:string }
 
-  <div>
-    <img src={if user.avatarUrl { user.avatarUrl } else { "/default-avatar.jpg" }}/>
-    <h2>{user.name}</h2>
-    <span>{user.email}</span>
-  </div>
+let users:User[] = {
+  <User id="1" name="Alice" email="alice@example.com" />
+  <User id="2" name="Bob" email="bob@example.com" />
+  <User id="3" name="Carol" email="carol@example.com" />
 }
+
+let root() = { users }
 ```
 
-Inline object usage works the same way.
-
-```nx
-<UserCard user=<User id="456" name="Jane" email="jane@example.com"/> />
-
-let users = [
-  <User id="1" name="Alice" email="alice@example.com"/>,
-  <User id="2" name="Bob" email="bob@example.com"/>,
-  <User id="3" name="Carol" email="carol@example.com"/>
-]
-
-type <StringContainer value:string metadata:string created:string/>
-
-let stringContainer = <StringContainer
-  value="hello world"
-  metadata="text data"
-  created="2023-01-01"
-/>
-```
-
-This duality simplifies data modelling, component authoring, and tooling: the same grammar powers both structures.
+This duality simplifies data modelling, component authoring, and tooling: the same grammar powers
+both structures.
 
 ## See also
 - Language Tour: [Types](/language-tour/types)

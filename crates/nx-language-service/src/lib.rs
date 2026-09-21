@@ -3442,6 +3442,25 @@ component <SearchBox placeholder:string /> = {
         assert!(hover.contents.contains("int"), "got: {}", hover.contents);
     }
 
+    /// The suffixes compose in source order, and hover is where an author reads the composition
+    /// back. `T[]`, `T?[]` and `T[]?` are three types, and none of them is rendered `void`.
+    #[test]
+    fn hover_over_a_binding_spells_its_sequence_and_nullable_suffixes() {
+        for (source, expected) in [
+            ("let na⟨cursor⟩mes:string[] = { \"a\" }\n", "string[]"),
+            ("let al⟨cursor⟩iases:string?[] = { null }\n", "string?[]"),
+            ("let que⟨cursor⟩ries:string[]? = null\n", "string[]?"),
+        ] {
+            let hover = hover_at(source).expect("hover content");
+            assert!(
+                hover.contents.contains(expected),
+                "expected {expected} in: {}",
+                hover.contents
+            );
+            assert!(!hover.contents.contains("void"), "got: {}", hover.contents);
+        }
+    }
+
     /// An emit is bound at a use site as `on<Emit>`, which the compiler checks like any other
     /// property of the component, so completion offers it and hover describes it: the component's
     /// own emits and the ones it inherits, from whichever module declared them.

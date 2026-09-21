@@ -23,16 +23,18 @@ type Schedule = {
 // An alias names an instantiation, which is also how a construction site writes an argument that
 // is not a bare type name.
 type IntBounds = <Bounds T=int/>
-type Ints = int[]
+type MaybeInt = int?
 
 let week:<Bounds T=int/> = <Bounds T=int start={1} end={7} />
 
 // Arguments are matched to parameters by name, in any order.
 let entry:<Pair TValue=int TKey=string/> = <Pair TKey=string TValue=int key="mon" value={1} />
 
-// An applied type nests, and an alias stands in for the argument at the construction site.
+// An applied type nests, and an alias stands in for the argument at the construction site. A type
+// argument is an item type: `int?` is one, and a sequence such as `int[]` is not, since `T[]` in
+// `Page` would then be a sequence of sequences.
 let pages:<Page T=<Bounds T=int/>/> = <Page T=IntBounds items={ week } next={null} render={null} />
-let counts:<Page T=int[]/> = <Page T=Ints items={ } next={null} render={null} />
+let maybes:<Page T=int?/> = <Page T=MaybeInt items={ 1 null } next={null} render={null} />
 
 // Reading a field substitutes the argument: `week.start` is an `int`.
 let firstDay:int = {week.start}

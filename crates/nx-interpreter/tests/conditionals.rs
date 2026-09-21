@@ -66,16 +66,34 @@ fn test_if_else_false_branch() {
 /// Test if without else (returns null on false)
 #[test]
 fn test_if_without_else() {
+    // A missing `else` is an `else { }`, so the result is a sequence of zero or one items rather
+    // than a nullable. A nullable result is written by giving the `else` explicitly, which
+    // `test_if_without_else_and_an_explicit_null` covers.
     let source = r#"
-        let maybe_double(x:int): int? = { if x > 0 { x * 2 } }
+        let maybe_double(x:int): int[] = { if x > 0 { x * 2 } }
     "#;
 
-    // Condition true, returns x * 2
+    // Condition true: the branch's item.
+    let result = execute_nx_function(source, "maybe_double", vec![Value::Int(5)])
+        .unwrap_or_else(|e| panic!("{}", e));
+    assert_eq!(result, Value::Array(vec![Value::Int(10)]));
+
+    // Condition false: no items at all, and no null among them.
+    let result = execute_nx_function(source, "maybe_double", vec![Value::Int(-5)])
+        .unwrap_or_else(|e| panic!("{}", e));
+    assert_eq!(result, Value::Array(Vec::new()));
+}
+
+#[test]
+fn test_if_without_else_and_an_explicit_null() {
+    let source = r#"
+        let maybe_double(x:int): int? = { if x > 0 { x * 2 } else { null } }
+    "#;
+
     let result = execute_nx_function(source, "maybe_double", vec![Value::Int(5)])
         .unwrap_or_else(|e| panic!("{}", e));
     assert_eq!(result, Value::Int(10));
 
-    // Condition false, returns null
     let result = execute_nx_function(source, "maybe_double", vec![Value::Int(-5)])
         .unwrap_or_else(|e| panic!("{}", e));
     assert_eq!(result, Value::Null);
@@ -860,7 +878,7 @@ fn test_condition_list_basic() {
 #[test]
 fn test_condition_list_without_else() {
     let source = r#"
-        let sign(x:int): int? = {
+        let sign(x:int): int[] = {
             if {
                 x > 0 => 1
                 x < 0 => -1
@@ -870,18 +888,18 @@ fn test_condition_list_without_else() {
 
     assert_eq!(
         execute_nx_function(source, "sign", vec![Value::Int(42)]).unwrap(),
-        Value::Int(1)
+        Value::Array(vec![Value::Int(1)])
     );
 
     assert_eq!(
         execute_nx_function(source, "sign", vec![Value::Int(-42)]).unwrap(),
-        Value::Int(-1)
+        Value::Array(vec![Value::Int(-1)])
     );
 
-    // Zero doesn't match any condition, should return null
+    // Zero matches no condition, so the uncovered path is an `else { }`: no items, not a null.
     assert_eq!(
         execute_nx_function(source, "sign", vec![Value::Int(0)]).unwrap(),
-        Value::Null
+        Value::Array(Vec::new())
     );
 }
 
@@ -995,7 +1013,7 @@ fn test_match_expression_integers() {
 #[test]
 fn test_match_expression_without_else() {
     let source = r#"
-        let special(x:int): string? = {
+        let special(x:int): string[] = {
             if x is {
                 42 => "answer"
                 0 => "nothing"
@@ -1005,18 +1023,18 @@ fn test_match_expression_without_else() {
 
     assert_eq!(
         execute_nx_function(source, "special", vec![Value::Int(42)]).unwrap(),
-        Value::String(SmolStr::new("answer"))
+        Value::Array(vec![Value::String(SmolStr::new("answer"))])
     );
 
     assert_eq!(
         execute_nx_function(source, "special", vec![Value::Int(0)]).unwrap(),
-        Value::String(SmolStr::new("nothing"))
+        Value::Array(vec![Value::String(SmolStr::new("nothing"))])
     );
 
-    // No match, should return null
+    // No arm matches, so the uncovered path is an `else { }`: no items, not a null.
     assert_eq!(
         execute_nx_function(source, "special", vec![Value::Int(1)]).unwrap(),
-        Value::Null
+        Value::Array(Vec::new())
     );
 }
 

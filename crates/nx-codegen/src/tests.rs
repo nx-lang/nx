@@ -635,7 +635,10 @@ let root(items: int[]): int[] = { for item in items { item + answer } }"#,
     assert!(index.contains("from \"./m0_main.js\";"));
     assert!(!module.contains(".ts\""));
     assert!(module.contains("export function root(items: readonly number[]): readonly number[]"));
-    assert!(module.contains("return Array.from(items).map((item, _index) => (item + m1_answer));"));
+    // A `for` concatenates what its body yields, so it splices rather than maps.
+    assert!(
+        module.contains("return Array.from(items).flatMap((item, _index) => (item + m1_answer));")
+    );
     assert!(!module.contains("nx-runtime"));
     assert!(!module.contains("nxArray"));
     assert!(!module.contains("nxElement"));
@@ -873,6 +876,8 @@ let root() = { add(1, 2) }
             "return (true ? 1 : 2);",
         ),
         (
+            // Items splice: the flattening is what a sequence-valued item is spliced by, and it
+            // is written for every sequence so that one rule covers them all.
             "array",
             "let root(): int[] = { 1 2 3 }",
             "return [1, 2, 3];",
@@ -880,7 +885,7 @@ let root() = { add(1, 2) }
         (
             "loop",
             "let root(items:int[]) = { for item, index in items { item + index } }",
-            "Array.from(items).map((item, index) => (item + index))",
+            "Array.from(items).flatMap((item, index) => (item + index))",
         ),
         (
             "record",
@@ -951,6 +956,82 @@ let root(): Shape = { <Shape.circle radius=1.5 /> }
         assert!(!js_module.contains(": unknown"));
         assert!(!js_module.contains("export type"));
     }
+}
+
+/// The flat sequence model in generated JavaScript: items splice, and a conditional with no
+/// `else` contributes nothing where it is not taken.
+#[test]
+fn generated_javascript_splices_items_and_drops_an_untaken_conditional() {
+    let cases = [
+        // Two sequences in a braced value concatenate.
+        (
+            r#"let xs:string[] = {"a" "b"}
+let ys:string[] = {"c"}
+let root(): string[] = { xs ys }"#,
+            "[\"a\",\"b\",\"c\"]",
+        ),
+        // A sequence and an item share one sequence.
+        (
+            r#"let xs:string[] = {"a" "b"}
+let root(): string[] = { xs "c" }"#,
+            "[\"a\",\"b\",\"c\"]",
+        ),
+        // A `for` concatenates what its body yields.
+        (
+            r#"type Row = { cells:int[] }
+let rows:Row[] = { <Row cells={1 2}/> <Row cells={3 4}/> }
+let root(): int[] = { for r in rows { r.cells } }"#,
+            "[1,2,3,4]",
+        ),
+        // A conditional body contributes on the iterations it is taken, and nothing on the rest.
+        (
+            r#"let ns:int[] = {1 2 3 4}
+let root(): int[] = { for n in ns { if (n % 2 == 0) { n } } }"#,
+            "[2,4]",
+        ),
+        // A written null is an item like any other and survives the splice.
+        (r#"let root(): string?[] = { "a" null }"#, "[\"a\",null]"),
+    ];
+
+    for (source, expected) in cases {
+        let artifact = artifact_from_source(source);
+        assert_eq!(
+            execute_generated_javascript_artifact_root(&artifact, ""),
+            expected,
+            "for source: {source}"
+        );
+    }
+}
+
+#[test]
+fn an_untaken_conditional_child_emits_no_content_item() {
+    let source = r#"type A = { n:int = 1 }
+type Box = { content items:A[] }
+let c = false
+let root(): Box = { <Box><A/>{if c { <A/> }}</Box> }"#;
+    let artifact = artifact_from_source(source);
+
+    // The untaken branch is the empty list, so the splice drops it with no element form of its own.
+    let module = generated_file(&artifact, CodegenTarget::JavaScript, "m0_main.js");
+    assert!(
+        module.contains(": [])"),
+        "expected an empty-list branch: {module}"
+    );
+    assert!(
+        !module.contains(": null)"),
+        "no null element form: {module}"
+    );
+
+    let output = execute_generated_javascript_artifact_root(&artifact, "");
+    assert!(
+        !output.contains("null"),
+        "an untaken conditional contributes no items: {output}"
+    );
+    assert_eq!(
+        output.matches("\"$type\"").count(),
+        2,
+        "one Box and one A: {output}"
+    );
 }
 
 #[test]

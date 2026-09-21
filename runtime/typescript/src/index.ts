@@ -1752,7 +1752,10 @@ export function constructComponentDescriptor(
   const { declaration, component } = componentDeclaration(linkedProgram, name);
   const { fields: input, handlers } = splitHandlerProperties(linkedProgram.entry, declaration, props, `${name} props`);
   const contentField = component.props.find((field) => field.isContent);
-  applyContentBinding(input, contentField?.name, component.props, content, name);
+  // A host supplies content as an argument, with no body to have been written or not written, and
+  // the argument defaults to the empty array. So no content passed means no content: there is no
+  // way for a caller to say "a body that produced nothing", and the declared default stands.
+  applyContentBinding(input, contentField?.name, component.props, content, name, false);
   const normalized = normalizeFields(
     linkedProgram,
     linkedProgram.entry,
@@ -2152,7 +2155,73 @@ function nodesAt(context: EvalContext, entry: Uint32Array, at: number): { values
  * as one list of children.
  */
 function contentAt(context: EvalContext, entry: Uint32Array, at: number): NxCanonicalValue[] {
-  return spliceContent(nodesAt(context, entry, at).values);
+  return itemsAt(context, entry, at);
+}
+
+/**
+ * Whether a body was written at `at`, which is the count of children the element was given.
+ *
+ * A body of one child that contributes nothing still counts, which is the whole reason this is
+ * asked separately from how many values the body produced.
+ */
+function hasBodyAt(entry: Uint32Array, at: number): boolean {
+  return entry[at] !== 0;
+}
+
+/** Evaluates the `count, node × count` list at `at` as the items of one sequence. */
+function itemsAt(context: EvalContext, entry: Uint32Array, at: number): NxCanonicalValue[] {
+  const count = entry[at]!;
+  const items: NxCanonicalValue[] = [];
+  for (let position = at + 1; position < at + 1 + count; position += 1) {
+    evalItemInto(entry[position]!, context, items);
+  }
+  return items;
+}
+
+/**
+ * Appends what one item contributes to the sequence it sits in.
+ *
+ * A list value contributes its elements and every other value contributes itself. That is the
+ * whole rule. A conditional that takes no branch needs no case here: it evaluates to the empty
+ * sequence, so it splices away like any other list-valued item, and a conditional nested in one
+ * is no different. Nothing inspects the node, so a written null stays an item.
+ */
+function evalItemInto(index: number, context: EvalContext, items: NxCanonicalValue[]): void {
+  const value = evalNode(index, context);
+  if (Array.isArray(value)) {
+    items.push(...value);
+  } else {
+    items.push(value);
+  }
+}
+
+/** The branch an `if` or `if … is` takes, `undefined` when it takes none. */
+function takenBranch(context: EvalContext, entry: Uint32Array): number | undefined {
+  if (entry[0] === nodeKinds.if) {
+    if (truthy(evalNode(entry[1]!, context))) {
+      return entry[2]!;
+    }
+    return entry[3] === NX_IR_NONE ? undefined : entry[3]!;
+  }
+  const scrutinee = evalNode(entry[1]!, context);
+  const arms = entry[2]!;
+  let position = 3;
+  for (let arm = 0; arm < arms; arm += 1) {
+    const patterns = entry[position]!;
+    let matched = false;
+    for (let pattern = position + 1; pattern < position + 1 + patterns; pattern += 1) {
+      if (!matched && patternMatches(scrutinee, evalNode(entry[pattern]!, context))) {
+        matched = true;
+      }
+    }
+    const body = entry[position + 1 + patterns]!;
+    if (matched) {
+      return body;
+    }
+    position += patterns + 2;
+  }
+  const otherwise = entry[position]!;
+  return otherwise === NX_IR_NONE ? undefined : otherwise;
 }
 
 function spliceContent(values: readonly NxCanonicalValue[]): NxCanonicalValue[] {
@@ -2230,36 +2299,17 @@ function evalNode(index: number, context: EvalContext): NxCanonicalValue {
       return evalCall(context, index, entry);
     case nodeKinds.intrinsic:
       return evalIntrinsic(context, index, entry);
-    case nodeKinds.if: {
-      const condition = evalNode(entry[1]!, context);
-      if (truthy(condition)) {
-        return evalNode(entry[2]!, context);
-      }
-      return entry[3] === NX_IR_NONE ? null : evalNode(entry[3]!, context);
-    }
+    case nodeKinds.if:
     case nodeKinds.ifIs: {
-      const scrutinee = evalNode(entry[1]!, context);
-      const arms = entry[2]!;
-      let position = 3;
-      for (let arm = 0; arm < arms; arm += 1) {
-        const patterns = entry[position]!;
-        let matched = false;
-        for (let pattern = position + 1; pattern < position + 1 + patterns; pattern += 1) {
-          if (!matched && patternMatches(scrutinee, evalNode(entry[pattern]!, context))) {
-            matched = true;
-          }
-        }
-        const body = entry[position + 1 + patterns]!;
-        if (matched) {
-          return evalNode(body, context);
-        }
-        position += patterns + 2;
-      }
-      const otherwise = entry[position]!;
-      return otherwise === NX_IR_NONE ? null : evalNode(otherwise, context);
+      // A missing `else` is an `else { }`, so a conditional that takes no branch is the empty
+      // sequence. Where the value is an item being collected that splices away to nothing, by the
+      // same rule any other sequence-valued item follows; where one value is expected, the
+      // expression's type is a sequence and an empty one is what it promises.
+      const body = takenBranch(context, entry);
+      return body === undefined ? [] : evalNode(body, context);
     }
     case nodeKinds.array:
-      return nodesAt(context, entry, 1).values;
+      return itemsAt(context, entry, 1);
     case nodeKinds.for: {
       const iterable = evalNode(entry[5]!, context);
       if (!Array.isArray(iterable)) {
@@ -2267,13 +2317,17 @@ function evalNode(index: number, context: EvalContext): NxCanonicalValue {
       }
       const itemSlot = entry[1]!;
       const indexSlot = entry[3]!;
-      return iterable.map((item, position) => {
+      // A `for` concatenates what its body yields, so each iteration contributes on the same terms
+      // as an item of a braced value list.
+      const results: NxCanonicalValue[] = [];
+      iterable.forEach((item, position) => {
         context.frame[itemSlot] = item;
         if (indexSlot !== NX_IR_NONE) {
           context.frame[indexSlot] = position;
         }
-        return evalNode(entry[6]!, context);
+        evalItemInto(entry[6]!, context, results);
       });
+      return results;
     }
     case nodeKinds.forRange: {
       const iterable = evalNode(entry[5]!, context);
@@ -2303,7 +2357,7 @@ function evalNode(index: number, context: EvalContext): NxCanonicalValue {
         if (indexSlot !== NX_IR_NONE) {
           context.frame[indexSlot] = position;
         }
-        results.push(evalNode(entry[6]!, context));
+        evalItemInto(entry[6]!, context, results);
       }
       return results;
     }
@@ -2489,7 +2543,7 @@ function evalRecord(context: EvalContext, nodeIndex: number, entry: Uint32Array)
   const { properties, next } = propertiesAt(context, entry, 3);
   const content = contentAt(context, entry, next);
   const contentField = record.fields.find((field) => field.isContent)?.name;
-  applyContentBinding(properties, contentField, record.fields, content, name);
+  applyContentBinding(properties, contentField, record.fields, content, name, hasBodyAt(entry, next));
   const normalized =
     record.updateTarget !== undefined
       ? normalizePatchFields(context, record.fields, properties, name)
@@ -2517,7 +2571,7 @@ function evalUnionCase(context: EvalContext, nodeIndex: number, entry: Uint32Arr
   const content = contentAt(context, entry, next);
   const path = `${unionName}.${caseName}`;
   const contentField = unionCase.fields.find((field) => field.isContent)?.name;
-  applyContentBinding(properties, contentField, unionCase.fields, content, path);
+  applyContentBinding(properties, contentField, unionCase.fields, content, path, hasBodyAt(entry, next));
   const normalized = normalizeFields(context.program, linked, declaration, unionCase.fields, properties, [], path, false, context.options);
   return { $type: path, ...normalized };
 }
@@ -2534,7 +2588,7 @@ function evalComponentDescriptor(context: EvalContext, nodeIndex: number, entry:
   const content = contentAt(context, entry, next);
   const { fields: props, handlers } = splitHandlerProperties(linked, declaration, properties, `${name} props`);
   const contentField = component.props.find((field) => field.isContent)?.name;
-  applyContentBinding(props, contentField, component.props, content, name);
+  applyContentBinding(props, contentField, component.props, content, name, hasBodyAt(entry, next));
   const normalized = normalizeFields(context.program, linked, declaration, component.props, props, [], `${name} props`, false, context.options);
   return { $type: name, ...normalized, ...handlerObject(handlers) };
 }
@@ -2957,14 +3011,25 @@ function valuesEqual(left: NxCanonicalValue, right: NxCanonicalValue): boolean {
 // Boundary normalization
 // ------------------------------------------------------------------------------------------------
 
+/**
+ * Binds an element's body to its content property.
+ *
+ * `hasBody` is whether a body was written, which is not the same as whether it produced anything.
+ * An element with no body leaves the content property to its declared default; a body that was
+ * written and produced nothing binds the empty list, so `<Box>{}</Box>` means what `<Box items={}
+ * />` means, and so do a `for` that iterates zero times and a conditional child that is not taken.
+ * Falling back to the default for either would disagree with the interpreter and with generated
+ * code, which both bind the empty list.
+ */
 function applyContentBinding(
   input: Record<string, NxCanonicalValue>,
   contentField: string | undefined,
   fields: readonly PreparedField[],
   content: readonly NxCanonicalValue[],
   path: string,
+  hasBody: boolean,
 ): void {
-  if (content.length === 0) {
+  if (content.length === 0 && !hasBody) {
     return;
   }
   if (contentField === undefined) {
@@ -2975,7 +3040,7 @@ function applyContentBinding(
   }
   const declared = fields.find((field) => field.name === contentField)?.ty;
   const bindsList = declared !== undefined && isListType(declared);
-  input[contentField] = bindsList || content.length > 1 ? [...content] : content[0]!;
+  input[contentField] = bindsList || content.length !== 1 ? [...content] : content[0]!;
 }
 
 /**
@@ -3084,7 +3149,8 @@ function normalizeValue(context: EvalContext, ty: PreparedType, value: NxCanonic
       // A single value at a list-typed site is a list of one. That is the language's rule, not a
       // leniency: `Shadows={ <SkiaShadow /> }` and `xs={3.0}` both evaluate to one-element lists
       // under the interpreter, and the IR records the value at its own type rather than wrapping
-      // it, leaving the coercion to normalization.
+      // it, leaving the coercion to normalization. The lift applies once: an element type is an
+      // item type, so the recursion below never wraps a value a second time.
       const items = Array.isArray(value) ? value : [value];
       return items.map((item, index) => normalizeValue(context, ty.element, item, `${path}[${index}]`));
     }

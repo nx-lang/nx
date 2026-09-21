@@ -6,21 +6,35 @@ order and rejecting redundant same-layer nullability.
 
 ## Requirements
 
-### Requirement: Type references support composed postfix list and nullable suffixes
+### Requirement: Type references compose one sequence suffix with nullable suffixes
 Anywhere NX accepts a type reference, the parser and analysis pipeline SHALL allow a primitive,
 qualified, user-defined, function, or parenthesized base type followed by zero or more postfix
 suffixes. A parenthesized type SHALL be `(`, a type reference, `)`, and SHALL denote the type it
-encloses. Supported suffixes SHALL remain `[]` for list types and `?` for nullable types. The
-system SHALL apply those suffixes in source order, preserving the distinction between nested lists,
-lists of nullable elements, and nullable lists. A suffix written after a function type's result
-SHALL apply to the result, so a suffix on the function itself requires parentheses. The system
-SHALL reject a nullable suffix when it would make the same outer type layer nullable twice,
-including across a parenthesis.
+encloses. Supported suffixes SHALL remain `[]` for sequence types and `?` for nullable types. The
+system SHALL apply those suffixes in source order, preserving the distinction between a sequence of
+nullable elements and a nullable sequence. A suffix written after a function type's result SHALL
+apply to the result, so a suffix on the function itself requires parentheses. The system SHALL
+reject a nullable suffix when it would make the same outer type layer nullable twice, including
+across a parenthesis. The system SHALL reject a `[]` suffix when the type it applies to is already a
+sequence, whether that sequence was spelled in the same suffix chain, inside a parenthesis, as a
+function type's result, or through an alias, so that at most one `[]` applies along any type
+reference chain.
 
-#### Scenario: Nested list alias is accepted
-- **WHEN** a file contains `type Matrix = string[][]`
-- **THEN** parsing and lowering SHALL accept `Matrix`
-- **AND** SHALL preserve it as a list whose element type is `string[]`
+#### Scenario: Nested sequence suffixes are rejected
+- **WHEN** a file contains `type Matrix = string[][]`, `type Maybe = string[]?[]` and `type Paren = (string[])[]`
+- **THEN** parsing SHALL produce a validation error on the second `[]` of each
+- **AND** SHALL explain that a sequence cannot contain sequences
+- **AND** SHALL continue to accept `type Names = string[]` and `type MaybeNames = string[]?`
+
+#### Scenario: A sequence alias does not take a further sequence suffix
+- **WHEN** a file contains `type Names = string[]` and `type Rows = Names[]`
+- **THEN** analysis SHALL reject `Rows` with a diagnostic naming `Names` as already a sequence
+- **AND** SHALL continue to accept `type MaybeNames = Names?`
+
+#### Scenario: A function type's sequence result does not take a further sequence suffix
+- **WHEN** a file contains `type Bad = <function />: string[][]` and `type Loaders = (<function />: string[])[]`
+- **THEN** parsing SHALL reject `Bad` on the second `[]`
+- **AND** SHALL accept `Loaders` as a sequence of functions, each returning a sequence of strings
 
 #### Scenario: Nullable list field is accepted
 - **WHEN** a file contains `type SearchState = { queries:string[]? }`

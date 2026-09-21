@@ -108,10 +108,15 @@ let state: LoadState =
 
 ```nx
 type UserList = User[]
-type NameLookup = (string, User)[]
+type MaybeUser = User?
+type MaybeUsers = User[]?
 ```
 
-Sequence modifiers (`[]`) and nullable modifiers (`?`) apply to any type.
+The sequence suffix (`[]`) and the nullable suffix (`?`) apply to any type and compose in source
+order, so `User?[]` is a sequence whose items may be null and `User[]?` is a nullable sequence.
+Neither stacks on its own layer: `User??` is rejected, and so is `User[][]`, because a sequence
+never contains a sequence. Where data has to nest, a record is what nests it — declare the row and
+take a sequence of rows. The same rule reaches an alias, so `UserList[]` is not a type either.
 
 ## Using types in code
 

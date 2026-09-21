@@ -17,9 +17,13 @@ pub enum TypeRef {
     /// Examples: `int`, `string`, `MyType`
     Name(Name),
 
-    /// Array type.
+    /// Sequence type.
     ///
-    /// Example: `int[]`, `string[]`
+    /// <para>A sequence is flat, so a well-formed reference never wraps an `Array` in another
+    /// one. `string[][]` is rejected by post-parse validation and `Names[]` where `Names` is a
+    /// sequence alias is rejected when the reference is resolved.</para>
+    ///
+    /// Example: `int[]`, `string?[]`
     Array(Box<TypeRef>),
 
     /// Nullable type.

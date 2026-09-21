@@ -163,13 +163,13 @@ fn a_list_of_ranges_takes_the_join_of_its_instantiations() {
         "let same = { (0..5) (5..=9) }\n\
          let bad:int = {same}\n\
          let root() = { 1 }\n",
-        "found list <Range T=int/>[]",
+        "found <Range T=int/>[]",
     );
     assert_reports(
         "let mixed = { (0..5) (0.0..1.0) }\n\
          let bad:int = {mixed}\n\
          let root() = { 1 }\n",
-        "found list object[]",
+        "found object[]",
     );
 }
 

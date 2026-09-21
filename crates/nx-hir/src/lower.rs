@@ -3936,7 +3936,6 @@ type Mode = light | dark"#;
               tags: string[]
               age: int?
               aliases: string?[]
-              grouped: string[][]
               backupTags: string[]?
               maybeAliases: string?[]?
             }
@@ -3995,22 +3994,6 @@ type Mode = light | dark"#;
                 other => panic!("Expected nullable alias element type, got {:?}", other),
             },
             other => panic!("Expected array alias type, got {:?}", other),
-        }
-
-        let grouped = record
-            .properties
-            .iter()
-            .find(|field| field.name.as_str() == "grouped")
-            .expect("Expected grouped field");
-        match &grouped.ty {
-            TypeRef::Array(outer) => match outer.as_ref() {
-                TypeRef::Array(inner) => match inner.as_ref() {
-                    TypeRef::Name(name) => assert_eq!(name.as_str(), "string"),
-                    other => panic!("Expected grouped inner string type, got {:?}", other),
-                },
-                other => panic!("Expected grouped inner array type, got {:?}", other),
-            },
-            other => panic!("Expected grouped outer array type, got {:?}", other),
         }
 
         let backup_tags = record

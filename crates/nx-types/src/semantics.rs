@@ -313,9 +313,9 @@ mod tests {
 
     #[test]
     fn test_void_is_not_a_builtin_type() {
-        // The unit type still exists and still renders as `void`; it is only unspellable.
+        // There is no unit type any more: `void` is a name a declaration may take, and nothing in
+        // the checker renders a type as `void`.
         assert_eq!(builtin_type(&Name::new("void")), None);
-        assert_eq!(Type::void().to_string(), "void");
     }
 
     #[test]

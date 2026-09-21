@@ -300,13 +300,21 @@ Semantic note: `TypeSuffix*` preserves source-order composition, but post-parse 
 reapplying `QMARK` to the same outer type layer. `string?[]?` is valid; `string??`,
 `string?[]??` and `(string?)?` are invalid.
 
+Semantic note: a sequence never contains a sequence, so post-parse validation also rejects a
+second `LBRACK RBRACK` along a chain, carrying "already a sequence" through a parenthesized type
+as it carries "already nullable". `string[]`, `string?[]` and `string[]?` are valid; `string[][]`,
+`string[]?[]`, `(string[])[]` and `<function />: string[][]` are invalid. A function type's result
+is a layer of its own, so `(<function />: string[])[]` is valid. The rule is completed at type
+resolution, which rejects a `[]` whose base resolves through an alias to a sequence type.
+
 PrimitiveType (AST: PrimitiveTypeSyntax)
 - PrimitiveType → STRING | INT32 | INT64 | FLOAT32 | FLOAT64 | BOOLEAN | OBJECT
   - fields: name: "string"|"int"|"int32"|"int64"|"float32"|"float64"|"boolean"|"object"
 
-Semantic note: `void` is not among them. The unit type exists in inference — it is what an `if`
-with no `else` takes — and still renders as `void` in diagnostics, but it has no source spelling,
-so `void` in type position is an ordinary named type reference like any other undeclared name.
+Semantic note: `void` is not among them, and there is no unit type in inference either. An `if`
+with no `else` is read as having an `else { }`, so its type is a sequence of what its branches
+produce rather than a unit type, and no diagnostic renders a type as `void`. `void` in type position
+is an ordinary named type reference like any other undeclared name.
 
 UserDefinedType (AST: UserTypeSyntax)
 - UserDefinedType → QualifiedName

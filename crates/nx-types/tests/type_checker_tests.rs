@@ -1636,7 +1636,7 @@ fn test_composed_list_type_mismatch_diagnostics_preserve_rendered_shapes() {
     assert!(
         messages
             .iter()
-            .any(|message| message.contains("expects string[]?, found list string?[]")),
+            .any(|message| message.contains("expects string[]?, found string?[]")),
         "Expected list-of-nullable vs nullable-list mismatch message, got {:?}",
         messages
     );

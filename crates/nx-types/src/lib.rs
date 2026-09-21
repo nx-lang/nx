@@ -101,7 +101,7 @@
 //!
 //! ## Compound Types
 //!
-//! - **Arrays**: `int[]`, `string[][]`, `string[]?`, `string?[]`
+//! - **Sequences**: `int[]`, `string[]?`, `string?[]` — flat, so never `string[][]`
 //! - **Functions**: `(int, string) => boolean`
 //! - **Nullable**: `int?`, `string?`
 //! - **Named types**: User-defined types and element names

@@ -2955,9 +2955,8 @@ fn emit_named_type(
         "int" | "int32" | "int64" | "float32" | "float64" => "number".to_string(),
         "string" => "string".to_string(),
         "boolean" => "boolean".to_string(),
-        // `void` is not an NX type name any more; a `void` here is a user declaration, so it falls
-        // through to the reference lookup. `Primitive::Void` still emits `void` in
-        // `emit_primitive_type` — the unit type keeps its rendering, it just has no source name.
+        // `void` is not an NX type name and no longer a type in the checker either, so a `void`
+        // here is a user declaration and falls through to the reference lookup.
         _ => context
             .type_reference(current_module_id, name)
             .map(|reference| {
@@ -2989,7 +2988,6 @@ fn emit_primitive_type(primitive: Primitive) -> String {
         | Primitive::Float64 => "number".to_string(),
         Primitive::String => "string".to_string(),
         Primitive::Boolean => "boolean".to_string(),
-        Primitive::Void => "void".to_string(),
         // TypeScript spells the bottom type, and `readonly never[]` is exactly what an empty list
         // is. Reaching here at all takes an unannotated binding, which is reported before code is
         // generated, so this is the honest rendering rather than a load-bearing one.
@@ -3119,8 +3117,17 @@ fn emit_expression(
             else_branch
                 .as_ref()
                 .map(|expr| emit_expression(current_module_id, expr, context))
-                .unwrap_or_else(|| "null".to_string())
+                // A missing `else` is an `else { }`, so the untaken branch is the empty sequence.
+                // Where the value is collected, `.flat()` splices it away; where it is bound, an
+                // empty array is what a sequence-typed site expects.
+                .unwrap_or_else(|| "[]".to_string())
         ),
+        // Refused with a diagnostic before emission, in
+        // `collect_expression_source_codegen_diagnostics`, so no program that compiled reaches
+        // this string. Whoever adds match support here must emit an uncovered path as `[]`,
+        // exactly as the `If` arm above emits a missing `else`: a match with no `else` carries
+        // the same implicit `else { }`, and emitting `null` instead would put a null item into
+        // every sequence the match is collected into.
         CodegenExpressionKind::Match { .. } => {
             "nxRuntimeError(\"match expressions are not supported by executable source codegen yet\")"
                 .to_string()
@@ -3144,14 +3151,9 @@ fn emit_expression(
             expression.as_deref(),
             context,
         ),
-        CodegenExpressionKind::Array(elements) => format!(
-            "[{}]",
-            elements
-                .iter()
-                .map(|element| emit_expression(current_module_id, element, context))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
+        CodegenExpressionKind::Array(elements) => {
+            emit_sequence_items(current_module_id, elements, context)
+        }
         CodegenExpressionKind::For {
             item,
             index,
@@ -3163,13 +3165,18 @@ fn emit_expression(
             // A range is not a JavaScript iterable, so counting it is a helper that takes the
             // callback rather than an array that is then mapped. Only the call around the callback
             // differs, so the body is emitted once either way.
+            // A `for` concatenates what its body yields, so each iteration is spliced on the same
+            // terms as an item of a braced value list: `flatMap` splices a list-valued body and
+            // drops an iteration that contributed nothing, and `nxRangeMap` collects results that
+            // one `flat` splices the same way.
             let (open, close) = if *over_range {
                 ("nxRangeMap(", ", ")
             } else {
-                ("Array.from(", ").map(")
+                ("Array.from(", ").flatMap(")
             };
+            let tail = if *over_range { ".flat()" } else { "" };
             format!(
-                "{}{}{}({}, {}) => {})",
+                "{}{}{}({}, {}) => {}){tail}",
                 open,
                 emit_expression(current_module_id, iterable, context),
                 close,
@@ -3523,17 +3530,66 @@ fn emit_content_value(
     content: &[CodegenExpression],
     context: &EmitContext,
 ) -> String {
+    // One content expression binds as itself, as it does in the interpreter, which binds a lone
+    // child and then coerces it to the property's type. A conditional needs nothing extra: analysis
+    // lifts a branch the join made a sequence at the source, so a taken `if c { <A/> }` is already
+    // `[A]` and an untaken one `[]`. Splicing a lone child instead would be wrong for a nullable
+    // sequence, turning an absent one into `[null]` where the interpreter binds `null`.
     if content.len() == 1 {
         emit_expression(current_module_id, &content[0], context)
     } else {
-        format!(
-            "[{}]",
-            content
-                .iter()
-                .map(|expr| emit_expression(current_module_id, expr, context))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
+        emit_sequence_items(current_module_id, content, context)
+    }
+}
+
+/// Emits items collected into one sequence, splicing each item's contribution.
+///
+/// <para>Every item is emitted as itself and the whole is flattened one level, which makes a
+/// sequence-valued item contribute its elements and every other item contribute itself. That
+/// covers a conditional with no `else` without an arm of its own: it emits `[]` where it is not
+/// taken, and an empty array splices away to nothing. One level is the whole of it, because no
+/// item's own type is a sequence of sequences.</para>
+///
+/// <para>The flattening is left off where no item can contribute anything but itself, which the
+/// item types say. `{"admin" "editor"}` is two strings and stays `["admin", "editor"]`: a `.flat()`
+/// there could never do anything, and generated code is read.</para>
+fn emit_sequence_items(
+    current_module_id: RuntimeModuleId,
+    items: &[CodegenExpression],
+    context: &EmitContext,
+) -> String {
+    let emitted = items
+        .iter()
+        .map(|item| emit_expression(current_module_id, item, context))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if items.iter().any(item_can_splice) {
+        format!("[{}].flat()", emitted)
+    } else {
+        format!("[{}]", emitted)
+    }
+}
+
+/// Whether an item can contribute anything other than exactly itself.
+///
+/// <para>That is an item holding a sequence, an `object` item -- opaque to the type system, and it
+/// may be holding one -- an item whose type the checker left open, and a conditional that can
+/// contribute nothing, which is emitted as `[]` and only flattening removes.</para>
+fn item_can_splice(item: &CodegenExpression) -> bool {
+    match &item.ty {
+        Some(ty) => type_can_hold_a_sequence(ty),
+        None => true,
+    }
+}
+
+fn type_can_hold_a_sequence(ty: &Type) -> bool {
+    match ty {
+        Type::Array(_) => true,
+        Type::Nullable(inner) => type_can_hold_a_sequence(inner),
+        Type::Named(named) => named.name.as_str() == "object",
+        Type::Primitive(_) | Type::Union(_) | Type::UnionCase(_) | Type::Function { .. } => false,
+        // A type parameter, an error, an unresolved variable: nothing here says it cannot.
+        _ => true,
     }
 }
 

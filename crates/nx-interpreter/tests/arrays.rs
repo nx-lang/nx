@@ -1,6 +1,8 @@
 //! Integration tests for array operations
 //!
-//! Tests for array literals, empty arrays, nested arrays, and arrays of different types.
+//! Tests for array literals, empty arrays, splicing, and arrays of different types.
+//!
+//! A sequence is flat: there are no nested-array cases here because no NX source produces one.
 //!
 //! Note: Array literal syntax [1, 2, 3] is not yet supported in the parser.
 //! Tests using array literals are marked #[ignore] until parser support is added.
@@ -243,59 +245,6 @@ fn test_a_body_that_produced_nothing_binds_the_empty_list_over_a_default() {
 }
 
 // ============================================================================
-// Nested Arrays (ignored until parser support is added)
-// ============================================================================
-
-#[test]
-#[ignore = "array literal syntax not yet supported in parser"]
-fn test_nested_array_simple() {
-    let source = r#"
-        let <arr /> = { [[1, 2], [3, 4]] }
-    "#;
-
-    let result = execute_function(source, "arr", vec![]).unwrap_or_else(|e| panic!("{}", e));
-    assert_eq!(
-        result,
-        Value::Array(vec![
-            Value::Array(vec![Value::Int(1), Value::Int(2)]),
-            Value::Array(vec![Value::Int(3), Value::Int(4)])
-        ])
-    );
-}
-
-#[test]
-#[ignore = "array literal syntax not yet supported in parser"]
-fn test_nested_array_mixed_sizes() {
-    let source = r#"
-        let <arr /> = { [[1], [2, 3], [4, 5, 6]] }
-    "#;
-
-    let result = execute_function(source, "arr", vec![]).unwrap_or_else(|e| panic!("{}", e));
-    assert_eq!(
-        result,
-        Value::Array(vec![
-            Value::Array(vec![Value::Int(1)]),
-            Value::Array(vec![Value::Int(2), Value::Int(3)]),
-            Value::Array(vec![Value::Int(4), Value::Int(5), Value::Int(6)])
-        ])
-    );
-}
-
-#[test]
-#[ignore = "array literal syntax not yet supported in parser"]
-fn test_deeply_nested_array() {
-    let source = r#"
-        let <arr /> = { [[[1]]] }
-    "#;
-
-    let result = execute_function(source, "arr", vec![]).unwrap_or_else(|e| panic!("{}", e));
-    assert_eq!(
-        result,
-        Value::Array(vec![Value::Array(vec![Value::Array(vec![Value::Int(1)])])])
-    );
-}
-
-// ============================================================================
 // Arrays with Expressions (ignored until parser support is added)
 // ============================================================================
 
@@ -459,5 +408,273 @@ fn test_mixed_type_array() {
             // Type error is acceptable if NX enforces homogeneous arrays
         }
         Ok(other) => panic!("Unexpected result: {:?}", other),
+    }
+}
+
+// ============================================================================
+// Splicing: what an item contributes to the sequence it sits in
+// ============================================================================
+
+#[test]
+fn braced_value_items_splice() {
+    let source = r#"
+        let xs:string[] = {"a" "b"}
+        let ys:string[] = {"c"}
+        let all(): string[] = {xs ys}
+    "#;
+
+    let result = execute_function(source, "all", vec![]).unwrap_or_else(|e| panic!("{}", e));
+    assert_eq!(
+        result,
+        Value::Array(vec![
+            Value::String(SmolStr::new("a")),
+            Value::String(SmolStr::new("b")),
+            Value::String(SmolStr::new("c")),
+        ])
+    );
+}
+
+#[test]
+fn a_for_concatenates_what_its_body_yields() {
+    let source = r#"
+        type Row = { cells:int[] }
+        let rows:Row[] = { <Row cells={1 2}/> <Row cells={3 4}/> }
+        let flat(): int[] = {for r in rows { r.cells }}
+    "#;
+
+    let result = execute_function(source, "flat", vec![]).unwrap_or_else(|e| panic!("{}", e));
+    assert_eq!(
+        result,
+        Value::Array(vec![
+            Value::Int(1),
+            Value::Int(2),
+            Value::Int(3),
+            Value::Int(4),
+        ])
+    );
+}
+
+#[test]
+fn a_for_whose_body_yields_nothing_yields_the_empty_array() {
+    let source = r#"
+        let ys:string[] = {"q"}
+        let xs(): string[] = {for y in ys {}}
+    "#;
+
+    let result = execute_function(source, "xs", vec![]).unwrap_or_else(|e| panic!("{}", e));
+    assert_eq!(result, Value::Array(vec![]));
+}
+
+#[test]
+fn a_conditional_for_body_filters() {
+    let source = r#"
+        let ns:int[] = {1 2 3 4}
+        let evens(): int[] = {for n in ns { if (n % 2 == 0) { n } }}
+    "#;
+
+    let result = execute_function(source, "evens", vec![]).unwrap_or_else(|e| panic!("{}", e));
+    assert_eq!(result, Value::Array(vec![Value::Int(2), Value::Int(4)]));
+}
+
+#[test]
+fn an_untaken_conditional_child_contributes_no_items() {
+    let source = r#"
+        type A = { n:int = 1 }
+        type Box = { content items:A[] }
+        let c = false
+        let root() = { <Box><A/>{if c { <A/> }}</Box> }
+    "#;
+
+    let result = execute_function(source, "root", vec![]).unwrap_or_else(|e| panic!("{}", e));
+    let Value::Record { fields, .. } = &result else {
+        panic!("expected a record, got {result:?}");
+    };
+    let items = fields.get("items").expect("items");
+    match items {
+        Value::Array(items) => assert_eq!(items.len(), 1, "no null item: {items:?}"),
+        // One item is a sequence of one, so a lone child need not be wrapped.
+        Value::Record { .. } => {}
+        other => panic!("unexpected content value: {other:?}"),
+    }
+}
+
+#[test]
+fn a_written_null_item_survives() {
+    let source = r#"
+        let xs(): string?[] = {"a" null}
+    "#;
+
+    let result = execute_function(source, "xs", vec![]).unwrap_or_else(|e| panic!("{}", e));
+    assert_eq!(
+        result,
+        Value::Array(vec![Value::String(SmolStr::new("a")), Value::Null])
+    );
+}
+
+#[test]
+fn a_conditional_nested_in_a_conditional_contributes_no_items() {
+    // Taking the branch here rather than in `eval_expr` is what makes this work: the rule applies
+    // again to whatever the branch is, so the inner conditional contributes nothing instead of
+    // evaluating to the `null` its value form would have. The IR runtime and generated JavaScript
+    // both resolve the branch the same way, and `emitted-ir.test.mjs` pins the three together.
+    let source = r#"
+        type A = { n:int = 1 }
+        type Box = { content items:A[] }
+        let yes = true
+        let no = false
+        let root() = { <Box><A/>{if yes { if no { <A n=2 /> } }}</Box> }
+    "#;
+
+    let result = execute_function(source, "root", vec![]).unwrap_or_else(|e| panic!("{}", e));
+    let Value::Record { fields, .. } = &result else {
+        panic!("expected a record, got {result:?}");
+    };
+    match fields.get("items").expect("items") {
+        Value::Array(items) => assert_eq!(items.len(), 1, "no null item: {items:?}"),
+        Value::Record { .. } => {}
+        other => panic!("unexpected content value: {other:?}"),
+    }
+}
+
+#[test]
+fn an_else_on_the_outer_conditional_does_not_resurrect_the_null() {
+    // The outer conditional has an `else`, so it always takes a branch -- but the branch it takes
+    // is itself a conditional that does not, and that is the thing that contributes nothing.
+    let source = r#"
+        type A = { n:int = 1 }
+        type Box = { content items:A?[] }
+        let yes = true
+        let no = false
+        let root() = { <Box><A/>{if yes { if no { <A n=2 /> } } else { <A n=3 /> }}</Box> }
+    "#;
+
+    let result = execute_function(source, "root", vec![]).unwrap_or_else(|e| panic!("{}", e));
+    let Value::Record { fields, .. } = &result else {
+        panic!("expected a record, got {result:?}");
+    };
+    match fields.get("items").expect("items") {
+        Value::Array(items) => assert_eq!(items.len(), 1, "no null item: {items:?}"),
+        Value::Record { .. } => {}
+        other => panic!("unexpected content value: {other:?}"),
+    }
+}
+
+#[test]
+fn a_nested_conditional_that_is_taken_contributes_its_item() {
+    let source = r#"
+        type A = { n:int = 1 }
+        let yes = true
+        let all(): A[] = { <A/> if yes { if yes { <A n=2 /> } } }
+    "#;
+
+    let result = execute_function(source, "all", vec![]).unwrap_or_else(|e| panic!("{}", e));
+    let Value::Array(items) = &result else {
+        panic!("expected an array, got {result:?}");
+    };
+    assert_eq!(items.len(), 2, "{items:?}");
+}
+
+/// Evaluates `function` of the *analyzed* `source`.
+///
+/// <para>`execute_function` above lowers and runs, which skips analysis and so skips every rewrite
+/// analysis writes back into the module: widenings, literal conversions, and the lift of a branch
+/// the join made a sequence. A test of any of those has to come through here, as
+/// `text_content.rs` does for text joins.</para>
+fn execute_analyzed(source: &str, function: &str) -> Value {
+    let checked = nx_types::check_str(source, "test.nx");
+    assert!(
+        checked.errors().is_empty(),
+        "expected the source to type check, got {:?}",
+        checked
+            .errors()
+            .iter()
+            .map(|diagnostic| diagnostic.message().to_string())
+            .collect::<Vec<_>>()
+    );
+    let module = checked.lowered_module.expect("lowered module");
+    Interpreter::new()
+        .execute_function(&module, function, vec![])
+        .unwrap_or_else(|error| panic!("evaluation failed: {error}"))
+}
+
+#[test]
+fn a_taken_conditional_is_a_one_item_sequence_not_a_bare_item() {
+    // The join types `if c { 1 } ` as `int[]`, and analysis lifts the branch at the source so its
+    // value agrees: iterating it yields one item. Before the lift, an unannotated binding held a
+    // bare `1`, and `for x in v` failed at run time because `1` is not iterable.
+    let result = execute_analyzed(
+        r#"
+        let c = true
+        let v = { if c { 1 } }
+        let root(): int[] = { for x in v { x * 10 } }
+    "#,
+        "root",
+    );
+    assert_eq!(result, Value::Array(vec![Value::Int(10)]));
+
+    // A closed conditional lifts its item branch the same way beside a sequence branch.
+    let result = execute_analyzed(
+        r#"
+        let c = true
+        let xs:int[] = {5 6}
+        let either = { if c { 1 } else { xs } }
+        let root(): int[] = { for x in either { x } }
+    "#,
+        "root",
+    );
+    assert_eq!(result, Value::Array(vec![Value::Int(1)]));
+}
+
+#[test]
+fn a_lifted_branch_that_widens_widens_inside_its_sequence() {
+    // No annotation between the join and the result, so nothing can repair the value afterwards:
+    // the `1` has to come out of the join already as `1.0`, inside its one-item sequence.
+    let result = execute_analyzed(
+        r#"
+        let c = true
+        let fs:float64[] = {2.5}
+        let v = { if c { 1 } else { fs } }
+        let root() = { v }
+    "#,
+        "root",
+    );
+    assert_eq!(result, Value::Array(vec![Value::Float(1.0)]));
+}
+
+#[test]
+fn a_spliced_sequence_widens_to_the_joined_item_type() {
+    // The join is over what each item contributes, so the widening that follows it has to be too:
+    // measured against `float64`, an `int[]` widens to nothing, while the `int` it contributes
+    // widens to `float64`. Nothing after the join may repair the value, so the root is unannotated
+    // and the module is analyzed: a `float64[]` return would coerce the ints itself and pass this
+    // with the widening missing.
+    let result = execute_analyzed(
+        r#"
+        let ns:int[] = {1 2}
+        let all = { ns 1.5 }
+        let root() = { all }
+    "#,
+        "root",
+    );
+    assert_eq!(
+        result,
+        Value::Array(vec![
+            Value::Float(1.0),
+            Value::Float(2.0),
+            Value::Float(1.5)
+        ])
+    );
+}
+
+#[test]
+fn an_explicit_null_else_beside_a_sequence_is_a_nullable_sequence() {
+    // `else { null }` is how a nullable value is written now that a missing `else` is `{}`. A
+    // written null is not an item to lift, so beside a sequence it makes a nullable sequence and
+    // evaluates to null -- not `[null]`, which would be a null item.
+    for source in [
+        "let c = false\nlet xs:string[] = {\"a\"}\nlet root() = { if c { xs } else { null } }",
+        "let c = true\nlet xs:string[] = {\"a\"}\nlet root() = { if c { null } else { xs } }",
+    ] {
+        assert_eq!(execute_analyzed(source, "root"), Value::Null, "{source:?}");
     }
 }

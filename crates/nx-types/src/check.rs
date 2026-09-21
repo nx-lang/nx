@@ -241,6 +241,7 @@ pub fn analyze_prepared_module(
         .collect();
     let folded_constants = ctx.folded_constants().clone();
     let string_conversions = ctx.string_conversions().clone();
+    let lifted_joins = ctx.lifted_joins().clone();
     let widened_joins: FxHashMap<_, _> = ctx
         .widened_joins()
         .iter()
@@ -290,6 +291,11 @@ pub fn analyze_prepared_module(
         type_env.set_expr_type(created, Type::string());
     }
 
+    // A branch the join lifted from an item to a sequence is wrapped as a one-item sequence, so
+    // its value is what its type says in every engine. This runs before the widenings, which then
+    // find a lifted branch as its wrapper's one element and widen it there.
+    let lifts = nx_hir::apply_join_lifts(&mut prepared_module, &lifted_joins);
+
     // A branch of a join that widens is wrapped so it produces a value of the join's numeric
     // type. The wrapper is typed as the widened branch, which is what the join expects of it.
     for (wrapped, branch) in nx_hir::apply_join_widenings(&mut prepared_module, &widened_joins) {
@@ -299,6 +305,20 @@ pub fn analyze_prepared_module(
             .cloned()
             .unwrap_or(Type::Error);
         type_env.set_expr_type(wrapped, crate::infer::widened_type(&branch_ty, target));
+    }
+
+    // Each lift wrapper is a sequence of its branch, typed after the widenings so that a branch
+    // that also widened gives a sequence of the widened type: `[1.0]` is a `float64[]`.
+    for (wrapped, branch) in lifts {
+        let branch_ty = type_env
+            .get_expr_type(branch)
+            .cloned()
+            .unwrap_or(Type::Error);
+        let element_ty = match widened_joins.get(&branch) {
+            Some(target) => crate::infer::widened_type(&branch_ty, *target),
+            None => branch_ty,
+        };
+        type_env.set_expr_type(wrapped, Type::array(element_ty));
     }
 
     nx_hir::apply_contextual_name_resolutions(

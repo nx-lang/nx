@@ -772,6 +772,79 @@ pub fn apply_range_constructions(module: &mut PreparedModule) -> Vec<ExprId> {
     created
 }
 
+/// Wraps each branch the join lifted from an item to a sequence as a one-item sequence.
+///
+/// <para>An `if` or match whose branches are an item and a sequence — including an `if` with no
+/// `else`, whose missing branch is `{}` — is typed as a sequence, and a branch producing a bare
+/// item has to produce a sequence for that type to be true of its value. Wrapping the branch in a
+/// one-element array literal makes it so in every engine at once, because each of them already
+/// evaluates an array literal to a sequence and splices its elements: a lifted `1` becomes `[1]`,
+/// and a lifted `object` that happens to hold a sequence stays flat.</para>
+///
+/// <para>Run before [`apply_join_widenings`]. A lifted branch that also widens keeps its widening,
+/// because that pass visits array literals as parents too and finds the branch as the new array's
+/// one element, so `1` becomes `[1.0]`. Returns each wrapper beside the branch it wraps, for the
+/// caller to type.</para>
+pub fn apply_join_lifts(
+    module: &mut PreparedModule,
+    lifted: &FxHashSet<ExprId>,
+) -> Vec<(ExprId, ExprId)> {
+    let mut created = Vec::new();
+    if lifted.is_empty() {
+        return created;
+    }
+
+    let raw_module = module.raw_module_mut();
+    let parents = raw_module
+        .exprs()
+        .filter(|(_, expr)| matches!(expr, ast::Expr::If { .. } | ast::Expr::Match { .. }))
+        .map(|(id, _)| id)
+        .collect::<Vec<_>>();
+
+    for parent in parents {
+        let mut parent_expr = raw_module.expr(parent).clone();
+        let mut children = match &mut parent_expr {
+            ast::Expr::If {
+                then_branch,
+                else_branch,
+                ..
+            } => std::iter::once(then_branch)
+                .chain(else_branch.as_mut())
+                .collect::<Vec<_>>(),
+            ast::Expr::Match {
+                arms, else_branch, ..
+            } => arms
+                .iter_mut()
+                .map(|arm| &mut arm.body)
+                .chain(else_branch.as_mut())
+                .collect(),
+            _ => continue,
+        };
+
+        let mut changed = false;
+        for child in children.iter_mut() {
+            if !lifted.contains(child) {
+                continue;
+            }
+            let span = raw_module.expr_span(**child);
+            let wrapped = raw_module.alloc_expr(ast::Expr::Array {
+                elements: vec![**child],
+                span,
+            });
+            raw_module.set_expr_span(wrapped, span);
+            created.push((wrapped, **child));
+            **child = wrapped;
+            changed = true;
+        }
+        drop(children);
+        if changed {
+            *raw_module.expr_mut(parent) = parent_expr;
+        }
+    }
+
+    created
+}
+
 /// Wraps each branch of a join that type analysis found to widen in an [`ast::Expr::Widen`].
 ///
 /// <para>Runs on the same terms as [`apply_string_conversions`]. `widened` maps a branch of an

@@ -25,6 +25,10 @@ const COMPONENT_DEFINITION_SYNTAX: &str =
 const DUPLICATE_NULLABLE_SUFFIX_NOTE: &str =
     "A nullable suffix can only be applied once per type layer. `string?[]?` is valid because \
      `[]` creates a new outer list layer.";
+const NESTED_SEQUENCE_SUFFIX_NOTE: &str =
+    "A sequence cannot contain sequences, so at most one `[]` applies along a type reference \
+     chain. `string?[]` and `string[]?` stay valid because `?` changes a layer rather than adding \
+     one; to nest data, declare a record whose field is a sequence.";
 const TYPE_PARAMETER_SYNTAX: &str =
     "A type parameter is declared as `Name:type` at the start of a component signature or a record \
      declaration, after `extends` and before every other property, with no default value, no \
@@ -273,13 +277,20 @@ fn validate_type_suffix_chain(
     };
 
     // `(string?)?` makes one layer nullable twice: the parentheses add no layer of their own, so
-    // a `?` ending the enclosed type is the current layer's nullable suffix.
-    let mut current_nullable_suffix: Option<TextRange> =
-        if base.kind() == SyntaxKind::PARENTHESIZED_TYPE {
-            trailing_nullable_suffix(&base)
-        } else {
-            None
-        };
+    // a `?` ending the enclosed type is the current layer's nullable suffix. `(string[])[]` nests a
+    // sequence for the same reason, so a `[]` inside the parentheses is the current layer's
+    // sequence suffix.
+    let (mut current_nullable_suffix, mut current_sequence_suffix): (
+        Option<TextRange>,
+        Option<TextRange>,
+    ) = if base.kind() == SyntaxKind::PARENTHESIZED_TYPE {
+        (
+            trailing_nullable_suffix(&base),
+            enclosed_sequence_suffix(&base),
+        )
+    } else {
+        (None, None)
+    };
 
     for child in children {
         match child.kind() {
@@ -304,6 +315,25 @@ fn validate_type_suffix_chain(
                 }
             }
             SyntaxKind::LBRACKET => {
+                if let Some(previous_sequence_suffix) = current_sequence_suffix {
+                    diagnostics.push(
+                        Diagnostic::error("nested-sequence-suffix")
+                            .with_message("A sequence cannot contain sequences")
+                            .with_label(
+                                Label::primary(file_name, child.span())
+                                    .with_message("remove this `[]`"),
+                            )
+                            .with_label(
+                                Label::secondary(file_name, previous_sequence_suffix)
+                                    .with_message("this `[]` already made the type a sequence"),
+                            )
+                            .with_note(NESTED_SEQUENCE_SUFFIX_NOTE)
+                            .build(),
+                    );
+                } else {
+                    current_sequence_suffix = Some(child.span());
+                }
+                // `[]` opens a new outer layer, so a `?` after it is that layer's first.
                 current_nullable_suffix = None;
             }
             _ => {}
@@ -322,6 +352,32 @@ fn trailing_nullable_suffix(parenthesized: &SyntaxNode) -> Option<TextRange> {
     match last.kind() {
         SyntaxKind::QUESTION => Some(last.span()),
         SyntaxKind::PARENTHESIZED_TYPE => trailing_nullable_suffix(&last),
+        _ => None,
+    }
+}
+
+/// The span of the `[]` that makes the type a parenthesized type encloses a sequence, when there
+/// is one.
+///
+/// <para>Parentheses add no layer, so `(string[])` is a sequence at the enclosing layer just as
+/// `string[]` is, and a nested parenthesized type is looked through the same way. A `?` after the
+/// `[]` does not change the answer: `(string[]?)` is a nullable sequence, and a `[]` applied to it
+/// would still nest. A function type's result is a layer of its own, so
+/// `(<function />: string[])` is a function, not a sequence.</para>
+fn enclosed_sequence_suffix(parenthesized: &SyntaxNode) -> Option<TextRange> {
+    let inner = parenthesized.child_by_field("type")?;
+    let mut base: Option<SyntaxNode> = None;
+    for child in inner.children_with_tokens() {
+        match child.kind() {
+            SyntaxKind::LBRACKET => return Some(child.span()),
+            _ if base.is_none() => base = Some(child),
+            _ => {}
+        }
+    }
+    match base {
+        Some(base) if base.kind() == SyntaxKind::PARENTHESIZED_TYPE => {
+            enclosed_sequence_suffix(&base)
+        }
         _ => None,
     }
 }

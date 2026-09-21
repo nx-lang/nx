@@ -2033,12 +2033,13 @@ let root() = { <ShortTextQuestion /> }"#,
     #[test]
     fn test_cli_typegen_file_preserves_composed_typescript_list_suffixes() {
         let source = r#"
-            export type Matrix = string[][]
+            export type Names = string[]
             export type MaybeNames = string[]?
+            export type Aliases = string?[]
             export type Payload = {
+              names:string[]
               aliases:string?[]
               maybeNames:string[]?
-              matrix:string[][]
             }
         "#;
         let (_dir, path) = create_temp_nx_file(source);
@@ -2055,18 +2056,19 @@ let root() = { <ShortTextQuestion /> }"#,
             "CLI should generate composed TypeScript list suffixes for .nx file input"
         );
         let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(stdout.contains("export type Matrix = string[][];"));
+        assert!(stdout.contains("export type Names = string[];"));
         assert!(stdout.contains("export type MaybeNames = string[] | null;"));
+        assert!(stdout.contains("export type Aliases = (string | null)[];"));
+        assert!(stdout.contains("names: string[];"));
         assert!(stdout.contains("aliases: (string | null)[];"));
         assert!(stdout.contains("maybeNames: string[] | null;"));
-        assert!(stdout.contains("matrix: string[][];"));
     }
 
     #[test]
     fn test_cli_typegen_file_preserves_composed_csharp_list_suffixes() {
         let source = r#"
             export type Payload = {
-              matrix:string[][]
+              names:string[]
               maybeNames:string[]?
               aliases:string?[]
             }
@@ -2087,7 +2089,7 @@ let root() = { <ShortTextQuestion /> }"#,
             "CLI should generate composed C# list suffixes for .nx file input"
         );
         let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(stdout.contains("public string[][] Matrix { get; set; } = default!;"));
+        assert!(stdout.contains("public string[] Names { get; set; } = default!;"));
         assert!(stdout.contains("public string[]? MaybeNames { get; set; }"));
         assert!(stdout.contains("public string?[] Aliases { get; set; } = default!;"));
     }

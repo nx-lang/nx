@@ -31,6 +31,7 @@ fn assert_reports(source: &str, needle: &str) -> Vec<String> {
 const RANGE: &str = "type Range = { T:type start:T end:T }\n";
 const BOX: &str = "type Box = { T:type value:T }\n";
 const PAIR: &str = "type Pair = { TKey:type TValue:type key:TKey value:TValue }\n";
+const PAGE: &str = "type Page = { T:type items:T[] }\n";
 
 // ---------------------------------------------------------------------------------------------
 // An applied type names one instantiation
@@ -62,12 +63,37 @@ fn an_alias_names_an_instantiation() {
 }
 
 #[test]
-fn applied_types_nest_and_take_suffixed_arguments() {
+fn applied_types_nest_and_take_nullable_arguments() {
     assert_clean(&format!(
-        "{BOX}type IntBox = <Box T=int/>\ntype Ints = int[]\n\
+        "{BOX}type IntBox = <Box T=int/>\ntype MaybeInt = int?\n\
          let a:<Box T=<Box T=int/>/> = <Box T=IntBox value={{<Box T=int value={{1}} />}} />\n\
-         let b:<Box T=int[]/> = <Box T=Ints value={{ 1 }} />"
+         let b:<Box T=int?/> = <Box T=MaybeInt value={{null}} />"
     ));
+}
+
+#[test]
+fn a_sequence_type_is_not_a_type_argument() {
+    // Substituting a sequence for `T` would make a `T[]` field a sequence of sequences.
+    for source in [
+        format!("{BOX}let a:<Box T=int[]/> = <Box T=int value={{ 1 }} />"),
+        format!("{BOX}type Ints = int[]\nlet a:<Box T=Ints/> = <Box T=int value={{ 1 }} />"),
+        format!("{BOX}type Ints = int[]\nlet a = <Box T=Ints value={{ 1 }} />"),
+        format!("{PAGE}type Ints = int[]\nlet p:<Page T=Ints/> = <Page T=int items={{ 1 }} />"),
+    ] {
+        let errors = assert_reports(&source, "A type argument must not be a sequence");
+        assert!(
+            errors
+                .iter()
+                .all(|message| !message.contains("found object")),
+            "{errors:?}"
+        );
+    }
+
+    // The alias is named where one was written.
+    assert_reports(
+        &format!("{BOX}type Ints = int[]\nlet a = <Box T=Ints value={{ 1 }} />"),
+        "'Ints' is a sequence",
+    );
 }
 
 #[test]
@@ -358,7 +384,7 @@ fn equal_instantiations_join_to_themselves() {
              let b = <Box T=int value={{2}} />\n\
              let bad:int = {{ a b }}"
         ),
-        "found list <Box T=int/>[]",
+        "found <Box T=int/>[]",
     );
 }
 
@@ -373,7 +399,7 @@ fn differing_instantiations_join_to_object() {
              let b = <Box T=string value=\"x\" />\n\
              let bad:int = {{ a b }}"
         ),
-        "found list object[]",
+        "found object[]",
     );
     assert_clean(&format!(
         "{BOX}let a = <Box T=int value={{1}} />\n\
@@ -393,7 +419,7 @@ fn an_instantiation_joins_with_an_unrelated_record_at_object() {
              let c = <Contact name=\"a\" />\n\
              let bad:int = {{ a c }}"
         ),
-        "found list object[]",
+        "found object[]",
     );
 }
 

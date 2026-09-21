@@ -137,12 +137,18 @@ UserDefinedType ::=
     QualifiedName
 ```
 
-Type suffixes compose in source order. `string?[]` means a list of nullable strings, while
-`string[]?` means a nullable list of strings.
+Type suffixes compose in source order. `string?[]` means a sequence of nullable strings, while
+`string[]?` means a nullable sequence of strings.
 A nullable suffix may only be applied once per outer type layer. `string?[]?` is valid because
-`[]` introduces a new list layer before the final `?`, while `string?[]??` is rejected during
+`[]` introduces a new sequence layer before the final `?`, while `string?[]??` is rejected during
 post-parse validation as a redundant nullable suffix. Parentheses add no layer, so `(string?)?` is
 rejected on the same terms.
+A sequence never contains a sequence, so `[]` applies at most once along a type reference chain.
+`string[][]`, `string[]?[]` and `(string[])[]` are rejected during post-parse validation, and an
+alias that names a sequence is rejected as the base of a further `[]` during type resolution:
+given `type Names = string[]`, `Names[]` is not a type. A function type's result is a layer of its
+own, so `(<function />: string[])[]` is a sequence of functions and is accepted, while
+`<function />: string[][]` is not. Where data has to nest, a record is what nests it.
 
 A function type is spelled as an element function is defined, with `let`, the name and the body
 removed and `function` where the name was: `<function Item:Contact Index:int />: DrawnNode` is the

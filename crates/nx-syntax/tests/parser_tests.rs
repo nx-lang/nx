@@ -889,17 +889,17 @@ fn test_parse_type_annotations() {
 #[test]
 fn test_parse_composed_type_suffixes() {
     let source = r#"
-        type Matrix = string[][]
+        type Matrix = string?[]?
         type MaybeNames = string[]?
         type NameHistory = string?[]
 
         type SearchState = {
           queries: string[]?
           aliases: string?[]
-          grouped: string[][]
+          grouped: string?[]?
         }
 
-        let loadUsers(users: User[][]): User[][] = {users}
+        let loadUsers(users: User?[]): User[]? = {users}
         let maybeUsers(): User[]? = null
     "#;
     let result = parse_str(source, "composed-types.nx");
@@ -920,7 +920,7 @@ fn test_parse_composed_type_suffixes() {
             .child_by_field("type")
             .expect("Matrix alias should have type")
             .text(),
-        "string[][]"
+        "string?[]?"
     );
     assert_eq!(
         aliases[1]
@@ -952,7 +952,7 @@ fn test_parse_composed_type_suffixes() {
                 .to_string()
         })
         .collect();
-    assert_eq!(field_types, vec!["string[]?", "string?[]", "string[][]"]);
+    assert_eq!(field_types, vec!["string[]?", "string?[]", "string?[]?"]);
 
     let maybe_users = root
         .children()
@@ -1347,7 +1347,7 @@ fn test_parse_empty_braced_value_in_value_position_control_flow() {
     let sources = [
         "let pick(c:boolean): string[] = {if c {\"a\" \"b\"} else {}}",
         "let pick(c:boolean): string[] = {if { c => {} else => {\"a\" \"b\"} }}",
-        "let xs:string[][] = {for y in ys {}}",
+        "let xs:string[] = {for y in ys {}}",
     ];
 
     for source in sources {
@@ -4163,6 +4163,57 @@ fn test_duplicate_nullable_across_a_parenthesis_is_rejected() {
     assert!(result.is_ok(), "{:?}", result.errors);
     let result = parse_str("type AlsoFine = ((string?)[])?", "test.nx");
     assert!(result.is_ok(), "{:?}", result.errors);
+}
+
+#[test]
+fn test_nested_sequence_suffix_is_rejected() {
+    // A sequence never contains a sequence, so the second `[]` is the one reported, wherever the
+    // first one was written.
+    let nested = [
+        ("type Matrix = string[][]", "string[][]"),
+        ("type Maybe = string[]?[]", "string[]?[]"),
+        ("type Paren = (string[])[]", "(string[])[]"),
+        ("type Bad = <function />: string[][]", "string[][]"),
+        ("type Deep = ((string[]))[]", "((string[]))[]"),
+    ];
+
+    for (source, described) in nested {
+        let result = parse_str(source, "test.nx");
+        let codes: Vec<_> = result.errors.iter().filter_map(|d| d.code()).collect();
+        assert_eq!(
+            codes,
+            vec!["nested-sequence-suffix"],
+            "{described} should report one nesting error: {:?}",
+            result.errors
+        );
+        let primary = result.errors[0]
+            .labels()
+            .iter()
+            .find(|label| label.primary)
+            .expect("the nesting error should have a primary label");
+        assert_eq!(
+            &source[primary.range], "[",
+            "the reported `[]` is the second one in {described}"
+        );
+        assert_eq!(
+            usize::from(primary.range.start()),
+            source.rfind("[]").unwrap(),
+            "the trailing `[]` is the one reported in {described}"
+        );
+    }
+
+    // `?` changes a layer rather than adding one, parentheses add no layer at all, and a function
+    // type's result is a layer of its own.
+    for source in [
+        "type MaybeNames = string[]?",
+        "type NameHistory = string?[]",
+        "type Names = (string)[]",
+        "type MaybeNested = string?[]?",
+        "type Loaders = (<function />: string[])[]",
+    ] {
+        let result = parse_str(source, "test.nx");
+        assert!(result.is_ok(), "{source}: {:?}", result.errors);
+    }
 }
 
 #[test]

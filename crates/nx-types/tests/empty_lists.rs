@@ -320,24 +320,20 @@ fn empty_list_in_an_if_branch_takes_its_type_from_the_other_branch() {
 }
 
 #[test]
-fn empty_list_as_a_for_body_is_accepted_where_a_nested_list_is_declared() {
-    // A `for` wraps its body in another list, so a body of `{}` is a list of empty lists. That is
-    // what a `string[][]` site declares, and the inner element type is unobservable either way.
-    assert_clean("let ys:string[] = {\"q\"}\nlet xs:string[][] = {for y in ys {}}");
+fn empty_list_as_a_for_body_yields_the_empty_list() {
+    // A `for` concatenates what its body yields, so a body of `{}` yields nothing at all. The
+    // result is `never[]`, which satisfies every sequence type.
+    assert_clean("let ys:string[] = {\"q\"}\nlet xs:string[] = {for y in ys {}}");
 }
 
 #[test]
-fn empty_list_as_a_for_body_at_a_flat_list_site_reports_only_the_mismatch() {
-    let source = "let ys:string[] = {\"q\"}\nlet xs:string[] = {for y in ys {}}";
+fn empty_list_as_a_for_body_still_needs_an_annotation_to_name_its_element_type() {
+    let source = "let ys:string[] = {\"q\"}\nlet a = {for y in ys {}}";
     let messages = errors(source);
     assert_eq!(
         messages.len(),
         1,
-        "the site's own mismatch is the whole story, got: {messages:?}"
-    );
-    assert!(
-        messages[0].contains("{}[]"),
-        "expected the type to be spelled as the source reads, got: {messages:?}"
+        "the missing annotation is the whole story, got: {messages:?}"
     );
     assert!(
         !messages[0].contains("T0")

@@ -282,15 +282,14 @@ be offered as a completion, and SHALL NOT be highlighted as a primitive, so the 
 the eight names above. A user declaration MAY take the name `never`, resolved by the same rules that
 govern any non-primitive name.
 
-The system SHALL render it as `never` in a diagnostic that names a type it inferred, on the same
-terms as the unit type. Where a diagnostic reports a type the author wrote as `{}`, it SHALL spell
-it `{}` rather than naming the bottom type, because that is the form the author can act on. Where a
-diagnostic reports a type that an unspecified type parameter fixed, it SHALL name the parameter and
-the `Name=` form rather than naming the bottom type, for the same reason.
+The system SHALL render it as `never` in a diagnostic that names a type it inferred. Where a
+diagnostic reports a type the author wrote as `{}`, it SHALL spell it `{}` rather than naming the
+bottom type, because that is the form the author can act on. Where a diagnostic reports a type that
+an unspecified type parameter fixed, it SHALL name the parameter and the `Name=` form rather than
+naming the bottom type, for the same reason.
 
 No value SHALL have the bottom type, so it SHALL NOT appear in any runtime representation, in a
-value crossing the host boundary, or in a runtime type test. Its surface is therefore smaller than
-the unit type's, which does appear in each of those.
+value crossing the host boundary, or in a runtime type test.
 
 Code generation SHALL render it in every target it can reach. It can reach only the targets that
 render *inferred* types; a target that maps from source type annotations SHALL NOT be able to reach
@@ -321,32 +320,3 @@ use-site fact and SHALL NOT reach code generation through a declaration.
 - **WHEN** a file contains `type Contact = { name:string } external component <List TItem:type items:TItem[]? /> let contacts:Contact[] = {} let v = <List items={contacts} />`
 - **THEN** analysis SHALL reject `items`
 - **AND** the diagnostic SHALL name `TItem` and show `TItem=`, and SHALL NOT spell the expected type as `never[]?`
-
-### Requirement: The unit type is inference-internal and has no source spelling
-The system SHALL retain a unit type that type inference assigns where an expression produces no
-meaningful value — an `if` with no `else`, a block with no trailing expression, and a match that may
-match nothing. That type SHALL NOT be nameable in NX source, and its absence from the primitive set
-SHALL be a property of the language rather than an omission from the list.
-
-The system SHALL continue to render the unit type as `void` in diagnostics and in any other output
-that names a type it inferred. Rendering a name an author cannot write is deliberate: the author
-receives the name, they do not supply it.
-
-No NX source construct requires the unit type to be written. Functions are expression-bodied, so a
-function always produces a value, and NX has no expression that fails to produce one.
-
-#### Scenario: A no-else conditional still has the unit type
-- **WHEN** type inference analyzes an `if` expression with no `else` branch
-- **THEN** the expression SHALL take the unit type
-- **AND** removing `void` from the primitive set SHALL NOT change that
-
-#### Scenario: A diagnostic may name the unit type
-- **WHEN** the system reports a type mismatch whose found type is the unit type
-- **THEN** the diagnostic SHALL render that type as `void`
-
-#### Scenario: The unit type cannot be written in source
-- **WHEN** a file annotates a binding or a function return as `void` and no type named `void` is
-  declared
-- **THEN** analysis SHALL NOT resolve the annotation to the unit type
-- **AND** SHALL treat it as a reference to an undeclared name, exactly as it treats any other name
-  it cannot resolve

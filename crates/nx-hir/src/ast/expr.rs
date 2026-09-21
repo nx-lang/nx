@@ -351,17 +351,18 @@ pub enum Expr {
         span: TextSpan,
     },
 
-    /// Array literal.
+    /// A sequence of items, written as a braced value list.
     ///
-    /// Example: `[1, 2, 3]`
+    /// <para>An element whose own type is a sequence contributes its items rather than nesting,
+    /// so `{xs ys}` with two `string[]` values is one `string[]`.</para>
+    ///
+    /// Example: `{1 2 3}`
     Array {
         elements: Vec<ExprId>,
         span: TextSpan,
     },
 
-    /// Array index operation.
-    ///
-    /// Example: `arr[0]`, `matrix[i][j]`
+    /// Index operation. NX source has no way to write one; the variant is unreached.
     Index {
         base: ExprId,
         index: ExprId,

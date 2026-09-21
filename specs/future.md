@@ -1067,3 +1067,160 @@ generating this source should report, not produce a file.
 
 **Related.** "A dependency's generic record can be named but not patched" above is the other half of
 what a probe of generic companions across library boundaries turned up.
+
+## Inference invents `object` where it should ask
+
+**Observed.** The join has exactly one fallback. `common_supertype`
+(`crates/nx-types/src/semantics.rs:36`) tries each side against the other and, when neither
+satisfies the other, answers `Type::named("object")`. The inference context's own
+`common_supertype` (`crates/nx-types/src/infer.rs`) recurses through records, sequences and
+nullables and then delegates to that same fallback. So a join that failed and a join that
+genuinely landed on `object` are the same answer, and nothing downstream can tell them apart:
+
+```nx
+let v = { if c { 1 } else { names } }   // object
+let xs = { 1 "two" }                    // object[]
+```
+
+The value of this is that a declared `object` still works, because a declared type does not go
+through the join at all. Each of these is accepted today, and would keep working under the stricter
+rule below — the expected type is pushed to the items or the value, and each is checked against
+`object` individually:
+
+```nx
+let xs:object[] = { 1 "two" }
+<Box items={1 "two"} />                                    // items:object[]
+let pick(c:boolean, n:int, s:string): object = { if c { n } else { s } }
+```
+
+That matters because it means the stricter rule needs no cast expression to escape to, which is the
+usual reason a rule like this is deferred. NX has no cast today and would not need one for this.
+
+**Why it might matter.** An inferred `object` is a failure reported as a success, and the
+diagnostic then surfaces at the *consumer* rather than at the line that wrote the mismatch. RF8 in
+the `flat-sequences` review is the shape of it: an empty match arm joined with an element produced
+`object`, and what the author saw was `expects A[], found object[]` at the binding, several lines
+from the conditional that caused it.
+
+The rule worth adopting: **inference never invents `object`; a site may always ask for it.** Where
+the join has nothing better than `object`, that is an error naming both types, and the author
+answers it with an annotation — which is a thing they can already write.
+
+**What would settle it.** Not a change to the fallback on its own. Today an `if` computes
+`common_supertype(then, else)` and only then compares the result to the expected type, so making
+the join error would reject the annotated `pick` above along with the unannotated cases. The
+expected type has to be pushed down into the branches and each branch checked against it, with the
+join used only where there is no expected type. That is bidirectional checking for conditionals,
+and it touches every join site rather than the sequence-shaped ones.
+
+Before flipping it, survey where an inferred `object` legitimately arises: `examples/`,
+`sites/playground/src/examples/nx`, `docs/drawnui-proposal`, and the fiddle catalogue. Note that
+`object` has three other sources that this rule does not touch and must not disturb — a declared
+annotation, the host boundary, and codegen's erasure of `Element` and of component type parameters
+(`crates/nx-codegen/src/builder.rs`).
+
+**Related.** `flat-sequences` made the join lift an item to a sequence, so a failed join between an
+item and a sequence now surfaces as `object[]` where it used to surface as `object`. Both are the
+same "the join gave up" answer and this rule would treat them alike. "A Declaration Named After A
+Primitive Is Constructible But Unnameable" above covers `object` from the other side: it is a
+`Type::Named` rather than a `Type::Primitive`, which is why a user declaration can shadow it.
+
+## Removing `null`: `?` as an occurrence indicator
+
+**Observed.** `T?` currently means "one value, which may be null". The `flat-sequences` work needed
+it to also mean "zero or one items" — that is what an `if` with no `else` produces — and the two
+readings collide at `T?[]`, a sequence whose items may be null. `{ "a" null }` at a `string?[]` has
+a null that is an item, not an absence, so no rule keyed on the type can tell the two apart. That
+collision is why the contribution of an untaken conditional had to be recognised from the *source
+node* rather than from its type or its value, and that parallel "type versus contribution" notion
+is what RF1, RF2, RF7 and RF8 of the `flat-sequences` review all turned out to be.
+
+XPath has no such collision because it has no null: there `?` is purely an occurrence indicator and
+nothing can be confused with it. The direction recorded here is to follow it — remove `null` from
+NX, let `{}` mean the absence of a value, and make `?` mean zero-or-one.
+
+Three things make NX unusually well placed for this, all measured rather than assumed:
+
+- **There is no null-handling surface to replace.** No `?.`, `??`, `is null` or `== null` exists in
+  the language, the reference, or any `.nx` file in the repository. A `T?` can be produced and
+  passed but not branched on. In most languages that surface is the expensive part of the change;
+  here it is empty.
+- **Absence already exists independently of null.** `update-records` distinguishes "field absent
+  from the patch, leave unchanged" from "field set to null, clear it", and that distinction is
+  carried by *field presence in the patch record*, not by the null value. `{}` meaning cleared and
+  absent meaning untouched preserves it exactly. An absent element body already differs from an
+  empty one on the same basis.
+- **The empty sequence is already first class.** `{}` is a `never[]`, `never` is already the join's
+  identity, and the join already lets one arm of an `if` be `{}` and the other a `string[]` without
+  climbing to `object` (`crates/nx-types/src/infer.rs`, the `common_supertype` bottom-type arm).
+
+Surface to move: 51 `Value::Null` sites and 95 `Type::Nullable`/`strip_nullable` sites outside
+tests, and roughly ten specs naming nullability.
+
+**Why it might matter.** Beyond the collision above, `T?[]` and `T[]?` both stop being meaningful
+under occurrence semantics — zero-or-one of zero-or-more is just zero-or-more — which removes a
+distinction the type-suffix rules currently have to teach and authors currently have to keep
+straight. It also makes one rule cover what are now two: an item is a sequence of one, and a value
+that is not there is a sequence of none.
+
+**What would settle it.** Three designs, none of them blocking:
+
+- **The host boundary.** JSON, C# and TypeScript all have null. Inbound null maps to the empty
+  sequence; outbound, an absent field is either omitted or emitted as null. This is the only place
+  the decision leaves NX, and it touches `crates/nx-value`, C# and TypeScript typegen, the IR
+  runtime and FFI.
+- **Presence testing.** Branching on empty needs a spelling. XPath's answer is the effective boolean
+  value plus `exists`/`empty`. NX has neither today, which is a gap already — a `T?` can be built
+  and never tested — so this is new surface the language arguably wants regardless.
+- **What `?` means in a type reference.** `T?` becomes an occurrence indicator, `T?[]` and `T[]?`
+  are rejected rather than distinguished, and `type-reference-suffixes` is rewritten around one
+  suffix rule instead of two composing ones.
+
+**Ordering.** This wants to come *after* the sequence work, not before. The flat model — a sequence
+never contains a sequence, an item in a collecting position contributes its items — survives
+unchanged and is what this builds on. The `flat-sequences` decision that an `if` with no `else`
+carries an implicit `{}` rather than an implicit `null` is forward-compatible with it: under
+occurrence semantics "yields zero or one items" and "is a `T[]`" are the same claim, and `T?` is
+simply the more precise type for it, so this change sharpens a type rather than reversing a
+behaviour. Doing it first would mean building on the contribution machinery that the sequence work
+deletes.
+
+Three behaviours the sequence work left in place for this change to settle, all a consequence of
+`?` meaning "nullable" rather than "zero or one". The first two are sound today; the third is a
+cross-engine disagreement this change should close rather than inherit:
+
+- **A null's type decides its shape beside a sequence.** The untyped `null` literal is not lifted by
+  the join, so `if c { xs } else { null }` is a nullable sequence and is `null` when untaken — that
+  is how a nullable value is written. A value *typed* nullable is a real item and is lifted, so with
+  `let n:string? = null`, `if c { xs } else { n }` is `string?[]` and is `[null]`. Same runtime
+  value, two shapes, decided by the static type.
+- **An absent nullable sequence in a collecting position is one null item.** `{ maybeXs "c" }` with
+  `maybeXs:string[]? = null` is `[null, "c"]`, typed `string?[]`, because every engine pushes an
+  absent value as an item. The alternative — that an absent sequence contributes nothing, like an
+  empty one — is arguably closer to "a sequence contributes its items", but it would change runtime
+  values in every engine, so the sequence work kept what the engines do.
+- **A lone content child has no rule the engines share** (RF28 in the `flat-sequences` review,
+  deferred here). The checker judges a body of exactly one child by the child's own type, and a body
+  of several by what each child contributes. For every type but a nullable sequence the two agree;
+  for `A[]?` they do not, so `<Box>{if c { as2 } else { null }}</Box>` is rejected at a content
+  property declared `A?[]` while the same child beside a sibling is accepted. The engines disagree
+  underneath, and did at HEAD too: the interpreter binds a lone child as itself and then coerces it
+  to the property's type, the TypeScript IR runtime splices it, and generated JavaScript emits it as
+  itself. At a property declared `A[]?`, a lone absent child is `null` in the interpreter, a throw
+  (`Expected Box.items[0] to be an object`) in the IR runtime, and `null` in generated JavaScript.
+  No checker-only change closes this: judging a lone child by its contribution would accept the
+  `A?[]` case, where generated JavaScript then binds `null` rather than `[null]`, and newly reject
+  `<Box>{maybeList}</Box>` at `A[]?`, where two engines agree. Whatever this change decides a lone
+  child means, all three engines and the checker have to be brought to it together, with a
+  three-engine case in `runtime/typescript/test/emitted-ir.test.mjs` that includes the IR runtime —
+  the existing lone-child case there excludes it for exactly this reason.
+
+Under occurrence semantics all three disappear: there is no null value to be typed one way or the
+other, an absent `T?` is simply zero items, and with `T?[]` gone and `T[]?` collapsing to `T[]`,
+no type is left whose own type and contribution differ, so the lone and many-child paths in the
+checker stop disagreeing. The engines still need one lone-child binding rule chosen and applied in
+all three, but it no longer turns on how an absent sequence behaves.
+
+**Related.** "Inference invents `object` where it should ask" above is the other type-system rule
+this line of work turned up. `openspec/specs/type-reference-suffixes` and
+`openspec/specs/update-records` are the two specs this would rewrite most.

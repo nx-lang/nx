@@ -2239,7 +2239,7 @@ impl Interpreter {
             ast::Expr::Array { elements, .. } => {
                 let mut values = Vec::with_capacity(elements.len());
                 for elem_expr in elements {
-                    values.push(self.eval_expr(module, ctx, *elem_expr)?);
+                    self.eval_item_into(module, ctx, *elem_expr, &mut values)?;
                 }
                 Ok(Value::Array(values))
             }
@@ -2654,6 +2654,23 @@ impl Interpreter {
     }
 
     /// Evaluate an if expression (T037)
+    /// Evaluates a condition and requires it to be a boolean.
+    fn eval_condition(
+        &self,
+        module: &LoweredModule,
+        ctx: &mut ExecutionContext,
+        condition: ExprId,
+    ) -> Result<bool, RuntimeError> {
+        match self.eval_expr(module, ctx, condition)? {
+            Value::Boolean(value) => Ok(value),
+            other => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: "boolean".to_string(),
+                actual: other.type_name().to_string(),
+                operation: "if condition".to_string(),
+            })),
+        }
+    }
+
     fn eval_if(
         &self,
         module: &LoweredModule,
@@ -2662,20 +2679,7 @@ impl Interpreter {
         then_branch: ExprId,
         else_branch: Option<ExprId>,
     ) -> Result<Value, RuntimeError> {
-        // Evaluate condition
-        let condition_value = self.eval_expr(module, ctx, condition)?;
-
-        // Condition must be a bool
-        let condition_bool = match condition_value {
-            Value::Boolean(b) => b,
-            v => {
-                return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                    expected: "boolean".to_string(),
-                    actual: v.type_name().to_string(),
-                    operation: "if condition".to_string(),
-                }))
-            }
-        };
+        let condition_bool = self.eval_condition(module, ctx, condition)?;
 
         // Execute appropriate branch
         if condition_bool {
@@ -2683,7 +2687,10 @@ impl Interpreter {
         } else if let Some(else_expr) = else_branch {
             self.eval_expr(module, ctx, else_expr)
         } else {
-            Ok(Value::Null)
+            // A missing `else` is an `else { }`. Where items are collected this splices away by
+            // the ordinary rule, and where one value is expected the type is a sequence, so no
+            // caller is expecting a null here.
+            Ok(Value::Array(Vec::new()))
         }
     }
 
@@ -2695,22 +2702,36 @@ impl Interpreter {
         arms: &[ast::MatchArm],
         else_branch: Option<ExprId>,
     ) -> Result<Value, RuntimeError> {
+        match self.match_arm_body(module, ctx, scrutinee, arms)? {
+            Some(body) => self.eval_expr(module, ctx, body),
+            None => match else_branch {
+                Some(else_expr) => self.eval_expr(module, ctx, else_expr),
+                // As for an `if` with no `else`: an uncovered path is an `else { }`.
+                None => Ok(Value::Array(Vec::new())),
+            },
+        }
+    }
+
+    /// The body of the first arm whose pattern matches, or `None` when no arm does.
+    fn match_arm_body(
+        &self,
+        module: &LoweredModule,
+        ctx: &mut ExecutionContext,
+        scrutinee: ExprId,
+        arms: &[ast::MatchArm],
+    ) -> Result<Option<ExprId>, RuntimeError> {
         let scrutinee_value = self.eval_expr(module, ctx, scrutinee)?;
 
         for arm in arms {
             for pattern in &arm.patterns {
                 let pattern_value = self.eval_match_pattern(module, ctx, *pattern)?;
                 if self.values_match(&scrutinee_value, &pattern_value)? {
-                    return self.eval_expr(module, ctx, arm.body);
+                    return Ok(Some(arm.body));
                 }
             }
         }
 
-        if let Some(else_expr) = else_branch {
-            self.eval_expr(module, ctx, else_expr)
-        } else {
-            Ok(Value::Null)
-        }
+        Ok(None)
     }
 
     fn eval_match_pattern(
@@ -3445,6 +3466,31 @@ impl Interpreter {
         Ok(())
     }
 
+    /// Appends what one item contributes to the sequence it sits in.
+    ///
+    /// <para>A sequence value contributes its elements and every other value contributes itself.
+    /// That is the whole rule, and every collecting position follows it -- a braced value list,
+    /// body content, and the yields of a `for` -- so all of them produce the same value for the
+    /// same items.</para>
+    ///
+    /// <para>A conditional with no `else` needs nothing here. It evaluates to the empty sequence
+    /// when it takes no branch, so it splices away like any other sequence-valued item, and a
+    /// conditional nested in one is no different. Nothing inspects the source, so a written `null`
+    /// stays an item.</para>
+    fn eval_item_into(
+        &self,
+        module: &LoweredModule,
+        ctx: &mut ExecutionContext,
+        item_expr: ExprId,
+        items: &mut Vec<Value>,
+    ) -> Result<(), RuntimeError> {
+        match self.eval_expr(module, ctx, item_expr)? {
+            Value::Array(elements) => items.extend(elements),
+            other => items.push(other),
+        }
+        Ok(())
+    }
+
     fn eval_content_expressions(
         &self,
         module: &LoweredModule,
@@ -3453,13 +3499,7 @@ impl Interpreter {
     ) -> Result<Vec<Value>, RuntimeError> {
         let mut values = Vec::new();
         for content_expr in content_exprs {
-            let value = self.eval_expr(module, ctx, *content_expr)?;
-            match value {
-                // Content arrays represent sibling body-content results from multi-item braces and
-                // element-producing control flow, so splice them into the parent content list.
-                Value::Array(items) => values.extend(items),
-                other => values.push(other),
-            }
+            self.eval_item_into(module, ctx, *content_expr, &mut values)?;
         }
         Ok(values)
     }
@@ -3470,9 +3510,9 @@ impl Interpreter {
     /// body that was written and produced no values is a different thing: it binds the empty list,
     /// so `<Box>{}</Box>` means what `<Box items={} />` means. The rule is about the body, not
     /// about `{}` -- a `for` that iterates zero times produces no values too, and binds no children
-    /// rather than falling back to the declared default. An `if` that takes no branch is not among
-    /// them: it evaluates to null and never reaches the zero-value case. Only the two cases are
-    /// told apart here; the values themselves are already spliced.</para>
+    /// rather than falling back to the declared default, and so does a body that is one `if` that
+    /// takes no branch. Only the two cases are told apart here; the values themselves are already
+    /// spliced.</para>
     fn normalize_content_values(
         &self,
         content_exprs: &[ExprId],
@@ -3552,28 +3592,37 @@ impl Interpreter {
         }
 
         if let Type::Array(expected_item) = expected {
-            return match value {
-                Value::Array(values) => {
-                    let mut coerced = Vec::with_capacity(values.len());
-                    for item in values {
-                        coerced.push(self.coerce_value_to_resolved_type(
-                            module,
-                            item,
-                            expected_item,
-                            operation,
-                            origin,
-                        )?);
-                    }
-                    Ok(Value::Array(coerced))
-                }
-                other => Ok(Value::Array(vec![self.coerce_value_to_resolved_type(
+            // An item is a sequence of one, and the lift applies once: a sequence's element type is
+            // an item type, so wrapping a scalar and coercing the elements is the whole of it.
+            debug_assert!(
+                !matches!(expected_item.strip_nullable(), Type::Array(_)),
+                "a sequence type has an item element type, found {expected}"
+            );
+            let values = match value {
+                Value::Array(values) => values,
+                other => vec![other],
+            };
+            let mut coerced = Vec::with_capacity(values.len());
+            for item in values {
+                let item = self.coerce_value_to_resolved_type(
                     module,
-                    other,
+                    item,
                     expected_item,
                     operation,
                     origin,
-                )?])),
-            };
+                )?;
+                // A sequence value never holds a sequence value. An `object` element is the one
+                // exception: it may hold anything, including a sequence, and is opaque as an item.
+                // `object?` is that same exception -- nullability says what the element may be
+                // instead of a value, not what it may be.
+                debug_assert!(
+                    !matches!(item, Value::Array(_))
+                        || is_object_type(expected_item.strip_nullable()),
+                    "a sequence value never holds a sequence value at {expected}"
+                );
+                coerced.push(item);
+            }
+            return Ok(Value::Array(coerced));
         }
 
         // A constant case arrives from host input as its bare authored name. When the declared
@@ -4057,9 +4106,9 @@ impl Interpreter {
                 ctx.define_variable(SmolStr::new(index_name.as_str()), Value::Int(idx as i64));
             }
 
-            // Evaluate body
-            let result = self.eval_expr(module, ctx, body_expr)?;
-            results.push(result);
+            // A `for` concatenates what its body yields, so each iteration contributes on the
+            // same terms as an item of a braced value list.
+            self.eval_item_into(module, ctx, body_expr, &mut results)?;
 
             // Pop scope
             ctx.pop_scope();
@@ -4099,8 +4148,7 @@ impl Interpreter {
 
             // As for a list: the body is one more evaluation, and so one more operation against
             // the budget, which is what stops a range that is merely large.
-            let result = self.eval_expr(module, ctx, body_expr)?;
-            results.push(result);
+            self.eval_item_into(module, ctx, body_expr, &mut results)?;
             ctx.pop_scope();
         }
 

@@ -378,8 +378,9 @@ let week:<Range T=int/> = <Range T=int start={1} end={7} endInclusive={true} />
 ```
 
 An applied type composes with `?` and `[]` in source order, nests (`<Page T=<Range T=int/>/>`), may
-take any type as an argument, and may name a qualified tag, which is how the update companion is
-written (`<Range.Update T=int/>`). Arguments are matched to parameters **by name**, so
+take any item type as an argument — a sequence is not one, since a record declaring `items:T[]`
+would then have a field that is a sequence of sequences — and may name a qualified tag, which is how
+the update companion is written (`<Range.Update T=int/>`). Arguments are matched to parameters **by name**, so
 `<Pair TValue=int TKey=string/>` and `<Pair TKey=string TValue=int/>` are one type.
 
 ### Distinct per argument, and invariant
@@ -421,12 +422,18 @@ takes where a type position would take the spelled-out type:
 
 ```nx
 type Box = { T:type value:T }
-type Ints = int[]
+type MaybeInt = int?
 type IntRange = <Range T=int/>
 
-let boxedInts:<Box T=int[]/> = <Box T=Ints value={ 1 2 } />
+let maybeBoxed:<Box T=int?/> = <Box T=MaybeInt value={null} />
 let nested:<Box T=<Range T=int/>/> = <Box T=IntRange value={<Range T=int start={1} end={5} endInclusive={false} />} />
 ```
+
+A type argument is an item type. `int?`, a record, a union, a function type and another applied
+type are all item types; a sequence is not, so `<Box T=int[]/>` and an alias that names a sequence
+are rejected — a record declaring `items:T[]` would otherwise have a field that is a sequence of
+sequences. Where a parameter has to stand for many values, declare the field as `T[]` and pass the
+item type.
 
 ### Companions
 The derived update record carries the same parameters and is named the same way, and the update

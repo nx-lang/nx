@@ -125,11 +125,14 @@ parenthesized before they can appear as list items.
 - **WHEN** a file contains `let value = {a - b}`
 - **THEN** the parser SHALL accept the braced expression as a single `ValueExpression`
 
-### Requirement: Values braced expressions infer scalar or list types from source arity
+### Requirement: Values braced expressions infer scalar or flat list types from source arity
 A `ValuesBracedExpression` with one source item SHALL infer to that item's type. A
 `ValuesBracedExpression` with more than one source item SHALL infer to a list of the most specific
-common item type. If no more specific common type exists, the inferred list type SHALL be
-`object[]`.
+common item type, where the item type an item contributes is the element type of its own type when
+that type is a list, and its type otherwise. A list-typed item therefore splices: `{xs ys}` with
+`xs:string[]` and `ys:string[]` is a `string[]`, and `{xs "a"}` is a `string[]`, never a list of
+lists. If no more specific common type exists, the inferred list type SHALL be `object[]`. An item
+of type `object` contributes `object`, whatever it holds at runtime.
 
 A `ValuesBracedExpression` with no source items SHALL be list-valued. This is stated rather than
 derived: because one item infers a scalar, zero is the one arity that cannot be scalar, and it does
@@ -163,6 +166,11 @@ a `for` that iterates zero times has said that there are no children, which is n
 saying nothing. This SHALL hold at a content property whose declared default is non-empty: the
 default answers an absent body, and a body that produced nothing is not one.
 
+A `for` in a value position SHALL yield a list whose item type is what its body contributes under
+the same rule: the element type of a list-typed body, and the body's type otherwise. A `for` whose
+body is the empty list SHALL therefore yield `never[]`, which satisfies every list type, and SHALL
+NOT yield a list of lists.
+
 #### Scenario: Singleton braced value keeps a scalar type
 - **WHEN** type inference analyzes `let value = {1}`
 - **THEN** `value` SHALL infer as `int` rather than `int[]`
@@ -170,6 +178,11 @@ default answers an absent body, and a body that produced nothing is not one.
 #### Scenario: Multi-item braced value infers a list type
 - **WHEN** type inference analyzes `let value = {1 2 3}`
 - **THEN** `value` SHALL infer as `int[]`
+
+#### Scenario: A list-typed item contributes its element type
+- **WHEN** type inference analyzes `let xs:string[] = {"a" "b"}` and `let value = {xs "c"}`
+- **THEN** `value` SHALL infer as `string[]`
+- **AND** `let both = {xs xs}` SHALL infer as `string[]` as well
 
 #### Scenario: Heterogeneous element list falls back to object
 - **WHEN** type inference analyzes `let value = {<A/> <B/>}`
@@ -259,11 +272,10 @@ default answers an absent body, and a body that produced nothing is not one.
 - **AND** the empty arm SHALL evaluate to a `string[]` with no elements
 - **AND** the same SHALL hold for the branch form, `{if c {"a" "b"} else {}}`
 
-#### Scenario: An empty `for` body is a list of empty lists
-- **WHEN** type checking analyzes `let xs:string[][] = {for y in ys {}}`
-- **THEN** it SHALL report no diagnostics, since `never[][]` satisfies `string[][]`
-- **AND** `let xs:string[] = {for y in ys {}}` SHALL report exactly one diagnostic, the site's own
-  mismatch, naming the found type as `{}[]` rather than by any type the author cannot write
+#### Scenario: An empty `for` body yields the empty list
+- **WHEN** type checking analyzes `let ys:string[] = {"q"}` and `let xs:string[] = {for y in ys {}}`
+- **THEN** it SHALL report no diagnostics, since `never[]` satisfies `string[]`
+- **AND** evaluation SHALL bind an empty `string[]` to `xs`
 - **AND** `let a = {for y in ys {}}` SHALL still report that the element type of the list bound to
   `a` cannot be determined
 

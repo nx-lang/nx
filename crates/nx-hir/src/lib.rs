@@ -48,13 +48,14 @@ pub use prepared::{
 };
 
 pub use components::{
-    apply_constant_folds, apply_contextual_name_resolutions, apply_join_widenings,
-    apply_literal_conversions, apply_range_constructions, apply_string_conversions,
-    component_declaration_origin, effective_component_contract, effective_component_contract_at,
-    effective_component_contract_for_name, erase_type_parameters, is_component_subtype,
-    promote_component_handler_bindings, remove_property_entries, resolve_component_definition,
-    validate_component_definitions, ComponentAncestor, ComponentResolutionError, ContextualRewrite,
-    EffectiveComponentContract, InvalidComponentBaseReason, StringConversions,
+    apply_constant_folds, apply_contextual_name_resolutions, apply_join_lifts,
+    apply_join_widenings, apply_literal_conversions, apply_range_constructions,
+    apply_string_conversions, component_declaration_origin, effective_component_contract,
+    effective_component_contract_at, effective_component_contract_for_name, erase_type_parameters,
+    is_component_subtype, promote_component_handler_bindings, remove_property_entries,
+    resolve_component_definition, validate_component_definitions, ComponentAncestor,
+    ComponentResolutionError, ContextualRewrite, EffectiveComponentContract,
+    InvalidComponentBaseReason, StringConversions,
 };
 
 // Re-export database types

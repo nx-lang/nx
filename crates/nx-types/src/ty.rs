@@ -36,15 +36,12 @@ pub enum Primitive {
     String,
     /// Boolean type
     Boolean,
-    /// Void/unit type (functions with no return value)
-    Void,
     /// The bottom type: the type of a value that does not exist.
     ///
-    /// <para>Inference-internal, like [`Primitive::Void`] and for the same reason — an author
-    /// receives it, they never write it. It has no source spelling and no runtime representation,
-    /// because no value has bottom type. What it exists for is the empty list: `{}` is a
-    /// `never[]`, and `never` being below every type is what makes that one value usable at every
-    /// list-typed site without the site having to be consulted.</para>
+    /// <para>Inference-internal: it can appear in a diagnostic but is never written in source, and
+    /// it has no runtime representation, because no value has bottom type. What it exists for is
+    /// the empty list: `{}` is a `never[]`, and `never` being below every type is what makes that
+    /// one value usable at every list-typed site without the site having to be consulted.</para>
     Never,
 }
 
@@ -59,7 +56,6 @@ impl Primitive {
             Primitive::Float64 => "float64",
             Primitive::String => "string",
             Primitive::Boolean => "boolean",
-            Primitive::Void => "void",
             Primitive::Never => "never",
         }
     }
@@ -98,7 +94,7 @@ impl Primitive {
             Primitive::Float64 => PrimitiveType::Float64,
             Primitive::String => PrimitiveType::String,
             Primitive::Boolean => PrimitiveType::Boolean,
-            Primitive::Void | Primitive::Never => return None,
+            Primitive::Never => return None,
         })
     }
 
@@ -194,12 +190,16 @@ impl fmt::Display for Primitive {
 /// Types are immutable and can be shared via `Arc` for efficiency.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
-    /// Primitive type (int, int32, int64, float32, float64, string, boolean, void)
+    /// Primitive type (int, int32, int64, float32, float64, string, boolean, never)
     Primitive(Primitive),
 
-    /// Array type: T[]
+    /// Sequence type: T[]
     ///
-    /// Example: `int[]`, `string[][]`
+    /// <para>A sequence is flat: its element type is an item type, never another sequence. No
+    /// type reference, alias chain, type-argument substitution or inference result produces an
+    /// `Array` whose element is an `Array`.</para>
+    ///
+    /// Example: `int[]`, `string?[]`, `string[]?`
     Array(Box<Type>),
 
     /// Nullable type: T?
@@ -572,11 +572,6 @@ impl Type {
             ),
             _ => self.clone(),
         }
-    }
-
-    /// Creates a primitive void type.
-    pub fn void() -> Self {
-        Type::Primitive(Primitive::Void)
     }
 
     /// Creates an array type.
@@ -1168,7 +1163,6 @@ mod tests {
         assert_eq!(Type::float64(), Type::Primitive(Primitive::Float64));
         assert_eq!(Type::string(), Type::Primitive(Primitive::String));
         assert_eq!(Type::boolean(), Type::Primitive(Primitive::Boolean));
-        assert_eq!(Type::void(), Type::Primitive(Primitive::Void));
     }
 
     #[test]
@@ -1180,7 +1174,7 @@ mod tests {
         assert_eq!(Type::float64().to_string(), "float64");
         assert_eq!(Type::string().to_string(), "string");
         assert_eq!(Type::boolean().to_string(), "boolean");
-        assert_eq!(Type::void().to_string(), "void");
+        assert_eq!(Type::never().to_string(), "never");
     }
 
     #[test]

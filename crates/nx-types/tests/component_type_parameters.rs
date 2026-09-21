@@ -109,7 +109,7 @@ fn a_type_argument_fixes_the_element_type_of_a_list_prop() {
 fn a_mismatch_is_reported_against_the_substituted_type() {
     assert_reports(
         &format!("{CONTACT}{SKIA_LAYOUT}let v = <SkiaLayout TItem=Contact itemsSource={{ \"a\" \"b\" }} />"),
-        "expects Contact[]?, found list string[]",
+        "expects Contact[]?, found string[]",
     );
 }
 
@@ -122,6 +122,22 @@ fn a_primitive_an_alias_and_a_union_are_all_acceptable_arguments() {
          let c = <List TItem=Fit items=fill />\n\
          let d = <List TItem=object items={{ 1 \"two\" }} />"
     ));
+}
+
+#[test]
+fn an_alias_to_a_sequence_is_not_an_acceptable_argument() {
+    // A type argument stands where an item type stands, so `TItem=Names` would make `TItem[]` a
+    // sequence of sequences.
+    let errors = assert_reports(
+        &format!("type Names = string[]\n{LIST}let v = <List TItem=Names items={{ \"x\" }} />"),
+        "A type argument must not be a sequence",
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|message| message.contains("'Names' is a sequence")),
+        "{errors:?}"
+    );
 }
 
 #[test]
@@ -153,7 +169,7 @@ fn an_enclosing_component_forwards_its_own_type_parameter() {
         &format!(
             "{SKIA_LAYOUT}component <Section TItem:type items:TItem[] labels:string[] /> = {{ <SkiaLayout TItem=TItem itemsSource={{labels}} /> }}"
         ),
-        "expects TItem[]?, found list string[]",
+        "expects TItem[]?, found string[]",
     );
 }
 
