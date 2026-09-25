@@ -13,10 +13,10 @@ namespace NxLang.Nx.Serialization;
 /// </summary>
 /// <remarks>
 /// <para>Writing follows the DTO's <see cref="NxUpdateSchema"/>: <c>$type</c> first, then every set field in
-/// ordinal key order, with a field set to <see langword="null"/> written as nil. Reading leaves a missing key
-/// unset, reads a present nil as set to null, and rejects a key the schema does not declare, naming the key and
-/// the DTO, as the NX runtime rejects a field a record does not declare. A <c>$type</c> that names a different
-/// record is rejected the same way.</para>
+/// ordinal key order, with a cleared field written as nil. Reading leaves a missing key unset, reads a present
+/// nil as cleared, and rejects a key the schema does not declare, naming the key and the DTO, as the NX runtime
+/// rejects a field a record does not declare. A nil for a field the schema knows cannot be cleared, and a
+/// <c>$type</c> that names a different record, are rejected the same way.</para>
 /// <para>Field values go through <see cref="MessagePackSerializer"/> by the type the schema carries; the DTO's
 /// own members are never reflected over.</para>
 /// </remarks>
@@ -104,6 +104,12 @@ public sealed class NxUpdateRecordMessagePackFormatter<TRecord> : IMessagePackFo
                 {
                     throw new MessagePackSerializationException(
                         $"'{key}' is not a field of {typeof(TRecord).Name} ('{schema.NxType}').");
+                }
+
+                if (reader.NextMessagePackType == MessagePackType.Nil && !field.Clearable)
+                {
+                    throw new MessagePackSerializationException(
+                        field.CannotClearMessage(schema.NxType, typeof(TRecord).Name));
                 }
 
                 record.SetFieldValue(key, MessagePackSerializer.Deserialize(field.ValueType, ref reader, options));

@@ -1,0 +1,84 @@
+{
+  "entry": "main.nx",
+  "emit": [
+    "main.nx"
+  ],
+  "entrypoints": [
+    {
+      "module": "main.nx",
+      "function": "ada"
+    },
+    {
+      "module": "main.nx",
+      "function": "withAuthor"
+    },
+    {
+      "module": "main.nx",
+      "function": "withoutAuthor"
+    },
+    {
+      "module": "main.nx",
+      "function": "writtenEmpty"
+    },
+    {
+      "module": "main.nx",
+      "function": "has"
+    },
+    {
+      "module": "main.nx",
+      "function": "hasNot"
+    },
+    {
+      "module": "main.nx",
+      "function": "name"
+    },
+    {
+      "module": "main.nx",
+      "function": "noName"
+    },
+    {
+      "module": "main.nx",
+      "function": "named"
+    },
+    {
+      "module": "main.nx",
+      "function": "anonymous"
+    },
+    {
+      "module": "main.nx",
+      "function": "noNick"
+    },
+    {
+      "module": "main.nx",
+      "function": "isTagged"
+    },
+    {
+      "module": "main.nx",
+      "function": "isNotTagged"
+    },
+    {
+      "module": "main.nx",
+      "function": "lone"
+    },
+    {
+      "module": "main.nx",
+      "function": "several"
+    },
+    {
+      "module": "main.nx",
+      "function": "cleared"
+    },
+    {
+      "module": "main.nx",
+      "function": "renamed"
+    },
+    {
+      "module": "main.nx",
+      "function": "clearedNick"
+    },
+    {
+      "module": "main.nx",
+      "function": "root"
+    }
+  ]
+}

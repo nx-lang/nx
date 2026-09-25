@@ -46,8 +46,10 @@ crossings are lossy and are not implicit.
 Widening SHALL apply to an expression of any form, not only to a literal, and at every site that
 declares a type for the value written there: component and external component property bindings,
 property defaults, record field defaults and record field values, annotated `let` bindings, declared
-return types, arguments at a typed parameter, each element of a list written at a list-typed site,
-a content property, and any of those with a nullable declared type.
+return types, arguments at a typed parameter, each item of a sequence written at a `+` or `*` site,
+a content property, and any of those through an occurrence. Widening SHALL apply to the item type
+and SHALL leave the occurrence alone: `int?` widens to `float64?`, `int+` to `float64+` and `int*`
+to `float64*`, item by item, and SHALL NOT change how many items there are.
 
 #### Scenario: An int expression binds at a float64 site
 - **WHEN** a file declares `external component <B v:float64 />` and a component parameter `n:int`,
@@ -80,23 +82,23 @@ a content property, and any of those with a nullable declared type.
 - **THEN** analysis SHALL reject the binding
 
 #### Scenario: Widening applies to each element of a list
-- **WHEN** a file declares a property of type `float64[]` and binds it to a list whose elements are
-  typed `int` and `int32`
+- **WHEN** a file declares a property of type `float64+` and binds it to a braced sequence whose
+  items are typed `int` and `int32`
 - **THEN** analysis SHALL accept the binding
-- **AND** every element of the bound list SHALL be a `float64` when the program is evaluated
+- **AND** every item of the bound sequence SHALL be a `float64` when the program is evaluated
 
 #### Scenario: Widening applies at a nullable site
-- **WHEN** a file declares `external component <B v:float64? />` and a component parameter `n:int`,
+- **WHEN** a file declares `external component <B v?:float64 />` and a component parameter `n:int`,
   and binds `<B v={n} />`
 - **THEN** analysis SHALL accept the binding
 
 #### Scenario: A nullable value widens at a nullable site
-- **WHEN** a file declares `let f(n:int?): float64? = { n }` and
-  `let g(ns:int?[]): float64?[] = { ns }`
+- **WHEN** a file declares `let f(n?:int): float64? = { n }` and
+  `let g(ns:int+): float64+ = { ns }`
 - **THEN** analysis SHALL accept both declarations
-- **AND** evaluating `f` with `n` holding `3` SHALL produce the `float64` `3.0`, and with `null`
-  SHALL produce `null`
-- **AND** `let h(n:int64?): float64? = { n }` SHALL be rejected, naming `int64?` and `float64?`
+- **AND** evaluating `f` with `n` holding `3` SHALL produce the `float64` `3.0`, and with `n` empty
+  SHALL produce the empty value
+- **AND** `let h(n?:int64): float64? = { n }` SHALL be rejected, naming `int64?` and `float64?`
 
 ### Requirement: Mixed numeric operands take the narrowest common widening
 When the two operands of an arithmetic operator (`+`, `-`, `*`, `/`, `%`) or a comparison operator
@@ -213,12 +215,14 @@ non-string operand SHALL be converted to its canonical text form and the two str
 left operand first. `+` SHALL remain left-associative, so the operands of an outer `+` are the
 results of the inner ones.
 
-The system SHALL reject `+` when one operand is a string and the other is `null`, a nullable type
-(including `string?`), a record, a list, a union case, a function, `object`, or any other type that
-is not a stringifiable primitive, with a diagnostic naming the operand type. Whether a `+` adds or
-concatenates SHALL be decided from the checked operand types, and SHALL NOT depend on the syntactic
-form of the operands: a field access, a call result, and a parameter of type `string` concatenate
-exactly as a string literal does.
+Both operands of `+` SHALL be exactly-one values. The system SHALL reject `+` when one operand is a
+string and the other carries an occurrence — `?`, `+` or `*`, `string?` included — a record, a
+union case, a function, `object`, or any other type that is not a stringifiable primitive, with a
+diagnostic naming the operand type. For an operand whose occurrence admits zero, the diagnostic
+SHALL name `??` as the way to supply a value, as `presence-operators` defines it. Whether a `+`
+adds or concatenates SHALL be decided from the checked operand types, and SHALL NOT depend on the
+syntactic form of the operands: a field access, a call result, and a parameter of type `string`
+concatenate exactly as a string literal does.
 
 #### Scenario: String plus int concatenates
 - **WHEN** a file declares `let f(count:int) = "Total: " + count`
@@ -249,16 +253,18 @@ exactly as a string literal does.
 - **AND** the diagnostic SHALL name `Item`
 
 #### Scenario: String plus null is rejected
-- **WHEN** a file declares `let f(s:string?) = "value: " + s`
-- **THEN** analysis SHALL reject the declaration
+- **WHEN** a file declares `let f(s?:string) = "value: " + s`
+- **THEN** analysis SHALL reject the declaration, naming `string?`
+- **AND** the diagnostic SHALL name `??` as the fix
+- **AND** `let g(s?:string) = "value: " + (s ?? "")` SHALL be accepted
 
 #### Scenario: String plus a list is rejected
-- **WHEN** a file declares `let f(xs:int[]) = "items: " + xs`
-- **THEN** analysis SHALL reject the declaration
+- **WHEN** a file declares `let f(xs:int+) = "items: " + xs`
+- **THEN** analysis SHALL reject the declaration, naming `int+`
 
 ### Requirement: Text body content binds to a string content property as one string
-When element body content binds to a content property whose declared type is `string` or `string?`
-and the body consists of text runs and braced values, the system SHALL bind the property to a single
+When element body content binds to a content property declared `text:string` or `text?:string` and
+the body consists of text runs and braced values, the system SHALL bind the property to a single
 string: the pieces in source order, each text run as written and each braced value in its canonical
 text form. Line breaks SHALL be treated as layout: each stretch of whitespace that contains a line
 break, whether between two pieces or inside a text run, SHALL become one space, and whitespace
@@ -271,9 +277,9 @@ body is text for a processor the host supplies, which reads those line breaks it
 come off a typed body is the indentation its lines share, the line break that follows the open tag,
 and a whitespace-only last line before the close tag. An escape in a text run (`\@`, `\{`, `\}`)
 SHALL bind as the character it escapes. A braced value SHALL be accepted only when its type is
-`string` or a stringifiable primitive; any other type SHALL be rejected with a diagnostic naming the
-type. The rule SHALL apply to a body that is a single text run or a single braced number or boolean
-as well. A body that is a single braced `string` SHALL bind as that string.
+`string` or a stringifiable primitive, exactly one; any other type SHALL be rejected with a
+diagnostic naming the type. The rule SHALL apply to a body that is a single text run or a single
+braced number or boolean as well. A body that is a single braced `string` SHALL bind as that string.
 
 This rule SHALL apply only where body content binds to a declared content property. Body content
 under a tag that resolves to no declaration is not type-checked today and SHALL be unchanged by this
@@ -349,6 +355,13 @@ requirement.
   and `let f(item:Item) = <Label>Item: {item}</Label>`
 - **THEN** analysis SHALL reject the body
 - **AND** the diagnostic SHALL name `Item`
+
+#### Scenario: A text body binds at an optional string content property
+- **WHEN** a file contains `type Label = { content text?:string }` and
+  `let f(count:int) = <Label>Total: {count}</Label>`
+- **THEN** analysis SHALL accept the body
+- **AND** evaluating `f(3)` SHALL bind `text` to `"Total: 3"`, and `<Label />` SHALL leave `text`
+  empty
 
 #### Scenario: An Element content property is unchanged
 - **WHEN** a file declares `component <Panel content body:Element /> = { <section>{body}</section> }`
@@ -431,25 +444,27 @@ analysis already guarantees they never narrow.
 - **THEN** evaluation SHALL fail with a diagnostic saying the value is out of range for `int32`
 
 ### Requirement: A join takes the narrowest type its branches widen to, and its branches widen to it
-The branches of an `if` with an `else`, the arms of a match, and the elements of a list literal
-SHALL be joined into one type, which SHALL be the narrowest type every branch widens to. A branch
-whose numeric type is narrower than the join's SHALL evaluate to a value of the join's numeric type,
-on the same terms as a value bound at a declared site, including item by item inside a list or a
-nullable type. The widening SHALL apply to the branch's result: the branch SHALL compute at its own
-type, so its operators SHALL be the ones its own operands select.
+The branches of an `if` with an `else`, the arms of a match, and the items of a braced sequence
+SHALL be joined into one type, whose item type SHALL be the narrowest type every branch's item type
+widens to. A branch whose numeric type is narrower than the join's SHALL evaluate to a value of the
+join's numeric type, on the same terms as a value bound at a declared site, including item by item
+through an occurrence. The widening SHALL apply to the branch's result: the branch SHALL compute at
+its own type, so its operators SHALL be the ones its own operands select.
 
-Nullability SHALL be lifted out of the join: joining `A?` with `B` or with `B?` SHALL yield the join
-of `A` and `B`, made nullable. The `null` literal SHALL add nullability and nothing else, so joining
-`null` with `T` SHALL yield `T?`. A join whose inner types have no common type other than `object`
-SHALL yield `object`, which already admits `null`, and not `object?`.
+The join's occurrence SHALL be the least upper bound of the branches' occurrences, as
+`occurrence-types` defines: joining `A?` with `B` or with `B?` SHALL yield the join of `A` and `B`
+with the `?` occurrence, and a branch that is the empty value SHALL contribute its zero-or-one
+occurrence and no item type, so `if c { n }` with no `else` is `int?`. A join whose item types have
+no common type other than `object` SHALL yield `object` with the joined occurrence, so `string?`
+joined with `float64` is `object?`.
 
 #### Scenario: A narrower branch of a join evaluates at the join's type
 - **WHEN** `let pick(b:boolean, n:int, x:float64) = { if b { n } else { x } }` is evaluated with `b`
   true and `n` holding `3`
 - **THEN** the result SHALL be the `float64` `3.0`
 - **AND** dividing that result by an `int` holding `2` SHALL yield `1.5` on every backend
-- **AND** the same SHALL hold for the arms of a match and the elements of a list literal, item by
-  item inside a list or nullable type
+- **AND** the same SHALL hold for the arms of a match and the items of a braced sequence, item by
+  item through an occurrence
 
 #### Scenario: A narrower branch computes at its own type before it widens
 - **WHEN** `let half(b:boolean, n:int, x:float64) = { if b { n / 2 } else { x } }` is evaluated
@@ -459,17 +474,19 @@ SHALL yield `object`, which already admits `null`, and not `object?`.
   before it widens, on every backend
 
 #### Scenario: A branch joined with null is nullable
-- **WHEN** type inference analyzes `if b { n } else { null }` with `n:int`
+- **WHEN** type inference analyzes `if b { n } else { }` with `n:int`
 - **THEN** the expression SHALL take the type `int?`
-- **AND** `if b { null } else { x }` with `x:float64` SHALL take the type `float64?`
+- **AND** `if b { } else { x }` with `x:float64` SHALL take the type `float64?`
+- **AND** `if b { n }` with no `else` SHALL take the type `int?` on the same terms
 
 #### Scenario: Nullability is lifted out of a numeric join in either order
 - **WHEN** type inference joins an `int?` branch with a `float64` branch, or an `int` branch with a
   `float64?` branch
 - **THEN** the join SHALL be `float64?` in both cases
-- **AND** `if a { n } else { if b { x } else { null } }` with `n:int` and `x:float64`, evaluated
-  with `a` true and `n` holding `3`, SHALL yield the `float64` `3.0`
+- **AND** `if a { n } else { if b { x } }` with `n:int` and `x:float64`, evaluated with `a` true
+  and `n` holding `3`, SHALL yield the `float64` `3.0`
 
 #### Scenario: A join with no common type stays object
 - **WHEN** type inference joins a `string?` branch with a `float64` branch
-- **THEN** the join SHALL be `object`, not `object?`
+- **THEN** the join SHALL be `object?`
+- **AND** joining a `string` branch with a `float64` branch SHALL be `object`

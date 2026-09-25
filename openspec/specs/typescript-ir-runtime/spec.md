@@ -53,13 +53,22 @@ thrown exception from the non-throwing API.
 ### Requirement: TypeScript runtime evaluates IR function entrypoints
 The TypeScript runtime SHALL evaluate public IR function entrypoints using eager NX semantics for
 the supported expression set. Function evaluation SHALL bind normalized arguments, execute
-module-qualified calls and references through the prepared program, enforce resource or recursion
-limits where exposed, and return canonical JSON-compatible NX values.
+module-qualified calls and references through the prepared program, normalize a function's result
+and a value's initializer to the declared type the declaration carries, enforce resource or
+recursion limits where exposed, and return canonical JSON-compatible NX values. An entry call —
+`evaluateFunction` or `callFunction` — SHALL return `null` for an empty result of a function whose
+declaration sets the optional-result flag, as `nx-ir-format` defines it; a call inside the program
+SHALL see the empty array.
 
 #### Scenario: Root function evaluates through IR
 - **WHEN** a prepared IR program contains `let root() = { 1 + 2 }`
 - **AND** a caller evaluates function entrypoint `root`
 - **THEN** the runtime SHALL return `3`
+
+#### Scenario: A declared result is normalized and an empty optional result is null
+- **WHEN** a prepared IR program contains `let many(): int+ = { 5 }`, `let none(): int? = { if false { 1 } }` and `let caller(): int* = { none() }`
+- **AND** a caller evaluates each as a function entrypoint
+- **THEN** the runtime SHALL return `[5]`, `null` and `[]`
 
 #### Scenario: Cross-module function call evaluates through IR
 - **WHEN** a prepared IR program contains a root function that calls an imported library function
@@ -74,10 +83,10 @@ limits where exposed, and return canonical JSON-compatible NX values.
 - **AND** it SHALL evaluate the else branch only when no arm matches
 
 #### Scenario: Out-of-bounds array index is rejected
-- **WHEN** a prepared IR function evaluates an array index expression whose index is negative or
-  greater than or equal to the array length
+- **WHEN** a prepared IR function evaluates an index expression whose index is negative or
+  greater than or equal to the sequence length
 - **THEN** the runtime SHALL fail with a diagnostic identifying the out-of-bounds index
-- **AND** it SHALL NOT return `null` for the missing array element
+- **AND** it SHALL NOT return the empty value for the missing item
 
 ### Requirement: TypeScript runtime constructs component descriptors atomically
 The TypeScript runtime SHALL evaluate component descriptor expressions as atomic descriptor
@@ -85,9 +94,11 @@ construction. Descriptor construction SHALL normalize props and content through 
 effective prop contract and SHALL return a canonical descriptor payload without evaluating the
 referenced component body.
 
-Content binding SHALL respect the declared type of the content property. When that property's type
-is a list, the bound value SHALL be a list regardless of how many children were supplied, including
-exactly one. When that property's type is not a list, a single child SHALL bind to the child itself.
+Content binding SHALL respect the declared occurrence of the content property. When that property
+is declared `+` or `*`, the bound value SHALL be an array regardless of how many children were
+supplied, including exactly one, which binds a one-element array. When that property is declared
+exactly-one or optional (`?:`), a single child SHALL bind to the child itself. This is the one
+lone-child rule every engine shares: the child's value, lifted once to the declared type.
 
 A handler property on a descriptor (`on<Emit>` for an emit the component declares) SHALL NOT be
 treated as an unknown prop, wherever a descriptor's properties are normalized: in a descriptor
@@ -112,23 +123,23 @@ and one whose handler answers another emit or component SHALL fail with a type-m
 - **AND** it SHALL include `label` equal to `"Untitled"`
 
 #### Scenario: A single child of a list-typed content property binds as a list
-- **WHEN** a component declares a content property typed as a list of components
+- **WHEN** a component declares `content items:Badge+`
 - **AND** a descriptor for it is constructed with exactly one child
-- **THEN** the content property SHALL be a list holding that one child
+- **THEN** the content property SHALL be an array holding that one child
 - **AND** descriptor construction SHALL NOT report a boundary type error
 
 #### Scenario: Several children of a list-typed content property bind as a list
-- **WHEN** a component declares a content property typed as a list of components
+- **WHEN** a component declares a content property typed `+` or `*`
 - **AND** a descriptor for it is constructed with more than one child
-- **THEN** the content property SHALL be a list holding those children in the order supplied
+- **THEN** the content property SHALL be an array holding those children in the order supplied
 
 #### Scenario: A single child of a non-list content property binds directly
-- **WHEN** a component declares a content property whose type is not a list
+- **WHEN** a component declares `content body:Element` or `content body?:Element`
 - **AND** a descriptor for it is constructed with exactly one child
-- **THEN** the content property SHALL be that child itself rather than a list
+- **THEN** the content property SHALL be that child itself rather than an array
 
 #### Scenario: List content binding matches the Rust interpreter
-- **WHEN** the same NX program binds a single child to a list-typed content property
+- **WHEN** the same NX program binds a single child to a `+`, `*`, exactly-one or optional content property
 - **THEN** the value the TypeScript runtime produces for that property SHALL match the value the
   Rust interpreter produces for it
 
@@ -351,14 +362,26 @@ change SHALL refuse it by that name rather than silently drop the binding.
 ### Requirement: TypeScript runtime validates JSON boundary values against IR schemas
 The TypeScript runtime SHALL use IR schema metadata to normalize and validate public boundary
 values, including function arguments, component props, component state, state patches, enum values,
-records, arrays, nullable values, and union cases. Missing required fields, unknown fields, invalid
-enum members, and type mismatches SHALL produce diagnostics consistent with existing NX runtime
-behavior.
+records, sequences and optional values, and union cases. Sequences and optional values SHALL be
+decoded as `occurrence-types` defines the canonical encoding: at a `?` or `*` site a missing key,
+`null` and an empty array are the empty value and a one-element array at a `?` site is its element;
+at a `+` site a missing key, `null` and an empty array are rejected; at an exactly-one site `null`
+is rejected. Missing required fields, unknown fields, invalid enum members, and type mismatches
+SHALL produce diagnostics consistent with existing NX runtime behavior.
 
 #### Scenario: Missing required prop is rejected
 - **WHEN** a caller initializes a prepared component requiring prop `label:string`
 - **AND** the caller omits `label`
 - **THEN** the runtime SHALL fail with a diagnostic identifying the missing prop
+
+#### Scenario: Host absence decodes to the empty value where zero is admitted
+- **WHEN** a caller initializes a prepared component declaring `subtitle?:string tags?:string+` with props `{ subtitle: null, tags: [] }`, and again with `{}`
+- **THEN** both initializations SHALL succeed with `subtitle` and `tags` empty
+- **AND** the rendered output SHALL be identical for the two
+
+#### Scenario: Host absence is rejected where at least one is required
+- **WHEN** a caller initializes a prepared component declaring `items:string+` with props `{ items: [] }`, or `{ items: null }`
+- **THEN** the runtime SHALL fail with a diagnostic naming `items`
 
 #### Scenario: Unknown state field is rejected
 - **WHEN** a caller evaluates a component with state object `{ query: "docs", extra: true }`
@@ -388,18 +411,18 @@ behavior.
 The TypeScript IR runtime SHALL normalize record, union, and component values produced inside the
 same prepared IR program with the same effective schema used for public boundary inputs. For valid
 IR emitted from successfully analyzed source, runtime evaluation SHALL NOT fail with
-`nx-ir-boundary-*` diagnostics for nullable union absence, content-property fields, single values
-at list-typed fields, or record discriminators that were valid in native evaluation.
+`nx-ir-boundary-*` diagnostics for an absent optional union field, content-property fields, single
+values at `+`- or `*`-typed fields, or record discriminators that were valid in native evaluation.
 
-A single value at a list-typed field SHALL normalize to a list holding that one value. This is the
-language's own coercion — the interpreter evaluates `xs={3.0}` and `xs={ <Item /> }` to one-element
-lists, and the IR records such a value at its own type rather than as a list, leaving the coercion
-to normalization.
+A single value at a `+`- or `*`-typed field SHALL normalize to a one-element array. This is the
+language's own lift — the interpreter evaluates `xs={3.0}` and `xs={ <Item /> }` to one-element
+sequences, and the IR records such a value at its own type rather than as a sequence, leaving the
+lift to normalization.
 
 A field whose type is spelled through a type alias SHALL normalize as the type the alias stands for,
-however many aliases it is spelled through. A type alias is transparent in NX — `type Ints = int[]`
-*is* a list — so the IR SHALL carry what an alias resolves to rather than the alias, and a list
-reached that way SHALL take the single-value coercion and the list content binding like any other.
+however many aliases it is spelled through. A type alias is transparent in NX — `type Ints = int+`
+*is* a sequence — so the IR SHALL carry what an alias resolves to rather than the alias, and a
+sequence reached that way SHALL take the single-value lift and the content binding like any other.
 
 A record value carries a `$type` discriminator, stamped by record construction. Where such a value
 is normalized into a record-typed field, the declared type of the field SHALL supply the field list,
@@ -427,14 +450,14 @@ no NX program can produce. A discriminator naming a concrete record that extends
 SHALL continue to be accepted.
 
 #### Scenario: Nullable union absence passes runtime normalization
-- **WHEN** a prepared IR program evaluates a nullable union field to `null`
-- **THEN** the TypeScript IR runtime SHALL accept the value for that nullable union field
-- **AND** it SHALL return `null` in canonical output
+- **WHEN** a prepared IR program evaluates a record whose field `completion?:FlowCompletion` was not written
+- **THEN** the TypeScript IR runtime SHALL accept the empty value for that field
+- **AND** the canonical output SHALL carry no `completion` key
 
 #### Scenario: Invalid undeclared union case remains rejected
 - **WHEN** a host boundary input or malformed IR value supplies `$type: "FlowCompletion.undefined"` for a `FlowCompletion` union that does not declare `undefined`
 - **THEN** the TypeScript IR runtime SHALL reject the value with an `nx-ir-boundary-type` diagnostic
-- **AND** it SHALL NOT reinterpret the undeclared case as `null`
+- **AND** it SHALL NOT reinterpret the undeclared case as the empty value
 
 #### Scenario: Content-populated required field does not report missing
 - **WHEN** a prepared IR program constructs a component or record value whose required content property is supplied through element body content
@@ -442,19 +465,18 @@ SHALL continue to be accepted.
 - **AND** it SHALL NOT report `nx-ir-boundary-field` for the content property
 
 #### Scenario: A single value at a list-typed property normalizes to a list of one
-- **WHEN** a prepared IR program binds a value that is not a list to a property whose declared type
-  is a list
-- **THEN** the property SHALL hold a list containing that one value
+- **WHEN** a prepared IR program binds a value that is not a sequence to a property declared `+` or `*`
+- **THEN** the property SHALL hold an array containing that one value
 - **AND** it SHALL NOT report `nx-ir-boundary-type` for the value not being an array
 
 #### Scenario: A list spelled through an alias is still a list
-- **WHEN** a program declares `type Ints = int[]` and binds `xs={3}` to a prop typed `Ints`, or binds
-  one child to a content property typed through an alias of a list
-- **THEN** the property SHALL hold a list of one
+- **WHEN** a program declares `type Ints = int+` and binds `xs={3}` to a prop typed `Ints`, or binds
+  one child to a content property typed through an alias of a `+` or `*` type
+- **THEN** the property SHALL hold an array of one
 - **AND** it SHALL equal the value the Rust interpreter produces for the same program
 
 #### Scenario: Single-value list coercion matches the Rust interpreter
-- **WHEN** the same NX program binds a single value to a list-typed property
+- **WHEN** the same NX program binds a single value to a `+`- or `*`-typed property
 - **THEN** the value the TypeScript runtime produces for that property SHALL match the value the
   Rust interpreter produces for it
 
@@ -475,7 +497,7 @@ SHALL continue to be accepted.
   Rust interpreter produces for it
 
 #### Scenario: Public boundary validation still rejects malformed host input
-- **WHEN** a host supplies JSON with an unknown field, a missing non-nullable required field, or an invalid union discriminator
+- **WHEN** a host supplies JSON with an unknown field, a missing required field, `null` at an exactly-one field, or an invalid union discriminator
 - **THEN** the TypeScript IR runtime SHALL continue to reject the input with an `nx-ir-boundary-*` diagnostic
 - **AND** it SHALL NOT treat this generated-IR parity requirement as permission to accept malformed host input
 
@@ -569,11 +591,12 @@ The implementation SHALL include automated tests that emit NX IR from source or 
 execute the IR through the TypeScript runtime, and compare results against native interpreter
 evaluation for the supported non-reactive subset. Component tests SHALL cover descriptor
 construction, initialization, explicit state evaluation, state patch validation, conditional
-content based on state, and dispatch.
+content based on state, lone-child content binding at each occurrence, and dispatch.
 
 #### Scenario: Function parity test compares interpreter and IR runtime
 - **WHEN** a supported NX program uses primitives, arithmetic, conditionals, match expressions,
-  arrays, loops, records, unions, enums, member access, and function calls
+  sequences, optional values and the presence operators, loops, records, unions, enums, member
+  access, and function calls
 - **THEN** automated tests SHALL verify that TypeScript IR runtime output matches native
   interpreter output for the same program
 
@@ -593,12 +616,14 @@ content based on state, and dispatch.
 ### Requirement: TypeScript runtime normalizes update records as patches
 When the TypeScript runtime normalizes a value whose declared type is an update record — from an
 IR construction expression or from host input at a boundary — it SHALL keep absent fields absent
-rather than filling them from defaults or with `null`, SHALL accept `null` only for fields the
-declaration marks nullable, SHALL reject unknown fields, and SHALL stamp the value with the update
-record's `$type`.
+rather than filling them from defaults or with the empty value, SHALL decode a present `null` or
+empty array as a present empty field only for fields the declaration marks clearable and SHALL
+reject it naming the field otherwise, SHALL reject unknown fields, SHALL stamp the value with the
+update record's `$type`, and SHALL encode a present empty field as `null` in canonical output, as
+`update-records` requires.
 
 #### Scenario: Evaluated update record omits unsupplied fields
-- **WHEN** a prepared IR program evaluates `<User.Update email={null} />` for `type User = { name:string = "anon" email:string? }`
+- **WHEN** a prepared IR program evaluates `<User.Update email={} />` for `type User = { name:string = "anon" email?:string }`
 - **THEN** the result SHALL be `{ $type: "User.Update", email: null }`
 - **AND** the result SHALL NOT have a `name` property
 
@@ -608,7 +633,7 @@ record's `$type`.
 - **AND** the normalized value SHALL NOT have an `email` property
 
 #### Scenario: Null for a non-nullable update field is rejected
-- **WHEN** a caller passes `{ $type: "User.Update", name: null }` for a `User` whose `name` is `string`
+- **WHEN** a caller passes `{ $type: "User.Update", name: null }` or `{ $type: "User.Update", name: [] }` for a `User` whose `name` is `string`
 - **THEN** normalization SHALL fail with a diagnostic naming `name`
 
 #### Scenario: A program that uses update records requires the feature
@@ -619,12 +644,18 @@ record's `$type`.
 ### Requirement: TypeScript runtime applies a component update record to host-owned state
 The state-patch operation SHALL accept the component's update record value, in addition to a plain
 partial state object, and SHALL apply it with the same semantics: present fields replace the
-current value, absent fields keep it, a present `null` sets a nullable field to `null`, and the
-result is validated against the state schema.
+current value, absent fields keep it, a present empty value clears an optional state field so the
+next state carries no key for it, and the result is validated against the state schema. A present
+empty value for a state field that is not optional SHALL be rejected naming the field.
 
 #### Scenario: Component update record patches state
 - **WHEN** a caller applies `{ $type: "Counter.Update", count: 3 }` to current state `{ count: 1, label: "x" }` for prepared component `Counter`
 - **THEN** the runtime SHALL return next state `{ count: 3, label: "x" }`
+
+#### Scenario: A present empty clears an optional state field
+- **WHEN** a caller applies `{ $type: "Search.Update", query: null }` to current state `{ query: "docs" }` for a prepared component whose state declares `query?:string`
+- **THEN** the runtime SHALL return a next state with no `query` key
+- **AND** the same patch against a component whose state declares `query:string` SHALL fail with a diagnostic naming `query`
 
 #### Scenario: An update record for a different component is rejected
 - **WHEN** a caller applies a value whose `$type` is `Other.Update` to `Counter` state
@@ -640,7 +671,7 @@ accepted by a runtime that supports this change, and the feature name SHALL appe
 diagnostic a runtime without support reports.
 
 #### Scenario: Evaluated property union case is the bare field name
-- **WHEN** a prepared IR program evaluates `User.Property.email` for `type User = { name:string email:string? }`
+- **WHEN** a prepared IR program evaluates `User.Property.email` for `type User = { name:string email?:string }`
 - **THEN** the result SHALL be the string `"email"`
 
 #### Scenario: Host input for a property union is validated against the cases
@@ -651,18 +682,20 @@ diagnostic a runtime without support reports.
 ### Requirement: TypeScript runtime evaluates the update intrinsics and exports them as helpers
 The TypeScript runtime SHALL evaluate the intrinsic call construct for `apply`, `merge`, `diff`,
 and `changed` with the semantics the `update-records` capability specifies: present fields
-replace, absent fields keep, a present `null` is carried, `merge` lets the second argument win,
-`diff` lists only differing fields comparing records and lists structurally, and `changed` lists
-present fields in declaration order. The result of `apply` SHALL be stamped with the target
-record's `$type`, the results of `merge` and `diff` with the update record's `$type`, and the
-result of `changed` SHALL be an array of bare strings. The runtime SHALL also export the same four
+replace, absent fields keep, a present empty field is carried as present and empty, `merge` lets
+the second argument win, `diff` lists only differing fields comparing records and sequences
+structurally, and `changed` lists present fields in declaration order. The result of `apply` SHALL
+be stamped with the target record's `$type`, the results of `merge` and `diff` with the update
+record's `$type`, and the result of `changed` SHALL be an array of bare strings. Applying a present
+empty field to a record SHALL leave that field absent from the result's keys, which is how the
+canonical encoding writes an empty optional field. The runtime SHALL also export the same four
 operations as functions a host can call on values it holds, typed so that the record and update
 arguments share one record type parameter. A prepared program that lists the update-intrinsic
 feature SHALL be accepted by a runtime that supports this change.
 
 #### Scenario: Evaluated apply replaces present fields only
-- **WHEN** a prepared IR program evaluates `apply(<User name="Ada" email="x@y" />, <User.Update email={null} />)` for `type User = { name:string email:string? }`
-- **THEN** the result SHALL be `{ $type: "User", name: "Ada", email: null }`
+- **WHEN** a prepared IR program evaluates `apply(<User name="Ada" email="x@y" />, <User.Update email={} />)` for `type User = { name:string email?:string }`
+- **THEN** the result SHALL be `{ $type: "User", name: "Ada" }` with no `email` key
 
 #### Scenario: Evaluated diff and changed agree
 - **WHEN** a prepared IR program evaluates `changed(diff(<User name="Ada" email="x@y" />, <User name="Bo" email="x@y" />))` for the same `User`
@@ -670,7 +703,7 @@ feature SHALL be accepted by a runtime that supports this change.
 
 #### Scenario: Exported helper applies a host-held update
 - **WHEN** a host calls the exported apply helper with `{ $type: "User", name: "Ada", email: "x@y" }` and `{ $type: "User.Update", email: null }`
-- **THEN** the helper SHALL return `{ $type: "User", name: "Ada", email: null }`
+- **THEN** the helper SHALL return `{ $type: "User", name: "Ada" }` with no `email` key
 - **AND** the exported merge helper called with `{ $type: "User.Update", name: "Ada" }` and `{ $type: "User.Update", name: "Bo" }` SHALL return `{ $type: "User.Update", name: "Bo" }`
 
 #### Scenario: Exported helpers reject mismatched targets
@@ -759,7 +792,7 @@ and returns the canonical result. A function value SHALL be equal to another onl
 the same declaration.
 
 #### Scenario: A rendered descriptor carries the Function record
-- **WHEN** a linked program declares `let <Row Item:object Index:int />: string = "r"` in `main.nx` and `external component <List ItemTemplate:(<function Item:object Index:int />: string)? /> let root() = <List ItemTemplate={Row} />`
+- **WHEN** a linked program declares `let <Row Item:object Index:int />: string = "r"` in `main.nx` and `external component <List ItemTemplate?:<function Item:object Index:int />: string /> let root() = <List ItemTemplate={Row} />`
 - **AND** `evaluateFunction(program, "root")` is called
 - **THEN** the result's `ItemTemplate` SHALL be `{ "$type": "Function", "module": "main.nx", "name": "Row" }`
 
@@ -866,3 +899,51 @@ names the limit before running the body at all.
 #### Scenario: An older runtime refuses the module by name
 - **WHEN** a runtime that does not know `ranges-v1` prepares a module that lists it
 - **THEN** preparation SHALL fail naming the feature `ranges-v1`
+
+### Requirement: TypeScript runtime evaluates the presence operators
+The TypeScript runtime SHALL read the `seq` type kind, the `exists`, `optionalMember` and
+`coalesce` node kinds, the `{}` match pattern and the required feature `occurrence-v1`, and SHALL
+evaluate each with the semantics `presence-operators` defines for every engine: an `exists` node
+evaluates its operand once and yields `true` when it holds at least one item and `false` when it is
+the empty value; an `optionalMember` node evaluates its receiver once and yields the empty value
+when the receiver is empty and the named member otherwise; a `coalesce` node yields its left
+operand when that holds at least one item and otherwise evaluates and yields its right operand,
+which it SHALL NOT evaluate in the first case; a `{}` pattern matches exactly when the scrutinee is
+the empty value. The runtime SHALL carry the empty value as one representation wherever it arises —
+an omitted optional field, an untaken branch, an empty `for` — and SHALL NOT hold `null` or
+`undefined` as an NX value.
+
+A module whose schema version is below `5` SHALL be refused by the version check as before. A
+schema-`5` module that contains one of the three node kinds or a `{}` pattern and does not list
+`occurrence-v1` SHALL be reported as malformed, naming the feature. A runtime that does not
+implement `occurrence-v1` SHALL refuse a module that lists it by name.
+
+#### Scenario: A presence test is a boolean
+- **WHEN** a prepared program evaluates `let has(b:Book): boolean = { b.author? }` for `type Book = { title:string author?:Person }`
+- **THEN** `has` applied to a `Book` with no `author` SHALL return `false` and to one with an `author` SHALL return `true`
+
+#### Scenario: A step through an absent receiver is empty
+- **WHEN** a prepared program evaluates `let name(b:Book): string? = { b.author?.name }` with a `Book` whose `author` is absent
+- **THEN** the canonical result SHALL be the empty value
+- **AND** with an `author` present it SHALL be that author's `name`
+
+#### Scenario: A fallback is lazy
+- **WHEN** a prepared program evaluates `let f(o?:int): int = { o ?? fail() }` where `fail` raises a runtime error, with `o` holding `1`
+- **THEN** the result SHALL be `1` and no error SHALL be raised
+- **AND** with `o` empty the evaluation SHALL fail with `fail`'s error
+
+#### Scenario: The empty pattern matches absence
+- **WHEN** a prepared program evaluates `let f(b:Book): string = { if b.author is { {} => "anonymous" else => b.author.name } }` with a `Book` whose `author` is absent
+- **THEN** the result SHALL be `"anonymous"`
+
+#### Scenario: Operator results match the Rust interpreter
+- **WHEN** the same NX program uses `x?`, `x?.m`, `x ?? y` and a `{}` pattern
+- **THEN** the values the TypeScript runtime produces SHALL match the values the Rust interpreter produces for the same inputs
+
+#### Scenario: An operator node without the feature is malformed
+- **WHEN** a hand-built schema-`5` image contains a `coalesce` node and does not list `occurrence-v1`
+- **THEN** preparation SHALL fail with a diagnostic naming `occurrence-v1`
+
+#### Scenario: An older runtime refuses the module by name
+- **WHEN** a runtime that does not implement `occurrence-v1` prepares a module that lists it
+- **THEN** preparation SHALL fail with a diagnostic naming the feature

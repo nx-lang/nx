@@ -6,20 +6,22 @@ TBD - created by archiving change add-nx-ir-format. Update Purpose after archive
 ### Requirement: NX IR program artifacts are versioned and deterministic
 The system SHALL define a versioned NX IR artifact emitted from a successful `ProgramArtifact`, one
 per emitted module. The artifact SHALL be a little-endian binary image whose fixed header carries a
-format magic, IR schema version `4` and the image's total length, and whose sections carry the
+format magic, IR schema version `5` and the image's total length, and whose sections carry the
 expected runtime ABI `nx-ir-runtime-v2`, the required feature list, the module table, the module's
 public entrypoints, and the module's tables and declarations. Equivalent `ProgramArtifact` inputs
 with equivalent IR options SHALL produce byte-identical images. A reader SHALL refuse an image whose
 magic or schema version it does not implement with a diagnostic naming the version found and the
 version supported, and SHALL NOT interpret the bytes that follow the header.
 
-Schema `4` differs from schema `3` by the `text` node kind, `20`, by the `float32` binary operators
-`16` to `19`, and by `concat` taking string operands only. Every other kind, table and layout is
-unchanged.
+Schema `5` differs from schema `4` by the `seq` type kind, which carries an occurrence and replaces
+the `array` and `nullable` type kinds, by the `exists`, `optionalMember` and `coalesce` node kinds
+and the `{}` match pattern, and by the `null` node kind no longer being emitted. Every other kind,
+table and layout is unchanged. Schema `4` differed from schema `3` by the `text` node kind, `20`, by
+the `float32` binary operators `16` to `19`, and by `concat` taking string operands only.
 
 #### Scenario: Valid program artifact emits IR metadata
 - **WHEN** a caller emits NX IR from a valid `ProgramArtifact` containing a `root()` function
-- **THEN** the image SHALL carry schema version `4` and runtime ABI `nx-ir-runtime-v2`
+- **THEN** the image SHALL carry schema version `5` and runtime ABI `nx-ir-runtime-v2`
 - **AND** the image SHALL list `root` as a function entrypoint
 - **AND** the module table's first entry SHALL carry the module's identity and fingerprint
 
@@ -36,8 +38,8 @@ unchanged.
 - **AND** the system SHALL NOT emit a partial artifact
 
 #### Scenario: An older schema is refused
-- **WHEN** a runtime is given an image whose schema version is `3`
-- **THEN** preparation SHALL fail with a diagnostic naming version `3` and the supported version `4`
+- **WHEN** a runtime is given an image whose schema version is `4`
+- **THEN** preparation SHALL fail with a diagnostic naming version `4` and the supported version `5`
 - **AND** the reader SHALL NOT interpret the bytes that follow the header
 
 #### Scenario: A document that is not an image is refused
@@ -121,17 +123,21 @@ referenced record, union, enum, or type alias came from a loaded library artifac
   reference
 - **AND** IR generation SHALL NOT require global bare-name lookup to rediscover `FlowStep`
 
-### Requirement: Emitted IR is boundary-clean for valid nullable and content-boundary programs
+### Requirement: Emitted IR is boundary-clean for valid optional and content-boundary programs
 For a source program that passes analysis and native evaluation, emitted NX IR SHALL preserve the
-schema, default, nullable, nominal, and content-property metadata required for supported runtimes to
-evaluate public entrypoints without rejecting the program's own generated values at a boundary
+schema, default, occurrence, nominal, and content-property metadata required for supported runtimes
+to evaluate public entrypoints without rejecting the program's own generated values at a boundary
 schema check. The IR runtime output SHALL match native canonical JSON-compatible output for
-nullable union fields and content-derived required fields.
+optional union fields and content-derived required fields. Absence is the empty value: an optional
+field that holds it SHALL be encoded as an omitted field, and a `*` field that holds it as an empty
+array, as `occurrence-types` defines the canonical encoding; no IR node and no runtime value SHALL
+stand for `null`.
 
 #### Scenario: Nullable union field does not emit synthetic invalid case
-- **WHEN** a valid program constructs a record with an omitted or explicit-null field typed as a nullable discriminated union
+- **WHEN** a valid program constructs a record with an omitted or explicitly empty field declared `completion?:FlowCompletion` for a discriminated union `FlowCompletion`
 - **AND** NX IR is emitted for the program
-- **THEN** the IR SHALL encode the field absence as `null` or as an omitted nullable field that normalizes to `null`
+- **THEN** the IR SHALL encode the field as omitted, or as an explicit empty value that normalizes to the empty value
+- **AND** evaluating the IR SHALL produce canonical output with no `completion` key
 - **AND** evaluating the IR SHALL NOT produce an undeclared union discriminator such as `FlowCompletion.undefined`
 
 #### Scenario: Content property children satisfy required field through IR
@@ -149,17 +155,18 @@ nullable union fields and content-derived required fields.
 ### Requirement: NX IR encodes the supported eager expression set
 NX IR SHALL encode the supported non-reactive expression forms needed for eager evaluation,
 including literals, local slot references, top-level references, unary and binary operations,
-function calls, intrinsic calls, `if`, match-style `if is` forms, `let`, blocks, arrays, loops,
-index access, member access, record literals, union cases, intrinsic elements, component
-descriptors, and action handlers. There SHALL be one union-case construct covering both constant
-and payload cases rather than separate constructs for enum members and union cases, and that
-construct SHALL mark a constant case as constant in expression position as well as in the
-declaration, so a runtime produces the bare case name without consulting the declaration. A call to
-one of the update intrinsics (`apply`, `merge`, `diff`, `changed`) SHALL be encoded as an intrinsic
-call construct that names the intrinsic and carries its argument expressions, distinct from a call
-to a declared function, and a program that contains one SHALL list a required feature naming
-update-intrinsic support. A `changed` call SHALL also carry the declared field order of the target
-record, so a runtime orders the result without consulting the declaration.
+function calls, intrinsic calls, `if`, match-style `if is` forms, `let`, blocks, braced sequences,
+loops, index access, member access, the presence operators and the `{}` pattern, record literals,
+union cases, intrinsic elements, component descriptors, and action handlers. There SHALL be one
+union-case construct covering both constant and payload cases rather than separate constructs for
+enum members and union cases, and that construct SHALL mark a constant case as constant in
+expression position as well as in the declaration, so a runtime produces the bare case name without
+consulting the declaration. A call to one of the update intrinsics (`apply`, `merge`, `diff`,
+`changed`) SHALL be encoded as an intrinsic call construct that names the intrinsic and carries its
+argument expressions, distinct from a call to a declared function, and a program that contains one
+SHALL list a required feature naming update-intrinsic support. A `changed` call SHALL also carry
+the declared field order of the target record, so a runtime orders the result without consulting
+the declaration.
 
 An action-handler binding (`onTapped=<Update count={count + 1} />`) SHALL be encoded as an
 action-handler node kind that carries a reference to the component and the name of the emit the
@@ -186,10 +193,10 @@ as IR build diagnostics.
   body expression
 
 #### Scenario: Index expressions preserve bounds-sensitive semantics
-- **WHEN** NX IR contains an index expression over an array value
+- **WHEN** NX IR contains an index expression over a sequence value
 - **THEN** supported runtimes SHALL require an integer index
-- **AND** an index outside the array bounds SHALL fail with a runtime diagnostic rather than
-  evaluating to `null`
+- **AND** an index outside the sequence bounds SHALL fail with a runtime diagnostic rather than
+  evaluating to the empty value
 
 #### Scenario: Constant and payload cases use one IR construct
 - **WHEN** NX source contains `type Shape = circle | square { n:int }` and constructs both cases
@@ -356,10 +363,13 @@ declared props, so a runtime can carry the parent's bindings with the instance.
 
 ### Requirement: NX IR preserves canonical NX value encoding rules
 NX IR SHALL preserve enough type and value metadata for runtimes to produce canonical raw NX values.
-Array values SHALL evaluate as arrays, constant union cases SHALL evaluate as authored case strings,
-records and payload union cases SHALL evaluate as object/map payloads with `$type` discriminators
-when their type requires one, and numeric values that cannot safely round-trip through JavaScript
-numbers SHALL use a lossless tagged representation.
+A `+` or `*` value SHALL evaluate as an array, including the empty array for an empty `*` value; a
+`?` value that holds an item SHALL evaluate as that item, and an empty `?` value SHALL be an
+omitted key where it is a record field, as `occurrence-types` defines the canonical encoding.
+Constant union cases SHALL evaluate as authored case strings, records and payload union cases SHALL
+evaluate as object/map payloads with `$type` discriminators when their type requires one, and
+numeric values that cannot safely round-trip through JavaScript numbers SHALL use a lossless tagged
+representation.
 
 #### Scenario: Enum output remains a bare string
 - **WHEN** NX source evaluates `Theme.dark` where `Theme` is a constant union
@@ -372,6 +382,12 @@ numbers SHALL use a lossless tagged representation.
 - **AND** the value is produced through an NX IR runtime
 - **THEN** the canonical output value SHALL include `$type` with value `LoadState.failed`
 - **AND** it SHALL include the declared `message` field
+
+#### Scenario: An empty optional field is an omitted key and an empty sequence is an empty array
+- **WHEN** NX source contains `type Book = { title:string author?:string tags?:string+ } let b() = <Book title="B" />` and `let t(b:Book): string* = { b.tags }`
+- **AND** the values of `b()` and `t(b())` are produced through an NX IR runtime
+- **THEN** the canonical output of `b()` SHALL contain `title` and neither an `author` nor a `tags` key, since an empty optional field is not stored whatever its occurrence
+- **AND** the canonical output of `t(b())` SHALL be the empty array
 
 #### Scenario: Large integer literal is lossless
 - **WHEN** NX source contains an integer literal that cannot be represented exactly as a JavaScript
@@ -407,17 +423,19 @@ When a program references a derived update record `T.Update` — by constructing
 a type annotation, or by declaring a state or prop field of that type — emitted NX IR SHALL contain
 a declaration for it. The declaration SHALL identify itself as an update record, SHALL name its
 target `T`, and SHALL carry its own field schemas so that a runtime can normalize a value of the
-type without consulting the target: every field optional, no default expressions, and nullability
-copied from the target field. Update record declarations that the program does not reference SHALL
-NOT be emitted, so that programs which never use a patch produce the same IR as before. A program
-that references an update record SHALL list a required feature naming update-record support, so a
-runtime that predates this change rejects the program rather than misreading the declaration.
+type without consulting the target: every field optional in the sense that it may be absent, no
+default expressions, and the clearable mark copied from the target field's optional mark, so the
+runtime accepts a present empty value only where `T` declares the field `?:`. Update record
+declarations that the program does not reference SHALL NOT be emitted, so that programs which never
+use a patch produce the same IR as before. A program that references an update record SHALL list a
+required feature naming update-record support, so a runtime that predates this change rejects the
+program rather than misreading the declaration.
 
 #### Scenario: A referenced update record is declared with its own schema
-- **WHEN** NX source contains `type User = { name:string = "anon" email:string? } let patch = <User.Update email={null} />`
+- **WHEN** NX source contains `type User = { name:string = "anon" email?:string } let patch = <User.Update email={} />`
 - **AND** NX IR is emitted for the program
 - **THEN** the IR SHALL contain a declaration for `User.Update` marked as an update record targeting `User`
-- **AND** that declaration SHALL list fields `name` and `email`, both optional, with `email` nullable and neither carrying a default
+- **AND** that declaration SHALL list fields `name` and `email`, both able to be absent, with `email` clearable, `name` not clearable, and neither carrying a default
 
 #### Scenario: Unreferenced update records are not emitted
 - **WHEN** NX source contains `type User = { name:string } let user = <User name="Ada" />`
@@ -444,7 +462,7 @@ declaration. A case of a property union SHALL be encoded with the existing union
 as a constant case.
 
 #### Scenario: A referenced property union is declared with its cases
-- **WHEN** NX source contains `abstract type Named = { name:string } type User extends Named = { email:string? } let key = {User.Property.email}`
+- **WHEN** NX source contains `abstract type Named = { name:string } type User extends Named = { email?:string } let key = {User.Property.email}`
 - **AND** NX IR is emitted for the program
 - **THEN** the IR SHALL contain a union declaration for `User.Property` marked as a property union targeting `User`
 - **AND** that declaration SHALL list constant cases `name` then `email` and no base
@@ -463,36 +481,37 @@ as a constant case.
 
 ### Requirement: NX IR erases component type parameters
 NX IR SHALL NOT carry component type parameters. A component's prop schema and state schema in IR
-SHALL describe each field with the type parameter replaced by the top type `object`, the
-component's derived update record SHALL describe each field the same way, and a component
-descriptor in IR SHALL NOT include a property for a type argument the source bound. IR emitted for
-a program with generic components SHALL remain deterministic and boundary-clean.
+SHALL describe each field with the type parameter replaced by the top type `object`, keeping the
+field's occurrence around the erased type, the component's derived update record SHALL describe
+each field the same way, and a component descriptor in IR SHALL NOT include a property for a type
+argument the source bound. IR emitted for a program with generic components SHALL remain
+deterministic and boundary-clean.
 
 #### Scenario: Prop schema carries the erased type
-- **WHEN** NX source declares `external component <SkiaLayout TItem:type itemsSource:TItem[]? />`
+- **WHEN** NX source declares `external component <SkiaLayout TItem:type itemsSource?:TItem+ />`
 - **AND** NX IR is emitted for the program
-- **THEN** the component declaration in IR SHALL include a prop schema for `itemsSource` typed as a nullable list of `object`
+- **THEN** the component declaration in IR SHALL include a prop schema for `itemsSource` typed `object*`: the `seq` type kind over `object` with the `*` occurrence
 - **AND** it SHALL NOT include a prop schema or any other entry for `TItem`
 
 #### Scenario: Descriptor omits the type argument
-- **WHEN** NX source declares `type Contact = { name:string } external component <SkiaLayout TItem:type itemsSource:TItem[]? /> let v = <SkiaLayout TItem=Contact itemsSource={} />`
+- **WHEN** NX source declares `type Contact = { name:string } external component <SkiaLayout TItem:type itemsSource?:TItem+ /> let v = <SkiaLayout TItem=Contact itemsSource={} />`
 - **AND** NX IR is emitted for the program
 - **THEN** the descriptor expression for `v` SHALL carry a property for `itemsSource` and no property for `TItem`
 
 #### Scenario: Update record carries the erased type
-- **WHEN** NX source declares `component <List TItem:type items:TItem[]? /> = { state { sel:TItem? = null } <Label /> } let u = <List.Update sel=null />`
+- **WHEN** NX source declares `component <List TItem:type items?:TItem+ /> = { state { sel?:TItem } <Label /> } let u = <List.Update sel={} />`
 - **AND** NX IR is emitted for the program
-- **THEN** the `List.Update` declaration in IR SHALL type `sel` as nullable `object` and SHALL NOT mention `TItem`
+- **THEN** the `List.Update` declaration in IR SHALL type `sel` as `object?`, mark it clearable, and SHALL NOT mention `TItem`
 
 ### Requirement: NX IR erases record type parameters and type arguments
 NX IR SHALL NOT carry record type parameters or type arguments. A generic record's field schema in
 IR, and the field schema of its derived update record, SHALL describe each field with the type
 parameter replaced by the top type `object`. An applied type SHALL be encoded as the nominal
 reference to its record, with no encoding of its arguments, wherever a type reference appears —
-including under list and nullable wrappers and inside a function type. A record construction in
-IR SHALL NOT include a property for a type argument the source bound. Adding generic records SHALL
-NOT change the IR schema version, and IR emitted for a program with generic records SHALL remain
-deterministic and boundary-clean.
+including under an occurrence and inside a function type. A record construction in IR SHALL NOT
+include a property for a type argument the source bound. Adding generic records SHALL NOT change
+the IR schema version, and IR emitted for a program with generic records SHALL remain deterministic
+and boundary-clean.
 
 #### Scenario: Field schema carries the erased type
 - **WHEN** NX source declares `type Range = { T:type start:T end:T endInclusive:boolean }`
@@ -501,9 +520,9 @@ deterministic and boundary-clean.
 - **AND** it SHALL NOT include a field or any other entry for `T`
 
 #### Scenario: An applied type is a nominal reference
-- **WHEN** NX source declares `type Range = { T:type start:T end:T }` and `type Slider = { range:<Range T=float64/> marks:<Range T=int/>[]? }`
+- **WHEN** NX source declares `type Range = { T:type start:T end:T }` and `type Slider = { range:<Range T=float64/> marks?:<Range T=int/>+ }`
 - **AND** NX IR is emitted for the program
-- **THEN** `range` SHALL be typed as the nominal reference to `Range` and `marks` as a nullable list of that same reference
+- **THEN** `range` SHALL be typed as the nominal reference to `Range` and `marks` as a `seq` type with the `*` occurrence over that same reference
 
 #### Scenario: Construction omits the type argument
 - **WHEN** NX source declares `type Range = { T:type start:T end:T }` and `let r = <Range T=int start={1} end={5} />`
@@ -560,8 +579,8 @@ added without a schema change.
 - **AND** every use SHALL refer to it by index
 
 #### Scenario: A type is written once
-- **WHEN** twenty component props share the type nullable `string`
-- **THEN** the type table SHALL contain nullable `string` once
+- **WHEN** twenty component props are declared `?:string`, so each is typed `string?`
+- **THEN** the type table SHALL contain the `seq` type `string?` once
 - **AND** each prop SHALL refer to it by index
 
 #### Scenario: Slots are declaration-local integers
@@ -661,15 +680,17 @@ The type table SHALL have a function type kind. A function type entry SHALL reco
 and, in declared order, each parameter's name, type and whether it is the content parameter, every
 name and type by table index. A function type SHALL be written once in the type table and referred
 to by index, like every other type. A prop, field, parameter, return or local typed by a function
-type in source SHALL be typed by that entry in IR; the top type SHALL NOT stand in for it. The
-explained form of an artifact SHALL render a function type in NX spelling.
+type in source SHALL be typed by that entry in IR; the top type SHALL NOT stand in for it. An
+optional property whose type is a function type SHALL be typed by the `seq` type with the `?`
+occurrence over that entry. The explained form of an artifact SHALL render a function type in NX
+spelling, parenthesized when it sits under an occurrence.
 
 #### Scenario: A function-typed prop is typed as a function
-- **WHEN** NX source declares `external component <List ItemTemplate:(<function Item:object Index:int />: string)? />`
+- **WHEN** NX source declares `external component <List ItemTemplate?:<function Item:object Index:int />: string />`
 - **AND** NX IR is emitted for the program
-- **THEN** the component declaration's prop schema for `ItemTemplate` SHALL be a nullable type
-  whose inner type is a function type with the parameters `Item` of `object` and `Index` of `int`
-  and the result `string`
+- **THEN** the component declaration's prop schema for `ItemTemplate` SHALL be the `?` occurrence
+  over a function type with the parameters `Item` of `object` and `Index` of `int` and the result
+  `string`
 - **AND** the explained text SHALL show it as `(<function Item:object Index:int />: string)?`
 
 #### Scenario: Two identical function types share one entry
@@ -682,15 +703,15 @@ result type — the erasure that replaces the parameter with `object` SHALL reac
 type mentions the parameter.
 
 #### Scenario: A template prop is erased through the function type
-- **WHEN** NX source declares `external component <SkiaLayout TItem:type ItemTemplate:(<function Item:TItem Index:int />: object)? />`
+- **WHEN** NX source declares `external component <SkiaLayout TItem:type ItemTemplate?:<function Item:TItem Index:int />: object />`
 - **AND** NX IR is emitted for the program
-- **THEN** the prop schema for `ItemTemplate` SHALL be a nullable function type whose `Item`
-  parameter is typed `object`
+- **THEN** the prop schema for `ItemTemplate` SHALL be the `?` occurrence over a function type
+  whose `Item` parameter is typed `object`
 - **AND** the artifact SHALL NOT mention `TItem`
 
 ### Requirement: NX IR carries a function as a value
 A `reference` node that names a function declaration SHALL be a value in any expression position,
-not only as a call's callee: a property value, a list element, a function result, a field, a
+not only as a call's callee: a property value, a sequence item, a function result, a field, a
 call argument. A module whose node table contains such a reference in a position other than a
 callee, or whose type table contains a function type, SHALL list a required feature naming
 function-value support, `function-values-v1`, so a runtime that predates function values refuses
@@ -698,7 +719,7 @@ the module by name rather than by an unknown kind. A module with neither SHALL N
 explained form SHALL render the reference by the function's module-qualified name.
 
 #### Scenario: A function bound to a prop is a reference node
-- **WHEN** NX source declares `let <Row Item:object />: string = "r" external component <List ItemTemplate:(<function Item:object />: string)? /> let root() = <List ItemTemplate={Row} />`
+- **WHEN** NX source declares `let <Row Item:object />: string = "r" external component <List ItemTemplate?:<function Item:object />: string /> let root() = <List ItemTemplate={Row} />`
 - **AND** NX IR is emitted for the program
 - **THEN** the `ItemTemplate` property of the descriptor in `root` SHALL be a `reference` node
   naming `Row`
@@ -771,9 +792,9 @@ no prelude declaration SHALL be byte-for-byte what it was before the prelude exi
 ### Requirement: NX IR encodes iteration over a range as its own node behind a required feature
 A `for` whose iterable is a `Range` SHALL be encoded as a `forRange` node, kind `22`, with the
 layout of a `for` node — item slot and name, optional index slot and name, iterable, body — whose
-iterable evaluates to a `Range` record. A `for` whose iterable is a list SHALL be encoded as before.
-A module that contains a `forRange` node SHALL list the required feature `ranges-v1`, and a module
-that contains none SHALL NOT, whether or not it constructs a range. The `explain` text of a
+iterable evaluates to a `Range` record. A `for` whose iterable is a sequence SHALL be encoded as
+before. A module that contains a `forRange` node SHALL list the required feature `ranges-v1`, and a
+module that contains none SHALL NOT, whether or not it constructs a range. The `explain` text of a
 `forRange` node SHALL read as a `for` over a range. Adding the node kind and the feature SHALL NOT
 change the IR schema version.
 
@@ -788,7 +809,7 @@ change the IR schema version.
 - **THEN** the emitted module SHALL NOT list `ranges-v1`
 
 #### Scenario: A list loop is unchanged
-- **WHEN** NX source contains `let doubled(items:int[]) = { for item in items { item * 2 } }`
+- **WHEN** NX source contains `let doubled(items:int+) = { for item in items { item * 2 } }`
 - **THEN** the body SHALL be a `for` node and the module SHALL NOT list `ranges-v1`
 
 ### Requirement: A range is recognized by shape, and its element type is erased
@@ -820,3 +841,109 @@ reproduce them.
 #### Scenario: The schema version is unchanged
 - **WHEN** NX IR is emitted for a program that iterates a range
 - **THEN** the image SHALL carry the same schema version as an image for a program without one
+
+### Requirement: NX IR encodes occurrences with one sequence type kind and the presence operators as node kinds
+The type table SHALL have one `seq` type kind that carries an occurrence — `?`, `+` or `*` — over an
+exactly-one item type, and every type that carries an occurrence in source SHALL be encoded by it.
+A property, field, state field or parameter declared `p?:T` SHALL be typed in IR by its read type,
+`T?`, and one declared `p?:T+` by `T*`, as `optional-properties` defines the read type, so a runtime
+normalizes an omitted field to the empty value without a second flag. The `array` and `nullable`
+type kinds and the `null` node kind SHALL stay assigned, so no later kind reuses their numbers, and
+a schema-`5` emitter SHALL NOT emit them; a schema-`5` reader that finds one SHALL report the
+artifact as malformed. A `seq` type SHALL never have a `seq` item type, since no suffixed type is an
+item type.
+
+NX IR SHALL encode the presence operators of `presence-operators` as three node kinds, `exists`
+(`x?`), `optionalMember` (`x?.m`) and `coalesce` (`x ?? y`), each newly assigned a number, and
+SHALL encode the `{}` match pattern as a pattern form of the match construct. A module whose node
+table contains any of the three nodes, or whose match arms contain a `{}` pattern, SHALL list the
+required feature `occurrence-v1`, so a runtime that predates the operators refuses the module by
+name; a module that contains none SHALL NOT list it, whether or not its type table contains a `seq`
+type. There SHALL be no node kind for a `null` value and no node kind for a conditional operator.
+
+An `ir explain` rendering SHALL print a `seq` type by its NX spelling (`string?`, `Person+`,
+`object*`), a function type under an occurrence parenthesized, an `exists` node as `x?`, an
+`optionalMember` node as `x?.m`, a `coalesce` node as `x ?? y` and the pattern as `{}`, and SHALL
+NOT print the words "nullable" or "null" or the `[]` suffix.
+
+#### Scenario: Each occurrence is one seq type
+- **WHEN** NX source declares `type Book = { title:string subtitle?:string authors:Person+ tags?:string+ }`
+- **AND** NX IR is emitted for the program
+- **THEN** the field schema SHALL type `title` as `string`, `subtitle` as `string?`, `authors` as `Person+` and `tags` as `string*`
+- **AND** each of `string?`, `Person+` and `string*` SHALL be a `seq` type entry written once in the type table
+- **AND** the explained text SHALL show those spellings
+
+#### Scenario: The retired kinds are not emitted
+- **WHEN** NX IR is emitted for any program of the conformance corpus
+- **THEN** no type entry SHALL use the `array` or `nullable` type kind and no node SHALL use the `null` node kind
+- **AND** a hand-built schema-`5` image containing one of them SHALL be refused as malformed
+
+#### Scenario: The presence operators are nodes behind a feature
+- **WHEN** NX source contains `type Book = { author?:Person } let byline(b:Book): string = { if b.author? { b.author.name } else { b.author?.name ?? "anonymous" } }`
+- **AND** NX IR is emitted for the program
+- **THEN** the condition SHALL be an `exists` node over the `author` member access
+- **AND** the `else` branch SHALL be a `coalesce` node whose left operand is an `optionalMember` node naming `name`
+- **AND** the module SHALL list `occurrence-v1` among its required features
+- **AND** the explained text SHALL show `b.author?`, `b.author?.name` and `?? "anonymous"`
+
+#### Scenario: The empty pattern is a pattern form
+- **WHEN** NX source contains `let f(o?:int): int = { if o is { {} => 0 else => o } }`
+- **AND** NX IR is emitted for the program
+- **THEN** the match construct SHALL carry an arm whose pattern is the `{}` pattern
+- **AND** the module SHALL list `occurrence-v1`
+
+#### Scenario: A program without the operators lists no feature
+- **WHEN** NX source declares `type Book = { subtitle?:string tags:string+ }` and neither tests presence, steps through an optional nor writes a fallback or a `{}` pattern
+- **AND** NX IR is emitted for the program
+- **THEN** the required feature list SHALL NOT name `occurrence-v1`
+- **AND** the type table SHALL still contain the `seq` types `string?` and `string+`
+
+### Requirement: NX IR carries the result type of a function and a value
+A function declaration SHALL carry its declared result type, and a value declaration its declared
+type, each absent when the source declares none. A runtime SHALL normalize a function's result and
+a value's initializer to that type as it normalizes an argument at a parameter, so the three
+engines agree: `let g(): int+ = { 5 }` returns `[5]`, and a one-item sequence returned where `int?`
+is declared is its item. Without a declared type the result SHALL be the body's value as it is,
+as the interpreter leaves it.
+
+A function declaration SHALL also carry result flags whose bit 0 is set when its result type,
+declared or inferred, is a standalone `T?`. An entry call — a host evaluating the function, by
+name or through a function value — SHALL then return an empty result to the host as `null`, as
+`occurrence-types` requires; inside the program the empty value SHALL stay the empty array. An
+`ir explain` rendering SHALL print a declared type as `: T` after the parameters and the flag as
+`(optional result)`.
+
+#### Scenario: A declared result is normalized in every engine
+- **WHEN** NX source contains `let g(): int+ = { 5 }`, `let h(o?:int): int? = { for x in o { x } }`, `let k(xs?:int+): int+ = { xs ?? 5 }` and `type Ints = int+ let fives: Ints = { 5 }`
+- **AND** the interpreter, the NX IR runtime and generated JavaScript each evaluate `g()`, `h(1)`, `k({})` and `fives`
+- **THEN** every engine SHALL give `[5]`, `1`, `[5]` and `[5]`
+
+#### Scenario: An empty optional result is null at the host
+- **WHEN** NX source contains `let maybe(): string? = { if false { "a" } }` and `let inferred() = { if false { 1 } }`
+- **AND** NX IR is emitted for the program
+- **THEN** both function declarations SHALL set the optional-result flag and only `maybe` SHALL carry a declared result type
+- **AND** `evaluateFunction` in the NX IR runtime SHALL return `null` for each
+- **AND** the explained text SHALL show `function maybe(): string? (optional result) =` and `function inferred() (optional result) =`
+
+### Requirement: NX IR leaves a parameter a call omits to the function
+A function declaration SHALL carry each parameter's default as a node of the function's own frame,
+absent when the parameter has none, emitted with the parameters before it bound so that it reads
+them through their slots. A call node SHALL carry its arguments by position, where an absent
+argument is a parameter the call left out, and the argument list MAY stop before the trailing
+parameters it leaves out. A runtime SHALL fill each parameter a call leaves out in the callee: the
+default, evaluated in the callee's frame after the parameters before it and normalized to the
+parameter's type, or the empty value when the parameter is optional; a required parameter left
+out SHALL be refused, naming it. The caller's image SHALL NOT contain the default, so a program
+linked against a newer library receives that library's defaults. An `ir explain` rendering SHALL
+print a default as `name: T = <node>` and an absent argument as `_`.
+
+#### Scenario: A default travels with the function and a call leaves the parameter out
+- **WHEN** NX source contains `let f(a:int, b:int = { a + 1 }, c?:int) = { a }` and `let r() = { <f a=1 c=2 /> }`
+- **AND** NX IR is emitted for the program
+- **THEN** `f`'s second parameter SHALL carry a default node and its first and third none
+- **AND** the call in `r` SHALL carry three arguments, the second absent
+- **AND** the explained text SHALL show `function f(a: int, b: int = (a add 1), c?: int)` and `f(1, _, 2)`
+
+#### Scenario: Every engine fills a parameter from the callee's module
+- **WHEN** the `parameter-defaults` corpus program is evaluated by the interpreter, the NX IR runtime and generated JavaScript
+- **THEN** every engine SHALL give the recorded result for each entrypoint, including a default that reads a value private to the called function's module

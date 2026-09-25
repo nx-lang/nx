@@ -21,14 +21,14 @@ one string: each run of text as written, and each braced value in its text form.
 ```nx
 type Label = { content text:string }
 
-let total(count: int) = <Label>Total: {count}</Label>
-let name(first: string, last: string) = <Label>{first} {last}</Label>
+let <Total count:int /> = <Label>Total: {count}</Label>
+let <FullName first:string last:string /> = <Label>{first} {last}</Label>
 ```
 
-`total(3)` binds `text` to `"Total: 3"`, and `name("Ada", "Lovelace")` binds it to
-`"Ada Lovelace"`. A body can also be a single braced value, so `<Label>{count}</Label>` binds `"3"`.
+`<Total count=3 />` binds `text` to `"Total: 3"`, and `<FullName first="Ada" last="Lovelace" />`
+binds it to `"Ada Lovelace"`. A body can also be a single braced value, so `<Label>{count}</Label>` binds `"3"`.
 A braced value must be a `string`, a number or a `boolean`, the same values `+` joins to a string;
-a record, a list or a nullable value is a type error naming the type. The numbers print in the
+a record, a sequence or a value that may be empty is a type error naming the type. The numbers print in the
 [canonical text forms](/reference/syntax/expressions#canonical-text-forms), so `{1.0}` reads `1`.
 
 A body under a tag with no declaration, such as `<p>`, is not type checked and is unchanged by this
@@ -46,7 +46,7 @@ the text:
 - The whitespace at the start and end of the body is **removed**.
 
 ```nx
-let summary(count: int, first: string, last: string) =
+let <TaskSummary count:int first:string last:string /> =
   <Label>
     {first}
     {last}
@@ -55,7 +55,7 @@ let summary(count: int, first: string, last: string) =
   </Label>
 ```
 
-`summary(3, "Ada", "Lovelace")` binds `"Ada Lovelace has 3 open  tasks"`, the same string as
+`<TaskSummary count=3 first="Ada" last="Lovelace" />` binds `"Ada Lovelace has 3 open  tasks"`, the same string as
 writing the body on one line. Moving the element into a deeper container, or reformatting it,
 never changes the text.
 
@@ -70,7 +70,7 @@ so a nested list keeps the rest — along with the line break after the open tag
 before the close tag. Each `@{}` value is joined as a braced value is.
 
 ```nx
-let note(count:int) =
+let <TaskNote count:int /> =
   <Note:markdown>
     # Tasks
 
@@ -81,7 +81,7 @@ let note(count:int) =
   </Note>
 ```
 
-`note(3)` binds `"# Tasks\n\nYou have 3 open.\n\n- one\n- two"`, which a Markdown processor reads
+`<TaskNote count=3 />` binds `"# Tasks\n\nYou have 3 open.\n\n- one\n- two"`, which a Markdown processor reads
 as a heading, a paragraph and a two-item list.
 
 #### How this compares with JSX, HTML and XAML

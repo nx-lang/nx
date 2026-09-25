@@ -2,6 +2,7 @@
   "main.nx::andSkipsRight": false,
   "main.nx::andTakesRight": true,
   "main.nx::arithmetic": 5,
+  "main.nx::bareFailed": "Offline",
   "main.nx::big": {
     "$type": "nx.int",
     "value": "9007199254740993"
@@ -20,7 +21,9 @@
     },
     "count": 42
   },
+  "main.nx::failedLoad": "Offline",
   "main.nx::greeting": "Hello, Ada",
+  "main.nx::idleLoad": "idle",
   "main.nx::integerDivision": 3,
   "main.nx::integerRemainder": 1,
   "main.nx::logicalNot": false,
@@ -31,6 +34,7 @@
   "main.nx::ordered": true,
   "main.nx::realDivision": 3.5,
   "main.nx::realRemainder": 1.5,
+  "main.nx::reviewStage": "review",
   "main.nx::root": 5,
   "main.nx::small": "small",
   "main.nx::squares": [

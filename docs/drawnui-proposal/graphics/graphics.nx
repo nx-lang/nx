@@ -54,9 +54,9 @@ export type ContentAlignment = {
 // are deferred.
 export abstract external component <GraphicsCommon
   opacity: float64 = 1.0
-  transform: Transform[]?           // ordered local transforms
-  clipPath: string?
-  accessibility: Accessibility?
+  transform?: Transform+           // ordered local transforms
+  clipPath?: string
+  accessibility?: Accessibility
 />
 
 // §6.1 — accepted by every filled or stroked geometry, in addition to GraphicsCommon. NX allows
@@ -64,15 +64,15 @@ export abstract external component <GraphicsCommon
 // forming a second mixin; that works because everything taking shape properties takes graphics
 // properties too.
 //
-// NX gap: `fill` is nullable rather than defaulted because the default is per component and a
-// derived component cannot override an inherited default. The renderer resolves null as
+// NX gap: `fill` is optional rather than defaulted because the default is per component and a
+// derived component cannot override an inherited default. The renderer resolves an empty `fill` as
 // `Paint.none` for Line and Polyline, and black for closed shapes and Path. The Polyline case is a
 // deliberate divergence from SVG, which fills an open polyline by default and surprises everyone.
 export abstract external component <ShapeCommon extends GraphicsCommon
-  fill: Paint?
-  stroke: Stroke?
+  fill?: Paint
+  stroke?: Stroke
   fillRule: FillRule = nonzero
-  shadows: Shadow[]?
+  shadows?: Shadow+
 />
 
 // §6.2 — root drawing surface and the bridge into Level 2 UI, so it takes UiCommon rather than
@@ -85,14 +85,14 @@ export abstract external component <ShapeCommon extends GraphicsCommon
 export external component <Drawing extends UiCommon
   viewBox: ViewBox
   fit: ViewBoxFit = contain
-  contentAlignment: ContentAlignment?   // only meaningful when `fit` preserves the aspect ratio
-  content children: Element[]?
+  contentAlignment?: ContentAlignment   // only meaningful when `fit` preserves the aspect ratio
+  content children?: Element+
 />
 
 // §6.3 — a transform/clip/opacity scope with no geometry of its own; SVG `g`, or a Skia
 // save/restore scope.
 export external component <Group extends GraphicsCommon
-  content children: Element[]?
+  content children?: Element+
 />
 
 // §6.4 — SVG `rect`.
@@ -103,7 +103,7 @@ export external component <Rect extends ShapeCommon
   width: float64                    // non-negative
   height: float64                   // non-negative
   rx: float64 = 0
-  ry: float64?                      // null means "same as rx"
+  ry?: float64                      // omitted means "same as rx"
 />
 
 // §6.5 — SVG `circle`. Kept separate from Ellipse: more legible for models and for people.
@@ -131,12 +131,12 @@ export external component <Line extends ShapeCommon
 
 // §6.8 — SVG `polyline`: two or more vertices, path left open.
 export external component <Polyline extends ShapeCommon
-  points: Point[]
+  points: Point+
 />
 
 // §6.9 — SVG `polygon`: three or more vertices, closing segment implicit.
 export external component <Polygon extends ShapeCommon
-  points: Point[]
+  points: Point+
 />
 
 // §6.10 — SVG path data (M/L/H/V/C/S/Q/T/A/Z, absolute or relative). This is already the format of
@@ -153,16 +153,16 @@ export external component <Path extends ShapeCommon
 export external component <Text extends GraphicsCommon
   x: float64                        // text anchor x
   y: float64                        // baseline y
-  fontFamily: string?               // null means the host default
+  fontFamily?: string               // omitted means the host default
   fontSize: float64 = 16
   fontWeight: float64 = 400         // 1..1000
   fontStyle: FontStyle = normal
   textAnchor: TextAnchor = start
   dominantBaseline: DominantBaseline = auto
   letterSpacing: float64 = 0
-  fill: Paint?                      // null resolves to black
-  stroke: Stroke?
-  shadows: Shadow[]?
+  fill?: Paint                      // empty resolves to black
+  stroke?: Stroke
+  shadows?: Shadow+
   content text: string              // `\n` requests explicit line breaks
 />
 

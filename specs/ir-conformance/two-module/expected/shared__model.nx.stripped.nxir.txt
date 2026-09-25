@@ -12,7 +12,7 @@ union Theme
   case light constant
   case dark constant
 
-function answer() =
+function answer(): int =
   42
 
 component Card external
@@ -20,7 +20,7 @@ component Card external
     Title: string required
     Theme: Theme = Theme.light
 
-function makeUser(id: int, name: string) =
+function makeUser(id: int, name: string): User =
   <User id=id name=name />
 
 component Control abstract external

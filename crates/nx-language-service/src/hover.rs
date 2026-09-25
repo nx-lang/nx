@@ -51,6 +51,19 @@ fn prefixed(kind: &str, rest: impl AsRef<str>) -> String {
     format!("({}) {}", kind, rest.as_ref())
 }
 
+/// The `?` between an optional property's name and its colon, or nothing.
+///
+/// <para>The mark is the property's, not its type's: `subtitle?:string` declares a property that
+/// may be omitted, and reads as `string?`. Hover spells the declaration, so the mark goes where the
+/// author wrote it.</para>
+pub(crate) fn optional_mark(optional: bool) -> &'static str {
+    if optional {
+        "?"
+    } else {
+        ""
+    }
+}
+
 /// A declaration spelled the way its author wrote it, read from HIR.
 ///
 /// <para>The item is the declaration itself, so this is the one place that knows an element-style
@@ -102,10 +115,11 @@ fn function_signature(function: &Function, kind: DocumentSymbolKind) -> String {
             "let {}{}",
             tag_signature(
                 function.name.as_str(),
-                function
-                    .params
-                    .iter()
-                    .map(|param| (param.name.as_str(), &param.ty)),
+                function.params.iter().map(|param| (
+                    param.name.as_str(),
+                    param.optional,
+                    &param.ty
+                )),
             ),
             return_type
         );
@@ -114,7 +128,14 @@ fn function_signature(function: &Function, kind: DocumentSymbolKind) -> String {
     let params = function
         .params
         .iter()
-        .map(|param| format!("{}:{}", param.name.as_str(), type_ref_display(&param.ty)))
+        .map(|param| {
+            format!(
+                "{}{}:{}",
+                param.name.as_str(),
+                optional_mark(param.optional),
+                type_ref_display(&param.ty)
+            )
+        })
         .collect::<Vec<_>>()
         .join(", ");
     format!("let {}({}){}", function.name.as_str(), params, return_type)
@@ -134,21 +155,29 @@ fn component_signature(component: &Component) -> String {
         prefix,
         tag_signature(
             component.name.as_str(),
-            component
-                .props
-                .iter()
-                .map(|property| (property.name.as_str(), &property.ty)),
+            component.props.iter().map(|property| (
+                property.name.as_str(),
+                property.optional,
+                &property.ty
+            )),
         )
     )
 }
 
-/// `<Panel title:string />` — the tag with the properties it accepts.
+/// `<Panel title:string subtitle?:string />` — the tag with the properties it accepts.
 fn tag_signature<'a>(
     name: &str,
-    properties: impl Iterator<Item = (&'a str, &'a TypeRef)>,
+    properties: impl Iterator<Item = (&'a str, bool, &'a TypeRef)>,
 ) -> String {
     let properties = properties
-        .map(|(property, ty)| format!("{}:{}", property, type_ref_display(ty)))
+        .map(|(property, optional, ty)| {
+            format!(
+                "{}{}:{}",
+                property,
+                optional_mark(optional),
+                type_ref_display(ty)
+            )
+        })
         .collect::<Vec<_>>()
         .join(" ");
     if properties.is_empty() {
@@ -192,14 +221,19 @@ fn record_signature(record: &RecordDef) -> String {
     format!("{} = {{\n{}\n}}", head, lines.join("\n"))
 }
 
-/// One record field's name and declared type: `name: string`.
+/// One record field's name and declared type: `name: string`, or `subtitle?: string`.
 ///
 /// <para>Not its default. `RecordField::default` is an `ExprId`, and turning one back into the NX
 /// an author wrote needs an expression renderer this crate does not have — rendering only the
 /// literal ones would make the hover's fidelity depend on what the default happens to be. The
 /// omission is uniform instead.</para>
 fn field_signature(field: &RecordField) -> String {
-    format!("{}: {}", field.name.as_str(), type_ref_display(&field.ty))
+    format!(
+        "{}{}: {}",
+        field.name.as_str(),
+        optional_mark(field.optional),
+        type_ref_display(&field.ty)
+    )
 }
 
 /// `type Role = admin | guest`, or one bar-led case per line where that does not fit.
@@ -224,7 +258,14 @@ fn union_signature(union_def: &UnionDef) -> String {
             let fields = case
                 .fields
                 .iter()
-                .map(|field| format!("{}:{}", field.name.as_str(), type_ref_display(&field.ty)))
+                .map(|field| {
+                    format!(
+                        "{}{}:{}",
+                        field.name.as_str(),
+                        optional_mark(field.optional),
+                        type_ref_display(&field.ty)
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join(" ");
             format!("{} {{ {} }}", case.name.as_str(), fields)
@@ -247,18 +288,24 @@ fn union_signature(union_def: &UnionDef) -> String {
     format!("{} =\n{}", head, listed)
 }
 
-/// `(parameter) count: int`.
-pub(crate) fn parameter(name: &str, ty: &str) -> String {
-    prefixed("parameter", format!("{}: {}", name, ty))
+/// `(parameter) count: int`, or `(parameter) count?: int` for an optional parameter.
+pub(crate) fn parameter(name: &str, optional: bool, ty: &str) -> String {
+    prefixed(
+        "parameter",
+        format!("{}{}: {}", name, optional_mark(optional), ty),
+    )
 }
 
-/// `(property) User.name: string`.
-pub(crate) fn property(qualifier: Option<&str>, name: &str, ty: &str) -> String {
+/// `(property) User.name: string`, or `(property) User.subtitle?: string` for an optional one.
+pub(crate) fn property(qualifier: Option<&str>, name: &str, optional: bool, ty: &str) -> String {
     let name = match qualifier {
         Some(qualifier) => format!("{}.{}", qualifier, name),
         None => name.to_string(),
     };
-    prefixed("property", format!("{}: {}", name, ty))
+    prefixed(
+        "property",
+        format!("{}{}: {}", name, optional_mark(optional), ty),
+    )
 }
 
 /// `(type parameter) Range.T`.

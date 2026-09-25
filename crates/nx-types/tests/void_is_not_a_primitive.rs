@@ -48,8 +48,8 @@ fn a_user_declaration_may_take_the_name_void() {
 
 #[test]
 fn no_inferred_type_renders_as_void() {
-    // The unit type is gone: an `if` with no `else` carries an implicit `else { }` and is a
-    // sequence, an uncovered match path follows the same rule, and nothing else constructed one.
+    // The unit type is gone: an `if` with no `else` carries an implicit `else { }` and is an
+    // optional, an uncovered match path follows the same rule, and nothing else constructed one.
     // So no diagnostic can name a type `void` except the user's own declaration of that name.
     let messages = errors("let c = true\nlet v:string = { if c { 1 } }");
     assert!(!messages.is_empty());
@@ -60,17 +60,16 @@ fn no_inferred_type_renders_as_void() {
 }
 
 #[test]
-fn a_no_else_conditional_is_a_sequence_rather_than_the_unit_type() {
+fn a_no_else_conditional_is_an_optional_rather_than_the_unit_type() {
     // An `if` with no `else` carries an implicit `else { }`, so its type is the join of the branch
-    // with the empty sequence -- a sequence of what the branch produces, not the unit type, and
-    // not a nullable either.
+    // with the empty value -- the branch's type admitting zero, not the unit type.
     let source = "let c = true\nlet v = { if c { 1 } }";
     let ty = check(source)
         .type_env
         .lookup(&Name::new("v"))
         .cloned()
         .expect("binding v");
-    assert_eq!(ty, Type::array(Type::int()), "got: {ty}");
+    assert_eq!(ty, Type::optional(Type::int()), "got: {ty}");
 }
 
 #[test]

@@ -1,5 +1,5 @@
 /**
- * The NX IR runtime: prepares schema 4 images, links them by name, and evaluates them.
+ * The NX IR runtime: prepares schema 5 images, links them by name, and evaluates them.
  *
  * An image carries one module as flat tables of 32-bit cells over one string blob, and the runtime
  * reads it in place. `prepareNxIrModule` validates every section, offset and index of the image and
@@ -9,7 +9,7 @@
  * one prepared catalog serves any number of programs.
  */
 import { NX_PRELUDE_IMAGE_BASE64, NX_PRELUDE_VERSION } from "./prelude-image.js";
-export const NX_IR_SCHEMA_VERSION = 4;
+export const NX_IR_SCHEMA_VERSION = 5;
 export const NX_IR_RUNTIME_ABI = "nx-ir-runtime-v2";
 export const NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1 = "update-records-v1";
 export const NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1 = "property-unions-v1";
@@ -19,6 +19,11 @@ export const NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1 = "action-handlers-v1";
 export const NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1 = "function-values-v1";
 /** Iteration over a range: the `forRange` node. Building a range needs no feature. */
 export const NX_IR_REQUIRED_FEATURE_RANGES_V1 = "ranges-v1";
+/**
+ * The presence operators — `exists`, `optionalMember` and `coalesce` nodes — and the `{}` match
+ * pattern. A `seq` type alone needs no feature: it is a type kind, not a node.
+ */
+export const NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1 = "occurrence-v1";
 const knownFeatures = new Set([
     NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
     NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1,
@@ -26,6 +31,7 @@ const knownFeatures = new Set([
     NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1,
     NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1,
     NX_IR_REQUIRED_FEATURE_RANGES_V1,
+    NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1,
 ]);
 /** The reserved identity of the NX prelude, the module every NX module sees without an import. */
 export const NX_PRELUDE_MODULE_IDENTITY = "@nx/prelude.nx";
@@ -424,9 +430,12 @@ function readDebug(bytes, declarationCount, nodeCount, fail) {
     }
     return { declarationSpans, nodeSpans, sourceBytes };
 }
-/** The kind numbers of schema 4, as `docs/nx-ir-format.md` assigns them. */
+/**
+ * The kind numbers of schema 5, as `docs/nx-ir-format.md` assigns them. Kind `0`, the `null`
+ * node, was retired with schema 5: the language has no null value, so a reader reports the kind
+ * as malformed rather than evaluating it.
+ */
 export const nodeKinds = {
-    null: 0,
     bool: 1,
     string: 2,
     number: 3,
@@ -449,6 +458,12 @@ export const nodeKinds = {
     text: 20,
     namedCall: 21,
     forRange: 22,
+    /** `x?`: `[23, operand]`, true when the operand holds at least one item. */
+    exists: 23,
+    /** `x?.m`: `[24, receiver, str]`, the empty value when the receiver is empty and `x.m` otherwise. */
+    optionalMember: 24,
+    /** `x ?? y`: `[25, left, right]`, the left operand when it holds an item and the right one otherwise. */
+    coalesce: 25,
 };
 /**
  * The start and the number of integers of a `Range` record, or `undefined` when the value is not one.
@@ -478,7 +493,7 @@ export const nodeKinds = {
  * `docs/nx-ir-format.md` records it.</para>
  */
 function integerRange(value) {
-    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    if (!isObject(value)) {
         return undefined;
     }
     const record = value;
@@ -500,9 +515,23 @@ function integerRange(value) {
 }
 /** The primitive types a `text` node can name: the ones with a canonical text form. */
 const textTypes = ["int", "int32", "int64", "float32", "float64", "boolean"];
-export const typeKinds = { primitive: 0, nominal: 1, array: 2, nullable: 3, function: 4 };
-/** Bit 0 of a function type parameter's flags cell: the parameter takes body content. */
-const functionParamFlags = { content: 1 };
+/**
+ * The type kinds. `2` (`array`) and `3` (`nullable`) were retired with schema 5, replaced by
+ * `seq`, and stay assigned so no later kind reuses them; a reader reports either as malformed.
+ */
+export const typeKinds = { primitive: 0, nominal: 1, function: 4, seq: 5 };
+/**
+ * The bits of a `seq` type's occurrence cell: whether the type admits no value and whether it
+ * admits more than one. `?` is `1`, `+` is `2` and `*` is `3`; exactly one is never a `seq`.
+ */
+export const occurrenceFlags = { empty: 1, many: 2 };
+/** The bits of a function type parameter's flags cell: takes body content; is optional (`p?:T`). */
+const functionParamFlags = { content: 1, optional: 2 };
+/**
+ * The bits of a function declaration's result flags: the result type, declared or inferred, is a
+ * standalone `T?`, so an entry call returns an empty result to the host as `null`.
+ */
+const functionResultFlags = { optional: 1 };
 export const constantKinds = { int: 0, bigint: 1, float: 2 };
 export const declarationKinds = {
     function: 0,
@@ -545,6 +574,18 @@ export class NxIrRuntimeError extends Error {
         this.name = "NxIrRuntimeError";
         this.diagnostics = diagnostics;
     }
+}
+/** Whether a site of this type admits the empty value: a `?` or `*` occurrence. */
+function admitsEmpty(ty) {
+    return ty.kind === "seq" && ty.mayBeEmpty;
+}
+/** Whether a site of this type holds an array: a `+` or `*` occurrence. */
+function admitsMany(ty) {
+    return ty.kind === "seq" && ty.mayBeMany;
+}
+/** The top type, which holds any value — a sequence included, opaquely. */
+function isObjectType(ty) {
+    return ty.kind === "primitive" && ty.name === "object";
 }
 /** The default of {@link NxRuntimeOptions.maxRangeLength}. */
 export const NX_DEFAULT_MAX_RANGE_LENGTH = 1_000_000;
@@ -681,20 +722,26 @@ function indexNominalShapes(declarations, target) {
     }
 }
 const NODES = ["node"];
+const OPT_NODES = ["optNode"];
 const STRS = ["str"];
 const REFS = ["ref"];
 const PROPERTY = ["str", "node"];
 const FIELD = ["str", "type", "optNode", "int"];
 const PARAM = ["str", "type", "int"];
+const DECLARED_PARAM = ["str", "type", "optNode", "int"];
 const ARM = [{ list: NODES }, "node"];
 const UNION_CASE = ["str", { list: FIELD }, "int"];
 const EMIT = ["str", "ref"];
-/** The operands after the kind cell, by table and kind number. */
+/**
+ * The operands after the kind cell, by table and kind number. A hole is a kind number that is
+ * assigned but retired — the `array` and `nullable` types and the `null` node of schema 4 — so an
+ * entry of that kind is reported as malformed rather than laid out.
+ */
 const layouts = {
-    types: [["str"], ["ref"], ["type"], ["type"], ["type", { list: PARAM }]],
+    types: [["str"], ["ref"], undefined, undefined, ["type", { list: PARAM }], ["itemType", "occurrence"]],
     constants: [["i64"], ["str"], ["f64"]],
     nodes: [
-        [],
+        undefined,
         ["int"],
         ["str"],
         ["const"],
@@ -702,7 +749,7 @@ const layouts = {
         ["ref"],
         ["binary", "node", "node"],
         ["unary", "node"],
-        ["node", { list: NODES }],
+        ["node", { list: OPT_NODES }],
         ["intrinsic", { list: NODES }, { list: STRS }],
         ["node", "node", "optNode"],
         ["node", { list: ARM }, "optNode"],
@@ -718,10 +765,13 @@ const layouts = {
         ["node", { list: PROPERTY }],
         // A range loop has a `for`'s layout; only what its iterable evaluates to differs.
         ["int", "str", "optSlot", "optStr", "node", "node"],
+        ["node"],
+        ["node", "str"],
+        ["node", "node"],
     ],
     declarations: [
-        ["str", { list: PARAM }, "node"],
-        ["str", "node"],
+        ["str", { list: DECLARED_PARAM }, "node", "optType", "int"],
+        ["str", "node", "optType"],
         ["str", { list: FIELD }, { list: REFS }, "int", "optRef"],
         ["str", { list: FIELD }, { list: FIELD }, "optNode", "int", { list: EMIT }],
         ["str", { list: UNION_CASE }, { list: REFS }, "optRef"],
@@ -780,7 +830,10 @@ class TableReader {
         const kind = cursor.next();
         const layout = layouts[table][kind];
         if (layout === undefined) {
-            this.#fail(`Unknown ${table.replace(/s$/, "")} kind ${kind} at ${what}.`);
+            const retired = (table === "types" && (kind === 2 || kind === 3)) || (table === "nodes" && kind === 0)
+                ? ` (retired with schema ${NX_IR_SCHEMA_VERSION})`
+                : "";
+            this.#fail(`Unknown ${table.replace(/s$/, "")} kind ${kind}${retired} at ${what}.`);
             return;
         }
         // A node's children precede it, and a type's inner type precedes it, so a reader that walks
@@ -789,8 +842,48 @@ class TableReader {
             nodes: table === "nodes" ? index : this.#image.entryCount("nodes"),
             types: table === "types" ? index : this.#image.entryCount("types"),
         };
-        if (this.#validateSeq(cursor, layout, bounds, what) && !cursor.finished) {
+        if (!this.#validateSeq(cursor, layout, bounds, what)) {
+            return;
+        }
+        if (!cursor.finished) {
             this.#fail(`${what} has ${cursor.cells.length - cursor.position} cell(s) more than its layout.`);
+            return;
+        }
+        if (table === "nodes") {
+            this.#validateOccurrenceFeature(entry, kind, what);
+        }
+    }
+    /**
+     * The presence operators and the `{}` pattern are nodes a runtime that predates them has never
+     * seen, so a module that carries one lists `occurrence-v1`; one that carries one without listing
+     * it is malformed, and says which feature it should have named.
+     */
+    #validateOccurrenceFeature(entry, kind, what) {
+        if (this.#image.requiredFeatures.includes(NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1)) {
+            return;
+        }
+        const operator = kind === nodeKinds.exists ? "exists" : kind === nodeKinds.optionalMember ? "optionalMember" : kind === nodeKinds.coalesce ? "coalesce" : undefined;
+        if (operator !== undefined) {
+            this.#fail(`${what} is an '${operator}' node, which requires the feature '${NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1}' the module does not list.`);
+            return;
+        }
+        if (kind !== nodeKinds.ifIs) {
+            return;
+        }
+        // `[11, node, [[[node...], node]...], node?]`: each arm's patterns, looking for an empty
+        // `array` node, which is the `{}` pattern.
+        const arms = entry[2];
+        let position = 3;
+        for (let arm = 0; arm < arms; arm += 1) {
+            const patterns = entry[position];
+            for (let pattern = position + 1; pattern < position + 1 + patterns; pattern += 1) {
+                const node = this.#image.entry("nodes", entry[pattern]);
+                if (node.length === 2 && node[0] === nodeKinds.array && node[1] === 0) {
+                    this.#fail(`${what} matches the '{}' pattern, which requires the feature '${NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1}' the module does not list.`);
+                    return;
+                }
+            }
+            position += patterns + 2;
         }
     }
     #validateSeq(cursor, ops, bounds, what) {
@@ -839,12 +932,25 @@ class TableReader {
                 return cell === NX_IR_NONE || inRange("string", cell, this.#image.stringCount);
             case "type":
                 return inRange("type", cell, bounds.types);
+            case "itemType": {
+                // A `seq` type's item is an exactly-one type: no suffixed type is an item type.
+                if (!inRange("type", cell, bounds.types)) {
+                    return false;
+                }
+                return (this.#image.entry("types", cell)[0] !== typeKinds.seq ||
+                    this.#fail(`${what} is a seq type whose item type ${cell} is itself a seq type.`));
+            }
+            case "occurrence":
+                return ((cell >= 1 && cell <= (occurrenceFlags.empty | occurrenceFlags.many)) ||
+                    this.#fail(`${what} carries the occurrence cell ${cell}, which spells no suffix.`));
             case "const":
                 return inRange("constant", cell, this.#image.entryCount("constants"));
             case "node":
                 return inRange("node", cell, bounds.nodes);
             case "optNode":
                 return cell === NX_IR_NONE || inRange("node", cell, bounds.nodes);
+            case "optType":
+                return cell === NX_IR_NONE || inRange("type", cell, bounds.types);
             case "ref":
             case "optRef": {
                 const name = cursor.cells[cursor.position++];
@@ -899,6 +1005,10 @@ class TableReader {
         const cell = cursor.next();
         return cell === NX_IR_NONE ? -1 : cell;
     }
+    #optType(cursor) {
+        const cell = cursor.next();
+        return cell === NX_IR_NONE ? undefined : this.type(cell);
+    }
     type(index) {
         const cached = this.#types.get(index);
         if (cached !== undefined) {
@@ -913,9 +1023,16 @@ class TableReader {
             case typeKinds.nominal:
                 prepared = { kind: "nominal", slot: entry[1], name: this.#image.string(entry[2]) };
                 break;
-            case typeKinds.array:
-                prepared = { kind: "array", element: this.type(entry[1]) };
+            case typeKinds.seq: {
+                const occurrence = entry[2];
+                prepared = {
+                    kind: "seq",
+                    item: this.type(entry[1]),
+                    mayBeEmpty: (occurrence & occurrenceFlags.empty) !== 0,
+                    mayBeMany: (occurrence & occurrenceFlags.many) !== 0,
+                };
                 break;
+            }
             case typeKinds.function: {
                 const result = this.type(entry[1]);
                 const params = [];
@@ -925,14 +1042,15 @@ class TableReader {
                         name: this.#image.string(entry[position]),
                         ty: this.type(entry[position + 1]),
                         isContent: (entry[position + 2] & functionParamFlags.content) !== 0,
+                        isOptional: (entry[position + 2] & functionParamFlags.optional) !== 0,
                     });
                 }
                 prepared = { kind: "function", params, result };
                 break;
             }
             default:
-                prepared = { kind: "nullable", inner: this.type(entry[1]) };
-                break;
+                // Every kind the validator admits is handled above.
+                fail("nx-ir-malformed", `Unknown type kind ${String(entry[0])} at type ${index}.`);
         }
         this.#types.set(index, prepared);
         return prepared;
@@ -963,14 +1081,27 @@ class TableReader {
                 const params = this.#list(cursor, () => {
                     const paramName = this.#image.string(cursor.next());
                     const ty = this.type(cursor.next());
-                    return { name: paramName, ty, isContent: cursor.next() !== 0 };
+                    const defaultNode = this.#optNode(cursor);
+                    const flags = cursor.next();
+                    return {
+                        name: paramName,
+                        ty,
+                        isContent: (flags & functionParamFlags.content) !== 0,
+                        isOptional: (flags & functionParamFlags.optional) !== 0,
+                        default: defaultNode,
+                    };
                 });
-                prepared = { tag: "function", params, body: cursor.next() };
+                const body = cursor.next();
+                const result = this.#optType(cursor);
+                const isOptionalResult = (cursor.next() & functionResultFlags.optional) !== 0;
+                prepared = { tag: "function", params, body, result, isOptionalResult };
                 break;
             }
-            case declarationKinds.value:
-                prepared = { tag: "value", value: cursor.next() };
+            case declarationKinds.value: {
+                const value = cursor.next();
+                prepared = { tag: "value", value, ty: this.#optType(cursor) };
                 break;
+            }
             case declarationKinds.record: {
                 const fields = this.#fields(cursor);
                 const bases = this.#list(cursor, () => this.#ref(cursor));
@@ -1214,7 +1345,7 @@ export function evaluateFunction(program, name, args = [], options = {}) {
     if (declaration === undefined || declaration.kind.tag !== "function") {
         fail("nx-ir-missing-entrypoint", `Function entrypoint '${name}' was not found.`);
     }
-    return canonicalizeRendered(invokeFunction(linkedProgram, linkedProgram.entry, declaration, args, options, 0)).value;
+    return entryResult(declaration, invokeFunction(linkedProgram, linkedProgram.entry, declaration, args, options, 0));
 }
 export function constructComponentDescriptor(program, name, props = {}, content = [], options = {}) {
     const linkedProgram = programOf(program);
@@ -1316,7 +1447,7 @@ export function dispatchComponentActions(program, instance, batch, options = {})
                 fail("nx-ir-handler-token", `Unknown handler token '${token}' for the '${instance.component}' instance.`);
             }
             const owned = handler.owner === ownerKey;
-            const results = invokeHandler(linkedProgram, handler, requireObject(object.action ?? null, `${path}.action`), owned ? { component, state: working } : undefined, options);
+            const results = invokeHandler(linkedProgram, handler, requireObject(object.action, `${path}.action`), owned ? { component, state: working } : undefined, options);
             for (const result of results) {
                 if (owned && isUpdateRecordFor(result, linkedProgram, ownerKey)) {
                     working = patchComponentState(linkedProgram, linked, declaration, component, working, result, options);
@@ -1346,12 +1477,14 @@ export function dispatchComponentActions(program, instance, batch, options = {})
     });
     // The body sees the declared props and the state, as it did at initialization; the handler
     // props the parent bound are carried by the instance but were never in scope.
+    // A prop or state field the instance carries no key for is an empty optional, which the body
+    // reads as the empty value.
     const frame = [];
     component.props.forEach((field, index) => {
-        frame[index] = instance.props[field.name] ?? null;
+        frame[index] = instance.props[field.name] ?? [];
     });
     component.state.forEach((field, index) => {
-        frame[component.props.length + index] = working[field.name] ?? null;
+        frame[component.props.length + index] = working[field.name] ?? [];
     });
     const generation = instance.generation + 1;
     const { value: rendered, handlers } = canonicalizeRendered(evalNode(component.body, { program: linkedProgram, linked, declaration, frame, options, depth: 0 }), generation);
@@ -1374,15 +1507,23 @@ export function dispatchComponentActions(program, instance, batch, options = {})
 export function normalizeComponentState(program, name, state, options = {}) {
     const linkedProgram = programOf(program);
     const { declaration, component } = componentDeclaration(linkedProgram, name);
-    const frame = new Array(component.props.length).fill(null);
-    return normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.state, state, frame, `${name} state`, true, options);
+    return normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.state, state, propsFrame(component), `${name} state`, true, options);
+}
+/**
+ * A frame with the prop slots left unbound, for validating state on its own: no default is
+ * evaluated there, so nothing reads a prop, and a slot that is read anyway fails as unbound
+ * rather than yielding a value the props never held.
+ */
+function propsFrame(component) {
+    return new Array(component.props.length);
 }
 /**
  * Applies a patch to host-owned component state and returns the validated next state.
  *
  * The patch is either a plain partial state object or the component's own update record,
  * `{ $type: "<Component>.Update", ... }`. Either way a present field replaces the current value, an
- * absent one keeps it, and a present `null` sets a nullable field to `null`.
+ * absent one keeps it, and a present empty value — `null` or `[]` — clears an optional state field,
+ * so the next state carries no key for it; for a field that is not optional it is rejected.
  */
 export function applyComponentStatePatch(program, name, currentState, patch, options = {}) {
     const linkedProgram = programOf(program);
@@ -1403,8 +1544,7 @@ function patchComponentState(program, linked, declaration, component, currentSta
             fail("nx-ir-state-field", `Unknown ${name} state field '${key}'.`);
         }
     }
-    const frame = new Array(component.props.length).fill(null);
-    return normalizeFields(program, linked, declaration, component.state, { ...currentState, ...fields }, frame, `${name} state`, true, options);
+    return normalizeFields(program, linked, declaration, component.state, { ...currentState, ...fields }, propsFrame(component), `${name} state`, true, options);
 }
 function componentDeclaration(program, name) {
     const declaration = program.componentEntrypoints.get(name);
@@ -1475,6 +1615,11 @@ function resolveReference(linked, slot, name) {
     }
     return { linked: target, declaration };
 }
+/**
+ * Calls a function with its arguments by position. An argument that is `undefined`, or past the
+ * end of `args`, was left out: the function fills its parameter with the default it declares,
+ * evaluated here after the parameters before it, or with empty when the parameter is optional.
+ */
 function invokeFunction(program, linked, declaration, args, options, depth) {
     const maxCallDepth = options.maxCallDepth ?? 100;
     if (depth > maxCallDepth) {
@@ -1484,19 +1629,35 @@ function invokeFunction(program, linked, declaration, args, options, depth) {
     if (kind.tag !== "function") {
         fail("nx-ir-call", `'${declaration.name}' is not a function.`);
     }
-    if (args.length !== kind.params.length) {
-        fail("nx-ir-arguments", `Function '${declaration.name}' expected ${kind.params.length} arguments, got ${args.length}.`);
+    if (args.length > kind.params.length) {
+        fail("nx-ir-arguments", `Function '${declaration.name}' expected at most ${kind.params.length} arguments, got ${args.length}.`);
     }
     const frame = [];
     const context = { program, linked, declaration, frame, options, depth };
     kind.params.forEach((param, index) => {
-        // Body content reaches the content parameter as the list of children the emitter gathered,
-        // and a child that is itself a list is spliced, as it is for a component's content.
         const arg = args[index];
-        const value = param.isContent && Array.isArray(arg) ? spliceContent(arg) : arg;
+        let value;
+        if (arg !== undefined) {
+            // Body content reaches the content parameter as the list of children the emitter
+            // gathered, and a child that is itself a list is spliced, as it is for a component's
+            // content.
+            value = param.isContent && Array.isArray(arg) ? spliceContent(arg) : arg;
+        }
+        else if (param.default >= 0) {
+            value = evalNode(param.default, context);
+        }
+        else if (param.isOptional) {
+            value = [];
+        }
+        else {
+            fail("nx-ir-arguments", `Function '${declaration.name}' requires argument '${param.name}'.`);
+        }
         frame[index] = normalizeValue(context, param.ty, value, param.name);
     });
-    return evalNode(kind.body, context);
+    const result = evalNode(kind.body, context);
+    return kind.result === undefined
+        ? result
+        : normalizeValue(context, kind.result, result, `return value for '${declaration.name}'`);
 }
 function entryAt(context, index) {
     return context.linked.module.artifact.entry("nodes", index);
@@ -1543,8 +1704,8 @@ function itemsAt(context, entry, at) {
  *
  * A list value contributes its elements and every other value contributes itself. That is the
  * whole rule. A conditional that takes no branch needs no case here: it evaluates to the empty
- * sequence, so it splices away like any other list-valued item, and a conditional nested in one
- * is no different. Nothing inspects the node, so a written null stays an item.
+ * value, which is the empty sequence, so it splices away like any other list-valued item, and a
+ * conditional nested in one is no different.
  */
 function evalItemInto(index, context, items) {
     const value = evalNode(index, context);
@@ -1556,9 +1717,9 @@ function evalItemInto(index, context, items) {
     }
 }
 /** The branch an `if` or `if … is` takes, `undefined` when it takes none. */
-function takenBranch(context, entry) {
+function takenBranch(context, entry, index) {
     if (entry[0] === nodeKinds.if) {
-        if (truthy(evalNode(entry[1], context))) {
+        if (requireBoolean(context, index, evalNode(entry[1], context), "if condition")) {
             return entry[2];
         }
         return entry[3] === NX_IR_NONE ? undefined : entry[3];
@@ -1570,7 +1731,7 @@ function takenBranch(context, entry) {
         const patterns = entry[position];
         let matched = false;
         for (let pattern = position + 1; pattern < position + 1 + patterns; pattern += 1) {
-            if (!matched && patternMatches(scrutinee, evalNode(entry[pattern], context))) {
+            if (!matched && patternMatches(scrutinee, evalPattern(context, entry[pattern]))) {
                 matched = true;
             }
         }
@@ -1582,6 +1743,25 @@ function takenBranch(context, entry) {
     }
     const otherwise = entry[position];
     return otherwise === NX_IR_NONE ? undefined : otherwise;
+}
+/**
+ * A match arm's pattern as a value. A pattern naming a union case with fields stands for every
+ * record of that case, so it is the case's `$type` alone: building the record would ask for fields
+ * a pattern never supplies. Every other pattern is evaluated as the expression it is.
+ */
+function evalPattern(context, index) {
+    const entry = entryAt(context, index);
+    if (entry[0] === nodeKinds.unionCase) {
+        const image = context.linked.module.artifact;
+        const unionName = image.string(entry[2]);
+        const caseName = image.string(entry[3]);
+        const { declaration } = resolveReference(context.linked, entry[1], unionName);
+        if (declaration.kind.tag === "union" &&
+            declaration.kind.cases.some((candidate) => candidate.name === caseName && !candidate.isConstant)) {
+            return { $type: `${unionName}.${caseName}` };
+        }
+    }
+    return evalNode(index, context);
 }
 function spliceContent(values) {
     return values.flatMap((value) => (Array.isArray(value) ? value : [value]));
@@ -1602,8 +1782,6 @@ function evalNode(index, context) {
     const entry = entryAt(context, index);
     const image = context.linked.module.artifact;
     switch (entry[0]) {
-        case nodeKinds.null:
-            return null;
         case nodeKinds.bool:
             return entry[1] !== 0;
         case nodeKinds.string:
@@ -1626,11 +1804,11 @@ function evalNode(index, context) {
             // `and` and `or` are the only non-strict operators: the left operand decides whether the
             // right one runs at all, so a guard such as `d != 0 && n / d > 1` never divides by zero.
             if (operator === "and" || operator === "or") {
-                const left = truthy(evalNode(entry[2], context));
+                const left = requireBoolean(context, index, evalNode(entry[2], context), operator);
                 if (left === (operator === "or")) {
                     return left;
                 }
-                return truthy(evalNode(entry[3], context));
+                return requireBoolean(context, index, evalNode(entry[3], context), operator);
             }
             return evalBinary(context, index, operator, evalNode(entry[2], context), evalNode(entry[3], context));
         }
@@ -1642,7 +1820,7 @@ function evalNode(index, context) {
                 case "neg":
                     return -checkedNumber(context, index, operand, "neg");
                 case "not":
-                    return !truthy(operand);
+                    return !requireBoolean(context, index, operand, "not");
                 default:
                     fail("nx-ir-operator", `Unknown unary operator '${String(entry[1])}'.`, context, index);
             }
@@ -1655,25 +1833,35 @@ function evalNode(index, context) {
         case nodeKinds.if:
         case nodeKinds.ifIs: {
             // A missing `else` is an `else { }`, so a conditional that takes no branch is the empty
-            // sequence. Where the value is an item being collected that splices away to nothing, by the
+            // value. Where the value is an item being collected that splices away to nothing, by the
             // same rule any other sequence-valued item follows; where one value is expected, the
-            // expression's type is a sequence and an empty one is what it promises.
-            const body = takenBranch(context, entry);
+            // expression's type admits zero and the empty value is what it promises.
+            const body = takenBranch(context, entry, index);
             return body === undefined ? [] : evalNode(body, context);
         }
         case nodeKinds.array:
             return itemsAt(context, entry, 1);
         case nodeKinds.for: {
+            // The iterable is read as its items: a `+` or `*` value is an array of them, and a `?` value
+            // is the empty array or the one item it holds, so a `for` over an optional runs at most once.
             const iterable = evalNode(entry[5], context);
-            if (!Array.isArray(iterable)) {
-                fail("nx-ir-for", "For expression iterable must evaluate to an array.", context, index);
-            }
             const itemSlot = entry[1];
             const indexSlot = entry[3];
+            // An optional that holds an item runs the body once, and the product of `?` with the body's
+            // occurrence is the body's own, so the body's value is the loop's value unchanged: an item
+            // stays an item rather than becoming a one-element array, as in the interpreter.
+            if (!Array.isArray(iterable) && !isEmptyValue(iterable)) {
+                context.frame[itemSlot] = iterable;
+                if (indexSlot !== NX_IR_NONE) {
+                    context.frame[indexSlot] = 0;
+                }
+                return evalNode(entry[6], context);
+            }
+            const items = Array.isArray(iterable) ? iterable : [];
             // A `for` concatenates what its body yields, so each iteration contributes on the same terms
             // as an item of a braced value list.
             const results = [];
-            iterable.forEach((item, position) => {
+            items.forEach((item, position) => {
                 context.frame[itemSlot] = item;
                 if (indexSlot !== NX_IR_NONE) {
                     context.frame[indexSlot] = position;
@@ -1704,14 +1892,19 @@ function evalNode(index, context) {
             }
             return results;
         }
-        case nodeKinds.member: {
-            const base = evalNode(entry[1], context);
-            const member = image.string(entry[2]);
-            const object = requireObject(base, "member access");
-            if (!Object.prototype.hasOwnProperty.call(object, member)) {
-                fail("nx-ir-member", `Object does not contain member '${member}'.`, context, index);
-            }
-            return object[member];
+        case nodeKinds.member:
+            return readMember(context, index, evalNode(entry[1], context), image.string(entry[2]));
+        case nodeKinds.optionalMember: {
+            // `x?.m`: the receiver is evaluated once; when it is empty so is the result.
+            const receiver = optionalItem(evalNode(entry[1], context));
+            return receiver === undefined ? [] : readMember(context, index, receiver, image.string(entry[2]));
+        }
+        case nodeKinds.exists:
+            return !isEmptyValue(evalNode(entry[1], context));
+        case nodeKinds.coalesce: {
+            // `x ?? y`: the right operand runs only when the left is empty.
+            const left = evalNode(entry[1], context);
+            return isEmptyValue(left) ? evalNode(entry[2], context) : left;
         }
         case nodeKinds.record:
             return evalRecord(context, index, entry);
@@ -1737,6 +1930,31 @@ function evalNode(index, context) {
         default:
             fail("nx-ir-expression", `Unknown NX IR node kind '${String(entry[0])}'.`, context, index);
     }
+}
+/**
+ * Reads a member of a record value. A record stores no entry for an optional field that is empty,
+ * so a declared field that is not stored reads as the empty value; an update record's fields are
+ * all of that kind, since an absent one is unchanged. The declaration is found by the value's
+ * `$type`, as `isUpdateRecordFor` finds it; a name two modules share reads as empty when either
+ * declares the field so, which is what a value stamped with that name can be.
+ */
+function readMember(context, nodeIndex, base, member) {
+    const object = requireObject(base, "member access");
+    if (Object.prototype.hasOwnProperty.call(object, member)) {
+        return object[member];
+    }
+    if (typeof object.$type === "string" && fieldReadsAsEmpty(context.program, object.$type, member)) {
+        return [];
+    }
+    fail("nx-ir-member", `Object does not contain member '${member}'.`, context, nodeIndex);
+}
+/** Whether `member` is a field of the shape `discriminator` names that reads as empty when it is not stored. */
+function fieldReadsAsEmpty(program, discriminator, member) {
+    return program.nominalShapesFor(discriminator).some((shape) => {
+        const declaration = shape.linked.module.declarationsByName.get(shape.discriminator);
+        const isUpdate = declaration !== undefined && declaration.kind.tag === "record" && declaration.kind.updateTarget !== undefined;
+        return shape.fields.some((field) => field.name === member && (isUpdate || admitsEmpty(field.ty)));
+    });
 }
 /**
  * `[19, ref, str, ref, slot, ref?, node]`: the component and emit the handler answers, the action
@@ -1795,12 +2013,11 @@ function evalReference(context, slot, name, nodeIndex) {
         return internal(new FunctionReferenceValue(linked, declaration));
     }
     if (declaration.kind.tag === "value") {
-        return evalNode(declaration.kind.value, {
-            ...context,
-            linked,
-            declaration,
-            frame: [],
-        });
+        const valueContext = { ...context, linked, declaration, frame: [] };
+        const value = evalNode(declaration.kind.value, valueContext);
+        return declaration.kind.ty === undefined
+            ? value
+            : normalizeValue(valueContext, declaration.kind.ty, value, `value '${declaration.name}'`);
     }
     fail("nx-ir-reference", `Declaration '${name}' cannot be used as a value.`, context, nodeIndex);
 }
@@ -1809,7 +2026,13 @@ function evalCall(context, nodeIndex, entry) {
     if (!isFunctionReference(callee)) {
         fail("nx-ir-call", "NX IR call callee did not evaluate to a function reference.", context, nodeIndex);
     }
-    const args = nodesAt(context, entry, 2).values;
+    // An argument the call left out is `NX_IR_NONE`, passed on as `undefined` for the function to fill.
+    const count = entry[2];
+    const args = [];
+    for (let position = 3; position < 3 + count; position += 1) {
+        const node = entry[position];
+        args.push(node === NX_IR_NONE ? undefined : evalNode(node, context));
+    }
     return invokeFunction(context.program, callee.linked, callee.declaration, args, context.options, context.depth + 1);
 }
 /**
@@ -1827,19 +2050,15 @@ function evalNamedCall(context, nodeIndex, entry) {
 /**
  * Invokes a function value with arguments by name. The caller supplied every parameter of the
  * function *type* it holds, so an argument the declaration does not name is dropped, and a
- * parameter the declaration names must be present.
+ * parameter the declaration names must be present unless it has a default or is optional, in
+ * which case the function fills it.
  */
 function invokeFunctionByName(program, callee, args, options, depth) {
     const kind = callee.declaration.kind;
     if (kind.tag !== "function") {
         fail("nx-ir-call", `'${callee.declaration.name}' is not a function.`);
     }
-    const positional = kind.params.map((param) => {
-        if (!Object.prototype.hasOwnProperty.call(args, param.name)) {
-            fail("nx-ir-arguments", `Function '${callee.declaration.name}' requires argument '${param.name}'.`);
-        }
-        return args[param.name];
-    });
+    const positional = kind.params.map((param) => Object.prototype.hasOwnProperty.call(args, param.name) ? args[param.name] : undefined);
     return invokeFunction(program, callee.linked, callee.declaration, positional, options, depth);
 }
 /**
@@ -1854,7 +2073,16 @@ export function callFunction(program, value, args = {}, options = {}) {
         fail("nx-ir-function-value", "callFunction expects a Function record: { $type: \"Function\", module, name }.");
     }
     const callee = resolveFunctionRecord(linkedProgram, record, "callFunction");
-    return canonicalizeRendered(invokeFunctionByName(linkedProgram, callee, args, options, 0)).value;
+    return entryResult(callee.declaration, invokeFunctionByName(linkedProgram, callee, args, options, 0));
+}
+/**
+ * An entry call's result as the host reads it: canonical, and `null` where the function's result
+ * type is a standalone `T?` and holds nothing — the host's spelling of an absent single value.
+ * Every other result keeps its encoding, so an empty `T*` stays `[]`.
+ */
+function entryResult(declaration, value) {
+    const isOptionalResult = declaration.kind.tag === "function" && declaration.kind.isOptionalResult;
+    return isOptionalResult && isEmptyValue(value) ? null : canonicalizeRendered(value).value;
 }
 function evalRecord(context, nodeIndex, entry) {
     const image = context.linked.module.artifact;
@@ -2032,9 +2260,14 @@ function canonicalizeRendered(value, generation) {
         for (const key of Object.keys(item).sort()) {
             canonical.set(key, walk(item[key]));
         }
+        // An update record is the one place the canonical encoding writes `null`: a present empty
+        // field is a cleared one, and key presence is what carries that, so the value is `null`
+        // rather than the empty array an empty `*` field would be.
+        const isUpdate = typeof item.$type === "string" && item.$type.endsWith(".Update");
         const output = {};
         for (const key of Object.keys(item)) {
-            output[key] = canonical.get(key);
+            const value = canonical.get(key);
+            output[key] = isUpdate && key !== "$type" && isEmptyValue(value) ? null : value;
         }
         return output;
     };
@@ -2074,7 +2307,7 @@ function invokeHandler(program, handler, action, live, options) {
     const frame = handler.captured.slice();
     if (live !== undefined) {
         live.component.state.forEach((field, index) => {
-            frame[live.component.props.length + index] = live.state[field.name] ?? null;
+            frame[live.component.props.length + index] = live.state[field.name] ?? [];
         });
     }
     frame[handler.actionSlot] = normalizedAction;
@@ -2148,38 +2381,63 @@ function evalIntrinsic(context, nodeIndex, entry) {
     }
 }
 function intrinsicRecord(value, intrinsic) {
-    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    if (!isObject(value) || typeof value.$type !== "string") {
         fail("nx-ir-intrinsic", `Intrinsic '${intrinsic}' expects a record value, got ${JSON.stringify(value)}.`);
     }
-    const record = value;
-    if (typeof record.$type !== "string") {
-        fail("nx-ir-intrinsic", `Intrinsic '${intrinsic}' expects a record value, got ${JSON.stringify(value)}.`);
-    }
-    return record;
+    return value;
 }
 /**
- * `apply(record, update)`: the record with each field present in the update replaced, a present
- * `null` included; every absent field keeps its value. The update must be the record's own
- * `<Type>.Update`.
+ * A host-held value as the runtime holds it: every `null` — the canonical spelling of a cleared
+ * update field, and what a JSON host writes for an absent optional — is the empty value. Nothing
+ * else in a canonical value is `null`, so the decoding is safe at any depth.
+ */
+function decodeHostValue(value) {
+    if (value === null) {
+        return [];
+    }
+    if (Array.isArray(value)) {
+        return value.map(decodeHostValue);
+    }
+    if (!isObject(value)) {
+        return value;
+    }
+    const output = {};
+    for (const [key, item] of Object.entries(value)) {
+        output[key] = decodeHostValue(item);
+    }
+    return output;
+}
+function decodeHostRecord(value) {
+    return decodeHostValue(value);
+}
+/**
+ * `apply(record, update)`: the record with each field present in the update replaced, and each
+ * field the update clears — present as `null` or the empty value — left out of the result, which
+ * is how the canonical encoding writes an empty optional field; every absent field keeps its
+ * value. The update must be the record's own `<Type>.Update`.
  */
 export function applyUpdate(record, update) {
-    return applyRecordUpdate(record, update);
+    return canonicalizeRendered(applyRecordUpdate(decodeHostRecord(record), decodeHostRecord(update))).value;
 }
-/** `merge(first, second)`: every field present in either update, the second winning. */
+/**
+ * `merge(first, second)`: every field present in either update, the second winning, a cleared
+ * field included. A cleared field is `null` in the result, as the canonical encoding spells it.
+ */
 export function mergeUpdates(first, second) {
-    return mergeUpdateRecords(first, second);
+    return canonicalizeRendered(mergeUpdateRecords(decodeHostRecord(first), decodeHostRecord(second))).value;
 }
 /**
  * `diff(before, after)`: the `<Type>.Update` carrying exactly the fields whose values differ, each
- * with its value from `after`, comparing records and lists structurally.
+ * with its value from `after`, comparing records and lists structurally. A field either record
+ * leaves out is empty there, so a field `after` clears is present and `null` in the result.
  */
 export function diffRecords(before, after) {
-    return diffRecordValues(before, after);
+    return canonicalizeRendered(diffRecordValues(decodeHostRecord(before), decodeHostRecord(after))).value;
 }
 /**
- * `changed(update)`: the names of the fields present in the update, in the order the update
- * record's declaration in `program` lists them. Fails when the program does not declare the
- * update record, since the order is then unknowable from the value.
+ * `changed(update)`: the names of the fields present in the update, cleared ones included, in the
+ * order the update record's declaration in `program` lists them. Fails when the program does not
+ * declare the update record, since the order is then unknowable from the value.
  */
 export function changedFields(update, program) {
     return changedFieldsInOrder(update, declaredFieldOrder(update, program));
@@ -2199,13 +2457,29 @@ function changedFieldsInOrder(update, order) {
     };
     return keys.sort((left, right) => position(left) - position(right));
 }
+/**
+ * Every present field of the update replaces the record's. A present empty value clears the
+ * field, and a record stores no entry for an empty optional field, so the key is removed rather
+ * than set to the empty value.
+ */
 function applyRecordUpdate(record, update) {
     const expected = `${record.$type}.Update`;
     if (update.$type !== expected) {
         fail("nx-ir-intrinsic", `Cannot apply '${update.$type}' to a '${record.$type}': only '${expected}' patches it.`);
     }
-    const { $type: _update, ...fields } = update;
-    return { ...record, ...fields };
+    const output = { ...record };
+    for (const [key, value] of Object.entries(update)) {
+        if (key === "$type") {
+            continue;
+        }
+        if (isEmptyValue(value)) {
+            delete output[key];
+        }
+        else {
+            output[key] = value;
+        }
+    }
+    return output;
 }
 function mergeUpdateRecords(first, second) {
     if (first.$type !== second.$type) {
@@ -2219,36 +2493,51 @@ function diffRecordValues(before, after) {
         fail("nx-ir-intrinsic", `Cannot diff '${before.$type}' against '${after.$type}': the records have different types.`);
     }
     const output = { $type: `${before.$type}.Update` };
-    // A field either record leaves out reads as `null`, so a field only one of them carries still
-    // compares.
+    // A field either record leaves out is an empty optional there, so a field only one of them
+    // carries still compares, and one `after` leaves out is present and empty in the result.
     for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
         if (key === "$type") {
             continue;
         }
-        const next = after[key] ?? null;
-        if (!valuesEqual(before[key] ?? null, next)) {
+        const next = fieldOrEmpty(after, key);
+        if (!valuesEqual(fieldOrEmpty(before, key), next)) {
             output[key] = next;
         }
     }
     return output;
 }
+/** A record's field, or the empty value for a key the record does not store. */
+function fieldOrEmpty(record, key) {
+    return Object.prototype.hasOwnProperty.call(record, key) ? record[key] : [];
+}
+/**
+ * The one equality `==`, match patterns and `diff` share: numbers, strings and booleans by value,
+ * lists by their items in order, records by their fields, and a function value by the
+ * declaration it names. Every value compares as a sequence, so an item equals a one-element list
+ * holding an equal item. The empty value equals only the empty value, being the empty sequence,
+ * and every empty is the one empty value, so an omitted optional field compares equal to one
+ * written empty.
+ */
 function valuesEqual(left, right) {
-    if (Array.isArray(left) || Array.isArray(right)) {
-        return (Array.isArray(left) &&
-            Array.isArray(right) &&
-            left.length === right.length &&
-            left.every((item, index) => valuesEqual(item, right[index] ?? null)));
+    if (Array.isArray(left) && Array.isArray(right)) {
+        return left.length === right.length && left.every((item, index) => valuesEqual(item, right[index]));
     }
-    if (left !== null && typeof left === "object") {
-        if (right === null || typeof right !== "object") {
+    if (Array.isArray(left)) {
+        return left.length === 1 && valuesEqual(left[0], right);
+    }
+    if (Array.isArray(right)) {
+        return right.length === 1 && valuesEqual(left, right[0]);
+    }
+    if (isFunctionReference(left) || isFunctionReference(right)) {
+        return isFunctionReference(left) && isFunctionReference(right) && left.declaration === right.declaration;
+    }
+    if (isObject(left) || isObject(right)) {
+        if (!isObject(left) || !isObject(right)) {
             return false;
         }
-        const leftRecord = left;
-        const rightRecord = right;
-        const leftKeys = Object.keys(leftRecord);
-        const rightKeys = Object.keys(rightRecord);
-        return (leftKeys.length === rightKeys.length &&
-            leftKeys.every((key) => valuesEqual(leftRecord[key] ?? null, rightRecord[key] ?? null)));
+        const leftKeys = Object.keys(left);
+        return (leftKeys.length === Object.keys(right).length &&
+            leftKeys.every((key) => Object.prototype.hasOwnProperty.call(right, key) && valuesEqual(left[key], right[key])));
     }
     return left === right;
 }
@@ -2260,10 +2549,15 @@ function valuesEqual(left, right) {
  *
  * `hasBody` is whether a body was written, which is not the same as whether it produced anything.
  * An element with no body leaves the content property to its declared default; a body that was
- * written and produced nothing binds the empty list, so `<Box>{}</Box>` means what `<Box items={}
+ * written and produced nothing binds the empty value, so `<Box>{}</Box>` means what `<Box items={}
  * />` means, and so do a `for` that iterates zero times and a conditional child that is not taken.
  * Falling back to the default for either would disagree with the interpreter and with generated
- * code, which both bind the empty list.
+ * code, which both bind the empty value.
+ *
+ * <para>The lone-child rule every engine shares: a content property declared `+` or `*` binds an
+ * array however many children were supplied, one included; one declared exactly-one or `?` binds
+ * a single child as the child itself. That is the child's value lifted once to the declared type,
+ * which is what `normalizeValue` does at any sequence site.</para>
  */
 function applyContentBinding(input, contentField, fields, content, path, hasBody) {
     if (content.length === 0 && !hasBody) {
@@ -2276,25 +2570,18 @@ function applyContentBinding(input, contentField, fields, content, path, hasBody
         fail("nx-ir-boundary-field", `${path} field '${contentField}' was supplied both as a property and as content.`);
     }
     const declared = fields.find((field) => field.name === contentField)?.ty;
-    const bindsList = declared !== undefined && isListType(declared);
+    const bindsList = declared !== undefined && admitsMany(declared);
     input[contentField] = bindsList || content.length !== 1 ? [...content] : content[0];
-}
-/**
- * Whether a content property's declared type holds a list, looking through nullability.
- *
- * A list-typed content property binds a list however many children were supplied, including exactly
- * one. Collapsing a single child to the child itself would then fail normalization, and it would
- * disagree with the interpreter, which lists the single child.
- */
-function isListType(ty) {
-    if (ty.kind === "nullable") {
-        return isListType(ty.inner);
-    }
-    return ty.kind === "array";
 }
 /**
  * Normalizes host or program input against a declaration's fields, binding each field's slot in
  * `frame` as it goes so a later field's default can read an earlier field.
+ *
+ * <para>A field that is not written binds its default, or the empty value when its type admits
+ * zero — an optional field, `p?:T`, is typed by its read type `T?` — and is otherwise missing. An
+ * optional field whose value is empty, written or not, is stored as no key at all: the canonical
+ * encoding omits it, and a read of the declared field yields the empty value. Its slot in `frame`
+ * still holds the empty value, so a default or a body reads it as such.</para>
  *
  * `linked` and `declaration` are where the fields were declared: defaults are node indices of that
  * module, and a nominal type resolves through that module's table. `options` are the caller's own,
@@ -2321,21 +2608,26 @@ function normalizeFields(program, linked, declaration, fields, input, frame, pat
         else if (!requireExplicit && field.default >= 0) {
             value = normalizeValue(context, field.ty, evalNode(field.default, context), `${path}.${field.name}`);
         }
-        else if (!field.isRequired && !requireExplicit) {
-            value = null;
+        else if (!field.isRequired && admitsEmpty(field.ty)) {
+            value = [];
         }
         else {
             fail("nx-ir-boundary-field", `Missing required ${path} field '${field.name}'.`, context);
         }
-        output[field.name] = value;
+        if (!(admitsEmpty(field.ty) && isEmptyValue(value))) {
+            output[field.name] = value;
+        }
         frame[firstSlot + offset] = value;
     });
     return output;
 }
 /**
  * Normalizes the fields of an update record: only the fields supplied, each checked against its
- * declared type. An absent field means "unchanged", so it stays absent; a present `null` is
- * accepted only where the field is nullable.
+ * declared type. An absent field means "unchanged", so it stays absent; a present empty value —
+ * `null` or `[]` from a host, the empty value from the program — clears the field, and is accepted
+ * only where the target declares the field optional, which its type says by admitting zero. A
+ * cleared field is stored as present and empty, so key presence carries "cleared"; the canonical
+ * encoder writes it as `null`.
  */
 function normalizePatchFields(context, fields, input, path) {
     const byName = new Map(fields.map((field) => [field.name, field]));
@@ -2350,30 +2642,60 @@ function normalizePatchFields(context, fields, input, path) {
             continue;
         }
         const value = input[field.name];
-        if (value === null && field.ty.kind !== "nullable") {
-            fail("nx-ir-boundary-type", `Expected ${path}.${field.name} to be non-null; an update record sets a field to null only where the field is nullable.`);
+        if ((value === null || isEmptyValue(value)) && !admitsEmpty(field.ty)) {
+            fail("nx-ir-boundary-type", `Expected ${path}.${field.name} to hold a value; an update record clears a field only where the target declares it optional.`);
         }
         output[field.name] = normalizeValue(context, field.ty, value, `${path}.${field.name}`);
     }
     return output;
 }
+/**
+ * Normalizes a value to a declared type, which is where a value takes its site's occurrence.
+ *
+ * <para>At a `seq` site the value is read as its items: a single value is one item, the language's
+ * one-level lift — `xs={3.0}` at `float64+` is a one-element sequence, and the IR records the
+ * value at its own type rather than wrapping it — and a host's `null`, like a missing key, is no
+ * items. No items is the empty value where the occurrence admits zero and an error where it does
+ * not; more than one is an error where it admits one at most. A `+` or `*` value is always an
+ * array and a `?` value that holds an item is the item itself, so `[x]` at a `?` site is `x`. The
+ * lift applies once, since an item type is never a `seq`.</para>
+ *
+ * <para>An exactly-one site takes exactly one value: a one-element sequence reaching it — a `for`
+ * over an optional, say — is read as its element, and `null`, the empty value and a longer
+ * sequence are what it cannot take. `object` is the one exception: it may hold a sequence,
+ * opaquely.</para>
+ */
 function normalizeValue(context, ty, value, path) {
+    if (ty.kind === "seq") {
+        const items = value === null ? [] : Array.isArray(value) ? value : [value];
+        if (items.length === 0) {
+            if (ty.mayBeEmpty) {
+                return [];
+            }
+            fail("nx-ir-boundary-type", `Expected ${path} to hold at least one value, got the empty value.`);
+        }
+        if (!ty.mayBeMany && items.length > 1) {
+            fail("nx-ir-boundary-type", `Expected ${path} to hold at most one value, got a sequence of ${items.length}.`);
+        }
+        const normalized = items.map((item, index) => normalizeValue(context, ty.item, item, `${path}[${index}]`));
+        return ty.mayBeMany ? normalized : normalized[0];
+    }
+    if (Array.isArray(value) && !isObjectType(ty)) {
+        if (value.length === 1) {
+            return normalizeValue(context, ty, value[0], path);
+        }
+        fail("nx-ir-boundary-type", value.length === 0
+            ? `Expected ${path} to hold a value, got the empty value.`
+            : `Expected ${path} to hold one value, got a sequence of ${value.length}.`);
+    }
+    if (value === null) {
+        fail("nx-ir-boundary-type", `Expected ${path} to hold a value, got null.`);
+    }
     switch (ty.kind) {
         case "primitive":
             return normalizePrimitiveValue(ty.name, value, path);
         case "nominal":
             return normalizeNominalValue(context, ty, value, path);
-        case "array": {
-            // A single value at a list-typed site is a list of one. That is the language's rule, not a
-            // leniency: `Shadows={ <SkiaShadow /> }` and `xs={3.0}` both evaluate to one-element lists
-            // under the interpreter, and the IR records the value at its own type rather than wrapping
-            // it, leaving the coercion to normalization. The lift applies once: an element type is an
-            // item type, so the recursion below never wraps a value a second time.
-            const items = Array.isArray(value) ? value : [value];
-            return items.map((item, index) => normalizeValue(context, ty.element, item, `${path}[${index}]`));
-        }
-        case "nullable":
-            return value === null ? null : normalizeValue(context, ty.inner, value, path);
         case "function": {
             // A function value from the program is already a reference; one from a host is the
             // canonical record, resolved to the declaration it names. The checker related the value's
@@ -2600,9 +2922,9 @@ function evalBinary(context, nodeIndex, operator, lhs, rhs) {
             }
             return lhs + rhs;
         case "eq":
-            return deepEqual(lhs, rhs);
+            return valuesEqual(lhs, rhs);
         case "ne":
-            return !deepEqual(lhs, rhs);
+            return !valuesEqual(lhs, rhs);
         case "lt":
             return number(lhs) < number(rhs);
         case "le":
@@ -2670,9 +2992,6 @@ function primitiveText(context, nodeIndex, value, type) {
     }
 }
 function describeValue(value) {
-    if (value === null) {
-        return "null";
-    }
     return Array.isArray(value) ? "a list" : `a ${typeof value}`;
 }
 function checkedNumber(context, nodeIndex, value, operation) {
@@ -2690,23 +3009,47 @@ function checkedInteger(context, nodeIndex, value, operation) {
 function normalizeSignedZero(value) {
     return Object.is(value, -0) ? 0 : value;
 }
-function truthy(value) {
-    return Boolean(value);
+/** A condition or a logical operand, which the checker typed as a boolean. */
+function requireBoolean(context, nodeIndex, value, what) {
+    if (typeof value !== "boolean") {
+        fail("nx-ir-type", `Expected a boolean for '${what}', got ${describeValue(value)}.`, context, nodeIndex);
+    }
+    return value;
 }
+/** The empty value: the empty sequence, which is also the absent value. */
+function isEmptyValue(value) {
+    return Array.isArray(value) && value.length === 0;
+}
+/**
+ * The item an optional value holds, or `undefined` when it is empty. A `?` value that holds an
+ * item is the item itself; a one-element sequence reaching an optional receiver — a `for` over an
+ * optional, before any typed site normalized it — is read as that element.
+ */
+function optionalItem(value) {
+    if (Array.isArray(value) && value.length <= 1) {
+        return value[0];
+    }
+    return value;
+}
+/**
+ * Whether a match arm's pattern matches the scrutinee. The `{}` pattern — the empty value —
+ * matches exactly the empty value; a record pattern matches by `$type`; anything else by the
+ * language's equality.
+ */
 function patternMatches(value, pattern) {
+    if (isEmptyValue(pattern) || isEmptyValue(value)) {
+        return isEmptyValue(pattern) && isEmptyValue(value);
+    }
     if (isObject(value) && isObject(pattern) && typeof pattern.$type === "string") {
         return value.$type === pattern.$type;
     }
-    return deepEqual(value, pattern);
-}
-function deepEqual(lhs, rhs) {
-    return JSON.stringify(lhs) === JSON.stringify(rhs);
+    return valuesEqual(value, pattern);
 }
 function isFunctionReference(value) {
     return value instanceof FunctionReferenceValue;
 }
 function requireObject(value, path) {
-    if (!isObject(value) || Array.isArray(value)) {
+    if (!isObject(value)) {
         fail("nx-ir-boundary-type", `Expected ${path} to be an object.`);
     }
     return value;

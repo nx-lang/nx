@@ -17,11 +17,6 @@ pub enum RuntimeErrorKind {
     /// Triggered when attempting to divide or modulo by zero
     DivisionByZero,
 
-    /// Operation on null value
-    ///
-    /// Triggered when attempting arithmetic or logical operations on null
-    NullOperation { operation: String },
-
     /// Type mismatch in operation
     ///
     /// Triggered when operand types don't match operation requirements
@@ -39,8 +34,11 @@ pub enum RuntimeErrorKind {
 
     /// Parameter count mismatch in function call
     ///
-    /// Triggered when function is called with wrong number of arguments
+    /// Triggered when function is called with wrong number of arguments: fewer than `required`,
+    /// the parameters before the trailing ones a caller may omit, or more than `expected`, all of
+    /// them.
     ParameterCountMismatch {
+        required: usize,
         expected: usize,
         actual: usize,
         function: SmolStr,
@@ -71,9 +69,6 @@ pub enum RuntimeErrorKind {
 
     /// Case not declared on the referenced union type
     UnionCaseNotFound { union: SmolStr, case: SmolStr },
-
-    /// Record field not found on the given record value
-    RecordFieldNotFound { record: SmolStr, field: SmolStr },
 
     /// Array index was outside the available element range
     ArrayIndexOutOfBounds { index: i64, length: usize },
@@ -134,9 +129,6 @@ impl fmt::Display for RuntimeErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             RuntimeErrorKind::DivisionByZero => write!(f, "Division by zero"),
-            RuntimeErrorKind::NullOperation { operation } => {
-                write!(f, "Cannot perform {} on null value", operation)
-            }
             RuntimeErrorKind::TypeMismatch {
                 expected,
                 actual,
@@ -150,9 +142,20 @@ impl fmt::Display for RuntimeErrorKind {
                 write!(f, "Undefined variable: {}", name)
             }
             RuntimeErrorKind::ParameterCountMismatch {
+                required,
                 expected,
                 actual,
                 function,
+            } if required < expected => write!(
+                f,
+                "Function {} expects {} to {} parameter(s), got {}",
+                function, required, expected, actual
+            ),
+            RuntimeErrorKind::ParameterCountMismatch {
+                expected,
+                actual,
+                function,
+                ..
             } => write!(
                 f,
                 "Function {} expects {} parameter(s), got {}",
@@ -176,12 +179,9 @@ impl fmt::Display for RuntimeErrorKind {
             RuntimeErrorKind::UnionCaseNotFound { union, case } => {
                 write!(f, "Union '{}' has no case named '{}'", union, case)
             }
-            RuntimeErrorKind::RecordFieldNotFound { record, field } => {
-                write!(f, "Record '{}' has no field named '{}'", record, field)
-            }
             RuntimeErrorKind::ArrayIndexOutOfBounds { index, length } => write!(
                 f,
-                "Array index {} is out of bounds for length {}",
+                "Index {} is out of bounds for length {}",
                 index, length
             ),
             RuntimeErrorKind::RecordTypeNotFound { name } => {

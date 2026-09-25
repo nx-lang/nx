@@ -1,0 +1,22 @@
+// A parameter a call leaves out is filled by the function that declares it: with its default,
+// which may read the parameters before it, or with empty when it is optional. A positional call
+// leaves out trailing parameters; an element call leaves out any of them by name.
+import "../lib/text.nx"
+
+let add(a:int, b:int = { a * 10 }, c?:int) = { a + b + (c ?? 0) }
+let oneArgument() = { add(1) }
+let twoArguments() = { add(1, 2) }
+let allArguments() = { add(1, 2, 3) }
+let skipMiddle() = { <add a=1 c=5 /> }
+
+let fallback(a:int, b?:int) = { b ?? a }
+let emptyOptional() = { fallback(4) }
+
+// A default is lifted to its parameter's occurrence, as an argument is.
+let count(xs:int+ = { 7 }) = { xs }
+let liftedDefault() = { count() }
+
+let importedDefault() = { title("Ada") }
+let importedAll() = { title("Ada", "Ms.", "!") }
+let elementDefaults() = { <Badge label="x" /> }
+let elementSkip() = { <Badge label="x" tone="!" /> }

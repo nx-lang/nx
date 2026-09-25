@@ -8,7 +8,7 @@
 // shape. The original shows a toast with the pointer position instead; the position is not part
 // of the emit's payload, so the label says only that the request was taken.
 
-component <Demo extends DrawnNode Title:string content Children:DrawnNode[] /> = {
+component <Demo extends DrawnNode Title:string content Children:DrawnNode+ /> = {
   <SkiaStack Spacing=8 WidthRequest=150>
     <SkiaShape CornerRadius=<CornerRadius TopLeft=8 /> WidthRequest=150 HeightRequest=110
       BackgroundColor="#2B3035">

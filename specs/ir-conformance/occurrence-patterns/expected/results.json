@@ -1,0 +1,17 @@
+{
+  "main.nx::described": "Ada",
+  "main.nx::root": "Ada",
+  "main.nx::undescribed": "anonymous",
+  "main.nx::withAuthor": {
+    "$type": "Book",
+    "author": {
+      "$type": "Person",
+      "name": "Ada"
+    },
+    "title": "A"
+  },
+  "main.nx::withoutAuthor": {
+    "$type": "Book",
+    "title": "B"
+  }
+}

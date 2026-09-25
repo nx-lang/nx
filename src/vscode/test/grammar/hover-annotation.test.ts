@@ -2,7 +2,7 @@
 // not NX: a parameter, a field, and a union case have no standalone spelling in the language, so
 // hover writes them with a parenthesized kind. Without a rule for that shape the line falls
 // outside every declaration context the grammar scopes inside — the names go unhighlighted, and
-// the annotation colon and `?` are scoped as a ternary's.
+// the optional mark and a type's `?` are scoped as a presence test.
 import { expect } from 'chai';
 import type { IGrammar } from 'vscode-textmate';
 import { expectScopes, loadGrammar, scopesForSubstring } from './helpers.js';
@@ -19,8 +19,8 @@ describe('NX hover annotations', () => {
     grammar = await loadGrammar();
   });
 
-  it('scopes the owner, the property, and its type', () => {
-    const line = '(property) ShapeCommon.shadows: Shadow[]?';
+  it('scopes the owner, the property, its optional mark, and its type', () => {
+    const line = '(property) ShapeCommon.shadows?: Shadow+';
 
     expectScopes(scopes(grammar, line, 'property'), 'the kind').toInclude(
       'meta.annotation.hover.kind.nx'
@@ -31,25 +31,32 @@ describe('NX hover annotations', () => {
     expectScopes(scopes(grammar, line, 'shadows'), 'the property').toInclude(
       'variable.other.property.nx'
     );
+    const { tokens } = grammar.tokenizeLine(line, null);
+    const property = tokens.find(t => line.slice(t.startIndex, t.endIndex) === 'shadows');
+    expect(property, 'the property is a token of its own, without the `?`').to.not.equal(undefined);
+    expectScopes(scopes(grammar, line, '?'), 'the optional mark')
+      .toInclude('keyword.operator.optional.nx')
+      .toNotInclude('keyword.operator.type-modifier.nx');
     expectScopes(scopes(grammar, line, 'Shadow'), 'the declared type').toInclude(
       'entity.name.type.nx'
     );
-    expectScopes(scopes(grammar, line, '[]?'), 'the type suffixes').toInclude(
+    expectScopes(scopes(grammar, line, '+'), 'the type suffix').toInclude(
       'keyword.operator.type-modifier.nx'
     );
   });
 
-  // The colon of an annotation and the `?` of a nullable type are not a ternary's. Outside a
-  // declaration context they were scoped as one, which is the defect this rule exists to fix.
-  it('does not scope the annotation colon or the nullable suffix as a ternary', () => {
-    const line = '(property) ShapeCommon.shadows: Shadow[]?';
+  // The colon of an annotation and the `?` of an optional type are not an expression's. Outside a
+  // declaration context the `?` was scoped as an operator, which is the defect this rule exists
+  // to fix.
+  it('does not scope the annotation colon or the type suffix as a presence test', () => {
+    const line = '(parameter) p: Person?';
 
-    expectScopes(scopes(grammar, line, ':'), 'the annotation colon')
-      .toInclude('punctuation.separator.type.annotation.nx')
-      .toNotInclude('punctuation.separator.conditional.nx');
-    expectScopes(scopes(grammar, line, '[]?'), 'the nullable suffix').toNotInclude(
-      'keyword.operator.conditional.nx'
+    expectScopes(scopes(grammar, line, ':'), 'the annotation colon').toInclude(
+      'punctuation.separator.type.annotation.nx'
     );
+    expectScopes(scopes(grammar, line, '?'), 'the type suffix')
+      .toInclude('keyword.operator.type-modifier.nx')
+      .toNotInclude('keyword.operator.presence.nx');
   });
 
   it('scopes a parameter and its primitive type', () => {
@@ -110,7 +117,7 @@ describe('NX hover annotations', () => {
   // hover content, or to suppress a rule inside it — sees all three.
   it('marks every shape as a hover annotation line', () => {
     for (const line of [
-      '(property) ShapeCommon.shadows: Shadow[]?',
+      '(property) ShapeCommon.shadows?: Shadow+',
       '(case) Role.admin',
       '(built-in type) Element'
     ]) {

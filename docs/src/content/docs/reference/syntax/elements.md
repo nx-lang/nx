@@ -143,11 +143,12 @@ Element-shaped construction also builds patches. Every record `T` has an update 
 whose fields are all optional, so the element names only the fields that change:
 
 ```nx
-<ProfileEditor changes=<User.Update email={null} /> />
+<ProfileEditor changes=<User.Update email={} /> />
 ```
 
-Here `email` is set to null and every other `User` field is left as it was; the value carries only
-the `email` key. See [Updating state](/reference/syntax/functions#updating-state).
+Here `email` is cleared — present and empty, encoded as JSON `null` — and every other `User` field
+is left as it was; the value carries only the `email` key. Clearing is allowed only for a field
+declared optional, such as `email?:string`. See [Updating state](/reference/syntax/functions#updating-state).
 
 ## See also
 - Language Tour: [Elements](/language-tour/elements)

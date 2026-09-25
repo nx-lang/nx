@@ -1,5 +1,5 @@
 module input.nx fingerprint 2080198121860257358
-links drawnui.nx version "9" fingerprint 10443083107296702259
+links drawnui.nx version "9" fingerprint 3992344325433453158
 entrypoints functions [root] components []
 
 value title @3:1-3:26 =

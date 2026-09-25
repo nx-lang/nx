@@ -47,6 +47,7 @@ fn test_add_function_direct_hir() {
     let func = Function {
         name: Name::new("add"),
         visibility: nx_hir::Visibility::Export,
+        form: nx_hir::FunctionForm::Paren,
         params,
         return_type: None,
         body: add_expr,
@@ -94,6 +95,7 @@ fn test_subtract_function_direct_hir() {
     let func = Function {
         name: Name::new("sub"),
         visibility: nx_hir::Visibility::Export,
+        form: nx_hir::FunctionForm::Paren,
         params,
         return_type: None,
         body: sub_expr,
@@ -140,6 +142,7 @@ fn test_multiply_function_direct_hir() {
     let func = Function {
         name: Name::new("mul"),
         visibility: nx_hir::Visibility::Export,
+        form: nx_hir::FunctionForm::Paren,
         params,
         return_type: None,
         body: mul_expr,
@@ -186,6 +189,7 @@ fn test_divide_function_direct_hir() {
     let func = Function {
         name: Name::new("div"),
         visibility: nx_hir::Visibility::Export,
+        form: nx_hir::FunctionForm::Paren,
         params,
         return_type: None,
         body: div_expr,
@@ -232,6 +236,7 @@ fn test_division_by_zero_direct_hir() {
     let func = Function {
         name: Name::new("div"),
         visibility: nx_hir::Visibility::Export,
+        form: nx_hir::FunctionForm::Paren,
         params,
         return_type: None,
         body: div_expr,
@@ -281,6 +286,7 @@ fn test_string_concat_direct_hir() {
     let func = Function {
         name: Name::new("concat"),
         visibility: nx_hir::Visibility::Export,
+        form: nx_hir::FunctionForm::Paren,
         params,
         return_type: None,
         body: concat_expr,
@@ -345,6 +351,7 @@ fn test_block_with_variables_direct_hir() {
     let func = Function {
         name: Name::new("compute"),
         visibility: nx_hir::Visibility::Export,
+        form: nx_hir::FunctionForm::Paren,
         params,
         return_type: None,
         body: block_expr,
@@ -406,6 +413,7 @@ fn test_complex_arithmetic_direct_hir() {
     let func = Function {
         name: Name::new("calc"),
         visibility: nx_hir::Visibility::Export,
+        form: nx_hir::FunctionForm::Paren,
         params,
         return_type: None,
         body: add_expr,
@@ -446,6 +454,7 @@ fn array_index_module(index: i64) -> LoweredModule {
     module.add_item(Item::Function(Function {
         name: Name::new("root"),
         visibility: nx_hir::Visibility::Export,
+        form: nx_hir::FunctionForm::Paren,
         params: Vec::new(),
         return_type: None,
         body,
@@ -477,7 +486,7 @@ fn test_array_index_out_of_bounds_direct_hir() {
 
         assert_eq!(
             error.to_string(),
-            format!("Array index {index} is out of bounds for length 2")
+            format!("Index {index} is out of bounds for length 2")
         );
         match error.kind() {
             RuntimeErrorKind::ArrayIndexOutOfBounds {

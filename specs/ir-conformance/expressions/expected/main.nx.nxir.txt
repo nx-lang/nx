@@ -1,5 +1,5 @@
-module main.nx fingerprint 15107792274714562326
-entrypoints functions [add arithmetic integerDivision realDivision integerRemainder realRemainder comparisons moreComparisons ordered andSkipsRight orSkipsRight andTakesRight orTakesRight negation logicalNot greeting chooseBig small classify classified doubled squares big maybe element root] components []
+module main.nx fingerprint 12997715528169375669
+entrypoints functions [add arithmetic integerDivision realDivision integerRemainder realRemainder comparisons moreComparisons ordered andSkipsRight orSkipsRight andTakesRight orTakesRight negation logicalNot greeting chooseBig small classify classified stageLabel reviewStage loadLabel idleLoad failedLoad bareLabel bareFailed doubled squares big maybe element root] components []
 
 value answer @2:1-2:16 =
   42
@@ -10,73 +10,70 @@ value name @3:1-3:17 =
 value flag @4:1-4:16 =
   true
 
-value nothing @5:1-5:19 =
-  null
-
-value items @6:1-6:22 =
+value items @5:1-5:22 =
   [1, 2, 3]
 
-value zero @7:1-7:13 =
+value zero @6:1-6:13 =
   0
 
-function add(a: int, b: int) @9:1-9:34 =
+function add(a: int, b: int) @8:1-8:34 =
   (a add b)
 
-function arithmetic() @10:1-10:41 =
+function arithmetic() @9:1-9:41 =
   ((add(1, 2) mul 3) sub 4)
 
-function integerDivision() @11:1-11:34 =
+function integerDivision() @10:1-10:34 =
   (7 idiv 2)
 
-function realDivision() @12:1-12:35 =
+function realDivision() @11:1-11:35 =
   (7.0 div 2.0)
 
-function integerRemainder() @13:1-13:35 =
+function integerRemainder() @12:1-12:35 =
   (7 imod 3)
 
-function realRemainder() @14:1-14:36 =
+function realRemainder() @13:1-13:36 =
   (7.5 mod 2.0)
 
-function comparisons(x: int) @15:1-15:58 =
+function comparisons(x: int) @14:1-14:58 =
   (((x lt 10) and (x ge 0)) or (x eq 100))
 
-function moreComparisons(x: int) @16:1-16:59 =
+function moreComparisons(x: int) @15:1-15:59 =
   (((x gt 1) and (x le 5)) and (x ne 3))
 
-function ordered() @17:1-17:57 =
+function ordered() @16:1-16:57 =
   (comparisons(5) and moreComparisons(2))
 
-function andSkipsRight() @20:1-20:53 =
+function andSkipsRight() @19:1-19:53 =
   ((answer lt 0) and ((1 idiv zero) gt 0))
 
-function orSkipsRight() @21:1-21:52 =
+function orSkipsRight() @20:1-20:52 =
   ((answer gt 0) or ((1 idiv zero) gt 0))
 
-function andTakesRight() @22:1-22:53 =
+function andTakesRight() @21:1-21:53 =
   ((answer gt 0) and (answer lt 100))
 
-function orTakesRight() @23:1-23:52 =
+function orTakesRight() @22:1-22:52 =
   ((answer lt 0) or (answer eq 42))
 
-function negation() @24:1-24:29 =
+function negation() @23:1-23:29 =
   neg answer
 
-function logicalNot() @25:1-25:29 =
+function logicalNot() @24:1-24:29 =
   not flag
 
-function greeting() @26:1-26:38 =
+function greeting() @25:1-25:38 =
   ("Hello, " concat name)
 
-function chooseBig(x: int) @27:1-27:52 =
+function chooseBig(x: int) @26:1-26:64 =
   if (x gt 10) then
     "big"
   else
     "small"
 
-function small() @28:1-28:31 =
+function small() @27:1-27:31 =
   chooseBig(3)
 
-function classify(x: int) @29:1-35:2 =
+function classify(x: int) @28:1-34:2 =
   if x is
     0 =>
       "zero"
@@ -85,30 +82,75 @@ function classify(x: int) @29:1-35:2 =
     else =>
       "many"
 
-function classified() @36:1-36:35 =
+function classified() @35:1-35:35 =
   classify(2)
 
-function doubled() @37:1-37:66 =
+union Stage @38:1-38:35
+  case draft constant
+  case review constant
+  case done constant
+
+union Load @39:1-39:45
+  case idle constant
+  case failed
+    message: string required
+
+function stageLabel(s: Stage) @40:1-40:107 =
+  if s is
+    Stage.draft =>
+      "draft"
+    Stage.review =>
+      "review"
+    else =>
+      "done"
+
+function reviewStage() @41:1-41:49 =
+  stageLabel(Stage.review)
+
+function loadLabel(l: Load) @42:1-42:86 =
+  if l is
+    Load.idle =>
+      "idle"
+    Load.failed =>
+      l.message
+
+function idleLoad() @43:1-43:42 =
+  loadLabel(Load.idle)
+
+function failedLoad() @44:1-44:68 =
+  loadLabel(<Load.failed message="Offline" />)
+
+function bareLabel(l: Load) @45:1-45:76 =
+  if l is
+    Load.idle =>
+      "idle"
+    Load.failed =>
+      l.message
+
+function bareFailed() @46:1-46:68 =
+  bareLabel(<Load.failed message="Offline" />)
+
+function doubled() @47:1-47:66 =
   for item, index in items yield
     ((item mul 2) add index)
 
-function squares() @38:1-38:54 =
+function squares() @48:1-48:54 =
   for item in items yield
     (item mul item)
 
-function big() @39:1-39:33 =
+function big() @49:1-49:33 =
   9007199254740993
 
-function maybe() @40:1-40:41 =
+function maybe() @50:1-50:53 =
   if flag then
     name
   else
     "nobody"
 
-function element() @41:1-41:63 =
+function element() @51:1-51:63 =
   <div class="box" count=answer>
     <span />
   </div>
 
-function root() @42:1-42:30 =
+function root() @52:1-52:30 =
   arithmetic()

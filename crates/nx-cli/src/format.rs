@@ -21,7 +21,8 @@ use std::fmt::Write;
 /// An empty list is not among them — it is emitted as `{}`, on its own and in property position,
 /// at every list-typed site, including one
 /// whose declared default is itself empty, so that rendering never depends on reasoning about
-/// defaults. Emptiness is not what decides the nested case: `{{"a"}}` is as ungrammatical as `{{}}`.
+/// defaults. Emptiness is not what decides the nested case: `{{"a"}}` is ungrammatical, and `{{}}`
+/// reads back as the empty value rather than a list holding one.
 pub fn format_value(value: &Value) -> Result<String, String> {
     let mut output = String::new();
     format_value_inner(value, &mut output, 0)?;
@@ -36,7 +37,6 @@ fn format_value_inner(value: &Value, output: &mut String, indent: usize) -> Resu
         Value::Float(f) => output.push_str(&format_real_literal(f.to_string(), f.is_finite())),
         Value::String(s) => output.push_str(s.as_str()),
         Value::Boolean(b) => write!(output, "{}", b).unwrap(),
-        Value::Null => output.push_str("null"),
 
         // A constant union case names its union, exactly as the qualified source form does.
         Value::UnionCase { union, case } => {
@@ -122,7 +122,6 @@ fn format_property_value(value: &Value, output: &mut String, indent: usize) -> R
         Value::Float32(f) => output.push_str(&format_real_literal(f.to_string(), f.is_finite())),
         Value::Float(f) => output.push_str(&format_real_literal(f.to_string(), f.is_finite())),
         Value::Boolean(b) => write!(output, "{}", b).unwrap(),
-        Value::Null => output.push_str("null"),
         // A bare case name; the declaring union comes from the target type.
         Value::UnionCase { case, .. } => output.push_str(case.as_str()),
         // A function value is bound by naming the declaration, `Row={ContactRow}`.
@@ -138,10 +137,10 @@ fn format_property_value(value: &Value, output: &mut String, indent: usize) -> R
                 if i > 0 {
                     output.push(' ');
                 }
-                // A brace inside a brace does not parse: `value_list_item_expression` does not
-                // admit a `ValuesBracedExpression`, so `{{"a"}}` is a syntax error and so is `{{}}`.
-                // A list of lists therefore has no NX spelling at any depth, empty or not, and is
-                // reported rather than rendered as source that cannot be read back.
+                // A brace inside a brace does not parse, so `{{"a"}}` is a syntax error; `{{}}`
+                // parses, but as the empty value, since a sequence is flat. A list of lists
+                // therefore has no NX spelling at any depth, empty or not, and is reported rather
+                // than rendered as source that would not read back as itself.
                 if matches!(element, Value::Array(_)) {
                     return Err(unspellable_nested_list());
                 }
@@ -214,7 +213,7 @@ mod tests {
         let mut fields = FxHashMap::default();
         fields.insert(SmolStr::new("w"), Value::Float(1.5));
         fields.insert(SmolStr::new("flag"), Value::Boolean(true));
-        fields.insert(SmolStr::new("opt"), Value::Null);
+        fields.insert(SmolStr::new("opt"), Value::empty());
         fields.insert(
             SmolStr::new("fit"),
             Value::UnionCase {
@@ -239,7 +238,7 @@ mod tests {
         let formatted = formatted(&value);
         assert_eq!(
             formatted.trim(),
-            "<Box fit=cover flag=true opt=null state=loading w=1.5 />"
+            "<Box fit=cover flag=true opt={} state=loading w=1.5 />"
         );
         assert!(
             !formatted.contains('"'),
@@ -288,7 +287,7 @@ mod tests {
         fields.insert(SmolStr::new("neg"), Value::Float(-1.0));
         fields.insert(SmolStr::new("n"), Value::Int(42));
         fields.insert(SmolStr::new("flag"), Value::Boolean(true));
-        fields.insert(SmolStr::new("opt"), Value::Null);
+        fields.insert(SmolStr::new("opt"), Value::empty());
         fields.insert(
             SmolStr::new("fit"),
             Value::UnionCase {
@@ -311,7 +310,7 @@ mod tests {
         let source = format!(
             "type Fit = fill | contain | cover\n\
              type LoadState = idle | loading\n\
-             type Box = {{ w: float64 neg: float64 n: int flag: boolean opt: string? \
+             type Box = {{ w: float64 neg: float64 n: int flag: boolean opt?: string \
              fit: Fit state: LoadState }}\n{}",
             formatted(&value)
         );
@@ -358,9 +357,11 @@ mod tests {
         assert_eq!(formatted(&Value::Boolean(false)), "false");
     }
 
+    /// The empty value — what an optional property that was not written holds — is the empty
+    /// sequence, and `{}` is its spelling.
     #[test]
-    fn test_format_null() {
-        assert_eq!(formatted(&Value::Null), "null");
+    fn test_format_empty_value() {
+        assert_eq!(formatted(&Value::empty()), "{}");
     }
 
     #[test]
@@ -444,7 +445,7 @@ mod tests {
     #[test]
     fn test_format_action_handler() {
         let mut module = nx_hir::LoweredModule::new(nx_hir::SourceId::new(0));
-        let body = module.alloc_expr(nx_hir::ast::Expr::Literal(nx_hir::ast::Literal::Null));
+        let body = module.alloc_expr(nx_hir::ast::Expr::Literal(nx_hir::ast::Literal::Int(0)));
         let value = Value::ActionHandler {
             module_id: nx_interpreter::RuntimeModuleId::new(0),
             component: nx_hir::Name::new("SearchBox"),
@@ -545,7 +546,7 @@ mod tests {
         };
 
         let source = format!(
-            "type Box = {{ items: string[] }}\nlet <make /> = {{ {} }}\n",
+            "type Box = {{ items?: string+ }}\nlet <make /> = {{ {} }}\n",
             formatted(&value)
         );
 
@@ -557,48 +558,13 @@ mod tests {
             source
         );
 
+        // An optional field holding the empty value is not stored, so the record carries no
+        // entry for it; an entry, if one were stored, would have to be the empty value.
         match evaluate(&source, "make") {
             Value::Record { fields, .. } => match fields.get(&SmolStr::new("items")) {
-                Some(Value::Array(items)) => {
-                    assert!(items.is_empty(), "expected no items, got: {items:?}")
-                }
-                other => panic!("expected an empty list, got: {other:?}"),
-            },
-            other => panic!("expected a record, got: {other:?}"),
-        }
-    }
-
-    /// Omission is only sound where the declared default is itself empty. This is the case that
-    /// rules it out as a general strategy: omitting the field here re-reads as the default.
-    #[test]
-    fn test_format_empty_list_at_a_field_with_a_non_empty_default_still_renders() {
-        let mut fields = FxHashMap::default();
-        fields.insert(SmolStr::new("items"), Value::Array(Vec::new()));
-        let value = Value::Record {
-            type_name: nx_hir::Name::new("Box"),
-            fields,
-        };
-
-        let source = format!(
-            "type Box = {{ items: string[] = {{\"a\" \"b\"}} }}\nlet <make /> = {{ {} }}\n",
-            formatted(&value)
-        );
-
-        let result = nx_types::check_str(&source, "roundtrip.nx");
-        assert!(
-            result.errors().is_empty(),
-            "formatted output should type check, got: {:?}\nsource:\n{}",
-            result.errors(),
-            source
-        );
-
-        match evaluate(&source, "make") {
-            Value::Record { fields, .. } => match fields.get(&SmolStr::new("items")) {
-                Some(Value::Array(items)) => assert!(
-                    items.is_empty(),
-                    "the rendered empty list must not re-read as the declared default, got: {items:?}"
-                ),
-                other => panic!("expected an empty list, got: {other:?}"),
+                None => {}
+                Some(value) if value.is_empty_value() => {}
+                other => panic!("expected the empty value, got: {other:?}"),
             },
             other => panic!("expected a record, got: {other:?}"),
         }
@@ -654,8 +620,8 @@ mod tests {
 
     /// A list of lists is reported, not rendered.
     ///
-    /// The inner braces would be emitted as `{{}}`, and `value_list_item_expression` does not admit
-    /// a `ValuesBracedExpression`, so that output is a syntax error. Giving the empty list a
+    /// The inner braces would be emitted as `{{}}`, which reads back as the empty value rather than
+    /// a list holding an empty list, since a sequence is flat. Giving the empty list a
     /// spelling removed the `is_empty` guard that used to reject this case for an unrelated reason;
     /// the case is caught on its own terms instead.
     #[test]

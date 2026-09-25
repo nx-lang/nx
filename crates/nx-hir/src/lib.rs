@@ -245,6 +245,13 @@ pub struct Param {
     pub ty: ast::TypeRef,
     /// Whether this parameter receives markup body content for element-style invocation.
     pub is_content: bool,
+    /// Whether the parameter carries the `?` mark: it may be omitted, and reads inside the body
+    /// as a type that admits zero.
+    pub optional: bool,
+    /// The value an omitted parameter takes. The function evaluates it, not the caller, so a
+    /// library can change a default without its callers being rebuilt; it may read the
+    /// parameters declared before it.
+    pub default: Option<ExprId>,
     /// Source location
     pub span: TextSpan,
 }
@@ -261,9 +268,32 @@ impl Param {
             name,
             ty,
             is_content,
+            optional: false,
+            default: None,
             span,
         }
     }
+
+    /// Marks the parameter optional.
+    pub fn optional(mut self) -> Self {
+        self.optional = true;
+        self
+    }
+
+    /// Whether a caller may leave the parameter out: it is optional or has a default.
+    pub fn is_omissible(&self) -> bool {
+        self.optional || self.default.is_some()
+    }
+}
+
+/// How a function declares its parameters, which decides how it may be called.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FunctionForm {
+    /// `let <Name a:T />`: called only as an element, binding arguments by name.
+    #[default]
+    Element,
+    /// `let name(a:T)`: called by position, `name(x)`, or as an element.
+    Paren,
 }
 
 /// Function declaration with parameters, return type, and body.
@@ -273,6 +303,8 @@ pub struct Function {
     pub name: Name,
     /// Declaration visibility
     pub visibility: Visibility,
+    /// How the parameters were declared
+    pub form: FunctionForm,
     /// Parameter list
     pub params: Vec<Param>,
     /// Return type annotation (None means inferred)
@@ -327,6 +359,8 @@ pub struct UnionCaseField {
     pub ty: ast::TypeRef,
     /// Whether this field receives markup body content for element-style construction.
     pub is_content: bool,
+    /// Whether the field carries the `?` mark: omitted at construction it is the empty value.
+    pub optional: bool,
     /// Default value expression, if present.
     pub default: Option<ExprId>,
     /// Source span
@@ -346,6 +380,7 @@ impl UnionCaseField {
             name,
             ty,
             is_content,
+            optional: false,
             default,
             span,
         }
@@ -357,6 +392,7 @@ impl UnionCaseField {
             name: field.name,
             ty: field.ty,
             is_content: field.is_content,
+            optional: field.optional,
             default: field.default,
             span: field.span,
         }
@@ -451,7 +487,7 @@ pub enum UpdateIntrinsic {
     Merge,
     /// `diff(before, after): T.Update` — the fields whose values differ, taken from `after`.
     Diff,
-    /// `changed(update): T.Property[]` — the present fields, in declaration order.
+    /// `changed(update): T.Property*` — the present fields, in declaration order.
     Changed,
 }
 
@@ -535,7 +571,7 @@ pub fn type_ref_names(ty: &ast::TypeRef) -> Vec<&Name> {
                     collect(arg, names);
                 }
             }
-            ast::TypeRef::Array(inner) | ast::TypeRef::Nullable(inner) => collect(inner, names),
+            ast::TypeRef::Seq { inner, .. } => collect(inner, names),
             ast::TypeRef::Function {
                 params,
                 return_type,
@@ -561,6 +597,11 @@ pub struct RecordField {
     pub ty: ast::TypeRef,
     /// Whether this field receives markup body content for element-style construction.
     pub is_content: bool,
+    /// Whether the field carries the `?` mark (`subtitle?:string`): it may be omitted at
+    /// construction, in which case it is the empty value, and it reads as a type that admits
+    /// zero. The mark lives here rather than on `ty`, so an update record's clearable rule and
+    /// the read type can each see the mark and the declared type separately.
+    pub optional: bool,
     /// Default value expression (if present)
     pub default: Option<ExprId>,
     /// Source span
@@ -580,9 +621,16 @@ impl RecordField {
             name,
             ty,
             is_content,
+            optional: false,
             default,
             span,
         }
+    }
+
+    /// Marks the field optional.
+    pub fn optional(mut self) -> Self {
+        self.optional = true;
+        self
     }
 }
 
@@ -649,6 +697,8 @@ pub struct EffectiveField {
     pub ty: ast::TypeRef,
     /// Whether this field receives markup body content for element-style construction.
     pub is_content: bool,
+    /// Whether the field carries the `?` mark; see [`RecordField::optional`].
+    pub optional: bool,
     /// Stable identity of the module that declared the field.
     pub module_identity: String,
     /// Default expression together with the module that owns it.
@@ -666,11 +716,12 @@ impl EffectiveField {
         let default = field
             .default
             .map(|expr_id| QualifiedExprRef::new(module_identity.clone(), expr_id));
-        let is_required = field.default.is_none() && !matches!(field.ty, ast::TypeRef::Nullable(_));
+        let is_required = field.default.is_none() && !field.optional;
         Self {
             name: field.name,
             ty: field.ty,
             is_content: field.is_content,
+            optional: field.optional,
             module_identity,
             default,
             is_required,
@@ -687,6 +738,7 @@ impl EffectiveField {
             name: field.name.clone(),
             ty: field.ty.clone(),
             is_content: field.is_content,
+            optional: field.optional,
             module_identity: module_identity.into(),
             default: None,
             is_required: field.is_required,
@@ -721,7 +773,7 @@ pub enum RecordKind {
     ///
     /// <para>An update record has the target's effective fields (a component's state fields), every
     /// one optional and none carrying a default. An absent field means "unchanged"; a present
-    /// `null` means "set to null".</para>
+    /// empty value clears the field, which only a field the target declares optional admits.</para>
     Update {
         /// Name of the record, action, or component this update record patches.
         target: Name,
@@ -1334,9 +1386,10 @@ mod tests {
         let func = Function {
             name: Name::new("test"),
             visibility: Visibility::Export,
+            form: crate::FunctionForm::Paren,
             params: Vec::new(),
             return_type: None,
-            body: module.alloc_expr(ast::Expr::Literal(ast::Literal::Null)),
+            body: module.alloc_expr(ast::Expr::Literal(ast::Literal::Int(0))),
             span: TextSpan::new(TextSize::from(0), TextSize::from(10)),
         };
 

@@ -772,14 +772,49 @@ pub fn apply_range_constructions(module: &mut PreparedModule) -> Vec<ExprId> {
     created
 }
 
+/// Whether an expression joins its branches' types: an `if`, a match, or a `??`.
+fn is_join(expr: &ast::Expr) -> bool {
+    matches!(
+        expr,
+        ast::Expr::If { .. } | ast::Expr::Match { .. } | ast::Expr::Coalesce { .. }
+    )
+}
+
+/// The branches of a join, whose types the checker joined, or `None` for any other expression.
+fn join_branches_mut(expr: &mut ast::Expr) -> Option<Vec<&mut ExprId>> {
+    match expr {
+        ast::Expr::If {
+            then_branch,
+            else_branch,
+            ..
+        } => Some(
+            std::iter::once(then_branch)
+                .chain(else_branch.as_mut())
+                .collect(),
+        ),
+        ast::Expr::Match {
+            arms, else_branch, ..
+        } => Some(
+            arms.iter_mut()
+                .map(|arm| &mut arm.body)
+                .chain(else_branch.as_mut())
+                .collect(),
+        ),
+        ast::Expr::Coalesce { left, right, .. } => Some(vec![left, right]),
+        _ => None,
+    }
+}
+
 /// Wraps each branch the join lifted from an item to a sequence as a one-item sequence.
 ///
-/// <para>An `if` or match whose branches are an item and a sequence — including an `if` with no
-/// `else`, whose missing branch is `{}` — is typed as a sequence, and a branch producing a bare
+/// <para>An `if`, match or `??` whose branches are an item and a sequence — including an `if` with
+/// no `else`, whose missing branch is `{}` — is typed as a sequence, and a branch producing a bare
 /// item has to produce a sequence for that type to be true of its value. Wrapping the branch in a
 /// one-element array literal makes it so in every engine at once, because each of them already
 /// evaluates an array literal to a sequence and splices its elements: a lifted `1` becomes `[1]`,
-/// and a lifted `object` that happens to hold a sequence stays flat.</para>
+/// and a lifted `object` that happens to hold a sequence stays flat. The left operand of `??` is a
+/// branch too, and splicing keeps its test: a lifted empty `o` is `[]`, which is still empty, so
+/// `o ?? ys` still falls back.</para>
 ///
 /// <para>Run before [`apply_join_widenings`]. A lifted branch that also widens keeps its widening,
 /// because that pass visits array literals as parents too and finds the branch as the new array's
@@ -797,28 +832,14 @@ pub fn apply_join_lifts(
     let raw_module = module.raw_module_mut();
     let parents = raw_module
         .exprs()
-        .filter(|(_, expr)| matches!(expr, ast::Expr::If { .. } | ast::Expr::Match { .. }))
+        .filter(|(_, expr)| is_join(expr))
         .map(|(id, _)| id)
         .collect::<Vec<_>>();
 
     for parent in parents {
         let mut parent_expr = raw_module.expr(parent).clone();
-        let mut children = match &mut parent_expr {
-            ast::Expr::If {
-                then_branch,
-                else_branch,
-                ..
-            } => std::iter::once(then_branch)
-                .chain(else_branch.as_mut())
-                .collect::<Vec<_>>(),
-            ast::Expr::Match {
-                arms, else_branch, ..
-            } => arms
-                .iter_mut()
-                .map(|arm| &mut arm.body)
-                .chain(else_branch.as_mut())
-                .collect(),
-            _ => continue,
+        let Some(mut children) = join_branches_mut(&mut parent_expr) else {
+            continue;
         };
 
         let mut changed = false;
@@ -848,7 +869,7 @@ pub fn apply_join_lifts(
 /// Wraps each branch of a join that type analysis found to widen in an [`ast::Expr::Widen`].
 ///
 /// <para>Runs on the same terms as [`apply_string_conversions`]. `widened` maps a branch of an
-/// `if` or `match`, or an element of a list literal, to the numeric type the join has. The
+/// `if`, `match` or `??`, or an element of a list literal, to the numeric type the join has. The
 /// wrapper takes the branch's place in its parent, so the branch keeps its id and the types
 /// recorded for it stay valid. The nodes this creates are returned with the branch each wraps, so
 /// the caller can type them.</para>
@@ -864,34 +885,18 @@ pub fn apply_join_widenings(
     let raw_module = module.raw_module_mut();
     let parents = raw_module
         .exprs()
-        .filter(|(_, expr)| {
-            matches!(
-                expr,
-                ast::Expr::If { .. } | ast::Expr::Match { .. } | ast::Expr::Array { .. }
-            )
-        })
+        .filter(|(_, expr)| is_join(expr) || matches!(expr, ast::Expr::Array { .. }))
         .map(|(id, _)| id)
         .collect::<Vec<_>>();
 
     for parent in parents {
         let mut parent_expr = raw_module.expr(parent).clone();
         let mut children = match &mut parent_expr {
-            ast::Expr::If {
-                then_branch,
-                else_branch,
-                ..
-            } => std::iter::once(then_branch)
-                .chain(else_branch.as_mut())
-                .collect::<Vec<_>>(),
-            ast::Expr::Match {
-                arms, else_branch, ..
-            } => arms
-                .iter_mut()
-                .map(|arm| &mut arm.body)
-                .chain(else_branch.as_mut())
-                .collect(),
             ast::Expr::Array { elements, .. } => elements.iter_mut().collect(),
-            _ => continue,
+            join => match join_branches_mut(join) {
+                Some(branches) => branches,
+                None => continue,
+            },
         };
 
         let mut changed = false;
@@ -1217,7 +1222,7 @@ fn push_whitespace_stretch(out: &mut String, stretch: &str) {
 }
 
 /// Replaces every reference to one of `params` in `ty` with the top type `object`, keeping the
-/// `[]`, `?` and function layers around it.
+/// occurrence (`?`, `+`, `*`), applied-type and function layers around it.
 ///
 /// <para>This is the erasure a generated surface applies when it receives a component value
 /// dynamically and so has nothing to bind a type parameter to: the IR prop schema, the C# contract
@@ -1238,9 +1243,8 @@ pub fn erase_type_parameters(ty: &ast::TypeRef, params: &[Name]) -> ast::TypeRef
                 .map(|(arg, ty)| (arg.clone(), erase_type_parameters(ty, params)))
                 .collect(),
         },
-        ast::TypeRef::Array(inner) => ast::TypeRef::array(erase_type_parameters(inner, params)),
-        ast::TypeRef::Nullable(inner) => {
-            ast::TypeRef::nullable(erase_type_parameters(inner, params))
+        ast::TypeRef::Seq { inner, occ } => {
+            ast::TypeRef::seq(erase_type_parameters(inner, params), *occ)
         }
         ast::TypeRef::Function {
             params: function_params,
@@ -1252,6 +1256,7 @@ pub fn erase_type_parameters(ty: &ast::TypeRef, params: &[Name]) -> ast::TypeRef
                     name: param.name.clone(),
                     ty: erase_type_parameters(&param.ty, params),
                     is_content: param.is_content,
+                    optional: param.optional,
                 })
                 .collect(),
             return_type: Box::new(erase_type_parameters(return_type, params)),
@@ -1354,6 +1359,9 @@ fn collect_handler_rewrites_in_item(
     };
     match item {
         Item::Function(function) => {
+            for default in function.params.iter().filter_map(|param| param.default) {
+                collect_handler_rewrites_in_expr(module, default, owner, rewrites);
+            }
             collect_handler_rewrites_in_expr(module, function.body, owner, rewrites)
         }
         Item::Value(value) => {
@@ -1484,8 +1492,15 @@ fn collect_handler_rewrites_in_expr(
             collect_handler_rewrites_in_expr(module, *base, owner, rewrites);
             collect_handler_rewrites_in_expr(module, *index, owner, rewrites);
         }
-        ast::Expr::Member { base, .. } => {
+        ast::Expr::Member { base, .. } | ast::Expr::OptionalMember { base, .. } => {
             collect_handler_rewrites_in_expr(module, *base, owner, rewrites);
+        }
+        ast::Expr::Exists { operand, .. } => {
+            collect_handler_rewrites_in_expr(module, *operand, owner, rewrites);
+        }
+        ast::Expr::Coalesce { left, right, .. } => {
+            collect_handler_rewrites_in_expr(module, *left, owner, rewrites);
+            collect_handler_rewrites_in_expr(module, *right, owner, rewrites);
         }
         ast::Expr::RecordLiteral { properties, .. } => {
             for property in properties {
@@ -2213,8 +2228,8 @@ mod tests {
     fn derived_component_inherits_type_parameters_ahead_of_its_own() {
         let prepared = prepared(
             r#"
-            abstract component <ItemsBase TItem:type items:TItem[] />
-            component <Keyed extends ItemsBase TKey:type keys:TKey[] /> = { <Label /> }
+            abstract component <ItemsBase TItem:type items:TItem* />
+            component <Keyed extends ItemsBase TKey:type keys:TKey* /> = { <Label /> }
         "#,
         );
 
@@ -2297,12 +2312,12 @@ mod tests {
     fn erase_type_parameters_replaces_parameter_names_under_suffixes() {
         let params = [Name::new("TItem")];
         let erased = erase_type_parameters(
-            &ast::TypeRef::nullable(ast::TypeRef::array(ast::TypeRef::name("TItem"))),
+            &ast::TypeRef::zero_or_more(ast::TypeRef::name("TItem")),
             &params,
         );
         assert_eq!(
             erased,
-            ast::TypeRef::nullable(ast::TypeRef::array(ast::TypeRef::name("object")))
+            ast::TypeRef::zero_or_more(ast::TypeRef::name("object"))
         );
         assert_eq!(
             erase_type_parameters(&ast::TypeRef::name("Contact"), &params),
@@ -2314,12 +2329,12 @@ mod tests {
     fn erase_type_parameters_reaches_inside_a_function_type() {
         let params = [Name::new("TItem")];
         let template = |item: &str| {
-            ast::TypeRef::nullable(ast::TypeRef::function(
+            ast::TypeRef::optional(ast::TypeRef::function(
                 vec![
                     ast::FunctionParam::new("Item", ast::TypeRef::name(item)),
                     ast::FunctionParam::new("Index", ast::TypeRef::name("int")),
                 ],
-                ast::TypeRef::array(ast::TypeRef::name(item)),
+                ast::TypeRef::one_or_more(ast::TypeRef::name(item)),
             ))
         };
         assert_eq!(
@@ -2332,7 +2347,7 @@ mod tests {
     fn erase_type_parameters_reaches_inside_an_applied_type() {
         let params = [Name::new("TItem")];
         let applied = |arg: &str| {
-            ast::TypeRef::array(ast::TypeRef::applied(
+            ast::TypeRef::one_or_more(ast::TypeRef::applied(
                 "Range",
                 vec![(Name::new("T"), ast::TypeRef::name(arg))],
             ))
@@ -2391,7 +2406,7 @@ mod tests {
     fn remove_property_entries_drops_plain_entries_by_value_expression() {
         let mut prepared = prepared(
             r#"
-            external component <List TItem:type items:string[]? />
+            external component <List TItem:type items:string* />
             let v = <List TItem=string items={} />
         "#,
         );

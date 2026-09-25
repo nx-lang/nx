@@ -1,6 +1,9 @@
-use nx_hir::Name;
+use nx_hir::ast::Occurrence;
+use nx_hir::{is_update_record_name, Name};
 use nx_interpreter::Value;
+use nx_types::Type;
 use nx_value::NxValue;
+use rustc_hash::FxHashMap;
 use smol_str::SmolStr;
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -50,10 +53,14 @@ impl Error for FromNxValueError {}
 
 /// Converts an interpreter [`Value`] into the serializable [`NxValue`] representation.
 ///
-/// Scalar types (`Null`, `Boolean`, `Int`, `Float`, `String`) and arrays map directly.
+/// Scalar types (`Boolean`, `Int`, `Float`, `String`) and arrays map directly; the empty value is
+/// the empty array on both sides, and a record stores no entry for an empty optional field, so
+/// the encoding omits the key. An entry call's result is converted by [`entry_result_to_nx_value`]
+/// instead, which writes an empty standalone `T?` as [`NxValue::Null`].
 ///
 /// Record values become [`NxValue::Record`] with their `type_name` preserved and fields
-/// sorted alphabetically (via [`BTreeMap`]).
+/// sorted alphabetically (via [`BTreeMap`]). A present empty field of an update record is a
+/// cleared field and becomes [`NxValue::Null`], so the host reads the key and its `null`.
 ///
 /// Constant union cases become [`NxValue::String`] carrying the bare authored case name. The
 /// declaring union type is not preserved on the wire; consumers recover it from the target
@@ -69,7 +76,6 @@ impl Error for FromNxValueError {}
 /// the running program, so it is likewise not decoded from host input.
 pub fn to_nx_value(value: &Value) -> NxValue {
     match value {
-        Value::Null => NxValue::Null,
         Value::Boolean(value) => NxValue::Bool(*value),
         Value::Int32(value) => NxValue::Int32(*value),
         Value::Int(value) => NxValue::Int(*value),
@@ -80,7 +86,7 @@ pub fn to_nx_value(value: &Value) -> NxValue {
         Value::UnionCase { case, .. } => NxValue::String(case.to_string()),
         Value::Record { type_name, fields } => NxValue::Record {
             type_name: Some(type_name.as_str().to_string()),
-            properties: fields_to_properties(fields),
+            properties: fields_to_properties(fields, is_update_record_name(type_name.as_str())),
         },
         Value::Function { module, name } => NxValue::Record {
             type_name: Some("Function".to_string()),
@@ -117,13 +123,13 @@ pub fn from_nx_value(value: &NxValue) -> Result<Value, FromNxValueError> {
 
 fn from_nx_value_at_path(value: &NxValue, path: &str) -> Result<Value, FromNxValueError> {
     match value {
-        NxValue::Null => Ok(Value::Null),
         NxValue::Bool(value) => Ok(Value::Boolean(*value)),
         NxValue::Int32(value) => Ok(Value::Int32(*value)),
         NxValue::Int(value) => Ok(Value::Int(*value)),
         NxValue::Float32(value) => Ok(Value::Float32(*value)),
         NxValue::Float(value) => Ok(Value::Float(*value)),
         NxValue::String(value) => Ok(Value::String(SmolStr::new(value.as_str()))),
+        NxValue::Null => Ok(Value::empty()),
         NxValue::Array(elements) => Ok(Value::Array(
             elements
                 .iter()
@@ -142,17 +148,18 @@ fn from_nx_value_at_path(value: &NxValue, path: &str) -> Result<Value, FromNxVal
                 return Err(FromNxValueError::unsupported_function(path));
             }
 
+            // A present `null` or `[]` is kept as written: construction against the declared type
+            // decides what it means there. It is the empty value at a `?` or `*` site, the
+            // instruction to clear a field of an update record, and an error where a value is
+            // required, even one with a default, which only a missing key takes.
+            let mut fields = FxHashMap::default();
+            for (key, value) in properties {
+                let value = from_nx_value_at_path(value, &format!("{path}.{key}"))?;
+                fields.insert(SmolStr::new(key.as_str()), value);
+            }
             Ok(Value::Record {
                 type_name: Name::new(type_name.as_deref().unwrap_or("object")),
-                fields: properties
-                    .iter()
-                    .map(|(key, value)| {
-                        Ok((
-                            SmolStr::new(key.as_str()),
-                            from_nx_value_at_path(value, &format!("{path}.{key}"))?,
-                        ))
-                    })
-                    .collect::<Result<_, _>>()?,
+                fields,
             })
         }
     }
@@ -160,13 +167,35 @@ fn from_nx_value_at_path(value: &NxValue, path: &str) -> Result<Value, FromNxVal
 
 fn fields_to_properties(
     fields: &rustc_hash::FxHashMap<smol_str::SmolStr, Value>,
+    is_update_record: bool,
 ) -> BTreeMap<String, NxValue> {
     let mut obj = BTreeMap::new();
     for (key, value) in fields {
-        obj.insert(key.to_string(), to_nx_value(value));
+        let value = if is_update_record && value.is_empty_value() {
+            NxValue::Null
+        } else {
+            to_nx_value(value)
+        };
+        obj.insert(key.to_string(), value);
     }
 
     obj
+}
+
+/// Converts the result of an entry call — a function or value the host evaluates — for the host.
+///
+/// <para>A result whose type is a standalone `T?` and that holds nothing is [`NxValue::Null`], the
+/// spelling hosts use for an absent single value and the one typegen's `T | null` and C#'s `T?`
+/// expect. Every other result converts as [`to_nx_value`] does, so an empty `T*` stays `[]`.
+/// `result_type` is the entry's declared or inferred type; without one, the result converts
+/// as it is.</para>
+pub fn entry_result_to_nx_value(value: &Value, result_type: Option<&Type>) -> NxValue {
+    let is_optional = result_type.is_some_and(|ty| ty.occurrence() == Occurrence::OPTIONAL);
+    if is_optional && value.is_empty_value() {
+        NxValue::Null
+    } else {
+        to_nx_value(value)
+    }
 }
 
 #[cfg(test)]
@@ -290,7 +319,7 @@ mod tests {
 
         let cleared = Value::Record {
             type_name: Name::new("User.Update"),
-            fields: rustc_hash::FxHashMap::from_iter([(SmolStr::new("email"), Value::Null)]),
+            fields: rustc_hash::FxHashMap::from_iter([(SmolStr::new("email"), Value::empty())]),
         };
         let json = to_nx_value(&cleared)
             .to_json_string()

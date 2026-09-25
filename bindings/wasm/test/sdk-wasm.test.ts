@@ -30,7 +30,7 @@ describe("program artifacts", () => {
       expect(ir.bytes.byteLength % 4).toBe(0);
       expect(ir.identity).toBe("demo.nx");
       expect(ir.metadata.identity).toBe("demo.nx");
-      expect(ir.metadata.schemaVersion).toBe(4);
+      expect(ir.metadata.schemaVersion).toBe(5);
       expect(ir.metadata.fingerprint).toBeTypeOf("string");
       expect(ir.metadata.runtimeAbi).toBe("nx-ir-runtime-v2");
       expect(ir.metadata.functionEntrypoints).toEqual(["root"]);
@@ -40,6 +40,31 @@ describe("program artifacts", () => {
       artifact.dispose();
       expect(evaluateFunction(prepared, "root")).toBe(42);
       expect(evaluateFunction(prepareNxIrProgram(ir.bytes), "root")).toBe(42);
+    } finally {
+      artifact.dispose();
+    }
+  });
+
+  it("compiles every property shape and records each field's occurrence", () => {
+    // `name:T`, `name?:T`, `name:T+` and `name?:T+`: the four shapes a property slot admits.
+    const source = `export type Person = { name:string }
+export type Book = { title:string author?:Person tags:string+ extras?:string+ }
+let root() = <Book title="A" tags={"x"} />`;
+    const artifact = host.buildProgramArtifact(source, { fileName: "shapes.nx" });
+    try {
+      const [ir] = artifact.generateNxIr();
+      expect(ir!.metadata.schemaVersion).toBe(5);
+      expect(host.explainNxIr(ir!.bytes)).toContain(
+        "record Book\n  title: string required\n  author: Person?\n  tags: string+ required\n  extras: string*\n"
+      );
+
+      // The image runs: a lone child at a `+` field is a one-element array, and an omitted optional
+      // field is an omitted key, not `null`.
+      expect(evaluateFunction(prepareNxIrProgram(ir!.bytes), "root")).toEqual({
+        $type: "Book",
+        title: "A",
+        tags: ["x"]
+      });
     } finally {
       artifact.dispose();
     }

@@ -25,8 +25,8 @@ fn never_satisfies_every_expected_type() {
     assert!(Type::never().is_compatible_with(&Type::string()));
     assert!(Type::never().is_compatible_with(&Type::int()));
     assert!(Type::never().is_compatible_with(&Type::named("object")));
-    assert!(Type::array(Type::never()).is_compatible_with(&Type::array(Type::string())));
-    assert!(Type::array(Type::never()).is_compatible_with(&Type::array(Type::int())));
+    assert!(Type::one_or_more(Type::never()).is_compatible_with(&Type::one_or_more(Type::string())));
+    assert!(Type::one_or_more(Type::never()).is_compatible_with(&Type::one_or_more(Type::int())));
 }
 
 /// Nothing is below the bottom type, so the relation does not run the other way.
@@ -63,7 +63,10 @@ fn a_user_declaration_may_take_the_name_never() {
 #[test]
 fn never_renders_under_its_own_name() {
     assert_eq!(Type::never().to_string(), "never");
-    assert_eq!(Type::array(Type::never()).to_string(), "never[]");
+    assert_eq!(Type::one_or_more(Type::never()).to_string(), "never+");
+    // Only the empty value inhabits `never` under an occurrence that admits zero.
+    assert_eq!(Type::zero_or_more(Type::never()).to_string(), "{}");
+    assert_eq!(Type::empty().to_string(), "{}");
 }
 
 /// A diagnostic about a value the author wrote as `{}` spells it `{}`, not `never[]`. The bottom

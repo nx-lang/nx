@@ -1,6 +1,6 @@
 //! Integration tests for edge cases and special scenarios
 //!
-//! Tests for variable shadowing, Unicode strings, null handling, union error handling,
+//! Tests for variable shadowing, Unicode strings, empty-value handling, union error handling,
 //! boolean operations, and other edge cases.
 //!
 //! Note: Ternary and if-else expression tests are in conditionals.rs
@@ -64,6 +64,7 @@ fn test_variable_shadowing_in_block() {
     let func = Function {
         name: Name::new("shadow"),
         visibility: nx_hir::Visibility::Export,
+        form: nx_hir::FunctionForm::Paren,
         params,
         return_type: None,
         body: inner_y,
@@ -209,6 +210,7 @@ fn test_deeply_nested_blocks() {
     let func = Function {
         name: Name::new("deep_blocks"),
         visibility: nx_hir::Visibility::Export,
+        form: nx_hir::FunctionForm::Paren,
         params,
         return_type: None,
         body,
@@ -225,37 +227,28 @@ fn test_deeply_nested_blocks() {
 }
 
 // ============================================================================
-// Null/Void Handling
+// Empty Value Handling
 // ============================================================================
-
-/// Test null literal
-#[test]
-fn test_null_literal() {
-    let source = r#"
-        let <nothing /> = { null }
-    "#;
-
-    let result = execute_function(source, "nothing", vec![]).unwrap_or_else(|e| panic!("{}", e));
-    assert_eq!(result, Value::Null);
-}
 
 /// Test the empty braced body
 ///
-/// Superseded `test_void_value`, which read `{ }` as an element that produces nothing. `{}` is now
-/// the spelling of the empty list, so an empty braced body produces one. Type checking still
-/// rejects this particular source, because an unannotated binding supplies no element type, but the
-/// interpreter runs below that and evaluates the list it was given.
+/// Superseded `test_void_value`, which read `{ }` as an element that produces nothing. `{}` is the
+/// spelling of the empty value, so an empty braced body produces it. Type checking still rejects
+/// this particular source, because an unannotated binding supplies no item type, but the
+/// interpreter runs below that and evaluates the value it was given.
 #[test]
-fn test_empty_braced_body_is_an_empty_list() {
+fn test_empty_braced_body_is_the_empty_value() {
     let source = r#"
         let <empty_elem /> = { }
     "#;
 
     let result = execute_function(source, "empty_elem", vec![]).unwrap_or_else(|e| panic!("{}", e));
-    match result {
-        Value::Array(items) => assert!(items.is_empty(), "Expected no items, got {:?}", items),
-        other => panic!("Expected an empty array, got {:?}", other),
-    }
+    assert!(
+        result.is_empty_value(),
+        "Expected the empty value, got {:?}",
+        result
+    );
+    assert_eq!(result, Value::empty());
 }
 
 // ============================================================================
@@ -363,6 +356,7 @@ fn test_boolean_double_negation() {
     let func = Function {
         name: Name::new("double_neg"),
         visibility: nx_hir::Visibility::Export,
+        form: nx_hir::FunctionForm::Paren,
         params,
         return_type: None,
         body: not_not_x,
@@ -468,12 +462,13 @@ fn test_type_mismatch_parameter() {
 // Record Edge Cases
 // ============================================================================
 
-/// Test accessing undefined field on record
+/// An undeclared field is the checker's to reject; at runtime, a declared field a record does not
+/// store is an empty optional field and reads as the empty value.
 #[test]
-fn test_undefined_record_field() {
+fn test_unstored_optional_record_field_reads_as_empty() {
     let source = r#"
-        type Person = { name: string = "Unknown" }
-        let <age person:Person /> = { person.age }
+        type Person = { name: string = "Unknown" nickname?: string }
+        let <nickname person:Person /> = { person.nickname }
     "#;
 
     use rustc_hash::FxHashMap;
@@ -482,14 +477,17 @@ fn test_undefined_record_field() {
 
     let result = execute_function(
         source,
-        "age",
+        "nickname",
         vec![Value::Record {
             type_name: nx_hir::Name::new("Person"),
             fields: person,
         }],
+    )
+    .expect("an unstored optional field reads");
+    assert!(
+        result.is_empty_value(),
+        "Expected the empty value, got {result:?}"
     );
-    // Should error because 'age' field doesn't exist
-    assert!(result.is_err(), "Expected error for undefined field access");
 }
 
 /// Test empty record

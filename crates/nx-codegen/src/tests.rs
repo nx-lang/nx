@@ -285,6 +285,21 @@ fn assert_generated_typescript_artifact_type_checks(artifact: &ProgramArtifact) 
     );
 }
 
+/// A JavaScript snippet as TypeScript writes it: each `$type: "Name"` entry followed by `as const`.
+fn typescript_type_tags(snippet: &str) -> String {
+    let mut output = String::new();
+    let mut rest = snippet;
+    while let Some(start) = rest.find("$type: \"") {
+        let value_start = start + "$type: \"".len();
+        let value_end = value_start + rest[value_start..].find('"').expect("closing quote") + 1;
+        output.push_str(&rest[..value_end]);
+        output.push_str(" as const");
+        rest = &rest[value_end..];
+    }
+    output.push_str(rest);
+    output
+}
+
 fn interpreter_json_root(source: &str) -> String {
     let artifact = artifact_from_source(source);
     interpreter_json_artifact_root(&artifact)
@@ -297,9 +312,15 @@ fn interpreter_json_artifact_root(artifact: &ProgramArtifact) -> String {
     }
 }
 
+/// Generated output against the interpreter's. A generated function returns an empty `T?` result
+/// as `nxEmpty`, as its TypeScript signature says, where the interpreter's entry call returns the
+/// host's `null`.
 fn assert_json_values_eq(actual: &str, expected: &str) {
     let actual: Value = serde_json::from_str(actual).expect("actual generated json");
     let expected: Value = serde_json::from_str(expected).expect("expected interpreter json");
+    if expected == Value::Null && actual == Value::Array(Vec::new()) {
+        return;
+    }
     assert_eq!(actual, expected);
 }
 
@@ -341,7 +362,7 @@ fn a_record_field_read_resolves_its_type_in_the_declaring_module() {
     let modules = [
         (
             "main.nx",
-            "import { Swatch } from \"./model.nx\"\n             type Hue = Blue | Violet\n             external component <Paint colour:Hue? />\n             abstract external component <Node />\n             component <Chip extends Node s:Swatch /> = { <Paint colour={s.hue} /> }\n             let root() = { <Chip s=<Swatch hue={Swatch} /> /> }",
+            "import { Swatch } from \"./model.nx\"\n             type Hue = Blue | Violet\n             external component <Paint colour?:Hue />\n             abstract external component <Node />\n             component <Chip extends Node s:Swatch /> = { <Paint colour={s.hue} /> }\n             let root() = { <Chip s=<Swatch hue={Swatch} /> /> }",
         ),
         (
             "model.nx",
@@ -369,37 +390,45 @@ fn a_record_field_read_resolves_its_type_in_the_declaring_module() {
     );
 }
 
-/// A written-but-empty body and an absent body mean different things, and the two implementations
-/// of that rule must agree.
+/// A written-but-empty body is the empty value, so on an optional content property it binds what
+/// an absent body binds, and on a defaulted one it is refused rather than displacing the default.
+/// The interpreter and code generation must agree on both.
 ///
 /// <para>The interpreter keys on whether any content expression was written
 /// (`normalize_content_values` in `nx-interpreter`); code generation keys on whether the emitted
 /// content list is non-empty, in three separate places across two crates. Nothing but this test
-/// holds them together, and this is the one shape whose meaning the change altered: `<Box>{}</Box>`
-/// now binds the empty list where it previously could not be written at all.</para>
+/// holds them together.</para>
 #[test]
-fn an_empty_written_body_generates_an_empty_list_and_an_absent_one_takes_the_default() {
+fn an_empty_written_body_binds_the_empty_value_and_an_absent_one_takes_the_default() {
     const WRITTEN: &str = r#"
         type A = { n: int = 1 }
-        type Box = { content items: object[] = {<A n=9 />} }
+        type Box = { content items?: A+ }
         let root() = { <Box>{}</Box> }
+    "#;
+    const OMITTED: &str = r#"
+        type A = { n: int = 1 }
+        type Box = { content items?: A+ }
+        let root() = { <Box /> }
     "#;
     const ABSENT: &str = r#"
         type A = { n: int = 1 }
-        type Box = { content items: object[] = {<A n=9 />} }
+        type Box = { content items: A+ = {<A n=9 />} }
         let root() = { <Box /> }
     "#;
+    const REFUSED: &str = r#"
+        type A = { n: int = 1 }
+        type Box = { content items: A+ = {<A n=9 />} }
+        let root() = { <Box>{}</Box> }
+    "#;
 
-    let written = artifact_from_source(WRITTEN);
-    let module = generated_file(&written, CodegenTarget::TypeScript, "m0_main.ts");
-    assert!(
-        module.contains("items: []"),
-        "a written-but-empty body should generate an empty list, got: {module}"
-    );
-    assert_json_values_eq(
-        &interpreter_json_root(WRITTEN),
-        r#"{"$type":"Box","items":[]}"#,
-    );
+    // An empty optional field is an omitted key, whether the body was written empty or left out.
+    for source in [WRITTEN, OMITTED] {
+        assert_json_values_eq(&interpreter_json_root(source), r#"{"$type":"Box"}"#);
+        assert_json_values_eq(
+            &execute_generated_javascript_root(source),
+            &interpreter_json_root(source),
+        );
+    }
 
     let absent = artifact_from_source(ABSENT);
     let module = generated_file(&absent, CodegenTarget::TypeScript, "m0_main.ts");
@@ -410,6 +439,25 @@ fn an_empty_written_body_generates_an_empty_list_and_an_absent_one_takes_the_def
     assert_json_values_eq(
         &interpreter_json_root(ABSENT),
         r#"{"$type":"Box","items":[{"$type":"A","n":9}]}"#,
+    );
+    assert_json_values_eq(
+        &execute_generated_javascript_root(ABSENT),
+        &interpreter_json_root(ABSENT),
+    );
+
+    // The empty value does not satisfy `A+`, so a written-empty body cannot reach a defaulted
+    // `+` property: analysis refuses it before either engine sees it.
+    let error = emit_program(
+        &artifact_from_source(REFUSED),
+        &CodegenOptions::javascript(),
+    )
+    .expect_err("a written-empty body at a defaulted `+` property is refused");
+    assert!(
+        error.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message().contains("expects A+") && diagnostic.message().contains("found {}")
+        }),
+        "{:?}",
+        error.diagnostics
     );
 }
 
@@ -622,7 +670,7 @@ fn typescript_uses_js_import_specifiers_and_only_used_runtime_helpers() {
             (
                 "app/main.nx",
                 r#"import { answer } from "../shared/value.nx"
-let root(items: int[]): int[] = { for item in items { item + answer } }"#,
+let root(items: int+): int+ = { for item in items { item + answer } }"#,
             ),
             ("shared/value.nx", r#"export let answer: int = 42"#),
         ],
@@ -635,11 +683,16 @@ let root(items: int[]): int[] = { for item in items { item + answer } }"#,
     assert!(index.contains("from \"./m0_main.js\";"));
     assert!(!module.contains(".ts\""));
     assert!(module.contains("export function root(items: readonly number[]): readonly number[]"));
-    // A `for` concatenates what its body yields, so it splices rather than maps.
+    // A `for` concatenates what its body yields, so it splices rather than maps, and it iterates
+    // through `nxItems`, the one helper this module needs from the runtime.
     assert!(
-        module.contains("return Array.from(items).flatMap((item, _index) => (item + m1_answer));")
+        module.contains("return nxItems(items).flatMap((item, _index) => (item + m1_answer));"),
+        "{module}"
     );
-    assert!(!module.contains("nx-runtime"));
+    assert!(
+        module.contains("import { nxItems } from \"./nx-runtime.js\";"),
+        "{module}"
+    );
     assert!(!module.contains("nxArray"));
     assert!(!module.contains("nxElement"));
     assert!(!module.contains("nxRuntimeError"));
@@ -665,6 +718,116 @@ let root(): User = { <User name="Ada" age={answer} /> }"#,
             ("shared/value.nx", r#"export let answer: int = 42"#),
         ],
         "app/main.nx",
+    );
+    assert_generated_typescript_artifact_type_checks(&artifact);
+}
+
+#[test]
+fn a_type_alias_named_by_a_signature_or_field_is_declared() {
+    let artifact = artifact_from_workspace(
+        &[
+            (
+                "app/main.nx",
+                r#"import { Name, Maybe, People } from "../shared/types.nx"
+type Ints = int+
+type R = { n:Name ps:People xs:Ints }
+let count(ps:People, n:Name, xs:Ints): Maybe = {}
+let root() = { 1 }"#,
+            ),
+            (
+                "shared/types.nx",
+                r#"export type Person = { name:string }
+export type Name = string
+export type Maybe = string?
+export type People = Person+"#,
+            ),
+        ],
+        "app/main.nx",
+    );
+    assert_generated_typescript_artifact_type_checks(&artifact);
+    let module = generated_file(&artifact, CodegenTarget::TypeScript, "m0_main.ts");
+    assert!(
+        module.contains("type Ints = readonly number[];"),
+        "{module}"
+    );
+}
+
+#[test]
+fn a_record_extending_an_abstract_base_is_accepted_where_the_base_is_expected() {
+    let artifact = artifact_from_source(
+        r#"abstract type Shape = { id:int }
+type Circle extends Shape = { r:int }
+type Square extends Shape = { side:int = 1 }
+type Badge extends Shape = | icon { glyph:string } | dot
+let idOf(s:Shape): int = { s.id }
+let radius(c:Circle): int = { c.r }
+let root() = {
+  idOf(<Circle id={1} r={2} />) + idOf(<Square id={2} />) + idOf(<Badge.icon id={3} glyph="x" />)
+    + radius(<Circle id={4} r={5} />)
+}"#,
+    );
+    assert_generated_typescript_artifact_type_checks(&artifact);
+    let module = generated_file(&artifact, CodegenTarget::TypeScript, "m0_main.ts");
+    for expected in [
+        "export interface Shape {\n  readonly $type: string;",
+        "export interface Circle extends Shape {\n  readonly $type: \"Circle\";",
+        "export interface Badge_icon extends Shape {",
+        "satisfies Circle as Circle",
+        "satisfies Badge_icon as Badge_icon",
+    ] {
+        assert!(
+            module.contains(expected),
+            "expected {expected:?} in:\n{module}"
+        );
+    }
+    // A plain literal is pinned only in TypeScript.
+    let javascript = generated_file(&artifact, CodegenTarget::JavaScript, "m0_main.js");
+    assert!(!javascript.contains("satisfies"), "{javascript}");
+}
+
+#[test]
+fn a_record_extending_a_base_from_another_module_is_accepted_there() {
+    let artifact = artifact_from_workspace(
+        &[
+            (
+                "app/main.nx",
+                r#"import { Shape, idOf, Badge } from "../lib/shapes.nx"
+type Circle extends Shape = { r:int }
+let local(s:Shape): int = { s.id }
+let root() = { idOf(<Circle id={1} r={2} />) + local(<Badge.icon id={3} glyph="x" />) }"#,
+            ),
+            (
+                "lib/shapes.nx",
+                r#"export abstract type Shape = { id:int }
+export let idOf(s:Shape): int = { s.id }
+export type Badge extends Shape = | icon { glyph:string } | dot"#,
+            ),
+        ],
+        "app/main.nx",
+    );
+    assert_generated_typescript_artifact_type_checks(&artifact);
+    let module = generated_file(&artifact, CodegenTarget::TypeScript, "m0_main.ts");
+    for expected in [
+        "import type { Shape as m1_Shape }",
+        "export interface Circle extends m1_Shape {",
+        "satisfies Extract<m1_Badge, { readonly $type: \"Badge.icon\" }>",
+    ] {
+        assert!(
+            module.contains(expected),
+            "expected {expected:?} in:\n{module}"
+        );
+    }
+}
+
+#[test]
+fn an_inferred_type_naming_a_derived_declaration_emits_it() {
+    // Neither `Person.Property` nor `Person.Update` is written: each is only the inferred result
+    // type of an update intrinsic, which the signature prints.
+    let artifact = artifact_from_source(
+        r#"type Person = { name:string age?:int }
+let edited(a:Person, b:Person) = { changed(diff(a, b)) }
+let delta(a:Person, b:Person) = { diff(a, b) }
+let root() = { edited(<Person name="a" />, <Person name="b" />) }"#,
     );
     assert_generated_typescript_artifact_type_checks(&artifact);
 }
@@ -713,6 +876,7 @@ fn materialized_record_iife_uses_collision_free_field_temps() {
                 kind: CodegenDeclarationKind::Function {
                     params: Vec::new(),
                     return_type: None,
+                    declared_return_type: None,
                     body: CodegenExpression {
                         expr_id: 0,
                         span: TextSpan::default(),
@@ -772,6 +936,7 @@ fn int_field_with_default(name: &str, value: i64) -> CodegenRecordField {
             name: "int".to_string(),
         },
         is_content: false,
+        optional: false,
         is_required: false,
         default: Some(int_expression(value as u32, value)),
         owner_module_id: RuntimeModuleId::new(0),
@@ -816,7 +981,7 @@ let root() = { <User age=42 name="Ada" /> }"#,
 fn emits_strong_typescript_records_and_constant_unions() {
     let record_artifact = artifact_from_source(
         r#"
-type User = { name: string tags: string[] age: int }
+type User = { name: string tags: string+ age: int }
 let root() = { <User age=42 name="Ada" tags={ "admin" "editor" } /> }
 "#,
     );
@@ -830,7 +995,7 @@ let root() = { <User age=42 name="Ada" tags={ "admin" "editor" } /> }
     assert!(record_module.contains("readonly age: number;"));
     assert!(record_module.contains("export function root(): User"));
     assert!(record_module.contains(
-        "return ({ $type: \"User\", name: \"Ada\", tags: [\"admin\", \"editor\"], age: 42 });"
+        "return ({ $type: \"User\" as const, name: \"Ada\", tags: [\"admin\", \"editor\"], age: 42 });"
     ));
     assert!(!record_module.contains("export const User"));
     assert!(!record_module.contains("nxArray"));
@@ -879,13 +1044,18 @@ let root() = { add(1, 2) }
             // Items splice: the flattening is what a sequence-valued item is spliced by, and it
             // is written for every sequence so that one rule covers them all.
             "array",
-            "let root(): int[] = { 1 2 3 }",
+            "let root(): int+ = { 1 2 3 }",
+            "return [1, 2, 3];",
+        ),
+        (
+            "array that may be empty",
+            "let root(): int* = { 1 2 3 }",
             "return [1, 2, 3];",
         ),
         (
             "loop",
-            "let root(items:int[]) = { for item, index in items { item + index } }",
-            "Array.from(items).flatMap((item, index) => (item + index))",
+            "let root(items:int+) = { for item, index in items { item + index } }",
+            "nxItems(items).flatMap((item, index) => (item + index))",
         ),
         (
             "record",
@@ -944,9 +1114,12 @@ let root(): Shape = { <Shape.circle radius=1.5 /> }
         let ts_module = generated_file(&artifact, CodegenTarget::TypeScript, "m0_main.ts");
         let js_module = generated_file(&artifact, CodegenTarget::JavaScript, "m0_main.js");
 
+        // TypeScript writes an object literal's `$type` `as const`, so it keeps its literal type
+        // wherever the object is not contextually typed.
+        let ts_expected = typescript_type_tags(expected);
         assert!(
-            ts_module.contains(expected),
-            "missing TS snippet: {expected}"
+            ts_module.contains(&ts_expected),
+            "missing TS snippet: {ts_expected}"
         );
         assert!(
             js_module.contains(expected),
@@ -965,32 +1138,44 @@ fn generated_javascript_splices_items_and_drops_an_untaken_conditional() {
     let cases = [
         // Two sequences in a braced value concatenate.
         (
-            r#"let xs:string[] = {"a" "b"}
-let ys:string[] = {"c"}
-let root(): string[] = { xs ys }"#,
+            r#"let xs:string+ = {"a" "b"}
+let ys:string+ = {"c"}
+let root(): string+ = { xs ys }"#,
             "[\"a\",\"b\",\"c\"]",
         ),
         // A sequence and an item share one sequence.
         (
-            r#"let xs:string[] = {"a" "b"}
-let root(): string[] = { xs "c" }"#,
+            r#"let xs:string+ = {"a" "b"}
+let root(): string+ = { xs "c" }"#,
             "[\"a\",\"b\",\"c\"]",
         ),
         // A `for` concatenates what its body yields.
         (
-            r#"type Row = { cells:int[] }
-let rows:Row[] = { <Row cells={1 2}/> <Row cells={3 4}/> }
-let root(): int[] = { for r in rows { r.cells } }"#,
+            r#"type Row = { cells:int+ }
+let rows:Row+ = { <Row cells={1 2}/> <Row cells={3 4}/> }
+let root(): int+ = { for r in rows { r.cells } }"#,
             "[1,2,3,4]",
         ),
         // A conditional body contributes on the iterations it is taken, and nothing on the rest.
         (
-            r#"let ns:int[] = {1 2 3 4}
-let root(): int[] = { for n in ns { if (n % 2 == 0) { n } } }"#,
+            r#"let ns:int+ = {1 2 3 4}
+let root(): int* = { for n in ns { if (n % 2 == 0) { n } } }"#,
             "[2,4]",
         ),
-        // A written null is an item like any other and survives the splice.
-        (r#"let root(): string?[] = { "a" null }"#, "[\"a\",null]"),
+        // An empty item is the empty sequence, so the splice drops it.
+        (
+            r#"let none(): string? = {}
+let root(): string* = { "a" none() }"#,
+            "[\"a\"]",
+        ),
+        // An optional binding that holds an item is that item, and one that is empty splices
+        // to nothing.
+        (
+            r#"let o:string? = "b"
+let e:string? = {}
+let root(): string* = { "a" o e }"#,
+            "[\"a\",\"b\"]",
+        ),
     ];
 
     for (source, expected) in cases {
@@ -1006,7 +1191,7 @@ let root(): int[] = { for n in ns { if (n % 2 == 0) { n } } }"#,
 #[test]
 fn an_untaken_conditional_child_emits_no_content_item() {
     let source = r#"type A = { n:int = 1 }
-type Box = { content items:A[] }
+type Box = { content items:A+ }
 let c = false
 let root(): Box = { <Box><A/>{if c { <A/> }}</Box> }"#;
     let artifact = artifact_from_source(source);
@@ -1014,7 +1199,7 @@ let root(): Box = { <Box><A/>{if c { <A/> }}</Box> }"#;
     // The untaken branch is the empty list, so the splice drops it with no element form of its own.
     let module = generated_file(&artifact, CodegenTarget::JavaScript, "m0_main.js");
     assert!(
-        module.contains(": [])"),
+        module.contains(": nxEmpty)"),
         "expected an empty-list branch: {module}"
     );
     assert!(
@@ -1541,7 +1726,7 @@ fn generated_component_descriptors_apply_cross_module_inherited_defaults() {
             (
                 "app/main.nx",
                 r#"import { Question } from "../shared/ui.nx"
-external component <ShortTextQuestion extends Question placeholder:string? />
+external component <ShortTextQuestion extends Question placeholder?:string />
 let root() = { <ShortTextQuestion /> }"#,
             ),
             (
@@ -1555,8 +1740,9 @@ let root() = { <ShortTextQuestion /> }"#,
 
     assert_json_values_eq(
         &output,
-        r#"{ "$type": "ShortTextQuestion", "label": "Untitled", "placeholder": null }"#,
+        r#"{ "$type": "ShortTextQuestion", "label": "Untitled" }"#,
     );
+    assert_json_values_eq(&output, &interpreter_json_artifact_root(&artifact));
 }
 
 #[test]
@@ -1578,7 +1764,7 @@ fn generated_parent_renders_two_external_children_of_same_type() {
     let artifact = artifact_from_source(
         r#"
 external component <TextInput id:string label:string value:string = "" />
-let textInputs(): TextInput[] = {
+let textInputs(): TextInput+ = {
   <TextInput id="firstName" label="First name" />
   <TextInput id="lastName" label="Last name" />
 }
@@ -1883,15 +2069,15 @@ let root() = { 1 }
 }
 
 #[test]
-fn generated_component_entry_handles_constant_cases_nullable_fields_and_lists() {
+fn generated_component_entry_handles_constant_cases_optional_fields_and_lists() {
     let artifact = artifact_from_source(
         r#"
 type Mode = exact | fuzzy
-external component <Summary mode:Mode tags:string[] note:string? />
-component <SearchBox tags:string[] mode:Mode = { Mode.exact } /> = {
+external component <Summary mode:Mode tags:string+ note?:string />
+component <SearchBox tags:string+ mode:Mode = { Mode.exact } /> = {
   state {
-    query:string?
-    tags:string[] = {tags}
+    query?:string
+    tags:string+ = {tags}
     mode:Mode = {mode}
   }
   <Summary mode={mode} tags={tags} note={query} />
@@ -1910,12 +2096,56 @@ let root() = { 1 }
 }));"#,
     );
 
+    // An empty optional state field reaches the descriptor as an omitted key.
     assert_json_values_eq(
         &output,
         r#"{
-  "omitted": { "$type": "Summary", "mode": "exact", "tags": ["nx"], "note": null },
+  "omitted": { "$type": "Summary", "mode": "exact", "tags": ["nx"] },
   "explicit": { "$type": "Summary", "mode": "fuzzy", "tags": ["ui"], "note": "docs" }
 }"#,
+    );
+}
+
+/// The schema of a `+` prop refuses the host's empty array and `null`, where a `?:T+` prop reads
+/// both as the empty value, as every decoder does at a `?` or `*` site, and an empty optional
+/// prop is an omitted key.
+#[test]
+fn generated_schema_boundaries_decode_host_absence_by_occurrence() {
+    let artifact = artifact_from_source(
+        r#"
+external component <Summary items:string+ tags?:string+ subtitle?:string />
+let root() = { 1 }
+"#,
+    );
+    let output = execute_generated_javascript_artifact_script(
+        &artifact,
+        r#"console.log(JSON.stringify({
+  absent: m.SummarySchema.fromJson({ items: ["a"] }),
+  written: m.SummarySchema.fromJson({ items: ["a"], tags: [], subtitle: null }),
+  emptyItems: m.SummarySchema.tryFromJson({ items: [] }),
+  nullItems: m.SummarySchema.tryFromJson({ items: null })
+}));"#,
+    );
+    let output: Value = serde_json::from_str(&output).expect("schema boundary output");
+
+    assert_eq!(
+        output["absent"],
+        serde_json::json!({ "$type": "Summary", "items": ["a"] })
+    );
+    assert_eq!(output["written"], output["absent"]);
+    assert_eq!(output["emptyItems"]["ok"], false);
+    assert!(
+        output["emptyItems"]["diagnostics"][0]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("items")),
+        "{output}"
+    );
+    assert_eq!(output["nullItems"]["ok"], false);
+    assert!(
+        output["nullItems"]["diagnostics"][0]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("items")),
+        "{output}"
     );
 }
 
@@ -2083,11 +2313,12 @@ fn both_case_list_spellings_generate_identical_javascript_and_typescript() {
 fn generated_javascript_keeps_absent_update_fields_absent() {
     let output = execute_generated_javascript_root(
         r#"
-type User = { name:string = "anon" email:string? }
-let root() = <User.Update email={null} />
+type User = { name:string = "anon" email?:string }
+let root() = <User.Update email={} />
 "#,
     );
 
+    // A present empty field is `null`, the one place the canonical encoding writes it.
     assert_json_values_eq(&output, r#"{ "$type": "User.Update", "email": null }"#);
 }
 
@@ -2110,7 +2341,7 @@ let root() = <Counter.Update count=1 />
 #[test]
 fn generated_javascript_serializes_a_property_case_as_its_field_name() {
     let source = r#"
-type User = { name:string email:string? }
+type User = { name:string email?:string }
 let root() = <Box key={User.Property.email} />
 "#;
     let output = execute_generated_javascript_root(source);
@@ -2121,8 +2352,8 @@ let root() = <Box key={User.Property.email} />
 #[test]
 fn generated_javascript_applies_an_update_through_the_runtime() {
     let source = r#"
-type User = { name:string email:string? }
-let root() = {apply(<User name="Ada" email="x@y" />, <User.Update email={null} />)}
+type User = { name:string email?:string }
+let root() = {apply(<User name="Ada" email="x@y" />, <User.Update email={} />)}
 "#;
     let artifact = artifact_from_source(source);
     let module = generated_file(&artifact, CodegenTarget::JavaScript, "m0_main.js");
@@ -2133,19 +2364,17 @@ let root() = {apply(<User name="Ada" email="x@y" />, <User.Update email={null} /
         module
     );
 
+    // The cleared field is absent from the result's keys.
     let output = execute_generated_javascript_artifact_root(&artifact, "");
-    assert_json_values_eq(
-        &output,
-        r#"{ "$type": "User", "name": "Ada", "email": null }"#,
-    );
+    assert_json_values_eq(&output, r#"{ "$type": "User", "name": "Ada" }"#);
     assert_json_values_eq(&output, &interpreter_json_root(source));
 }
 
 #[test]
 fn generated_javascript_lists_changed_fields_in_declaration_order() {
     let source = r#"
-type User = { name:string email:string? age:int? }
-let root() = {changed(<User.Update age={null} name="Ada" />)}
+type User = { name:string email?:string age?:int }
+let root() = {changed(<User.Update age={} name="Ada" />)}
 "#;
     let output = execute_generated_javascript_root(source);
     assert_json_values_eq(&output, r#"["name", "age"]"#);
@@ -2156,17 +2385,27 @@ let root() = {changed(<User.Update age={null} name="Ada" />)}
 fn generated_javascript_merges_and_diffs_like_the_interpreter() {
     let cases = [
         r#"
-type User = { name:string email:string? age:int? }
-let root() = {changed(merge(<User.Update age={null} />, <User.Update name="Ada" />))}
+type User = { name:string email?:string age?:int }
+let root() = {changed(merge(<User.Update age={} />, <User.Update name="Ada" />))}
 "#,
         r#"
 type Address = { city:string }
-type User = { name:string tags:string[] home:Address }
+type User = { name:string tags:string+ home:Address }
 let root() = {diff(<User name="Ada" tags={ "x" "y" } home=<Address city="Paris" /> />, <User name="Ada" tags={ "y" "x" } home=<Address city="Rome" /> />)}
 "#,
         r#"
-type User = { name:string email:string? }
+type User = { name:string email?:string }
 let root() = {changed(diff(<User name="Ada" email="x@y" />, <User name="Bo" email="x@y" />))}
+"#,
+        // A field cleared between the two records is a present empty field of the diff.
+        r#"
+type User = { name:string email?:string }
+let root() = {diff(<User name="Ada" email="x@y" />, <User name="Ada" />)}
+"#,
+        // A merge keeps a present empty field present, so it still clears when applied.
+        r#"
+type User = { name:string email?:string }
+let root() = {apply(<User name="Ada" email="x@y" />, merge(<User.Update name="Bo" />, <User.Update email={} />))}
 "#,
     ];
     for source in cases {
@@ -2179,13 +2418,14 @@ let root() = {changed(diff(<User name="Ada" email="x@y" />, <User name="Bo" emai
 #[test]
 fn generated_javascript_calls_an_intrinsic_inside_an_element_property() {
     let source = r#"
-type User = { name:string email:string? age:int? }
-let root() = <Box keys={changed(<User.Update age={null} name="Ada" />)} />
+type User = { name:string email?:string age?:int }
+let root() = <Box keys={changed(<User.Update age={} name="Ada" />)} />
 "#;
     let artifact = artifact_from_source(source);
     let module = generated_file(&artifact, CodegenTarget::JavaScript, "m0_main.js");
+    // `nxCleared` writes the update record's present fields, `null` for the cleared one.
     assert!(
-        module.contains("import { nxChangedFields, nxElement }"),
+        module.contains("import { nxChangedFields, nxCleared, nxElement }"),
         "{}",
         module
     );
@@ -2205,14 +2445,14 @@ fn generated_javascript_reaches_property_unions_and_intrinsics_across_workspace_
                 "data.nx",
                 r#"
 export abstract type Named = { name:string }
-export type User extends Named = { email:string? age:int? }
+export type User extends Named = { email?:string age?:int }
 "#,
             ),
             (
                 "main.nx",
                 r#"
 import { User } from "./data.nx"
-let root() = <Box first={User.Property.name} keys={changed(<User.Update age={null} name="Ada" />)} />
+let root() = <Box first={User.Property.name} keys={changed(<User.Update age={} name="Ada" />)} />
 "#,
             ),
         ],
@@ -2238,11 +2478,6 @@ let root() = <Box first={User.Property.name} keys={changed(<User.Update age={nul
     assert_json_values_eq(&output, &interpreter_json_artifact_root(&artifact));
 }
 
-/// The JavaScript and TypeScript runtime modules are two hand-maintained copies, and nothing in
-/// generated-program execution reaches every branch of their intrinsic helpers. One script run
-/// against both pins each helper to the interpreter's answer for the same values — a record
-/// missing an optional field, a merged `null`, an order-less `changed` — and fails the moment the
-/// copies disagree.
 /// Dividing by zero fails on every backend. Generated JavaScript would otherwise return `Infinity`
 /// or `NaN`, where the interpreter and the IR runtime raise a run-time error.
 #[test]
@@ -2274,6 +2509,11 @@ console.log(JSON.stringify(out));
     );
 }
 
+/// The JavaScript and TypeScript runtime modules are two hand-maintained copies, and nothing in
+/// generated-program execution reaches every branch of their intrinsic helpers. One script run
+/// against both pins each helper to the interpreter's answer for the same values — a record
+/// missing an optional field, a merged `null`, an order-less `changed` — and fails the moment the
+/// copies disagree.
 #[test]
 fn emitted_runtime_intrinsic_helpers_agree_across_targets() {
     let script = r#"
@@ -2282,6 +2522,7 @@ const user = { $type: "User", name: "Ada", email: "x@y" };
 const partial = { $type: "User", name: "Ada" };
 const out = [];
 out.push(rt.nxApplyUpdate(user, { $type: "User.Update", email: null }));
+out.push(rt.nxApplyUpdate(user, { $type: "User.Update", email: [] }));
 out.push(rt.nxMergeUpdates({ $type: "User.Update", name: "Ada", email: "x@y" }, { $type: "User.Update", email: null }));
 out.push(rt.nxDiffRecords(user, partial));
 out.push(rt.nxDiffRecords(partial, user));
@@ -2293,16 +2534,33 @@ try {
 } catch (error) {
   out.push(error instanceof rt.NxRuntimeError ? error.message : String(error));
 }
+// The presence operators over the one empty representation and its host synonyms.
+out.push([rt.nxExists("x"), rt.nxExists([]), rt.nxExists(null), rt.nxExists(undefined), rt.nxExists(["x"])]);
+out.push([rt.nxStep([], "name"), rt.nxStep({ name: "Ada" }, "name"), rt.nxStep({ $type: "User" }, "email")]);
+let ran = false;
+out.push([rt.nxCoalesce("x", () => { ran = true; return "y"; }), ran, rt.nxCoalesce([], () => "y")]);
+out.push([rt.nxItems([]), rt.nxItems("x"), rt.nxItems(["x", "y"])]);
+out.push([rt.nxOptional("k", []), rt.nxOptional("k", "v"), rt.nxOptional("k", ["v"])]);
+out.push([rt.nxCleared([]), rt.nxCleared("v")]);
 console.log(JSON.stringify(out));
 "#;
+    // Applying a present empty field leaves the field absent from the result's keys; a merge and
+    // a diff carry it as present and `null`.
     let expected = r#"[
-        { "$type": "User", "name": "Ada", "email": null },
+        { "$type": "User", "name": "Ada" },
+        { "$type": "User", "name": "Ada" },
         { "$type": "User.Update", "name": "Ada", "email": null },
         { "$type": "User.Update", "email": null },
         { "$type": "User.Update", "email": "x@y" },
         { "$type": "User.Update" },
         ["name", "email"],
-        "nxChangedFields needs the update record's declared field order"
+        "nxChangedFields needs the update record's declared field order",
+        [true, false, false, false, true],
+        [[], "Ada", []],
+        ["x", false, "y"],
+        [[], ["x"], ["x", "y"]],
+        [{}, { "k": "v" }, { "k": "v" }],
+        [null, "v"]
     ]"#;
 
     let mut outputs = Vec::new();
@@ -2318,16 +2576,17 @@ console.log(JSON.stringify(out));
 /// a record and not a JavaScript iterable. The values are the interpreter's.
 #[test]
 fn generated_code_counts_over_a_range_through_the_runtime_helper() {
-    let source = "let squares(): int[] = { for i, n in 0..4 { i * i + n } }\n\
-                  let pages(): int[] = { for page in 1..=3 { page } }\n\
-                  let none(): int[] = { for i in 5..2 { i } }\n\
-                  let root(): int[] = { squares() }";
+    // A `for` over a range may yield nothing, so each is `int*`.
+    let source = "let squares(): int* = { for i, n in 0..4 { i * i + n } }\n\
+                  let pages(): int* = { for page in 1..=3 { page } }\n\
+                  let none(): int* = { for i in 5..2 { i } }\n\
+                  let root(): int* = { squares() }";
     let artifact = artifact_from_source(source);
 
     let module = generated_file(&artifact, CodegenTarget::TypeScript, "m0_main.ts");
     assert!(
         module.contains(
-            "nxRangeMap(({ $type: \"Range\", start: 0, end: 4, endInclusive: false }), (i, n) =>"
+            "nxRangeMap(({ $type: \"Range\" as const, start: 0, end: 4, endInclusive: false }), (i, n) =>"
         ),
         "{module}"
     );
@@ -2358,11 +2617,11 @@ fn generated_code_counts_over_a_range_through_the_runtime_helper() {
 fn generated_typescript_with_property_references_and_intrinsics_type_checks() {
     let artifact = artifact_from_source(
         r#"
-type User = { name:string email:string? age:int? }
+type User = { name:string email?:string age?:int }
 let key(): User.Property = {User.Property.email}
-let applied(): User = {apply(<User name="Ada" />, <User.Update email={null} />)}
+let applied(): User = {apply(<User name="Ada" />, <User.Update email={} />)}
 let merged(): User.Update = {merge(<User.Update name="Ada" />, <User.Update age=1 />)}
-let changedKeys(): User.Property[] = {changed(diff(<User name="Ada" />, <User name="Bo" />))}
+let changedKeys(): User.Property* = {changed(diff(<User name="Ada" />, <User name="Bo" />))}
 "#,
     );
     let module = generated_file(&artifact, CodegenTarget::TypeScript, "m0_main.ts");
@@ -2375,7 +2634,7 @@ let changedKeys(): User.Property[] = {changed(diff(<User name="Ada" />, <User na
 // ---------------------------------------------------------------------------------------------
 
 const GENERIC_LAYOUT: &str = "type Contact = { name:string }\n\
-    external component <SkiaLayout TItem:type itemsSource:TItem[]? />\n\
+    external component <SkiaLayout TItem:type itemsSource?:TItem+ />\n\
     let v = <SkiaLayout TItem=Contact itemsSource={} />\n\
     let root() = { v }";
 
@@ -2386,8 +2645,12 @@ fn generated_typescript_carries_a_type_parameter_generically_and_erases_it_on_th
     let artifact = artifact_from_source(GENERIC_LAYOUT);
     let module = generated_file(&artifact, CodegenTarget::TypeScript, "m0_main.ts");
 
+    // `?:TItem+` is an optional property whose value is an array; its read type `TItem*` is an
+    // array that may be empty, so neither side mentions `null`.
     assert!(
-        module.contains("type SkiaLayoutProps<TItem = unknown> = {\n  itemsSource?: readonly TItem[] | null;\n};"),
+        module.contains(
+            "type SkiaLayoutProps<TItem = unknown> = {\n  itemsSource?: readonly TItem[];\n};"
+        ),
         "{module}"
     );
     assert!(
@@ -2395,7 +2658,7 @@ fn generated_typescript_carries_a_type_parameter_generically_and_erases_it_on_th
         "{module}"
     );
     assert!(
-        module.contains("type SkiaLayoutElement = {\n  readonly $type: \"SkiaLayout\";\n  readonly itemsSource: readonly unknown[] | null;\n};"),
+        module.contains("type SkiaLayoutElement = {\n  readonly $type: \"SkiaLayout\";\n  readonly itemsSource?: readonly unknown[];\n};"),
         "{module}"
     );
     assert!(
@@ -2415,7 +2678,7 @@ fn generated_typescript_carries_a_type_parameter_generically_and_erases_it_on_th
 fn generated_typescript_emits_a_generic_record_and_its_instantiation() {
     let artifact = artifact_from_source(
         "type Range = { T:type start:T end:T }\n\
-         type Slider = { range:<Range T=float64/> marks:<Range T=int/>[]? }\n\
+         type Slider = { range:<Range T=float64/> marks?:<Range T=int/>+ }\n\
          let s = <Slider range={<Range T=float64 start={0} end={1} />} />\n\
          let root() = { s }",
     );
@@ -2432,7 +2695,7 @@ fn generated_typescript_emits_a_generic_record_and_its_instantiation() {
         "{module}"
     );
     assert!(
-        module.contains("readonly marks?: readonly Range<number>[] | null;"),
+        module.contains("readonly marks?: readonly Range<number>[];"),
         "{module}"
     );
     assert!(
@@ -2464,7 +2727,7 @@ const inferred = SkiaLayout({ itemsSource: [{ name: "a" }] });
 const bare = SkiaLayout({});
 const erasedProps: SkiaLayoutProps = { itemsSource: [1, "two"] };
 const types: ["SkiaLayout", "SkiaLayout", "SkiaLayout"] = [typed.$type, inferred.$type, bare.$type];
-const items: readonly unknown[] | null = inferred.itemsSource;
+const items: readonly unknown[] = inferred.itemsSource ?? [];
 // A wrong item type does not fit the named instantiation.
 // @ts-expect-error
 const mismatched: SkiaLayoutProps<{ name: string }> = { itemsSource: [1] };
@@ -2499,14 +2762,11 @@ export { types, items, erasedProps, mismatched };
         &artifact,
         "console.log(JSON.stringify([m.SkiaLayout({}).$type, m.root()]));",
     );
-    assert_json_values_eq(
-        &rendered,
-        r#"["SkiaLayout", { "$type": "SkiaLayout", "itemsSource": [] }]"#,
-    );
+    assert_json_values_eq(&rendered, r#"["SkiaLayout", { "$type": "SkiaLayout" }]"#);
 }
 
-const GENERIC_STATEFUL_LIST: &str = "external component <Label text:string? />\n\
-    component <List TItem:type items:TItem[]? /> = { state { sel:TItem? = null } <Label /> }\n";
+const GENERIC_STATEFUL_LIST: &str = "external component <Label text?:string />\n\
+    component <List TItem:type items?:TItem+ /> = { state { sel?:TItem } <Label /> }\n";
 
 /// State is a snapshot the host holds as data, and its instantiation was fixed at an NX use site
 /// the host never sees, so the state type erases the parameter the way the element type does.
@@ -2518,7 +2778,7 @@ fn generated_typescript_erases_a_type_parameter_on_the_state_type() {
     let module = generated_file(&artifact, CodegenTarget::TypeScript, "m0_main.ts");
 
     assert!(
-        module.contains("type ListState = {\n  readonly sel: unknown | null;\n};"),
+        module.contains("type ListState = {\n  readonly sel?: unknown;\n};"),
         "{module}"
     );
     assert!(
@@ -2536,7 +2796,7 @@ fn generated_typescript_erases_a_type_parameter_on_the_state_type() {
 #[test]
 fn an_update_record_of_a_generic_component_erases_the_parameter() {
     let artifact = artifact_from_source(&format!(
-        "{GENERIC_STATEFUL_LIST}let u = <List.Update sel=null />\nlet root() = {{ u }}"
+        "{GENERIC_STATEFUL_LIST}let u = <List.Update sel={{}} />\nlet root() = {{ u }}"
     ));
     let module = generated_file(&artifact, CodegenTarget::TypeScript, "m0_main.ts");
 
@@ -2549,19 +2809,366 @@ fn an_update_record_of_a_generic_component_erases_the_parameter() {
     assert_generated_typescript_artifact_type_checks(&artifact);
 }
 
-/// An optional nullable prop is `T | null | undefined` on the input and `T | null` once resolved:
-/// a key present with no value resolves to `null`, the same as an absent key. The rule is the
-/// resolver's, not a generic component's, so it is pinned on an ordinary component.
+/// An optional prop's key present with no value, present with `null`, or present with an empty
+/// array resolves to the empty value, the same as an absent key, and the descriptor carries no key
+/// for it. The rule is the resolver's, not a generic component's, so it is pinned on an ordinary
+/// component.
 #[test]
-fn a_nullable_prop_present_with_no_value_resolves_to_null() {
+fn an_optional_prop_present_with_no_value_resolves_to_the_empty_value() {
     let artifact =
-        artifact_from_source("external component <Box label:string? />\nlet root() = { <Box /> }");
+        artifact_from_source("external component <Box label?:string />\nlet root() = { <Box /> }");
     let rendered = execute_generated_javascript_artifact_script(
         &artifact,
-        "console.log(JSON.stringify([m.Box({ label: undefined }), m.Box({})]));",
+        "console.log(JSON.stringify([m.Box({ label: undefined }), m.Box({ label: null }), m.Box({ label: [] }), m.Box({}), m.root()]));",
     );
     assert_json_values_eq(
         &rendered,
-        r#"[{ "$type": "Box", "label": null }, { "$type": "Box", "label": null }]"#,
+        r#"[{ "$type": "Box" }, { "$type": "Box" }, { "$type": "Box" }, { "$type": "Box" }, { "$type": "Box" }]"#,
+    );
+    assert_json_values_eq(
+        &execute_generated_javascript_artifact_root(&artifact, ""),
+        &interpreter_json_artifact_root(&artifact),
+    );
+}
+
+// ------------------------------------------------------------------------------------------------
+// Presence operators
+// ------------------------------------------------------------------------------------------------
+
+/// The presence test, the step, the fallback and the `{}` pattern evaluate in generated JavaScript
+/// to what the interpreter evaluates them to, over the one empty representation.
+#[test]
+fn generated_javascript_evaluates_the_presence_operators_like_the_interpreter() {
+    let cases = [
+        (
+            r#"type Person = { name:string }
+type Book = { title:string author?:Person }
+let root() = { <Box has={<Book title="A" />.author?} /> }"#,
+            r#"{ "$type": "Box", "has": false }"#,
+        ),
+        (
+            r#"type Person = { name:string }
+type Book = { title:string author?:Person }
+let root() = { <Box has={<Book title="A" author=<Person name="Ada" /> />.author?} /> }"#,
+            r#"{ "$type": "Box", "has": true }"#,
+        ),
+        (
+            r#"type Person = { name:string }
+type Book = { author?:Person }
+let root() = { <Box name={<Book />.author?.name ?? "anonymous"} /> }"#,
+            r#"{ "$type": "Box", "name": "anonymous" }"#,
+        ),
+        (
+            r#"type Person = { name:string }
+type Book = { author?:Person }
+let root() = { <Box name={<Book author=<Person name="Ada" /> />.author?.name ?? "anonymous"} /> }"#,
+            r#"{ "$type": "Box", "name": "Ada" }"#,
+        ),
+        // A `?:T+` field reads as `T*`: empty when omitted, the array when written.
+        (
+            r#"type Book = { tags?:string+ }
+let root() = { <Box none={<Book />.tags?} some={<Book tags={"x" "y"} />.tags?} /> }"#,
+            r#"{ "$type": "Box", "none": false, "some": true }"#,
+        ),
+        // `??` binds above arithmetic.
+        (
+            r#"let f(o?:int): int = { 10 + o ?? 5 }
+let root() = { f({}) + f(1) }"#,
+            "26",
+        ),
+    ];
+    // The `{}` match pattern has no case here: executable source codegen does not support match
+    // expressions, so the conformance corpus covers it through the IR runtime instead.
+    for (source, expected) in cases {
+        let output = execute_generated_javascript_root(source);
+        assert_json_values_eq(&output, expected);
+        assert_json_values_eq(&output, &interpreter_json_root(source));
+    }
+}
+
+/// The fallback runs only when the left operand is empty.
+#[test]
+fn generated_javascript_evaluates_the_fallback_lazily() {
+    let artifact = artifact_from_source(
+        "let fail(): int = { 1 / 0 }\n\
+         let f(o?:int): int = { o ?? fail() }\n\
+         let root() = { f(1) }",
+    );
+    let module = generated_file(&artifact, CodegenTarget::JavaScript, "m0_main.js");
+    assert!(
+        module.contains("nxCoalesce(o, () => fail())"),
+        "the fallback is a thunk: {module}"
+    );
+    let output = execute_generated_javascript_artifact_script(
+        &artifact,
+        r#"const out = [m.root()];
+try {
+  out.push(m.f([]));
+} catch (error) {
+  out.push(error.message ?? String(error));
+}
+console.log(JSON.stringify(out));"#,
+    );
+    assert_json_values_eq(&output, r#"[1, "Division by zero"]"#);
+    assert_json_values_eq(
+        &execute_generated_javascript_artifact_root(&artifact, ""),
+        &interpreter_json_artifact_root(&artifact),
+    );
+}
+
+/// `==` compares by value in every engine: two empty optionals are equal, records compare by
+/// their fields, and a sequence by its items.
+#[test]
+fn generated_javascript_equality_is_structural_like_the_interpreter() {
+    let prelude = "type P = { name:string nick?:string }\n\
+         let same(a:P, b:P) = { a.nick == b.nick }\n";
+    let cases = [
+        (
+            "let root() = { same(<P name=\"x\" />, <P name=\"y\" />) }",
+            "true",
+        ),
+        (
+            "let root() = { same(<P name=\"x\" nick=\"n\" />, <P name=\"y\" />) }",
+            "false",
+        ),
+        (
+            "let root() = { <P name=\"x\" nick=\"n\" /> == <P name=\"x\" nick=\"n\" /> }",
+            "true",
+        ),
+        (
+            "let root() = { <P name=\"x\" /> != <P name=\"y\" /> }",
+            "true",
+        ),
+        (
+            "let xs:int+ = { 1 2 }\nlet ys:int+ = { 1 2 }\nlet root() = { xs == ys }",
+            "true",
+        ),
+    ];
+    for (body, expected) in cases {
+        let source = format!("{prelude}{body}");
+        let output = execute_generated_javascript_root(&source);
+        assert_json_values_eq(&output, expected);
+        assert_json_values_eq(&output, &interpreter_json_root(&source));
+    }
+
+    // Two exactly-one primitives still compare with `===`.
+    let artifact =
+        artifact_from_source("let f(a:int, b:int) = { a == b }\nlet root() = { f(1, 1) }");
+    let module = generated_file(&artifact, CodegenTarget::JavaScript, "m0_main.js");
+    assert!(module.contains("(a === b)"), "{module}");
+    assert!(!module.contains("nxValuesEqual"), "{module}");
+}
+
+/// The runtime's equality treats every value as a sequence: an item equals a one-element array
+/// holding an equal item, and every spelling of the empty value is the one empty.
+#[test]
+fn emitted_runtime_equality_treats_an_item_as_a_sequence_of_one() {
+    for target in [CodegenTarget::JavaScript, CodegenTarget::TypeScript] {
+        let output = execute_script_against_emitted_runtime(
+            target,
+            &format!(
+                "import {{ nxValuesEqual as eq }} from './nx-runtime.js';\n\
+                 console.log(JSON.stringify([eq(1, [1]), eq([1], 1), eq(1, [1, 1]), eq([], null), \
+                 eq(undefined, []), eq([], [[]]), eq({{ $type: 'P', a: 1 }}, {{ $type: 'P', a: [1] }}), \
+                 eq({{ $type: 'P' }}, {{ $type: 'P', a: 1 }})]));"
+            ),
+        );
+        assert_json_values_eq(
+            &output,
+            "[true, true, false, true, true, false, true, false]",
+        );
+    }
+}
+
+/// An occurrence decision reads the alias-resolved type, so `type Ints = int+` lifts exactly as
+/// `int+` does, and a call argument and a `??` fallback are lifted to the sequence their site
+/// binds.
+#[test]
+fn generated_javascript_lifts_through_aliases_arguments_and_fallbacks() {
+    let prelude = "type Ints = int+\n\
+         type R = { xs:Ints }\n\
+         type O = { xs?:Ints }\n\
+         type Item = { n:int }\n\
+         type Items = Item+\n\
+         type Box = { content items:Items }\n\
+         external component <Ext xs?:Ints />\n\
+         let f(xs?:int+) = { xs ?? 5 }\n\
+         let p(xs:int+) = { xs }\n\
+         type S = { xs:int+ }\n\
+         let k(xs?:int+) = <S xs={xs ?? 5} />\n";
+    for body in [
+        "let root() = <R xs={3} />",
+        "let root() = <O xs={3} />",
+        "let root() = <Box><Item n=1 /></Box>",
+        "let root() = <Ext xs={3} />",
+        "let root() = { f(3) }",
+        "let root() = { f({}) }",
+        "let root() = { p(5) }",
+        "let root() = { k({}) }",
+    ] {
+        let source = format!("{prelude}{body}");
+        assert_json_values_eq(
+            &execute_generated_javascript_root(&source),
+            &interpreter_json_root(&source),
+        );
+    }
+}
+
+/// A `for` over an optional yields its body's value unchanged, so an item stays an item in
+/// generated JavaScript exactly as in the interpreter, and an empty optional yields `{}`.
+#[test]
+fn generated_javascript_for_over_an_optional_yields_its_item() {
+    let prelude = "type Person = { name:string }\n\
+         let name(p?:Person) = { for x in p { x.name } }\n\
+         let names(ps:Person+) = { for x in ps { x.name } }\n";
+    for body in [
+        "let root() = { name(<Person name=\"Ada\" />) }",
+        "let root() = { name({}) }",
+        "let root() = { name(<Person name=\"Ada\" />) == \"Ada\" }",
+        "let root() = { names(<Person name=\"Ada\" />) }",
+    ] {
+        let source = format!("{prelude}{body}");
+        assert_json_values_eq(
+            &execute_generated_javascript_root(&source),
+            &interpreter_json_root(&source),
+        );
+    }
+}
+
+/// A record reached through a component's props is validated at each field's read type, so an
+/// optional `+` field admits `[]` and `null`, and either is dropped as an empty optional field is.
+#[test]
+fn generated_record_schemas_validate_optional_fields_at_the_read_type() {
+    let artifact = artifact_from_source(
+        "type Book = { title:string tags?:string+ sub?:string }\n\
+         external component <Ext b:Book />\n\
+         component <Show book:Book /> = { <Ext b={book} /> }\n\
+         let root() = { <Show book={<Book title=\"x\" />} /> }",
+    );
+    let output = execute_generated_javascript_artifact_script(
+        &artifact,
+        r#"const out = [];
+for (const book of [
+  { $type: "Book", title: "x", tags: [] },
+  { $type: "Book", title: "x", sub: null },
+  { $type: "Book", title: "x", tags: "a" },
+]) {
+  out.push(m.ShowSchema.initializeJson({ book }).rendered);
+}
+console.log(JSON.stringify(out));"#,
+    );
+    assert_json_values_eq(
+        &output,
+        r#"[
+          { "$type": "Ext", "b": { "$type": "Book", "title": "x" } },
+          { "$type": "Ext", "b": { "$type": "Book", "title": "x" } },
+          { "$type": "Ext", "b": { "$type": "Book", "title": "x", "tags": ["a"] } }
+        ]"#,
+    );
+}
+
+/// An empty optional state field is an omitted key in generated code, as it is in the IR runtime,
+/// and reads as the empty value in the render.
+#[test]
+fn generated_initial_state_omits_an_empty_optional_field() {
+    let artifact = artifact_from_source(
+        "external component <Ext label?:string />\n\
+         component <Card title?:string /> = { state { sel?:string tags?:string+ n:int = 1 } \
+         <Ext label={sel ?? title} /> }\n\
+         let root() = { <Card /> }",
+    );
+    let output = execute_generated_javascript_artifact_script(
+        &artifact,
+        r#"const a = m.CardSchema.initializeJson({ title: "t" });
+const b = m.CardSchema.evaluateJson({}, { n: 2, sel: "s" });
+console.log(JSON.stringify([a.state, a.rendered, b]));"#,
+    );
+    assert_json_values_eq(
+        &output,
+        r#"[{ "n": 1 }, { "$type": "Ext", "label": "t" }, { "$type": "Ext", "label": "s" }]"#,
+    );
+    assert_generated_typescript_artifact_type_checks(&artifact);
+}
+
+/// Loops, `??` and `?.` type-check under `--strict`: the runtime helpers carry the item and member
+/// types through rather than widening them to `NxValue`.
+#[test]
+fn generated_typescript_type_checks_loops_and_occurrence_operators() {
+    let artifact = artifact_from_source(
+        "let inc(xs:int+): int+ = { for x in xs { x + 1 } }\n\
+         type P = { nick?:string }\n\
+         let n(p:P): string = { p.nick ?? \"none\" }\n\
+         let s(p?:P): string? = { p?.nick }\n\
+         let m(p?:P): string = { p?.nick ?? \"d\" }\n\
+         let e(a:P, b:P): boolean = { a.nick == b.nick }\n\
+         let root() = { inc(1) }",
+    );
+    assert_generated_typescript_artifact_type_checks(&artifact);
+
+    // `?.` into a `*` member, a `for` over an optional member, chained fallbacks, an optional
+    // member read into an optional field, and a conditional record at a `?` and a `*` site.
+    let artifact = artifact_from_source(
+        "type Person = { name:string nick?:string tags?:string+ }\n\
+         type Book = { title:string author?:Person subtitle?:string }\n\
+         type Item = { n:int }\n\
+         type Opt = { content one?:Item }\n\
+         type Star = { content items?:Item+ }\n\
+         let bk() = <Book title=\"T\" author={<Person name=\"Ada\" />} />\n\
+         let tags(): string* = { bk().author?.tags }\n\
+         let authorName(): string? = { for t in bk().author { t.name } }\n\
+         let subtitle(): string = { bk().subtitle ?? bk().subtitle ?? \"x\" }\n\
+         let copied(): Person = <Person name=\"A\" nick={bk().subtitle} />\n\
+         let one(c:boolean): Opt = <Opt>{if c { <Item n=1 /> }}</Opt>\n\
+         let star(c:boolean): Star = <Star>{if c { <Item n=1 /> }}</Star>\n\
+         let root() = { tags() }",
+    );
+    assert_generated_typescript_artifact_type_checks(&artifact);
+    assert_json_values_eq(
+        &execute_generated_javascript_artifact_script(
+            &artifact,
+            "console.log(JSON.stringify([m.tags(), m.authorName(), m.subtitle(), m.copied(), \
+             m.one(true), m.one(false), m.star(true), m.star(false)]));",
+        ),
+        r#"[[], "Ada", "x", { "$type": "Person", "name": "A" },
+            { "$type": "Opt", "one": { "$type": "Item", "n": 1 } }, { "$type": "Opt" },
+            { "$type": "Star", "items": [{ "$type": "Item", "n": 1 }] }, { "$type": "Star" }]"#,
+    );
+}
+
+/// An element call may leave out an optional parameter, which binds the empty value.
+#[test]
+fn generated_javascript_element_call_omits_an_optional_parameter() {
+    let prelude = "let <Row Item:string Note?:string />: string = { Item + (Note ?? \"-none\") }\n";
+    for body in [
+        "let root() = { <Row Item=\"x\" /> }",
+        "let root() = { <Row Item=\"x\" Note=\"y\" /> }",
+    ] {
+        let source = format!("{prelude}{body}");
+        assert_json_values_eq(
+            &execute_generated_javascript_root(&source),
+            &interpreter_json_root(&source),
+        );
+    }
+}
+
+/// Executable source codegen does not support match expressions, so a `{}` pattern is refused with
+/// a diagnostic rather than emitted; the IR runtime evaluates it.
+#[test]
+fn generated_javascript_refuses_a_match_on_the_empty_pattern() {
+    let error = emit_program(
+        &artifact_from_source(
+            "type Person = { name:string }\n\
+             type Book = { author?:Person }\n\
+             let root() = { if <Book />.author is { {} => \"anonymous\" else => \"named\" } }",
+        ),
+        &CodegenOptions::javascript(),
+    )
+    .expect_err("a match is refused");
+    assert!(
+        error.diagnostics.iter().any(|diagnostic| diagnostic
+            .message()
+            .contains("match expressions are not supported by executable source codegen")),
+        "{:?}",
+        error.diagnostics
     );
 }

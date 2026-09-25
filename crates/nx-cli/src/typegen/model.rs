@@ -24,7 +24,14 @@ pub struct ExportedAlias {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExportedRecordField {
     pub name: String,
+    /// The declared type, without the property's own `?` mark: `T` for `name?:T`. A field is
+    /// declared `name:T`, `name?:T`, `name:T+` or `name?:T+`, so this never carries `?` or `*`.
     pub ty: TypeRef,
+    /// Whether the field carries the `?` mark (`name?:T`): it may be absent, and reads as a type
+    /// that admits zero. Each emitter spells the mark as its host does — an optional property in
+    /// TypeScript, a nullable one in C# — and it is what makes an update companion's field
+    /// clearable.
+    pub optional: bool,
     pub default_value: Option<ExportedFieldDefault>,
     /// Identity of the module that declared the field, when it is not the module that owns the
     /// exported declaration carrying it.
@@ -47,7 +54,6 @@ pub enum ExportedLiteralDefault {
     Int(i64),
     Float(OrderedFloat),
     Boolean(bool),
-    Null,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -135,7 +141,8 @@ pub struct ExportedExternalState {
 ///
 /// <para>It has the target's effective fields — a component's state fields — every one optional,
 /// and carries the `<Target>.Update` discriminator. An absent field means "unchanged" and a present
-/// `null` means "set to null", so each host surface keeps the two apart.</para>
+/// `null` means "cleared" — the empty value, which only a field declared `name?:T` in the target
+/// admits — so each host surface keeps the two apart.</para>
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExportedUpdate {
     pub target_name: String,
@@ -449,6 +456,7 @@ impl ExportedTypeGraph {
         imported_build: ImportedTypesBuild,
         imported_type_collector: &ImportedTypeCollector,
     ) -> Result<ExportedTypeGraphBuild, String> {
+        reject_fields_admitting_zero(module, source_path)?;
         let file_name = source_path
             .file_name()
             .map(PathBuf::from)
@@ -494,6 +502,7 @@ impl ExportedTypeGraph {
                 continue;
             };
 
+            reject_fields_admitting_zero(artifact, Path::new(&artifact.file_name))?;
             let declarations = collect_exported_declarations(artifact);
             if declarations.is_empty() {
                 continue;
@@ -1676,8 +1685,11 @@ impl CachedImportedLibrary {
 
     fn type_ref_is_reference(&self, ty: &TypeRef, seen_aliases: &mut BTreeSet<String>) -> bool {
         match ty {
-            TypeRef::Nullable(inner) => self.type_ref_is_reference(inner, seen_aliases),
-            TypeRef::Array(_) | TypeRef::Function { .. } => true,
+            // A `?` type is its item's host type made nullable; a `+` or `*` type is an array.
+            TypeRef::Seq { inner, occ } if !occ.admits_many() => {
+                self.type_ref_is_reference(inner, seen_aliases)
+            }
+            TypeRef::Seq { .. } | TypeRef::Function { .. } => true,
             // An applied type is its record: a record is always a reference type.
             TypeRef::Applied { name, .. } | TypeRef::Name(name) => {
                 self.type_name_is_reference(name.as_str(), seen_aliases)
@@ -2020,7 +2032,7 @@ fn rewrite_type_ref_names(ty: &mut TypeRef, rename: &mut impl FnMut(&str) -> Opt
                 rewrite_type_ref_names(arg, rename);
             }
         }
-        TypeRef::Array(inner) | TypeRef::Nullable(inner) => rewrite_type_ref_names(inner, rename),
+        TypeRef::Seq { inner, .. } => rewrite_type_ref_names(inner, rename),
         TypeRef::Function {
             params,
             return_type,
@@ -2059,6 +2071,7 @@ fn export_update(
                 .map(|field| ExportedRecordField {
                     name: field.name.as_str().to_string(),
                     ty: field.ty,
+                    optional: field.optional,
                     default_value: None,
                     declaring_module: (field.module_identity != module_identity)
                         .then_some(field.module_identity),
@@ -2072,6 +2085,7 @@ fn export_update(
                 .map(|field| ExportedRecordField {
                     name: field.name.as_str().to_string(),
                     ty: field.ty.clone(),
+                    optional: field.optional,
                     default_value: None,
                     declaring_module: None,
                 })
@@ -2119,6 +2133,7 @@ fn export_external_state(
             .map(|field| ExportedRecordField {
                 name: field.name.as_str().to_string(),
                 ty: field.ty.clone(),
+                optional: field.optional,
                 default_value: None,
                 declaring_module: None,
             })
@@ -2131,6 +2146,7 @@ fn export_record_field(module: &LoweredModule, field: &RecordField) -> ExportedR
     ExportedRecordField {
         name: field.name.as_str().to_string(),
         ty: field.ty.clone(),
+        optional: field.optional,
         default_value: export_field_default(module, field.default),
         declaring_module: None,
     }
@@ -2140,6 +2156,7 @@ fn export_union_case_field(module: &LoweredModule, field: &UnionCaseField) -> Ex
     ExportedRecordField {
         name: field.name.as_str().to_string(),
         ty: field.ty.clone(),
+        optional: field.optional,
         default_value: export_field_default(module, field.default),
         declaring_module: None,
     }
@@ -2165,8 +2182,45 @@ fn export_literal_default(literal: &Literal) -> ExportedLiteralDefault {
         Literal::Int32(value) => ExportedLiteralDefault::Int(i64::from(*value)),
         Literal::Float(value) | Literal::Float32(value) => ExportedLiteralDefault::Float(*value),
         Literal::Boolean(value) => ExportedLiteralDefault::Boolean(*value),
-        Literal::Null => ExportedLiteralDefault::Null,
     }
+}
+
+/// Fails when the checker found a property whose type admits zero values.
+///
+/// <para>A property admits zero only through the `?` mark on its name, so a field is declared
+/// `name:T`, `name?:T`, `name:T+` or `name?:T+`. The emitters rely on that — a field's type never
+/// carries `?` or `*` — but typegen otherwise tolerates checker errors, so a field typed `string*`,
+/// or through an alias to `string?`, would generate a shape the language rejects. The checker's
+/// message names the field and the `name?:` fix.</para>
+fn reject_fields_admitting_zero(module: &ModuleArtifact, source_path: &Path) -> Result<(), String> {
+    let rejected = module
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code() == Some("optional-in-type-slot"))
+        .cloned()
+        .collect::<Vec<_>>();
+    if rejected.is_empty() {
+        return Ok(());
+    }
+
+    // Rendered with their source locations, as the library path reports diagnostics, when the
+    // source can be read back; the bare messages otherwise.
+    let rendered = match std::fs::read_to_string(source_path) {
+        Ok(source) => {
+            let sources = std::collections::HashMap::from([(module.file_name.clone(), source)]);
+            nx_diagnostics::render_diagnostics_cli(&rejected, &sources)
+        }
+        Err(_) => rejected
+            .iter()
+            .map(|diagnostic| diagnostic.message().to_string())
+            .collect::<Vec<_>>()
+            .join("\n"),
+    };
+    Err(format!(
+        "Failed to analyze '{}':\n{}",
+        source_path.display(),
+        rendered.trim_end()
+    ))
 }
 
 fn module_output_stem(path: &Path) -> Result<PathBuf, String> {
@@ -2206,7 +2260,7 @@ mod tests {
         let source = r#"
             export abstract type Question = { label:string }
             export type QuestionBaseAlias = Question
-            export type ShortTextQuestion extends QuestionBaseAlias = { placeholder:string? }
+            export type ShortTextQuestion extends QuestionBaseAlias = { placeholder?:string }
         "#;
         let module = analyze_module(source, "types.nx");
         let graph = ExportedTypeGraph::from_module(&module, Path::new("types.nx")).unwrap();
@@ -2233,12 +2287,12 @@ mod tests {
         .expect("base file");
         fs::write(
             library_dir.join("derived.nx"),
-            "export abstract type TextQuestion extends Question = { placeholder:string? }",
+            "export abstract type TextQuestion extends Question = { placeholder?:string }",
         )
         .expect("derived file");
         fs::write(
             library_dir.join("short-text.nx"),
-            "export type ShortTextQuestion extends TextQuestion = { maxLength:int? }",
+            "export type ShortTextQuestion extends TextQuestion = { maxLength?:int }",
         )
         .expect("short text file");
 
@@ -2611,7 +2665,7 @@ export type ChatLink = string
     fn exports_update_companions_for_records_actions_and_stateful_components() {
         let module = analyze_module(
             r#"
-            export type User = { name:string = "anon" email:string? }
+            export type User = { name:string = "anon" email?:string }
             export action Saved = { id:int }
             export component <Counter step:int = 1 /> = { state { count:int = 0 } <Label /> }
             export component <Plain /> = { <Label /> }
@@ -2933,7 +2987,7 @@ export type User extends Named = { email:string }
     fn exports_property_companions_for_records_actions_and_stateful_components() {
         let module = analyze_module(
             r#"
-            export type User = { name:string = "anon" email:string? }
+            export type User = { name:string = "anon" email?:string }
             export action Saved = { id:int }
             export component <Counter step:int = 1 /> = { state { count:int = 0 } <Label /> }
             export component <Plain /> = { <Label /> }
@@ -2997,7 +3051,7 @@ export type User extends Named = { email:string }
         let module = analyze_module(
             r#"
             export type Contact = { title:string }
-            export external component <Table sortBy:Contact.Property? columns:Contact.Property[] />
+            export external component <Table sortBy?:Contact.Property columns:Contact.Property+ />
             "#,
             "types.nx",
         );
@@ -3008,22 +3062,21 @@ export type User extends Named = { email:string }
         else {
             panic!("expected the Table contract");
         };
-        let record_field_type = |name: &str| {
-            &table
+        let record_field = |name: &str| {
+            table
                 .fields
                 .iter()
                 .find(|field| field.name == name)
                 .unwrap_or_else(|| panic!("expected field {}", name))
-                .ty
         };
+        let companion = TypeRef::Name(nx_hir::Name::new("Contact_property"));
+        assert_eq!(record_field("sortBy").ty, companion);
+        assert!(record_field("sortBy").optional);
         assert_eq!(
-            record_field_type("sortBy"),
-            &TypeRef::nullable(TypeRef::Name(nx_hir::Name::new("Contact_property")))
+            record_field("columns").ty,
+            TypeRef::one_or_more(companion.clone())
         );
-        assert_eq!(
-            record_field_type("columns"),
-            &TypeRef::array(TypeRef::Name(nx_hir::Name::new("Contact_property")))
-        );
+        assert!(!record_field("columns").optional);
     }
 
     #[test]

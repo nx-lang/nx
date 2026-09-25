@@ -9,11 +9,11 @@ This tutorial builds a small, realistic component with typed props, events, layo
 Create `examples/nx/profile-card.nx`:
 
 ```nx
-type <User id:string name:string title:string? avatarUrl:string?/>
+type <User id:string name:string title?:string avatarUrl?:string/>
 type <ProfileAction label:string onClick:() => void/>
 ```
 
-- Optional props use `?`; callbacks are typed like ordinary functions.
+- Optional props carry `?` on their name and may be left out; callbacks are typed like ordinary functions.
 - Keep types beside the component so they stay in sync.
 
 ## 2) Lay out the component
@@ -22,14 +22,14 @@ Add a basic skeleton with sensible defaults:
 ```nx
 let <ProfileCard
   user:User
-  actions:ProfileAction[] = []
+  actions?:ProfileAction+
   tone:string = "neutral"/> =
   <article className={`card tone-${tone}`}>
     <header>
-      <img src={if user.avatarUrl { user.avatarUrl } else { "/placeholder.png" }} alt={user.name}/>
+      <img src={user.avatarUrl ?? "/placeholder.png"} alt={user.name}/>
       <div>
         <h3>{user.name}</h3>
-        if user.title { <p>{user.title}</p> }
+        if user.title? { <p>{user.title}</p> }
       </div>
     </header>
     <footer>
@@ -41,17 +41,18 @@ let <ProfileCard
 ```
 
 - Attributes accept expressions (including `if`) without leaving markup mode.
-- Defaults keep the call site concise (`actions` defaults to an empty list).
+- Defaults keep the call site concise, and an optional prop such as `actions` can be left out
+  entirely: it is then empty, and the `for` over it yields nothing.
 
 ## 3) Add interaction and stateful inputs
 Model simple state by threading values through props and callbacks:
 
 ```nx
 let <ProfileScreen user:User/> =
-  let actions: ProfileAction[] = [
-    <ProfileAction label="Message" onClick={() => sendMessage(user.id)}/>,
+  let actions: ProfileAction+ = {
+    <ProfileAction label="Message" onClick={() => sendMessage(user.id)}/>
     <ProfileAction label="Follow" onClick={() => follow(user.id)}/>
-  ]
+  }
 
   <ProfileCard user={user} actions={actions} tone="info"/>
 ```

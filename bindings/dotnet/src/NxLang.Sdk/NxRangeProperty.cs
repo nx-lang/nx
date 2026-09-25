@@ -73,6 +73,7 @@ internal sealed class NxRange_propertyWireFormat : INxEnumWireFormat<NxRange_pro
 
 /// <summary>
 /// The typed field keys of <see cref="NxRange{T}"/>, which <see cref="NxRange_update{T}"/>'s schema is built from.
+/// None of the prelude's range fields is optional, so none can be cleared.
 /// </summary>
 /// <typeparam name="T">The type of the bounds, as on <see cref="NxRange{T}"/>.</typeparam>
 public static class NxRangeProperties<T>
@@ -81,19 +82,22 @@ public static class NxRangeProperties<T>
     public static readonly NxProperty<NxRange<T>, T> Start = new(
         NxRange_propertyWireFormat.Format(NxRange_property.Start),
         record => record.Start,
-        (record, value) => record.Start = value);
+        (record, value) => record.Start = value,
+        clearable: false);
 
     /// <summary>The key of <see cref="NxRange{T}.End"/>.</summary>
     public static readonly NxProperty<NxRange<T>, T> End = new(
         NxRange_propertyWireFormat.Format(NxRange_property.End),
         record => record.End,
-        (record, value) => record.End = value);
+        (record, value) => record.End = value,
+        clearable: false);
 
     /// <summary>The key of <see cref="NxRange{T}.EndInclusive"/>.</summary>
     public static readonly NxProperty<NxRange<T>, bool> EndInclusive = new(
         NxRange_propertyWireFormat.Format(NxRange_property.EndInclusive),
         record => record.EndInclusive,
-        (record, value) => record.EndInclusive = value);
+        (record, value) => record.EndInclusive = value,
+        clearable: false);
 
     /// <summary>
     /// Returns the key <paramref name="property"/> names.

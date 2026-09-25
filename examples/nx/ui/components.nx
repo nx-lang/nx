@@ -1,4 +1,4 @@
-let <AppShell class:string content:Element[]/> =
+let <AppShell class:string content:Element+/> =
   <div class={class}>
     {content}
   </div>

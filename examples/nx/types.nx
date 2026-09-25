@@ -2,8 +2,8 @@
 type UserId = int
 type Username = string
 type MaybeUser = User?
-type UserList = UserBase[]
-type EntityList = Entity[]
+type UserList = UserBase+
+type EntityList = Entity+
 
 // A closed set of constants is a union whose cases carry no payload
 type CardSortMode = open | closed
@@ -19,7 +19,7 @@ abstract type Entity = {
 
 abstract type UserBase extends Entity = {
   name: Username
-  email: string?
+  email?: string
   age: int = 18
 }
 
@@ -49,7 +49,7 @@ let <UserCard
     <h3>{user.name}</h3>
     <p:>ID: {user.id}</p>
     if user.email is {
-      null => <p:>No email</p>
+      {} => <p:>No email</p>
       else => <p:>Email: {user.email}</p>
     }
     <p:>Age: {user.age}</p>

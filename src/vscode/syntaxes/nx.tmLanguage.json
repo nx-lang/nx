@@ -221,15 +221,11 @@
       ]
     },
     "literals": {
-      "comment": "The reserved value literals. Split out of `keywords-core` so a context can recognise them without also claiming the declaration keywords, which are legal identifiers and attribute names.",
+      "comment": "The reserved value literals, `true` and `false`; the language has no `null`. Split out of `keywords-core` so a context can recognise them without also claiming the declaration keywords, which are legal identifiers and attribute names.",
       "patterns": [
         {
           "name": "constant.language.boolean.nx",
           "match": "\\b(?:true|false)\\b"
-        },
-        {
-          "name": "constant.language.null.nx",
-          "match": "\\bnull\\b"
         }
       ]
     },
@@ -254,10 +250,6 @@
         {
           "name": "support.type.primitive.nx",
           "match": "\\b(?:string|int|int32|int64|float32|float64|boolean|object)\\b"
-        },
-        {
-          "name": "keyword.operator.type-modifier.nx",
-          "match": "\\[\\]"
         }
       ]
     },
@@ -288,12 +280,19 @@
           "match": "\\|"
         },
         {
-          "name": "keyword.operator.conditional.nx",
-          "match": "\\?"
+          "comment": "The fallback `x ?? y`, one token. Ahead of the presence test so it is not read as two of them.",
+          "name": "keyword.operator.coalesce.nx",
+          "match": "\\?\\?"
         },
         {
-          "name": "punctuation.separator.conditional.nx",
-          "match": ":"
+          "comment": "The step `x?.m`, one token. Ahead of the presence test and the dot rule so it is not read as a test followed by a member-access dot.",
+          "name": "keyword.operator.optional-access.nx",
+          "match": "\\?\\."
+        },
+        {
+          "comment": "The postfix presence test `x?`: a `?` after a value expression that is not the start of `?.` or `??`. A `?` before a colon is a property's optional mark and a `?` after a type is a type modifier, which the annotation rules claim before this one is reached.",
+          "name": "keyword.operator.presence.nx",
+          "match": "\\?(?![.?:])"
         },
         {
           "comment": "Ahead of the dot rule, so `..` and `..=` are one operator rather than two member-access dots or a dot and an assignment.",
@@ -390,7 +389,7 @@
           ]
         },
         {
-          "comment": "The declared type of a value definition. Anchored on the colon so the `?` and `[]` suffixes are scoped as type modifiers rather than as a ternary.",
+          "comment": "The declared type of a value definition. Anchored on the colon so the `?`, `+` and `*` suffixes are scoped as type modifiers rather than as a presence test or an arithmetic operator.",
           "begin": "(:)",
           "beginCaptures": {
             "1": {
@@ -692,7 +691,7 @@
               "include": "#types"
             },
             {
-              "match": "\\b([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*)\\b((?:\\[\\]|\\?)*)",
+              "match": "\\b([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*)\\b([?+*]?)",
               "captures": {
                 "1": {
                   "name": "entity.name.type.nx"
@@ -857,16 +856,19 @@
     "record-property": {
       "patterns": [
         {
-          "begin": "\\b([A-Za-z_][A-Za-z0-9_-]*)\\s*(:)",
+          "begin": "\\b([A-Za-z_][A-Za-z0-9_-]*)\\s*(\\?)?\\s*(:)",
           "beginCaptures": {
             "1": {
               "name": "variable.other.property.nx"
             },
             "2": {
+              "name": "keyword.operator.optional.nx"
+            },
+            "3": {
               "name": "punctuation.separator.type.annotation.nx"
             }
           },
-          "end": "(?=\\s*[A-Za-z_][A-Za-z0-9_-]*\\s*:|\\s*\\}|^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
+          "end": "(?=\\s*[A-Za-z_][A-Za-z0-9_-]*\\s*\\??\\s*:|\\s*\\}|^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
           "patterns": [
             {
               "include": "#comments"
@@ -2099,8 +2101,8 @@
     "declaration-property": {
       "patterns": [
         {
-          "comment": "A property definition inside an element-shaped declaration signature: `[content] name: Type[[]][?] [= default]`. Unlike an element attribute, the name is a definition and what follows the colon is a type.",
-          "begin": "\\b(?:(content)\\s+)?([A-Za-z_][A-Za-z0-9_-]*)\\s*(:)",
+          "comment": "A property definition inside an element-shaped declaration signature: `[content] name[?]: Type[?|+|*] [= default]`. Unlike an element attribute, the name is a definition and what follows the colon is a type. The `?` before the colon is the optional mark, a token of its own between the name and the colon.",
+          "begin": "\\b(?:(content)\\s+)?([A-Za-z_][A-Za-z0-9_-]*)\\s*(\\?)?\\s*(:)",
           "beginCaptures": {
             "1": {
               "name": "storage.modifier.content.nx"
@@ -2109,10 +2111,13 @@
               "name": "variable.other.property.nx"
             },
             "3": {
+              "name": "keyword.operator.optional.nx"
+            },
+            "4": {
               "name": "punctuation.separator.type.annotation.nx"
             }
           },
-          "end": "(?=\\s*(?:content\\s+)?[A-Za-z_][A-Za-z0-9_-]*\\s*:|\\s*/\\s*>|\\s*\\bemits\\b|\\s*[},)]|^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
+          "end": "(?=\\s*(?:content\\s+)?[A-Za-z_][A-Za-z0-9_-]*\\s*\\??\\s*:|\\s*/\\s*>|\\s*\\bemits\\b|\\s*[},)]|^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
           "patterns": [
             {
               "include": "#comments"
@@ -2345,7 +2350,7 @@
       ]
     },
     "type-annotation": {
-      "comment": "The type after an annotation colon: a function type, a parenthesized type, or a name, each with its sequence and optional suffixes. Anchored with \\G so it only matches immediately after the colon (or, inside a function or parenthesized type, after what preceded it).",
+      "comment": "The type after an annotation colon: a function type, a parenthesized type, or a name, each with at most one occurrence suffix (`?`, `+` or `*`). Anchored with \\G so it only matches immediately after the colon (or, inside a function or parenthesized type, after what preceded it).",
       "patterns": [
         {
           "comment": "A function type: an element function's signature with `function` in the name slot, `<function Item:Contact Index:int />: DrawnNode`. The parameters are property definitions and may span lines; the result after `/>:` is read by the end match, so a name, primitive or alias result is scoped like every other annotation.",
@@ -2359,7 +2364,7 @@
               "name": "keyword.other.function.nx"
             }
           },
-          "end": "(/)\\s*(>)\\s*(:)\\s*(?:(string|int32|int64|int|float32|float64|boolean|object)(?![A-Za-z0-9_-])|([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*))((?:\\[\\]|\\?)*)|(/)\\s*(>)",
+          "end": "(/)\\s*(>)\\s*(:)\\s*(?:(string|int32|int64|int|float32|float64|boolean|object)(?![A-Za-z0-9_-])|([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*))([?+*]?)|(/)\\s*(>)",
           "endCaptures": {
             "1": {
               "name": "punctuation.definition.tag.self-closing.nx"
@@ -2404,7 +2409,7 @@
               "name": "punctuation.definition.type.group.nx"
             }
           },
-          "end": "(\\))((?:\\[\\]|\\?)*)",
+          "end": "(\\))([?+*]?)",
           "endCaptures": {
             "1": {
               "name": "punctuation.definition.type.group.nx"
@@ -2423,7 +2428,7 @@
           ]
         },
         {
-          "match": "\\G\\s*(string|int32|int64|int|float32|float64|boolean|object)(?![A-Za-z0-9_-])((?:\\[\\]|\\?)*)",
+          "match": "\\G\\s*(string|int32|int64|int|float32|float64|boolean|object)(?![A-Za-z0-9_-])([?+*]?)",
           "captures": {
             "1": {
               "name": "support.type.primitive.nx"
@@ -2434,7 +2439,7 @@
           }
         },
         {
-          "match": "\\G\\s*([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*)(?![A-Za-z0-9_-])((?:\\[\\]|\\?)*)",
+          "match": "\\G\\s*([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*)(?![A-Za-z0-9_-])([?+*]?)",
           "captures": {
             "1": {
               "name": "entity.name.type.nx"
@@ -2504,7 +2509,7 @@
       ]
     },
     "attributes-condition": {
-      "comment": "The attribute patterns admissible inside a property-list condition arm. Identical to `#attributes` except that the trailing `#keywords-core` fallback is replaced by `#literals`: inside a condition a bare `state` or `type` is an expression name, not a declaration keyword, and only `true`, `false`, and `null` are reserved.",
+      "comment": "The attribute patterns admissible inside a property-list condition arm. Identical to `#attributes` except that the trailing `#keywords-core` fallback is replaced by `#literals`: inside a condition a bare `state` or `type` is an expression name, not a declaration keyword, and only `true` and `false` are reserved.",
       "patterns": [
         {
           "include": "#property-list-if"
@@ -2579,12 +2584,12 @@
       ]
     },
     "hover-annotation": {
-      "comment": "One line of editor hover content, such as `(property) ShapeCommon.shadows: Shadow[]?`. NX has no such form: the parenthesized kind is what hover writes for a position that has no NX spelling of its own — a parameter, a field, a case. Without these patterns the rest of the line falls out of every declaration context the grammar scopes inside, so the names go unhighlighted and the annotation colon and `?` are scoped as a ternary's. A line-based grammar cannot tell hover content from element text that happens to read the same way, so the cost is bounded rather than avoided: a line of prose beginning with one of the five kind words these patterns recognize — `property`, `parameter`, `case`, `primitive type`, `built-in type` — in the shape the pattern for that kind matches, is scoped as a hover annotation. That is the trade for highlighting every fragment hover emits.",
+      "comment": "One line of editor hover content, such as `(property) ShapeCommon.shadows?: Shadow+`. NX has no such form: the parenthesized kind is what hover writes for a position that has no NX spelling of its own — a parameter, a field, a case. Without these patterns the rest of the line falls out of every declaration context the grammar scopes inside, so the names go unhighlighted and the optional mark and a type's `?` are scoped as a presence test. A line-based grammar cannot tell hover content from element text that happens to read the same way, so the cost is bounded rather than avoided: a line of prose beginning with one of the five kind words these patterns recognize — `property`, `parameter`, `case`, `primitive type`, `built-in type` — in the shape the pattern for that kind matches, is scoped as a hover annotation. That is the trade for highlighting every fragment hover emits.",
       "patterns": [
         {
-          "comment": "`(property) Owner.name: Type` — the owner is a qualifier, the last name is the thing hovered, and what follows the colon is a type.",
+          "comment": "`(property) Owner.name[?]: Type` — the owner is a qualifier, the last name is the thing hovered, a `?` before the colon is the optional mark, and what follows the colon is a type.",
           "name": "meta.annotation.hover.nx",
-          "begin": "^\\((property|parameter)\\)\\s+((?:[A-Za-z_][A-Za-z0-9_]*\\.)*)([A-Za-z_][A-Za-z0-9_-]*)\\s*(:)",
+          "begin": "^\\((property|parameter)\\)\\s+((?:[A-Za-z_][A-Za-z0-9_]*\\.)*)([A-Za-z_][A-Za-z0-9_-]*)\\s*(\\?)?\\s*(:)",
           "beginCaptures": {
             "1": {
               "name": "meta.annotation.hover.kind.nx"
@@ -2596,6 +2601,9 @@
               "name": "variable.other.property.nx"
             },
             "4": {
+              "name": "keyword.operator.optional.nx"
+            },
+            "5": {
               "name": "punctuation.separator.type.annotation.nx"
             }
           },
@@ -2639,7 +2647,7 @@
               "include": "#types"
             },
             {
-              "match": "[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*((?:\\[\\]|\\?)*)",
+              "match": "[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*([?+*]?)",
               "captures": {
                 "0": {
                   "name": "entity.name.type.nx"

@@ -4,8 +4,8 @@ abstract external component <Node />
 external component <Label extends Node text:int />
 external component <Button extends Node label:string emits { Tapped { } } />
 external component <TextInput extends Node value:string />
-external component <Card extends Node items:Node[] header:Node count:int />
-component <Stack extends Node content children:Node[] /> = { <column>{children}</column> }
+external component <Card extends Node items:Node+ header:Node count:int />
+component <Stack extends Node content children:Node+ /> = { <column>{children}</column> }
 
 action Reset = { }
 action SearchSubmitted = { searchString:string }

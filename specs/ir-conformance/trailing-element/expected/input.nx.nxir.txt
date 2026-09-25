@@ -1,5 +1,5 @@
 module input.nx fingerprint 2032086910821180579
-links drawnui.nx version "9" fingerprint 10443083107296702259
+links drawnui.nx version "9" fingerprint 3992344325433453158
 entrypoints functions [root] components []
 
 function root() @1:1-5:14 =

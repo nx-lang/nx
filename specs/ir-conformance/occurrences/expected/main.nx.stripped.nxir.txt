@@ -1,0 +1,100 @@
+module main.nx fingerprint 4767313403569770331
+requires update-records-v1 update-intrinsics-v1 occurrence-v1
+entrypoints functions [ada withAuthor withoutAuthor writtenEmpty hasAuthor has hasNot authorName name noName byline named anonymous nick noNick tagged isTagged isNotTagged lone several cleared renamed clearedNick root] components [Box]
+
+record Person
+  name: string required
+  nick: string?
+
+record Book
+  title: string required
+  author: Person?
+  tags: string*
+
+record Item
+  n: int required
+
+component Box external
+  props
+    content items: Item+ required
+
+function ada() =
+  <Person name="Ada" />
+
+function withAuthor() =
+  <Book author=ada() tags=["x", "y"] title="A" />
+
+function withoutAuthor() =
+  <Book title="B" />
+
+function writtenEmpty() =
+  <Book author={} tags={} title="C" />
+
+function hasAuthor(b: Book): boolean =
+  b.author?
+
+function has() =
+  hasAuthor(withAuthor())
+
+function hasNot() =
+  hasAuthor(withoutAuthor())
+
+function authorName(b: Book): string? (optional result) =
+  b.author?.name
+
+function name() (optional result) =
+  authorName(withAuthor())
+
+function noName() (optional result) =
+  authorName(withoutAuthor())
+
+function byline(b: Book): string =
+  ("by " concat (b.author?.name ?? "anonymous"))
+
+function named() =
+  byline(withAuthor())
+
+function anonymous() =
+  byline(withoutAuthor())
+
+function nick(b: Book): string? (optional result) =
+  b.author?.nick
+
+function noNick() (optional result) =
+  nick(withAuthor())
+
+function tagged(b: Book): boolean =
+  b.tags?
+
+function isTagged() =
+  tagged(withAuthor())
+
+function isNotTagged() =
+  tagged(withoutAuthor())
+
+function lone() =
+  <Box>
+    <Item n=1 />
+  </Box>
+
+function several() =
+  <Box>
+    <Item n=1 />
+    <Item n=2 />
+  </Box>
+
+function cleared() =
+  <Person.Update nick={} />
+
+function renamed() =
+  <Person.Update name="Bo" />
+
+function clearedNick() =
+  apply(<Person name="Ada" nick="A" />, cleared())
+
+function root() =
+  withAuthor()
+
+record Person.Update update of Person
+  name: string
+  nick: string?

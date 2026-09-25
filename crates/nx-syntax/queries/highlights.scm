@@ -144,6 +144,8 @@
   "||"
   "!"
   "?"
+  "?."
+  "??"
   "=>"
   ":"
 ] @operator
@@ -174,7 +176,6 @@
 (real_literal) @number
 (hex_literal) @number
 (bool_literal) @constant.builtin
-(null_literal) @constant.builtin
 
 ;; Identifiers
 (identifier_expression

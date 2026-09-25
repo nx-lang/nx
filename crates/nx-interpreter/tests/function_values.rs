@@ -67,9 +67,9 @@ fn record(type_name: &str, fields: &[(&str, Value)]) -> Value {
 fn a_function_bound_to_a_function_typed_property_is_the_function_value() {
     let runtime = Runtime::new(
         "type Contact = { name:string }\n\
-         external component <List TItem:type ItemsSource:TItem[]? ItemTemplate:(<function Item:TItem Index:int />: string)? />\n\
+         external component <List TItem:type ItemsSource?:TItem+ ItemTemplate?:(<function Item:TItem Index:int />: string) />\n\
          let <Row Item:Contact Index:int />: string = {Item.name}\n\
-         let contacts:Contact[] = {}\n\
+         let contacts:Contact* = {}\n\
          let root() = <List TItem=Contact ItemsSource={contacts} ItemTemplate={Row} />",
     );
     let Value::Record { type_name, fields } = runtime.call("root") else {
@@ -121,7 +121,7 @@ fn the_function_ignores_a_parameter_the_type_supplied() {
 fn a_function_typed_component_prop_is_invoked_as_an_element() {
     let runtime = Runtime::new(
         "abstract external component <DrawnNode />\n\
-         external component <SkiaLabel extends DrawnNode Text:string? />\n\
+         external component <SkiaLabel extends DrawnNode Text?:string />\n\
          type Contact = { name:string }\n\
          component <Section extends DrawnNode Item:Contact Row:<function Item:Contact Index:int />: DrawnNode /> = { <Row Item={Item} Index=0 /> }\n\
          let <ContactRow Item:Contact Index:int />: DrawnNode = <SkiaLabel Text={Item.name} />",

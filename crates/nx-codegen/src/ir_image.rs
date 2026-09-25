@@ -1,4 +1,4 @@
-//! The NX IR image: schema 4 as a little-endian binary a runtime reads in place.
+//! The NX IR image: schema 5 as a little-endian binary a runtime reads in place.
 //!
 //! <para>An image is a 16-byte header, a directory of sections, and the sections themselves, each
 //! starting on a four-byte boundary. The string table is an offset array over one UTF-8 blob; every
@@ -92,6 +92,8 @@ enum Op {
     Str,
     /// One cell indexing the type table.
     Type,
+    /// One cell indexing the type table, or `NONE` (`-1` in the model).
+    OptType,
     /// One cell indexing the constant table.
     Const,
     /// One cell indexing the node table.
@@ -118,11 +120,13 @@ enum Op {
 }
 
 const NODES: &[Op] = &[Op::Node];
+const OPT_NODES: &[Op] = &[Op::OptNode];
 const STRS: &[Op] = &[Op::Str];
 const REFS: &[Op] = &[Op::RefPair];
 const PROPERTY: &[Op] = &[Op::Str, Op::Node];
 const FIELD: &[Op] = &[Op::Str, Op::Type, Op::OptNode, Op::Int];
 const PARAM: &[Op] = &[Op::Str, Op::Type, Op::Int];
+const DECLARED_PARAM: &[Op] = &[Op::Str, Op::Type, Op::OptNode, Op::Int];
 const ARM: &[Op] = &[Op::List(NODES), Op::Node];
 const UNION_CASE: &[Op] = &[Op::Str, Op::List(FIELD), Op::Int];
 const EMIT: &[Op] = &[Op::Str, Op::RefPair];
@@ -170,7 +174,9 @@ impl Table {
             Table::Types => match kind {
                 ty::PRIMITIVE => &[Op::Str],
                 ty::NOMINAL => &[Op::Ref],
-                ty::ARRAY | ty::NULLABLE => &[Op::Type],
+                // `array` (2) and `nullable` (3) were retired with schema 5 and are not laid out,
+                // so an image carrying one is refused as malformed.
+                ty::SEQ => &[Op::Type, Op::Int],
                 ty::FUNCTION => &[Op::Type, Op::List(PARAM)],
                 _ => return None,
             },
@@ -181,7 +187,7 @@ impl Table {
                 _ => return None,
             },
             Table::Nodes => match kind {
-                node::NULL => &[],
+                // `null` (0) was retired with schema 5 and is not laid out.
                 node::BOOL => &[Op::Int],
                 node::STRING => &[Op::Str],
                 node::NUMBER => &[Op::Const],
@@ -190,7 +196,7 @@ impl Table {
                 node::BINARY => &[Op::Code(kinds::binary::NAMES), Op::Node, Op::Node],
                 node::UNARY => &[Op::Code(kinds::unary::NAMES), Op::Node],
                 node::TEXT => &[Op::Node, Op::Str],
-                node::CALL => &[Op::Node, Op::List(NODES)],
+                node::CALL => &[Op::Node, Op::List(OPT_NODES)],
                 node::NAMED_CALL => &[Op::Node, Op::List(PROPERTY)],
                 node::INTRINSIC => &[
                     Op::Code(kinds::intrinsic::NAMES),
@@ -210,7 +216,9 @@ impl Table {
                     Op::Node,
                     Op::Node,
                 ],
-                node::MEMBER => &[Op::Node, Op::Str],
+                node::MEMBER | node::OPTIONAL_MEMBER => &[Op::Node, Op::Str],
+                node::EXISTS => &[Op::Node],
+                node::COALESCE => &[Op::Node, Op::Node],
                 node::RECORD | node::COMPONENT => &[Op::Ref, Op::List(PROPERTY), Op::List(NODES)],
                 node::UNION_CASE => &[Op::Ref, Op::Str, Op::List(PROPERTY), Op::List(NODES)],
                 node::ELEMENT => &[Op::Int, Op::Str, Op::List(PROPERTY), Op::List(NODES)],
@@ -218,8 +226,14 @@ impl Table {
                 _ => return None,
             },
             Table::Declarations => match kind {
-                declaration::FUNCTION => &[Op::Str, Op::List(PARAM), Op::Node],
-                declaration::VALUE => &[Op::Str, Op::Node],
+                declaration::FUNCTION => &[
+                    Op::Str,
+                    Op::List(DECLARED_PARAM),
+                    Op::Node,
+                    Op::OptType,
+                    Op::Int,
+                ],
+                declaration::VALUE => &[Op::Str, Op::Node, Op::OptType],
                 declaration::RECORD => &[
                     Op::Str,
                     Op::List(FIELD),
@@ -410,7 +424,7 @@ fn write_op<'a>(op: Op, items: &'a [IrItem], pool: &mut Vec<u32>) -> Result<&'a 
         Op::Int | Op::Code(_) | Op::Str | Op::Type | Op::Const | Op::Node => {
             pool.push(cell(int(first)?)?);
         }
-        Op::OptNode | Op::OptSlot | Op::OptStr => {
+        Op::OptNode | Op::OptSlot | Op::OptStr | Op::OptType => {
             let value = int(first)?;
             pool.push(if value == -1 { NONE } else { cell(value)? });
         }
@@ -1130,7 +1144,42 @@ fn validate_table(
             ..*bounds
         };
         validate_entry(table, entry, &bounds)
+            .and_then(|()| {
+                if table == Table::Types {
+                    validate_seq_type(cells, entry)
+                } else {
+                    Ok(())
+                }
+            })
             .map_err(|error| malformed(format!("{} {index}: {error}", table.name())))?;
+    }
+    Ok(())
+}
+
+/// The rules a `seq` type entry keeps beyond its layout: the occurrence cell spells a suffix, and
+/// the item is an exactly-one type, never itself a `seq`. The entry's layout was checked already,
+/// so its item names an earlier type entry.
+fn validate_seq_type(types: &CellTable<'_>, entry: Cells<'_>) -> Result<(), String> {
+    if entry.get(0).map(i64::from) != Some(kinds::ty::SEQ) {
+        return Ok(());
+    }
+    let (Some(item), Some(cell)) = (entry.get(1), entry.get(2)) else {
+        return Err("the seq type is shorter than its layout".to_string());
+    };
+    if kinds::ty::occurrence_from_cell(i64::from(cell)).is_none() {
+        return Err(format!(
+            "the seq type carries the occurrence cell {cell}, which spells no suffix"
+        ));
+    }
+    let item_kind = types
+        .offsets
+        .range(item as usize)
+        .and_then(|(start, end)| types.pool.slice(start, end))
+        .and_then(|item_entry| item_entry.get(0));
+    if item_kind.map(i64::from) == Some(kinds::ty::SEQ) {
+        return Err(format!(
+            "the seq type's item type {item} is itself a seq type"
+        ));
     }
     Ok(())
 }
@@ -1196,6 +1245,7 @@ fn validate_op(cursor: &mut Cursor<'_>, op: Op, bounds: &Bounds) -> Result<(), N
         Op::Const => bounds.check("constant", cursor.next()?, bounds.constants)?,
         Op::Node => bounds.check("node", cursor.next()?, bounds.nodes)?,
         Op::OptNode => optional(cursor, "node", bounds.nodes)?,
+        Op::OptType => optional(cursor, "type", bounds.types)?,
         Op::OptStr => optional(cursor, "string", bounds.strings)?,
         Op::Ref | Op::RefPair => reference(cursor)?,
         Op::OptRef => {
@@ -1287,7 +1337,7 @@ fn decode_op(cursor: &mut Cursor<'_>, op: Op, items: &mut Vec<IrItem>) {
         Op::Int | Op::Code(_) | Op::Str | Op::Type | Op::Const | Op::Node => {
             items.push(IrItem::Int(next()));
         }
-        Op::OptNode | Op::OptSlot | Op::OptStr => {
+        Op::OptNode | Op::OptSlot | Op::OptStr | Op::OptType => {
             let cell = next();
             items.push(IrItem::Int(if cell == i64::from(NONE) { -1 } else { cell }));
         }
@@ -1389,7 +1439,7 @@ mod tests {
         let bytes = write_nx_ir_image(&artifact).expect("image");
 
         assert_eq!(&bytes[0..4], b"NXIR");
-        assert_eq!(cell_at(&bytes, 4), 4, "schema version");
+        assert_eq!(cell_at(&bytes, 4), 5, "schema version");
         assert_eq!(cell_at(&bytes, 8) as usize, bytes.len(), "total length");
         assert_eq!(cell_at(&bytes, 12), 6, "six sections without debug");
 
@@ -1446,11 +1496,15 @@ mod tests {
             ]
         );
 
-        // Declarations: `[1, 0, 0]` (value title = node 0) and `[0, 2, [], 13]` (function root).
+        // Declarations: `[1, 0, 0, -1]` (value title = node 0, no declared type) and
+        // `[0, 2, [], 13, -1, 0]` (function root, no declared result, not optional).
         let (declarations, declarations_len) = sections[5];
         let cells =
             Cells::from_bytes(&bytes[declarations..declarations + declarations_len]).to_vec();
-        assert_eq!(cells, vec![2, 0, 3, 7, 1, 0, 0, 0, 2, 0, 13]);
+        assert_eq!(
+            cells,
+            vec![2, 0, 4, 10, 1, 0, 0, NONE, 0, 2, 0, 13, NONE, 0]
+        );
 
         // Node 13, `[18, 1, 14, [[3, 1], [5, 2]], [5, 7, 9, 12]]`: the component descriptor of
         // `SkiaLayout` with two properties and four children.
@@ -1540,9 +1594,47 @@ mod tests {
             NxIrImage::open(&bytes).unwrap_err(),
             NxIrImageError::SchemaVersion {
                 found: 3,
-                supported: 4
+                supported: 5
             }
         );
+    }
+
+    /// A `seq` type whose occurrence cell spells no suffix, and one whose item is itself a `seq`,
+    /// are refused, as the TypeScript reader refuses them.
+    #[test]
+    fn a_malformed_seq_type_is_refused() {
+        use crate::ir::IrItem;
+        let base = snippet_input();
+        let int = base.types.len() as i64;
+        let seq = int + 1;
+        for (extra, needle) in [
+            (IrItem::ints([kinds::ty::SEQ, int, 0]), "occurrence cell 0"),
+            (IrItem::ints([kinds::ty::SEQ, int, 4]), "occurrence cell 4"),
+            (
+                IrItem::ints([kinds::ty::SEQ, seq, kinds::ty::OCCURRENCE_EMPTY]),
+                "is itself a seq type",
+            ),
+        ] {
+            let mut artifact = base.clone();
+            let name = artifact.strings.len() as i64;
+            artifact.strings.push("int".to_string());
+            artifact
+                .types
+                .push(IrItem::ints([kinds::ty::PRIMITIVE, name]));
+            artifact.types.push(IrItem::ints([
+                kinds::ty::SEQ,
+                int,
+                kinds::ty::OCCURRENCE_MANY,
+            ]));
+            artifact.types.push(extra);
+            let bytes = write_nx_ir_image(&artifact).expect("image");
+            match NxIrImage::open(&bytes) {
+                Err(NxIrImageError::Malformed(message)) => {
+                    assert!(message.contains(needle), "{message}")
+                }
+                other => panic!("expected a malformed image, got {other:?}"),
+            }
+        }
     }
 
     /// Cut at every four-byte boundary, an image is refused rather than read short.

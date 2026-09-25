@@ -28,8 +28,8 @@ fn assert_reports(source: &str, needle: &str) -> Vec<String> {
 }
 
 const CONTACT: &str = "type Contact = { name:string }\n";
-const SKIA_LAYOUT: &str = "external component <SkiaLayout TItem:type itemsSource:TItem[]? />\n";
-const LIST: &str = "external component <List TItem:type items:TItem[]? />\n";
+const SKIA_LAYOUT: &str = "external component <SkiaLayout TItem:type itemsSource?:TItem+ />\n";
+const LIST: &str = "external component <List TItem:type items?:TItem+ />\n";
 
 // ---------------------------------------------------------------------------------------------
 // A type parameter is a rigid nominal type within its declaration
@@ -54,8 +54,8 @@ fn two_type_parameters_are_distinct_types() {
 #[test]
 fn a_type_parameter_satisfies_object_and_accepts_the_empty_list() {
     assert_clean(
-        "component <Ok TItem:type items:TItem[] = {} /> = { state { o:object = {items} } <Label /> }\n\
-         let v = <Ok items={} />",
+        "component <Ok TItem:type item:TItem items?:TItem+ /> = { state { o:object = {item} } <Label /> }\n\
+         let v = <Ok TItem=int item=1 items={} />",
     );
 }
 
@@ -63,16 +63,16 @@ fn a_type_parameter_satisfies_object_and_accepts_the_empty_list() {
 fn a_type_parameter_shadows_a_same_named_type_inside_the_component() {
     assert_clean(
         "type TItem = { id:int }\n\
-         component <List TItem:type items:TItem[] /> = { <Label /> }\n\
+         component <List TItem:type items:TItem+ /> = { <Label /> }\n\
          let v = <List TItem=string items={\"a\"} />",
     );
     // With the record as the argument instead, a string no longer fits: the parameter, not the
-    // record, is what `items:TItem[]` named.
+    // record, is what `items:TItem+` named.
     assert_reports(
         "type TItem = { id:int }\n\
-         component <List TItem:type items:TItem[] /> = { <Label /> }\n\
+         component <List TItem:type items:TItem+ /> = { <Label /> }\n\
          let v = <List TItem=TItem items={\"a\"} />",
-        "expects TItem[], found string",
+        "expects TItem+, found string",
     );
 }
 
@@ -89,7 +89,7 @@ fn a_type_parameter_is_not_visible_outside_its_component() {
 #[test]
 fn a_type_parameter_is_usable_in_the_component_body() {
     assert_clean(
-        "component <First TItem:type items:TItem[] /> = { state { first:TItem? = null } <Label text=\"ok\" /> }",
+        "component <First TItem:type items:TItem+ /> = { state { first?:TItem } <Label text=\"ok\" /> }",
     );
 }
 
@@ -100,7 +100,7 @@ fn a_type_parameter_is_usable_in_the_component_body() {
 #[test]
 fn a_type_argument_fixes_the_element_type_of_a_list_prop() {
     assert_clean(&format!(
-        "{CONTACT}{SKIA_LAYOUT}let contacts:Contact[] = {{}}\n\
+        "{CONTACT}{SKIA_LAYOUT}let contacts:Contact* = {{}}\n\
          let v = <SkiaLayout TItem=Contact itemsSource={{contacts}} />"
     ));
 }
@@ -109,7 +109,7 @@ fn a_type_argument_fixes_the_element_type_of_a_list_prop() {
 fn a_mismatch_is_reported_against_the_substituted_type() {
     assert_reports(
         &format!("{CONTACT}{SKIA_LAYOUT}let v = <SkiaLayout TItem=Contact itemsSource={{ \"a\" \"b\" }} />"),
-        "expects Contact[]?, found string[]",
+        "expects Contact*, found string+",
     );
 }
 
@@ -126,50 +126,62 @@ fn a_primitive_an_alias_and_a_union_are_all_acceptable_arguments() {
 
 #[test]
 fn an_alias_to_a_sequence_is_not_an_acceptable_argument() {
-    // A type argument stands where an item type stands, so `TItem=Names` would make `TItem[]` a
-    // sequence of sequences.
+    // A type argument stands where an item type stands, so `TItem=Names` would make `TItem+` a
+    // sequence of sequences, and `TItem=Maybe` would let a slot spelled `items:TItem+` admit zero.
+    for alias in ["type Names = string+", "type Maybe = string?"] {
+        let name = alias.split_whitespace().nth(1).unwrap();
+        let errors = assert_reports(
+            &format!("{alias}\n{LIST}let v = <List TItem={name} items={{ \"x\" }} />"),
+            "A type argument must be exactly one value",
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|message| message.contains(&format!("'{name}' carries an occurrence"))),
+            "{errors:?}"
+        );
+    }
+}
+
+#[test]
+fn a_suffixed_argument_is_not_an_acceptable_argument() {
     let errors = assert_reports(
-        &format!("type Names = string[]\n{LIST}let v = <List TItem=Names items={{ \"x\" }} />"),
-        "A type argument must not be a sequence",
+        &format!("{LIST}let v = <List TItem=string? items={{ \"x\" }} />"),
+        "A type argument must be exactly one value; 'string?' carries an occurrence",
     );
-    assert!(
-        errors
-            .iter()
-            .any(|message| message.contains("'Names' is a sequence")),
-        "{errors:?}"
-    );
+    assert_eq!(errors.len(), 1, "{errors:?}");
 }
 
 #[test]
 fn a_type_parameter_in_an_emitted_action_payload_is_rejected() {
     let errors = assert_reports(
-        "component <List TItem:type items:TItem[]? emits { pick { item:TItem } } /> = { <Label /> }",
+        "component <List TItem:type items?:TItem+ emits { pick { item:TItem } } /> = { <Label /> }",
         "Emitted action 'pick' on component 'List' cannot type its payload field 'item' by type parameter 'TItem'",
     );
     assert_eq!(errors.len(), 1, "{errors:?}");
     // An inherited parameter is a type in the derived signature on the same terms.
     assert_reports(
-        "abstract component <Base TItem:type items:TItem[]? />\n\
+        "abstract component <Base TItem:type items?:TItem+ />\n\
          component <List extends Base emits { pick { item:TItem } } /> = { <Label /> }",
         "Emitted action 'pick' on component 'List' cannot type its payload field 'item' by type parameter 'TItem'",
     );
     // A payload field typed by something else is unaffected.
     assert_clean(
-        "component <List TItem:type items:TItem[]? emits { pick { index:int } } /> = { <Label /> }",
+        "component <List TItem:type items?:TItem+ emits { pick { index:int } } /> = { <Label /> }",
     );
 }
 
 #[test]
 fn an_enclosing_component_forwards_its_own_type_parameter() {
     assert_clean(&format!(
-        "{SKIA_LAYOUT}component <Section TItem:type items:TItem[] /> = {{ <SkiaLayout TItem=TItem itemsSource={{items}} /> }}"
+        "{SKIA_LAYOUT}component <Section TItem:type items:TItem+ /> = {{ <SkiaLayout TItem=TItem itemsSource={{items}} /> }}"
     ));
     // The forwarded parameter is the enclosing one: a value of another type does not fit.
     assert_reports(
         &format!(
-            "{SKIA_LAYOUT}component <Section TItem:type items:TItem[] labels:string[] /> = {{ <SkiaLayout TItem=TItem itemsSource={{labels}} /> }}"
+            "{SKIA_LAYOUT}component <Section TItem:type items:TItem+ labels:string+ /> = {{ <SkiaLayout TItem=TItem itemsSource={{labels}} /> }}"
         ),
-        "expects TItem[]?, found string[]",
+        "expects TItem*, found string+",
     );
 }
 
@@ -230,7 +242,7 @@ fn binding_a_type_argument_on_a_component_without_that_parameter_is_an_unknown_p
 #[test]
 fn a_use_site_that_never_touches_the_parameter_needs_no_argument() {
     assert_clean(
-        "external component <SkiaLayout TItem:type itemsSource:TItem[]? content children:object[]? />\n\
+        "external component <SkiaLayout TItem:type itemsSource?:TItem+ content children?:object+ />\n\
          let v = <SkiaLayout><Label /></SkiaLayout>",
     );
 }
@@ -245,7 +257,7 @@ fn an_empty_list_is_accepted_without_an_argument() {
 #[test]
 fn a_non_empty_binding_without_an_argument_names_the_parameter() {
     let errors = assert_reports(
-        &format!("{CONTACT}{SKIA_LAYOUT}let contacts:Contact[] = {{}}\nlet v = <SkiaLayout itemsSource={{contacts}} />"),
+        &format!("{CONTACT}{SKIA_LAYOUT}let contacts:Contact* = {{}}\nlet v = <SkiaLayout itemsSource={{contacts}} />"),
         "Property 'itemsSource' on 'SkiaLayout' is typed by 'TItem', which was not specified",
     );
     assert!(
@@ -261,7 +273,7 @@ fn a_non_empty_binding_without_an_argument_names_the_parameter() {
 #[test]
 fn each_parameter_falls_back_independently() {
     assert_clean(
-        "external component <Grid TRow:type TCol:type rows:TRow[]? cols:TCol[]? />\n\
+        "external component <Grid TRow:type TCol:type rows?:TRow+ cols?:TCol+ />\n\
          let v = <Grid TRow=int rows={ 1 2 } />",
     );
 }
@@ -269,8 +281,8 @@ fn each_parameter_falls_back_independently() {
 #[test]
 fn an_unspecified_parameter_failure_and_an_ordinary_mismatch_are_reported_separately() {
     let errors = errors(&format!(
-        "{CONTACT}external component <List TItem:type items:TItem[]? count:int />\n\
-         let contacts:Contact[] = {{}}\nlet v = <List items={{contacts}} count=\"x\" />"
+        "{CONTACT}external component <List TItem:type items?:TItem+ count:int />\n\
+         let contacts:Contact* = {{}}\nlet v = <List items={{contacts}} count=\"x\" />"
     ));
     assert!(
         errors
@@ -302,17 +314,17 @@ fn a_type_parameter_is_not_a_value_in_the_body() {
 
 #[test]
 fn a_type_parameter_is_never_a_missing_property() {
-    assert_clean("external component <List TItem:type items:TItem[] />\nlet v = <List items={} />");
+    assert_clean("external component <List TItem:type items?:TItem+ />\nlet v = <List items={} />");
 }
 
 #[test]
 fn the_property_union_of_a_generic_stateful_component_is_derived_from_state_only() {
     assert_clean(
-        "component <List TItem:type items:TItem[] /> = { state { selected:int = 0 } <Label /> }\n\
+        "component <List TItem:type items:TItem+ /> = { state { selected:int = 0 } <Label /> }\n\
          let k:List.Property = {List.Property.selected}",
     );
     assert_reports(
-        "component <List TItem:type items:TItem[] /> = { state { selected:int = 0 } <Label /> }\n\
+        "component <List TItem:type items:TItem+ /> = { state { selected:int = 0 } <Label /> }\n\
          let k:List.Property = {List.Property.TItem}",
         "TItem",
     );
@@ -383,29 +395,29 @@ fn type_arguments_are_removed_from_the_element_and_kept_in_the_analysis_result()
 #[test]
 fn a_derived_component_accepts_an_argument_for_an_inherited_type_parameter() {
     assert_clean(&format!(
-        "abstract external component <ItemsBase TItem:type itemsSource:TItem[]? />\n\
-         external component <ContactList extends ItemsBase spacing:int? />\n\
-         {CONTACT}let contacts:Contact[] = {{}}\n\
+        "abstract external component <ItemsBase TItem:type itemsSource?:TItem+ />\n\
+         external component <ContactList extends ItemsBase spacing?:int />\n\
+         {CONTACT}let contacts:Contact* = {{}}\n\
          let v = <ContactList TItem=Contact itemsSource={{contacts}} spacing=4 />"
     ));
     assert_reports(
         &format!(
-            "abstract external component <ItemsBase TItem:type itemsSource:TItem[]? />\n\
-             external component <ContactList extends ItemsBase spacing:int? />\n\
+            "abstract external component <ItemsBase TItem:type itemsSource?:TItem+ />\n\
+             external component <ContactList extends ItemsBase spacing?:int />\n\
              {CONTACT}let v = <ContactList TItem=Contact itemsSource={{ \"a\" }} spacing=4 />"
         ),
-        "expects Contact[]?, found string",
+        "expects Contact*, found string",
     );
 }
 
 #[test]
 fn a_derived_component_body_sees_the_inherited_type_parameter() {
     assert_clean(
-        "abstract component <ItemsBase TItem:type items:TItem[] />\n\
-         component <Count extends ItemsBase /> = { state { first:TItem? = null } <Label /> }",
+        "abstract component <ItemsBase TItem:type items:TItem+ />\n\
+         component <Count extends ItemsBase /> = { state { first?:TItem } <Label /> }",
     );
     assert_reports(
-        "abstract component <ItemsBase TItem:type items:TItem[] />\n\
+        "abstract component <ItemsBase TItem:type items:TItem+ />\n\
          component <Count extends ItemsBase /> = { state { first:TItem = \"x\" } <Label /> }",
         "expects TItem, found string",
     );
@@ -414,8 +426,8 @@ fn a_derived_component_body_sees_the_inherited_type_parameter() {
 #[test]
 fn a_derived_component_adds_its_own_type_parameter_after_the_inherited_one() {
     assert_clean(
-        "abstract component <ItemsBase TItem:type items:TItem[] />\n\
-         component <Keyed extends ItemsBase TKey:type keys:TKey[] /> = { <Label /> }\n\
+        "abstract component <ItemsBase TItem:type items:TItem+ />\n\
+         component <Keyed extends ItemsBase TKey:type keys:TKey+ /> = { <Label /> }\n\
          let v = <Keyed TItem=string TKey=int items={ \"a\" } keys={ 1 } />",
     );
 }
@@ -453,7 +465,7 @@ fn a_duplicate_type_parameter_or_prop_name_is_rejected() {
 #[test]
 fn a_type_parameter_after_a_regular_prop_is_rejected() {
     assert_reports(
-        "component <Bad items:object[] TItem:type /> = { <Label /> }",
+        "component <Bad items:object+ TItem:type /> = { <Label /> }",
         "Type parameter 'TItem' must be declared before every prop",
     );
 }
@@ -461,7 +473,7 @@ fn a_type_parameter_after_a_regular_prop_is_rejected() {
 #[test]
 fn a_type_parameter_named_after_a_primitive_is_rejected() {
     assert_reports(
-        "external component <List string:type items:string[]? />\nlet v = <List string=int items={ 1 } />",
+        "external component <List string:type items?:string+ />\nlet v = <List string=int items={ 1 } />",
         "Type parameter 'string' cannot take the name of a primitive type",
     );
 }

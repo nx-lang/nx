@@ -1,0 +1,2 @@
+// Parentheses add no layer, so the outer `*` gives a type that already carries `+` a second suffix.
+type Twice = (string+)*

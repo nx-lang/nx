@@ -1,0 +1,33 @@
+module main.nx fingerprint 13146085580254358516
+requires occurrence-v1
+entrypoints functions [withAuthor withoutAuthor describe described undescribed root] components []
+
+record Person
+  name: string required
+  nick: string?
+
+record Book
+  title: string required
+  author: Person?
+
+function withAuthor() =
+  <Book author=<Person name="Ada" /> title="A" />
+
+function withoutAuthor() =
+  <Book title="B" />
+
+function describe(b: Book): string =
+  if b.author is
+    {} =>
+      "anonymous"
+    else =>
+      b.author.name
+
+function described() =
+  describe(withAuthor())
+
+function undescribed() =
+  describe(withoutAuthor())
+
+function root() =
+  described()

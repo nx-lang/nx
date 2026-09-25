@@ -1,11 +1,11 @@
 //! Type inference for expressions.
 
 use crate::{
-    common_supertype as generic_common_supertype, is_object_type, numeric_literal_target,
-    semantics::PRIMITIVE_TYPE_NAMES,
+    numeric_literal_target,
+    semantics::{common_item_supertype, PRIMITIVE_TYPE_NAMES},
     ty::{
-        check_function_satisfies, DeclaringOrigin, FunctionMismatch, FunctionParam, NamedType,
-        Primitive, TypeParameterRef, UnionCaseType, UnionType,
+        check_function_satisfies, read_type, DeclaringOrigin, FunctionMismatch, FunctionParam,
+        NamedType, Occurrence, Primitive, TypeParameterRef, UnionCaseType, UnionType,
     },
     type_satisfies_expected as generic_type_satisfies_expected, Type, TypeEnvironment,
 };
@@ -97,8 +97,16 @@ impl UnionEntry {
 enum HandlerResultItem {
     /// A value of this type, written at this span.
     Value(Type, TextSpan),
-    /// An empty list, which a handler may never return.
-    EmptyList(TextSpan),
+    /// A value that may be empty, which a handler may never return.
+    MayBeEmpty(Type, TextSpan),
+}
+
+/// A call's callee when it names a declared function: how it was declared, and each parameter as
+/// its name and whether a caller may omit it.
+struct DeclaredCallee {
+    name: Name,
+    form: nx_hir::FunctionForm,
+    params: Vec<(Name, bool)>,
 }
 
 struct ElementBindingSpec {
@@ -169,6 +177,16 @@ struct PropertyPathBinding {
     /// The expression the type was inferred from, so a contextual name can be recorded once it
     /// resolves against this binding's expected type.
     value: ExprId,
+}
+
+/// What to write instead when an operator that takes exactly one value meets a value that may
+/// be empty (supply one with `??`) or may be many (take its items with `for`).
+fn occurrence_operand_hint(ty: &Type) -> &'static str {
+    if ty.admits_many() {
+        "take its items with `for`"
+    } else {
+        "supply a value for the empty case with `??`"
+    }
 }
 
 /// The source spelling of a binary operator, for diagnostics.
@@ -321,7 +339,7 @@ pub struct InferenceContext<'a> {
     /// `Expr::Widen`, on the same terms as `converted_literals`, so a runtime that tells the two
     /// apart produces the value the join's type says.
     widened_joins: FxHashMap<ExprId, Primitive>,
-    /// The branches of an `if` or match that the join lifted from an item to a sequence.
+    /// The branches of an `if`, match or `??` that the join lifted from an item to a sequence.
     ///
     /// <para>The join types a branch producing `T` beside a sequence as `T[]`, and the lifting is
     /// only a claim about the type until the branch's value follows it. Each branch recorded here
@@ -383,6 +401,13 @@ pub struct InferenceContext<'a> {
     /// Read when a type error is reported, to say which name is the item and which the index
     /// when the error reads like the two were swapped.
     indexed_loops: Vec<IndexedLoop>,
+    /// The paths a presence test has narrowed, innermost last: `b.author` read as `Person` inside
+    /// `if b.author? { … }`.
+    ///
+    /// <para>An entry is pushed when a branch is entered under a narrowing condition and popped
+    /// when the branch is left, so nothing escapes its branch. Values are immutable, so nothing in
+    /// the branch invalidates an entry. A path is an identifier followed by member names.</para>
+    narrowings: Vec<Narrowing>,
     /// Where a diagnostic about a type *reference* is reported.
     ///
     /// <para>A `TypeRef` carries no span of its own, so a problem with one — an applied type that
@@ -390,6 +415,16 @@ pub struct InferenceContext<'a> {
     /// construct that does have one, which is the annotation or field that wrote it. Callers that
     /// know the construct set it around the conversion.</para>
     type_ref_span: TextSpan,
+}
+
+/// A path a presence test or a match arm has narrowed, and the binding it narrowed.
+struct Narrowing {
+    path: Vec<Name>,
+    ty: Type,
+    /// The depth of the scope the path's root identifier resolved in when the narrowing was
+    /// pushed. A binding of the same name in an inner scope shadows the narrowed one, so the
+    /// narrowing applies only while the root still resolves at this depth.
+    root_depth: Option<usize>,
 }
 
 /// The names an indexed `for` binds, and where its body uses them.
@@ -439,6 +474,7 @@ impl<'a> InferenceContext<'a> {
             resolved_type_arguments: FxHashMap::default(),
             range_for_expressions: FxHashSet::default(),
             indexed_loops: Vec::new(),
+            narrowings: Vec::new(),
         };
         ctx.register_type_definitions();
         // Aliases before anything that can resolve one, so a target that nests a sequence is
@@ -472,6 +508,146 @@ impl<'a> InferenceContext<'a> {
         }
     }
 
+    /// The path an expression spells — an identifier followed by member names, written with `.`
+    /// or `?.` — or `None` for any other expression.
+    fn expr_path(&self, expr_id: ExprId) -> Option<Vec<Name>> {
+        match self.module.raw_module().expr(expr_id) {
+            ast::Expr::Ident(name) => Some(vec![name.clone()]),
+            ast::Expr::Member { base, member, .. }
+            | ast::Expr::OptionalMember { base, member, .. } => {
+                let mut path = self.expr_path(*base)?;
+                path.push(member.clone());
+                Some(path)
+            }
+            _ => None,
+        }
+    }
+
+    /// The type a presence test has narrowed `path` to, innermost narrowing first.
+    fn narrowed_type(&self, path: &[Name]) -> Option<Type> {
+        let root_depth = self.env.binding_depth(path.first()?);
+        self.narrowings
+            .iter()
+            .rev()
+            .find(|narrowing| narrowing.path == path && narrowing.root_depth == root_depth)
+            .map(|narrowing| narrowing.ty.clone())
+    }
+
+    /// Puts `narrowings` in force, returning the depth to pass to `pop_narrowings` when the
+    /// branch they apply to is left.
+    fn push_narrowings(&mut self, narrowings: Vec<(Vec<Name>, Type)>) -> usize {
+        let depth = self.narrowings.len();
+        for (path, ty) in narrowings {
+            let root_depth = path.first().and_then(|root| self.env.binding_depth(root));
+            self.narrowings.push(Narrowing {
+                path,
+                ty,
+                root_depth,
+            });
+        }
+        depth
+    }
+
+    /// Removes the narrowings pushed since `push_narrowings` returned `depth`.
+    fn pop_narrowings(&mut self, depth: usize) {
+        self.narrowings.truncate(depth);
+    }
+
+    /// `ty`, unless the expression is a path a presence test has narrowed, in which case the
+    /// narrowed type wins.
+    fn narrowed_or(&self, expr_id: ExprId, ty: Type) -> Type {
+        match self
+            .expr_path(expr_id)
+            .and_then(|path| self.narrowed_type(&path))
+        {
+            Some(narrowed) if !ty.is_error() => narrowed,
+            _ => ty,
+        }
+    }
+
+    /// Infers `expr` with `narrowings` in force, and removes them afterwards.
+    fn infer_under_narrowings(&mut self, narrowings: Vec<(Vec<Name>, Type)>, expr: ExprId) -> Type {
+        let depth = self.push_narrowings(narrowings);
+        let ty = self.infer_expr(expr);
+        self.pop_narrowings(depth);
+        ty
+    }
+
+    /// True when two values whose occurrences differ can still be compared for equality: every
+    /// value compares as a sequence, so `int?` and `int+` compare item by item. The item types
+    /// must be comparable as exactly-one values are, and the empty type compares with anything.
+    fn items_comparable(&mut self, lhs_ty: &Type, rhs_ty: &Type) -> bool {
+        let (lhs_item, rhs_item) = (lhs_ty.item().clone(), rhs_ty.item().clone());
+        if lhs_item == Type::never() || rhs_item == Type::never() {
+            return true;
+        }
+        match (&lhs_item, &rhs_item) {
+            (Type::Primitive(a), Type::Primitive(b)) if a.is_numeric() && b.is_numeric() => {
+                Primitive::numeric_promotion(*a, *b).is_some()
+            }
+            (Type::UnionCase(lhs_case), Type::UnionCase(rhs_case)) => {
+                lhs_case.shares_union_with(rhs_case)
+            }
+            _ => {
+                self.type_satisfies_expected(&lhs_item, &rhs_item)
+                    || self.type_satisfies_expected(&rhs_item, &lhs_item)
+            }
+        }
+    }
+
+    /// The narrowings a condition establishes in the branch it proves (`when` is `true`) or
+    /// refutes (`when` is `false`).
+    ///
+    /// <para>Four forms narrow and nothing else does: `p?` narrows `p` where it is true; `!c`
+    /// swaps the branches of `c`; `a && b` narrows by both operands where it is true; and a
+    /// tested chain `a?.b?` narrows every receiver along it, since the chain can only hold a value
+    /// when each step did. A disjunction narrows nothing in either branch, and a call, a `for`
+    /// body or a `let` binding of a test result narrows nothing at all. The types are read from
+    /// the condition's own inference, which ran before this.</para>
+    fn condition_narrowings(&self, condition: ExprId, when: bool) -> Vec<(Vec<Name>, Type)> {
+        let mut narrowings = Vec::new();
+        match self.module.raw_module().expr(condition) {
+            ast::Expr::Exists { operand, .. } if when => {
+                self.presence_narrowings(*operand, &mut narrowings);
+            }
+            ast::Expr::UnaryOp {
+                op: ast::UnOp::Not,
+                expr,
+                ..
+            } => return self.condition_narrowings(*expr, !when),
+            ast::Expr::BinaryOp {
+                lhs,
+                op: ast::BinOp::And,
+                rhs,
+                ..
+            } if when => {
+                narrowings.extend(self.condition_narrowings(*lhs, true));
+                narrowings.extend(self.condition_narrowings(*rhs, true));
+            }
+            _ => {}
+        }
+        narrowings
+    }
+
+    /// The narrowings a presence test of `operand` establishes: the operand's own path, and the
+    /// receiver of every `?.` step along it, each read with zero removed.
+    fn presence_narrowings(&self, operand: ExprId, narrowings: &mut Vec<(Vec<Name>, Type)>) {
+        if let ast::Expr::OptionalMember { base, .. } = self.module.raw_module().expr(operand) {
+            self.presence_narrowings(*base, narrowings);
+        }
+        let Some(path) = self.expr_path(operand) else {
+            return;
+        };
+        let Some(ty) = self.env.get_expr_type(operand) else {
+            return;
+        };
+        if ty.is_error() || !ty.admits_zero() {
+            return;
+        }
+        let narrowed = ty.with_occurrence(ty.occurrence().without_zero());
+        narrowings.push((path, narrowed));
+    }
+
     /// Infers the type of an expression.
     pub fn infer_expr(&mut self, expr_id: ExprId) -> Type {
         let expr = self.module.raw_module().expr(expr_id);
@@ -499,14 +675,14 @@ impl<'a> InferenceContext<'a> {
                 Some(DeclaringOrigin::new(module_identity, *definition_id)),
             ),
 
-            // Identifiers look up in environment
+            // Identifiers look up in environment, then in the narrowings in force.
             ast::Expr::Ident(name) => {
                 self.record_loop_name_use(expr_id, name);
-                if let Some(ty) = self.env.lookup(name) {
-                    ty.clone()
-                } else {
-                    Type::Error
-                }
+                let ty = match self.env.lookup(name) {
+                    Some(ty) => ty.clone(),
+                    None => Type::Error,
+                };
+                self.narrowed_or(expr_id, ty)
             }
 
             // Binary operations
@@ -568,10 +744,47 @@ impl<'a> InferenceContext<'a> {
                         return Type::Error;
                     }
 
+                    // An element-style function binds its arguments by name only: its signature
+                    // lists them as attributes, in no order a caller is meant to rely on.
+                    let declared = self.declared_function_callee(*func);
+                    if let Some(callee) = declared
+                        .as_ref()
+                        .filter(|callee| callee.form == nx_hir::FunctionForm::Element)
+                    {
+                        let form = std::iter::once(format!("<{}", callee.name))
+                            .chain(callee.params.iter().map(|(name, _)| format!("{name}=...")))
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                            + " />";
+                        self.error(
+                            "positional-call-of-element-function",
+                            format!(
+                                "'{}' is declared in element style, so its arguments bind by \
+                                 name; call it as an element, {form}",
+                                callee.name
+                            ),
+                            *span,
+                        );
+                        for arg in args {
+                            self.infer_expr(*arg);
+                        }
+                        return Type::Error;
+                    }
+
+                    // A call may leave off the trailing parameters a caller may omit; the function
+                    // fills each with its default, or with empty.
+                    let required = declared.as_ref().map(|callee| {
+                        callee
+                            .params
+                            .iter()
+                            .rposition(|(_, omissible)| !omissible)
+                            .map_or(0, |last| last + 1)
+                    });
+
                     // Infer argument types
                     let arg_tys: Vec<_> = args.iter().map(|arg| self.infer_expr(*arg)).collect();
 
-                    self.infer_call(&func_ty, args, &arg_tys, *span)
+                    self.infer_call(&func_ty, args, &arg_tys, required, *span)
                 }
             }
 
@@ -593,16 +806,20 @@ impl<'a> InferenceContext<'a> {
                     );
                 }
 
-                let then_ty = self.infer_expr(*then_branch);
+                // A presence test in the condition narrows the tested path in the branch it
+                // proves: `p?` in the `then`, `!p?` in the `else`.
+                let then_narrowings = self.condition_narrowings(*condition, true);
+                let then_ty = self.infer_under_narrowings(then_narrowings, *then_branch);
 
-                // A missing `else` is an `else { }`. Joining with the empty sequence is the whole
-                // of the rule: the join lifts an item to a sequence, so a branch producing `T`
-                // gives `T[]`, and a branch that is already a sequence gives that sequence back
-                // -- including a branch that is itself a conditional with no `else`, which is why
-                // nesting needs nothing of its own. Only branches that exist can be widened.
+                // A missing `else` is an `else { }`. Joining with the empty value is the whole of
+                // the rule: the join takes the least upper bound of the occurrences, so a branch
+                // producing `T` gives `T?` and one producing `T+` gives `T*` -- including a branch
+                // that is itself a conditional with no `else`, which is why nesting needs nothing
+                // of its own. Only branches that exist can be widened.
                 match else_branch {
                     Some(else_id) => {
-                        let else_ty = self.infer_expr(*else_id);
+                        let else_narrowings = self.condition_narrowings(*condition, false);
+                        let else_ty = self.infer_under_narrowings(else_narrowings, *else_id);
                         let joined = self.common_supertype(&then_ty, &else_ty);
                         let members = [(*then_branch, then_ty), (*else_id, else_ty)];
                         self.record_join_lifts(&members, &joined);
@@ -610,7 +827,7 @@ impl<'a> InferenceContext<'a> {
                         joined
                     }
                     None => {
-                        let joined = self.common_supertype(&then_ty, &Self::implicit_empty_else());
+                        let joined = self.common_supertype(&then_ty, &Type::empty());
                         let members = [(*then_branch, then_ty)];
                         self.record_join_lifts(&members, &joined);
                         self.record_join_widenings(&members, &joined);
@@ -626,23 +843,26 @@ impl<'a> InferenceContext<'a> {
                 span,
             } => self.infer_match_expr(*scrutinee, arms, *else_branch, *span),
 
-            // Arrays
+            // Braced values
             ast::Expr::Array { elements, span } => {
                 if elements.is_empty() {
-                    // An empty list is a list of the bottom type. That is its type outright, not a
-                    // placeholder for one the site has yet to supply: `never` is below every type,
-                    // so `never[]` is below every list type, and the one value is usable at every
-                    // list-typed site without anything having to be resolved later.
-                    Type::array(Type::never())
+                    // `{}` is the empty value, and its type is the empty type: the bottom item
+                    // type under `?`. That is its type outright, not a placeholder for one the
+                    // site has yet to supply: `never` is below every item type and `?` below `*`,
+                    // so the one value is usable at every `?` and `*` site without anything
+                    // having to be resolved later.
+                    Type::empty()
+                } else if elements.len() == 1 {
+                    // A single item is itself: `{x}` is `x`.
+                    self.infer_expr(elements[0])
                 } else {
-                    // Items splice: what each contributes is its element type when it is itself a
-                    // sequence -- a conditional with no `else` among them, since its type is one --
-                    // and the item's own type otherwise. The join is over contributions, and so is
-                    // the widening that follows it: what `{ns 1.5}` has to widen to `float64` is
-                    // the `int` inside `ns`, not `ns` itself, and an `int[]` measured against a
-                    // `float64` widens to nothing. The widening is still recorded against the
-                    // item, because the item is what a widening wraps -- and wrapping a sequence
-                    // widens it element by element.
+                    // Items splice: each contributes its item type and its occurrence, and the
+                    // occurrences add -- two items that may each be present may be two, and the
+                    // collection is at least one when any item is. The join is over item types,
+                    // and so is the widening that follows it: what `{ns 1.5}` has to widen to
+                    // `float64` is the `int` inside `ns`, not `ns` itself. The widening is still
+                    // recorded against the item, because the item is what a widening wraps -- and
+                    // wrapping a sequence widens it element by element.
                     let contributions: Vec<_> = elements
                         .iter()
                         .map(|e| {
@@ -650,14 +870,13 @@ impl<'a> InferenceContext<'a> {
                             self.item_contribution_of(*e)
                         })
                         .collect();
-                    let item_ty = self.common_sequence_item_type(&contributions, *span);
-                    let members = elements
-                        .iter()
-                        .copied()
-                        .zip(contributions)
-                        .collect::<Vec<_>>();
+                    let item_types: Vec<_> =
+                        contributions.iter().map(|(ty, _)| ty.clone()).collect();
+                    let item_ty = self.common_sequence_item_type(&item_types, *span);
+                    let occ = Self::summed_occurrence(contributions.iter().map(|(_, occ)| *occ));
+                    let members = elements.iter().copied().zip(item_types).collect::<Vec<_>>();
                     self.record_join_widenings(&members, &item_ty);
-                    Type::array(item_ty)
+                    Type::seq(item_ty, occ)
                 }
             }
 
@@ -670,19 +889,19 @@ impl<'a> InferenceContext<'a> {
                 if !index_ty.is_compatible_with(&Type::int()) && !index_ty.is_error() {
                     self.error(
                         "type-mismatch",
-                        format!("Array index must be an integer, found {}", index_ty),
+                        format!("Index must be an integer, found {}", index_ty),
                         *span,
                     );
                 }
 
-                // Base must be array
+                // Base must be a sequence
                 match base_ty {
-                    Type::Array(elem_ty) => *elem_ty,
+                    Type::Seq { item, .. } => *item,
                     Type::Error => Type::Error,
                     _ => {
                         self.error(
                             "type-mismatch",
-                            format!("Cannot index into non-array type {}", base_ty),
+                            format!("Cannot index into {}, which is not a sequence", base_ty),
                             *span,
                         );
                         Type::Error
@@ -692,7 +911,7 @@ impl<'a> InferenceContext<'a> {
 
             // Member access
             ast::Expr::Member { base, member, span } => {
-                if let Some(name) = self.flattened_expr_name(expr_id) {
+                let ty = if let Some(name) = self.flattened_expr_name(expr_id) {
                     if let Some(ty) = self.env.lookup(&name) {
                         ty.clone()
                     } else if self.report_unresolved_property_reference(&name, *span) {
@@ -719,13 +938,65 @@ impl<'a> InferenceContext<'a> {
                         self.union_case_by_member(&union_info, member, *span)
                     } else {
                         let base_ty = self.infer_expr(*base);
-                        self.infer_member_access(&base_ty, member, *span)
+                        self.infer_member_access(*base, &base_ty, member, *span)
                     }
                 } else if let Some(union_info) = self.union_info_for_expr(*base) {
                     self.union_case_by_member(&union_info, member, *span)
                 } else {
                     let base_ty = self.infer_expr(*base);
-                    self.infer_member_access(&base_ty, member, *span)
+                    self.infer_member_access(*base, &base_ty, member, *span)
+                };
+                self.narrowed_or(expr_id, ty)
+            }
+
+            // `x?.m`: a step through a receiver that may be empty.
+            ast::Expr::OptionalMember { base, member, span } => {
+                let base_ty = self.infer_expr(*base);
+                let ty = self.infer_optional_member_access(&base_ty, member, *span);
+                self.narrowed_or(expr_id, ty)
+            }
+
+            // `x?`: true when `x` holds an item. The operand must be able to be empty, or the
+            // test is always true and is reported as such.
+            ast::Expr::Exists { operand, span } => {
+                let operand_ty = self.infer_expr(*operand);
+                if !operand_ty.is_error() && !operand_ty.admits_zero() {
+                    self.warn(
+                        "presence-test-always-true",
+                        format!(
+                            "A value of type {} is always present, so the `?` test is always true",
+                            operand_ty
+                        ),
+                        *span,
+                    );
+                }
+                Type::boolean()
+            }
+
+            // `x ?? y`: `x` when it holds an item, `y` otherwise. The result admits what `x` admits
+            // with zero removed, joined with what `y` admits.
+            ast::Expr::Coalesce { left, right, span } => {
+                let left_ty = self.infer_expr(*left);
+                let right_ty = self.infer_expr(*right);
+                if left_ty.is_error() || right_ty.is_error() {
+                    Type::Error
+                } else {
+                    if !left_ty.admits_zero() {
+                        self.warn(
+                            "fallback-never-taken",
+                            format!(
+                                "A value of type {} is always present, so the `??` fallback is never taken",
+                                left_ty
+                            ),
+                            *span,
+                        );
+                    }
+                    let present = left_ty.with_occurrence(left_ty.occurrence().without_zero());
+                    let joined = self.common_supertype(&present, &right_ty);
+                    let members = [(*left, present), (*right, right_ty)];
+                    self.record_join_lifts(&members, &joined);
+                    self.record_join_widenings(&members, &joined);
+                    joined
                 }
             }
 
@@ -774,39 +1045,43 @@ impl<'a> InferenceContext<'a> {
                 body,
                 ..
             } => {
-                // Infer iterable type: a list, or a range of an integer type.
+                // Infer iterable type: a sequence or an optional, or a range of an integer type.
                 let iterable_ty = self.infer_expr(*iterable);
-                let item_ty = match iterable_ty.clone() {
-                    Type::Array(inner) => *inner,
-                    Type::Error => Type::Error,
-                    // An optional range is not accepted, exactly as an optional list is not:
-                    // `prelude_range_argument` matches the type as it stands.
+                let (item_ty, iterated_occ) = match iterable_ty.clone() {
+                    Type::Seq { item, occ } => (*item, occ),
+                    Type::Error => (Type::Error, Occurrence::ZERO_OR_MORE),
+                    // An optional range is not accepted, exactly as an optional sequence is
+                    // iterated as what it holds: `prelude_range_argument` matches the type as it
+                    // stands. A range may be empty, so it iterates zero or more times.
                     other => match self.prelude_range_argument(&other) {
                         // A range of an integer type counts; the item is an integer of that type
-                        // and the index, as for a list, an `int`.
+                        // and the index, as for a sequence, an `int`.
                         Some(Type::Primitive(primitive)) if primitive.is_integer() => {
                             self.range_for_expressions.insert(expr_id);
-                            Type::Primitive(primitive)
+                            (Type::Primitive(primitive), Occurrence::ZERO_OR_MORE)
                         }
                         // Any other range is rejected rather than given a guessed step.
                         Some(_) => {
                             self.error(
                                 "range-not-iterable",
                                 format!(
-                                    "A for iterable must be a list or a range of an integer type, \
-                                     found {other}: only a range of an integer type iterates"
+                                    "A for iterable must be a sequence or a range of an integer \
+                                     type, found {other}: only a range of an integer type iterates"
                                 ),
                                 expr.span(),
                             );
-                            Type::Error
+                            (Type::Error, Occurrence::ZERO_OR_MORE)
                         }
                         None => {
                             self.error(
                                 "type-mismatch",
-                                format!("For iterable must be an array, found {}", other),
+                                format!(
+                                    "For iterable must be a sequence or an optional value, found {}",
+                                    other
+                                ),
                                 expr.span(),
                             );
-                            Type::Error
+                            (Type::Error, Occurrence::ZERO_OR_MORE)
                         }
                     },
                 };
@@ -824,17 +1099,19 @@ impl<'a> InferenceContext<'a> {
                         index_uses: Vec::new(),
                     });
                 }
-                // A `for` concatenates what its body yields, so the result is a sequence of
-                // what one iteration contributes: the element type of a sequence-valued body, no
-                // items at all where a conditional was not taken, and the body's own type
-                // otherwise.
-                let item_contribution = self.item_contribution(*body);
+                // A `for` concatenates what its body yields, so the result's item type is what
+                // one iteration contributes, and its occurrence is the product of the iterated
+                // occurrence and the body's: at least one only when both are, bounded by one only
+                // when both are. Over `int+` a body of `int` yields `int+`, a body that may
+                // yield nothing yields `int*`, and over an optional a body of `string` yields
+                // `string?`.
+                let (body_item, body_occ) = self.item_contribution(*body);
                 if index.is_some() {
                     self.indexed_loops.pop();
                 }
                 self.env.pop_scope();
 
-                Type::array(item_contribution)
+                Type::seq(body_item, iterated_occ.product(body_occ))
             }
 
             // Let expressions (used for match lowering)
@@ -879,12 +1156,28 @@ impl<'a> InferenceContext<'a> {
         // resolving them a second time.
         let mut param_types = Vec::with_capacity(func.params.len());
         for param in &func.params {
-            let param_ty = self.type_from_type_ref_at(param.span, &param.ty);
-            self.env.bind(param.name.clone(), param_ty.clone());
+            let param_ty = self.property_slot_type(param.span, &param.name, &param.ty);
+            // A default is checked before its own parameter is bound, so it sees the parameters
+            // declared before it and nothing later.
+            if let Some(default) = param.default {
+                let actual = self.infer_expr(default);
+                self.check_typed_binding_for(
+                    Some(default),
+                    &actual,
+                    &param_ty,
+                    param.span,
+                    "parameter-default-type-mismatch",
+                    format!("Default value for parameter '{}'", param.name),
+                );
+            }
+            // The body reads an optional parameter at a type that admits zero.
+            self.env
+                .bind(param.name.clone(), read_type(&param_ty, param.optional));
             param_types.push(FunctionParam {
                 name: param.name.clone(),
                 ty: param_ty,
                 is_content: param.is_content,
+                optional: param.optional,
             });
         }
 
@@ -904,16 +1197,16 @@ impl<'a> InferenceContext<'a> {
             expected
         } else {
             // The same rule as an unannotated value binding, at the other place a binding's type
-            // can be fixed by an empty list. `never[]` is a type this function could simply have;
-            // it is reported because a signature saying only "a list of nothing in particular"
-            // tells a caller nothing, and the annotation is where that gets said.
+            // can be fixed by an empty value. `{}` is a type this function could simply have; it
+            // is reported because a signature saying only "nothing in particular" tells a caller
+            // nothing, and the annotation is where that gets said.
             if Self::mentions_never(&body_ty) {
                 self.error(
-                    "empty-list-element-type-unknown",
+                    "empty-value-type-unknown",
                     format!(
-                        "Cannot determine the element type of the empty list returned by '{}'; \
-                         annotate the return type with the list type you mean, as in \
-                         'let {}(): string[] = {{}}'",
+                        "Cannot determine the item type of the empty value returned by '{}'; \
+                         annotate the return type with the type you mean, as in \
+                         'let {}(): string* = {{}}'",
                         func.name, func.name
                     ),
                     func.span,
@@ -998,33 +1291,39 @@ impl<'a> InferenceContext<'a> {
                         .iter()
                         .any(|declared| declared.name == field.name);
                     let field_ty = if declared_here {
-                        self.type_from_type_ref_in_at(
+                        self.property_slot_type_in(
                             field.span,
                             Some(&field.module_identity),
+                            &field.name,
                             &field.ty,
                         )
                     } else {
                         self.type_from_type_ref_in_quietly(Some(&field.module_identity), &field.ty)
                     };
                     self.check_component_field_default(component, &field.name, &field_ty);
-                    self.env.bind(field.name.clone(), field_ty);
+                    // The body reads an optional prop at a type that admits zero.
+                    self.env
+                        .bind(field.name.clone(), read_type(&field_ty, field.optional));
                 }
             }
             // Without a contract there is no base chain to read, and the component's own props are
             // the whole of what its body and its defaults can see.
             None => {
                 for field in &component.props {
-                    let field_ty = self.type_from_type_ref_at(field.span, &field.ty);
+                    let field_ty = self.property_slot_type(field.span, &field.name, &field.ty);
                     self.check_component_field_default(component, &field.name, &field_ty);
-                    self.env.bind(field.name.clone(), field_ty);
+                    self.env
+                        .bind(field.name.clone(), read_type(&field_ty, field.optional));
                 }
             }
         }
 
         for field in &component.state {
-            let field_ty = self.type_from_type_ref_at(field.span, &field.ty);
+            let field_ty = self.property_slot_type(field.span, &field.name, &field.ty);
             self.check_component_field_default(component, &field.name, &field_ty);
-            self.env.bind(field.name.clone(), field_ty);
+            // Optional state starts empty and reads at a type that admits zero.
+            self.env
+                .bind(field.name.clone(), read_type(&field_ty, field.optional));
         }
 
         // A body is absent exactly when the component is abstract or external, and there is then
@@ -1084,10 +1383,13 @@ impl<'a> InferenceContext<'a> {
         self.collect_handler_result_items(body, &mut items);
         for item in items {
             match item {
-                HandlerResultItem::EmptyList(span) => self.error(
+                HandlerResultItem::MayBeEmpty(ty, span) => self.error(
                     "handler-result-empty",
-                    "Action handler must return at least one action or update record; found an empty list"
-                        .to_string(),
+                    format!(
+                        "Action handler must return at least one action or update record; found \
+                         a value of type {} that may be empty",
+                        ty
+                    ),
                     span,
                 ),
                 HandlerResultItem::Value(ty, span) => {
@@ -1143,10 +1445,9 @@ impl<'a> InferenceContext<'a> {
                 .cloned()
                 .unwrap_or(Type::Error)
             {
-                ty if Self::is_empty_list_type(&ty) => {
-                    items.push(HandlerResultItem::EmptyList(span))
-                }
-                Type::Array(inner) => items.push(HandlerResultItem::Value(*inner, span)),
+                // A handler's result must not admit zero: it is one or more actions or updates.
+                ty if ty.admits_zero() => items.push(HandlerResultItem::MayBeEmpty(ty, span)),
+                Type::Seq { item, .. } => items.push(HandlerResultItem::Value(*item, span)),
                 ty => items.push(HandlerResultItem::Value(ty, span)),
             },
         }
@@ -1307,7 +1608,6 @@ impl<'a> InferenceContext<'a> {
             ast::Literal::Float(_) => Type::float64(),
             ast::Literal::Float32(_) => Type::float32(),
             ast::Literal::Boolean(_) => Type::boolean(),
-            ast::Literal::Null => Type::nullable(self.fresh_var()),
         }
     }
 
@@ -1319,20 +1619,26 @@ impl<'a> InferenceContext<'a> {
         span: TextSpan,
     ) -> Type {
         let scrutinee_ty = self.infer_expr(scrutinee);
-        let scrutinee_name = match self.module.raw_module().expr(scrutinee) {
-            ast::Expr::Ident(name) => Some(name.clone()),
-            _ => None,
-        };
-        let union_ty = match &scrutinee_ty {
+        let scrutinee_path = self.expr_path(scrutinee);
+        // A union under `?` still matches by case; the `{}` arm is what covers its absence.
+        let union_ty = match scrutinee_ty.item() {
             Type::Union(union_ty) => Some(union_ty.clone()),
             _ => None,
         };
 
         let mut covered_cases = FxHashSet::default();
+        let mut covered_empty = false;
         let mut result_tys = Vec::new();
         let mut result_members = Vec::new();
 
         for arm in arms {
+            // The arms after a `{}` arm can only be reached by a value that holds an item, so a
+            // path scrutinee reads as present in them, exactly as a presence test narrows it.
+            let present_narrowings = self.present_scrutinee_narrowings(
+                scrutinee_path.as_deref(),
+                &scrutinee_ty,
+                covered_empty,
+            );
             let pattern_tys = arm
                 .patterns
                 .iter()
@@ -1343,6 +1649,7 @@ impl<'a> InferenceContext<'a> {
                         union_ty.as_ref(),
                         &pattern_ty,
                         &mut covered_cases,
+                        &mut covered_empty,
                         self.module.raw_module().expr(*pattern).span(),
                     );
                     pattern_ty
@@ -1350,16 +1657,11 @@ impl<'a> InferenceContext<'a> {
                 .collect::<Vec<_>>();
 
             let narrowed_case = self.match_arm_narrowed_case(union_ty.as_ref(), &pattern_tys);
-            let body_ty =
-                if let (Some(name), Some(case_ty)) = (scrutinee_name.as_ref(), narrowed_case) {
-                    self.env.push_scope();
-                    self.env.bind(name.clone(), Type::UnionCase(case_ty));
-                    let ty = self.infer_expr(arm.body);
-                    self.env.pop_scope();
-                    ty
-                } else {
-                    self.infer_expr(arm.body)
-                };
+            let mut narrowings = present_narrowings;
+            if let (Some(path), Some(case_ty)) = (scrutinee_path.as_ref(), narrowed_case) {
+                narrowings.push((path.clone(), Type::UnionCase(case_ty)));
+            }
+            let body_ty = self.infer_under_narrowings(narrowings, arm.body);
 
             result_members.push((arm.body, body_ty.clone()));
             result_tys.push(body_ty);
@@ -1370,34 +1672,43 @@ impl<'a> InferenceContext<'a> {
                 .cases
                 .iter()
                 .all(|case| covered_cases.contains(case))
+                && (covered_empty || !scrutinee_ty.admits_zero())
         });
 
         // A path no arm covers is the match's own absent `else`: the arms that are there decide
-        // the type, and the uncovered path contributes nothing where items are collected and null
-        // where one value is expected.
+        // the item type, and the uncovered path contributes the empty value.
         let mut uncovered = false;
         if let Some(else_id) = else_branch {
-            let else_ty = self.infer_expr(else_id);
+            let narrowings = self.present_scrutinee_narrowings(
+                scrutinee_path.as_deref(),
+                &scrutinee_ty,
+                covered_empty,
+            );
+            let else_ty = self.infer_under_narrowings(narrowings, else_id);
             result_members.push((else_id, else_ty.clone()));
             result_tys.push(else_ty);
         } else if let Some(union_ty) = union_ty.as_ref() {
             if !is_exhaustive {
-                let missing = union_ty
+                let mut missing = union_ty
                     .cases
                     .iter()
                     .filter(|case| !covered_cases.contains(*case))
-                    .map(|case| case.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                    .map(|case| case.as_str().to_string())
+                    .collect::<Vec<_>>();
+                if scrutinee_ty.admits_zero() && !covered_empty {
+                    missing.push("{}".to_string());
+                }
                 self.error(
                     "non-exhaustive-union-match",
                     format!(
                         "Union match on '{}' is missing cases: {}",
-                        union_ty.name, missing
+                        union_ty.name,
+                        missing.join(", ")
                     ),
                     span,
                 );
-                uncovered = true;
+                // The missing cases are the mistake, and they are reported. Reading them as an
+                // `else { }` too would add a mismatch against the result type on top of it.
             }
         } else {
             uncovered = true;
@@ -1406,7 +1717,7 @@ impl<'a> InferenceContext<'a> {
         // A path no arm covers is this match's missing `else`, and is read as an `else { }` --
         // the same rule an `if` without one follows, joined over arms rather than over a branch.
         if uncovered && !result_tys.is_empty() {
-            result_tys.push(Self::implicit_empty_else());
+            result_tys.push(Type::empty());
         }
         let joined = self.common_result_type(&result_tys);
         self.record_join_lifts(&result_members, &joined);
@@ -1414,11 +1725,30 @@ impl<'a> InferenceContext<'a> {
         joined
     }
 
+    /// The narrowing the arms after a `{}` arm, and the `else` arm of a match with one, read a
+    /// path scrutinee under: present, with zero removed from its occurrence.
+    fn present_scrutinee_narrowings(
+        &self,
+        scrutinee_path: Option<&[Name]>,
+        scrutinee_ty: &Type,
+        covered_empty: bool,
+    ) -> Vec<(Vec<Name>, Type)> {
+        let Some(path) = scrutinee_path else {
+            return Vec::new();
+        };
+        if !covered_empty || scrutinee_ty.is_error() || !scrutinee_ty.admits_zero() {
+            return Vec::new();
+        }
+        let narrowed = scrutinee_ty.with_occurrence(scrutinee_ty.occurrence().without_zero());
+        vec![(path.to_vec(), narrowed)]
+    }
+
     fn infer_match_pattern(&mut self, pattern: ExprId, scrutinee_ty: &Type) -> Type {
         // A bare pattern resolves against the scrutinee's type in preference to any lexically
         // visible binding of the same name. The preference is reported so a pattern that used to
         // compare against a variable never changes meaning silently.
-        if let ast::Expr::ContextualName { name, span } = self.module.raw_module().expr(pattern) {
+        if let ast::Expr::ContextualName { name, span, .. } = self.module.raw_module().expr(pattern)
+        {
             let name = name.clone();
             let span = *span;
             if self.env.lookup(&name).is_some() {
@@ -1457,9 +1787,28 @@ impl<'a> InferenceContext<'a> {
         union_ty: Option<&UnionType>,
         pattern_ty: &Type,
         covered_cases: &mut FxHashSet<Name>,
+        covered_empty: &mut bool,
         span: TextSpan,
     ) {
         if pattern_ty.is_error() || scrutinee_ty.is_error() {
+            return;
+        }
+
+        // The `{}` pattern matches the empty value, so it is only worth writing where the
+        // scrutinee can be empty.
+        if pattern_ty.is_empty_type() {
+            if scrutinee_ty.admits_zero() {
+                *covered_empty = true;
+            } else {
+                self.warn(
+                    "empty-pattern-never-matches",
+                    format!(
+                        "A value of type {} is always present, so the `{{}}` pattern never matches",
+                        scrutinee_ty
+                    ),
+                    span,
+                );
+            }
             return;
         }
 
@@ -1522,17 +1871,18 @@ impl<'a> InferenceContext<'a> {
     /// Records each branch of a join that the join lifted from an item to a sequence.
     ///
     /// <para>Each one is wrapped as a one-item sequence after analysis, so the branch's value is
-    /// what the join's type says: a taken `if c { 1 }` evaluates to `[1]`.</para>
+    /// what the join's type says: a taken `if c { 1 } else { xs }` evaluates to `[1]`. A join to
+    /// `?` lifts nothing, since an optional value that holds an item is the item itself.</para>
     fn record_join_lifts(&mut self, members: &[(ExprId, Type)], joined: &Type) {
-        // A branch is lifted when the join is a sequence and the branch is not: the join made a
-        // sequence of it. A branch that is already a sequence, and one of type `never` or an
-        // error, contributes nothing of its own to lift. Forgotten otherwise, since inference can
-        // visit a join more than once.
-        let joined_is_sequence = Self::is_sequence_shaped(joined);
+        // A branch is lifted when the join admits many and the branch does not: the join made a
+        // sequence of it. A branch that is already a sequence, the empty value, and one of type
+        // `never` or an error, contributes nothing of its own to lift. Forgotten otherwise, since
+        // inference can visit a join more than once.
+        let joined_is_sequence = joined.admits_many();
         for (expr, ty) in members {
             let lifted = joined_is_sequence
-                && !Self::is_sequence_shaped(ty)
-                && !Self::is_null_literal_type(ty)
+                && !ty.admits_many()
+                && !ty.is_empty_type()
                 && !ty.is_error()
                 && !matches!(ty, Type::Primitive(Primitive::Never));
             if lifted {
@@ -1546,7 +1896,7 @@ impl<'a> InferenceContext<'a> {
     /// Records each branch of a join whose numeric type is narrower than the join's.
     ///
     /// <para>A branch is recorded against the join's numeric type, which is also what it widens
-    /// to inside a list or a nullable type. A branch that already has the join's type, or that
+    /// to under an occurrence. A branch that already has the join's type, or that
     /// the join did not widen (an `object` join, say), is forgotten, since inference can visit a
     /// join more than once.</para>
     fn record_join_widenings(&mut self, members: &[(ExprId, Type)], joined: &Type) {
@@ -1856,11 +2206,22 @@ impl<'a> InferenceContext<'a> {
                         return ty;
                     }
                 }
+                let hint = [&lhs_ty, &rhs_ty]
+                    .into_iter()
+                    .find(|ty| !ty.occurrence().is_one())
+                    .map(|ty| {
+                        format!(
+                            "; {} is not exactly one value: {}",
+                            ty,
+                            occurrence_operand_hint(ty)
+                        )
+                    })
+                    .unwrap_or_default();
                 self.error(
                     "type-mismatch",
                     format!(
-                        "Binary operator {:?} cannot be applied to types {} and {}",
-                        op, lhs_ty, rhs_ty
+                        "Binary operator {:?} cannot be applied to types {} and {}{}",
+                        op, lhs_ty, rhs_ty, hint
                     ),
                     span,
                 );
@@ -1872,6 +2233,30 @@ impl<'a> InferenceContext<'a> {
             // equality with each other, since a value of that union is either of them; union
             // cases have no order, so the relational operators stay rejected.
             Eq | Ne | Lt | Le | Gt | Ge => {
+                // Ordering is defined on exactly one value per side; a value that may be empty or
+                // may be many has no order, and the runtime would fail on it.
+                if matches!(op, Lt | Le | Gt | Ge)
+                    && (!lhs_ty.occurrence().is_one() || !rhs_ty.occurrence().is_one())
+                {
+                    let hint = if lhs_ty.admits_many() || rhs_ty.admits_many() {
+                        "compare the items inside a `for`"
+                    } else {
+                        "supply a value with `??` first"
+                    };
+                    self.error(
+                        "type-mismatch",
+                        format!(
+                            "Cannot apply {} to {} and {}: it orders exactly one value on each \
+                             side; {}",
+                            binop_spelling(op),
+                            lhs_ty,
+                            rhs_ty,
+                            hint
+                        ),
+                        span,
+                    );
+                    return Type::Error;
+                }
                 if let Some((a, b)) = numeric_pair {
                     if Primitive::numeric_promotion(a, b).is_some() {
                         return Type::boolean();
@@ -1896,6 +2281,7 @@ impl<'a> InferenceContext<'a> {
                 if sibling_cases
                     || self.type_satisfies_expected(&lhs_ty, &rhs_ty)
                     || self.type_satisfies_expected(&rhs_ty, &lhs_ty)
+                    || (matches!(op, Eq | Ne) && self.items_comparable(&lhs_ty, &rhs_ty))
                 {
                     Type::boolean()
                 } else {
@@ -1940,6 +2326,13 @@ impl<'a> InferenceContext<'a> {
         other: &Type,
         span: TextSpan,
     ) -> Option<Result<Type, ()>> {
+        // Equality compares every value as a sequence, so a literal beside `float32?` or
+        // `int32+` is typed by that side's item type; every other operator takes exactly one.
+        let other = if matches!(op, ast::BinOp::Eq | ast::BinOp::Ne) {
+            other.item()
+        } else {
+            other
+        };
         if !matches!(other, Type::Primitive(primitive) if primitive.is_numeric()) {
             return None;
         }
@@ -1959,8 +2352,8 @@ impl<'a> InferenceContext<'a> {
     /// <para>`None` when neither operand is a string, so the caller reports the addition as it
     /// would any other mistyped one. With a string operand, the other must be a string or a
     /// stringifiable primitive — a number or a boolean — and is recorded for its text conversion;
-    /// anything else is rejected naming its type. `null` and a nullable type are among the
-    /// rejected: there is no one text a missing value obviously has.</para>
+    /// anything else is rejected naming its type. A value that admits zero or many is among the
+    /// rejected: there is no one text a missing value, or several, obviously has.</para>
     fn infer_concatenation(
         &mut self,
         expr_id: ExprId,
@@ -1987,20 +2380,21 @@ impl<'a> InferenceContext<'a> {
                         .insert(operand, primitive);
                 }
                 None => {
-                    let found = if Self::is_null_literal_type(ty) {
-                        "null".to_string()
+                    let message = if !ty.occurrence().is_one() {
+                        format!(
+                            "Cannot join {} to a string with +: + takes exactly one value on each \
+                             side; {}",
+                            ty,
+                            occurrence_operand_hint(ty)
+                        )
                     } else {
-                        ty.to_string()
-                    };
-                    self.error(
-                        "type-mismatch",
                         format!(
                             "Cannot join {} to a string with +: only a string, a number or a \
                              boolean has a text form",
-                            found
-                        ),
-                        span,
-                    );
+                            ty
+                        )
+                    };
+                    self.error("type-mismatch", message, span);
                     accepted = false;
                 }
             }
@@ -2030,6 +2424,15 @@ impl<'a> InferenceContext<'a> {
         if operand.is_error() {
             return Type::Error;
         }
+        let hint = if operand.occurrence().is_one() {
+            String::new()
+        } else {
+            format!(
+                "; {} is not exactly one value: {}",
+                operand,
+                occurrence_operand_hint(operand)
+            )
+        };
 
         match op {
             ast::UnOp::Neg => {
@@ -2040,7 +2443,10 @@ impl<'a> InferenceContext<'a> {
                 }
                 self.error(
                     "type-mismatch",
-                    format!("Negation requires a numeric type, found {}", operand),
+                    format!(
+                        "Negation requires a numeric type, found {}{}",
+                        operand, hint
+                    ),
                     span,
                 );
                 Type::Error
@@ -2051,7 +2457,7 @@ impl<'a> InferenceContext<'a> {
                 } else {
                     self.error(
                         "type-mismatch",
-                        format!("Logical NOT requires boolean, found {}", operand),
+                        format!("Logical NOT requires boolean, found {}{}", operand, hint),
                         span,
                     );
                     Type::Error
@@ -2060,12 +2466,15 @@ impl<'a> InferenceContext<'a> {
         }
     }
 
-    /// Infers the result type of a function call.
+    /// Infers the result type of a function call. `required` is how many leading arguments the
+    /// call must supply when the callee is a declaration that lets trailing ones be omitted;
+    /// otherwise every parameter is required.
     fn infer_call(
         &mut self,
         func_ty: &Type,
         args: &[ExprId],
         arg_tys: &[Type],
+        required: Option<usize>,
         span: nx_diagnostics::TextSpan,
     ) -> Type {
         // A call that cannot be checked has already reported what is wrong with it. Adding a
@@ -2078,12 +2487,18 @@ impl<'a> InferenceContext<'a> {
         match func_ty {
             Type::Function { params, ret } => {
                 // Check argument count
-                if params.len() != arg_tys.len() {
+                let required = required.unwrap_or(params.len()).min(params.len());
+                if arg_tys.len() < required || arg_tys.len() > params.len() {
+                    let expected = if required == params.len() {
+                        params.len().to_string()
+                    } else {
+                        format!("{} to {}", required, params.len())
+                    };
                     self.error(
                         "arg-count-mismatch",
                         format!(
                             "Function expects {} arguments, got {}",
-                            params.len(),
+                            expected,
                             arg_tys.len()
                         ),
                         span,
@@ -2091,13 +2506,14 @@ impl<'a> InferenceContext<'a> {
                     return Type::Error;
                 }
 
-                // Check argument types. The argument expression is passed so a literal written
-                // there can take the parameter's type.
+                // Check argument types against each parameter's read type, so an optional
+                // parameter accepts `{}` and a `?` value. The argument expression is passed so a
+                // literal written there can take the parameter's type.
                 for (i, (param, arg_ty)) in params.iter().zip(arg_tys.iter()).enumerate() {
                     self.check_typed_binding_for(
                         args.get(i).copied(),
                         arg_ty,
-                        &param.ty,
+                        &param.read_type(),
                         span,
                         "type-mismatch",
                         format!("Argument {}", i),
@@ -2117,13 +2533,112 @@ impl<'a> InferenceContext<'a> {
         }
     }
 
-    fn infer_member_access(&mut self, base_ty: &Type, member: &Name, span: TextSpan) -> Type {
-        // A nullable base reads its field like a non-nullable one. NX has no narrowing construct to
-        // discharge the null with, and the catalogs that drive most markup declare every property
-        // optional, so requiring one would make a nullable record or union prop unreadable rather
-        // than safer. The field's own declared type is returned, not a nullable of it, for the same
-        // reason: a `string?` here would fail at every `string` site downstream.
-        match base_ty.strip_nullable() {
+    fn infer_member_access(
+        &mut self,
+        base: ExprId,
+        base_ty: &Type,
+        member: &Name,
+        span: TextSpan,
+    ) -> Type {
+        // A space splits `?.`, so `x? .m` reads a member of the presence test, a `boolean`.
+        if let ast::Expr::Exists { operand, .. } = self.module.raw_module().expr(base) {
+            let fix = match self.flattened_expr_name(*operand) {
+                Some(receiver) => format!("{}?.{}", receiver, member),
+                None => format!("?.{}", member),
+            };
+            self.error(
+                "member-access-on-presence-test",
+                format!(
+                    "A presence test is a boolean, which has no member '{}'; to read a member \
+                     of a value that may be empty, write `{}` with no space",
+                    member, fix
+                ),
+                span,
+            );
+            return Type::Error;
+        }
+        // A receiver that may be empty is read with `?.`, and a sequence has no members at all:
+        // the occurrence is decided here, and the field is read from the item type below.
+        match base_ty.occurrence() {
+            Occurrence::ONE => {}
+            Occurrence::OPTIONAL => {
+                // Show the whole access with `?.` when the receiver is a path the author can
+                // copy, and the step alone otherwise.
+                let fix = match self.flattened_expr_name(base) {
+                    Some(receiver) => format!("{}?.{}", receiver, member),
+                    None => format!("?.{}", member),
+                };
+                self.error_involving(
+                    "member-access-on-optional",
+                    format!(
+                        "A value of type {} may be empty, so `.{}` cannot read it; write `{}`, \
+                         which is empty when the receiver is empty",
+                        base_ty, member, fix
+                    ),
+                    span,
+                    Some(base_ty),
+                );
+                return Type::Error;
+            }
+            _ => return self.member_access_on_sequence(base_ty, member, span),
+        }
+        self.infer_item_member_access(base_ty, member, span)
+    }
+
+    /// Types `x?.m`: the member's read type, admitting zero because the receiver may.
+    fn infer_optional_member_access(
+        &mut self,
+        base_ty: &Type,
+        member: &Name,
+        span: TextSpan,
+    ) -> Type {
+        match base_ty.occurrence() {
+            Occurrence::OPTIONAL => {}
+            Occurrence::ONE => {
+                if !base_ty.is_error() {
+                    self.warn(
+                        "unnecessary-optional-step",
+                        format!(
+                            "A value of type {} is always present, so `?.{}` is unnecessary; \
+                             write `.{}`",
+                            base_ty, member, member
+                        ),
+                        span,
+                    );
+                }
+                return self.infer_item_member_access(base_ty, member, span);
+            }
+            _ => return self.member_access_on_sequence(base_ty, member, span),
+        }
+        let member_ty = self.infer_item_member_access(base_ty.item(), member, span);
+        if member_ty.is_error() {
+            return member_ty;
+        }
+        member_ty.with_occurrence(member_ty.occurrence().join(Occurrence::OPTIONAL))
+    }
+
+    /// Rejects `.m` and `?.m` on a `+` or `*` receiver, which has no members.
+    fn member_access_on_sequence(&mut self, base_ty: &Type, member: &Name, span: TextSpan) -> Type {
+        if base_ty.is_error() {
+            return Type::Error;
+        }
+        self.error_involving(
+            "member-access-on-sequence",
+            format!(
+                "A value of type {} is a sequence, which has no members; read `.{}` from each \
+                 item with `for`",
+                base_ty, member
+            ),
+            span,
+            Some(base_ty),
+        );
+        Type::Error
+    }
+
+    /// The read type of `member` on an exactly-one receiver: a record's field at its read type
+    /// (`T?` for a field declared `p?:T`), a union's shared field, or a case's field.
+    fn infer_item_member_access(&mut self, base_ty: &Type, member: &Name, span: TextSpan) -> Type {
+        match base_ty {
             Type::Union(union_ty) => {
                 if let Some(ty) =
                     self.union_shared_field_type(&union_ty.name, union_ty.origin(), member)
@@ -2168,7 +2683,7 @@ impl<'a> InferenceContext<'a> {
             // declared *that field*, which is not always the module the record itself came from.
             Type::Named(named) => {
                 let Ok(Some(shape)) = self.record_shape_of(named) else {
-                    return self.member_access_unsupported(member, span, None);
+                    return self.unknown_member(member, span, base_ty);
                 };
                 let Some(field) = shape.fields.iter().find(|field| field.name == *member) else {
                     let known = shape
@@ -2189,38 +2704,41 @@ impl<'a> InferenceContext<'a> {
                 };
                 let declaring_module = field.module_identity.clone();
                 let field_ty = field.ty.clone();
-                if named.args().is_empty() {
-                    return self.type_from_type_ref_in_quietly(Some(&declaring_module), &field_ty);
-                }
-                // Reading a field of an instantiation gives the field's declared type with each
-                // parameter replaced by its argument, which is what binding the parameters into
-                // the scope the annotation resolves in does in one step.
-                let scope: FxHashMap<Name, Type> = named.args().iter().cloned().collect();
-                let previous_scope = std::mem::replace(&mut self.type_parameter_scope, scope);
-                let ty = self.type_from_type_ref_in_quietly(Some(&declaring_module), &field_ty);
-                self.type_parameter_scope = previous_scope;
-                ty
+                // Every field of an update record may be absent, and an absent field reads as
+                // the empty value, so each reads as an optional field does whatever the target
+                // declared. Absent and cleared read alike; `changed` tells them apart.
+                let is_update = self
+                    .record_definition_for(named)
+                    .is_some_and(|record| matches!(record.kind, nx_hir::RecordKind::Update { .. }));
+                let optional = field.optional || is_update;
+                let declared = if named.args().is_empty() {
+                    self.type_from_type_ref_in_quietly(Some(&declaring_module), &field_ty)
+                } else {
+                    // Reading a field of an instantiation gives the field's declared type with
+                    // each parameter replaced by its argument, which is what binding the
+                    // parameters into the scope the annotation resolves in does in one step.
+                    let scope: FxHashMap<Name, Type> = named.args().iter().cloned().collect();
+                    let previous_scope = std::mem::replace(&mut self.type_parameter_scope, scope);
+                    let ty = self.type_from_type_ref_in_quietly(Some(&declaring_module), &field_ty);
+                    self.type_parameter_scope = previous_scope;
+                    ty
+                };
+                // A field declared `p?:T` reads as `T?`, and `p?:T+` as `T*`; so does any field
+                // of an update record.
+                read_type(&declared, optional)
             }
             Type::Error => Type::Error,
-            other => {
-                let base_ty = other.clone();
-                self.member_access_unsupported(member, span, Some(&base_ty))
-            }
+            _ => self.unknown_member(member, span, base_ty),
         }
     }
 
-    /// Reports a member access on a base that has no fields to reach.
-    fn member_access_unsupported(
-        &mut self,
-        member: &Name,
-        span: TextSpan,
-        base_ty: Option<&Type>,
-    ) -> Type {
+    /// Reports a member access on a value whose type has no such member.
+    fn unknown_member(&mut self, member: &Name, span: TextSpan, base_ty: &Type) -> Type {
         self.error_involving(
-            "not-implemented",
-            format!("Member access not yet implemented: .{}", member),
+            "unknown-member",
+            format!("A value of type {} has no member '{}'", base_ty, member),
             span,
-            base_ty,
+            Some(base_ty),
         );
         Type::Error
     }
@@ -2287,7 +2805,9 @@ impl<'a> InferenceContext<'a> {
         let field = shape.fields.iter().find(|field| field.name == *member)?;
         let field_module = field.module_identity.clone();
         let field_ty = field.ty.clone();
-        Some(self.type_from_type_ref_in_quietly(Some(&field_module), &field_ty))
+        let optional = field.optional;
+        let declared = self.type_from_type_ref_in_quietly(Some(&field_module), &field_ty);
+        Some(read_type(&declared, optional))
     }
 
     fn union_has_case_field(
@@ -2334,7 +2854,9 @@ impl<'a> InferenceContext<'a> {
             .find(|case| case.name == *case_name)?;
         let field = case.fields.iter().find(|field| field.name == *member)?;
         let field_ty = field.ty.clone();
-        Some(self.type_from_type_ref_in_quietly(declaring_module.as_deref(), &field_ty))
+        let optional = field.optional;
+        let declared = self.type_from_type_ref_in_quietly(declaring_module.as_deref(), &field_ty);
+        Some(read_type(&declared, optional))
     }
 
     fn infer_record_literal(
@@ -2392,9 +2914,14 @@ impl<'a> InferenceContext<'a> {
                     effective_shape.as_ref(),
                     &property.name,
                 ) {
-                    Some(field_ty) => {
+                    Some((field_ty, optional)) => {
+                        // A written value is checked against the field's read type, so an
+                        // optional field accepts `{}` and a required one does not.
                         let expected = self.under_type_arguments(arguments.as_ref(), |this| {
-                            this.type_from_type_ref_in_quietly(None, &field_ty)
+                            read_type(
+                                &this.type_from_type_ref_in_quietly(None, &field_ty),
+                                optional,
+                            )
                         });
                         let actual = self.infer_expr(property.value);
                         // A field typed by a parameter the construction left unbound is skipped:
@@ -2421,6 +2948,32 @@ impl<'a> InferenceContext<'a> {
                 }
             }
 
+            // A field that is not written binds its default, or the empty value when it is
+            // optional; otherwise it is missing.
+            let required: Vec<Name> = match effective_shape.as_ref() {
+                Some(shape) => shape
+                    .fields
+                    .iter()
+                    .filter(|field| field.is_required)
+                    .map(|field| field.name.clone())
+                    .collect(),
+                None => record_def
+                    .properties
+                    .iter()
+                    .filter(|field| field.default.is_none() && !field.optional)
+                    .map(|field| field.name.clone())
+                    .collect(),
+            };
+            for name in required {
+                if !properties.iter().any(|property| property.name == name) {
+                    self.error(
+                        "missing-property",
+                        format!("Element '{}' requires property '{}'", record, name),
+                        span,
+                    );
+                }
+            }
+
             let resolved = arguments.map(|arguments| {
                 self.consumed_type_arguments.extend(arguments.consumed);
                 arguments.resolved
@@ -2434,25 +2987,26 @@ impl<'a> InferenceContext<'a> {
         }
     }
 
+    /// A record field's declared type reference and whether it carries the `?` mark.
     fn record_field_type_ref(
         &self,
         record_def: &nx_hir::RecordDef,
         effective_shape: Option<&nx_hir::EffectiveRecordShape>,
         name: &Name,
-    ) -> Option<ast::TypeRef> {
+    ) -> Option<(ast::TypeRef, bool)> {
         if let Some(shape) = effective_shape {
             return shape
                 .fields
                 .iter()
                 .find(|field| field.name == *name)
-                .map(|field| field.ty.clone());
+                .map(|field| (field.ty.clone(), field.optional));
         }
 
         record_def
             .properties
             .iter()
             .find(|field| field.name == *name)
-            .map(|field| field.ty.clone())
+            .map(|field| (field.ty.clone(), field.optional))
     }
 
     fn infer_element_expression(
@@ -2476,7 +3030,7 @@ impl<'a> InferenceContext<'a> {
                     .map(|param| {
                         (
                             param.name.clone(),
-                            ElementPropertySpec::new(param.ty.clone(), true),
+                            ElementPropertySpec::new(param.read_type(), !param.optional),
                         )
                     })
                     .collect(),
@@ -2513,15 +3067,21 @@ impl<'a> InferenceContext<'a> {
                         .unwrap_or_else(|| self.nominal_named_type(&element.tag));
                 }
                 ResolvedPreparedItem::Imported { item, .. } => {
-                    if let Some((_name, _visibility, params, return_type, _span)) =
+                    if let Some((_name, _visibility, _form, params, return_type, _span)) =
                         interface_function_signature(&item)
                     {
                         let declaring_module = item.module_identity.clone();
                         let spec = self.build_element_binding_spec_in(
                             Some(declaring_module.as_str()),
-                            params
-                                .iter()
-                                .map(|param| (&param.name, &param.ty, param.is_content, true)),
+                            params.iter().map(|param| {
+                                (
+                                    &param.name,
+                                    &param.ty,
+                                    param.is_content,
+                                    !param.is_omissible(),
+                                    param.optional,
+                                )
+                            }),
                         );
                         self.check_element_bindings(element_id, element, span, &spec);
                         return self.type_from_type_ref_in_quietly(None, &return_type);
@@ -2907,7 +3467,7 @@ impl<'a> InferenceContext<'a> {
                     );
                     return Type::Error;
                 }
-                Type::array(property_union)
+                Type::zero_or_more(property_union)
             }
         }
     }
@@ -3049,10 +3609,15 @@ impl<'a> InferenceContext<'a> {
     ) {
         let spec = self.build_element_binding_spec_in(
             declaring_module,
-            function
-                .params
-                .iter()
-                .map(|param| (&param.name, &param.ty, param.is_content, true)),
+            function.params.iter().map(|param| {
+                (
+                    &param.name,
+                    &param.ty,
+                    param.is_content,
+                    !param.is_omissible(),
+                    param.optional,
+                )
+            }),
         );
         self.check_element_bindings(element_id, element, span, &spec);
     }
@@ -3102,10 +3667,15 @@ impl<'a> InferenceContext<'a> {
             if let Some(contract) = effective_contract.as_ref() {
                 this.build_element_binding_spec_in(
                     declaring_module,
-                    contract
-                        .props
-                        .iter()
-                        .map(|field| (&field.name, &field.ty, field.is_content, field.is_required)),
+                    contract.props.iter().map(|field| {
+                        (
+                            &field.name,
+                            &field.ty,
+                            field.is_content,
+                            field.is_required,
+                            field.optional,
+                        )
+                    }),
                 )
             } else {
                 this.build_element_binding_spec_in(
@@ -3115,8 +3685,8 @@ impl<'a> InferenceContext<'a> {
                             &field.name,
                             &field.ty,
                             field.is_content,
-                            field.default.is_none()
-                                && !matches!(field.ty, ast::TypeRef::Nullable(_)),
+                            field.default.is_none() && !field.optional,
+                            field.optional,
                         )
                     }),
                 )
@@ -3125,8 +3695,8 @@ impl<'a> InferenceContext<'a> {
         if let Some(arguments) = arguments {
             // A prop typed by a parameter the site left unbound is checked against a type no
             // value can be assumed to have, and remembers the parameter so a failure can be
-            // reported by its name. Where the prop *produces* a value of the parameter — a list
-            // of items — that is the bottom type, so only the empty list or `null` binds. Where
+            // reported by its name. Where the prop *produces* a value of the parameter — a
+            // sequence of items — that is the bottom type, so only the empty value binds. Where
             // the prop *consumes* one — a template's `Item` parameter, which the host will call
             // with whatever the items are — it is the top type, so a template that assumes any
             // particular item type fails and the diagnostic asks for the argument.
@@ -3289,9 +3859,11 @@ impl<'a> InferenceContext<'a> {
 
         for (key, value, span) in bindings {
             consumed.push(value);
-            let Some(ty) = self.resolve_type_argument(value, &key, component_name, span) else {
-                continue;
-            };
+            // An argument that was written but rejected still binds its parameter, as the error
+            // type: the rejection is the one problem, and the parameter is not also unspecified.
+            let ty = self
+                .resolve_type_argument(value, &key, component_name, span)
+                .unwrap_or(Type::Error);
             // A second binding of one parameter is reported as a duplicate property on the
             // same terms as any other; the first is the one that counts.
             bound.entry(key).or_insert(ty);
@@ -3334,8 +3906,10 @@ impl<'a> InferenceContext<'a> {
         span: TextSpan,
     ) -> Option<Type> {
         let expr = self.module.raw_module().expr(value).clone();
-        let name = match &expr {
-            ast::Expr::ContextualName { name, .. } => name.clone(),
+        let (name, occurrence) = match &expr {
+            ast::Expr::ContextualName {
+                name, occurrence, ..
+            } => (name.clone(), *occurrence),
             other => {
                 let suggested = match other {
                     ast::Expr::Literal(ast::Literal::String(text)) => text.to_string(),
@@ -3361,7 +3935,15 @@ impl<'a> InferenceContext<'a> {
             // it — a generic record named without its own arguments, say — is reported here, at
             // the element that wrote it.
             let ty = self.type_from_type_ref_at(span, &ast::TypeRef::Name(name.clone()));
-            if self.reject_sequence_type_argument(&ty, Some(&name), span) {
+            // A suffix written on the argument (`T=int?`) is reported on the same terms as one an
+            // alias carries (`T=Maybe`), naming the argument as written.
+            if let Some(occurrence) = occurrence {
+                let written = Name::new(&format!("{name}{occurrence}"));
+                let suffixed = ty.with_occurrence(occurrence);
+                self.reject_occurrence_type_argument(&suffixed, Some(&written), span);
+                return None;
+            }
+            if self.reject_occurrence_type_argument(&ty, Some(&name), span) {
                 return None;
             }
             return Some(ty);
@@ -3500,10 +4082,15 @@ impl<'a> InferenceContext<'a> {
             if let Some(shape) = effective_shape.as_ref() {
                 this.build_element_binding_spec_in(
                     declaring_module,
-                    shape
-                        .fields
-                        .iter()
-                        .map(|field| (&field.name, &field.ty, field.is_content, field.is_required)),
+                    shape.fields.iter().map(|field| {
+                        (
+                            &field.name,
+                            &field.ty,
+                            field.is_content,
+                            field.is_required,
+                            field.optional,
+                        )
+                    }),
                 )
             } else {
                 this.build_element_binding_spec_in(
@@ -3513,8 +4100,8 @@ impl<'a> InferenceContext<'a> {
                             &field.name,
                             &field.ty,
                             field.is_content,
-                            field.default.is_none()
-                                && !matches!(field.ty, ast::TypeRef::Nullable(_)),
+                            field.default.is_none() && !field.optional,
+                            field.optional,
                         )
                     }),
                 )
@@ -3626,21 +4213,23 @@ impl<'a> InferenceContext<'a> {
                     if field.is_content {
                         content_property = Some(field.name.clone());
                     }
-                    properties.insert(field.name, ElementPropertySpec::new(ty, field.is_required));
+                    properties.insert(
+                        field.name,
+                        ElementPropertySpec::new(read_type(&ty, field.optional), field.is_required),
+                    );
                 }
             }
         }
 
         for field in &case.fields {
             let ty = self.type_from_type_ref_in_quietly(declaring_module, &field.ty);
-            let is_required =
-                field.default.is_none() && !matches!(field.ty, ast::TypeRef::Nullable(_));
+            let is_required = field.default.is_none() && !field.optional;
             if field.is_content {
                 content_property = Some(field.name.clone());
             }
             properties.insert(
                 field.name.clone(),
-                ElementPropertySpec::new(ty, is_required),
+                ElementPropertySpec::new(read_type(&ty, field.optional), is_required),
             );
         }
 
@@ -3819,33 +4408,25 @@ impl<'a> InferenceContext<'a> {
         self.type_from_type_ref_walk(declaring_module, type_ref, &mut seen, true)
     }
 
-    /// Reports a `[]` applied to something that is already a sequence, once per name.
+    /// Reports an occurrence suffix applied to something that already carries one, once per name.
     ///
-    /// <para>A `[]` written directly on a spelled sequence -- `string[][]`, `(string[])[]` -- is
-    /// post-parse validation's to reject, at the `[]` itself. Saying it again from here would say
-    /// the same thing twice, in vaguer words and at a whole declaration's span, so only nesting
-    /// the parser cannot see is reported: a name that resolves to a sequence.</para>
-    fn report_nested_sequence_type(&mut self, inner: &ast::TypeRef) {
-        if Self::type_ref_spells_a_sequence(inner) {
+    /// <para>A second suffix written directly on a spelled one -- `string??`, `(string+)*` -- is
+    /// post-parse validation's to reject, at the suffix itself. Saying it again from here would
+    /// say the same thing twice, in vaguer words and at a whole declaration's span, so only what
+    /// the parser cannot see is reported: a name that resolves to a suffixed type.</para>
+    fn report_second_occurrence(&mut self, inner: &ast::TypeRef) {
+        if matches!(inner, ast::TypeRef::Seq { .. }) {
             return;
         }
         let span = self.type_ref_span;
         let message = match inner {
-            ast::TypeRef::Name(name) => {
-                format!("A sequence cannot contain sequences; '{name}' is already a sequence")
-            }
-            _ => "A sequence cannot contain sequences".to_string(),
+            ast::TypeRef::Name(name) => format!(
+                "Type already carries an occurrence; '{name}' says how many values it admits, \
+                 so no suffix can be applied to it"
+            ),
+            _ => "Type already carries an occurrence".to_string(),
         };
-        self.error("nested-sequence-type", message, span);
-    }
-
-    /// Whether a type reference has a `[]` of its own written on it, through any number of `?`.
-    fn type_ref_spells_a_sequence(type_ref: &ast::TypeRef) -> bool {
-        match type_ref {
-            ast::TypeRef::Array(_) => true,
-            ast::TypeRef::Nullable(inner) => Self::type_ref_spells_a_sequence(inner),
-            _ => false,
-        }
+        self.error("second-occurrence-suffix", message, span);
     }
 
     /// Converts a type reference one layer at a time, so that an applied type is reached wherever
@@ -3883,29 +4464,20 @@ impl<'a> InferenceContext<'a> {
             ast::TypeRef::Applied { name, args } => {
                 self.applied_type(declaring_module, name, args, seen, scoped)
             }
-            ast::TypeRef::Array(inner) => {
-                let element = self.type_from_type_ref_walk(declaring_module, inner, seen, scoped);
-                // A sequence of nothing usable is nothing usable, not a sequence. Wrapping the
-                // error would make an enclosing `[]` believe the inner reference named a
-                // sequence, so `type A = A[]` would report its cycle and then claim `A` is
-                // already a sequence -- on top of a name that is not a type at all.
-                if element.is_error() {
+            ast::TypeRef::Seq { inner, occ } => {
+                let item = self.type_from_type_ref_walk(declaring_module, inner, seen, scoped);
+                // A suffix on nothing usable is nothing usable, not a sequence. Wrapping the
+                // error would make an enclosing suffix believe the inner reference named a
+                // suffixed type, so `type A = A+` would report its cycle and then claim `A`
+                // already carries an occurrence -- on top of a name that is not a type at all.
+                if item.is_error() {
                     return Type::Error;
                 }
-                if matches!(element.strip_nullable(), Type::Array(_)) {
-                    self.report_nested_sequence_type(inner);
+                if matches!(item, Type::Seq { .. }) {
+                    self.report_second_occurrence(inner);
                     return Type::Error;
                 }
-                Type::array(element)
-            }
-            ast::TypeRef::Nullable(inner) => {
-                let inner = self.type_from_type_ref_walk(declaring_module, inner, seen, scoped);
-                // As for `[]`: nothing usable stays nothing usable rather than becoming a
-                // nullable of it, so an enclosing suffix reads the error for what it is.
-                if inner.is_error() {
-                    return Type::Error;
-                }
-                Type::nullable(inner)
+                Type::seq(item, *occ)
             }
             ast::TypeRef::Function {
                 params,
@@ -3913,10 +4485,18 @@ impl<'a> InferenceContext<'a> {
             } => {
                 let params = params
                     .iter()
-                    .map(|param| FunctionParam {
-                        name: param.name.clone(),
-                        ty: self.type_from_type_ref_walk(declaring_module, &param.ty, seen, scoped),
-                        is_content: param.is_content,
+                    .map(|param| {
+                        let ty =
+                            self.type_from_type_ref_walk(declaring_module, &param.ty, seen, scoped);
+                        // A function type's parameter is a property definition, so it takes the
+                        // `?` mark and refuses `?` and `*` in its type slot on the same terms.
+                        let ty = self.check_property_slot(&param.name, &param.ty, ty);
+                        FunctionParam {
+                            name: param.name.clone(),
+                            ty,
+                            is_content: param.is_content,
+                            optional: param.optional,
+                        }
                     })
                     .collect();
                 let ret = self.type_from_type_ref_walk(declaring_module, return_type, seen, scoped);
@@ -3979,29 +4559,37 @@ impl<'a> InferenceContext<'a> {
         Type::Error
     }
 
-    /// Rejects a type argument that is a sequence, naming the alias when one was written.
+    /// The occurrence suffix glued to `expr`, when it is a contextual name written with one.
+    fn contextual_name_occurrence(&self, expr: ExprId) -> Option<Occurrence> {
+        match self.module.raw_module().expr(expr) {
+            ast::Expr::ContextualName { occurrence, .. } => *occurrence,
+            _ => None,
+        }
+    }
+
+    /// Rejects a type argument that carries an occurrence, naming the alias when one was written.
     ///
-    /// <para>A type parameter stands where an item type stands: a record declaring `items:T[]`
-    /// instantiated with `T=int[]` would have a field that is a sequence of sequences, which no
-    /// NX type is. Checking the resolved argument covers `T=int[]`, `T=Ints` and a parameter
-    /// forwarded from an enclosing declaration alike, since all three arrive here as a
-    /// `Type`.</para>
-    fn reject_sequence_type_argument(
+    /// <para>A type parameter stands where an item type stands: a record declaring `items:T+`
+    /// instantiated with `T=int?` would have a field whose item admits zero, which no NX type
+    /// is. Checking the resolved argument covers `T=int?`, `T=Maybe` and a parameter forwarded
+    /// from an enclosing declaration alike, since all three arrive here as a `Type`. Optionality
+    /// belongs to the slot: `value?:T`.</para>
+    fn reject_occurrence_type_argument(
         &mut self,
         ty: &Type,
         written: Option<&Name>,
         span: TextSpan,
     ) -> bool {
-        if !matches!(ty.strip_nullable(), Type::Array(_)) {
+        if !matches!(ty, Type::Seq { .. }) {
             return false;
         }
         self.error(
-            "sequence-type-argument",
+            "occurrence-type-argument",
             match written {
-                Some(name) => {
-                    format!("A type argument must not be a sequence; '{name}' is a sequence")
-                }
-                None => "A type argument must not be a sequence".to_string(),
+                Some(name) => format!(
+                    "A type argument must be exactly one value; '{name}' carries an occurrence"
+                ),
+                None => "A type argument must be exactly one value".to_string(),
             },
             span,
         );
@@ -4091,7 +4679,7 @@ impl<'a> InferenceContext<'a> {
                 ast::TypeRef::Name(arg_name) => Some(arg_name.clone()),
                 _ => None,
             };
-            if self.reject_sequence_type_argument(&ty, written.as_ref(), span) {
+            if self.reject_occurrence_type_argument(&ty, written.as_ref(), span) {
                 failed = true;
             }
             // A bare name that reached no declaration is a misspelling, not a type. Nothing else
@@ -4116,6 +4704,11 @@ impl<'a> InferenceContext<'a> {
                 }
             }
             bound.insert(param.clone(), ty);
+        }
+        // A rejected argument is most often the missing one misspelled or misplaced, so the
+        // parameters it leaves unbound are not reported on top of it.
+        if failed {
+            return Type::Error;
         }
 
         let mut resolved = Vec::with_capacity(params.len());
@@ -4153,23 +4746,29 @@ impl<'a> InferenceContext<'a> {
         }
     }
 
+    /// Builds the binding contract of a use site from `(name, declared type, is content, is
+    /// required, is optional)` per property. A written value is checked against the property's
+    /// read type, so an optional property accepts `{}` and a required or defaulted one does not.
     fn build_element_binding_spec_in<'b, I>(
         &mut self,
         declaring_module: Option<&str>,
         bindings: I,
     ) -> ElementBindingSpec
     where
-        I: IntoIterator<Item = (&'b Name, &'b ast::TypeRef, bool, bool)>,
+        I: IntoIterator<Item = (&'b Name, &'b ast::TypeRef, bool, bool, bool)>,
     {
         let mut content_property = None;
         let mut properties = FxHashMap::default();
 
-        for (name, ty_ref, is_content, is_required) in bindings {
+        for (name, ty_ref, is_content, is_required, optional) in bindings {
             let ty = self.type_from_type_ref_in_quietly(declaring_module, ty_ref);
             if is_content {
                 content_property = Some(name.clone());
             }
-            properties.insert(name.clone(), ElementPropertySpec::new(ty, is_required));
+            properties.insert(
+                name.clone(),
+                ElementPropertySpec::new(read_type(&ty, optional), is_required),
+            );
         }
 
         ElementBindingSpec {
@@ -4283,23 +4882,40 @@ impl<'a> InferenceContext<'a> {
                 span,
             } => {
                 self.check_boolean_condition(*condition, *span, "property-list if condition");
+                // A presence test narrows here exactly as it does in an expression `if`.
+                let then_narrowings = self.condition_narrowings(*condition, true);
+                let depth = self.push_narrowings(then_narrowings);
                 let mut paths = self.property_paths_for_entries(then_entries);
+                self.pop_narrowings(depth);
+                let else_narrowings = self.condition_narrowings(*condition, false);
+                let depth = self.push_narrowings(else_narrowings);
                 paths.extend(self.property_paths_for_entries(else_entries));
+                self.pop_narrowings(depth);
                 paths
             }
             PropertyEntry::ConditionList {
                 arms, else_entries, ..
             } => {
+                // Arms are tried in order, as nested `if`/`else`: an arm is reached only when every
+                // earlier condition was false, so it and the `else` see each earlier condition's
+                // false-branch narrowings as well as their own.
                 let mut paths = Vec::new();
+                let outer = self.narrowings.len();
                 for arm in arms {
                     self.check_boolean_condition(
                         arm.condition,
                         arm.span,
                         "property-list condition arm",
                     );
+                    let narrowings = self.condition_narrowings(arm.condition, true);
+                    let depth = self.push_narrowings(narrowings);
                     paths.extend(self.property_paths_for_entries(&arm.entries));
+                    self.pop_narrowings(depth);
+                    let refuted = self.condition_narrowings(arm.condition, false);
+                    self.push_narrowings(refuted);
                 }
                 paths.extend(self.property_paths_for_entries(else_entries));
+                self.pop_narrowings(outer);
                 paths
             }
             PropertyEntry::Match {
@@ -4319,19 +4935,22 @@ impl<'a> InferenceContext<'a> {
         span: TextSpan,
     ) -> Vec<PropertyPath> {
         let scrutinee_ty = self.infer_expr(scrutinee);
-        let scrutinee_name = match self.module.raw_module().expr(scrutinee) {
-            ast::Expr::Ident(name) => Some(name.clone()),
-            _ => None,
-        };
-        let union_ty = match &scrutinee_ty {
+        let scrutinee_path = self.expr_path(scrutinee);
+        let union_ty = match scrutinee_ty.item() {
             Type::Union(union_ty) => Some(union_ty.clone()),
             _ => None,
         };
 
         let mut covered_cases = FxHashSet::default();
+        let mut covered_empty = false;
         let mut paths = Vec::new();
 
         for arm in arms {
+            let present_narrowings = self.present_scrutinee_narrowings(
+                scrutinee_path.as_deref(),
+                &scrutinee_ty,
+                covered_empty,
+            );
             let pattern_tys = arm
                 .patterns
                 .iter()
@@ -4342,6 +4961,7 @@ impl<'a> InferenceContext<'a> {
                         union_ty.as_ref(),
                         &pattern_ty,
                         &mut covered_cases,
+                        &mut covered_empty,
                         self.module.raw_module().expr(*pattern).span(),
                     );
                     pattern_ty
@@ -4349,14 +4969,13 @@ impl<'a> InferenceContext<'a> {
                 .collect::<Vec<_>>();
 
             let narrowed_case = self.match_arm_narrowed_case(union_ty.as_ref(), &pattern_tys);
-            if let (Some(name), Some(case_ty)) = (scrutinee_name.as_ref(), narrowed_case) {
-                self.env.push_scope();
-                self.env.bind(name.clone(), Type::UnionCase(case_ty));
-                paths.extend(self.property_paths_for_entries(&arm.entries));
-                self.env.pop_scope();
-            } else {
-                paths.extend(self.property_paths_for_entries(&arm.entries));
+            let mut narrowings = present_narrowings;
+            if let (Some(path), Some(case_ty)) = (scrutinee_path.as_ref(), narrowed_case) {
+                narrowings.push((path.clone(), Type::UnionCase(case_ty)));
             }
+            let depth = self.push_narrowings(narrowings);
+            paths.extend(self.property_paths_for_entries(&arm.entries));
+            self.pop_narrowings(depth);
         }
 
         let is_exhaustive = union_ty.as_ref().is_some_and(|union_ty| {
@@ -4364,19 +4983,30 @@ impl<'a> InferenceContext<'a> {
                 .cases
                 .iter()
                 .all(|case| covered_cases.contains(case))
+                && (covered_empty || !scrutinee_ty.admits_zero())
         });
 
         if !else_entries.is_empty() {
+            let narrowings = self.present_scrutinee_narrowings(
+                scrutinee_path.as_deref(),
+                &scrutinee_ty,
+                covered_empty,
+            );
+            let depth = self.push_narrowings(narrowings);
             paths.extend(self.property_paths_for_entries(else_entries));
+            self.pop_narrowings(depth);
         } else if let Some(union_ty) = union_ty.as_ref() {
             if !is_exhaustive {
-                let missing = union_ty
+                let mut missing = union_ty
                     .cases
                     .iter()
                     .filter(|case| !covered_cases.contains(*case))
-                    .map(|case| case.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                    .map(|case| case.as_str().to_string())
+                    .collect::<Vec<_>>();
+                if scrutinee_ty.admits_zero() && !covered_empty {
+                    missing.push("{}".to_string());
+                }
+                let missing = missing.join(", ");
                 self.error(
                     "non-exhaustive-union-match",
                     format!(
@@ -4454,11 +5084,11 @@ impl<'a> InferenceContext<'a> {
             for property in &path.properties {
                 if let Some(expected) = spec.properties.get(&property.key) {
                     // A property whose type an unspecified parameter fixed is checked quietly
-                    // first: an empty list or `null` still binds. Only a failure is reported, and
-                    // it names the parameter and the form that supplies it, because `never[]?`
-                    // is not something the author can act on.
+                    // first: the empty value still binds. Only a failure is reported, and it
+                    // names the parameter and the form that supplies it, because `never*` is not
+                    // something the author can act on.
                     if let Some(param) = expected.unspecified_parameter.as_ref() {
-                        if !self.type_satisfies_expected_with_coercion(&property.ty, &expected.ty) {
+                        if !self.type_satisfies_expected(&property.ty, &expected.ty) {
                             self.error(
                                 "type-parameter-not-specified",
                                 format!(
@@ -4526,76 +5156,57 @@ impl<'a> InferenceContext<'a> {
         }
     }
 
+    /// The type of several content expressions collected into one sequence: the join of their
+    /// item types under the sum of their occurrences.
     fn normalized_sequence_type(&mut self, exprs: &[ExprId], span: TextSpan) -> Type {
         if exprs.is_empty() {
-            return Type::array(self.fresh_var());
+            return Type::empty();
         }
 
         if exprs.len() == 1 {
             return self.infer_expr(exprs[0]);
         }
 
-        // Content is spliced, so what an item contributes is its element type. An empty list
-        // contributes `never`, which the join discards in favour of its siblings -- and a sequence
-        // of nothing but empty lists stays a `never[]`, which is what it is.
-        let item_types: Vec<_> = exprs
+        // Content is spliced, so what an item contributes is its item type and its occurrence.
+        // The empty value contributes `never`, which the join discards in favour of its siblings,
+        // and `?`, which adds nothing to the sum.
+        let contributions: Vec<_> = exprs
             .iter()
             .map(|expr_id| self.item_contribution(*expr_id))
             .collect();
+        let item_types: Vec<_> = contributions.iter().map(|(ty, _)| ty.clone()).collect();
+        let occ = Self::summed_occurrence(contributions.iter().map(|(_, occ)| *occ));
 
-        Type::array(self.common_sequence_item_type(&item_types, span))
+        Type::seq(self.common_sequence_item_type(&item_types, span), occ)
     }
 
-    /// The type of the `else { }` that a conditional without one is read as having.
-    ///
-    /// <para>An empty sequence, which is a `never[]`: `never` is the join's identity, so joining
-    /// with it takes the element type from the branches that are there and adds nothing of its
-    /// own. What it does add is the sequence layer, which is the point -- a conditional that can
-    /// take no branch produces zero or one of what its branches produce.</para>
-    fn implicit_empty_else() -> Type {
-        Type::array(Type::never())
+    /// The occurrence of a collection of items with these occurrences: the sum, folded left,
+    /// with a single item left unchanged.
+    fn summed_occurrence(occurrences: impl IntoIterator<Item = Occurrence>) -> Occurrence {
+        let mut occurrences = occurrences.into_iter();
+        let first = occurrences.next().unwrap_or(Occurrence::OPTIONAL);
+        occurrences.fold(first, Occurrence::sum)
     }
 
     /// What an item contributes to the sequence it sits in, typing the item first.
     ///
-    /// <para>A sequence-typed item contributes its elements and every other item contributes
-    /// itself. An `object` item contributes `object`: it may hold a sequence, but it is one item to
-    /// the type system. A conditional with no `else` is not a case of this: its type is already a
-    /// sequence, so it contributes its elements like any other sequence-typed item.</para>
-    fn item_contribution(&mut self, expr_id: ExprId) -> Type {
+    /// <para>Every item contributes its item type and its occurrence: a sequence-typed item its
+    /// items, an optional one zero or one, anything else exactly one. An `object` item contributes
+    /// `object`: it may hold a sequence, but it is one item to the type system.</para>
+    fn item_contribution(&mut self, expr_id: ExprId) -> (Type, Occurrence) {
         self.infer_expr(expr_id);
         self.item_contribution_of(expr_id)
     }
 
     /// The contribution of an item whose type has already been inferred.
-    fn item_contribution_of(&self, expr_id: ExprId) -> Type {
-        // One rule, and it reads only the item's own type: a sequence contributes its elements,
-        // anything else contributes itself. A conditional with no `else` needs no arm here
-        // because its type is already a sequence.
-        //
-        // A nullable sequence is still a sequence when it is present, and is one null item when it
-        // is not -- which is what every engine does with it, splicing a present value and pushing
-        // an absent one. So it contributes its element type made nullable: `string[]?` contributes
-        // `string?`. Contributing itself would build `string[]?[]`, a sequence of sequences that
-        // no type can spell and no binding can accept.
-        match self
+    fn item_contribution_of(&self, expr_id: ExprId) -> (Type, Occurrence) {
+        let ty = self
             .env
             .get_expr_type(expr_id)
             .cloned()
-            .unwrap_or(Type::Error)
-        {
-            Type::Array(inner) => *inner,
-            Type::Nullable(inner) if matches!(inner.as_ref(), Type::Array(_)) => {
-                let Type::Array(element) = *inner else {
-                    unreachable!("matched a nullable sequence");
-                };
-                match *element {
-                    already_nullable @ Type::Nullable(_) => already_nullable,
-                    element => Type::nullable(element),
-                }
-            }
-            other => other,
-        }
+            .unwrap_or(Type::Error);
+        let (item, occ) = ty.split();
+        (item.clone(), occ)
     }
 
     fn common_sequence_item_type(&self, item_types: &[Type], _span: TextSpan) -> Type {
@@ -4611,22 +5222,10 @@ impl<'a> InferenceContext<'a> {
         current
     }
 
-    /// Strips the wrappers a contextual name is allowed to resolve through.
-    ///
-    /// Nullability first, then one list level, so `Fit?` and `Fit[]` both resolve against `Fit` and
-    /// the existing scalar-to-list coercion applies to the resolved value.
+    /// Strips the occurrence a contextual name is allowed to resolve through, so `Fit?` and
+    /// `Fit+` both resolve against `Fit` and the one-level lift applies to the resolved value.
     fn contextual_target(expected: &Type) -> &Type {
-        let expected = match expected {
-            Type::Nullable(inner) => inner.as_ref(),
-            other => other,
-        };
-        match expected {
-            Type::Array(inner) => match inner.as_ref() {
-                Type::Nullable(inner) => inner.as_ref(),
-                other => other,
-            },
-            other => other,
-        }
+        expected.item()
     }
 
     /// Suggests the closest candidate to `name`, for a did-you-mean on an unresolved bare name.
@@ -4799,13 +5398,17 @@ impl<'a> InferenceContext<'a> {
         let binding_fits = self
             .env
             .lookup(name)
-            .is_some_and(|bound| self.type_satisfies_expected_with_coercion(bound, expected));
-        let fix = if binding_fits {
+            .is_some_and(|bound| self.type_satisfies_expected(bound, expected));
+        let fix = if name.as_str() == "null" && !binding_fits {
+            // NX has no `null`; quoting it would send the author to a string.
+            "; NX has no `null`: the absent value is written `{}`, and an optional property is \
+             simply omitted"
+                .to_string()
+        } else if binding_fits {
             format!("; to use the value bound to '{}' write {{{}}}", name, name)
-        } else if self.type_satisfies_expected_with_coercion(
-            &Type::Primitive(crate::ty::Primitive::String),
-            expected,
-        ) {
+        } else if self
+            .type_satisfies_expected(&Type::Primitive(crate::ty::Primitive::String), expected)
+        {
             format!("; for a string value write \"{}\"", name)
         } else {
             // Nothing can be pointed at by this name, but the form the site takes is still worth
@@ -4867,7 +5470,7 @@ impl<'a> InferenceContext<'a> {
             // A lone braced number or boolean at a `string` property is a join of one piece, and so
             // is a lone text run, whose layout the join removes.
             let lone_text_run = self.module.raw_module().element(element_id).text_runs == [0];
-            if expected.strip_nullable() == &Type::string()
+            if expected.item() == &Type::string()
                 && (lone_text_run || Self::stringifiable_primitive(&actual).is_some())
             {
                 let accepted = self.check_string_content_piece(content[0], &actual, span, &context);
@@ -4886,14 +5489,14 @@ impl<'a> InferenceContext<'a> {
             );
         }
 
-        if expected.strip_nullable() == &Type::string() {
+        if expected.item() == &Type::string() {
             return self.check_string_content_join(element_id, content, span, &context);
         }
 
         let actual = self.normalized_sequence_type(content, span);
 
-        if let Type::Array(element_expected) = expected.strip_nullable() {
-            match self.convert_literals_in(content, element_expected, span, &context) {
+        if expected.admits_many() {
+            match self.convert_literals_in(content, expected.item(), span, &context) {
                 Some(true) => return true,
                 // The diagnostic is already reported.
                 Some(false) => return false,
@@ -4901,7 +5504,7 @@ impl<'a> InferenceContext<'a> {
             }
         }
 
-        if self.type_satisfies_expected_with_coercion(&actual, expected) {
+        if self.type_satisfies_expected(&actual, expected) {
             return true;
         }
 
@@ -4956,17 +5559,12 @@ impl<'a> InferenceContext<'a> {
                 true
             }
             None => {
-                let found = if Self::is_null_literal_type(ty) {
-                    "null".to_string()
-                } else {
-                    ty.to_string()
-                };
                 self.error(
                     "content-type-mismatch",
                     format!(
                         "{}: a value of type {} cannot be written into text; only a string, \
                          a number or a boolean has a text form",
-                        context, found
+                        context, ty
                     ),
                     span,
                 );
@@ -5003,6 +5601,18 @@ impl<'a> InferenceContext<'a> {
         // A pending contextual name resolves here, where the expected type is finally known.
         if let Type::ContextualName(name) = actual {
             let name = name.clone();
+            if let Some(occurrence) = expr.and_then(|expr| self.contextual_name_occurrence(expr)) {
+                self.error(
+                    "occurrence-suffix-on-value",
+                    format!(
+                        "{}: '{}{}' puts an occurrence suffix on a value; only a type takes one, \
+                         so write '{}'",
+                        context, name, occurrence, name
+                    ),
+                    span,
+                );
+                return false;
+            }
             let Some(expr) = expr else {
                 self.error(
                     "contextual-name-without-expected-type",
@@ -5034,29 +5644,19 @@ impl<'a> InferenceContext<'a> {
             }
         }
 
-        if self.type_satisfies_expected_with_coercion(actual, expected) {
+        if self.type_satisfies_expected(actual, expected) {
             return true;
         }
 
         // Two same-named types are told apart by their declaring modules; one nominal type in
-        // a message is left unqualified.
-        let (expected_display, mut actual_display) = crate::display_type_pair(expected, actual);
-        if Self::is_null_literal_type(actual) {
-            actual_display = "null".to_string();
-        }
-        // `never` has no source spelling, so rendering an empty list's type directly would put a
-        // name the author cannot write in front of someone who wrote `{}`.
-        if let Some(rendered) = Self::empty_list_display(actual) {
-            actual_display = rendered;
-        }
+        // a message is left unqualified. The empty type renders as `{}`, the form the author
+        // wrote, rather than naming the bottom type.
+        let (expected_display, actual_display) = crate::display_type_pair(expected, actual);
         // A sequence where something else was expected gets the plain message and none of the
         // hints below, which are about scalars: a bare-form hint, a function signature's reason,
         // and a lossy numeric conversion are all beside the point when the mismatch is a sequence.
-        // The `[]` in the type already says it is a sequence, so the message does not repeat it.
-        let message = if matches!(actual, Type::Array(_))
-            && !Self::is_empty_list_type(actual)
-            && !matches!(expected, Type::Array(_))
-        {
+        // The suffix in the type already says it is a sequence, so the message does not repeat it.
+        let message = if actual.admits_many() && !expected.admits_many() {
             format!(
                 "{} expects {}, found {}",
                 context, expected_display, actual_display
@@ -5065,11 +5665,10 @@ impl<'a> InferenceContext<'a> {
             let mut hint = self.bare_form_hint(actual, expected);
             // Two function signatures side by side leave the reader to compare them; the reason
             // names the parameter that decided it.
-            if let Err(reason) = self.function_satisfies_expected(actual, expected.strip_nullable())
-            {
+            if let Err(reason) = self.function_satisfies_expected(actual, expected.item()) {
                 hint = format!("{hint}; {reason}");
             }
-            let lossy = match (actual, expected.strip_nullable()) {
+            let lossy = match (actual, expected.item()) {
                 (Type::Primitive(found), Type::Primitive(wanted))
                     if found.is_numeric() && wanted.is_numeric() =>
                 {
@@ -5172,38 +5771,47 @@ impl<'a> InferenceContext<'a> {
                 // `<Range T=float64/>` field binds two `float64` bounds, exactly as `start={0}`
                 // would. The recorded type is rebuilt for the same reason a list's is: it was
                 // inferred from operands that were still integers.
-                let argument = self.prelude_range_argument(expected.strip_nullable())?;
+                let argument = self.prelude_range_argument(expected.item())?;
                 if !self.convert_literals_in(&[start, end], &argument, span, context)? {
                     return Some(false);
                 }
-                let Type::Named(named) = expected.strip_nullable() else {
+                let Type::Named(named) = expected.item() else {
                     return None;
                 };
                 self.env.set_expr_type(expr, Type::Named(named.clone()));
                 Some(true)
             }
             ast::Expr::Array { elements, .. } => {
-                let Type::Array(element_expected) = expected.strip_nullable() else {
+                if !expected.admits_many() || elements.len() < 2 {
                     return None;
-                };
-                if !self.convert_literals_in(&elements, element_expected, span, context)? {
+                }
+                if !self.convert_literals_in(&elements, expected.item(), span, context)? {
                     return Some(false);
                 }
-                // The list's own recorded type was inferred from elements that were still
-                // integers, so it says `int[]` over elements that are now floats. Recomputing it
-                // the way inference would have is what keeps the list indistinguishable from one
+                // The braced value's own recorded type was inferred from elements that were still
+                // integers, so it says `int+` over elements that are now floats. Recomputing it
+                // the way inference would have is what keeps the value indistinguishable from one
                 // whose elements were written as real literals.
-                let item_types: Vec<_> = elements
+                let contributions: Vec<_> = elements
                     .iter()
                     .map(|element| {
                         self.env
                             .get_expr_type(*element)
                             .cloned()
                             .unwrap_or(Type::Error)
+                            .split()
+                            .0
+                            .clone()
                     })
                     .collect();
-                let item_ty = self.common_sequence_item_type(&item_types, span);
-                self.env.set_expr_type(expr, Type::array(item_ty));
+                let occ = Self::summed_occurrence(elements.iter().map(|element| {
+                    self.env
+                        .get_expr_type(*element)
+                        .map(Type::occurrence)
+                        .unwrap_or(Occurrence::ONE)
+                }));
+                let item_ty = self.common_sequence_item_type(&contributions, span);
+                self.env.set_expr_type(expr, Type::seq(item_ty, occ));
                 Some(true)
             }
             _ => None,
@@ -5336,7 +5944,7 @@ impl<'a> InferenceContext<'a> {
                 Some(false) => return Some(false),
                 None => {
                     let actual = self.env.get_expr_type(*element)?.clone();
-                    if !self.type_satisfies_expected_with_coercion(&actual, element_expected) {
+                    if !self.type_satisfies_expected(&actual, element_expected) {
                         return None;
                     }
                 }
@@ -5352,6 +5960,76 @@ impl<'a> InferenceContext<'a> {
     /// Records a type error.
     fn error(&mut self, code: &str, message: String, span: nx_diagnostics::TextSpan) {
         self.error_involving(code, message, span, None);
+    }
+
+    /// Records a warning: something the author should look at that does not make the program
+    /// wrong, such as a presence test on a value that is always present.
+    fn warn(&mut self, code: &str, message: String, span: nx_diagnostics::TextSpan) {
+        self.diagnostics.push(
+            Diagnostic::warning(code)
+                .with_message(message)
+                .with_label(Label::primary(self.file_name.clone(), span))
+                .build(),
+        );
+    }
+
+    /// Resolves a property definition's type and enforces the rule of its slot: the type admits
+    /// zero only through the `?` mark on the name.
+    ///
+    /// <para>The slot is checked once the type is resolved, because that is the only place an
+    /// alias to a `?` or `*` type is visible, and the message is the same whether the author wrote
+    /// `string?` or `Maybe`. A resolved `?` or `*` is rejected with the `name?:` form — with the
+    /// same base type, and with `+` where the type was `*`, since that is what `name?:T+` reads
+    /// as. The other slot rule, that an optional property has no default, is checked on the
+    /// syntax tree, where the default can be quoted as written.</para>
+    fn property_slot_type(&mut self, span: TextSpan, name: &Name, type_ref: &ast::TypeRef) -> Type {
+        self.property_slot_type_in(span, None, name, type_ref)
+    }
+
+    /// [`Self::property_slot_type`] for a definition written by `declaring_module`.
+    fn property_slot_type_in(
+        &mut self,
+        span: TextSpan,
+        declaring_module: Option<&str>,
+        name: &Name,
+        type_ref: &ast::TypeRef,
+    ) -> Type {
+        let ty = self.type_from_type_ref_in_at(span, declaring_module, type_ref);
+        let previous = std::mem::replace(&mut self.type_ref_span, span);
+        let ty = self.check_property_slot(name, type_ref, ty);
+        self.type_ref_span = previous;
+        ty
+    }
+
+    /// Enforces the property-slot rules on an already resolved type; see
+    /// [`Self::property_slot_type`]. Reported at `type_ref_span`.
+    fn check_property_slot(&mut self, name: &Name, written: &ast::TypeRef, ty: Type) -> Type {
+        let span = self.type_ref_span;
+        if ty.admits_zero() {
+            let base = ty.item().to_string();
+            let fix = if ty.admits_many() {
+                format!("{name}?:{base}+")
+            } else {
+                format!("{name}?:{base}")
+            };
+            // A bare name whose resolved type carries the occurrence is an alias: name it, since
+            // the suffix the rule is about is written at the alias, not here.
+            let carrier = match written {
+                ast::TypeRef::Name(alias) => format!("{} (an alias to {})", alias, ty),
+                _ => ty.to_string(),
+            };
+            self.error(
+                "optional-in-type-slot",
+                format!(
+                    "Property '{}' has type {}, which admits zero; a property admits zero only \
+                     through the `?` mark on its name: write `{}`",
+                    name, carrier, fix
+                ),
+                span,
+            );
+            return Type::Error;
+        }
+        ty
     }
 
     /// Reports an error whose message may not name every type it is about.
@@ -5621,7 +6299,7 @@ impl<'a> InferenceContext<'a> {
                     Self::rigid_type_parameter_scope(&type_param_names, owner),
                 );
                 for prop in &record_def.properties {
-                    let expected = self.type_from_type_ref_at(prop.span, &prop.ty);
+                    let expected = self.property_slot_type(prop.span, &prop.name, &prop.ty);
                     if let Some(default_expr) = prop.default {
                         let actual = self.infer_expr(default_expr);
                         self.check_typed_binding_for(
@@ -5642,9 +6320,9 @@ impl<'a> InferenceContext<'a> {
     /// Resolves each local type alias's target, so a target that is not a type is reported where
     /// the alias was written rather than at whichever use site reaches it first.
     ///
-    /// <para>`type Rows = Names[]` where `Names` is already a sequence is the case this exists
-    /// for: the parse validator sees no `[]` to object to, and an alias nobody uses would
-    /// otherwise never be resolved at all.</para>
+    /// <para>`type Rows = Names*` where `Names` already carries an occurrence is the case this
+    /// exists for: the parse validator sees no second suffix to object to, and an alias nobody
+    /// uses would otherwise never be resolved at all.</para>
     fn validate_local_type_aliases(&mut self) {
         let local_items = self.module.raw_module().items().to_vec();
         // Recorded before any of them is resolved, because resolving one alias can reach another
@@ -5704,7 +6382,7 @@ impl<'a> InferenceContext<'a> {
                         // Resolved whether or not it has a default, so a type reference that names
                         // nothing usable — a generic record with no arguments, say — is reported
                         // where it was written.
-                        let expected = self.type_from_type_ref_at(field.span, &field.ty);
+                        let expected = self.property_slot_type(field.span, &field.name, &field.ty);
                         if let Some(default_expr) = field.default {
                             let actual = self.infer_expr(default_expr);
                             self.check_typed_binding_for(
@@ -5770,7 +6448,7 @@ impl<'a> InferenceContext<'a> {
                     );
                 }
                 ResolvedPreparedItem::Imported { item, .. } => {
-                    if let Some((_name, _visibility, params, return_type, _span)) =
+                    if let Some((_name, _visibility, _form, params, return_type, _span)) =
                         interface_function_signature(&item)
                     {
                         let param_types = params
@@ -5782,6 +6460,7 @@ impl<'a> InferenceContext<'a> {
                                     &param.ty,
                                 ),
                                 is_content: param.is_content,
+                                optional: param.optional,
                             })
                             .collect::<Vec<_>>();
                         let return_type = self
@@ -5858,22 +6537,42 @@ impl<'a> InferenceContext<'a> {
                                 format!("Initializer for value '{}'", value.name),
                             );
                             expected
+                        } else if let Type::ContextualName(name) = &actual {
+                            // A bare name has no type of its own: it resolves only against a
+                            // declared type, which an unannotated binding does not supply.
+                            let message = if name.as_str() == "null" {
+                                "`null` is not a value; the absent value is written `{}`"
+                                    .to_string()
+                            } else {
+                                format!(
+                                    "'{}' is a bare name, which resolves only against a declared \
+                                     type; annotate '{}' with the type it should resolve against, \
+                                     or write the value in braces",
+                                    name, value.name
+                                )
+                            };
+                            self.error(
+                                "contextual-name-without-expected-type",
+                                message,
+                                value.span,
+                            );
+                            Type::Error
                         } else if Self::mentions_never(&actual) {
-                            // `never[]` is a real type and this binding could simply take it. It is
+                            // `{}` has a real type and this binding could simply take it. It is
                             // reported anyway, and only here, where the binding has a name to put
-                            // in the message: a binding whose type is fixed by an empty list says
-                            // nothing about what it is a list of, and the next reader has no way to
-                            // find out. The annotation is required for legibility, not because the
+                            // in the message: a binding whose type is fixed by the empty value says
+                            // nothing about what it holds, and the next reader has no way to find
+                            // out. The annotation is required for legibility, not because the
                             // system cannot type it, so the binding keeps the type it has rather
                             // than poisoning to `Error` — exactly as the function-return arm in
                             // `infer_function` does. A legibility rule reports once and leaves the
                             // program otherwise typed.
                             self.error(
-                                "empty-list-element-type-unknown",
+                                "empty-value-type-unknown",
                                 format!(
-                                    "Cannot determine the element type of the empty list bound to \
-                                     '{}'; annotate the binding with the list type you mean, as in \
-                                     'let {}: string[] = {{}}'",
+                                    "Cannot determine the item type of the empty value bound to \
+                                     '{}'; annotate the binding with the type you mean, as in \
+                                     'let {}: string* = {{}}'",
                                     value.name, value.name
                                 ),
                                 value.span,
@@ -6185,6 +6884,7 @@ impl<'a> InferenceContext<'a> {
                 name: param.name.clone(),
                 ty: self.type_from_type_ref_in_quietly(declaring_module, &param.ty),
                 is_content: param.is_content,
+                optional: param.optional,
             })
             .collect::<Vec<_>>();
         self.env
@@ -6214,6 +6914,43 @@ impl<'a> InferenceContext<'a> {
         };
         let (params, _) = self.function_typed_value(name)?;
         Some((name.clone(), params))
+    }
+
+    /// The form and parameters of a call's callee when it names a declared function under its
+    /// own name, each parameter as its name and whether a caller may omit it.
+    fn declared_function_callee(&self, callee: ExprId) -> Option<DeclaredCallee> {
+        let ast::Expr::Ident(name) = self.module.raw_module().expr(callee) else {
+            return None;
+        };
+        if self.env.binding_depth(name).is_some_and(|depth| depth > 1) {
+            return None;
+        }
+        match self.resolve_function_definition(name)? {
+            ResolvedPreparedItem::Raw {
+                item: Item::Function(function),
+                ..
+            } => Some(DeclaredCallee {
+                name: name.clone(),
+                form: function.form,
+                params: function
+                    .params
+                    .iter()
+                    .map(|param| (param.name.clone(), param.is_omissible()))
+                    .collect(),
+            }),
+            ResolvedPreparedItem::Imported { item, .. } => {
+                let (_, _, form, params, _, _) = interface_function_signature(&item)?;
+                Some(DeclaredCallee {
+                    name: name.clone(),
+                    form,
+                    params: params
+                        .iter()
+                        .map(|param| (param.name.clone(), param.is_omissible()))
+                        .collect(),
+                })
+            }
+            _ => None,
+        }
     }
 
     // The `Err` is large for the reason `RecordResolutionError` records: it carries the spans its
@@ -6335,10 +7072,17 @@ impl<'a> InferenceContext<'a> {
         }
 
         match (actual, expected) {
-            (_, Type::Nullable(_)) if Self::is_null_literal_type(actual) => true,
             // The bottom type satisfies every expectation, which is what makes it the bottom.
-            // Reached mostly as `never[]` against `T[]`, through the covariant array case below.
             (Type::Primitive(Primitive::Never), _) => true,
+            // Occurrences follow the lattice and items follow this relation. An exactly-one
+            // value at a suffixed site is a sequence of one — the one-level lift — and a value
+            // that admits zero or many never satisfies an exactly-one site.
+            (Type::Seq { .. }, Type::Seq { .. }) | (_, Type::Seq { .. }) => {
+                let (item, occ) = actual.split();
+                let (expected_item, expected_occ) = expected.split();
+                occ.satisfies(expected_occ) && self.type_satisfies_expected(item, expected_item)
+            }
+            (Type::Seq { .. }, _) => false,
             (Type::Named(actual_name), Type::Named(expected_name))
                 if expected_name.name.as_str() == "Element" =>
             {
@@ -6356,15 +7100,6 @@ impl<'a> InferenceContext<'a> {
             }
             (Type::Union(union), Type::Named(expected_name)) => {
                 self.union_type_satisfies_record(&union.name, union.origin(), expected_name)
-            }
-            (Type::Nullable(actual_inner), Type::Nullable(expected_inner)) => {
-                self.type_satisfies_expected(actual_inner, expected_inner)
-            }
-            (_, Type::Nullable(expected_inner)) => {
-                self.type_satisfies_expected(actual, expected_inner)
-            }
-            (Type::Array(actual_inner), Type::Array(expected_inner)) => {
-                self.type_satisfies_expected(actual_inner, expected_inner)
             }
             (Type::Function { .. }, Type::Function { .. }) => {
                 self.function_satisfies_expected(actual, expected).is_ok()
@@ -6397,149 +7132,53 @@ impl<'a> InferenceContext<'a> {
         )
     }
 
-    fn is_null_literal_type(ty: &Type) -> bool {
-        matches!(ty, Type::Nullable(inner) if matches!(inner.as_ref(), Type::Variable(_)))
-    }
-
-    /// True for the type an empty braced list infers: a list of the bottom type. Nothing else
-    /// produces that shape — every non-empty list has an item type to join.
-    fn is_empty_list_type(ty: &Type) -> bool {
-        matches!(ty, Type::Array(inner) if matches!(inner.as_ref(), Type::Primitive(Primitive::Never)))
-    }
-
     /// True when `never` occurs anywhere in this type.
     ///
-    /// <para>Only an empty list puts it there, so this asks whether the type was fixed by one. It
-    /// looks through a function's return type as well as through lists and nullables, because an
-    /// unannotated `let f(x) = {}` is a binding whose type an empty list decided just as much as
+    /// <para>Only the empty value puts it there, so this asks whether the type was fixed by one.
+    /// It looks through a function's return type as well as through an occurrence, because an
+    /// unannotated `let f(x) = {}` is a binding whose type the empty value decided just as much as
     /// `let a = {}` is.</para>
     fn mentions_never(ty: &Type) -> bool {
         match ty {
             Type::Primitive(Primitive::Never) => true,
-            Type::Array(inner) | Type::Nullable(inner) => Self::mentions_never(inner),
+            Type::Seq { item, .. } => Self::mentions_never(item),
             Type::Function { ret, .. } => Self::mentions_never(ret),
             _ => false,
         }
     }
 
-    /// Renders a type built around an empty list as the source spells it.
+    /// The join of two types: the least type above both.
     ///
-    /// <para>`None` for a type that holds no empty list, so a caller keeps its ordinary rendering.
-    /// `never[]` is accurate but is not what the author wrote, and it names a type they cannot
-    /// write; `{}` is. The search goes to any depth because an empty list can sit inside a list
-    /// the source wrapped around it — a `for` whose body is `{}` reads as `{}[]`.</para>
-    fn empty_list_display(ty: &Type) -> Option<String> {
-        if Self::is_empty_list_type(ty) {
-            return Some("{}".to_string());
-        }
-
-        match ty {
-            Type::Array(inner) => {
-                Self::empty_list_display(inner).map(|inner| format!("{}[]", inner))
-            }
-            Type::Nullable(inner) => {
-                Self::empty_list_display(inner).map(|inner| format!("{}?", inner))
-            }
-            _ => None,
-        }
-    }
-
-    fn type_satisfies_expected_with_coercion(&self, actual: &Type, expected: &Type) -> bool {
-        if self.type_satisfies_expected(actual, expected) {
-            return true;
-        }
-
-        let coercion_target = expected.strip_nullable();
-
-        match (actual, coercion_target) {
-            (Type::Array(actual_inner), Type::Array(expected_inner)) => {
-                self.type_satisfies_expected(actual_inner, expected_inner)
-            }
-            (Type::Array(_), _) if is_object_type(coercion_target) => true,
-            (Type::Array(_), _) => false,
-            (_, Type::Array(expected_inner)) => {
-                self.type_satisfies_expected(actual, expected_inner)
-            }
-            _ => false,
-        }
-    }
-
-    /// Whether a type is a sequence, looking through nullability.
-    ///
-    /// <para>`string[]` and `string[]?` both are; `string?` is not. The question the join asks is
-    /// whether a value of this type holds items, which a `?` does not change.</para>
-    fn is_sequence_shaped(ty: &Type) -> bool {
-        matches!(ty.strip_nullable(), Type::Array(_))
-    }
-
+    /// <para>The occurrence is split off first and joined by the lattice, so the arms of an `if`
+    /// join their item types however they are wrapped: `int` with `int+` is `int+`, `int?` with
+    /// `int+` is `int*`, and `{}` — the bottom item type under `?` — with `T` is `T?`, which is
+    /// what types a conditional with no `else`. The item types join by the record and component
+    /// lineages, which only the inference context knows; the structural join in `semantics`
+    /// answers `object` for two item types that are not equal.</para>
     fn common_supertype(&self, lhs: &Type, rhs: &Type) -> Type {
+        if lhs.is_error() || rhs.is_error() {
+            return Type::Error;
+        }
+        let (lhs_item, lhs_occ) = lhs.split();
+        let (rhs_item, rhs_occ) = rhs.split();
+        let item = self.common_item_supertype(lhs_item, rhs_item);
+        Type::seq(item, lhs_occ.join(rhs_occ))
+    }
+
+    /// The join of two item types; see [`Self::common_supertype`].
+    fn common_item_supertype(&self, lhs: &Type, rhs: &Type) -> Type {
         match (lhs, rhs) {
             // The bottom type is the identity of the join: it is below the other side already, so
-            // the other side is the least type above both. This is what lets one arm of an `if` be
-            // `{}` and the other a `string[]` without the join climbing to `object`.
+            // the other side is the least type above both.
             (Type::Primitive(Primitive::Never), other) => other.clone(),
             (other, Type::Primitive(Primitive::Never)) => other.clone(),
 
-            // Two sequence-valued branches of an `if` or arms of a match join here: a value
-            // position joins whole sequences, where a collecting position never reaches this arm
-            // because each item contributes its element type before the join. What the arm is for
-            // is the recursion into `self`: joining `Admin[]` with `User[]` at `Person[]` takes
-            // the record lineage, which only the inference context knows. Dropping it would leave
-            // the pair to the structural join in `semantics`, which answers `object` for two
-            // element types that are not equal.
-            (Type::Array(lhs_inner), Type::Array(rhs_inner)) => {
-                Type::array(self.common_supertype(lhs_inner, rhs_inner))
-            }
-
-            // An item is a sequence of one, so joining an item type with a sequence type gives a
-            // sequence. This is what types a conditional with no `else`: `if c { 1 }` joins `int`
-            // with the `never[]` of its implicit `else { }` and is an `int[]`, and `if c { xs }`
-            // joins `string[]` with it through the arm above and stays `string[]`.
-            //
-            // Exactly one side may be sequence-shaped. Two sequences joined element-wise are the
-            // arm above, and a nullable sequence beside a sequence is a nullable sequence -- the
-            // nullable arm below -- not a sequence of sequences.
-            //
-            // A written `null` is not an item to lift either. `if c { xs } else { null }` is the
-            // spelling of a nullable sequence, so `null` beside `string[]` is `string[]?` by the
-            // nullable arm, not `string?[]` holding a null item. Only the untyped null literal is
-            // excluded: a branch typed `int?` is a real item and lifts to `int?[]`.
-            (lhs, rhs)
-                if Self::is_sequence_shaped(lhs) != Self::is_sequence_shaped(rhs)
-                    && !Self::is_null_literal_type(lhs)
-                    && !Self::is_null_literal_type(rhs) =>
-            {
-                let (sequence, item) = if Self::is_sequence_shaped(lhs) {
-                    (lhs, rhs)
-                } else {
-                    (rhs, lhs)
-                };
-                let Type::Array(element) = sequence.strip_nullable() else {
-                    unreachable!("one side is sequence-shaped");
-                };
-                let lifted = Type::array(self.common_supertype(element, item));
-                // A nullable sequence may still be absent after the other side is lifted beside
-                // it, so the `?` it came with stays on the result: `string[]?` joined with
-                // `string` is `string[]?`, not a `string[]` that a null value would then violate.
-                if matches!(sequence, Type::Nullable(_)) {
-                    Type::nullable(lifted)
-                } else {
-                    lifted
-                }
-            }
-
-            (Type::Nullable(_), _) | (_, Type::Nullable(_)) => {
-                crate::semantics::nullable_join(lhs, rhs, |lhs, rhs| {
-                    self.common_supertype(lhs, rhs)
-                })
-                .expect("one side is nullable")
-            }
             (Type::UnionCase(lhs_case), Type::UnionCase(rhs_case))
                 if lhs_case.shares_union_with(rhs_case) =>
             {
                 self.union_entry_for(&lhs_case.union, lhs_case.origin())
                     .map(|entry| Type::Union(entry.shape()))
-                    .unwrap_or_else(|| generic_common_supertype(lhs, rhs))
+                    .unwrap_or_else(|| common_item_supertype(lhs, rhs))
             }
             (Type::UnionCase(case), Type::Union(union))
             | (Type::Union(union), Type::UnionCase(case))
@@ -6560,14 +7199,14 @@ impl<'a> InferenceContext<'a> {
                 if lhs_name == rhs_name {
                     lhs.clone()
                 } else {
-                    generic_common_supertype(lhs, rhs)
+                    common_item_supertype(lhs, rhs)
                 }
             }
             (Type::Named(lhs_name), Type::Named(rhs_name)) => self
                 .common_record_supertype(lhs_name, rhs_name)
                 .or_else(|| self.common_component_supertype(lhs_name, rhs_name))
-                .unwrap_or_else(|| generic_common_supertype(lhs, rhs)),
-            _ => generic_common_supertype(lhs, rhs),
+                .unwrap_or_else(|| common_item_supertype(lhs, rhs)),
+            _ => common_item_supertype(lhs, rhs),
         }
     }
 
@@ -6682,12 +7321,12 @@ fn join_widening(member: &Type, joined: &Type) -> Option<Primitive> {
         (Type::Primitive(from), Type::Primitive(to)) => {
             (from != to && from.is_numeric() && from.widens_to(*to)).then_some(*to)
         }
-        (Type::Array(member), Type::Array(joined))
-        | (Type::Nullable(member), Type::Nullable(joined)) => join_widening(member, joined),
-        (member, Type::Nullable(joined)) => join_widening(member, joined),
-        // An item the join lifted to a sequence widens to that sequence's element type: in
-        // `if c { 1 } else { floats }` the `1` becomes the one-item `float64[]` `[1.0]`.
-        (member, Type::Array(joined)) => join_widening(member, joined),
+        // A branch widens to the join's item type whatever the occurrences: in
+        // `if c { 1 } else { floats }` the `1` becomes the one-item `float64+` `[1.0]`.
+        (Type::Seq { item: member, .. }, Type::Seq { item: joined, .. }) => {
+            join_widening(member, joined)
+        }
+        (member, Type::Seq { item: joined, .. }) => join_widening(member, joined),
         _ => None,
     }
 }
@@ -6697,8 +7336,7 @@ pub(crate) fn widened_type(ty: &Type, target: nx_hir::ast::PrimitiveType) -> Typ
     fn widen(ty: &Type, target: Primitive) -> Type {
         match ty {
             Type::Primitive(primitive) if primitive.is_numeric() => Type::Primitive(target),
-            Type::Array(inner) => Type::array(widen(inner, target)),
-            Type::Nullable(inner) => Type::nullable(widen(inner, target)),
+            Type::Seq { item, occ } => Type::seq(widen(item, target), *occ),
             other => other.clone(),
         }
     }
@@ -6783,6 +7421,7 @@ mod tests {
         module.add_item(Item::Function(Function {
             name: Name::new("declared"),
             visibility: nx_hir::Visibility::Export,
+            form: nx_hir::FunctionForm::Paren,
             params: vec![],
             return_type: Some(TypeRef::name("float64")),
             body: converted_body,
@@ -6791,6 +7430,7 @@ mod tests {
         module.add_item(Item::Function(Function {
             name: Name::new("inferred"),
             visibility: nx_hir::Visibility::Export,
+            form: nx_hir::FunctionForm::Paren,
             params: vec![],
             return_type: None,
             body: untouched_body,
@@ -6828,6 +7468,7 @@ mod tests {
         let function = Function {
             name: Name::new("Button"),
             visibility: nx_hir::Visibility::Export,
+            form: nx_hir::FunctionForm::Paren,
             params: vec![param],
             return_type: None,
             body,
@@ -6860,6 +7501,7 @@ mod tests {
         let function = Function {
             name: Name::new("identity"),
             visibility: nx_hir::Visibility::Export,
+            form: nx_hir::FunctionForm::Paren,
             params: vec![Param::new(Name::new("value"), TypeRef::name("int"), span)],
             return_type: None,
             body,
@@ -6910,6 +7552,7 @@ mod tests {
         let add_fn = Function {
             name: Name::new("add"),
             visibility: nx_hir::Visibility::Export,
+            form: nx_hir::FunctionForm::Paren,
             params: vec![
                 Param::new(Name::new("a"), TypeRef::name("int"), span),
                 Param::new(Name::new("b"), TypeRef::name("int"), span),
@@ -6932,6 +7575,7 @@ mod tests {
         let double_fn = Function {
             name: Name::new("double"),
             visibility: nx_hir::Visibility::Export,
+            form: nx_hir::FunctionForm::Paren,
             params: vec![Param::new(Name::new("value"), TypeRef::name("int"), span)],
             return_type: Some(TypeRef::name("int")),
             body: double_body,
@@ -6957,6 +7601,7 @@ mod tests {
         let compute_fn = Function {
             name: Name::new("compute"),
             visibility: nx_hir::Visibility::Export,
+            form: nx_hir::FunctionForm::Paren,
             params: vec![Param::new(Name::new("n"), TypeRef::name("int"), span)],
             return_type: Some(TypeRef::name("int")),
             body: compute_body,
@@ -7145,6 +7790,7 @@ mod tests {
         let func = Function {
             name: Name::new("north"),
             visibility: nx_hir::Visibility::Export,
+            form: nx_hir::FunctionForm::Paren,
             params: vec![],
             return_type: None,
             body: member,

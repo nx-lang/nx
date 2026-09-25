@@ -28,7 +28,7 @@ let contacts = {
 // function, so DrawnUI calls it once per cell it binds, with the item and its index.
 let <ContactCell Item:Contact Index:int />: DrawnNode =
   <SkiaLayout Type=Absolute Padding=<Thickness Left=12 Top=10 Right=12 Bottom=10 />
-    BackgroundColor={Index % 2 == 1 ? "#0B1220" : "#111827"} UseCache=Image AnimationTapped=Ripple
+    BackgroundColor={if Index % 2 == 1 { "#0B1220" } else { "#111827" }} UseCache=Image AnimationTapped=Ripple
     HorizontalOptions=Fill>
     <SkiaShape Type=Circle WidthRequest=42 LockRatio=1
       VerticalOptions=Center BackgroundColor="#1F2937">

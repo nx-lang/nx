@@ -69,6 +69,126 @@ public sealed class DriftedEditorProps
 }
 
 /// <summary>
+/// A hand-written patch that clears <c>name</c>, which <c>User</c> declares required: the payload the generated
+/// companion's non-nullable <c>Name</c> accessor keeps a C# caller from building.
+/// </summary>
+[MessagePackObject]
+public sealed class ClearingUserPatch
+{
+    [Key("$type")]
+    public string Type { get; set; } = "User.Update";
+
+    [Key("name")]
+    public string? Name { get; set; }
+}
+
+[MessagePackObject]
+public sealed class ClearingEditorProps
+{
+    [Key("patch")]
+    public ClearingUserPatch Patch { get; set; } = new();
+}
+
+/// <summary>
+/// A hand-written patch that clears a component's <c>count</c>, a value-typed field the schema knows cannot be
+/// cleared.
+/// </summary>
+[MessagePackObject]
+public sealed class ClearingCounterPatch
+{
+    [Key("$type")]
+    public string Type { get; set; } = "Counter.Update";
+
+    [Key("count")]
+    public long? Count { get; set; }
+}
+
+[MessagePackObject]
+public sealed class BookEditorProps
+{
+    [Key("patch")]
+    public Book_update Patch { get; set; } = new();
+}
+
+/// <summary>
+/// A hand-written <c>Person</c> that carries its <c>$type</c>, which a record the host sends to a record-typed
+/// site needs and the generated <c>Person</c> does not write.
+/// </summary>
+[MessagePackObject]
+public sealed class PersonRecord
+{
+    [Key("$type")]
+    public string Type { get; set; } = "Person";
+
+    [Key("name")]
+    public string Name { get; set; } = "X";
+}
+
+/// <summary>
+/// A hand-written <c>Book</c> that carries its <c>$type</c> and writes its optional fields as they are set: a
+/// <c>null</c> is nil on the wire, an empty array is an empty array.
+/// </summary>
+[MessagePackObject]
+public sealed class BookRecord
+{
+    [Key("$type")]
+    public string Type { get; set; } = "Book";
+
+    [Key("title")]
+    public string Title { get; set; } = "A";
+
+    [Key("author")]
+    public PersonRecord? Author { get; set; }
+
+    [Key("tags")]
+    public string[]? Tags { get; set; }
+
+    [Key("authors")]
+    public PersonRecord[] Authors { get; set; } = new[] { new PersonRecord() };
+}
+
+[MessagePackObject]
+public sealed class BookViewerProps
+{
+    [Key("book")]
+    public BookRecord Book { get; set; } = new();
+}
+
+/// <summary>
+/// A hand-written <c>Book</c> with no <c>tags</c> or <c>author</c> key at all.
+/// </summary>
+[MessagePackObject]
+public sealed class BookWithoutOptionalKeys
+{
+    [Key("$type")]
+    public string Type { get; set; } = "Book";
+
+    [Key("title")]
+    public string Title { get; set; } = "A";
+
+    [Key("authors")]
+    public PersonRecord[] Authors { get; set; } = new[] { new PersonRecord() };
+}
+
+[MessagePackObject]
+public sealed class BareBookViewerProps
+{
+    [Key("book")]
+    public BookWithoutOptionalKeys Book { get; set; } = new();
+}
+
+/// <summary>
+/// The rendered <c>Panel</c> a <c>BookEditor</c> renders, with its patch read back through the generated
+/// companion.
+/// </summary>
+[MessagePackObject]
+public sealed class BookPanelElement
+{
+    [Key("patch")]
+    public Book_update Patch { get; set; } = new();
+}
+
+/// <summary>
 /// A hand-written patch whose keys fit <c>User</c> but whose discriminator names another record.
 /// </summary>
 [MessagePackObject]
@@ -209,7 +329,7 @@ public class NxUpdateRecordTests
     }
 
     [Fact]
-    public void UpdateRecord_Json_OmitsUnsetAndKeepsNull()
+    public void UpdateRecord_Json_OmitsUnsetAndWritesClearedAsNull()
     {
         User_update update = new() { Email = null };
 
@@ -269,7 +389,7 @@ public class NxUpdateRecordTests
     }
 
     [Fact]
-    public void UpdateRecord_MessagePack_OmitsUnsetAndKeepsNull()
+    public void UpdateRecord_MessagePack_OmitsUnsetAndWritesClearedAsNil()
     {
         User_update update = new() { Email = null };
 
@@ -329,7 +449,7 @@ public class NxUpdateRecordTests
     public void RawEffect_CarryingAnUpdateRecord_PreservesAbsence()
     {
         string source = """
-            type User = { name:string email:string? }
+            type User = { name:string email?:string }
             action Apply = { patch:User.Update }
             external component <Button value:int = 0 emits { Tapped { } } />
             component <Form emits { Apply } /> = {
@@ -359,7 +479,7 @@ public class NxUpdateRecordTests
     public void UpdateRecord_PassedAsAProp_DecodesNativelyWithOnlyThePresentField()
     {
         string source = """
-            type User = { name:string email:string? }
+            type User = { name:string email?:string }
             component <Editor patch:User.Update /> = { <Panel patch={patch} /> }
             """;
 
@@ -379,7 +499,7 @@ public class NxUpdateRecordTests
     public void UpdateRecord_PassedAsAProp_WithAnUnknownField_IsRejectedAtInitialization()
     {
         string source = """
-            type User = { name:string email:string? }
+            type User = { name:string email?:string }
             component <Editor patch:User.Update /> = { <Panel patch={patch} /> }
             """;
 
@@ -399,7 +519,7 @@ public class NxUpdateRecordTests
     public void BareUpdateRecord_FromARootBoundHandler_ReachesTheHostAsAnEffect()
     {
         string source = """
-            type User = { name:string email:string? }
+            type User = { name:string email?:string }
             external component <Button emits { Tapped { } } />
             let saveButton() = <Button onTapped=<User.Update name="Ada" /> />
             component <Form /> = { <Panel>{saveButton()}</Panel> }
@@ -435,7 +555,7 @@ public class NxUpdateRecordTests
     }
 
     [Fact]
-    public void UpdateRecord_FieldSetToNull_IsCarried()
+    public void UpdateRecord_ClearedField_IsCarried()
     {
         User_update update = new() { Email = null };
 
@@ -598,7 +718,7 @@ public class NxUpdateRecordTests
         Assert.True(merged.Email.HasValue);
         Assert.Null(merged.Email.Value);
 
-        // The TypeScript runtime's own case: a later `null` replaces an earlier value.
+        // The TypeScript runtime's own case: a later cleared field replaces an earlier value.
         User_update runtimeCase = User_update.Merge(
             new User_update { Name = "Ada", Email = "x@y" },
             new User_update { Email = null });
@@ -640,7 +760,7 @@ public class NxUpdateRecordTests
 
         Assert.Empty(Form_update.Diff(MakeForm(null), MakeForm(null)).Fields);
 
-        // An unset and a null field are different patches, so the nested record differs.
+        // An unset and a cleared field are different patches, so the nested record differs.
         Form_update pending = Form_update.Diff(MakeForm(null), MakeForm(NxOptional<string?>.Unset));
         Assert.Equal(new[] { "pending" }, pending.ChangedNames());
 
@@ -684,6 +804,220 @@ public class NxUpdateRecordTests
             cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(2, read.Count.Value);
     }
+
+    private const string BookSource = """
+        type Person = { name:string }
+        type Book = { title:string author?:Person tags?:string+ authors:Person+ }
+        component <BookEditor patch:Book.Update /> = { <Panel patch={patch} /> }
+        component <BookViewer book:Book /> = { <Panel book={book} /> }
+        """;
+
+    /// <summary>
+    /// <c>null</c> is the .NET spelling of a cleared field: it crosses the boundary as <c>null</c>, the NX runtime
+    /// reads it as the empty value for the optional <c>author</c>, and it comes back as a carried <c>null</c>.
+    /// </summary>
+    [Fact]
+    public void ClearedOptionalField_RoundTripsAsNullThroughTheRuntime()
+    {
+        BookEditorProps props = new() { Patch = new Book_update { Author = null } };
+
+        NxComponentInitResult<JsonElement> asJson =
+            NxRuntime.InitializeComponentJson(BookSource, "BookEditor", props);
+        JsonElement patch = asJson.Rendered.GetProperty("patch");
+        string[] keys = patch.EnumerateObject().Select(property => property.Name).ToArray();
+        Assert.Equal(new[] { "$type", "author" }, keys);
+        Assert.Equal("Book.Update", patch.GetProperty("$type").GetString());
+        Assert.Equal(JsonValueKind.Null, patch.GetProperty("author").ValueKind);
+
+        NxComponentInitResult<BookPanelElement> typed =
+            NxRuntime.InitializeComponent<BookEditorProps, BookPanelElement>(BookSource, "BookEditor", props);
+        Book_update read = typed.Rendered.Patch;
+        Assert.Equal(new[] { Book_property.Author }, read.Changed());
+        Assert.True(read.Author.HasValue);
+        Assert.Null(read.Author.Value);
+        Assert.False(read.Title.HasValue);
+    }
+
+    /// <summary>
+    /// The generated companion types <c>Name</c> as <c>NxOptional&lt;string&gt;</c>, so clearing it is a nullability
+    /// diagnostic in C#; a payload that clears it anyway is refused when the runtime constructs the
+    /// <c>User.Update</c>, naming the field, while clearing the optional <c>email</c> is accepted.
+    /// </summary>
+    [Fact]
+    public void ClearingANonClearableField_IsRejectedByTheRuntimeNamingIt()
+    {
+        string source = """
+            type User = { name:string email?:string }
+            component <Editor patch:User.Update /> = { <Panel patch={patch} /> }
+            """;
+
+        NxEvaluationException error = Assert.Throws<NxEvaluationException>(
+            () => NxRuntime.InitializeComponentJson(source, "Editor", new ClearingEditorProps()));
+        Assert.Contains("name", DiagnosticText(error), StringComparison.Ordinal);
+
+        NxComponentInitResult<JsonElement> cleared = NxRuntime.InitializeComponentJson(
+            source,
+            "Editor",
+            new EditorProps { Patch = new User_update { Email = null } });
+        JsonElement patch = cleared.Rendered.GetProperty("patch");
+        Assert.Equal(new[] { "$type", "email" }, patch.EnumerateObject().Select(property => property.Name).ToArray());
+        Assert.Equal(JsonValueKind.Null, patch.GetProperty("email").ValueKind);
+    }
+
+    /// <summary>
+    /// A <c>+</c> field is a plain array in C#, so an empty one compiles; the boundary is where <c>+</c> is
+    /// enforced.
+    /// </summary>
+    [Fact]
+    public void EmptyArrayAtAOneOrMoreSite_IsRejectedByTheRuntimeNamingIt()
+    {
+        BookViewerProps props = new()
+        {
+            Book = new BookRecord { Authors = Array.Empty<PersonRecord>() },
+        };
+
+        NxEvaluationException error = Assert.Throws<NxEvaluationException>(
+            () => NxRuntime.InitializeComponentJson(BookSource, "BookViewer", props));
+
+        Assert.Contains("authors", DiagnosticText(error), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NullAnEmptyArrayAndAMissingKey_AllDecodeAsTheEmptyValue()
+    {
+        object[] inputs =
+        {
+            new BookViewerProps { Book = new BookRecord { Tags = null, Author = null } },
+            new BookViewerProps { Book = new BookRecord { Tags = Array.Empty<string>() } },
+            new BareBookViewerProps(),
+        };
+
+        foreach (object props in inputs)
+        {
+            NxComponentInitResult<JsonElement> init;
+            try
+            {
+                init = NxRuntime.InitializeComponentJson(BookSource, "BookViewer", props);
+            }
+            catch (NxEvaluationException error)
+            {
+                Assert.Fail($"{props.GetType().Name}: {DiagnosticText(error)}");
+                return;
+            }
+
+            JsonElement book = init.Rendered.GetProperty("book");
+            string[] keys = book.EnumerateObject().Select(property => property.Name).ToArray();
+            Assert.Equal(new[] { "$type", "authors", "title" }, keys);
+        }
+    }
+
+    /// <summary>
+    /// A decoded optional sequence may read as <c>null</c> or as an empty array depending on where it came from;
+    /// <c>diff</c> sees one empty value either way, and carries a field that becomes empty as cleared.
+    /// </summary>
+    [Fact]
+    public void Diff_ReadsNullAndAnEmptyArrayAsOneEmptyValue()
+    {
+        Person[] authors = new[] { new Person { Name = "X" } };
+        Book nullTags = new() { Title = "A", Authors = authors, Tags = null };
+        Book emptyTags = new() { Title = "A", Authors = authors, Tags = Array.Empty<string>() };
+        Book tagged = new() { Title = "A", Authors = authors, Tags = new[] { "t" } };
+
+        Assert.Empty(Book_update.Diff(nullTags, emptyTags).Fields);
+        Assert.Empty(Book_update.Diff(emptyTags, nullTags).Fields);
+
+        Book_update cleared = Book_update.Diff(tagged, nullTags);
+        Assert.Equal(new[] { Book_property.Tags }, cleared.Changed());
+        Assert.True(cleared.Tags.HasValue);
+        Assert.Null(cleared.Tags.Value);
+        Book_update emptied = Book_update.Diff(tagged, emptyTags);
+        Assert.Equal(new[] { Book_property.Tags }, emptied.Changed());
+        Assert.True(emptied.Tags.HasValue);
+        Assert.Null(emptied.Tags.Value);
+    }
+
+    /// <summary>
+    /// <c>diff</c> refuses to carry a field that cannot be cleared as cleared, as <c>Set</c> does, rather than
+    /// build a patch the runtime would reject; only an invalid record can empty such a field.
+    /// </summary>
+    [Fact]
+    public void Diff_EmptyingANonClearableField_ThrowsNamingTheField()
+    {
+        Person[] authors = new[] { new Person { Name = "X" } };
+        Book before = new() { Title = "A", Authors = authors };
+
+        InvalidOperationException emptiedArray = Assert.Throws<InvalidOperationException>(
+            () => Book_update.Diff(before, new Book { Title = "A", Authors = Array.Empty<Person>() }));
+        Assert.Contains("'authors'", emptiedArray.Message, StringComparison.Ordinal);
+        Assert.Contains("Book.Update", emptiedArray.Message, StringComparison.Ordinal);
+
+        InvalidOperationException nulled = Assert.Throws<InvalidOperationException>(
+            () => Book_update.Diff(before, new Book { Title = null!, Authors = authors }));
+        Assert.Contains("'title'", nulled.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The schema knows a field cannot be cleared when the key says so, as every generated key does for a field
+    /// its target does not declare optional and the prelude's hand-written range keys do; a field whose key does
+    /// not say counts as clearable unless its CLR type cannot hold <c>null</c>, and the runtime is what refuses a
+    /// <c>null</c> for it.
+    /// </summary>
+    [Fact]
+    public void Schema_KnowsWhichFieldsCanBeCleared()
+    {
+        Assert.True(BookProperties.Author.Clearable);
+        Assert.True(BookProperties.Tags.Clearable);
+        Assert.True(UserProperties.Email.Clearable);
+        Assert.False(UserProperties.Name.Clearable);
+        Assert.False(BookProperties.Title.Clearable);
+        Assert.False(BookProperties.Authors.Clearable);
+        Assert.False(Assert.Single(new Counter_update().Schema.Fields).Clearable);
+        Assert.False(NxRangeProperties<long>.Start.Clearable);
+        Assert.False(NxRangeProperties<string>.Start.Clearable);
+        Assert.False(new NxField("n", typeof(long)).Clearable);
+        Assert.True(new NxField("n", typeof(long?)).Clearable);
+        Assert.False(new NxField("s", typeof(string), clearable: false).Clearable);
+    }
+
+    [Fact]
+    public void Set_NullForANonClearableField_ThrowsNamingTheField()
+    {
+        InvalidOperationException error = Assert.Throws<InvalidOperationException>(
+            () => new NxRange_update<string> { Start = null! });
+
+        Assert.Contains("start", error.Message, StringComparison.Ordinal);
+        Assert.Contains("Range.Update", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UpdateRecord_Json_NullForANonClearableField_ThrowsNamingTheField()
+    {
+        const string json = """{"$type":"Counter.Update","count":null}""";
+
+        JsonException error = Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<Counter_update>(json));
+
+        Assert.Contains("count", error.Message, StringComparison.Ordinal);
+        Assert.Contains(nameof(Counter_update), error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UpdateRecord_MessagePack_NilForANonClearableField_ThrowsNamingTheField()
+    {
+        byte[] bytes = MessagePackSerializer.Serialize(
+            new ClearingCounterPatch(),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        MessagePackSerializationException error = Assert.Throws<MessagePackSerializationException>(
+            () => MessagePackSerializer.Deserialize<Counter_update>(
+                bytes,
+                cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Contains("count", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains(nameof(Counter_update), error.ToString(), StringComparison.Ordinal);
+    }
+
+    private static string DiagnosticText(NxEvaluationException error) =>
+        string.Join("\n", error.Diagnostics.Select(diagnostic => diagnostic.Message));
 
     /// <summary>
     /// Collects the token of every action handler reference in a rendered JSON tree.

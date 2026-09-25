@@ -651,7 +651,7 @@ mod tests {
                 read_nx_ir_bundle(&read_payload_bytes(result)).expect("IR payload is a bundle");
             assert_eq!(artifacts.len(), 1);
             assert_eq!(&artifacts[0].bytes[..4], b"NXIR");
-            assert_eq!(artifacts[0].metadata.schema_version, 4);
+            assert_eq!(artifacts[0].metadata.schema_version, 5);
             nx_wasm_result_free(result);
 
             let image = artifacts[0].bytes.clone();

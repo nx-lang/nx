@@ -1,0 +1,100 @@
+module main.nx fingerprint 4767313403569770331
+requires update-records-v1 update-intrinsics-v1 occurrence-v1
+entrypoints functions [ada withAuthor withoutAuthor writtenEmpty hasAuthor has hasNot authorName name noName byline named anonymous nick noNick tagged isTagged isNotTagged lone several cleared renamed clearedNick root] components [Box]
+
+record Person @5:1-5:50
+  name: string required
+  nick: string?
+
+record Book @6:1-6:65
+  title: string required
+  author: Person?
+  tags: string*
+
+record Item @7:1-7:29
+  n: int required
+
+component Box external @8:1-8:54
+  props
+    content items: Item+ required
+
+function ada() @10:1-10:34 =
+  <Person name="Ada" />
+
+function withAuthor() @11:1-11:68 =
+  <Book author=ada() tags=["x", "y"] title="A" />
+
+function withoutAuthor() @12:1-12:41 =
+  <Book title="B" />
+
+function writtenEmpty() @13:1-13:58 =
+  <Book author={} tags={} title="C" />
+
+function hasAuthor(b: Book): boolean @14:1-14:47 =
+  b.author?
+
+function has() @15:1-15:40 =
+  hasAuthor(withAuthor())
+
+function hasNot() @16:1-16:46 =
+  hasAuthor(withoutAuthor())
+
+function authorName(b: Book): string? (optional result) @17:1-17:53 =
+  b.author?.name
+
+function name() (optional result) @18:1-18:42 =
+  authorName(withAuthor())
+
+function noName() (optional result) @19:1-19:47 =
+  authorName(withoutAuthor())
+
+function byline(b: Book): string @20:1-20:71 =
+  ("by " concat (b.author?.name ?? "anonymous"))
+
+function named() @21:1-21:39 =
+  byline(withAuthor())
+
+function anonymous() @22:1-22:46 =
+  byline(withoutAuthor())
+
+function nick(b: Book): string? (optional result) @23:1-23:47 =
+  b.author?.nick
+
+function noNick() (optional result) @24:1-24:38 =
+  nick(withAuthor())
+
+function tagged(b: Book): boolean @25:1-25:42 =
+  b.tags?
+
+function isTagged() @26:1-26:42 =
+  tagged(withAuthor())
+
+function isNotTagged() @27:1-27:48 =
+  tagged(withoutAuthor())
+
+function lone() @28:1-28:37 =
+  <Box>
+    <Item n=1 />
+  </Box>
+
+function several() @29:1-29:52 =
+  <Box>
+    <Item n=1 />
+    <Item n=2 />
+  </Box>
+
+function cleared() @30:1-30:42 =
+  <Person.Update nick={} />
+
+function renamed() @31:1-31:44 =
+  <Person.Update name="Bo" />
+
+function clearedNick() @32:1-32:73 =
+  apply(<Person name="Ada" nick="A" />, cleared())
+
+function root() @33:1-33:30 =
+  withAuthor()
+
+record Person.Update update of Person @5:1-5:50
+  name: string
+  nick: string?

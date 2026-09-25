@@ -6,6 +6,7 @@ import {
   NxDisposedResourceError,
   NxEvaluationError,
   NxLibraryRegistry,
+  type NxJsonRecord,
   NxProgramArtifact,
   NxProgramBuildContext,
   NxWorkspace,
@@ -50,7 +51,7 @@ function captureEvaluationError(callback: () => void): NxEvaluationError {
   return thrown as NxEvaluationError;
 }
 
-/** The parts of a schema 4 artifact these tests read. */
+/** The parts of an NX IR artifact these tests read. */
 type IrRuntimeModule = typeof import("@nx-lang/ir-runtime");
 
 /**
@@ -323,7 +324,7 @@ let root() = { "ready" }`
       join(flowDir, "Flow.nx"),
       `export type FlowCompletion = continue | end { message:string }
 export type QuestionFlow = {
-  completion:FlowCompletion?
+  completion?:FlowCompletion
   content steps:object
 }`
     );
@@ -339,8 +340,8 @@ export type QuestionFlow = {
         source: `import { QuestionFlow } from "../flow"
 import { Panel } from "../ui"
 let omitted(): QuestionFlow = { <QuestionFlow><Panel><span /></Panel></QuestionFlow> }
-let explicit(): QuestionFlow = { <QuestionFlow completion={null}><Panel><span /></Panel></QuestionFlow> }
-let root(): QuestionFlow[] = { omitted() explicit() }`
+let explicit(): QuestionFlow = { <QuestionFlow completion={}><Panel><span /></Panel></QuestionFlow> }
+let root(): QuestionFlow+ = { omitted() explicit() }`
       }
     ]);
 
@@ -352,6 +353,14 @@ let root(): QuestionFlow[] = { omitted() explicit() }`
       });
 
       try {
+        const value = artifact.evaluateJson() as readonly NxJsonRecord[];
+        // An empty optional field is an omitted key, whether it was omitted or written `{}`.
+        expect(value).toHaveLength(2);
+        for (const flow of value) {
+          expect(flow.$type).toBe("QuestionFlow");
+          expect(Object.keys(flow)).not.toContain("completion");
+        }
+
         const irRuntime = await importIrRuntime();
         const modules = new Map(
           artifact
@@ -361,7 +370,7 @@ let root(): QuestionFlow[] = { omitted() explicit() }`
         const program = irRuntime.linkNxIrProgram(modules.get("app/main.nx")!, {
           resolve: (identity) => modules.get(identity)
         });
-        expect(irRuntime.evaluateFunction(program, "root")).toEqual(artifact.evaluateJson());
+        expect(irRuntime.evaluateFunction(program, "root")).toEqual(value);
       } finally {
         artifact.dispose();
       }
@@ -371,6 +380,40 @@ let root(): QuestionFlow[] = { omitted() explicit() }`
       registry.dispose();
       rmSync(tempRoot, { recursive: true, force: true });
     }
+  });
+
+  it("encodes the empty value as an omitted key, `[]`, or `null` for a cleared update field", () => {
+    const declarations = `export type Person = { name:string nick?:string }
+export type Book = { title:string author?:Person tags:string+ extras?:string+ }
+`;
+    // Omitted and written-empty optional fields are both omitted keys; a lone child at a `+` or
+    // `?:T+` field is a one-element array.
+    expect(
+      evaluateJsonFromSource(`${declarations}let root() = {
+  <Book title="A" tags={"x"} />
+  <Book title="B" author={<Person name="Ada" />} tags={"x" "y"} extras={"z"} />
+  <Book title="C" author={} tags={"x"} extras={} />
+}`)
+    ).toEqual([
+      { $type: "Book", tags: ["x"], title: "A" },
+      { $type: "Book", author: { $type: "Person", name: "Ada" }, extras: ["z"], tags: ["x", "y"], title: "B" },
+      { $type: "Book", tags: ["x"], title: "C" }
+    ]);
+
+    // An entry call's empty standalone `?` result is the host's `null`; an empty `*` stays `[]`.
+    expect(evaluateJsonFromSource("let root(): int? = { if false { 1 } }")).toBeNull();
+    expect(evaluateJsonFromSource(`${declarations}let root(): string? = { <Book title="A" tags={"x"} />.author?.name }`)).toBeNull();
+    expect(evaluateJsonFromSource("let root(): int* = { if false { 1 } }")).toEqual([]);
+
+    // An update record is the one place `null` appears: a present `null` clears the field.
+    expect(evaluateJsonFromSource(`${declarations}let root() = <Person.Update nick={} />`)).toEqual({
+      $type: "Person.Update",
+      nick: null
+    });
+    expect(evaluateJsonFromSource(`${declarations}let root() = <Person.Update name="Bo" />`)).toEqual({
+      $type: "Person.Update",
+      name: "Bo"
+    });
   });
 
   it("generates deterministic NX IR images and metadata", () => {

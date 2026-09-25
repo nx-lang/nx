@@ -11,7 +11,7 @@
 // blue warrior is absent and the tile it would start on is empty. The Pause / fps / Seek buttons
 // on the first card are drawn in their starting state and do nothing.
 
-component <Card extends DrawnNode Title:string content Children:DrawnNode[] /> = {
+component <Card extends DrawnNode Title:string content Children:DrawnNode+ /> = {
   <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=8 />
     BackgroundColor="#2B3035" HorizontalOptions=Fill>
     <SkiaStack Padding=<Thickness Left=16 Top=12 Right=16 Bottom=12 /> Spacing=10>

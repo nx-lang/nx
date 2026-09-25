@@ -2586,6 +2586,7 @@ fn build_interface_item(
             })?;
 
             LibraryInterfaceKind::Function {
+                form: function.form,
                 params: function
                     .params
                     .iter()
@@ -2593,6 +2594,8 @@ fn build_interface_item(
                         name: param.name.clone(),
                         ty: param.ty.clone(),
                         is_content: param.is_content,
+                        optional: param.optional,
+                        has_default: param.default.is_some(),
                         span: param.span,
                     })
                     .collect(),
@@ -2681,7 +2684,8 @@ fn record_field_to_interface_field(field: &RecordField) -> LibraryInterfaceField
         name: field.name.clone(),
         ty: field.ty.clone(),
         is_content: field.is_content,
-        is_required: field.default.is_none() && !matches!(field.ty, TypeRef::Nullable(_)),
+        optional: field.optional,
+        is_required: field.default.is_none() && !field.optional,
         span: field.span,
     }
 }
@@ -2691,7 +2695,8 @@ fn union_case_field_to_interface_field(field: &UnionCaseField) -> LibraryInterfa
         name: field.name.clone(),
         ty: field.ty.clone(),
         is_content: field.is_content,
-        is_required: field.default.is_none() && !matches!(field.ty, TypeRef::Nullable(_)),
+        optional: field.optional,
+        is_required: field.default.is_none() && !field.optional,
         span: field.span,
     }
 }
@@ -2706,8 +2711,7 @@ fn type_from_function_binding(ty: &Type) -> Option<TypeRef> {
 fn type_to_type_ref(ty: &Type) -> Option<TypeRef> {
     match ty {
         Type::Primitive(primitive) => Some(TypeRef::name(primitive.as_str())),
-        Type::Array(inner) => Some(TypeRef::array(type_to_type_ref(inner)?)),
-        Type::Nullable(inner) => Some(TypeRef::nullable(type_to_type_ref(inner)?)),
+        Type::Seq { item, occ } => Some(TypeRef::seq(type_to_type_ref(item)?, *occ)),
         Type::Function { params, ret } => Some(TypeRef::function(
             params
                 .iter()
@@ -2716,6 +2720,7 @@ fn type_to_type_ref(ty: &Type) -> Option<TypeRef> {
                         name: param.name.clone(),
                         ty: type_to_type_ref(&param.ty)?,
                         is_content: param.is_content,
+                        optional: param.optional,
                     })
                 })
                 .collect::<Option<Vec<_>>>()?,
@@ -3160,7 +3165,7 @@ mod tests {
         .expect("base file");
         fs::write(
             ui_dir.join("derived.nx"),
-            r#"export type TextField extends Field = { placeholder:string? }"#,
+            r#"export type TextField extends Field = { placeholder?:string }"#,
         )
         .expect("derived file");
 
@@ -3189,7 +3194,7 @@ mod tests {
         fs::write(
             people_dir.join("User.nx"),
             r#"export abstract type Named = { name:string }
-export type User extends Named = { email:string? }"#,
+export type User extends Named = { email?:string }"#,
         )
         .expect("people file");
 
@@ -3203,7 +3208,7 @@ export type User extends Named = { email:string? }"#,
         let source = r#"import { User } from "../people"
 let key: User.Property = {User.Property.email}
 let keys = {changed(<User.Update name="Ada" />)}
-let patch = <User.Update email={null} />"#;
+let patch = <User.Update email={} />"#;
         fs::write(&path, source).expect("keys file");
         let artifact =
             build_program_artifact_from_source(source, &path.display().to_string(), &build_context)
@@ -3246,12 +3251,12 @@ let key = {User.Property.nickname}"#;
             workspace_module(
                 "data.nx",
                 r#"export abstract type Named = { name:string }
-export type User extends Named = { email:string? }"#,
+export type User extends Named = { email?:string }"#,
             ),
             workspace_module(
                 "main.nx",
                 r#"import { User } from "./data.nx"
-let root() = <Box a={User.Property.name} b={User.Property.email} keys={changed(<User.Update email={null} name="Ada" />)} />"#,
+let root() = <Box a={User.Property.name} b={User.Property.email} keys={changed(<User.Update email={} name="Ada" />)} />"#,
             ),
         ]);
         let artifact =
@@ -3931,7 +3936,7 @@ let root() = { <Panel fit=stretch /> }"#;
 
         let main_path = app_dir.join("main.nx");
         let source = r#"import "../ui"
-type TextField extends Field = { placeholder:string? }
+type TextField extends Field = { placeholder?:string }
 let root() = { 0 }"#;
         fs::write(&main_path, source).expect("main file");
 
@@ -4156,7 +4161,7 @@ export component <Panel content body:object /> = {
 
         let main_path = app_dir.join("main.nx");
         let source = r#"import { Wrapper, Wrap, Panel } from "../ui"
-let root(): object[] = {
+let root(): object+ = {
   <Wrap><Badge /></Wrap>
   <Wrapper><Badge /></Wrapper>
   <Panel><Badge /></Panel>
@@ -4547,8 +4552,8 @@ export let <Img fit: Fit = {Fit.fill}  state: LoadState = {LoadState.idle} /> = 
     fn an_evaluated_generic_component_record_serializes_without_its_type_argument() {
         let artifact = build_program_artifact_from_source(
             "type Contact = { name:string }\n\
-             external component <SkiaLayout TItem:type itemsSource:TItem[]? />\n\
-             let root() = { <SkiaLayout TItem=Contact itemsSource={} /> }",
+             external component <SkiaLayout TItem:type itemsSource?:TItem+ />\n\
+             let root() = { <SkiaLayout TItem=Contact itemsSource={<Contact name=\"Ada\" />} /> }",
             "main.nx",
             &ProgramBuildContext::empty(),
         )
@@ -4572,14 +4577,14 @@ export let <Img fit: Fit = {Fit.fill}  state: LoadState = {LoadState.idle} /> = 
                 "app.nx",
                 br#"import { ItemsBase } from "./base.nx"
 type Contact = { name:string }
-component <ContactList extends ItemsBase spacing:int? /> = { state { first:TItem? = null } <Label /> }
-let contacts:Contact[] = {}
+component <ContactList extends ItemsBase spacing?:int /> = { state { first?:TItem } <Label /> }
+let contacts:Contact* = {}
 let root() = { <ContactList TItem=Contact items={contacts} spacing=4 /> }"#
                     .to_vec(),
             ),
             workspace_module(
                 "base.nx",
-                br#"export abstract component <ItemsBase TItem:type items:TItem[]? />"#.to_vec(),
+                br#"export abstract component <ItemsBase TItem:type items?:TItem+ />"#.to_vec(),
             ),
         ]);
 
@@ -4596,7 +4601,7 @@ let root() = { <ContactList items={ "a" } /> }"#
             ),
             workspace_module(
                 "base.nx",
-                br#"export abstract component <ItemsBase TItem:type items:TItem[]? />"#.to_vec(),
+                br#"export abstract component <ItemsBase TItem:type items?:TItem+ />"#.to_vec(),
             ),
         ]);
 
@@ -4892,7 +4897,7 @@ let root() = { <Draw s={<Circle r=1 />} /> }"#
             ),
             workspace_module(
                 "widgets.nx",
-                br#"export abstract type Shape = { label: string? }
+                br#"export abstract type Shape = { label?: string }
 export type Circle extends Shape = { r: int }
 export let <Draw s: Shape = {<Circle r=0 />} /> = <div label={s.label} />"#
                     .to_vec(),
@@ -4920,14 +4925,14 @@ export let <Draw s: Shape = {<Circle r=0 />} /> = <div label={s.label} />"#
             workspace_module(
                 "app.nx",
                 br#"import { Draw } from "./widgets.nx"
-abstract type Shape = { label: int? }
+abstract type Shape = { label?: int }
 type Circle extends Shape = { r: int }
 let root() = { <Draw s={<Circle r=1 />} /> }"#
                     .to_vec(),
             ),
             workspace_module(
                 "widgets.nx",
-                br#"export abstract type Shape = { label: string? }
+                br#"export abstract type Shape = { label?: string }
 export type Circle extends Shape = { r: int }
 export let <Draw s: Shape = {<Circle r=0 />} /> = <div label={s.label} />"#
                     .to_vec(),
@@ -5501,7 +5506,7 @@ export let <Panel p: Point = {<Point x=0 />} /> = <div x={p.x} />"#
             workspace_module("app.nx", app.as_bytes().to_vec()),
             workspace_module(
                 "widgets.nx",
-                br#"export abstract component <Card label:string? />
+                br#"export abstract component <Card label?:string />
 export component <Plain extends Card /> = { <div /> }
 export let <Draw s: Card /> = <div />"#
                     .to_vec(),
@@ -5517,7 +5522,7 @@ export let <Draw s: Card /> = <div />"#
     fn a_same_named_local_component_lineage_does_not_satisfy_a_foreign_one() {
         let messages = component_collision_workspace(
             r#"import { Draw } from "./widgets.nx"
-abstract component <Card label:int? />
+abstract component <Card label?:int />
 component <Fancy extends Card /> = { <div /> }
 let root() = { <Draw s={<Fancy />} /> }"#,
         );
@@ -6736,7 +6741,7 @@ let root(): int = { answer() }"#
                       let bound = {1..5}\n\
                       let s = <Slider range={2..=6} />\n\
                       let w:int = {width(0..3)}\n\
-                      let rs:<Range T=int/>[] = { (0..1) }\n\
+                      let rs:<Range T=int/>+ = { (0..1) }\n\
                       let counted = { for i in 0..4 { i } }\n\
                       let root() = { counted }\n";
         let artifact =

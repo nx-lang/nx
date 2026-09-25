@@ -1,4 +1,4 @@
 action ActionSharedWithMultipleComponents = {
   value: string
-  source: string?
+  source?: string
 }

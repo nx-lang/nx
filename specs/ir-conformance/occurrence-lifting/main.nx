@@ -1,0 +1,60 @@
+// Where a value takes its site's occurrence, in a program generated JavaScript also runs: an item
+// lifted to a `+` site through an alias, a call argument, a fallback (either operand, so a `for`
+// over it yields a sequence in every engine) and a declared result, a fallback operand widened to
+// the join's numeric type, structural equality of empty optionals and records, an optional
+// parameter left out of an element call, an empty standalone `?` result, which an entry call
+// returns to the host as `null`, and a field of an update record, which reads as empty whether it
+// is absent or cleared.
+export type Ints = int+
+export type Person = { name:string nick?:string }
+export type Scores = { values:Ints }
+export type Maybe = { values?:Ints }
+export type Item = { n:int }
+export type Items = Item+
+export type Shelf = { content items:Items }
+
+let aliasItem() = <Scores values={3} />
+let optionalAliasItem() = <Maybe values={3} />
+let aliasContent() = <Shelf><Item n=1 /></Shelf>
+let echo(xs:int+) = { xs }
+let argument() = { echo(5) }
+let orFive(xs?:int+) = { xs ?? 5 }
+let fallbackArgument() = { orFive(3) }
+let fallbackItem() = { orFive({}) }
+let fallbackAtSite(xs?:int+) = <Scores values={xs ?? 5} />
+let fallbackLifted() = { fallbackAtSite({}) }
+let bumped(xs?:int+) = { for x in xs ?? 5 { x + 1 } }
+let fallbackLoop() = { bumped({}) }
+let itemOr(ys:int+, o?:int) = { o ?? ys }
+let presentLifted() = { itemOr({2 3}, 1) }
+let halfOr(o?:int) = { o ?? 1.5 }
+let presentWidened() = { halfOr(1) }
+let sameNick(a:Person, b:Person) = { a.nick == b.nick }
+let emptyNicks() = { sameNick(<Person name="A" />, <Person name="B" />) }
+let differentNicks() = { sameNick(<Person name="A" nick="a" />, <Person name="B" />) }
+let samePeople() = { <Person name="A" nick="a" /> == <Person name="A" nick="a" /> }
+let otherPeople() = { <Person name="A" /> != <Person name="B" /> }
+let <Row Item:string Note?:string />: string = { Item + (Note ?? "-none") }
+let rowWithout() = { <Row Item="x" /> }
+let rowWith() = { <Row Item="x" Note="-y" /> }
+let declaredMany(): int+ = { 5 }
+let viaFor(o?:int): int? = { for x in o { x } }
+let declaredOne() = { viaFor(1) }
+let orFiveDeclared(xs?:int+): int+ = { xs ?? 5 }
+let declaredFallback() = { orFiveDeclared({}) }
+let fives: Ints = { 5 }
+let declaredValue() = { fives }
+let noString(): string? = { if false { "a" } }
+let noneInferred() = { if false { 1 } }
+let noInts(): int* = { if false { 1 } }
+let nameOr(u:Person.Update) = { u.name ?? "same" }
+let nickOr(u:Person.Update) = { u.nick ?? "same" }
+let nameOf(u:Person.Update) = { u.name }
+let updatedName() = { nameOr(<Person.Update name="Bo" />) }
+let absentName() = { nameOr(<Person.Update />) }
+let clearedNick() = { nickOr(<Person.Update nick={} />) }
+let updatedNick() = { nickOr(<Person.Update nick="b" />) }
+let absentRead() = { nameOf(<Person.Update />) }
+let nickOf(u:Person.Update) = { u.nick }
+let clearedRead() = { nickOf(<Person.Update nick={} />) }
+let root() = { aliasItem() }

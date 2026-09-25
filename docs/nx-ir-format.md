@@ -1,17 +1,20 @@
-# NX IR, schema 4
+# NX IR, schema 5
 
 NX IR is a deterministic binary image emitted from a successful `ProgramArtifact`. It is intended
-for caching, inspection, and loading by a runtime without re-reading NX source. Schema 4 carries
+for caching, inspection, and loading by a runtime without re-reading NX source. Schema 5 carries
 one module per image, links to other modules by name, and encodes the module as flat tables so
 that a name, a type or a literal is written once and referenced by index. The tables are 32-bit
 cells over one string blob, laid out so a runtime reads them in place: a JavaScript reader is one
 typed-array view per table, and no table is decoded before it is used.
 
-Schema 4 differs from schema 3 by the `text` node, kind `20`, by the `float32` binary operators
-`16` to `19`, and by `concat` taking string operands only; every other kind, table and layout is
-unchanged. Schema 3 and schema 2 artifacts,
-and the JSON encoding schema 3 had before it was released, are not read by any runtime and are not
-emitted by the compiler. There is no converter.
+Schema 5 differs from schema 4 by the `seq` type kind, `5`, which carries an occurrence and
+replaces the `array` and `nullable` type kinds; by the `exists`, `optionalMember` and `coalesce`
+node kinds, `23` to `25`, and the `{}` match pattern; and by the `null` node kind no longer being
+emitted. Every other kind, table and layout is unchanged. Schema 4 differed from schema 3 by the
+`text` node, kind `20`, by the `float32` binary operators `16` to `19`, and by `concat` taking
+string operands only. Schema 4 and earlier artifacts, and the JSON encoding schema 3 had before it
+was released, are not read by any runtime and are not emitted by the compiler. There is no
+converter.
 
 ## Reading this document
 
@@ -37,7 +40,8 @@ Layouts use these operand types:
 - `flags` — an integer whose bits are named in the layout.
 
 Kind numbers are assigned here and are never reused. A reader that meets a kind number it does not
-know must refuse the image.
+know must refuse the image. A retired kind keeps its number, so no later kind takes it; the emitter
+never writes it, and a reader that meets one reports the image as malformed.
 
 ## Cells
 
@@ -82,13 +86,19 @@ are non-decreasing, start at `0` and end at the pool's length.
 | --- | --- | --- | --- |
 | 0 | primitive | `[0, str]` | A built-in type named by the string: `int`, `int32`, `int64`, `float32`, `float64`, `string`, `boolean`, `void`, `never` or `object`. |
 | 1 | nominal | `[1, ref]` | A record, union or type alias declared in a module. |
-| 2 | array | `[2, type]` | A list of the element type. |
-| 3 | nullable | `[3, type]` | The inner type or `null`. |
-| 4 | function | `[4, type, [[str, type, flags]...]]` | A function type, `<function Item:Contact Index:int />: DrawnNode`: the result type, then each parameter's name, type and flags (bit 0: the parameter takes body content), in declared order. A function satisfies it by parameter name, so a function may declare fewer parameters than the type. |
+| 2 | array | — | Retired with schema 5, replaced by `seq`. Never emitted; an entry of this kind is malformed. |
+| 3 | nullable | — | Retired with schema 5, replaced by `seq`; as `array`. |
+| 4 | function | `[4, type, [[str, type, flags]...]]` | A function type, `<function Item:Contact Index:int />: DrawnNode`: the result type, then each parameter's name, type and flags (bit 0: the parameter takes body content; bit 1: the parameter is optional, `p?:T`), in declared order. A function satisfies it by parameter name, so a function may declare fewer parameters than the type. |
+| 5 | seq | `[5, type, occurrence]` | An item type under an occurrence, `string?`, `Person+`, `object*`: the item type, then an occurrence cell whose bit 0 says the type may be empty and bit 1 that it may hold many, so `?` is `1`, `+` is `2` and `*` is `3`. `0` is not written: a type that is exactly one has no wrapper. The item type is never itself a `seq`. |
 
-A type is written once: two fields of type `string?` share one `nullable` entry, which itself
-refers to one `primitive` entry. An `array` or `nullable` entry's inner type precedes it in the
-table, so no type reaches itself.
+A type is written once: two fields of type `string?` share one `seq` entry, which itself refers to
+one `primitive` entry. A `seq` entry's item type precedes it in the table, so no type reaches
+itself. Every occurrence in source is a `seq`, and a field, prop, state field or parameter declared
+`p?:T` is typed by its read type — `T?`, or `T*` for `p?:T+` — so a runtime normalizes an omitted
+field to the empty value from the type alone, with no second flag. `nxlang ir explain` prints a
+`seq` by its NX spelling and parenthesizes a function type under a suffix,
+`(<function Item:object Index:int />: string)?`, because a suffix written after a function type's
+result would bind to the result.
 
 Types appear on parameters, fields and props. Nodes do not carry types. Where evaluation depends on
 a type, the node kind or operator says so: integer division and modulo are their own operators.
@@ -111,7 +121,7 @@ reader that evaluates by index never needs to look ahead and no node reaches its
 
 | Kind | Name | Layout | Meaning |
 | --- | --- | --- | --- |
-| 0 | null | `[0]` | The `null` literal. |
+| 0 | null | — | Retired with schema 5: the language has no null value. Never emitted; a node of this kind is malformed. The empty value is an empty `array` node, `[12, []]`. |
 | 1 | bool | `[1, 0 or 1]` | A boolean literal. |
 | 2 | string | `[2, str]` | A string literal. |
 | 3 | number | `[3, const]` | A numeric literal. |
@@ -119,11 +129,11 @@ reader that evaluates by index never needs to look ahead and no node reaches its
 | 5 | reference | `[5, ref]` | A top-level function or value. A function reference evaluates to a function value, in any expression position — a call's callee, a property value, a list element, a result; a value reference evaluates the value. See *Function values*. |
 | 6 | binary | `[6, op, node, node]` | A binary operation; see *Binary operators*. |
 | 7 | unary | `[7, op, node]` | `0` negation, `1` logical not. |
-| 8 | call | `[8, node, [node...]]` | Calls the callee with the arguments. |
+| 8 | call | `[8, node, [node?...]]` | Calls the callee with its arguments by position. An absent argument is a parameter the call left out, and the list may stop before the trailing parameters it leaves out; the callee fills each with its default or, when the parameter is optional, the empty value. See *Parameters a call leaves out*. |
 | 9 | intrinsic | `[9, op, [node...], [str...]]` | An update intrinsic: `0` apply, `1` merge, `2` diff, `3` changed. The string list is the declared field order for `changed`, empty for the others. |
-| 10 | if | `[10, node, node, node?]` | Condition, then-branch, else-branch (absent yields `null`). |
-| 11 | ifIs | `[11, node, [[[node...], node]...], node?]` | Scrutinee, arms (each a pattern list and a body), else-branch. |
-| 12 | array | `[12, [node...]]` | A list literal. |
+| 10 | if | `[10, node, node, node?]` | Condition, then-branch, else-branch. An `if` with no else yields the empty value, `[]`, when the condition is false. |
+| 11 | ifIs | `[11, node, [[[node...], node]...], node?]` | Scrutinee, arms (each a pattern list and a body), else-branch. The `{}` pattern, which matches the empty value, is an empty `array` node, `[12, []]`, in an arm's pattern list; a module with one requires `occurrence-v1`. |
+| 12 | array | `[12, [node...]]` | A list literal. With no elements it is the empty value, `{}` in source, and `ir explain` prints it as `{}`. |
 | 13 | for | `[13, slot, str, slot?, str?, node, node]` | Item slot and name, index slot and name (both absent when there is no index), iterable, body. Yields the list of body values. |
 | 14 | member | `[14, node, str]` | Reads the named member of the base object. |
 | 15 | record | `[15, ref, [[str, node]...], [node...]]` | Constructs the record the reference names from named properties and content children. Defaults, required fields, the content field and whether the record is an update record all come from the declaration. |
@@ -134,11 +144,15 @@ reader that evaluates by index never needs to look ahead and no node reaches its
 | 20 | text | `[20, node, str]` | The canonical text form of a primitive value: the operand, and the name of its static type, one of `int`, `int32`, `int64`, `float32`, `float64` or `boolean`. See *Text conversion*. |
 | 21 | namedCall | `[21, node, [[str, node]...]]` | A call of a function-typed value by name, `<Row Item={c} Index={i} />` where `Row` is a parameter, a prop or a `let`: the callee, which evaluates to a function value, then each argument as a name and a node, sorted by name like any property list. The runtime binds the arguments to the callee's own parameters by name — a name the declaration lacks is dropped, a parameter it declares must be present. See *Function values*. |
 | 22 | forRange | `[22, slot, str, slot?, str?, node, node]` | A `for` whose iterable evaluates to a `Range` record, with the layout of a `for`. The body runs once per integer from the range's `start` upward, stopping before `end` or after it when `endInclusive` is true, with the item bound to that integer and the index, when present, to its position from zero. An empty or reversed range runs the body no times. Yields the list of body values. Requires `ranges-v1`. |
+| 23 | exists | `[23, node]` | `x?`: `true` when the operand holds at least one item, `false` when it is the empty value. Requires `occurrence-v1`. |
+| 24 | optionalMember | `[24, node, str]` | `x?.m`: the named member of the base when the base holds a value, and the empty value when the base is empty. Requires `occurrence-v1`. |
+| 25 | coalesce | `[25, node, node]` | `x ?? y`: the left operand when it holds at least one item, otherwise the right, which is evaluated only when the left is empty. Requires `occurrence-v1`. |
 
 A `{ expression }` block in NX source is its expression; it has no node of its own. NX has no
 syntax for a local `let` binding or an index expression, so neither has a node kind. A function
 type has a *type* kind but no node kind: a function reaches an expression by name, as a
-`reference`.
+`reference`. There is no node for a `null` value and none for a conditional operator: absence is
+the empty value, an empty `array`, and the presence operators are the three nodes above.
 
 Property lists are sorted by property name. Content lists are in source order.
 
@@ -167,11 +181,11 @@ Property lists are sorted by property name. Content lists are in source order.
 | 18 | fmul32 | `float32` multiplication: the product, rounded to the nearest `float32`. |
 | 19 | fdiv32 | `float32` division: the quotient, rounded to the nearest `float32`. |
 
-`and` and `or` are the only operators that do not evaluate both operands. `and` evaluates its right
-operand only when its left is true, and `or` only when its left is false, exactly as
+`and` and `or` are the only binary operators that do not evaluate both operands. `and` evaluates
+its right operand only when its left is true, and `or` only when its left is false, exactly as
 `if left then right else false` and `if left then true else right` would. Every other operator
-evaluates both. This matters because NX is not total: it is what lets `d != 0 && n / d > 1` guard
-the division rather than perform it.
+evaluates both; among the nodes, only `coalesce` is non-strict the same way. This matters because
+NX is not total: it is what lets `d != 0 && n / d > 1` guard the division rather than perform it.
 
 Division or remainder by zero is a runtime diagnostic.
 
@@ -221,8 +235,8 @@ declarations use the names the language gives them: `User.Update`, `User.Propert
 
 | Kind | Name | Layout |
 | --- | --- | --- |
-| 0 | function | `[0, str, [[str, type, isContent]...], node]` — name, parameters (name, type, `0` or `1`), body. |
-| 1 | value | `[1, str, node]` — name and value. |
+| 0 | function | `[0, str, [[str, type, node?, flags]...], node, type?, flags]` — name, parameters (name, type, default, flags: bit 0 content, bit 1 optional), body, declared result type and result flags. A parameter declared `p?:T` is typed by its read type, `T?` (`T*` for `p?:T+`), and sets the optional bit, so a call that leaves it out binds the empty value. A default is a node of the function's frame. See *Parameters a call leaves out* and *Results*. |
+| 1 | value | `[1, str, node, type?]` — name, value and declared type. See *Results*. |
 | 2 | record | `[2, str, [field...], [ref...], isAbstract, ref?]` — name, fields, abstract bases nearest first, `0` or `1`, and the update target when the record is a derived `T.Update`. |
 | 3 | component | `[3, str, [field...], [field...], node?, flags, [[str, ref]...]]` — name, props, state, body (absent for an external component), flags: bit 0 abstract, bit 1 external, and the emits: each an emit's local name and a reference to its action record, inherited emits included, in declaration order. An inherited emit's reference names the module that declared it. |
 | 4 | union | `[4, str, [[str, [field...], isConstant]...], [ref...], ref?]` — name, cases (name, fields, `0` or `1`), abstract bases, and the property target when the union is a derived `T.Property`. |
@@ -233,8 +247,21 @@ required. Record and component fields arrive flattened, a derived record listing
 fields before its own, so `bases` answers only what flattening cannot: whether a value stamped with
 one name is acceptable where another type was asked for. An abstract record has no values of its
 own. An update record's fields are all optional with no defaults, so a value keeps an absent field
-absent. A union case is constant when it declares no fields in a union with no base; its wire form
-is then the bare case name rather than a `$type` object.
+absent; a field whose type is a `?` `seq` is clearable, and a runtime accepts a present empty value
+only there. A union case is constant when it declares no fields in a union with no base; its wire
+form is then the bare case name rather than a `$type` object.
+
+### Results
+
+A function's result and a value's initializer are typed sites. The declared type is present only
+when the source declares one, and a runtime normalizes the result to it as it does an argument:
+`5` returned where `int+` is declared is `[5]`, and a one-item sequence where `int?` is declared is
+its item. Without a declared type the result is the body's value as it is.
+
+Bit 0 of a function's result flags is set when its result type, declared or inferred, is a
+standalone `T?`. An entry call — a host evaluating the function — then returns an empty result to the host
+as `null`, the host's spelling of an absent single value, rather than `[]`. Inside the program, and
+for any other type, the empty value stays `[]`.
 
 ### Slots
 
@@ -245,9 +272,21 @@ union case) the fields. Every `let`, `letStatement` and `for` binding after that
 handler's `action` binding, takes the next integer in the order the body is walked. Two
 declarations are free to use the same integers.
 
-A record's or component's field default can read the fields declared before it through their slots.
-A runtime normalizing a construction evaluates each default in a fresh frame for that declaration,
-binding each field's slot as it goes.
+A record's or component's field default, and a function's parameter default, can read the fields or
+parameters declared before it through their slots. A runtime normalizing a construction evaluates
+each default in a fresh frame for that declaration, binding each field's slot as it goes, and a call
+binds the callee's parameter slots the same way.
+
+### Parameters a call leaves out
+
+A call may leave a parameter out: a `call` node's argument is absent, or the list stops before it.
+The callee fills the parameter, not the caller: a runtime evaluates the parameter's default in the
+callee's frame, after binding the parameters before it, so the default a program gets is the one the
+function's module declares at link time, and it may read values that module keeps private. A
+parameter with no default is the empty value when it is optional; otherwise the call is refused,
+naming the parameter. A default is normalized to its parameter's type, as an argument is. A host
+calling a function positionally may likewise pass fewer arguments than it has parameters, and a
+`namedCall` or a host call by name leaves out a parameter by not naming it.
 
 ### Element ids
 
@@ -376,7 +415,7 @@ An image begins with a 16-byte header of four cells:
 | Offset | Cell | Value |
 | --- | --- | --- |
 | 0 | magic | The ASCII bytes `NXIR`. |
-| 4 | schema version | `4`. |
+| 4 | schema version | `5`. |
 | 8 | total length | The length of the whole image in bytes. |
 | 12 | directory count | The number of directory entries that follow. |
 
@@ -384,8 +423,9 @@ The directory follows at offset 16: one entry of three cells per section, `kind`
 `length`, each offset and length a multiple of four and each section inside the image. The emitter
 writes the sections in kind order, contiguously after the directory. A reader refuses an image
 whose magic or schema version it does not implement, naming the version found and the version it
-supports, and does not interpret the bytes that follow the header; it refuses an image whose total
-length is not the length of the bytes it was given, which is the truncation check.
+supports — a schema 4 image is refused as found `4`, supported `5` — and does not interpret the
+bytes that follow the header; it refuses an image whose total length is not the length of the bytes
+it was given, which is the truncation check.
 
 ## Validation
 
@@ -393,12 +433,13 @@ A reader establishes, before it answers any question about an image, that the he
 are well formed, that every offset array is non-decreasing and ends at its pool, that the string
 blob is UTF-8 and every string offset is a character boundary, and that every entry of every table
 follows its kind's layout with every index inside the table it names: strings, types, constants,
-nodes, declarations and module slots, with `none` allowed only where the layout says so. A node's
-child indices and an `array` or `nullable` type's inner index are bounded by the entry's own index
-rather than the table's count, so an entry that names itself or a later entry is refused and every
-walk over children terminates. After that pass every read is in bounds, so evaluation reads cells
-without further checks. A malformed or truncated image is refused with a diagnostic rather than an
-exception, and no input can make a reader read outside the image.
+nodes, declarations and module slots, with `none` allowed only where the layout says so; an entry
+of a retired kind, `array`, `nullable` or `null`, is malformed. A node's child indices and a `seq`
+type's item index are bounded by the entry's own index rather than the table's count, so an entry
+that names itself or a later entry is refused and every walk over children terminates. After that
+pass every read is in bounds, so evaluation reads cells without further checks. A malformed or
+truncated image is refused with a diagnostic rather than an exception, and no input can make a
+reader read outside the image.
 
 Both the Rust reader (`NxIrImage::open`) and the TypeScript runtime (`prepareNxIrModule`) are
 tested against the corpus: each truncates every image at every four-byte boundary, and each
@@ -418,21 +459,30 @@ derived property union lists `property-unions-v1`; one that calls an update intr
 `update-intrinsics-v1`; one that binds an action handler lists `action-handlers-v1`; one whose type
 table holds a function type, whose node table references a function anywhere but as a `call`'s
 callee, or which contains a `namedCall` lists `function-values-v1`; one that contains a `forRange`
-lists `ranges-v1`. Constructing a range needs no feature: that is an ordinary record construction,
-and only iterating one is a node a runtime may not know. A runtime that does not know a
+lists `ranges-v1`; one that contains an `exists`, `optionalMember` or `coalesce` node, or an `ifIs`
+arm with the `{}` pattern, lists `occurrence-v1`. Constructing a range needs no feature: that is an
+ordinary record construction, and only iterating one is a node a runtime may not know. A `seq` type
+needs none either: it is a type kind, not a node, so a module that declares `string?` fields and
+never tests, steps through or falls back from one lists nothing. A runtime that does not know a
 listed feature refuses the image rather than guessing, which is what makes the list safe to grow.
 An image does not record its evaluation semantics here. The schema version and the runtime ABI
 carry that, and an intentional change to how a runtime evaluates an image bumps the ABI.
 
 ## Values
 
-The value model is unchanged from schema 2. A record value is an object with a `$type` naming the
-record and one key per field. A union case is `{ "$type": "Union.case", ... }`, or the bare case
-name when the case is constant. A component descriptor is an object whose `$type` is the component
-name. An intrinsic element is an object whose `$type` is the tag, with its children under `content`: one
-child as itself, several as a list.
-An integer outside JavaScript's safe range is `{ "$type": "nx.int", "value": "<decimal>" }`, and
-arithmetic on one is a runtime diagnostic in JavaScript. An action handler is
+A record value is an object with a `$type` naming the record and one key per present field.
+Absence is the empty value, and the empty value is the empty array: a `+` or `*` value is an array,
+the empty `*` value being `[]`; a `?` value holding an item is that item itself, unwrapped; and a
+record stores no key for a field that holds the empty value, whatever its occurrence, so an omitted
+`author?:Person` and an omitted `tags?:string+` are both missing keys. No value is `null`. The one
+exception is an update record, which must tell a cleared field from an untouched one: it carries a
+key only for each present field and writes a cleared field as `null` on the wire, and a host
+supplying `null` or `[]` under a key of an update record clears that field. A union case is
+`{ "$type": "Union.case", ... }`, or the bare case name when the case is constant. A component
+descriptor is an object whose `$type` is the component name. An intrinsic element is an object
+whose `$type` is the tag, with its children under `content`: one child as itself, several as a
+list. An integer outside JavaScript's safe range is `{ "$type": "nx.int", "value": "<decimal>" }`,
+and arithmetic on one is a runtime diagnostic in JavaScript. An action handler is
 `{ "$type": "ActionHandler", "action": "<name>" }`, the name being the declaration name of the
 action record it accepts (`Button.Tapped` for an inline emit, `SearchSubmitted` for a shared one),
 plus a `token` when the output came from a lifecycle render; the record names the handler and is
@@ -537,15 +587,15 @@ let root() =
 ```
 
 Its image without the debug section, `specs/ir-conformance/snippet/expected/input.nx.stripped.nxir`,
-is 836 bytes. Cells are shown as little-endian values, sixteen bytes per line, offsets in hex.
+is 848 bytes. Cells are shown as little-endian values, sixteen bytes per line, offsets in hex.
 
 ```
-0000  "NXIR"  4         344       6           header: magic, schema 4, 836 bytes, 6 sections
+0000  "NXIR"  5         350       6           header: magic, schema 5, 848 bytes, 6 sections
 0010  0       58        118       1           directory: strings at 0x58, 280 bytes; module …
 0020  170     38        2         1a8         … at 0x170, 56 bytes; types at 0x1a8 …
 0030  8       3         1b0       28          … 8 bytes; constants at 0x1b0, 40 bytes
 0040  4       1d8       140       5           nodes at 0x1d8, 320 bytes; declarations …
-0050  318     2c                              … at 0x318, 44 bytes
+0050  318     38                              … at 0x318, 56 bytes
 ```
 
 The string section holds 20 strings: a count, 21 offsets and the blob.
@@ -572,7 +622,7 @@ The module section:
 ```
 0170  13      0         2         f           ABI string 19; no features; 2 modules; module 0 …
 0180  10      a3ea564e  1cde592b  11          … "input.nx", "", fingerprint 2080198121860257358 …
-0190  12      9a4d6f33  90ed48c1  1           … module 1: "drawnui.nx", "9", fingerprint 10443083107296702259
+0190  12      fa81ea66  3767a802  1           … module 1: "drawnui.nx", "9", fingerprint 3992344325433453158
 01a0  1       0                               function entrypoints [1]; component entrypoints []
 ```
 
@@ -620,16 +670,17 @@ The node table holds fourteen nodes in 64 cells:
 The declaration list:
 
 ```
-0318  2       0         3         7           count 2; offsets 0, 3, 7
-0328  1       0         0                     declaration 0: value "title" = node 0
-0334  0       2         0         d           declaration 1: function "root", no params, body node 13
+0318  2       0         4         a           count 2; offsets 0, 4, 10
+0328  1       0         0         ffffffff    declaration 0: value "title" = node 0, no declared type
+0338  0       2         0         d           declaration 1: function "root", no params, body node 13,
+0348  ffffffff 0                              …        no declared result, not optional
 ```
 
 `nxlang ir explain` prints the same thing in words:
 
 ```
 module input.nx fingerprint 2080198121860257358
-links drawnui.nx version "9" fingerprint 10443083107296702259
+links drawnui.nx version "9" fingerprint 3992344325433453158
 entrypoints functions [root] components []
 
 value title =
@@ -724,10 +775,10 @@ of its module's source.
 ## Non-goals
 
 NX IR is eager. Every operand is evaluated before its parent and exactly once, except in the
-branches of `if` and `ifIs` and in the right operand of `and` and `or`, which its left operand may
-skip. Nothing in the encoding mutates a value or reassigns a binding, and a node's children precede
-it in the table, so a runtime is free to memoize by node index: only a changed input can invalidate
-a cached result.
+branches of `if` and `ifIs` and in the right operand of `and`, `or` and `coalesce`, which its left
+operand may skip. Nothing in the encoding mutates a value or reassigns a binding, and a node's
+children precede it in the table, so a runtime is free to memoize by node index: only a changed
+input can invalidate a cached result.
 
 Dependency tracking, subscriptions, invalidation and hidden mutable component instances are
 therefore runtime policy rather than properties of this format, which neither provides them nor

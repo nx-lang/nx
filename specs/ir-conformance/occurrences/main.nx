@@ -1,0 +1,33 @@
+// The occurrence model: optional fields omitted and written empty, the presence test, the step,
+// the fallback, a lone child at a `+` content property, and an update record that clears a field.
+// The `{}` pattern is in `occurrence-patterns`, since generated JavaScript does not support match
+// and this program runs as generated JavaScript too.
+export type Person = { name:string nick?:string }
+export type Book = { title:string author?:Person tags?:string+ }
+export type Item = { n:int }
+export external component <Box content items:Item+ />
+
+let ada() = <Person name="Ada" />
+let withAuthor() = <Book title="A" author={ada()} tags={"x" "y"} />
+let withoutAuthor() = <Book title="B" />
+let writtenEmpty() = <Book title="C" author={} tags={} />
+let hasAuthor(b:Book): boolean = { b.author? }
+let has() = { hasAuthor(withAuthor()) }
+let hasNot() = { hasAuthor(withoutAuthor()) }
+let authorName(b:Book): string? = { b.author?.name }
+let name() = { authorName(withAuthor()) }
+let noName() = { authorName(withoutAuthor()) }
+let byline(b:Book): string = { "by " + b.author?.name ?? "anonymous" }
+let named() = { byline(withAuthor()) }
+let anonymous() = { byline(withoutAuthor()) }
+let nick(b:Book): string? = { b.author?.nick }
+let noNick() = { nick(withAuthor()) }
+let tagged(b:Book): boolean = { b.tags? }
+let isTagged() = { tagged(withAuthor()) }
+let isNotTagged() = { tagged(withoutAuthor()) }
+let lone() = <Box><Item n=1 /></Box>
+let several() = <Box><Item n=1 /><Item n=2 /></Box>
+let cleared() = <Person.Update nick={} />
+let renamed() = <Person.Update name="Bo" />
+let clearedNick() = { apply(<Person name="Ada" nick="A" />, cleared()) }
+let root() = { withAuthor() }

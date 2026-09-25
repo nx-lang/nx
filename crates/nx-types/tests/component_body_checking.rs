@@ -29,7 +29,7 @@ fn assert_reports(source: &str, needle: &str) {
 }
 
 const PAINT: &str = "type Hue = Red | Green\n\
-                     external component <Paint colour:Hue? />\n\
+                     external component <Paint colour?:Hue />\n\
                      abstract external component <Node />\n";
 
 #[test]
@@ -58,7 +58,7 @@ fn property_type_mismatch_in_a_component_body_is_reported() {
     assert_reports(
         "type Alpha = Red | Green\n\
          type Beta = Red | Blue\n\
-         external component <Paint colour:Alpha? />\n\
+         external component <Paint colour?:Alpha />\n\
          abstract external component <Node />\n\
          component <Wrapper extends Node /> = { <Paint colour={Beta.Red} /> }",
         "colour",
@@ -69,7 +69,7 @@ fn property_type_mismatch_in_a_component_body_is_reported() {
 fn a_component_body_reports_what_the_top_level_reports() {
     let preamble = "type Alpha = Red | Green\n\
                     type Beta = Red | Blue\n\
-                    external component <Paint colour:Alpha? />\n\
+                    external component <Paint colour?:Alpha />\n\
                     abstract external component <Node />\n";
     let in_body = errors(&format!(
         "{preamble}component <Wrapper extends Node /> = {{ <Paint colour={{Beta.Red}} /> }}"
@@ -136,31 +136,31 @@ fn reading_a_name_that_is_not_a_field_names_the_fields_that_exist() {
 }
 
 #[test]
-fn a_nullable_record_base_reads_its_field() {
+fn an_optional_record_base_reads_its_field_through_the_optional_step() {
     assert_clean(
         "type User = { name:string }\n\
-         external component <TextInput value:string />\n\
+         external component <TextInput value?:string />\n\
          abstract external component <Node />\n\
-         component <Row extends Node u:User? /> = { <TextInput value={u.name} /> }",
+         component <Row extends Node u?:User /> = { <TextInput value={u?.name} /> }",
     );
 }
 
 #[test]
-fn a_nullable_union_base_reads_its_shared_field() {
+fn an_optional_union_base_reads_its_shared_field_through_the_optional_step() {
     assert_clean(
         "abstract type EventBase = { source:string }\n\
          type UiEvent extends EventBase = | clicked { x:int }\n\
-         external component <TextInput value:string />\n\
-         let show(e:UiEvent?) = { <TextInput value={e.source} /> }",
+         external component <TextInput value?:string />\n\
+         let show(e?:UiEvent) = { <TextInput value={e?.source} /> }",
     );
 }
 
 #[test]
-fn a_nullable_base_still_rejects_a_name_that_is_not_a_field() {
+fn an_optional_base_still_rejects_a_name_that_is_not_a_field() {
     assert_reports(
         "type User = { name:string }\n\
-         external component <TextInput value:string />\n\
-         let show(u:User?) = { <TextInput value={u.nombre} /> }",
+         external component <TextInput value?:string />\n\
+         let show(u?:User) = { <TextInput value={u?.nombre} /> }",
         "Record 'User' has no field 'nombre'",
     );
 }

@@ -379,9 +379,10 @@ fn emit_declaration(
 /// record or an action that is not abstract — and from `NxUpdateRecord` otherwise, which is what a
 /// component's state companion gets. Either way it passes its schema to the base: the target's
 /// property keys from the `<Target>Properties` table, or a plain name→type table. Each field is an
-/// `NxOptional<T>` accessor pair over the base's map, so `new User_update { Email = null }` still
-/// means "set email to null". The schema-driven SDK converter and formatter named on the class
-/// write `$type` and only the set fields, so no member needs a wire attribute.</para>
+/// `NxOptional<T>` accessor pair over the base's map, so `new User_update { Email = null }` means
+/// "clear email" — legal because `email` is optional in `User`. The schema-driven SDK converter
+/// and formatter named on the class write `$type` and only the set fields, so no member needs a
+/// wire attribute.</para>
 fn emit_update(
     writer: &mut CodeWriter,
     update: &ExportedUpdate,
@@ -485,10 +486,12 @@ fn emit_update(
                         target.properties_table,
                         sanitize_csharp_member_name(&field.name)
                     ),
+                    // A field is clearable only where the target declares it optional.
                     None => format!(
-                        "new NxField(\"{}\", typeof({}))",
+                        "new NxField(\"{}\", typeof({}){})",
                         escape_csharp_string_literal(&field.name),
-                        csharp_typeof_operand(&csharp_type(&field.ty, context))
+                        csharp_typeof_operand(&csharp_field_type(field, context)),
+                        if field.optional { "" } else { ", clearable: false" }
                     ),
                 });
             }
@@ -519,8 +522,10 @@ fn emit_update(
                 "public string {discriminator_member} => \"{discriminator}\";"
             ));
 
+            // A clearable field — one the target declares `name?:T` — is `NxOptional<T?>`, so a
+            // host writes `null` to clear it; a non-clearable one is `NxOptional<T>`, so it cannot.
             for field in &update.fields {
-                let field_type = csharp_type(&field.ty, context);
+                let field_type = csharp_field_type(field, context);
                 let wire_name = escape_csharp_string_literal(&field.name);
                 let member = sanitize_csharp_member_name(&field.name);
                 let hides_base_member = UPDATE_RECORD_MEMBERS.contains(&member.as_str())
@@ -798,7 +803,7 @@ fn emit_property_table(
                     writer.blank_line();
                 }
                 let member = sanitize_csharp_member_name(&field.name);
-                let field_type = csharp_type(&field.ty, context);
+                let field_type = csharp_field_type(field, context);
                 let wire_name = match enum_case(&field.name) {
                     Some(property_enum) => format!(
                         "{}.Format({}.{})",
@@ -813,7 +818,14 @@ fn emit_property_table(
                 writer.indent();
                 writer.line(&format!("{wire_name},"));
                 writer.line(&format!("record => record.{member},"));
-                writer.line(&format!("(record, value) => record.{member} = value);"));
+                // A field is clearable only where the target declares it optional, which the
+                // CLR type cannot say for a reference type.
+                if field.optional {
+                    writer.line(&format!("(record, value) => record.{member} = value);"));
+                } else {
+                    writer.line(&format!("(record, value) => record.{member} = value,"));
+                    writer.line("clearable: false);");
+                }
                 writer.dedent();
             }
 
@@ -1386,7 +1398,7 @@ fn closed_update_formatter_for(
     context: &CSharpRenderContext<'_>,
 ) -> Option<ClosedUpdateFormatter> {
     let inner = match ty {
-        TypeRef::Nullable(inner) => inner.as_ref(),
+        TypeRef::Seq { inner, occ } if !occ.admits_many() => inner.as_ref(),
         other => other,
     };
     let TypeRef::Applied { name, .. } = inner else {
@@ -1499,7 +1511,7 @@ fn emit_record_fields(
     let mut needs_leading_blank_line = false;
 
     for field in fields {
-        let field_type = csharp_type(&field.ty, context);
+        let field_type = csharp_field_type(field, context);
         let field_name = sanitize_csharp_member_name(&field.name);
 
         let property_declaration = if let Some(initializer) =
@@ -1552,7 +1564,6 @@ fn csharp_default_initializer(
         ExportedLiteralDefault::Int(value) => value.to_string(),
         ExportedLiteralDefault::Float(value) => csharp_float_literal(*value, field_type),
         ExportedLiteralDefault::Boolean(value) => value.to_string(),
-        ExportedLiteralDefault::Null => "null".to_string(),
     })
 }
 
@@ -1697,6 +1708,29 @@ fn graph_resolves_record_base(context: &CSharpRenderContext<'_>, record: &Export
     context.graph().resolved_record_base(record).is_some()
 }
 
+/// The C# type of a field: its declared type, made nullable when the field carries the `?` mark.
+///
+/// <para>`name?:T` is a nullable `T`, and `name?:T+` is a nullable array, `T[]?`: the property may
+/// be absent, which the host reads as `null`. The mark is on the field rather than in its type, so
+/// the declared type is never itself a `?` type and the `?` is added exactly once.</para>
+fn csharp_field_type(field: &ExportedRecordField, context: &CSharpRenderContext<'_>) -> CSharpType {
+    let ty = csharp_type(&field.ty, context);
+    if field.optional {
+        csharp_nullable(ty)
+    } else {
+        ty
+    }
+}
+
+/// `ty` as a nullable type, unless it already is one.
+fn csharp_nullable(mut ty: CSharpType) -> CSharpType {
+    if !ty.is_nullable {
+        ty.text = format!("{}?", ty.text);
+        ty.is_nullable = true;
+    }
+    ty
+}
+
 fn csharp_type(ty: &TypeRef, context: &CSharpRenderContext<'_>) -> CSharpType {
     let mut seen_aliases = BTreeSet::new();
     csharp_type_inner(ty, context, &mut seen_aliases)
@@ -1708,13 +1742,12 @@ fn csharp_type_inner(
     seen_aliases: &mut BTreeSet<String>,
 ) -> CSharpType {
     match ty {
-        TypeRef::Nullable(inner) => {
-            let mut inner = csharp_type_inner(inner, context, seen_aliases);
-            inner.text = format!("{}?", inner.text);
-            inner.is_nullable = true;
-            inner
+        // `T?` is the item's type made nullable; `T+` and `T*` are both the array, since C# has no
+        // static spelling for non-emptiness — the runtime checks that at the NX boundary.
+        TypeRef::Seq { inner, occ } if !occ.admits_many() => {
+            csharp_nullable(csharp_type_inner(inner, context, seen_aliases))
         }
-        TypeRef::Array(inner) => {
+        TypeRef::Seq { inner, .. } => {
             let inner = csharp_type_inner(inner, context, seen_aliases);
             CSharpType {
                 text: format!("{}[]", inner.text),
@@ -1933,18 +1966,15 @@ fn csharp_imported_alias_target_type(
     context: &CSharpRenderContext<'_>,
 ) -> CSharpType {
     match ty {
-        TypeRef::Nullable(inner) => {
-            let mut inner = csharp_imported_alias_target_type(
+        TypeRef::Seq { inner, occ } if !occ.admits_many() => {
+            csharp_nullable(csharp_imported_alias_target_type(
                 inner,
                 dependency_namespace,
                 target_is_reference,
                 context,
-            );
-            inner.text = format!("{}?", inner.text);
-            inner.is_nullable = true;
-            inner
+            ))
         }
-        TypeRef::Array(inner) => {
+        TypeRef::Seq { inner, .. } => {
             let inner = csharp_imported_alias_target_type(
                 inner,
                 dependency_namespace,
@@ -2144,9 +2174,7 @@ fn imported_type_uses_dependency_namespace(imported_type: &ImportedType) -> bool
 
 fn imported_alias_target_uses_dependency_namespace(ty: &TypeRef) -> bool {
     match ty {
-        TypeRef::Nullable(inner) | TypeRef::Array(inner) => {
-            imported_alias_target_uses_dependency_namespace(inner)
-        }
+        TypeRef::Seq { inner, .. } => imported_alias_target_uses_dependency_namespace(inner),
         TypeRef::Function { .. } => false,
         TypeRef::Applied { name, .. } | TypeRef::Name(name) => !matches!(
             name.as_str(),

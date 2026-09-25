@@ -12,14 +12,14 @@ external component <DataTable
 type RowTemplate = <function Item:Contact Index:int />: DrawnNode
 
 // A content parameter.
-type Wrap = <function content Children:object[] />: string
+type Wrap = <function content Children:object+ />: string
 
 // A suffix after the result binds to the result; parentheses make the function itself
-// nullable or a list element.
+// optional or a sequence item.
 type Maybe = <function Count:int />: string?
 type Template = (<function Item:object />: string)?
-type Templates = (<function Item:object />: string)[]
-type Names = (string)[]
+type Templates = (<function Item:object />: string)+
+type Names = (string)+
 
 // A multi-line function type.
 type Multi =
@@ -29,9 +29,9 @@ type Multi =
   />: DrawnNode
 
 // Function types in every other type position.
-component <Section extends DrawnNode Items:Contact[] Row:RowTemplate Header:(<function />: DrawnNode)? /> = {
+component <Section extends DrawnNode Items:Contact+ Row:RowTemplate Header?:<function />: DrawnNode /> = {
   <DrawnNode />
 }
 
 let apply(f: <function n:int />: int, n:int): int = {n}
-let picked: (<function Item:Contact />: DrawnNode)? = null
+let picked: (<function Item:Contact />: DrawnNode)? = {}

@@ -117,15 +117,15 @@ would on the base. A derived component that declares a type parameter or a prop 
 as an inherited type parameter MUST be rejected.
 
 #### Scenario: Derived component accepts an argument for an inherited type parameter
-- **WHEN** a file contains `abstract external component <ItemsBase TItem:type itemsSource:TItem[]? /> external component <ContactList extends ItemsBase spacing:int? />` and `type Contact = { name:string } let contacts:Contact[] = {} let v = <ContactList TItem=Contact itemsSource={contacts} spacing=4 />`
-- **THEN** analysis SHALL accept the element, checking `itemsSource` against `Contact[]?`
+- **WHEN** a file contains `abstract external component <ItemsBase TItem:type itemsSource?:TItem+ /> external component <ContactList extends ItemsBase spacing?:int />` and `type Contact = { name:string } let contacts:Contact* = {} let v = <ContactList TItem=Contact itemsSource={contacts} spacing=4 />`
+- **THEN** analysis SHALL accept the element, checking `itemsSource` against `Contact*`, the write type of `itemsSource?:TItem+` with `TItem` bound to `Contact`
 
 #### Scenario: Derived component body sees the inherited type parameter
-- **WHEN** a file contains `abstract component <ItemsBase TItem:type items:TItem[] /> component <Count extends ItemsBase /> = { state { first:TItem? = null } <Label /> }`
-- **THEN** analysis SHALL accept the annotation `TItem?` inside the derived body
+- **WHEN** a file contains `abstract component <ItemsBase TItem:type items:TItem+ /> component <Count extends ItemsBase /> = { state { first?:TItem } <Label /> }`
+- **THEN** analysis SHALL accept the optional state field `first?:TItem` inside the derived body, reading `first` as `TItem?`
 
 #### Scenario: Derived component adds its own type parameter after the inherited one
-- **WHEN** a file contains `abstract component <ItemsBase TItem:type items:TItem[] /> component <Keyed extends ItemsBase TKey:type keys:TKey[] /> = { <Label /> }` and `let v = <Keyed TItem=string TKey=int items={ "a" } keys={ 1 } />`
+- **WHEN** a file contains `abstract component <ItemsBase TItem:type items:TItem+ /> component <Keyed extends ItemsBase TKey:type keys:TKey+ /> = { <Label /> }` and `let v = <Keyed TItem=string TKey=int items={ "a" } keys={ 1 } />`
 - **THEN** analysis SHALL accept both the declaration and the element
 
 #### Scenario: Redeclaring an inherited type parameter is rejected

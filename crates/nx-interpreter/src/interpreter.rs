@@ -93,7 +93,6 @@ enum SerializedValue {
     Float(f64),
     String(String),
     Boolean(bool),
-    Null,
     Array(Vec<SerializedValue>),
     UnionCase {
         union: String,
@@ -196,18 +195,15 @@ impl RenderedHandlers {
 /// <para>A value the interpreter produced was built against its declaration when it was created, so
 /// a record inside it is accepted by type name alone. A value the host supplied is a bag of fields
 /// static analysis never saw: every record in it, at any depth, is constructed from those fields
-/// against the declared type, so an unknown field, a `null` in a non-nullable slot, or a missing
-/// required field is reported at the boundary rather than carried into evaluation.</para>
+/// against the declared type, so an unknown field, an empty value in a slot that requires one, or
+/// a missing required field is reported at the boundary rather than carried into evaluation.</para>
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ValueOrigin {
     /// Produced by evaluation; nested records are already well formed.
     Internal,
-    /// Supplied by the host through props, explicit state, or a dispatch batch.
+    /// Supplied by the host through props, explicit state, a dispatch batch, or an argument of an
+    /// entry call.
     Host,
-    /// Supplied by the host as an argument of an entry call. A number in it takes the width of its
-    /// parameter as a [`ValueOrigin::Host`] number does, but a record in it is passed through as
-    /// the host built it rather than rebuilt from its fields.
-    EntryArgument,
 }
 
 impl Interpreter {
@@ -883,32 +879,21 @@ impl Interpreter {
         let function = self.find_function(module, function_name)?;
 
         // T011: Validate parameter count
-        if function.params.len() != args.len() {
-            return Err(RuntimeError::new(
-                RuntimeErrorKind::ParameterCountMismatch {
-                    expected: function.params.len(),
-                    actual: args.len(),
-                    function: SmolStr::new(function_name),
-                },
-            ));
-        }
+        self.check_argument_count(function_name, function, args.len())?;
 
         // T011: Create execution context
         let mut ctx = ExecutionContext::with_limits(limits);
         self.bind_top_level_values(module, &mut ctx)?;
 
-        let coerced_args = self.coerce_arguments_for_params(
+        // T012: Bind parameters to argument values, filling the omitted trailing ones
+        self.bind_function_params(
             module,
-            args,
-            &function.params,
+            &mut ctx,
+            function,
+            args.into_iter().map(Some).collect(),
             "function call",
-            ValueOrigin::EntryArgument,
+            ValueOrigin::Host,
         )?;
-
-        // T012: Bind parameters to argument values
-        for (param, arg) in function.params.iter().zip(coerced_args.iter()) {
-            ctx.define_variable(SmolStr::new(param.name.as_str()), arg.clone());
-        }
 
         // Execute the function body
         let result = self.eval_expr(module, &mut ctx, function.body)?;
@@ -982,10 +967,11 @@ impl Interpreter {
             ctx.define_variable(name.clone(), value.clone());
         }
         if let Some(live_state) = live_state {
+            // State stores no entry for an empty optional field, so a field an earlier handler in
+            // the batch cleared is absent here and reads as empty, not as its render-time value.
             for name in owner_state {
-                if let Some(value) = live_state.get(name) {
-                    ctx.define_variable(name.clone(), value.clone());
-                }
+                let value = live_state.get(name).cloned().unwrap_or_else(Value::empty);
+                ctx.define_variable(name.clone(), value);
             }
         }
         ctx.define_variable(SmolStr::new("action"), action);
@@ -1182,10 +1168,18 @@ impl Interpreter {
         let mut ctx = ExecutionContext::with_limits(limits);
         self.bind_top_level_values(component_module, &mut ctx)?;
         // The body sees the declared props and the state, as it did at initialization. Handler
-        // props the parent bound are carried in the snapshot but were never in scope.
+        // props the parent bound are carried in the snapshot but were never in scope, and an
+        // optional field the snapshot does not carry is empty.
         for field in &contract.props {
             if let Some(value) = decoded_snapshot.props.get(field.name.as_str()) {
                 ctx.define_variable(SmolStr::new(field.name.as_str()), value.clone());
+            } else if field.optional {
+                ctx.define_variable(SmolStr::new(field.name.as_str()), Value::empty());
+            }
+        }
+        for field in self.component_state_fields(component_module, component) {
+            if field.optional && !state.contains_key(field.name.as_str()) {
+                ctx.define_variable(SmolStr::new(field.name.as_str()), Value::empty());
             }
         }
         for (name, value) in &state {
@@ -1310,7 +1304,13 @@ impl Interpreter {
                 &operation,
                 ValueOrigin::Internal,
             )?;
-            state.insert(name, value);
+            // State stores no entry for an empty optional field, as initialization and `apply`
+            // leave none, so clearing one removes its entry.
+            if value.is_empty_value() {
+                state.remove(&name);
+            } else {
+                state.insert(name, value);
+            }
         }
         Ok(())
     }
@@ -1560,7 +1560,8 @@ impl Interpreter {
         operation: &str,
     ) -> Result<FxHashMap<SmolStr, Value>, RuntimeError> {
         match value {
-            Value::Null => Ok(FxHashMap::default()),
+            // The empty value is a record with no fields written.
+            Value::Array(elements) if elements.is_empty() => Ok(FxHashMap::default()),
             Value::Record { fields, .. } => Ok(fields),
             other => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
                 expected: "record".to_string(),
@@ -1629,8 +1630,9 @@ impl Interpreter {
                     ),
                 )?;
                 (value, ValueOrigin::Internal)
-            } else if matches!(&field.ty, ast::TypeRef::Nullable(_)) {
-                (Value::Null, ValueOrigin::Internal)
+            } else if field.optional {
+                // An optional field that was not written is empty.
+                (Value::empty(), ValueOrigin::Internal)
             } else if !field.is_required {
                 return Err(self.unavailable_effective_field_default_error(
                     &field.name,
@@ -1659,10 +1661,10 @@ impl Interpreter {
                     field.name.as_str()
                 ),
             )?;
-            let value = self.coerce_value_to_type_from(
+            let value = self.coerce_field_value_from(
                 owner_module,
                 value,
-                &field.ty,
+                field,
                 &format!(
                     "component {} '{}.{}'",
                     phase,
@@ -1673,7 +1675,11 @@ impl Interpreter {
             )?;
             ctx.define_variable(SmolStr::new(field.name.as_str()), value.clone());
             visible_fields.insert(SmolStr::new(field.name.as_str()), value.clone());
-            normalized.insert(SmolStr::new(field.name.as_str()), value);
+            // An empty optional field is not stored: the record carries no entry for it, and a
+            // read of the declared-optional field yields the empty value.
+            if !(field.optional && value.is_empty_value()) {
+                normalized.insert(SmolStr::new(field.name.as_str()), value);
+            }
         }
 
         Ok(normalized)
@@ -1834,8 +1840,8 @@ impl Interpreter {
         for field in &state_fields {
             let value = if let Some(value) = overrides.remove(field.name.as_str()) {
                 value
-            } else if matches!(&field.ty, ast::TypeRef::Nullable(_)) {
-                Value::Null
+            } else if field.optional {
+                Value::empty()
             } else {
                 return Err(self.missing_required_component_field_error(
                     &component.name,
@@ -1852,10 +1858,10 @@ impl Interpreter {
                     field.name.as_str()
                 ),
             )?;
-            let value = self.coerce_value_to_type_from(
+            let value = self.coerce_field_value_from(
                 owner_module,
                 value,
-                &field.ty,
+                field,
                 &format!(
                     "component state evaluation '{}.{}'",
                     component.name.as_str(),
@@ -2041,7 +2047,6 @@ impl Interpreter {
             Value::Float(value) => SerializedValue::Float(*value),
             Value::String(value) => SerializedValue::String(value.to_string()),
             Value::Boolean(value) => SerializedValue::Boolean(*value),
-            Value::Null => SerializedValue::Null,
             Value::Array(values) => {
                 SerializedValue::Array(values.iter().map(Self::serialize_runtime_value).collect())
             }
@@ -2100,7 +2105,6 @@ impl Interpreter {
             SerializedValue::Float(value) => Ok(Value::Float(value)),
             SerializedValue::String(value) => Ok(Value::String(SmolStr::new(value.as_str()))),
             SerializedValue::Boolean(value) => Ok(Value::Boolean(value)),
-            SerializedValue::Null => Ok(Value::Null),
             SerializedValue::Array(values) => Ok(Value::Array(
                 values
                     .into_iter()
@@ -2269,6 +2273,13 @@ impl Interpreter {
             } => self.eval_record_literal(module, ctx, record, properties),
             ast::Expr::Index { base, index, .. } => self.eval_index(module, ctx, *base, *index),
             ast::Expr::Member { base, member, .. } => self.eval_member(module, ctx, *base, member),
+            ast::Expr::OptionalMember { base, member, .. } => {
+                self.eval_optional_member(module, ctx, *base, member)
+            }
+            ast::Expr::Exists { operand, .. } => self.eval_exists(module, ctx, *operand),
+            ast::Expr::Coalesce { left, right, .. } => {
+                self.eval_coalesce(module, ctx, *left, *right)
+            }
             ast::Expr::ResolvedUnionCase {
                 union,
                 case,
@@ -2276,10 +2287,88 @@ impl Interpreter {
                 definition_id,
                 ..
             } => self.eval_resolved_union_case(ctx, union, case, module_identity, *definition_id),
-            _ => {
-                // Other expression types not yet implemented
-                Ok(Value::Null)
-            }
+            ast::Expr::ContextualName { name, .. } => Err(Self::undefined_variable_error(name)),
+            // A range expression is rewritten to the prelude's `Range` construction after
+            // analysis, so one reaching evaluation was never checked.
+            ast::Expr::Range { .. } => Err(Self::unchecked_expression_error(
+                "a range expression that was not rewritten",
+            )),
+            ast::Expr::Error(_) => Err(Self::unchecked_expression_error(
+                "an expression that failed to lower",
+            )),
+        }
+    }
+
+    // The arms above stay small on purpose: in a debug build `eval_expr`'s frame holds every
+    // arm's temporaries at once, and it recurses once per nested expression, so a deep NX
+    // recursion runs out of native stack when the arms carry their bodies inline.
+
+    fn undefined_variable_error(name: &Name) -> RuntimeError {
+        RuntimeError::new(RuntimeErrorKind::UndefinedVariable {
+            name: SmolStr::new(name.as_str()),
+        })
+    }
+
+    fn unchecked_expression_error(actual: &str) -> RuntimeError {
+        RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+            expected: "a checked expression".to_string(),
+            actual: actual.to_string(),
+            operation: "expression evaluation".to_string(),
+        })
+    }
+
+    /// `x?.m`: the empty value when the receiver is empty, `x.m` otherwise, with the receiver
+    /// evaluated once.
+    fn eval_optional_member(
+        &self,
+        module: &LoweredModule,
+        ctx: &mut ExecutionContext,
+        base: ExprId,
+        member: &Name,
+    ) -> Result<Value, RuntimeError> {
+        let base_value = self.eval_expr(module, ctx, base)?;
+        match Self::optional_item(base_value) {
+            None => Ok(Value::empty()),
+            Some(item) => self.project_member(item, member),
+        }
+    }
+
+    /// `x?`: true when the operand holds at least one item.
+    fn eval_exists(
+        &self,
+        module: &LoweredModule,
+        ctx: &mut ExecutionContext,
+        operand: ExprId,
+    ) -> Result<Value, RuntimeError> {
+        let value = self.eval_expr(module, ctx, operand)?;
+        Ok(Value::Boolean(!value.is_empty_value()))
+    }
+
+    /// `x ?? y`: `x` when it holds an item, else `y`, evaluated only then.
+    fn eval_coalesce(
+        &self,
+        module: &LoweredModule,
+        ctx: &mut ExecutionContext,
+        left: ExprId,
+        right: ExprId,
+    ) -> Result<Value, RuntimeError> {
+        let value = self.eval_expr(module, ctx, left)?;
+        if value.is_empty_value() {
+            self.eval_expr(module, ctx, right)
+        } else {
+            Ok(value)
+        }
+    }
+
+    /// The item an optional value holds, or `None` when it is empty.
+    ///
+    /// <para>A `?` value that holds an item is the item itself; a one-element sequence reaching an
+    /// optional receiver — a `for` over an optional, before any typed site normalized it — is read
+    /// as that element.</para>
+    fn optional_item(value: Value) -> Option<Value> {
+        match value {
+            Value::Array(mut elements) if elements.len() <= 1 => elements.pop(),
+            other => Some(other),
         }
     }
 
@@ -2340,7 +2429,6 @@ impl Interpreter {
             ast::Literal::Float32(f) => Value::Float32(f.0 as f32),
             ast::Literal::String(s) => Value::String(s.clone()),
             ast::Literal::Boolean(b) => Value::Boolean(*b),
-            ast::Literal::Null => Value::Null,
         };
         Ok(value)
     }
@@ -2465,30 +2553,20 @@ impl Interpreter {
             )?;
         }
 
-        let mut arg_values = Vec::with_capacity(function.params.len());
-        for param in &function.params {
-            match fields.remove(param.name.as_str()) {
-                Some(value) => arg_values.push(self.coerce_value_to_type(
-                    target_module,
-                    value,
-                    &param.ty,
-                    &format!("parameter '{}'", param.name.as_str()),
-                )?),
-                None => {
-                    return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                        expected: format!(
-                            "argument '{}' for function '{}'",
-                            param.name.as_str(),
-                            function_name
-                        ),
-                        actual: "missing".to_string(),
-                        operation: OPERATION.to_string(),
-                    }))
-                }
-            }
-        }
+        let arg_values = function
+            .params
+            .iter()
+            .map(|param| fields.remove(param.name.as_str()))
+            .collect::<Vec<_>>();
 
-        self.eval_function_call(target_module, ctx, function_name, function, arg_values)
+        self.eval_function_call(
+            module,
+            target_module,
+            ctx,
+            function_name,
+            function,
+            arg_values,
+        )
     }
 
     /// Evaluate a block expression (T014 - placeholder)
@@ -2506,11 +2584,11 @@ impl Interpreter {
             self.eval_stmt(module, ctx, stmt)?;
         }
 
-        // Evaluate final expression or return null
+        // Evaluate final expression, or produce the empty value
         let result = if let Some(expr_id) = final_expr {
             self.eval_expr(module, ctx, *expr_id)?
         } else {
-            Value::Null
+            Value::empty()
         };
 
         ctx.pop_scope();
@@ -2687,10 +2765,10 @@ impl Interpreter {
         } else if let Some(else_expr) = else_branch {
             self.eval_expr(module, ctx, else_expr)
         } else {
-            // A missing `else` is an `else { }`. Where items are collected this splices away by
-            // the ordinary rule, and where one value is expected the type is a sequence, so no
-            // caller is expecting a null here.
-            Ok(Value::Array(Vec::new()))
+            // A missing `else` is an `else { }`: the empty value. Where items are collected this
+            // splices away by the ordinary rule, and where one value is expected the type admits
+            // zero, so the empty value is what the caller expects.
+            Ok(Value::empty())
         }
     }
 
@@ -2707,7 +2785,7 @@ impl Interpreter {
             None => match else_branch {
                 Some(else_expr) => self.eval_expr(module, ctx, else_expr),
                 // As for an `if` with no `else`: an uncovered path is an `else { }`.
-                None => Ok(Value::Array(Vec::new())),
+                None => Ok(Value::empty()),
             },
         }
     }
@@ -2740,10 +2818,27 @@ impl Interpreter {
         ctx: &mut ExecutionContext,
         pattern: ExprId,
     ) -> Result<Value, RuntimeError> {
-        if let Some(qualified_name) = self.flattened_expr_name(module, pattern) {
+        // A payload case matches by its record type. A fieldless case is a constant value, so it
+        // falls through and matches by equality like any other value pattern. A bare case name
+        // (`failed =>`) reaches here already resolved by the checker; a qualified one does not.
+        if let ast::Expr::ResolvedUnionCase {
+            union,
+            case,
+            module_identity,
+            definition_id,
+            ..
+        } = module.expr(pattern)
+        {
+            if self.resolved_union_case_has_fields(module_identity, *definition_id, case) {
+                return Ok(Value::Record {
+                    type_name: Name::new(&format!("{}.{}", union, case)),
+                    fields: FxHashMap::default(),
+                });
+            }
+        } else if let Some(qualified_name) = self.flattened_expr_name(module, pattern) {
             if self
                 .resolve_union_case_definition(module, qualified_name.as_str())
-                .is_some()
+                .is_some_and(|(_, _, case)| !case.is_fieldless())
             {
                 return Ok(Value::Record {
                     type_name: Name::new(&qualified_name),
@@ -2755,7 +2850,40 @@ impl Interpreter {
         self.eval_expr(module, ctx, pattern)
     }
 
+    /// Whether the union case a checker-resolved case name refers to carries fields.
+    fn resolved_union_case_has_fields(
+        &self,
+        module_identity: &str,
+        definition_id: LocalDefinitionId,
+        case: &Name,
+    ) -> bool {
+        let Some(target_module) = self
+            .program
+            .as_ref()
+            .and_then(|program| program.module_by_prepared_identity(module_identity))
+        else {
+            return false;
+        };
+        let Some(Item::Union(union_def)) = target_module
+            .lowered_module
+            .item_by_definition(definition_id)
+        else {
+            return false;
+        };
+        union_def
+            .cases
+            .iter()
+            .any(|candidate| candidate.name == *case && !candidate.is_fieldless())
+    }
+
     fn values_match(&self, scrutinee: &Value, pattern: &Value) -> Result<bool, RuntimeError> {
+        // The `{}` pattern matches exactly the empty value.
+        if pattern.is_empty_value() {
+            return Ok(scrutinee.is_empty_value());
+        }
+        if scrutinee.is_empty_value() {
+            return Ok(false);
+        }
         if let (
             Value::Record {
                 type_name: scrutinee_type,
@@ -2835,13 +2963,17 @@ impl Interpreter {
         }
 
         match self.resolve_item(module, func_name.as_str()) {
-            Some((target_module, Item::Function(function))) => self.eval_function_call(
-                target_module,
-                ctx,
-                func_name.as_str(),
-                function,
-                arg_values,
-            ),
+            Some((target_module, Item::Function(function))) => {
+                self.check_argument_count(func_name.as_str(), function, arg_values.len())?;
+                self.eval_function_call(
+                    module,
+                    target_module,
+                    ctx,
+                    func_name.as_str(),
+                    function,
+                    arg_values.into_iter().map(Some).collect(),
+                )
+            }
             Some((target_module, Item::Record(record_def))) => self.eval_record_constructor_call(
                 target_module,
                 ctx,
@@ -2881,6 +3013,7 @@ impl Interpreter {
         if args.len() != intrinsic.arity() {
             return Err(RuntimeError::new(
                 RuntimeErrorKind::ParameterCountMismatch {
+                    required: intrinsic.arity(),
                     expected: intrinsic.arity(),
                     actual: args.len(),
                     function: SmolStr::new(intrinsic.name()),
@@ -2924,8 +3057,9 @@ impl Interpreter {
     }
 
     /// `apply(record, update)`: every present field of the update replaces the record's, a present
-    /// `null` included, after the same validation a dispatched patch gets; every other field keeps
-    /// its value, and no default is re-evaluated.
+    /// empty value included — it clears the field, which the record then stores no entry for —
+    /// after the same validation a dispatched patch gets; every other field keeps its value, and no
+    /// default is re-evaluated.
     fn apply_update_record(
         &self,
         module: &LoweredModule,
@@ -2956,7 +3090,11 @@ impl Interpreter {
                 &operation,
                 ValueOrigin::Internal,
             )?;
-            fields.insert(name, value);
+            if value.is_empty_value() {
+                fields.remove(&name);
+            } else {
+                fields.insert(name, value);
+            }
         }
         Ok(Value::Record { type_name, fields })
     }
@@ -3004,12 +3142,10 @@ impl Interpreter {
         let shape = self.effective_record_shape(module, &type_name)?;
         let mut changed = FxHashMap::default();
         for field in &shape.fields {
-            let before_value = before_fields
-                .get(field.name.as_str())
-                .unwrap_or(&Value::Null);
-            let after_value = after_fields
-                .get(field.name.as_str())
-                .unwrap_or(&Value::Null);
+            // An unstored optional field reads as the empty value on both sides.
+            let empty = Value::empty();
+            let before_value = before_fields.get(field.name.as_str()).unwrap_or(&empty);
+            let after_value = after_fields.get(field.name.as_str()).unwrap_or(&empty);
             if !crate::eval::logical::values_equal(before_value, after_value) {
                 changed.insert(SmolStr::new(field.name.as_str()), after_value.clone());
             }
@@ -3050,38 +3186,62 @@ impl Interpreter {
         ))
     }
 
+    /// Calls `function`, declared in `module`, from `caller`, with one slot per leading parameter:
+    /// `Some` for an argument the caller wrote, `None` for one it left out. Slots past the end are
+    /// left out too.
+    ///
+    /// <para>A function declared in another module runs in a context of its own, holding that
+    /// module's top-level values: its body and its defaults read what its own module declares,
+    /// including what that module keeps private, and nothing of the caller's.</para>
     fn eval_function_call(
+        &self,
+        caller: &LoweredModule,
+        module: &LoweredModule,
+        ctx: &mut ExecutionContext,
+        func_name: &str,
+        function: &Function,
+        args: Vec<Option<Value>>,
+    ) -> Result<Value, RuntimeError> {
+        if std::ptr::eq(caller, module) {
+            return self.eval_function_call_in(module, ctx, func_name, function, args);
+        }
+        let mut callee_ctx = ctx.fork_isolated();
+        let result = self
+            .bind_top_level_values(module, &mut callee_ctx)
+            .and_then(|()| {
+                self.eval_function_call_in(module, &mut callee_ctx, func_name, function, args)
+            });
+        ctx.sync_usage_from(&callee_ctx);
+        result
+    }
+
+    fn eval_function_call_in(
         &self,
         module: &LoweredModule,
         ctx: &mut ExecutionContext,
         func_name: &str,
         function: &Function,
-        arg_values: Vec<Value>,
+        args: Vec<Option<Value>>,
     ) -> Result<Value, RuntimeError> {
-        if function.params.len() != arg_values.len() {
-            return Err(RuntimeError::new(
-                RuntimeErrorKind::ParameterCountMismatch {
-                    expected: function.params.len(),
-                    actual: arg_values.len(),
-                    function: SmolStr::new(func_name),
-                },
-            ));
+        if args.len() > function.params.len() {
+            return Err(self.argument_count_error(func_name, function, args.len()));
         }
 
         let call_frame = crate::error::CallFrame::new(SmolStr::new(func_name), None);
         ctx.push_call_frame(call_frame)?;
 
-        let coerced_args = self.coerce_arguments_for_params(
+        ctx.push_scope();
+        if let Err(error) = self.bind_function_params(
             module,
-            arg_values,
-            &function.params,
+            ctx,
+            function,
+            args,
             "function call",
             ValueOrigin::Internal,
-        )?;
-
-        ctx.push_scope();
-        for (param, arg) in function.params.iter().zip(coerced_args.iter()) {
-            ctx.define_variable(SmolStr::new(param.name.as_str()), arg.clone());
+        ) {
+            ctx.pop_scope();
+            ctx.pop_call_frame();
+            return Err(error);
         }
 
         let result = self
@@ -3118,6 +3278,7 @@ impl Interpreter {
         if arg_values.len() > record_shape.fields.len() {
             return Err(RuntimeError::new(
                 RuntimeErrorKind::ParameterCountMismatch {
+                    required: record_shape.fields.len(),
                     expected: record_shape.fields.len(),
                     actual: arg_values.len(),
                     function: SmolStr::new(func_name),
@@ -3213,36 +3374,11 @@ impl Interpreter {
                 "element function call",
             )?;
 
-            if fields.len() != function.params.len() {
-                return Err(RuntimeError::new(
-                    RuntimeErrorKind::ParameterCountMismatch {
-                        expected: function.params.len(),
-                        actual: fields.len(),
-                        function: SmolStr::new(tag_name),
-                    },
-                ));
-            }
-
-            let mut arg_values = Vec::with_capacity(function.params.len());
-            for param in &function.params {
-                match fields.remove(param.name.as_str()) {
-                    Some(value) => {
-                        arg_values.push(self.coerce_value_to_type(
-                            target_module,
-                            value,
-                            &param.ty,
-                            &format!("parameter '{}'", param.name.as_str()),
-                        )?);
-                    }
-                    None => {
-                        return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                            expected: format!("argument '{}'", param.name.as_str()),
-                            actual: "missing".to_string(),
-                            operation: "element function call".to_string(),
-                        }))
-                    }
-                }
-            }
+            let arg_values = function
+                .params
+                .iter()
+                .map(|param| fields.remove(param.name.as_str()))
+                .collect::<Vec<_>>();
 
             if !fields.is_empty() {
                 return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
@@ -3252,7 +3388,14 @@ impl Interpreter {
                 }));
             }
 
-            return self.eval_function_call(target_module, ctx, tag_name, function, arg_values);
+            return self.eval_function_call(
+                module,
+                target_module,
+                ctx,
+                tag_name,
+                function,
+                arg_values,
+            );
         }
 
         if let Some((target_module, Item::Component(component))) =
@@ -3324,6 +3467,10 @@ impl Interpreter {
             "intrinsic element content channel",
             "element intrinsic call",
         )?;
+
+        // An undeclared element has no required fields, so every attribute is optional to it: an
+        // empty one is omitted, as an empty optional field of a declared record is.
+        fields.retain(|_, value| !value.is_empty_value());
 
         Ok(Value::Record {
             type_name: element.tag.clone(),
@@ -3473,10 +3620,9 @@ impl Interpreter {
     /// body content, and the yields of a `for` -- so all of them produce the same value for the
     /// same items.</para>
     ///
-    /// <para>A conditional with no `else` needs nothing here. It evaluates to the empty sequence
-    /// when it takes no branch, so it splices away like any other sequence-valued item, and a
-    /// conditional nested in one is no different. Nothing inspects the source, so a written `null`
-    /// stays an item.</para>
+    /// <para>A conditional with no `else` needs nothing here. It evaluates to the empty value when
+    /// it takes no branch, so it splices away like any other sequence-valued item, and a
+    /// conditional nested in one is no different.</para>
     fn eval_item_into(
         &self,
         module: &LoweredModule,
@@ -3507,8 +3653,8 @@ impl Interpreter {
     /// Reduces evaluated body content to the value its content property is bound to.
     ///
     /// <para>`None` means the element had no body, so the content property keeps its default. A
-    /// body that was written and produced no values is a different thing: it binds the empty list,
-    /// so `<Box>{}</Box>` means what `<Box items={} />` means. The rule is about the body, not
+    /// body that was written and produced no values is a different thing: it binds the empty
+    /// value, so `<Box>{}</Box>` means what `<Box items={} />` means. The rule is about the body, not
     /// about `{}` -- a `for` that iterates zero times produces no values too, and binds no children
     /// rather than falling back to the declared default, and so does a body that is one `if` that
     /// takes no branch. Only the two cases are told apart here; the values themselves are already
@@ -3520,31 +3666,141 @@ impl Interpreter {
     ) -> Option<Value> {
         match content_values.len() {
             0 if content_exprs.is_empty() => None,
-            0 => Some(Value::Array(Vec::new())),
+            0 => Some(Value::empty()),
             1 => content_values.into_iter().next(),
             _ => Some(Value::Array(content_values)),
         }
     }
 
-    fn coerce_arguments_for_params(
+    /// Reports a positional call that supplies too few or too many arguments. A call may stop
+    /// before the trailing parameters a caller may omit.
+    fn check_argument_count(
+        &self,
+        func_name: &str,
+        function: &Function,
+        count: usize,
+    ) -> Result<(), RuntimeError> {
+        let required = Self::required_argument_count(function);
+        if count < required || count > function.params.len() {
+            return Err(self.argument_count_error(func_name, function, count));
+        }
+        Ok(())
+    }
+
+    fn required_argument_count(function: &Function) -> usize {
+        function
+            .params
+            .iter()
+            .rposition(|param| !param.is_omissible())
+            .map_or(0, |last| last + 1)
+    }
+
+    fn argument_count_error(
+        &self,
+        func_name: &str,
+        function: &Function,
+        count: usize,
+    ) -> RuntimeError {
+        RuntimeError::new(RuntimeErrorKind::ParameterCountMismatch {
+            required: Self::required_argument_count(function),
+            expected: function.params.len(),
+            actual: count,
+            function: SmolStr::new(func_name),
+        })
+    }
+
+    /// Defines `function`'s parameters in the current scope, in order. A written argument is
+    /// coerced to the parameter's read type. A parameter left out takes its default, which the
+    /// function evaluates here, in its own module and after the parameters before it are
+    /// defined, so the default a caller gets is the one the function declares now; with no
+    /// default it is empty when optional and missing otherwise.
+    fn bind_function_params(
         &self,
         module: &LoweredModule,
-        arg_values: Vec<Value>,
-        params: &[nx_hir::Param],
+        ctx: &mut ExecutionContext,
+        function: &Function,
+        args: Vec<Option<Value>>,
         operation: &str,
         origin: ValueOrigin,
-    ) -> Result<Vec<Value>, RuntimeError> {
-        let mut coerced = Vec::with_capacity(arg_values.len());
-        for (param, value) in params.iter().zip(arg_values) {
-            coerced.push(self.coerce_value_to_type_from(
-                module,
-                value,
-                &param.ty,
-                &format!("{} parameter '{}'", operation, param.name.as_str()),
-                origin,
-            )?);
+    ) -> Result<(), RuntimeError> {
+        let mut args = args.into_iter();
+        for param in &function.params {
+            let value = match args.next().flatten() {
+                Some(value) => self.coerce_value_to_resolved_type(
+                    module,
+                    value,
+                    &nx_types::read_type(
+                        &self.runtime_type_from_type_ref(module, &param.ty),
+                        param.optional,
+                    ),
+                    &format!("{} parameter '{}'", operation, param.name.as_str()),
+                    origin,
+                )?,
+                None => match param.default {
+                    Some(default) => {
+                        let value = self.eval_expr(module, ctx, default)?;
+                        self.coerce_value_to_param(
+                            module,
+                            value,
+                            param,
+                            &format!("default of parameter '{}'", param.name.as_str()),
+                        )?
+                    }
+                    None if param.optional => Value::empty(),
+                    None => {
+                        return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                            expected: format!(
+                                "argument '{}' for function '{}'",
+                                param.name.as_str(),
+                                function.name.as_str()
+                            ),
+                            actual: "missing".to_string(),
+                            operation: operation.to_string(),
+                        }))
+                    }
+                },
+            };
+            ctx.define_variable(SmolStr::new(param.name.as_str()), value);
         }
-        Ok(coerced)
+        Ok(())
+    }
+
+    /// Coerces an argument to a parameter's read type: `T?` for `p?:T`, `T*` for `p?:T+`.
+    fn coerce_value_to_param(
+        &self,
+        module: &LoweredModule,
+        value: Value,
+        param: &nx_hir::Param,
+        operation: &str,
+    ) -> Result<Value, RuntimeError> {
+        let expected = nx_types::read_type(
+            &self.runtime_type_from_type_ref(module, &param.ty),
+            param.optional,
+        );
+        self.coerce_value_to_resolved_type(
+            module,
+            value,
+            &expected,
+            operation,
+            ValueOrigin::Internal,
+        )
+    }
+
+    /// Coerces a value written to a field to the field's read type, so an optional field accepts
+    /// the empty value and a `?` value, and a required or defaulted one does not.
+    fn coerce_field_value_from(
+        &self,
+        module: &LoweredModule,
+        value: Value,
+        field: &EffectiveField,
+        operation: &str,
+        origin: ValueOrigin,
+    ) -> Result<Value, RuntimeError> {
+        let expected = nx_types::read_type(
+            &self.runtime_type_from_type_ref(module, &field.ty),
+            field.optional,
+        );
+        self.coerce_value_to_resolved_type(module, value, &expected, operation, origin)
     }
 
     /// Coerces a value the interpreter itself produced; see [`ValueOrigin::Internal`].
@@ -3578,30 +3834,41 @@ impl Interpreter {
         operation: &str,
         origin: ValueOrigin,
     ) -> Result<Value, RuntimeError> {
-        if let Type::Nullable(expected_inner) = expected {
-            return match value {
-                Value::Null => Ok(Value::Null),
-                other => self.coerce_value_to_resolved_type(
-                    module,
-                    other,
-                    expected_inner,
-                    operation,
-                    origin,
-                ),
-            };
-        }
-
-        if let Type::Array(expected_item) = expected {
-            // An item is a sequence of one, and the lift applies once: a sequence's element type is
-            // an item type, so wrapping a scalar and coercing the elements is the whole of it.
+        if let Type::Seq {
+            item: expected_item,
+            occ,
+        } = expected
+        {
+            // A `+` or `*` value is always a sequence, and a `?` value that holds an item is the
+            // item itself: `[x]` at a `?` site becomes `x`, `x` at a `+` or `*` site becomes
+            // `[x]`, `[]` is left alone, and `[]` at a `+` site is an error. The lift applies
+            // once, since a sequence's item type is an item type, so wrapping a scalar and
+            // coercing the items is the whole of it.
             debug_assert!(
-                !matches!(expected_item.strip_nullable(), Type::Array(_)),
-                "a sequence type has an item element type, found {expected}"
+                !matches!(expected_item.as_ref(), Type::Seq { .. }),
+                "a sequence type has an item type, found {expected}"
             );
             let values = match value {
                 Value::Array(values) => values,
                 other => vec![other],
             };
+            if values.is_empty() {
+                if occ.admits_zero() {
+                    return Ok(Value::empty());
+                }
+                return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                    expected: expected.to_string(),
+                    actual: "{}".to_string(),
+                    operation: operation.to_string(),
+                }));
+            }
+            if !occ.admits_many() && values.len() > 1 {
+                return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                    expected: expected.to_string(),
+                    actual: format!("a sequence of {} values", values.len()),
+                    operation: operation.to_string(),
+                }));
+            }
             let mut coerced = Vec::with_capacity(values.len());
             for item in values {
                 let item = self.coerce_value_to_resolved_type(
@@ -3611,18 +3878,18 @@ impl Interpreter {
                     operation,
                     origin,
                 )?;
-                // A sequence value never holds a sequence value. An `object` element is the one
+                // A sequence value never holds a sequence value. An `object` item is the one
                 // exception: it may hold anything, including a sequence, and is opaque as an item.
-                // `object?` is that same exception -- nullability says what the element may be
-                // instead of a value, not what it may be.
                 debug_assert!(
-                    !matches!(item, Value::Array(_))
-                        || is_object_type(expected_item.strip_nullable()),
+                    !matches!(item, Value::Array(_)) || is_object_type(expected_item),
                     "a sequence value never holds a sequence value at {expected}"
                 );
                 coerced.push(item);
             }
-            return Ok(Value::Array(coerced));
+            if occ.admits_many() {
+                return Ok(Value::Array(coerced));
+            }
+            return Ok(coerced.pop().expect("one item"));
         }
 
         // A constant case arrives from host input as its bare authored name. When the declared
@@ -3677,7 +3944,8 @@ impl Interpreter {
         // A record the interpreter built keeps its shape: it was constructed against its
         // declaration already, so re-checking it on every function call would only cost time. A
         // record the host supplied is rebuilt from its fields, which is where unknown fields,
-        // missing required fields, and `null` in a non-nullable slot are caught at any depth.
+        // missing required fields, and an empty value in a slot that requires one are caught at
+        // any depth.
         match value {
             Value::Record { type_name, fields } => {
                 if !self.record_value_matches_expected_type(module, &type_name, expected) {
@@ -3688,9 +3956,7 @@ impl Interpreter {
                     }));
                 }
                 match origin {
-                    ValueOrigin::Internal | ValueOrigin::EntryArgument => {
-                        Ok(Value::Record { type_name, fields })
-                    }
+                    ValueOrigin::Internal => Ok(Value::Record { type_name, fields }),
                     ValueOrigin::Host => {
                         self.construct_host_record_value(module, type_name, fields, operation)
                     }
@@ -3723,18 +3989,36 @@ impl Interpreter {
     ) -> Result<Value, RuntimeError> {
         let value = match origin {
             ValueOrigin::Internal => value,
-            ValueOrigin::Host | ValueOrigin::EntryArgument => {
-                Self::host_number_at_site(value, expected, operation)?
-            }
+            ValueOrigin::Host => Self::host_number_at_site(value, expected, operation)?,
         };
 
-        if matches!(value, Value::Array(_)) && !is_object_type(expected) {
-            let actual_ty = self.runtime_type_of_value(&value);
-            return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                expected: expected.to_string(),
-                actual: format!("list {}", actual_ty),
-                operation: operation.to_string(),
-            }));
+        // An exactly-one site takes exactly one value. A one-element sequence reaching it — a
+        // `for` over an optional, say — is read as its element; the empty value and a longer
+        // sequence are what the site cannot take. `object` is the one exception: it may hold a
+        // sequence, opaquely.
+        if let Value::Array(elements) = value {
+            if is_object_type(expected) {
+                return Ok(Value::Array(elements));
+            }
+            let mut elements = elements;
+            return match elements.len() {
+                1 => self.coerce_non_record_value(
+                    elements.pop().expect("one element"),
+                    expected,
+                    operation,
+                    origin,
+                ),
+                0 => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                    expected: expected.to_string(),
+                    actual: "{}".to_string(),
+                    operation: operation.to_string(),
+                })),
+                count => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                    expected: expected.to_string(),
+                    actual: format!("a sequence of {count} values"),
+                    operation: operation.to_string(),
+                })),
+            };
         }
 
         if self.value_matches_expected_type(&value, expected) {
@@ -3755,7 +4039,7 @@ impl Interpreter {
     /// numeric conversion happens at run time: an `int` bound at a `float64` property is the
     /// `float64` `3.0` from here on, not an integer a consumer is left to widen. The canonical
     /// output tells the two apart, which is why the value is converted rather than left alone.
-    /// Lists and nullable types have been taken apart by the caller, so only a scalar arrives.
+    /// Sequences have been taken apart by the caller, so only a scalar arrives.
     /// `int64` has no carrier of its own, so widening to it changes only an `int32`.</para>
     fn widened_to_site(value: Value, expected: &Type) -> Value {
         let Type::Primitive(expected) = expected else {
@@ -3777,8 +4061,7 @@ impl Interpreter {
     /// there does: an integer after a range check at `int32` and an exactness check at `float32`,
     /// and a real by rounding at `float32`. A number that cannot take the width is refused here.
     /// Checked NX never needs this, because analysis already guarantees nothing narrows.
-    /// Lists and nullable types have been taken apart by the caller, so only a scalar
-    /// arrives.</para>
+    /// Sequences have been taken apart by the caller, so only a scalar arrives.</para>
     fn host_number_at_site(
         value: Value,
         expected: &Type,
@@ -3813,7 +4096,7 @@ impl Interpreter {
     /// Widens the numbers in a branch of a join to the join's numeric type, item by item in a list.
     ///
     /// <para>The type checker wrapped the branch in an `Expr::Widen` because its type is narrower
-    /// than the join's. `null` and anything that is not a number are left alone.</para>
+    /// than the join's. Anything that is not a number is left alone.</para>
     fn widened_value(value: Value, target: &Type) -> Value {
         match value {
             Value::Array(items) => Value::Array(
@@ -3828,10 +4111,6 @@ impl Interpreter {
     }
 
     fn value_matches_expected_type(&self, value: &Value, expected: &Type) -> bool {
-        if matches!(value, Value::Null) {
-            return matches!(expected, Type::Nullable(_)) || is_object_type(expected);
-        }
-
         let actual_ty = self.runtime_type_of_value(value);
         type_satisfies_expected(&actual_ty, expected)
     }
@@ -3844,17 +4123,16 @@ impl Interpreter {
             Value::Float(_) => Type::float64(),
             Value::String(_) => Type::string(),
             Value::Boolean(_) => Type::boolean(),
-            Value::Null => Type::nullable(Type::named("object")),
             Value::Array(values) => {
                 if values.is_empty() {
-                    Type::array(Type::named("object"))
+                    Type::empty()
                 } else {
                     let mut current = self.runtime_type_of_value(&values[0]);
                     for value in values.iter().skip(1) {
                         let value_ty = self.runtime_type_of_value(value);
                         current = common_supertype(&current, &value_ty);
                     }
-                    Type::array(current)
+                    Type::one_or_more(current.item().clone())
                 }
             }
             Value::UnionCase { union, .. } => Type::named(union.clone()),
@@ -3927,7 +4205,7 @@ impl Interpreter {
         if let ast::Expr::Ident(base_name) = module.expr(base_expr) {
             // Prefer runtime value if variable exists
             if let Some(var_value) = ctx.try_lookup_variable(base_name.as_str()) {
-                return self.project_member(var_value, member, Some(base_name.as_str()));
+                return self.project_member(var_value, member);
             }
         }
 
@@ -3960,26 +4238,19 @@ impl Interpreter {
         }
 
         let base_value = self.eval_expr(module, ctx, base_expr)?;
-        self.project_member(base_value, member, None)
+        self.project_member(base_value, member)
     }
 
-    fn project_member(
-        &self,
-        base_value: Value,
-        member: &Name,
-        record_label: Option<&str>,
-    ) -> Result<Value, RuntimeError> {
+    /// Reads a field of a record value.
+    ///
+    /// <para>The checker has proven the member is declared, and every record value was constructed
+    /// against its declaration, which stores every required field. A field that is not stored is
+    /// therefore an empty optional field, or an absent — unchanged — field of an update record, and
+    /// reads as the empty value.</para>
+    fn project_member(&self, base_value: Value, member: &Name) -> Result<Value, RuntimeError> {
         match base_value {
-            Value::Record { fields, .. } => {
-                if let Some(value) = fields.get(member.as_str()) {
-                    Ok(value.clone())
-                } else {
-                    let name = record_label.unwrap_or("record");
-                    Err(RuntimeError::new(RuntimeErrorKind::RecordFieldNotFound {
-                        record: SmolStr::new(name),
-                        field: SmolStr::new(member.as_str()),
-                    }))
-                }
+            Value::Record { mut fields, .. } => {
+                Ok(fields.remove(member.as_str()).unwrap_or_else(Value::empty))
             }
             Value::UnionCase { .. } => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
                 expected: "record".to_string(),
@@ -4008,7 +4279,7 @@ impl Interpreter {
             Value::Array(values) => values,
             other => {
                 return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                    expected: "array".to_string(),
+                    expected: "sequence".to_string(),
                     actual: other.type_name().to_string(),
                     operation: "index access".to_string(),
                 }));
@@ -4078,15 +4349,21 @@ impl Interpreter {
             return self.eval_for_range(module, ctx, item, index, range, body_expr);
         }
 
-        // Extract array elements
+        // A sequence iterates its items. An optional that holds an item (or an exactly-one value)
+        // iterates once over it, and the product of its occurrence with the body's is the body's
+        // own, so the body's value is the loop's value unchanged: an item stays an item rather
+        // than becoming a one-element list.
         let elements = match iterable_value {
-            Value::Array(ref arr) => arr.clone(),
-            _ => {
-                return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                    expected: "array".to_string(),
-                    actual: iterable_value.type_name().to_string(),
-                    operation: "for loop iteration".to_string(),
-                }))
+            Value::Array(arr) => arr,
+            element => {
+                ctx.push_scope();
+                ctx.define_variable(SmolStr::new(item.as_str()), element);
+                if let Some(index_name) = index {
+                    ctx.define_variable(SmolStr::new(index_name.as_str()), Value::Int(0));
+                }
+                let result = self.eval_expr(module, ctx, body_expr);
+                ctx.pop_scope();
+                return result;
             }
         };
 
@@ -4390,11 +4667,9 @@ impl Interpreter {
                         &expected_name.name,
                     )
                 }
-                Type::Nullable(expected_inner) => self.record_value_matches_expected_type(
-                    module,
-                    actual_type_name,
-                    expected_inner,
-                ),
+                Type::Seq { item, .. } => {
+                    self.record_value_matches_expected_type(module, actual_type_name, item)
+                }
                 _ => false,
             }
     }
@@ -4432,11 +4707,9 @@ impl Interpreter {
                             )
                     })
             }
-            Type::Nullable(expected_inner) => self.union_case_value_matches_expected_type(
-                module,
-                actual_type_name,
-                expected_inner,
-            ),
+            Type::Seq { item, .. } => {
+                self.union_case_value_matches_expected_type(module, actual_type_name, item)
+            }
             _ => false,
         }
     }
@@ -4488,7 +4761,9 @@ impl Interpreter {
     /// element against the component's props, as an element tag would be.
     ///
     /// <para>A name that reaches none of them, such as `object`, has no declared shape to check, so
-    /// the fields are kept as supplied. Every nested record is constructed the same way.</para>
+    /// the fields are kept as supplied, less the empty ones: with no declaration to say otherwise, a
+    /// present `null` or `[]` is the same absent value a missing key is. Every nested record is
+    /// constructed the same way.</para>
     fn construct_host_record_value(
         &self,
         module: &LoweredModule,
@@ -4539,7 +4814,7 @@ impl Interpreter {
                 fields: props,
             });
         }
-        Ok(Value::Record { type_name, fields })
+        Ok(without_empty_fields(Value::Record { type_name, fields }))
     }
 
     fn missing_required_record_field_error(
@@ -4595,7 +4870,7 @@ impl Interpreter {
         }
 
         // Handler invocation constructs the typed action record before executing the handler body,
-        // so defaults, nullable fields, and required-field diagnostics are applied at the input
+        // so defaults, optional fields, and required-field diagnostics are applied at the input
         // boundary.
         match action {
             Value::Record { type_name, fields } => self.construct_external_record_value(
@@ -4629,7 +4904,7 @@ impl Interpreter {
                 if values.is_empty() {
                     return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
                         expected: "one or more actions or update records".to_string(),
-                        actual: "empty array".to_string(),
+                        actual: "the empty value".to_string(),
                         operation: format!(
                             "action handler result for {}.{}",
                             component.as_str(),
@@ -4783,8 +5058,8 @@ impl Interpreter {
                         &format!("union case field '{}.{}'", discriminator, field.name),
                     )?;
                     (value, ValueOrigin::Internal)
-                } else if matches!(&field.ty, ast::TypeRef::Nullable(_)) {
-                    (Value::Null, ValueOrigin::Internal)
+                } else if field.optional {
+                    (Value::empty(), ValueOrigin::Internal)
                 } else if !field.is_required {
                     return Err(self.unavailable_effective_field_default_error(
                         &field.name,
@@ -4803,14 +5078,16 @@ impl Interpreter {
                     field,
                     &format!("union case field '{}.{}'", discriminator, field.name),
                 )?;
-                let value = self.coerce_value_to_type_from(
+                let value = self.coerce_field_value_from(
                     owner_module,
                     value,
-                    &field.ty,
+                    field,
                     &format!("union case field '{}.{}'", discriminator, field.name),
                     value_origin,
                 )?;
-                materialized.insert(SmolStr::new(field.name.as_str()), value);
+                if !(field.optional && value.is_empty_value()) {
+                    materialized.insert(SmolStr::new(field.name.as_str()), value);
+                }
             }
         }
 
@@ -4826,8 +5103,8 @@ impl Interpreter {
                     &format!("union case field '{}.{}'", discriminator, field.name),
                 )?;
                 (value, ValueOrigin::Internal)
-            } else if matches!(&field.ty, ast::TypeRef::Nullable(_)) {
-                (Value::Null, ValueOrigin::Internal)
+            } else if field.optional {
+                (Value::empty(), ValueOrigin::Internal)
             } else {
                 return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
                     expected: format!("union case field '{}.{}'", discriminator, field.name),
@@ -4836,14 +5113,20 @@ impl Interpreter {
                 }));
             };
 
-            let value = self.coerce_value_to_type_from(
+            let expected = nx_types::read_type(
+                &self.runtime_type_from_type_ref(module, &field.ty),
+                field.optional,
+            );
+            let value = self.coerce_value_to_resolved_type(
                 module,
                 value,
-                &field.ty,
+                &expected,
                 &format!("union case field '{}.{}'", discriminator, field.name),
                 value_origin,
             )?;
-            materialized.insert(SmolStr::new(field.name.as_str()), value);
+            if !(field.optional && value.is_empty_value()) {
+                materialized.insert(SmolStr::new(field.name.as_str()), value);
+            }
         }
 
         if let Some(unknown) = overrides.keys().next() {
@@ -4966,21 +5249,20 @@ impl Interpreter {
                     ),
                 )?;
                 (value, ValueOrigin::Internal)
-            } else if matches!(&prop.ty, ast::TypeRef::Nullable(_)) {
-                (Value::Null, ValueOrigin::Internal)
+            } else if prop.optional {
+                // An optional field that was not written is empty, and is not stored.
+                continue;
             } else if !prop.is_required {
                 return Err(self.unavailable_effective_field_default_error(
                     &prop.name,
                     &format!("record field '{}.{}'", record_def.name, prop.name),
                 ));
-            } else if let Some(operation) = missing_operation {
+            } else {
                 return Err(self.missing_required_record_field_error(
                     &record_def.name,
                     &prop.name,
-                    operation,
+                    missing_operation.unwrap_or("record construction"),
                 ));
-            } else {
-                (Value::Null, ValueOrigin::Internal)
             };
 
             let owner_module = self.owner_module_for_effective_field(
@@ -4991,13 +5273,18 @@ impl Interpreter {
                     record_def.name, prop.name
                 ),
             )?;
-            let value = self.coerce_value_to_type_from(
+            let value = self.coerce_field_value_from(
                 owner_module,
                 value,
-                &prop.ty,
+                prop,
                 &format!("record field '{}'", prop.name.as_str()),
                 value_origin,
             )?;
+            // An optional field written empty is not stored either: the record carries no entry,
+            // so its canonical encoding omits the key.
+            if prop.optional && value.is_empty_value() {
+                continue;
+            }
             materialized.insert(SmolStr::new(prop.name.as_str()), value);
         }
 
@@ -5010,9 +5297,10 @@ impl Interpreter {
     /// Builds an update record from the fields supplied, and only those.
     ///
     /// <para>An absent field means "unchanged", so it stays absent: no default is evaluated and
-    /// nothing is required. A present `null` is kept only where the target field is nullable, and
-    /// every present value is checked against the target field's type. The caller has already
-    /// rejected fields the target does not declare.</para>
+    /// nothing is required. A present empty value clears the field and is stored — key presence is
+    /// what carries "cleared" — but only where the target field is optional; every present value
+    /// is checked against the target field's read type. The caller has already rejected fields the
+    /// target does not declare.</para>
     fn build_update_record_value(
         &self,
         module: &LoweredModule,
@@ -5037,7 +5325,8 @@ impl Interpreter {
         })
     }
 
-    /// Checks one present update-record field value against the target field's declared type.
+    /// Checks one present update-record field value against the target field's read type, so the
+    /// empty value — a cleared field — is accepted exactly where the target field is optional.
     fn coerce_update_field_value(
         &self,
         module: &LoweredModule,
@@ -5046,15 +5335,8 @@ impl Interpreter {
         operation: &str,
         origin: ValueOrigin,
     ) -> Result<Value, RuntimeError> {
-        if value.is_null() && !matches!(&field.ty, ast::TypeRef::Nullable(_)) {
-            return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                expected: format!("non-null value for '{}'", field.name),
-                actual: "null".to_string(),
-                operation: operation.to_string(),
-            }));
-        }
         let owner_module = self.owner_module_for_effective_field(module, field, operation)?;
-        self.coerce_value_to_type_from(owner_module, value, &field.ty, operation, origin)
+        self.coerce_field_value_from(owner_module, value, field, operation, origin)
     }
 }
 
@@ -5102,6 +5384,23 @@ impl IntegerRange {
         } else {
             Value::Int(value)
         }
+    }
+}
+
+/// `value` with every empty record field removed, at any depth: the canonical form of a host
+/// value that has no declared shape to be constructed against.
+fn without_empty_fields(value: Value) -> Value {
+    match value {
+        Value::Record { type_name, fields } => Value::Record {
+            type_name,
+            fields: fields
+                .into_iter()
+                .filter(|(_, value)| !value.is_empty_value())
+                .map(|(name, value)| (name, without_empty_fields(value)))
+                .collect(),
+        },
+        Value::Array(items) => Value::Array(items.into_iter().map(without_empty_fields).collect()),
+        other => other,
     }
 }
 
@@ -5589,6 +5888,7 @@ mod tests {
         module.add_item(Item::Function(Function {
             name: Name::new("make"),
             visibility: nx_hir::Visibility::Export,
+            form: nx_hir::FunctionForm::Paren,
             params: vec![],
             return_type: None,
             body,
@@ -5626,10 +5926,10 @@ mod tests {
     }
 
     #[test]
-    fn test_invoke_action_handler_normalizes_host_supplied_action_defaults_and_nullable_fields() {
+    fn test_invoke_action_handler_normalizes_host_supplied_action_defaults_and_optional_fields() {
         let source = r#"
-            action SearchSubmitted = { searchString:string = "docs" source:string? }
-            action DoSearch = { search:string source:string? }
+            action SearchSubmitted = { searchString:string = "docs" source?:string }
+            action DoSearch = { search:string source?:string }
 
             component <SearchBox emits { SearchSubmitted } /> = {
               <TextInput />
@@ -5662,7 +5962,11 @@ mod tests {
                     fields.get("search"),
                     Some(&Value::String(SmolStr::new("docs")))
                 );
-                assert_eq!(fields.get("source"), Some(&Value::Null));
+                assert_eq!(
+                    fields.get("source"),
+                    None,
+                    "An empty optional field is not stored"
+                );
             }
             other => panic!("Expected action record result, got {:?}", other),
         }
@@ -5716,7 +6020,7 @@ mod tests {
     #[test]
     fn test_invoke_action_handler_rejects_missing_required_action_input_fields() {
         let source = r#"
-            action SearchSubmitted = { searchString:string source:string? }
+            action SearchSubmitted = { searchString:string source?:string }
             action DoSearch = { search:string }
 
             component <SearchBox emits { SearchSubmitted } /> = {
@@ -5872,7 +6176,7 @@ mod tests {
     #[test]
     fn test_invoke_action_handler_rejects_empty_and_non_action_results() {
         let source = r#"
-            action SearchSubmitted = { queries:string[] }
+            action SearchSubmitted = { queries?:string+ }
             action DoSearch = { search:string }
 
             component <SearchBox emits { SearchSubmitted } /> = {
@@ -5907,7 +6211,7 @@ mod tests {
         assert!(matches!(
             empty_error.kind(),
             RuntimeErrorKind::TypeMismatch { expected, actual, .. }
-                if expected == "one or more actions or update records" && actual == "empty array"
+                if expected == "one or more actions or update records" && actual == "the empty value"
         ));
 
         let mut wrong_input_fields = FxHashMap::default();
@@ -6178,7 +6482,7 @@ mod tests {
               state {
                 query:string
                 theme:ThemeMode
-                note:string?
+                note?:string
               }
               <TextInput value={query} theme={theme} note={note} />
             }
@@ -6199,7 +6503,7 @@ mod tests {
 
         let evaluated = interpreter
             .evaluate_component(module.as_ref(), "SearchBox", props.clone(), state)
-            .expect("Expected enum and nullable state evaluation to succeed");
+            .expect("Expected enum and optional state evaluation to succeed");
         assert_eq!(
             extract_record_field(&evaluated.rendered, "theme"),
             &Value::UnionCase {
@@ -6207,10 +6511,11 @@ mod tests {
                 case: SmolStr::new("dark"),
             }
         );
-        assert_eq!(
-            extract_record_field(&evaluated.rendered, "note"),
-            &Value::Null
-        );
+        // An empty attribute of an undeclared element is omitted.
+        let Value::Record { fields, .. } = &evaluated.rendered else {
+            panic!("Expected record value, got {:?}", evaluated.rendered);
+        };
+        assert!(!fields.contains_key("note"));
 
         let missing_state = interpreter
             .evaluate_component(
@@ -6482,7 +6787,7 @@ mod tests {
               state {
                 query:string
                 theme:ThemeMode
-                note:string?
+                note?:string
               }
             }
         "#;
@@ -6646,7 +6951,7 @@ mod tests {
     fn test_typed_value_binding_accepts_derived_external_component_value() {
         let source = r#"
             abstract external component <Question label:string />
-            external component <ShortTextQuestion extends Question placeholder:string? />
+            external component <ShortTextQuestion extends Question placeholder?:string />
 
             let question: Question = <ShortTextQuestion label={"Name"} placeholder={"Enter your name"} />
             let render() = { question }
@@ -6671,7 +6976,7 @@ mod tests {
             external component <ShortTextQuestion extends Question />
             external component <LongTextQuestion extends Question />
 
-            let questions: Question[] = {
+            let questions: Question+ = {
               <ShortTextQuestion label={"Name"} />
               <LongTextQuestion label={"Details"} />
             }
@@ -7169,8 +7474,8 @@ mod tests {
     fn update_record_construction_keeps_only_the_supplied_fields() {
         let (module, interpreter) = lower_module_runtime(
             r#"
-            type User = { name:string = "anon" email:string? }
-            let clearEmail() = <User.Update email={null} />
+            type User = { name:string = "anon" email?:string }
+            let clearEmail() = <User.Update email={} />
             let rename() = <User.Update name="Ada" />
             let none() = <User.Update />
             "#,
@@ -7179,7 +7484,7 @@ mod tests {
         let clear = interpreter
             .execute_function(module.as_ref(), "clearEmail", vec![])
             .expect("Expected update construction to succeed");
-        assert_eq!(clear, record("User.Update", &[("email", Value::Null)]));
+        assert_eq!(clear, record("User.Update", &[("email", Value::empty())]));
 
         let rename = interpreter
             .execute_function(module.as_ref(), "rename", vec![])
@@ -7197,12 +7502,12 @@ mod tests {
     }
 
     #[test]
-    fn update_record_construction_rejects_unknown_fields_and_null_for_non_nullable_fields() {
+    fn update_record_construction_rejects_unknown_fields_and_empty_for_required_fields() {
         let (module, interpreter) = lower_module_runtime(
             r#"
-            type User = { name:string email:string? }
+            type User = { name:string email?:string }
             let nickname() = <User.Update nickname="A" />
-            let nullName() = <User.Update name={null} />
+            let emptyName() = <User.Update name={} />
             let wrongType() = <User.Update name=3 />
             "#,
         );
@@ -7216,13 +7521,13 @@ mod tests {
             unknown
         );
 
-        let null_name = interpreter
-            .execute_function(module.as_ref(), "nullName", vec![])
-            .expect_err("Expected null for a non-nullable field to fail");
+        let empty_name = interpreter
+            .execute_function(module.as_ref(), "emptyName", vec![])
+            .expect_err("Expected an empty value for a required field to fail");
         assert!(
-            null_name.to_string().contains("User.Update.name"),
+            empty_name.to_string().contains("User.Update.name"),
             "got {}",
-            null_name
+            empty_name
         );
 
         let wrong_type = interpreter
@@ -7254,11 +7559,11 @@ mod tests {
             .construct_external_record_value(
                 module.as_ref(),
                 &Name::new("User.Update"),
-                FxHashMap::from_iter([(SmolStr::new("name"), Value::Null)]),
+                FxHashMap::from_iter([(SmolStr::new("name"), Value::empty())]),
                 &Name::new("User.Update"),
                 "host input",
             )
-            .expect_err("Expected null for a non-nullable host field to fail");
+            .expect_err("Expected an empty value for a required host field to fail");
         assert!(host_null.to_string().contains("name"), "got {}", host_null);
 
         let host_absent = interpreter
@@ -7511,7 +7816,7 @@ mod tests {
             r#"
             external component <Row emits { Tapped { } } />
             component <Picker /> = {
-              state { items:string[] = {"a" "b"} selected:string = "" }
+              state { items:string+ = {"a" "b"} selected:string = "" }
               <Column>
                 {for item in items { <Row onTapped={<Update items={"x" "y"} /> <Update selected={item} />} /> }}
               </Column>

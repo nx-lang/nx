@@ -1,0 +1,81 @@
+{
+  "main.nx::ada": {
+    "$type": "Person",
+    "name": "Ada"
+  },
+  "main.nx::anonymous": "by anonymous",
+  "main.nx::cleared": {
+    "$type": "Person.Update",
+    "nick": null
+  },
+  "main.nx::clearedNick": {
+    "$type": "Person",
+    "name": "Ada"
+  },
+  "main.nx::has": true,
+  "main.nx::hasNot": false,
+  "main.nx::isNotTagged": false,
+  "main.nx::isTagged": true,
+  "main.nx::lone": {
+    "$type": "Box",
+    "items": [
+      {
+        "$type": "Item",
+        "n": 1
+      }
+    ]
+  },
+  "main.nx::name": "Ada",
+  "main.nx::named": "by Ada",
+  "main.nx::noName": null,
+  "main.nx::noNick": null,
+  "main.nx::renamed": {
+    "$type": "Person.Update",
+    "name": "Bo"
+  },
+  "main.nx::root": {
+    "$type": "Book",
+    "author": {
+      "$type": "Person",
+      "name": "Ada"
+    },
+    "tags": [
+      "x",
+      "y"
+    ],
+    "title": "A"
+  },
+  "main.nx::several": {
+    "$type": "Box",
+    "items": [
+      {
+        "$type": "Item",
+        "n": 1
+      },
+      {
+        "$type": "Item",
+        "n": 2
+      }
+    ]
+  },
+  "main.nx::withAuthor": {
+    "$type": "Book",
+    "author": {
+      "$type": "Person",
+      "name": "Ada"
+    },
+    "tags": [
+      "x",
+      "y"
+    ],
+    "title": "A"
+  },
+  "main.nx::withoutAuthor": {
+    "$type": "Book",
+    "title": "B"
+  },
+  "main.nx::writtenEmpty": {
+    "$type": "Book",
+    "title": "C"
+  }
+}

@@ -1,5 +1,5 @@
-module main.nx fingerprint 15107792274714562326
-entrypoints functions [add arithmetic integerDivision realDivision integerRemainder realRemainder comparisons moreComparisons ordered andSkipsRight orSkipsRight andTakesRight orTakesRight negation logicalNot greeting chooseBig small classify classified doubled squares big maybe element root] components []
+module main.nx fingerprint 12997715528169375669
+entrypoints functions [add arithmetic integerDivision realDivision integerRemainder realRemainder comparisons moreComparisons ordered andSkipsRight orSkipsRight andTakesRight orTakesRight negation logicalNot greeting chooseBig small classify classified stageLabel reviewStage loadLabel idleLoad failedLoad bareLabel bareFailed doubled squares big maybe element root] components []
 
 value answer =
   42
@@ -9,9 +9,6 @@ value name =
 
 value flag =
   true
-
-value nothing =
-  null
 
 value items =
   [1, 2, 3]
@@ -87,6 +84,51 @@ function classify(x: int) =
 
 function classified() =
   classify(2)
+
+union Stage
+  case draft constant
+  case review constant
+  case done constant
+
+union Load
+  case idle constant
+  case failed
+    message: string required
+
+function stageLabel(s: Stage) =
+  if s is
+    Stage.draft =>
+      "draft"
+    Stage.review =>
+      "review"
+    else =>
+      "done"
+
+function reviewStage() =
+  stageLabel(Stage.review)
+
+function loadLabel(l: Load) =
+  if l is
+    Load.idle =>
+      "idle"
+    Load.failed =>
+      l.message
+
+function idleLoad() =
+  loadLabel(Load.idle)
+
+function failedLoad() =
+  loadLabel(<Load.failed message="Offline" />)
+
+function bareLabel(l: Load) =
+  if l is
+    Load.idle =>
+      "idle"
+    Load.failed =>
+      l.message
+
+function bareFailed() =
+  bareLabel(<Load.failed message="Offline" />)
 
 function doubled() =
   for item, index in items yield

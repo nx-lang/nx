@@ -3,7 +3,7 @@
 // comparison, and an integer widened at a `float64` site.
 type Item = { title:string }
 type Label = { content text:string }
-type Box = { width:float64 ratios:float64[] opacity:float64? }
+type Box = { width:float64 ratios:float64+ opacity?:float64 }
 
 let count = 3
 let item = <Item title="Rust" />
@@ -82,6 +82,6 @@ let productOrX(b:boolean, v:float32, x:float64) = { if b { v * 3 } else { x } }
 let scaledJoin(v:float32) = { productOrX(true, v, 0.5) }
 let joinedFloat32Product() = { scaledJoin(2.3) }
 
-// An int widened at a float64 site, in a list, and at a nullable site.
+// An int widened at a float64 site, in a sequence, and at an optional site.
 let widened() = { <Box width={count} ratios={count 2.5} opacity={count} /> }
 let root() = { total() }

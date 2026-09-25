@@ -17,8 +17,10 @@ The rule applies to the literal's spelling, not to the type of an arbitrary expr
 integer literal such as `-1` SHALL be treated as an integer literal for this purpose, because
 lowering folds the negation into the literal.
 
-The expected type SHALL be the one the site declares after nullability is stripped, so an integer
-literal SHALL be accepted at a `float64?` site on the same terms as at a `float64` site.
+The expected type SHALL be the one the site declares after the occurrence is stripped, so an integer
+literal SHALL be accepted at a site that reads `float64?`, `float64+` or `float64*` on the same
+terms as at a `float64` site, and the exactly-one literal SHALL then satisfy the site by the
+lattice in `occurrence-types`.
 
 The declared type decides both the type the value is *bound at* and the type *recorded for the
 literal*, and the recorded type SHALL be the same one a written real literal takes at that site.
@@ -49,18 +51,19 @@ two spellings remain indistinguishable, now at the site's own width rather than 
 - **AND** the bound value SHALL equal `-1.0`
 
 #### Scenario: Integer literal binds at a nullable float site
-- **WHEN** a file declares `external component <B v:float64? />` and binds `<B v=0 />`
+- **WHEN** a file declares `external component <B v?:float64 />` and binds `<B v=0 />`
 - **THEN** type checking SHALL accept the binding
-- **AND** the type of the literal SHALL be `float64`
+- **AND** the type of the literal SHALL be `float64`, and `v` SHALL read as `float64?`
 
 ### Requirement: Every site with a declared floating-point type supplies the expectation
 The system SHALL apply contextual typing of an integer literal at every site where a floating-point
 type is declared for the value being written, not only at component property bindings. Those sites
 SHALL include component and external component property bindings, property defaults in a declaration
 signature, record field defaults, record field values in a constructed record, annotated `let`
-bindings, declared return types, arguments at a floating-point parameter, elements of a list whose
-element type is floating-point, and element body content bound to a declared content property —
-whether that content is a single expression or several written as the elements of a declared list.
+bindings, declared return types, arguments at a floating-point parameter, items of a sequence whose
+item type is floating-point, and element body content bound to a declared content property —
+whether that content is a single expression or several written as the items of a declared `+` or
+`*` content property.
 
 A site that supplies no expected type SHALL be unaffected: an integer literal there SHALL continue
 to infer `int`.
@@ -81,16 +84,16 @@ to infer `int`.
 - **AND** the type of `x` SHALL be `float64`
 
 #### Scenario: List elements accept integer literals at a float element type
-- **WHEN** a file declares a property of type `float64[]` and binds it to a braced sequence of the
+- **WHEN** a file declares a property of type `float64+` and binds it to a braced sequence of the
   literals `1`, `2` and `3`
 - **THEN** type checking SHALL accept the binding
-- **AND** the bound value SHALL be the list `1.0`, `2.0`, `3.0`
+- **AND** the bound value SHALL be the sequence `1.0`, `2.0`, `3.0`
 
 #### Scenario: Element body content accepts integer literals
 - **WHEN** a file declares a content property of type `float64` and writes an integer literal as the
   element's body content
 - **THEN** type checking SHALL accept the binding
-- **AND** the same SHALL hold for several integer literals written as body content at a `float64[]`
+- **AND** the same SHALL hold for several integer literals written as body content at a `float64+`
   content property
 
 #### Scenario: Unannotated let still infers int

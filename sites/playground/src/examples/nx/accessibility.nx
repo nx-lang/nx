@@ -11,7 +11,7 @@
 // focused node — which the original reads from the canvas's AccessibilityManager, an engine object
 // NX has no way to reach (code-behind).
 
-component <Card extends DrawnNode Title:string content Children:DrawnNode[] /> = {
+component <Card extends DrawnNode Title:string content Children:DrawnNode+ /> = {
   <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=8 />
     BackgroundColor="#2B3035" HorizontalOptions=Fill
     AccessibilityRole="group" AccessibilityLabel={Title}>

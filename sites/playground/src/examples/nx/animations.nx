@@ -9,9 +9,9 @@
 // the frame counts in the original's titles are read from them. Those buttons are drawn and do
 // nothing.
 
-let speeds:float64[] = { 0.5 1.0 2.0 }
+let speeds:float64+ = { 0.5 1.0 2.0 }
 
-component <Card extends DrawnNode Title:string content Children:DrawnNode[] /> = {
+component <Card extends DrawnNode Title:string content Children:DrawnNode+ /> = {
   <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=8 />
     BackgroundColor="#2B3035" HorizontalOptions=Fill>
     <SkiaStack Padding=<Thickness Left=16 Top=12 Right=16 Bottom=12 /> Spacing=10>

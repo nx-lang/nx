@@ -2,6 +2,14 @@ use crate::{FunctionParam, Primitive, Type};
 use nx_hir::{ast, Name};
 use rustc_hash::FxHashSet;
 
+/// The structural join of two types: the least type above both.
+///
+/// <para>The item types join by the rules below — equality, numeric promotion, one satisfying the
+/// other, else `object` — and the occurrences join by the lattice, so `int?` with `int+` is
+/// `int*` and `string?` with `float64` is `object?`. The bottom item type is the identity, which
+/// is what makes `{}` joined with `T` a `T?`: the empty type contributes its `?` and no item.
+/// The inference context overrides this with a join that knows about records and unions, and
+/// splits the occurrence off the same way.</para>
 pub fn common_supertype(lhs: &Type, rhs: &Type) -> Type {
     if lhs.is_error() || rhs.is_error() {
         return Type::Error;
@@ -11,18 +19,29 @@ pub fn common_supertype(lhs: &Type, rhs: &Type) -> Type {
         return lhs.clone();
     }
 
-    if let Some(joined) = nullable_join(lhs, rhs, common_supertype) {
-        return joined;
+    let (lhs_item, lhs_occ) = lhs.split();
+    let (rhs_item, rhs_occ) = rhs.split();
+    let item = common_item_supertype(lhs_item, rhs_item);
+    Type::seq(item, lhs_occ.join(rhs_occ))
+}
+
+/// The join of two item types, with the bottom type as the identity.
+pub(crate) fn common_item_supertype(lhs: &Type, rhs: &Type) -> Type {
+    if lhs == rhs {
+        return lhs.clone();
+    }
+
+    if let Type::Primitive(Primitive::Never) = lhs {
+        return rhs.clone();
+    }
+    if let Type::Primitive(Primitive::Never) = rhs {
+        return lhs.clone();
     }
 
     if let (Type::Primitive(a), Type::Primitive(b)) = (lhs, rhs) {
         if let Some(promoted) = Primitive::numeric_promotion(*a, *b) {
             return Type::Primitive(promoted);
         }
-    }
-
-    if let (Type::Array(lhs_inner), Type::Array(rhs_inner)) = (lhs, rhs) {
-        return Type::array(common_supertype(lhs_inner, rhs_inner));
     }
 
     if type_satisfies_expected(lhs, rhs) {
@@ -36,33 +55,6 @@ pub fn common_supertype(lhs: &Type, rhs: &Type) -> Type {
     Type::named("object")
 }
 
-/// The join of two types when either is nullable, or `None` when neither is.
-///
-/// <para>Nullability is lifted out of the join: `A?` with `B`, or with `B?`, is the join of `A`
-/// and `B`, made nullable. The `null` literal is typed `T?` for a `T` nothing has decided, so it
-/// adds nullability and nothing else: `null` with `float64` is `float64?`. A join that climbs to
-/// `object` stays `object`, which already admits `null`. `join` is the join the caller applies to
-/// the inner types, so a join that knows about records and unions keeps knowing inside `?`.</para>
-pub(crate) fn nullable_join(
-    lhs: &Type,
-    rhs: &Type,
-    mut join: impl FnMut(&Type, &Type) -> Type,
-) -> Option<Type> {
-    let joined = match (lhs, rhs) {
-        (Type::Nullable(inner), other) | (other, Type::Nullable(inner)) if inner.is_variable() => {
-            other.clone()
-        }
-        (Type::Nullable(lhs), Type::Nullable(rhs)) => join(lhs, rhs),
-        (Type::Nullable(inner), other) | (other, Type::Nullable(inner)) => join(inner, other),
-        _ => return None,
-    };
-    Some(match joined {
-        Type::Nullable(_) | Type::Error => joined,
-        joined if is_object_type(&joined) => joined,
-        joined => Type::nullable(joined),
-    })
-}
-
 pub fn is_object_type(ty: &Type) -> bool {
     matches!(ty, Type::Named(named) if named.name.as_str() == "object")
 }
@@ -74,36 +66,23 @@ pub fn is_object_type(ty: &Type) -> bool {
 /// on either basis would change the value a host receives on the strength of an expectation that
 /// was never a numeric one.</para>
 ///
-/// <para>A list-typed site answers with its element type because a scalar binds there by coercion,
-/// so the element type is the expectation a literal written at that site actually meets.</para>
+/// <para>A suffixed site answers with its item type because a scalar binds there by the one-level
+/// lift, so the item type is the expectation a literal written at that site actually meets.</para>
 pub fn numeric_literal_target(expected: &Type) -> Option<Primitive> {
-    match expected.strip_nullable() {
+    match expected.item() {
         Type::Primitive(primitive) if primitive.is_numeric() => Some(*primitive),
-        Type::Array(element) => numeric_literal_target(element),
         _ => None,
     }
 }
 
+/// Whether a value of type `actual` satisfies a site of type `expected`.
+///
+/// <para>`object` is the top item type: it admits every item, under the occurrence the site
+/// declares. A sequence does not satisfy a plain `object` site, since `object` is exactly one
+/// value; it satisfies `object*`.</para>
 pub fn type_satisfies_expected(actual: &Type, expected: &Type) -> bool {
-    actual.is_compatible_with(expected) || is_object_type(expected)
-}
-
-pub fn type_satisfies_expected_with_coercion(actual: &Type, expected: &Type) -> bool {
-    if type_satisfies_expected(actual, expected) {
-        return true;
-    }
-
-    let coercion_target = expected.strip_nullable();
-
-    match (actual, coercion_target) {
-        (Type::Array(actual_inner), Type::Array(expected_inner)) => {
-            type_satisfies_expected(actual_inner, expected_inner)
-        }
-        (Type::Array(_), _) if is_object_type(coercion_target) => true,
-        (Type::Array(_), _) => false,
-        (_, Type::Array(expected_inner)) => type_satisfies_expected(actual, expected_inner),
-        _ => false,
-    }
+    actual.is_compatible_with(expected)
+        || (is_object_type(expected.item()) && actual.occurrence().satisfies(expected.occurrence()))
 }
 
 pub fn resolve_type_ref_with<F>(type_ref: &ast::TypeRef, resolve_named: &mut F) -> Type
@@ -130,11 +109,8 @@ where
         ast::TypeRef::Applied { name, .. } => {
             builtin_type(name).unwrap_or_else(|| resolve_named(name, seen))
         }
-        ast::TypeRef::Array(inner) => {
-            Type::array(resolve_type_ref_with_seen(inner, seen, resolve_named))
-        }
-        ast::TypeRef::Nullable(inner) => {
-            Type::nullable(resolve_type_ref_with_seen(inner, seen, resolve_named))
+        ast::TypeRef::Seq { inner, occ } => {
+            Type::seq(resolve_type_ref_with_seen(inner, seen, resolve_named), *occ)
         }
         ast::TypeRef::Function {
             params,
@@ -146,6 +122,7 @@ where
                     name: param.name.clone(),
                     ty: resolve_type_ref_with_seen(&param.ty, seen, resolve_named),
                     is_content: param.is_content,
+                    optional: param.optional,
                 })
                 .collect();
             let ret = resolve_type_ref_with_seen(return_type, seen, resolve_named);
@@ -194,79 +171,105 @@ mod tests {
     }
 
     #[test]
-    fn test_common_supertype_promotes_nested_array_items() {
+    fn test_common_supertype_promotes_sequence_items() {
         assert_eq!(
-            common_supertype(&Type::array(Type::int32()), &Type::array(Type::int64())),
-            Type::array(Type::int64())
+            common_supertype(
+                &Type::one_or_more(Type::int32()),
+                &Type::one_or_more(Type::int64())
+            ),
+            Type::one_or_more(Type::int64())
         );
         assert_eq!(
-            common_supertype(&Type::array(Type::float32()), &Type::array(Type::float64())),
-            Type::array(Type::float64())
-        );
-    }
-
-    #[test]
-    fn test_common_supertype_lifts_nullability_out_of_the_join() {
-        let null = Type::nullable(Type::var(0));
-        assert_eq!(
-            common_supertype(&null, &Type::float64()),
-            Type::nullable(Type::float64())
-        );
-        assert_eq!(
-            common_supertype(&Type::nullable(Type::int()), &Type::float64()),
-            Type::nullable(Type::float64())
-        );
-        assert_eq!(
-            common_supertype(&Type::nullable(Type::string()), &Type::float64()),
-            Type::named("object")
+            common_supertype(
+                &Type::zero_or_more(Type::float32()),
+                &Type::one_or_more(Type::float64())
+            ),
+            Type::zero_or_more(Type::float64())
         );
     }
 
     #[test]
-    fn test_type_satisfies_expected_with_coercion_allows_scalar_to_list() {
-        assert!(type_satisfies_expected_with_coercion(
+    fn test_common_supertype_joins_occurrences_by_the_lattice() {
+        // `{}` joined with `T` is `T?`: the empty type contributes `?` and no item.
+        assert_eq!(
+            common_supertype(&Type::empty(), &Type::float64()),
+            Type::optional(Type::float64())
+        );
+        assert_eq!(
+            common_supertype(&Type::optional(Type::int()), &Type::float64()),
+            Type::optional(Type::float64())
+        );
+        assert_eq!(
+            common_supertype(&Type::int(), &Type::one_or_more(Type::int())),
+            Type::one_or_more(Type::int())
+        );
+        assert_eq!(
+            common_supertype(
+                &Type::optional(Type::int()),
+                &Type::one_or_more(Type::int())
+            ),
+            Type::zero_or_more(Type::int())
+        );
+        // A join with no common item type still joins its occurrence.
+        assert_eq!(
+            common_supertype(&Type::optional(Type::string()), &Type::float64()),
+            Type::optional(Type::named("object"))
+        );
+    }
+
+    #[test]
+    fn test_type_satisfies_expected_lifts_a_scalar_to_a_sequence() {
+        assert!(type_satisfies_expected(
             &Type::int(),
-            &Type::array(Type::int())
+            &Type::one_or_more(Type::int())
         ));
-    }
-
-    #[test]
-    fn test_type_satisfies_expected_with_coercion_allows_array_to_nullable_array() {
-        assert!(type_satisfies_expected_with_coercion(
-            &Type::array(Type::int()),
-            &Type::nullable(Type::array(Type::int()))
-        ));
-    }
-
-    #[test]
-    fn test_type_satisfies_expected_with_coercion_allows_scalar_to_nullable_array() {
-        assert!(type_satisfies_expected_with_coercion(
+        assert!(type_satisfies_expected(
             &Type::int(),
-            &Type::nullable(Type::array(Type::int()))
+            &Type::zero_or_more(Type::int())
+        ));
+        assert!(type_satisfies_expected(
+            &Type::one_or_more(Type::int()),
+            &Type::zero_or_more(Type::int())
         ));
     }
 
     #[test]
-    fn test_type_satisfies_expected_with_coercion_rejects_nullable_array_to_array() {
-        assert!(!type_satisfies_expected_with_coercion(
-            &Type::nullable(Type::array(Type::int())),
-            &Type::array(Type::int())
+    fn test_type_satisfies_expected_follows_the_lattice_downward_never() {
+        assert!(!type_satisfies_expected(
+            &Type::zero_or_more(Type::int()),
+            &Type::one_or_more(Type::int())
         ));
-    }
-
-    #[test]
-    fn test_type_satisfies_expected_with_coercion_rejects_nullable_items_for_nullable_array() {
-        assert!(!type_satisfies_expected_with_coercion(
-            &Type::array(Type::nullable(Type::int())),
-            &Type::nullable(Type::array(Type::int()))
+        assert!(!type_satisfies_expected(
+            &Type::one_or_more(Type::int()),
+            &Type::optional(Type::int())
         ));
-    }
-
-    #[test]
-    fn test_type_satisfies_expected_with_coercion_rejects_list_to_scalar() {
-        assert!(!type_satisfies_expected_with_coercion(
-            &Type::array(Type::int()),
+        assert!(!type_satisfies_expected(
+            &Type::optional(Type::int()),
             &Type::int()
+        ));
+        assert!(!type_satisfies_expected(
+            &Type::one_or_more(Type::int()),
+            &Type::int()
+        ));
+    }
+
+    #[test]
+    fn test_object_is_the_top_item_type_under_the_site_occurrence() {
+        assert!(type_satisfies_expected(
+            &Type::int(),
+            &Type::named("object")
+        ));
+        assert!(type_satisfies_expected(
+            &Type::one_or_more(Type::int()),
+            &Type::zero_or_more(Type::named("object"))
+        ));
+        assert!(!type_satisfies_expected(
+            &Type::one_or_more(Type::int()),
+            &Type::named("object")
+        ));
+        assert!(!type_satisfies_expected(
+            &Type::empty(),
+            &Type::named("object")
         ));
     }
 
@@ -283,8 +286,11 @@ mod tests {
             Type::int64()
         );
         assert_eq!(
-            common_supertype(&Type::array(Type::int32()), &Type::array(Type::int())),
-            Type::array(Type::int())
+            common_supertype(
+                &Type::one_or_more(Type::int32()),
+                &Type::one_or_more(Type::int())
+            ),
+            Type::one_or_more(Type::int())
         );
     }
 
@@ -353,19 +359,17 @@ mod tests {
     }
 
     #[test]
-    fn test_numeric_literal_target_sees_through_nullable_and_list() {
+    fn test_numeric_literal_target_sees_through_an_occurrence() {
         assert_eq!(
-            numeric_literal_target(&Type::nullable(Type::float64())),
+            numeric_literal_target(&Type::optional(Type::float64())),
             Some(Primitive::Float64)
         );
         assert_eq!(
-            numeric_literal_target(&Type::array(Type::int32())),
+            numeric_literal_target(&Type::one_or_more(Type::int32())),
             Some(Primitive::Int32)
         );
         assert_eq!(
-            numeric_literal_target(&Type::nullable(Type::array(
-                Type::nullable(Type::float64())
-            ))),
+            numeric_literal_target(&Type::zero_or_more(Type::float64())),
             Some(Primitive::Float64)
         );
     }
@@ -379,7 +383,10 @@ mod tests {
         assert_eq!(numeric_literal_target(&Type::string()), None);
         assert_eq!(numeric_literal_target(&Type::boolean()), None);
         assert_eq!(numeric_literal_target(&Type::named("Thickness")), None);
-        assert_eq!(numeric_literal_target(&Type::array(Type::string())), None);
+        assert_eq!(
+            numeric_literal_target(&Type::one_or_more(Type::string())),
+            None
+        );
     }
 
     #[test]
@@ -389,10 +396,10 @@ mod tests {
                 ast::FunctionParam::new("Label", ast::TypeRef::name("string")),
                 ast::FunctionParam::content(
                     "Items",
-                    ast::TypeRef::array(ast::TypeRef::name("Custom")),
+                    ast::TypeRef::one_or_more(ast::TypeRef::name("Custom")),
                 ),
             ],
-            ast::TypeRef::nullable(ast::TypeRef::name("boolean")),
+            ast::TypeRef::optional(ast::TypeRef::name("boolean")),
         );
 
         let resolved =
@@ -403,9 +410,9 @@ mod tests {
             Type::function(
                 vec![
                     FunctionParam::new("Label", Type::string()),
-                    FunctionParam::content("Items", Type::array(Type::named("Custom"))),
+                    FunctionParam::content("Items", Type::one_or_more(Type::named("Custom"))),
                 ],
-                Type::nullable(Type::boolean())
+                Type::optional(Type::boolean())
             )
         );
     }

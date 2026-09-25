@@ -141,7 +141,7 @@ let root(): int = { 1 / 0 }
 withSource(
   `
 external component <Item label:string />
-external component <Stack content Children:Item[] />
+external component <Stack content Children:Item+ />
 let root() = { <Stack><Item label="only" /></Stack> }
 `,
   (dir, sourcePath) => {
@@ -154,7 +154,7 @@ let root() = { <Stack><Item label="only" /></Stack> }
 withSource(
   `
 type Shadow = { Y:float64 = 0.0 }
-external component <Shape shadows:Shadow[]? sizes:float64[]? />
+external component <Shape shadows?:Shadow+ sizes?:float64+ />
 let root() = { <Shape shadows={ <Shadow Y=6.0 /> } sizes={3.0} /> }
 `,
   (dir, sourcePath) => {
@@ -166,8 +166,8 @@ let root() = { <Shape shadows={ <Shadow Y=6.0 /> } sizes={3.0} /> }
 
 withSource(
   `
-type User = { name:string = "anon" email:string? }
-let root(): User.Update = { <User.Update email={null} /> }
+type User = { name:string = "anon" email?:string }
+let root(): User.Update = { <User.Update email={} /> }
 `,
   (dir, sourcePath) => {
     const ir = emitIr(dir, sourcePath);
@@ -242,13 +242,12 @@ let root() = { <Frame held={<Figure.circle r=2 />} /> }
 
 withSource(
   `
-type Ints = int[]
+type Ints = int+
 type AlsoInts = Ints
 abstract external component <Item />
 external component <Leaf extends Item />
-type Items = Item[]
-type MaybeItems = Items?
-external component <Box xs:AlsoInts? content items:MaybeItems />
+type Items = Item+
+external component <Box xs?:AlsoInts content items?:Items />
 let root() = { <Box xs={3}><Leaf /></Box> }
 `,
   (dir, sourcePath) => {
@@ -261,7 +260,7 @@ let root() = { <Box xs={3}><Leaf /></Box> }
 withSource(
   `
 type Thickness = { Left:float64 = 0.0  Top:float64 = 0.0 }
-abstract external component <Control Padding:Thickness = {<Thickness />} content Children:Control[]? />
+abstract external component <Control Padding:Thickness = {<Thickness />} content Children?:Control+ />
 external component <Panel extends Control />
 let root() = { <Panel Padding={<Thickness Left=4.0 />}><Panel /></Panel> }
 `,
@@ -348,10 +347,10 @@ console.log(JSON.stringify({ ints: ints(), first: first(), moved: moved() }));
 
 withSource(
   `
-type User = { name:string email:string? age:int? }
+type User = { name:string email?:string age?:int }
 let key(): User.Property = { User.Property.email }
-let root(): User = { apply(<User name="Ada" email="x@y" />, <User.Update email={null} />) }
-let keys(): User.Property[] = { changed(<User.Update age={null} name="Ada" />) }
+let root(): User = { apply(<User name="Ada" email="x@y" />, <User.Update email={} />) }
+let keys(): User.Property* = { changed(<User.Update age={} name="Ada" />) }
 `,
   (dir, sourcePath) => {
     const ir = emitIr(dir, sourcePath);
@@ -405,7 +404,7 @@ withSource(
 type Contact = { name:string }
 let <ContactRow Item:Contact Index:int />: string = {Item.name + "#" + Index}
 let <Compact Item:Contact />: string = {Item.name}
-external component <List TItem:type ItemsSource:TItem[]? ItemTemplate:(<function Item:TItem Index:int />: string)? />
+external component <List TItem:type ItemsSource?:TItem+ ItemTemplate?:<function Item:TItem Index:int />: string />
 component <Section Item:Contact Row:<function Item:Contact Index:int />: string /> = { <Row Item={Item} Index=2 /> }
 let root() = <List TItem=Contact ItemsSource={ <Contact name="Ada" /> } ItemTemplate={ContactRow} />
 `,
@@ -429,7 +428,7 @@ let root() = <List TItem=Contact ItemsSource={ <Contact name="Ada" /> } ItemTemp
 
 withSource(
   `
-external component <Box Label:string? Same:boolean? Other:boolean? />
+external component <Box Label?:string Same?:boolean Other?:boolean />
 let <Wrap Item:object />: string = "w"
 let <Plain Item:object />: string = "p"
 let F: <function Item:object />: string = {Wrap}
@@ -449,10 +448,10 @@ let root() = <Box Label=<F Item="x" /> Same={F == G} Other={F == H} />
 withSource(
   `
 type Item = { n:int }
-external component <Stack content Children:Item[] />
+external component <Stack content Children:Item+ />
 let xs = { 1 2 3 }
-let <Items content Items:Item[] />: Item[] = {Items}
-let <Shift Items:Item[] By:int />: Item[] = { for i in Items { <Item n={i.n + By} /> } }
+let <Items content Items:Item+ />: Item+ = {Items}
+let <Shift Items:Item+ By:int />: Item+ = { for i in Items { <Item n={i.n + By} /> } }
 let seed = { for x in xs { <Item n={x} /> } }
 let viaComponent() = <Stack> for x in xs { <Item n={x} /> } for x in xs { <Item n={x + 10} /> } </Stack>
 let viaFunction() = <Items> <Shift Items={seed} By=0 /> <Shift Items={seed} By=10 /> </Items>
@@ -473,9 +472,9 @@ let root() = { viaComponent() viaFunction() }
 
 withSource(
   `
-let xs:string[] = {"a" "b"}
-let ys:string[] = {"c"}
-let root(): string[] = { xs ys }
+let xs:string+ = {"a" "b"}
+let ys:string+ = {"c"}
+let root(): string+ = { xs ys }
 `,
   (dir, sourcePath) => {
     const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
@@ -488,10 +487,10 @@ let root(): string[] = { xs ys }
 
 withSource(
   `
-type Row = { cells:int[] }
-let rows:Row[] = { <Row cells={1 2}/> <Row cells={3 4}/> }
-let flat(): int[] = { for r in rows { r.cells } }
-let evens(): int[] = { for n in 1..=4 { if (n % 2 == 0) { n } } }
+type Row = { cells:int+ }
+let rows:Row+ = { <Row cells={1 2}/> <Row cells={3 4}/> }
+let flat(): int+ = { for r in rows { r.cells } }
+let evens(): int* = { for n in 1..=4 { if (n % 2 == 0) { n } } }
 let root() = { flat() evens() }
 `,
   (dir, sourcePath) => {
@@ -508,7 +507,7 @@ let root() = { flat() evens() }
 withSource(
   `
 type A = { n:int = 1 }
-type Box = { content items:A[] }
+type Box = { content items:A+ }
 let c = false
 let root(): Box = { <Box><A/>{if c { <A/> }}</Box> }
 `,
@@ -528,12 +527,12 @@ let root(): Box = { <Box><A/>{if c { <A/> }}</Box> }
 withSource(
   `
 type Badge = { n:int = 1 }
-type Row = { cells:int[] }
-type Box = { content items:Badge[] }
-type Result = { spliced:Badge[] values:string[] flat:int[] boxed:Box }
-let some:Badge[] = { <Badge/> <Badge/> }
-let xs:string[] = {"a" "b"}
-let rows:Row[] = { <Row cells={1 2}/> <Row cells={3 4}/> }
+type Row = { cells:int+ }
+type Box = { content items:Badge+ }
+type Result = { spliced:Badge+ values:string+ flat:int+ boxed:Box }
+let some:Badge+ = { <Badge/> <Badge/> }
+let xs:string+ = {"a" "b"}
+let rows:Row+ = { <Row cells={1 2}/> <Row cells={3 4}/> }
 let c = false
 let root(): Result = <Result
   spliced={some <Badge/>}
@@ -574,15 +573,15 @@ console.log(JSON.stringify(root()));
 withSource(
   `
 type Badge = { n:int = 1 }
-type Box = { content items:Badge[] }
-type Loose = { content items:Badge?[] }
+type Box = { content items:Badge+ }
+type Loose = { content items?:Badge+ }
 type Nested = { openInOpen:Box takenInner:Box closedOverOpen:Loose }
 let yes = true
 let no = false
 let root(): Nested = <Nested
   openInOpen={<Box><Badge/>{if yes { if no { <Badge n=2 /> } }}</Box>}
   takenInner={<Box><Badge/>{if yes { if yes { <Badge n=5 /> } }}</Box>}
-  closedOverOpen={<Loose><Badge/>{if yes { if no { <Badge n=3 /> } } else { <Badge n=4 /> }}</Loose>}
+  closedOverOpen={<Loose><Badge/><Badge n=6 />{if yes { if no { <Badge n=3 /> } } else { <Badge n=4 /> }}</Loose>}
 />
 `,
   (dir, sourcePath) => {
@@ -606,28 +605,30 @@ console.log(JSON.stringify(root()));
     // Both taken: the inner conditional's item arrives through the outer one.
     assertEqual(viaIr.takenInner.items.length, 2);
     assertEqual(viaIr.takenInner.items[1].n, 5);
-    // An `else` on the outer conditional does not make the untaken inner one contribute a null:
-    // the branch that was taken is itself the thing that contributes nothing.
-    assertEqual(viaIr.closedOverOpen.items.length, 1);
+    // An `else` on the outer conditional does not make the untaken inner one contribute an empty
+    // item: the branch that was taken is itself the thing that contributes nothing.
+    assertEqual(viaIr.closedOverOpen.items.length, 2);
     console.log("ok - a conditional nested in a conditional contributes nothing in all three engines");
   },
 );
 
 // A body that was written and produced nothing is not the same as no body at all. The first binds
-// the empty list; only the second leaves the content property to its declared default. Every case
-// here has a body, so the default must not appear -- and each sits alone, with no sibling to keep
-// the list non-empty, which is what makes the distinction observable.
+// the empty value; only the second leaves the content property to its declared default. A body that
+// may produce nothing is admitted only at an optional content property, which has no default, so
+// the two are told apart across two types: `Open` binds the empty value — an omitted key — however
+// the body came to produce nothing, and `Box` takes its default only when no body was written.
 withSource(
   `
 type Badge = { n:int = 1 }
-type Box = { content items:Badge[] = { <Badge n=9 /> } }
-type Defaults = { untaken:Box empty:Box noIterations:Box absent:Box }
+type Box = { content items:Badge+ = { <Badge n=9 /> } }
+type Open = { content items?:Badge+ }
+type Defaults = { untaken:Open empty:Open noIterations:Open absent:Box }
 let c = false
-let none:Badge[] = { }
+let none:Badge* = { }
 let root(): Defaults = <Defaults
-  untaken={<Box>{if c { <Badge n=2 /> }}</Box>}
-  empty={<Box>{}</Box>}
-  noIterations={<Box>{for b in none { b }}</Box>}
+  untaken={<Open>{if c { <Badge n=2 /> }}</Open>}
+  empty={<Open>{}</Open>}
+  noIterations={<Open>{for b in none { b }}</Open>}
   absent={<Box/>}
 />
 `,
@@ -646,29 +647,28 @@ console.log(JSON.stringify(root()));
 
     const viaIr = evaluateFunction(prepared, "root");
     assertEqual(viaIr, nativeJson(sourcePath));
-    // A body that produced nothing binds the empty list, however it came to produce nothing.
+    assertEqual(viaIr, generated);
+    // A body that produced nothing binds the empty value, however it came to produce nothing, and
+    // an empty optional field is an omitted key.
     for (const field of ["untaken", "empty", "noIterations"]) {
-      assertEqual(viaIr[field].items, []);
-      assertEqual(generated[field].items, []);
+      assertEqual("items" in viaIr[field], false);
+      assertEqual("items" in generated[field], false);
     }
     // No body at all is the one case the declared default is for.
     assertEqual(viaIr.absent.items.length, 1);
     assertEqual(viaIr.absent.items[0].n, 9);
-    // `absent` is compared field by field rather than through `assertEqual(viaIr, generated)`,
-    // because generated code binds a one-item default as the item instead of a one-item list. That
-    // is a gap in this target's coercion, not in the rule under test, and it is tracked separately.
-    console.log("ok - a body that produced nothing binds the empty list rather than the declared default");
+    console.log("ok - a body that produced nothing binds the empty value rather than the declared default");
   },
 );
 
-// A conditional with no `else` carries an implicit `else { }`, so it is a sequence in its own right
+// A conditional with no `else` carries an implicit `else { }`, so it admits zero in its own right
 // and needs no rule of its own in any engine: an empty arm written out and a missing one agree, and
 // a conditional alone in its braces behaves as it does beside other items.
 withSource(
   `
 type Badge = { n:int = 1 }
-type Box = { content items:Badge[] }
-type Implicit = { emptyArm:Box missingArm:Box alone:int[] beside:int[] taken:int[] }
+type Box = { content items:Badge+ }
+type Implicit = { emptyArm:Box missingArm:Box alone?:int beside:int+ taken?:int }
 let c = false
 let t = true
 let root(): Implicit = <Implicit
@@ -697,28 +697,29 @@ console.log(JSON.stringify(root()));
     // The written empty arm and the missing one are the same thing.
     assertEqual(viaIr.emptyArm, viaIr.missingArm);
     assertEqual(viaIr.emptyArm.items.length, 1);
-    // Alone in its braces or beside another item, an untaken conditional contributes nothing.
-    assertEqual(viaIr.alone, []);
+    // Alone in its braces an untaken conditional is the empty value, an omitted key at an optional
+    // field; beside another item it contributes nothing.
+    assertEqual("alone" in viaIr, false);
     assertEqual(viaIr.beside, [2]);
-    // A taken conditional is its branch as a one-item sequence, which is what its `int[]` type
-    // says; the checker lifts the branch at the source, so no engine binds a bare `1` here.
-    assertEqual(viaIr.taken, [1]);
+    // A taken conditional is its branch: a `?` value that holds an item is the item itself.
+    assertEqual(viaIr.taken, 1);
     assertEqual(generated, viaIr);
-    console.log("ok - a conditional with no else is a sequence in all three engines, alone or beside other items");
+    console.log("ok - a conditional with no else admits zero in all three engines, alone or beside other items");
   },
 );
 
-// A taken conditional's value has to be the sequence its type claims, or code that consumes it as
-// one breaks differently in each engine. Iterating it is the sharpest test: before the branch was
-// lifted at the source, the interpreter raised, the IR runtime threw, and generated JavaScript
-// iterated a string's characters -- `"new"` became `"n!" "e!" "w!"`.
+// A taken conditional's value has to be what its type claims, or code that consumes it breaks
+// differently in each engine. Iterating it is the sharpest test: a `for` over a `?` value that
+// holds an item runs once over that item — before this was pinned, the interpreter raised, the IR
+// runtime threw, and generated JavaScript iterated a string's characters, so `"new"` became
+// `"n!" "e!" "w!"`.
 withSource(
   `
-type Out = { counted:int[] tagged:string[] mixed:int[] }
+type Out = { counted?:int tagged?:string mixed:int+ }
 let c = true
 let v = { if c { 1 } }
-let tags:string[] = { if c { "new" } }
-let xs:int[] = {5 6}
+let tags:string? = { if c { "new" } }
+let xs:int+ = {5 6}
 let either = { if c { 1 } else { xs } }
 let root(): Out = <Out
   counted={for x in v { x * 10 }}
@@ -742,28 +743,30 @@ console.log(JSON.stringify(root()));
     const viaIr = evaluateFunction(prepared, "root");
     assertEqual(viaIr, nativeJson(sourcePath));
     assertEqual(viaIr, generated);
-    assertEqual(viaIr.counted, [10]);
-    assertEqual(viaIr.tagged, ["new!"]);
+    // A `for` over a `?` value yields a `?` value, so the one item is the value itself.
+    assertEqual(viaIr.counted, 10);
+    assertEqual(viaIr.tagged, "new!");
     assertEqual(viaIr.mixed, [1]);
-    console.log("ok - a taken conditional iterates as the one-item sequence its type says, in all three engines");
+    console.log("ok - a taken conditional iterates as the value its type says, in all three engines");
   },
 );
 
-// `else { null }` is how a nullable value is written now that a missing `else` is `{}`, and it has
-// to work beside a sequence as well as beside a scalar. A written null is not an item to lift, so
-// the result is a nullable sequence that is null -- never `[null]`, a null item. `xs` holds two
-// items on purpose: a one-item `{"a"}` at the `let xs:string[]` annotation meets the separate
-// single-item-lift gap in generated code, which this case is not about.
+// A conditional whose branches join to a sequence that admits zero has to work beside a sequence as
+// well as beside a scalar: an untaken branch is the empty value, never `[[]]` or a null item, and an
+// empty optional field is an omitted key. `xs` holds two items on purpose: a one-item `{"a"}` at the
+// `let xs:string+` annotation meets the separate single-item-lift gap in generated code, which this
+// case is not about.
 withSource(
   `
-type Out = { absent:string[]? present:string[]? reversed:string[]? }
+type Out = { absent?:string+ present?:string+ reversed?:string+ }
 let no = false
 let yes = true
-let xs:string[] = {"a" "b"}
+let xs:string+ = {"a" "b"}
+let none:string* = {}
 let root(): Out = <Out
-  absent={if no { xs } else { null }}
-  present={if yes { xs } else { null }}
-  reversed={if yes { null } else { xs }}
+  absent={if no { xs }}
+  present={if yes { xs }}
+  reversed={if yes { none } else { xs }}
 />
 `,
   (dir, sourcePath) => {
@@ -783,28 +786,28 @@ console.log(JSON.stringify(root()));
     assertEqual(viaIr, nativeJson(sourcePath));
     assertEqual(viaIr, generated);
     assertEqual(viaIr.present, ["a", "b"]);
-    // A null-valued field is absent from canonical output, so these compare as missing, not `[null]`.
-    assertEqual(viaIr.absent ?? null, null);
-    assertEqual(viaIr.reversed ?? null, null);
-    console.log("ok - an explicit null else beside a sequence is a nullable sequence in all three engines");
+    // An empty optional field is an omitted key in canonical output, never `[]` or `[null]`.
+    assertEqual("absent" in viaIr, false);
+    assertEqual("reversed" in viaIr, false);
+    console.log("ok - an untaken branch beside a sequence is an empty optional sequence in all three engines");
   },
 );
 
-// A lone content child binds as itself, then takes the property's type, which is what the
-// interpreter does. So an absent nullable sequence alone in a body binds `null` at a nullable-list
-// property. Generated code briefly spliced a lone child instead, turning it into `[null]`; with a
-// conditional's branch now lifted at the source there is no reason to splice one, and generated code
-// is back to what it emitted before. The IR runtime is not compared: it splices a lone child at any
-// list-typed property and then rejects the `null` element, which it already did before this change.
+// A lone content child binds as the child's value lifted once to the property's declared type,
+// the one lone-child rule every engine shares. So an empty sequence alone in a body binds the empty
+// value at an optional content property — an omitted key — in the interpreter, generated JavaScript
+// and the IR runtime alike; the IR runtime once spliced a lone child at any list-typed property and
+// then rejected the null it found, which is why it was left out of this comparison before.
 withSource(
   `
 type A = { n:int = 1 }
-type Box = { content items:A[]? }
+type Box = { content items?:A+ }
 let c = false
-let as2:A[] = { <A/> <A n=2 /> }
-let root() = { <Box>{if c { as2 } else { null }}</Box> }
+let as2:A+ = { <A/> <A n=2 /> }
+let root() = { <Box>{if c { as2 }}</Box> }
 `,
   (dir, sourcePath) => {
+    const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
     const generatedPath = join(dir, "js");
     runNxCli(["codegen", sourcePath, "--target", "javascript", "--output", generatedPath]);
     const indexUrl = pathToFileURL(join(generatedPath, "index.js")).href;
@@ -817,7 +820,36 @@ console.log(JSON.stringify(root()));
     );
     const native = nativeJson(sourcePath);
     assertEqual(generated, native);
-    assertEqual(native.items ?? null, null);
-    console.log("ok - a lone absent nullable sequence binds null in the interpreter and generated JavaScript");
+    assertEqual(evaluateFunction(prepared, "root"), native);
+    assertEqual("items" in native, false);
+    console.log("ok - a lone empty sequence binds an empty optional content property in all three engines");
+  },
+);
+
+// The same lone-child rule at an optional `+` content property, whose read type is `*`: one child
+// binds a one-item array, as it does at a required `+` property, in every engine.
+withSource(
+  `
+type A = { n:int = 1 }
+type Box = { content items?:A+ }
+let root() = { <Box><A/></Box> }
+`,
+  (dir, sourcePath) => {
+    const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
+    const generatedPath = join(dir, "js");
+    runNxCli(["codegen", sourcePath, "--target", "javascript", "--output", generatedPath]);
+    const indexUrl = pathToFileURL(join(generatedPath, "index.js")).href;
+    const generated = generatedJsJson(
+      generatedPath,
+      `
+import { root } from ${JSON.stringify(indexUrl)};
+console.log(JSON.stringify(root()));
+`,
+    );
+    const native = nativeJson(sourcePath);
+    assertEqual(native.items, [{ $type: "A", n: 1 }]);
+    assertEqual(evaluateFunction(prepared, "root"), native);
+    assertEqual(generated, native);
+    console.log("ok - a lone child at an optional plus content property binds a one-item array in all three engines");
   },
 );

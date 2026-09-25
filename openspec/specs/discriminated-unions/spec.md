@@ -8,14 +8,22 @@ The system SHALL construct discriminated union cases through the owning union's 
 Payload cases SHALL support element-style construction using `<Union.case ... />`. Fieldless cases
 SHALL support scoped member construction such as `Union.case`, and MAY also be constructed with an
 empty element-style case constructor. Payload case construction MUST validate required fields,
-defaulted fields, nullable fields, content fields, unknown fields, and field types using the same
-binding rules as record construction.
+defaulted fields, optional fields, content fields, unknown fields, and field types using the same
+binding rules as record construction, so an optional field that is not written binds the empty
+value and writing `{}` to a required or defaulted field is rejected, as `optional-properties`
+requires.
 
 #### Scenario: Payload case construction validates fields
 - **WHEN** a file contains `type LoadState = | failed { message:string retryable:boolean = true } let state:LoadState = <LoadState.failed message={"Offline"} />`
 - **THEN** type checking SHALL accept the construction
 - **AND** interpretation SHALL produce a case value with discriminator `LoadState.failed`
 - **AND** the case value SHALL include `retryable = true` from the case default
+
+#### Scenario: Payload case construction leaves an omitted optional field empty
+- **WHEN** a file contains `type LoadState = | failed { message:string code?:int } let state:LoadState = <LoadState.failed message={"Offline"} />`
+- **THEN** type checking SHALL accept the construction
+- **AND** the case value's `code` SHALL be the empty value, and its canonical JSON SHALL NOT contain a `code` key
+- **AND** `<LoadState.failed message={} />` SHALL be rejected because `message` is required
 
 #### Scenario: Fieldless case supports member shorthand
 - **WHEN** a file contains `type LoadState = idle | loading let state:LoadState = LoadState.idle`
@@ -43,8 +51,8 @@ unions SHALL remain closed; declarations outside the union case list MUST NOT ad
   `LoadState`
 
 #### Scenario: Sibling cases infer the owning union as common type
-- **WHEN** a file contains `type LoadState = | idle | failed { message:string } let states:LoadState[] = { LoadState.idle <LoadState.failed message={"Offline"} /> }`
-- **THEN** type checking SHALL accept the list because both items are cases of `LoadState`
+- **WHEN** a file contains `type LoadState = | idle | failed { message:string } let states:LoadState+ = { LoadState.idle <LoadState.failed message={"Offline"} /> }`
+- **THEN** type checking SHALL accept the sequence because both items are cases of `LoadState`
 
 #### Scenario: Union cases inherit abstract base fields
 - **WHEN** a file contains `abstract type EventBase = { source:string = "ui" } type UiEvent extends EventBase = | clicked { x:int y:int } let event:EventBase = <UiEvent.clicked x={1} y={2} />`
@@ -56,29 +64,6 @@ unions SHALL remain closed; declarations outside the union case list MUST NOT ad
 - **THEN** semantic validation SHALL reject `MoreLoadState extends LoadState` because a union is
   not an abstract record base
 
-### Requirement: Nullable union absence normalizes to null
-When a discriminated-union value is expected through a nullable type reference, the system SHALL
-represent absence as `null`. The system MUST NOT synthesize undeclared fieldless cases such as
-`<Union>.undefined` or `Union.undefined` to represent nullable absence. Declared fieldless union
-cases SHALL continue to normalize as scoped union case values.
-
-#### Scenario: Omitted nullable union field produces null
-- **WHEN** source contains `type FlowCompletion = | continue | end { message:string } type QuestionFlow = { completion:FlowCompletion? } let root(): QuestionFlow = <QuestionFlow />`
-- **THEN** type checking SHALL accept the omitted nullable `completion` field
-- **AND** interpretation SHALL normalize `completion` to `null`
-- **AND** the normalized output SHALL NOT include `$type: "FlowCompletion.undefined"`
-
-#### Scenario: Explicit null nullable union field produces null
-- **WHEN** source contains `type FlowCompletion = | continue | end { message:string } type QuestionFlow = { completion:FlowCompletion? } let root(): QuestionFlow = <QuestionFlow completion={null} />`
-- **THEN** type checking SHALL accept the explicit nullable `completion` field
-- **AND** interpretation SHALL normalize `completion` to `null`
-- **AND** the normalized output SHALL NOT include a union discriminator for `completion`
-
-#### Scenario: Declared fieldless union case remains a case value
-- **WHEN** source contains `type FlowCompletion = | continue | end { message:string } let root(): FlowCompletion = FlowCompletion.continue`
-- **THEN** interpretation SHALL normalize the result as a `FlowCompletion.continue` union case
-- **AND** the result SHALL remain distinct from `null`
-
 ### Requirement: Union field access respects narrowing
 The type checker SHALL allow access to fields that are known on the static type of an expression.
 On an unnarrowed union value, only fields inherited from an abstract base extended by the union
@@ -86,7 +71,7 @@ SHALL be accessible. Fields declared on individual cases SHALL be accessible onl
 flow has narrowed the value to that case.
 
 #### Scenario: Case field is inaccessible before narrowing
-- **WHEN** a file contains `type LoadState = | failed { message:string } | loaded { items:string[] } let read(state:LoadState) = state.message`
+- **WHEN** a file contains `type LoadState = | failed { message:string } | loaded { items:string+ } let read(state:LoadState) = state.message`
 - **THEN** type checking SHALL reject `state.message` because `message` is not available on every
   `LoadState` value
 
@@ -96,7 +81,7 @@ flow has narrowed the value to that case.
   case
 
 #### Scenario: Case field is accessible after narrowing
-- **WHEN** a file contains `type LoadState = | failed { message:string } | loaded { items:string[] } let read(state:LoadState) = if state is { LoadState.failed => state.message else => "" }`
+- **WHEN** a file contains `type LoadState = | failed { message:string } | loaded { items:string+ } let read(state:LoadState) = if state is { LoadState.failed => state.message else => "" }`
 - **THEN** type checking SHALL accept `state.message` in the `LoadState.failed` arm
 
 ### Requirement: Union matches are checked for case validity and exhaustiveness
@@ -207,6 +192,7 @@ including a case that inherits fields from an abstract base.
 - **WHEN** the union in the declaring module extends an abstract record base, and a bare payloadless
   case of it is written at a property of an imported component
 - **THEN** the constructed value SHALL carry the base's fields and their defaults
+
 ### Requirement: Union declaration syntax
 The parser SHALL support discriminated union declarations using the `type` keyword followed by a
 case list. A case list SHALL be one or more cases separated by `|`. A leading `|` before the first
@@ -219,7 +205,7 @@ There SHALL be no separate declaration form for a closed set of constants. A uni
 declare no fields, and which declares no base, is the form that scalar choices use.
 
 #### Scenario: Union declaration with fieldless and payload cases parses
-- **WHEN** a file contains `type LoadState = idle | loading | failed { message:string retryable:boolean = true } | loaded { items:Item[] }`
+- **WHEN** a file contains `type LoadState = idle | loading | failed { message:string retryable:boolean = true } | loaded { items:Item+ }`
 - **THEN** the parser and lowering SHALL preserve a union definition named `LoadState`
 - **AND** the union SHALL contain cases `idle`, `loading`, `failed`, and `loaded` in source order
 - **AND** the `failed` and `loaded` cases SHALL preserve their declared fields and defaults
@@ -327,3 +313,35 @@ as the form scalar choices use, and SHALL NOT document a separate enum declarati
 - **AND** it SHALL show `type LoadState = idle | failed { message:string }` for unions with
   payload cases
 - **AND** it SHALL NOT present these as two different kinds of declaration
+
+### Requirement: Union absence is the empty value
+When a discriminated-union value is expected through a type whose occurrence admits zero — an
+optional property `p?:Union` or an optional type `Union?` — the system SHALL represent absence as
+the empty value `{}`. The system MUST NOT synthesize an undeclared fieldless case such as
+`<Union>.undefined` or `Union.undefined` to represent absence, in the interpreter, the TypeScript IR
+runtime or any code generation target. A declared fieldless case SHALL continue to normalize as a
+scoped union case value and SHALL remain distinct from `{}`: a `State?` that holds `State.idle`
+is present. Absence of a `?`-typed union SHALL be matched with the `{}` pattern, and a match over
+`Union?` whose arms cover `{}` and every case SHALL be exhaustive, as `presence-operators` defines.
+
+#### Scenario: Omitted optional union field is empty
+- **WHEN** source contains `type FlowCompletion = | continue | end { message:string } type QuestionFlow = { completion?:FlowCompletion } let root(): QuestionFlow = <QuestionFlow />`
+- **THEN** type checking SHALL accept the omitted optional `completion` field
+- **AND** interpretation SHALL bind `completion` to the empty value
+- **AND** the canonical output SHALL NOT contain a `completion` key and SHALL NOT include `$type: "FlowCompletion.undefined"`
+
+#### Scenario: Explicit empty optional union field is empty
+- **WHEN** source contains `type FlowCompletion = | continue | end { message:string } type QuestionFlow = { completion?:FlowCompletion } let root(): QuestionFlow = <QuestionFlow completion={} />`
+- **THEN** type checking SHALL accept the explicit empty `completion` field
+- **AND** the value SHALL equal `<QuestionFlow />`
+- **AND** the normalized output SHALL NOT include a union discriminator for `completion`
+
+#### Scenario: Declared fieldless union case remains a case value
+- **WHEN** source contains `type FlowCompletion = | continue | end { message:string } let root(): FlowCompletion? = FlowCompletion.continue`
+- **THEN** interpretation SHALL normalize the result as a `FlowCompletion.continue` union case
+- **AND** the result SHALL remain distinct from the empty value, so `root()?` SHALL evaluate to `true`
+
+#### Scenario: Absence of an optional union is matched with the empty pattern
+- **WHEN** source contains `type FlowCompletion = | continue | end { message:string } let label(c?:FlowCompletion): string = { if c is { {} => "pending" continue => "continue" end => c.message } }`
+- **THEN** type checking SHALL accept the match as exhaustive
+- **AND** `label({})` SHALL evaluate to `"pending"`

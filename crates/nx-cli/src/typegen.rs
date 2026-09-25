@@ -296,7 +296,7 @@ mod tests {
     /// the instantiation statically, so the contract carries it as a generic parameter.
     #[test]
     fn a_component_type_parameter_is_erased_in_csharp_and_generic_in_typescript() {
-        let source = "export external component <SkiaLayout TItem:type itemsSource:TItem[]? />\n";
+        let source = "export external component <SkiaLayout TItem:type itemsSource?:TItem+ />\n";
 
         let csharp = generate_for(source, TargetLanguage::CSharp);
         assert!(
@@ -321,7 +321,7 @@ mod tests {
             "the contract should be generic with an unknown default:\n{typescript}"
         );
         assert!(
-            typescript.contains("itemsSource: TItem[] | null;"),
+            typescript.contains("itemsSource?: TItem[];"),
             "the field should be typed by the parameter:\n{typescript}"
         );
         assert!(
@@ -378,7 +378,7 @@ mod tests {
     #[test]
     fn an_applied_type_is_rendered_as_the_instantiation() {
         let source = "export type Range = { T:type start:T end:T }\n\
-                      export type Slider = { range:<Range T=float64/> marks:<Range T=int/>[]? }\n";
+                      export type Slider = { range:<Range T=float64/> marks?:<Range T=int/>+ }\n";
 
         let csharp = generate_for(source, TargetLanguage::CSharp);
         assert!(
@@ -393,7 +393,7 @@ mod tests {
         let typescript = generate_for(source, TargetLanguage::TypeScript);
         assert!(typescript.contains("range: Range<number>;"), "{typescript}");
         assert!(
-            typescript.contains("marks: Range<number>[] | null;"),
+            typescript.contains("marks?: Range<number>[];"),
             "{typescript}"
         );
     }
@@ -418,7 +418,7 @@ mod tests {
     #[test]
     fn a_component_type_parameter_as_an_argument_follows_the_component_rule() {
         let source = "export type Range = { T:type start:T end:T }\n\
-                      export external component <Slider TValue:type range:<Range T=TValue/>? />\n";
+                      export external component <Slider TValue:type range?:<Range T=TValue/> />\n";
 
         let csharp = generate_for(source, TargetLanguage::CSharp);
         assert!(
@@ -432,7 +432,7 @@ mod tests {
             "{typescript}"
         );
         assert!(
-            typescript.contains("range: Range<TValue> | null;"),
+            typescript.contains("range?: Range<TValue>;"),
             "{typescript}"
         );
     }
@@ -538,12 +538,12 @@ mod tests {
     /// contract it extends and declares it alongside its own.
     #[test]
     fn a_derived_component_contract_carries_inherited_type_parameters() {
-        let source = "export abstract external component <ItemsBase TItem:type items:TItem[]? />\n\
-                      export external component <Keyed extends ItemsBase TKey:type keys:TKey[]? />\n";
+        let source = "export abstract external component <ItemsBase TItem:type items?:TItem+ />\n\
+                      export external component <Keyed extends ItemsBase TKey:type keys?:TKey+ />\n";
 
         let typescript = generate_for(source, TargetLanguage::TypeScript);
         assert!(
-            typescript.contains("export interface Keyed<TItem = unknown, TKey = unknown> extends ItemsBaseBase<TItem>, NxRecord<\"Keyed\">"),
+            typescript.contains("export interface Keyed<TItem = unknown, TKey = unknown> extends ItemsBase<TItem> {\n  $type: \"Keyed\";"),
             "{typescript}"
         );
 
@@ -560,7 +560,7 @@ mod tests {
     /// NX use site fixed it — so both surfaces erase the parameter to the host's top type.
     #[test]
     fn a_generic_component_state_and_update_companion_erase_the_parameter() {
-        let source = "export external component <Picker TItem:type items:TItem[]? /> = { state { sel:TItem? } }\n";
+        let source = "export external component <Picker TItem:type items?:TItem+ /> = { state { sel?:TItem } }\n";
 
         let typescript = generate_for(source, TargetLanguage::TypeScript);
         let state = typescript
@@ -568,7 +568,7 @@ mod tests {
             .nth(1)
             .and_then(|tail| tail.split('}').next())
             .unwrap_or_else(|| panic!("Picker_state block:\n{typescript}"));
-        assert!(state.contains("sel: unknown | null;"), "{state}");
+        assert!(state.contains("sel?: unknown;"), "{state}");
         let update = typescript
             .split("export interface Picker_update")
             .nth(1)
@@ -761,11 +761,11 @@ mod tests {
             &[
                 (
                     "base.nx",
-                    "export abstract external component <ItemsBase TItem:type items:TItem[]? />",
+                    "export abstract external component <ItemsBase TItem:type items?:TItem+ />",
                 ),
                 (
                     "derived.nx",
-                    "export external component <ContactList extends ItemsBase extra:TItem[]? />",
+                    "export external component <ContactList extends ItemsBase extra?:TItem+ />",
                 ),
             ],
         );
@@ -778,10 +778,10 @@ mod tests {
         .unwrap();
         let derived = generated_file(&typescript, "derived.ts");
         assert!(
-            derived.contains("export interface ContactList<TItem = unknown> extends ItemsBaseBase<TItem>, NxRecord<\"ContactList\">"),
+            derived.contains("export interface ContactList<TItem = unknown> extends ItemsBase<TItem> {\n  $type: \"ContactList\";"),
             "{derived}"
         );
-        assert!(derived.contains("extra: TItem[] | null;"), "{derived}");
+        assert!(derived.contains("extra?: TItem[];"), "{derived}");
         assert!(typescript.warnings.is_empty(), "{:?}", typescript.warnings);
 
         let csharp = generate_library_types_with_warnings(
@@ -905,7 +905,7 @@ mod tests {
     fn generates_typescript_external_component_props_with_discriminators() {
         let source = r#"
             export abstract external component <Question label:string />
-            export external component <ShortTextQuestion extends Question placeholder:string? />
+            export external component <ShortTextQuestion extends Question placeholder?:string />
         "#;
         let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
@@ -917,12 +917,12 @@ mod tests {
 
         let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
 
-        assert!(output.contains("export interface QuestionBase {"));
+        assert!(output.contains("export interface Question extends NxRecord {"));
         assert!(output.contains("label: string;"));
-        assert!(output.contains("export type Question = ShortTextQuestion;"));
-        assert!(output
-            .contains("export interface ShortTextQuestion extends QuestionBase, NxRecord<\"ShortTextQuestion\">"));
-        assert!(output.contains("placeholder: string | null;"));
+        assert!(output.contains(
+            "export interface ShortTextQuestion extends Question {\n  $type: \"ShortTextQuestion\";"
+        ));
+        assert!(output.contains("placeholder?: string;"));
     }
 
     #[test]
@@ -945,16 +945,19 @@ mod tests {
         assert!(output.contains("data: string;"));
     }
 
+    /// Each occurrence has one host shape: `T?` in a type position is `T | null`, a property
+    /// declared `name?:T` is an optional property, and `T+` and `T*` are both `T[]` — TypeScript
+    /// has no static spelling for non-emptiness, which the runtime checks at the NX boundary.
     #[test]
-    fn generates_typescript_composed_list_and_nullable_types() {
+    fn generates_typescript_occurrence_types() {
         let source = r#"
-            export type Names = string[]
-            export type MaybeNames = string[]?
-            export type Aliases = string?[]
+            export type MaybeName = string?
+            export type Names = string+
+            export type Tags = string*
             export type Payload = {
-              names:string[]
-              aliases:string?[]
-              maybeNames:string[]?
+              names:string+
+              tags?:string+
+              nick?:string
             }
         "#;
         let module = source_module(source, "types.nx");
@@ -967,30 +970,48 @@ mod tests {
 
         let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
 
+        assert!(output.contains("export type MaybeName = string | null;"));
         assert!(output.contains("export type Names = string[];"));
-        assert!(output.contains("export type MaybeNames = string[] | null;"));
-        assert!(output.contains("export type Aliases = (string | null)[];"));
+        assert!(output.contains("export type Tags = string[];"));
         assert!(output.contains("names: string[];"));
-        assert!(output.contains("aliases: (string | null)[];"));
-        assert!(output.contains("maybeNames: string[] | null;"));
+        assert!(output.contains("tags?: string[];"));
+        assert!(output.contains("nick?: string;"));
     }
 
     /// NX arguments bind by name, so a function type is a function of one object of named
     /// arguments; a parameter inside it that is a component type parameter is erased like any
-    /// other, and the nullable suffix wraps the function, not its result.
+    /// other, an optional property holding one is an optional property, and a `?` suffix on a
+    /// function type wraps the function, not its result.
     #[test]
     fn generates_a_typescript_function_type_with_named_arguments() {
         let source = "abstract external component <DrawnNode />\n\
-                      export external component <DataTable TItem:type RowTemplate:(<function Item:TItem Index:int />: DrawnNode)? HeaderTemplate:<function />: DrawnNode />\n";
+                      export type MaybeHeader = (<function />: DrawnNode)?\n\
+                      export external component <DataTable TItem:type RowTemplate?:<function Item:TItem Index:int />: DrawnNode HeaderTemplate:<function />: DrawnNode />\n";
         let typescript = generate_for(source, TargetLanguage::TypeScript);
         assert!(
-            typescript.contains(
-                "RowTemplate: ((args: { Item: TItem; Index: number }) => DrawnNode) | null;"
-            ),
+            typescript
+                .contains("RowTemplate?: (args: { Item: TItem; Index: number }) => DrawnNode;"),
             "{typescript}"
         );
         assert!(
             typescript.contains("HeaderTemplate: () => DrawnNode;"),
+            "{typescript}"
+        );
+        assert!(
+            typescript.contains("export type MaybeHeader = (() => DrawnNode) | null;"),
+            "{typescript}"
+        );
+    }
+
+    /// An optional function-type parameter may be omitted, so it is an optional member of the
+    /// arguments object, as an optional property is.
+    #[test]
+    fn an_optional_function_type_parameter_is_an_optional_typescript_member() {
+        let source = "export type R = <function Item:string Index?:int />: string\n";
+        let typescript = generate_for(source, TargetLanguage::TypeScript);
+        assert!(
+            typescript
+                .contains("export type R = (args: { Item: string; Index?: number }) => string;"),
             "{typescript}"
         );
     }
@@ -1004,7 +1025,7 @@ mod tests {
     #[test]
     fn generates_a_csharp_function_reference_for_a_function_type() {
         let source = "abstract external component <DrawnNode />\n\
-                      export external component <DataTable TItem:type RowTemplate:(<function Item:TItem Index:int />: DrawnNode)? HeaderTemplate:<function />: DrawnNode />\n";
+                      export external component <DataTable TItem:type RowTemplate?:<function Item:TItem Index:int />: DrawnNode HeaderTemplate:<function />: DrawnNode />\n";
         let csharp = generate_for(source, TargetLanguage::CSharp);
         assert!(
             csharp.contains("global::NxLang.Nx.NxFunctionRef? RowTemplate"),
@@ -1017,12 +1038,78 @@ mod tests {
         assert!(!csharp.contains("System.Delegate"), "{csharp}");
     }
 
+    /// The TypeScript compiler, from `PATH` or from the repository's own `runtime/typescript`
+    /// install. A missing one fails the run instead of skipping it.
+    fn tsc_command() -> std::process::Command {
+        let workspace_tsc = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../runtime/typescript/node_modules/.bin/tsc");
+        for program in [PathBuf::from("tsc"), workspace_tsc] {
+            let probe = std::process::Command::new(&program)
+                .arg("--version")
+                .output();
+            if probe.is_ok_and(|output| output.status.success()) {
+                return std::process::Command::new(program);
+            }
+        }
+        panic!("`tsc` is not available: run `pnpm install` at the repository root");
+    }
+
+    /// Host code can pass any record extending an abstract base where the base is expected,
+    /// literal or not, and narrows a union extending the base by `$type`.
     #[test]
-    fn generates_typescript_abstract_record_runtime_unions() {
+    fn generated_typescript_abstract_family_type_checks_in_host_code() {
+        let source = r#"
+            export abstract type Shape = { id:int }
+            export type Circle extends Shape = { r:int }
+            export type Badge extends Shape = | icon { glyph:string } | dot
+        "#;
+        let generated = generate_for(source, TargetLanguage::TypeScript);
+        let temp_dir = TempDir::new().expect("temp dir");
+        fs::write(temp_dir.path().join("types.ts"), generated).expect("types.ts");
+        fs::write(
+            temp_dir.path().join("host.ts"),
+            r#"import type { Shape, Circle, Badge } from "./types";
+function idOf(s: Shape): number { return s.id; }
+idOf({ $type: "Circle", id: 1, r: 2 } satisfies Circle as Circle);
+declare const circle: Circle;
+idOf(circle);
+declare const badge: Badge;
+idOf(badge);
+function glyph(b: Badge): string {
+  switch (b.$type) {
+    case "Badge.icon": return b.glyph;
+    case "Badge.dot": return ".";
+  }
+}
+"#,
+        )
+        .expect("host.ts");
+
+        let output = tsc_command()
+            .args([
+                "--strict", "--noEmit", "--target", "es2022", "--module", "es2022",
+            ])
+            .args(["--moduleResolution", "bundler"])
+            .arg(temp_dir.path().join("host.ts"))
+            .output()
+            .expect("run tsc");
+        assert!(
+            output.status.success(),
+            "tsc failed:\n{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    /// An abstract record is an open contract, as in NX and in generated C#: its descendants extend
+    /// it and narrow its `$type`, and no closed union of them is generated. A closed set of
+    /// records is an NX union.
+    #[test]
+    fn generates_typescript_abstract_records_as_open_contracts() {
         let source = r#"
             export abstract type Question = { label:string }
-            export type ShortTextQuestion extends Question = { placeholder:string? }
-            export type LongTextQuestion extends Question = { wordLimit:int? }
+            export type ShortTextQuestion extends Question = { placeholder?:string }
+            export type LongTextQuestion extends Question = { wordLimit?:int }
         "#;
         let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
@@ -1034,16 +1121,22 @@ mod tests {
 
         let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
 
-        assert!(output.contains("export interface QuestionBase {"));
-        assert!(output.contains("export type Question = LongTextQuestion | ShortTextQuestion;"));
-        assert!(output
-            .contains("export interface ShortTextQuestion extends QuestionBase, NxRecord<\"ShortTextQuestion\">"));
-        assert!(output
-            .contains("export interface LongTextQuestion extends QuestionBase, NxRecord<\"LongTextQuestion\">"));
+        assert!(
+            output.contains("export interface Question extends NxRecord {"),
+            "{output}"
+        );
+        assert!(!output.contains("QuestionBase"), "{output}");
+        assert!(!output.contains("export type Question ="), "{output}");
+        assert!(output.contains(
+            "export interface ShortTextQuestion extends Question {\n  $type: \"ShortTextQuestion\";"
+        ));
+        assert!(output.contains(
+            "export interface LongTextQuestion extends Question {\n  $type: \"LongTextQuestion\";"
+        ));
     }
 
     #[test]
-    fn generates_typescript_abstract_action_runtime_unions() {
+    fn generates_typescript_abstract_actions_as_open_contracts() {
         let source = r#"
             export abstract action SearchAction = { source:string }
             export action SearchRequested extends SearchAction = { query:string }
@@ -1059,12 +1152,17 @@ mod tests {
 
         let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
 
-        assert!(output.contains("export interface SearchActionBase {"));
-        assert!(output.contains("export type SearchAction = SearchRequested | SearchSubmitted;"));
-        assert!(output
-            .contains("export interface SearchRequested extends SearchActionBase, NxRecord<\"SearchRequested\">"));
-        assert!(output
-            .contains("export interface SearchSubmitted extends SearchActionBase, NxRecord<\"SearchSubmitted\">"));
+        assert!(
+            output.contains("export interface SearchAction extends NxRecord {"),
+            "{output}"
+        );
+        assert!(!output.contains("export type SearchAction ="), "{output}");
+        assert!(output.contains(
+            "export interface SearchRequested extends SearchAction {\n  $type: \"SearchRequested\";"
+        ));
+        assert!(output.contains(
+            "export interface SearchSubmitted extends SearchAction {\n  $type: \"SearchSubmitted\";"
+        ));
     }
 
     #[test]
@@ -1099,15 +1197,16 @@ mod tests {
         assert!(output.contains("message: string;"));
         assert!(output.contains("retryable: boolean;"));
         assert!(output.contains("export type LoadState = \"idle\" | LoadStateFailed;"));
-        assert!(output.contains("export interface EventBaseBase {"));
+        assert!(output.contains("export interface EventBase extends NxRecord {"));
         assert!(output.contains("source: string;"));
         assert!(output.contains(
-            "export interface UiEventClicked extends EventBaseBase, NxRecord<\"UiEvent.clicked\">"
+            "export interface UiEventClicked extends EventBase {\n  $type: \"UiEvent.clicked\";"
         ));
         assert!(output.contains(
-            "export interface UiEventClosed extends EventBaseBase, NxRecord<\"UiEvent.closed\">"
+            "export interface UiEventClosed extends EventBase {\n  $type: \"UiEvent.closed\";"
         ));
-        assert!(output.contains("export type EventBase = UiEventClicked | UiEventClosed;"));
+        // The union is the closed set; the abstract base it extends stays open.
+        assert!(!output.contains("export type EventBase ="), "{output}");
         assert!(output.contains("export type UiEvent = UiEventClicked | UiEventClosed;"));
     }
 
@@ -1372,7 +1471,7 @@ mod tests {
         .expect("items file");
         fs::write(
             library_dir.join("state.nx"),
-            "export type LoadState = | loaded { items:Item[] }",
+            "export type LoadState = | loaded { items:Item+ }",
         )
         .expect("state file");
 
@@ -1503,7 +1602,7 @@ mod tests {
     fn generates_csharp_external_component_props_without_generated_discriminator_member() {
         let source = r#"
             export abstract external component <Question label:string />
-            export external component <ShortTextQuestion extends Question placeholder:string? />
+            export external component <ShortTextQuestion extends Question placeholder?:string />
         "#;
         let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
@@ -1639,10 +1738,9 @@ mod tests {
               enabled:boolean = true
               count:int = 42
               title:string = "hello"
-              maybe:string? = null
+              maybe?:string
               ratio:float64 = 0.25
               small:float32 = 0.5
-              maybeSmall:float32? = 0.5
             }
         "#;
         let module = source_module(source, "types.nx");
@@ -1658,10 +1756,13 @@ mod tests {
         assert!(output.contains("public bool Enabled { get; set; } = true;"));
         assert!(output.contains("public long Count { get; set; } = 42;"));
         assert!(output.contains("public string Title { get; set; } = \"hello\";"));
-        assert!(output.contains("public string? Maybe { get; set; } = null;"));
+        // An optional property has no default: it is nullable, with no initializer.
+        assert!(
+            output.contains("public string? Maybe { get; set; }\n"),
+            "{output}"
+        );
         assert!(output.contains("public double Ratio { get; set; } = 0.25;"));
         assert!(output.contains("public float Small { get; set; } = 0.5f;"));
-        assert!(output.contains("public float? MaybeSmall { get; set; } = 0.5f;"));
         assert!(!output.contains("public string Title { get; set; } = default!;"));
     }
 
@@ -1892,7 +1993,7 @@ mod tests {
         .expect("base file");
         fs::write(
             library_dir.join("short-text.nx"),
-            "export type ShortTextQuestion extends Question = { placeholder:string? }",
+            "export type ShortTextQuestion extends Question = { placeholder?:string }",
         )
         .expect("short text file");
 
@@ -1909,28 +2010,34 @@ mod tests {
             .iter()
             .find(|file| file.relative_path == *"base.ts")
             .expect("base.ts");
-        assert!(!base.content.contains("import type { NxRecord }"));
+        // The base is an open contract: it names no descendant, so it imports none.
         assert!(base
             .content
-            .contains("import type { ShortTextQuestion } from \"./short-text\";"));
-        assert!(base.content.contains("export interface QuestionBase {"));
+            .contains("import type { NxRecord } from \"./_nx\";"));
+        assert!(
+            !base.content.contains("ShortTextQuestion"),
+            "{}",
+            base.content
+        );
         assert!(base
             .content
-            .contains("export type Question = ShortTextQuestion;"));
+            .contains("export interface Question extends NxRecord {"));
 
         let short_text = files
             .iter()
             .find(|file| file.relative_path == *"short-text.ts")
             .expect("short-text.ts");
+        assert!(
+            !short_text.content.contains("NxRecord"),
+            "{}",
+            short_text.content
+        );
         assert!(short_text
             .content
-            .contains("import type { NxRecord } from \"./_nx\";"));
+            .contains("import type { Question } from \"./base\";"));
         assert!(short_text
             .content
-            .contains("import type { QuestionBase } from \"./base\";"));
-        assert!(short_text
-            .content
-            .contains("export interface ShortTextQuestion extends QuestionBase, NxRecord<\"ShortTextQuestion\">"));
+            .contains("export interface ShortTextQuestion extends Question {\n  $type: \"ShortTextQuestion\";"));
 
         let index = files
             .iter()
@@ -1970,28 +2077,34 @@ mod tests {
             .iter()
             .find(|file| file.relative_path == *"base.ts")
             .expect("base.ts");
-        assert!(!base.content.contains("import type { NxRecord }"));
+        // The base is an open contract: it names no descendant, so it imports none.
         assert!(base
             .content
-            .contains("import type { SearchRequested } from \"./requested\";"));
-        assert!(base.content.contains("export interface SearchActionBase {"));
+            .contains("import type { NxRecord } from \"./_nx\";"));
+        assert!(
+            !base.content.contains("SearchRequested"),
+            "{}",
+            base.content
+        );
         assert!(base
             .content
-            .contains("export type SearchAction = SearchRequested;"));
+            .contains("export interface SearchAction extends NxRecord {"));
 
         let requested = files
             .iter()
             .find(|file| file.relative_path == *"requested.ts")
             .expect("requested.ts");
+        assert!(
+            !requested.content.contains("NxRecord"),
+            "{}",
+            requested.content
+        );
         assert!(requested
             .content
-            .contains("import type { NxRecord } from \"./_nx\";"));
+            .contains("import type { SearchAction } from \"./base\";"));
         assert!(requested
             .content
-            .contains("import type { SearchActionBase } from \"./base\";"));
-        assert!(requested
-            .content
-            .contains("export interface SearchRequested extends SearchActionBase, NxRecord<\"SearchRequested\">"));
+            .contains("export interface SearchRequested extends SearchAction {\n  $type: \"SearchRequested\";"));
 
         let index = files
             .iter()
@@ -2125,7 +2238,7 @@ mod tests {
     fn generates_csharp_external_component_state_contracts_without_discriminator() {
         let source = r#"
             export external component <SearchBox /> = {
-              state { query:string theme:string? }
+              state { query:string theme?:string }
             }
         "#;
         let module = source_module(source, "types.nx");
@@ -2233,7 +2346,7 @@ mod tests {
     #[test]
     fn generates_csharp_concrete_record_and_action_fields_with_dual_annotations() {
         let source = r#"
-            export type ShortTextQuestion = { label:string placeholder:string? }
+            export type ShortTextQuestion = { label:string placeholder?:string }
             export action SearchRequested = { query:string }
         "#;
         let module = source_module(source, "types.nx");
@@ -2367,7 +2480,7 @@ export type QuestionFlowInitialExperience = {
     fn generates_csharp_abstract_record_polymorphism_metadata_for_concrete_descendants() {
         let source = r#"
             export abstract type Question = { label:string }
-            export type ShortTextQuestion extends Question = { placeholder:string? }
+            export type ShortTextQuestion extends Question = { placeholder?:string }
         "#;
         let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
@@ -2427,13 +2540,16 @@ export type QuestionFlowInitialExperience = {
         assert!(output.contains("[JsonPropertyName(\"query\")]"));
     }
 
+    /// `name?:T` is a nullable property, `name?:T+` a nullable array, and `name:T+` the array: C#
+    /// has no static spelling for non-emptiness either. A field never spells `T*`; see
+    /// `a_field_whose_type_admits_zero_is_rejected`.
     #[test]
-    fn generates_csharp_composed_list_and_nullable_field_types() {
+    fn generates_csharp_occurrence_field_types() {
         let source = r#"
             export type Payload = {
-              names:string[]
-              maybeNames:string[]?
-              aliases:string?[]
+              names:string+
+              tags?:string+
+              nick?:string
             }
         "#;
         let module = source_module(source, "types.nx");
@@ -2447,16 +2563,52 @@ export type QuestionFlowInitialExperience = {
         let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
 
         assert!(output.contains("public string[] Names { get; set; } = default!;"));
-        assert!(output.contains("public string[]? MaybeNames { get; set; }"));
-        assert!(output.contains("public string?[] Aliases { get; set; } = default!;"));
+        assert!(output.contains("public string[]? Tags { get; set; }"));
+        assert!(output.contains("public string? Nick { get; set; }"));
+    }
+
+    /// A property admits zero only through the `?` mark on its name, so typegen refuses a field
+    /// whose type admits zero — spelled directly or through an alias — rather than generate a shape
+    /// the language rejects, and the error names the field and the `name?:` fix.
+    #[test]
+    fn a_field_whose_type_admits_zero_is_rejected() {
+        let cases = [
+            ("export type P = { all:string* }", "all", "all?:string+"),
+            ("export type P = { nick:string? }", "nick", "nick?:string"),
+            (
+                "export type Maybe = string?\nexport type P = { sub:Maybe }",
+                "sub",
+                "sub?:string",
+            ),
+            (
+                "export type P =\n  | only { tags:string* }",
+                "tags",
+                "tags?:string+",
+            ),
+        ];
+
+        for language in [TargetLanguage::TypeScript, TargetLanguage::CSharp] {
+            for (source, field, fix) in cases {
+                let opts = GenerateTypesOptions {
+                    language,
+                    csharp_namespace: None,
+                    typescript_package_prefix: None,
+                    format: options::FormatOptions::defaults_for(language),
+                };
+                let error = generate_types(source, Path::new("types.nx"), &opts)
+                    .expect_err("a field whose type admits zero should be rejected");
+                assert!(error.contains(&format!("Property '{field}'")), "{error}");
+                assert!(error.contains(&format!("`{fix}`")), "{error}");
+            }
+        }
     }
 
     #[test]
     fn generates_csharp_multi_level_abstract_record_polymorphism_metadata() {
         let source = r#"
             export abstract type Question = { label:string }
-            export abstract type TextQuestion extends Question = { placeholder:string? }
-            export type ShortTextQuestion extends TextQuestion = { maxLength:int? }
+            export abstract type TextQuestion extends Question = { placeholder?:string }
+            export type ShortTextQuestion extends TextQuestion = { maxLength?:int }
         "#;
         let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
@@ -3046,7 +3198,7 @@ export type QuestionFlowInitialExperience = {
     fn generates_typescript_update_companions_with_optional_properties() {
         let output = generate_for(
             r#"
-            export type User = { name:string email:string? }
+            export type User = { name:string email?:string }
             export component <Counter step:int /> = { state { count:int = 0 } <Label /> }
             "#,
             TargetLanguage::TypeScript,
@@ -3057,10 +3209,12 @@ export type QuestionFlowInitialExperience = {
             .expect("User_update companion");
         let user_update = user_update.split('}').next().expect("companion body");
         assert!(user_update.contains("$type: \"User.Update\";"));
+        // `name` cannot be cleared, so it has no `| null`; `email` is optional in the target, so
+        // a present `null` clears it.
         assert!(user_update.contains("name?: string;"));
         assert!(user_update.contains("email?: string | null;"));
         assert!(!user_update.contains("name: string;"));
-        assert!(!user_update.contains("email: string | null;"));
+        assert!(!user_update.contains("name?: string | null;"));
 
         let (_, counter_update) = output
             .split_once("export interface Counter_update {")
@@ -3102,7 +3256,7 @@ export type QuestionFlowInitialExperience = {
     fn generates_csharp_update_companions_as_map_backed_dtos() {
         let output = generate_for(
             r#"
-            export type User = { name:string email:string? }
+            export type User = { name:string email?:string }
             export action Saved = { note:string }
             export component <Counter step:int /> = { state { count:int = 0 } <Label /> }
             "#,
@@ -3120,7 +3274,7 @@ export type QuestionFlowInitialExperience = {
         let expected_counter_schema = [
             "        private static readonly NxUpdateSchema FieldSchema = new(",
             "            \"Counter.Update\",",
-            "            new NxField(\"count\", typeof(long)));",
+            "            new NxField(\"count\", typeof(long), clearable: false));",
         ]
         .join(nl);
         assert!(counter.contains(&expected_counter_schema), "{counter}");
@@ -3200,7 +3354,7 @@ export type QuestionFlowInitialExperience = {
         let output = generate_for(
             r#"
             export abstract type Named = { name:string }
-            export type User extends Named = { email:string? }
+            export type User extends Named = { email?:string }
             export component <Counter step:int /> = { state { count:int = 0 } <Label /> }
             "#,
             TargetLanguage::CSharp,
@@ -3214,7 +3368,8 @@ export type QuestionFlowInitialExperience = {
             "        public static readonly NxProperty<User, string> Name = new(",
             "            User_propertyWireFormat.Format(User_property.Name),",
             "            record => record.Name,",
-            "            (record, value) => record.Name = value);",
+            "            (record, value) => record.Name = value,",
+            "            clearable: false);",
             "",
             "        public static readonly NxProperty<User, string?> Email = new(",
             "            User_propertyWireFormat.Format(User_property.Email),",
@@ -3367,18 +3522,84 @@ export type QuestionFlowInitialExperience = {
         assert!(
             generated
                 .value
-                .contains("new NxField(\"name\", typeof(string))"),
+                .contains("new NxField(\"name\", typeof(string), clearable: false)"),
             "{}",
             generated.value
         );
+    }
+
+    /// The four property shapes on one record, as the plain type, the update companion and the key
+    /// table spell them. A field the target declares `name?:` is clearable, so its companion field
+    /// and key carry a nullable value type; one the target requires is not, and does not.
+    #[test]
+    fn update_companions_and_keys_map_the_four_property_shapes() {
+        let source =
+            "export type Payload = { name:string nick?:string names:string+ tags?:string+ }\n";
+
+        let csharp = generate_for(source, TargetLanguage::CSharp);
+        let payload = csharp_companion_body(&csharp, "Payload\n");
+        for expected in [
+            "public string Name { get; set; } = default!;",
+            "public string? Nick { get; set; }",
+            "public string[] Names { get; set; } = default!;",
+            "public string[]? Tags { get; set; }",
+        ] {
+            assert!(payload.contains(expected), "{expected} in {payload}");
+        }
+        let update = csharp_companion_body(&csharp, "Payload_update");
+        for expected in [
+            "public NxOptional<string> Name",
+            "public NxOptional<string?> Nick",
+            "public NxOptional<string[]> Names",
+            "public NxOptional<string[]?> Tags",
+        ] {
+            assert!(update.contains(expected), "{expected} in {update}");
+        }
+        let (_, table) = csharp
+            .split_once("public static class PayloadProperties")
+            .expect("PayloadProperties table");
+        for expected in [
+            "NxProperty<Payload, string> Name",
+            "NxProperty<Payload, string?> Nick",
+            "NxProperty<Payload, string[]> Names",
+            "NxProperty<Payload, string[]?> Tags",
+        ] {
+            assert!(table.contains(expected), "{expected} in {table}");
+        }
+
+        let typescript = generate_for(source, TargetLanguage::TypeScript);
+        let (_, payload) = typescript
+            .split_once("export interface Payload extends NxRecord<\"Payload\"> {")
+            .expect("Payload record");
+        let payload = payload.split('}').next().expect("record body");
+        for expected in [
+            "name: string;",
+            "nick?: string;",
+            "names: string[];",
+            "tags?: string[];",
+        ] {
+            assert!(payload.contains(expected), "{expected} in {payload}");
+        }
+        let (_, update) = typescript
+            .split_once("export interface Payload_update {")
+            .expect("Payload_update companion");
+        let update = update.split('}').next().expect("companion body");
+        for expected in [
+            "name?: string;",
+            "nick?: string | null;",
+            "names?: string[];",
+            "tags?: string[] | null;",
+        ] {
+            assert!(update.contains(expected), "{expected} in {update}");
+        }
     }
 
     #[test]
     fn update_typed_fields_generate_as_the_companion_in_typescript() {
         let output = generate_for(
             r#"
-            export type User = { name:string email:string? }
-            export type Form = { pending:User.Update? drafts:User.Update[] }
+            export type User = { name:string email?:string }
+            export type Form = { pending?:User.Update drafts:User.Update+ }
             "#,
             TargetLanguage::TypeScript,
         );
@@ -3387,7 +3608,7 @@ export type QuestionFlowInitialExperience = {
             .split_once("export interface Form extends NxRecord<\"Form\"> {")
             .expect("Form record");
         let form = form.split('}').next().expect("record body");
-        assert!(form.contains("pending: User_update | null;"), "{form}");
+        assert!(form.contains("pending?: User_update;"), "{form}");
         assert!(form.contains("drafts: User_update[];"), "{form}");
         assert!(!output.contains("User_Update"), "{output}");
     }
@@ -3396,8 +3617,8 @@ export type QuestionFlowInitialExperience = {
     fn update_typed_fields_generate_as_the_companion_in_csharp() {
         let output = generate_for(
             r#"
-            export type User = { name:string email:string? }
-            export type Form = { pending:User.Update? drafts:User.Update[] }
+            export type User = { name:string email?:string }
+            export type Form = { pending?:User.Update drafts:User.Update+ }
             "#,
             TargetLanguage::CSharp,
         );
@@ -3518,8 +3739,13 @@ export type User extends Named = { email:string }
         )
         .unwrap();
         let user = generated_file(&typescript, "User.ts");
+        // The base from the dependency is extended, and imported with the field type.
         assert!(
-            user.contains("import type { Tag } from \"named\";"),
+            user.contains("import type { Named, Tag } from \"named\";"),
+            "{user}"
+        );
+        assert!(
+            user.contains("export interface User extends Named {"),
             "{user}"
         );
         assert!(user.contains("tag?: Tag;"), "{user}");
@@ -4115,7 +4341,7 @@ export type User extends Named = { email:string }
     #[test]
     fn a_generic_update_companion_csharp_cannot_format_is_reported() {
         let nested_foreign = generate_with_warnings_for(
-            "export type Patch = { many:<Range.Update T=int/>[] }",
+            "export type Patch = { many:<Range.Update T=int/>+ }",
             TargetLanguage::CSharp,
         );
         assert!(
@@ -4130,7 +4356,7 @@ export type User extends Named = { email:string }
         // closes its own shim wherever in the member's type it sits — at the member and below it.
         let own = generate_with_warnings_for(
             "export type Bounds = { T:type start:T end:T }\n\
-             export type Patch = { change:<Bounds.Update T=int/> many:<Bounds.Update T=int/>[] }",
+             export type Patch = { change:<Bounds.Update T=int/> many:<Bounds.Update T=int/>+ }",
             TargetLanguage::CSharp,
         );
         assert!(
@@ -4183,7 +4409,7 @@ export type User extends Named = { email:string }
         let output = generate_for(
             r#"
             export abstract type Named = { name:string }
-            export type User extends Named = { email:string? }
+            export type User extends Named = { email?:string }
             export component <Counter step:int /> = { state { count:int = 0 } <Label /> }
             "#,
             TargetLanguage::TypeScript,
@@ -4236,7 +4462,7 @@ export type User extends Named = { email:string }
     fn generates_csharp_property_companions_as_enums_with_the_wire_format() {
         let output = generate_for(
             r#"
-            export type User = { name:string email:string? }
+            export type User = { name:string email?:string }
             "#,
             TargetLanguage::CSharp,
         );
@@ -4258,11 +4484,11 @@ export type User extends Named = { email:string }
     fn property_typed_props_reference_the_companion_in_both_languages() {
         let source = r#"
             export type Contact = { title:string }
-            export external component <Table sortBy:Contact.Property? columns:Contact.Property[] />
+            export external component <Table sortBy?:Contact.Property columns:Contact.Property+ />
         "#;
         let typescript = generate_for(source, TargetLanguage::TypeScript);
         assert!(
-            typescript.contains("sortBy: Contact_property | null;"),
+            typescript.contains("sortBy?: Contact_property;"),
             "{}",
             typescript
         );
@@ -4295,14 +4521,14 @@ export type User extends Named = { email:string }
 
         fs::write(
             people_dir.join("User.nx"),
-            "export type User = { name:string email:string? }",
+            "export type User = { name:string email?:string }",
         )
         .expect("people file");
         fs::write(
             app_dir.join("Table.nx"),
             r#"import { User } from "../people"
 
-export external component <Table sortBy:User.Property? columns:User.Property[] patch:User.Update? />
+export external component <Table sortBy?:User.Property columns:User.Property+ patch?:User.Update />
 "#,
         )
         .expect("app file");
@@ -4338,7 +4564,7 @@ export external component <Table sortBy:User.Property? columns:User.Property[] p
             table.content
         );
         assert!(
-            table.content.contains("sortBy: User_Property | null;"),
+            table.content.contains("sortBy?: User_Property;"),
             "{}",
             table.content
         );
@@ -4348,7 +4574,7 @@ export external component <Table sortBy:User.Property? columns:User.Property[] p
             table.content
         );
         assert!(
-            table.content.contains("patch: User_Update | null;"),
+            table.content.contains("patch?: User_Update;"),
             "{}",
             table.content
         );
@@ -4363,7 +4589,7 @@ export external component <Table sortBy:User.Property? columns:User.Property[] p
     /// declare a copy.
     #[test]
     fn csharp_maps_a_prelude_range_to_the_sdk_type() {
-        let source = "export type Slider = { range:<Range T=float64/> marks:<Range T=int/>[]? }\n";
+        let source = "export type Slider = { range:<Range T=float64/> marks?:<Range T=int/>+ }\n";
         let csharp = generate_for(source, TargetLanguage::CSharp);
 
         let range = csharp

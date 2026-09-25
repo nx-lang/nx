@@ -1,0 +1,12 @@
+module lib/text.nx fingerprint 3894438921611365002
+requires occurrence-v1
+entrypoints functions [title Badge] components []
+
+value honorific =
+  "Dr."
+
+function title(name: string, prefix: string = honorific, suffix?: string): string =
+  (((prefix concat " ") concat name) concat (suffix ?? ""))
+
+function Badge(label: string, size: int = (2 mul 3), tone?: string): string =
+  (((label concat ":") concat text<int>(size)) concat (tone ?? ""))

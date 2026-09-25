@@ -108,10 +108,10 @@ fn invoke(token: &SmolStr, action: Value) -> Value {
 }
 
 const PEOPLE: &str = r#"
-    type User = { name:string email:string? }
-    external component <Grid sortBy:User.Property keys:People.Property[] emits { Sorted { } } />
+    type User = { name:string email?:string }
+    external component <Grid sortBy:User.Property keys:People.Property+ emits { Sorted { } } />
     component <People /> = {
-      state { sortBy:User.Property = {User.Property.name} keys:People.Property[] = { Property.sortBy } }
+      state { sortBy:User.Property = {User.Property.name} keys:People.Property+ = { Property.sortBy } }
       <Grid sortBy={sortBy} keys={keys} onSorted=<Update sortBy={User.Property.email} keys={ Property.sortBy Property.keys } /> />
     }
 "#;

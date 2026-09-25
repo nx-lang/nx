@@ -4,7 +4,7 @@
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { NX_IR_NONE, NX_IR_REQUIRED_FEATURE_RANGES_V1, NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION, NX_PRELUDE_MODULE_IDENTITY, NX_PRELUDE_VERSION, NxIrRuntimeError, applyComponentStatePatch, applyUpdate, callFunction, changedFields, constructComponentDescriptor, declarationKinds, diffRecords, dispatchComponentActions, evaluateComponent, evaluateFunction, float32Text, initializeComponent, linkNxIrProgram, mergeUpdates, nodeKinds, normalizeComponentState, prepareNxIrModule, prepareNxIrProgram, tryLinkNxIrProgram, tryPrepareNxIrModule, tryPrepareNxIrProgram, typeKinds, } from "../src/index.js";
+import { NX_IR_NONE, NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1, NX_IR_REQUIRED_FEATURE_RANGES_V1, NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION, NX_PRELUDE_MODULE_IDENTITY, NX_PRELUDE_VERSION, NxIrRuntimeError, applyComponentStatePatch, applyUpdate, callFunction, changedFields, constructComponentDescriptor, declarationKinds, diffRecords, dispatchComponentActions, evaluateComponent, evaluateFunction, float32Text, initializeComponent, linkNxIrProgram, mergeUpdates, nodeKinds, normalizeComponentState, occurrenceFlags, prepareNxIrModule, prepareNxIrProgram, tryLinkNxIrProgram, tryPrepareNxIrModule, tryPrepareNxIrProgram, typeKinds, } from "../src/index.js";
 const tests = [];
 function test(name, run) {
     tests.push([name, run]);
@@ -51,6 +51,8 @@ function assertThrows(run, expectedMessage) {
     throw new Error("Expected function to throw");
 }
 const sectionKinds = { strings: 0, module: 1, types: 2, constants: 3, nodes: 4, declarations: 5, debug: 6 };
+/** Bit 1 of a parameter's flags cell: the parameter is optional (`p?:T`). */
+const functionParamOptional = 2;
 class ArtifactBuilder {
     strings = [];
     types = [];
@@ -84,20 +86,33 @@ class ArtifactBuilder {
     nominal(name, identity) {
         return this.type([typeKinds.nominal, identity === undefined ? 0 : this.slot(identity), this.str(name)]);
     }
-    nullable(inner) {
-        return this.type([typeKinds.nullable, inner]);
+    /** `[5, item, occurrence]`: `item` under an occurrence, `1` for `?`, `2` for `+` and `3` for `*`. */
+    seq(item, occurrence) {
+        return this.type([typeKinds.seq, item, occurrence]);
     }
-    /** `[4, result, [[name, type, flags]...]]`: a function type with named parameters. */
+    /** `T?` */
+    optional(item) {
+        return this.seq(item, occurrenceFlags.empty);
+    }
+    /** `T+` */
+    oneOrMore(item) {
+        return this.seq(item, occurrenceFlags.many);
+    }
+    /** `T*` */
+    zeroOrMore(item) {
+        return this.seq(item, occurrenceFlags.empty | occurrenceFlags.many);
+    }
+    /**
+     * `[4, result, [[name, type, flags]...]]`: a function type with named parameters, each with its
+     * flags: bit 0 content, bit 1 optional.
+     */
     functionType(result, params = []) {
         return this.type([
             typeKinds.function,
             result,
             params.length,
-            ...params.flatMap(([name, ty, content]) => [this.str(name), ty, content === true ? 1 : 0]),
+            ...params.flatMap(([name, ty, flags]) => [this.str(name), ty, flags ?? 0]),
         ]);
-    }
-    array(element) {
-        return this.type([typeKinds.array, element]);
     }
     type(entry) {
         const key = entry.join(",");
@@ -150,8 +165,20 @@ class ArtifactBuilder {
         this.declarations.push(entry);
         return this.declarations.length - 1;
     }
-    fn(name, body, params = []) {
-        const index = this.declaration([declarationKinds.function, this.str(name), ...this.list(params), body]);
+    /**
+     * A function declaration: `result` is the declared result type, and `optionalResult` says the
+     * result type, declared or inferred, is a standalone `T?`. A parameter is `[name, type, flags]`,
+     * or `[name, type, default, flags]` when it has a default node.
+     */
+    fn(name, body, params = [], options = {}) {
+        const index = this.declaration([
+            declarationKinds.function,
+            this.str(name),
+            ...this.list(params.map((param) => (param.length === 3 ? [param[0], param[1], NX_IR_NONE, param[2]] : param))),
+            body,
+            options.result ?? NX_IR_NONE,
+            options.optionalResult === true ? 1 : 0,
+        ]);
         this.functionEntrypoints.push(index);
         return index;
     }
@@ -309,19 +336,19 @@ test("prepares a self-contained artifact and evaluates it without linking", () =
     shifted.set(artifact, 2);
     assertEqual(evaluateFunction(prepareNxIrProgram(shifted.subarray(2)), "root"), 3);
 });
-test("refuses schema 3 naming both versions, and unknown ABIs and features", () => {
+test("refuses schema 4 naming both versions, and unknown ABIs and features", () => {
     const b = new ArtifactBuilder("main.nx");
     b.fn("root", b.int(1));
     const artifact = b.build();
-    assertEqual(new DataView(artifact.buffer, artifact.byteOffset).getUint32(4, true), 4);
+    assertEqual(new DataView(artifact.buffer, artifact.byteOffset).getUint32(4, true), 5);
     const old = artifact.slice();
-    new DataView(old.buffer).setUint32(4, 3, true);
-    const schema3 = tryPrepareNxIrModule(old);
-    assertEqual(schema3.ok, false);
-    if (!schema3.ok) {
-        const message = schema3.diagnostics[0].message;
-        assertEqual(message.includes("schema version 3"), true);
+    new DataView(old.buffer).setUint32(4, 4, true);
+    const schema4 = tryPrepareNxIrModule(old);
+    assertEqual(schema4.ok, false);
+    if (!schema4.ok) {
+        const message = schema4.diagnostics[0].message;
         assertEqual(message.includes("schema version 4"), true);
+        assertEqual(message.includes("schema version 5"), true);
     }
     assertEqual(tryPrepareNxIrModule(b.build({ runtimeAbi: "nx-ir-runtime-v1" })).ok, false);
     const notAnImage = tryPrepareNxIrModule(new TextEncoder().encode('{"format":"nx-ir-json","schemaVersion":3}'));
@@ -632,8 +659,8 @@ test("a runtime diagnostic cites the span with debug data and the declaration wi
 // ------------------------------------------------------------------------------------------------
 /**
  * `abstract Base { name }`, `User extends Base { role }`, `Theme = light | dark`, `LoadState =
- * idle | failed { message }`, and a `Card` component with a `user: User`, `theme: Theme?`, a
- * `state: LoadState?` and content `children: object[]`, plus state `{ count: int = 0 }`.
+ * idle | failed { message }`, and a `Card` component with a `user:User`, `theme?:Theme`, a
+ * `load?:LoadState` and `content children?:object+`, plus state `{ count:int = 0 }`.
  */
 function shapesArtifact() {
     const b = new ArtifactBuilder("main.nx");
@@ -654,9 +681,9 @@ function shapesArtifact() {
     ]);
     const props = [
         b.field("user", b.nominal("Base"), { required: true }),
-        b.field("theme", b.nullable(b.nominal("Theme"))),
-        b.field("load", b.nullable(b.nominal("LoadState"))),
-        b.field("children", b.array(b.primitive("object")), { content: true }),
+        b.field("theme", b.optional(b.nominal("Theme"))),
+        b.field("load", b.optional(b.nominal("LoadState"))),
+        b.field("children", b.zeroOrMore(b.primitive("object")), { content: true }),
     ];
     const state = [b.field("count", int, { default: b.int(0) })];
     // The body renders `<div count={count} />`.
@@ -667,13 +694,8 @@ function shapesArtifact() {
 test("accepts a derived record at a base-typed prop and rejects an unrelated or abstract one", () => {
     const program = prepareNxIrProgram(shapesArtifact());
     const user = { $type: "User", name: "Ada", role: "admin" };
-    assertEqual(constructComponentDescriptor(program, "Card", { user }), {
-        $type: "Card",
-        user,
-        theme: null,
-        load: null,
-        children: null,
-    });
+    // An empty optional prop is an omitted key, not a null.
+    assertEqual(constructComponentDescriptor(program, "Card", { user }), { $type: "Card", user });
     assertThrows(() => constructComponentDescriptor(program, "Card", { user: { $type: "Other", name: "x" } }), "Expected Card props.user to be a Base");
     assertThrows(() => constructComponentDescriptor(program, "Card", { user: { name: "x" } }), "concrete type extending Base");
     assertThrows(() => constructComponentDescriptor(program, "Card", { user: { $type: "Base", name: "x" } }), "got abstract 'Base'");
@@ -721,7 +743,11 @@ test("normalizes constant and payload union cases from host input", () => {
         message: "x",
     });
     assertThrows(() => constructComponentDescriptor(program, "Card", { user, load: { $type: "LoadState.exploded" } }), "Invalid union case 'LoadState.exploded'");
-    assertEqual(fields(constructComponentDescriptor(program, "Card", { user, load: null })).load, null);
+    // A host's `null` and `[]` are the empty value, which the descriptor carries no key for.
+    for (const empty of [null, []]) {
+        const descriptor = fields(constructComponentDescriptor(program, "Card", { user, load: empty }));
+        assertEqual(Object.prototype.hasOwnProperty.call(descriptor, "load"), false);
+    }
 });
 test("binds content as a list whatever the child count", () => {
     const program = prepareNxIrProgram(shapesArtifact());
@@ -744,33 +770,42 @@ test("initializes, evaluates and patches a component's host-owned state", () => 
     assertThrows(() => applyComponentStatePatch(program, "Card", { count: 1 }, { $type: "Other.Update" }), "only 'Card.Update' patches it");
     assertThrows(() => applyComponentStatePatch(program, "Card", { count: 1 }, { size: 2 }), "Unknown Card state field 'size'");
 });
-test("host input for an update record keeps absent fields absent and rejects null where not nullable", () => {
+test("host input for an update record keeps absent fields absent and clears only a clearable field", () => {
     const b = new ArtifactBuilder("main.nx");
     const string = b.primitive("string");
-    b.record("User", [b.field("name", string, { required: true }), b.field("email", b.nullable(string))]);
-    b.record("User.Update", [b.field("name", string), b.field("email", b.nullable(string))], { updateTarget: b.ref("User") });
+    b.record("User", [b.field("name", string, { required: true }), b.field("email", b.optional(string))]);
+    b.record("User.Update", [b.field("name", string), b.field("email", b.optional(string))], { updateTarget: b.ref("User") });
     b.fn("same", b.node([nodeKinds.slot, 0, b.str("patch")]), [[b.str("patch"), b.nominal("User.Update"), 0]]);
     const program = prepareNxIrProgram(b.build({ requiredFeatures: ["update-records-v1"] }));
+    // A present `null` or `[]` is a cleared field, encoded as `null`; a missing key stays missing.
     assertEqual(evaluateFunction(program, "same", [{ $type: "User.Update", email: null }]), { $type: "User.Update", email: null });
+    assertEqual(evaluateFunction(program, "same", [{ $type: "User.Update", email: [] }]), { $type: "User.Update", email: null });
     assertEqual(evaluateFunction(program, "same", [{ name: "Bo" }]), { $type: "User.Update", name: "Bo" });
-    assertThrows(() => evaluateFunction(program, "same", [{ name: null }]), "an update record sets a field to null only where the field is nullable");
+    for (const empty of [null, []]) {
+        const refused = assertThrows(() => evaluateFunction(program, "same", [{ name: empty }]), "clears a field only where the target declares it optional");
+        assertEqual(refused.diagnostics[0].message.includes("name"), true);
+    }
 });
 test("the exported helpers apply, merge, diff and list changed fields on host-held values", () => {
     const b = new ArtifactBuilder("main.nx");
     const string = b.primitive("string");
-    b.record("User", [b.field("name", string, { required: true }), b.field("email", b.nullable(string)), b.field("age", b.nullable(b.primitive("int")))]);
-    b.record("User.Update", [b.field("name", string), b.field("email", b.nullable(string)), b.field("age", b.nullable(b.primitive("int")))], {
+    b.record("User", [b.field("name", string, { required: true }), b.field("email", b.optional(string)), b.field("age", b.optional(b.primitive("int")))]);
+    b.record("User.Update", [b.field("name", string), b.field("email", b.optional(string)), b.field("age", b.optional(b.primitive("int")))], {
         updateTarget: b.ref("User"),
     });
     const program = prepareNxIrProgram(b.build({ requiredFeatures: ["update-records-v1"] }));
     const user = { $type: "User", name: "Ada", email: "a@b", age: 3 };
-    assertEqual(applyUpdate(user, { $type: "User.Update", email: null }), { $type: "User", name: "Ada", email: null, age: 3 });
+    // A cleared field is left out of the applied record, which is how an empty optional is encoded.
+    assertEqual(applyUpdate(user, { $type: "User.Update", email: null }), { $type: "User", name: "Ada", age: 3 });
     assertEqual(mergeUpdates({ $type: "User.Update", age: null }, { $type: "User.Update", name: "Bo" }), {
         $type: "User.Update",
         age: null,
         name: "Bo",
     });
     assertEqual(diffRecords(user, { ...user, name: "Bo" }), { $type: "User.Update", name: "Bo" });
+    // An omitted optional is empty on both sides of a diff, and a field `after` drops is cleared.
+    assertEqual(diffRecords(user, { $type: "User", name: "Ada", age: 3 }), { $type: "User.Update", email: null });
+    assertEqual(diffRecords({ $type: "User", name: "Ada" }, { $type: "User", name: "Ada", email: null }), { $type: "User.Update" });
     assertEqual(changedFields({ $type: "User.Update", age: null, name: "Ada" }, program), ["name", "age"]);
     assertThrows(() => applyUpdate(user, { $type: "Other.Update" }), "only 'User.Update' patches it");
     // Each helper compares bare `$type` names, which two modules may share, so each checks its own
@@ -1036,8 +1071,8 @@ test("a handler resolved through the parent is the parent's own value", () => {
 // Function values
 // ------------------------------------------------------------------------------------------------
 /**
- * `let <Row Item:object Index:int />: string = "r"`, `external component <List ItemTemplate:(<function
- * Item:object Index:int />: string)? />`, `let root() = <List ItemTemplate={Row} />`, and a
+ * `let <Row Item:object Index:int />: string = "r"`, `external component <List ItemTemplate?:<function
+ * Item:object Index:int />: string />`, `let root() = <List ItemTemplate={Row} />`, and a
  * `component <Section Row:<function Item:object Index:int />: string /> = { <Row Item="a" Index=1 /> }`.
  */
 function templateArtifact() {
@@ -1047,7 +1082,7 @@ function templateArtifact() {
     const string = b.primitive("string");
     const template = b.functionType(string, [["Item", object], ["Index", int]]);
     b.fn("Row", b.string("r"), [[b.str("Item"), object, 0], [b.str("Index"), int, 0]]);
-    b.component("List", [b.field("ItemTemplate", b.nullable(template))], [], -1, { external: true });
+    b.component("List", [b.field("ItemTemplate", b.optional(template))], [], -1, { external: true });
     b.fn("root", b.node([nodeKinds.component, ...b.ref("List"), ...b.list([b.property("ItemTemplate", b.node([nodeKinds.reference, ...b.ref("Row")]))]), ...b.content([])]));
     // The prop is slot 0 of the component frame; the body calls it by name.
     const call = b.node([nodeKinds.namedCall, b.node([nodeKinds.slot, 0, b.str("Row")]), ...b.list([b.property("Item", b.string("a")), b.property("Index", b.int(1))])]);
@@ -1071,8 +1106,17 @@ test("the validator reads a function type and refuses one whose parameter type i
         throw new Error("List is not a component");
     }
     assertEqual(list.props[0].ty, {
-        kind: "nullable",
-        inner: { kind: "function", params: [{ name: "Item", ty: { kind: "primitive", name: "object" }, isContent: false }, { name: "Index", ty: { kind: "primitive", name: "int" }, isContent: false }], result: { kind: "primitive", name: "string" } },
+        kind: "seq",
+        item: {
+            kind: "function",
+            params: [
+                { name: "Item", ty: { kind: "primitive", name: "object" }, isContent: false, isOptional: false },
+                { name: "Index", ty: { kind: "primitive", name: "int" }, isContent: false, isOptional: false },
+            ],
+            result: { kind: "primitive", name: "string" },
+        },
+        mayBeEmpty: true,
+        mayBeMany: false,
     });
     const b = new ArtifactBuilder("main.nx");
     b.type([typeKinds.function, b.primitive("string"), 1, b.str("Item"), 99, 0]);
@@ -1094,7 +1138,7 @@ test("callFunction binds by name, drops an argument the function lacks, and name
     const program = prepareNxIrProgram(templateArtifact());
     const record = fields(evaluateFunction(program, "root")).ItemTemplate;
     assertEqual(callFunction(program, record, { Item: { $type: "Contact" }, Index: 3, Extra: 1 }), "r");
-    assertThrows(() => callFunction(program, record, { Item: null }), "requires argument 'Index'");
+    assertThrows(() => callFunction(program, record, { Item: { $type: "Contact" } }), "requires argument 'Index'");
     assertThrows(() => callFunction(program, { $type: "Function", module: "main.nx", name: "Nope" }, {}), "'Nope'");
     assertThrows(() => callFunction(program, { $type: "Function", module: "other.nx", name: "Row" }, {}), "'other.nx'");
     assertThrows(() => callFunction(program, "Row", {}), "Function record");
@@ -1285,7 +1329,6 @@ test("every shape that is not a range with integer bounds fails the same way", (
     b.fn("count", b.node([nodeKinds.forRange, 1, b.str("item"), NX_IR_NONE, NX_IR_NONE, span, item]), [[b.str("span"), b.primitive("object"), 0]]);
     const program = prepareNxIrProgram(b.build({ requiredFeatures: [NX_IR_REQUIRED_FEATURE_RANGES_V1] }));
     const refused = [
-        null,
         42,
         "nope",
         [1, 2, 3],
@@ -1307,6 +1350,8 @@ test("every shape that is not a range with integer bounds fails the same way", (
         const error = assertThrows(() => evaluateFunction(program, "count", [value]), "Range record with integer bounds");
         assertEqual(error.diagnostics[0].code, "nx-ir-for");
     }
+    // `null` never reaches the loop: an exactly-one site, `object` included, refuses it at the boundary.
+    assertEqual(assertThrows(() => evaluateFunction(program, "count", [null]), "got null").diagnostics[0].code, "nx-ir-boundary-type");
     // The shape that does work, so the refusals above are the value's doing and not the fixture's.
     assertEqual(evaluateFunction(program, "count", [{ $type: "Range", start: 2, end: 4, endInclusive: true }]), [2, 3, 4]);
 });
@@ -1371,7 +1416,7 @@ test("a lowered range limit holds while a state default is evaluated", () => {
         item,
     ]);
     const body = b.node([nodeKinds.element, 0, b.str("div"), ...b.list([]), ...b.content([])]);
-    b.component("Widget", [], [b.field("items", b.array(b.primitive("int")), { default: items })], body);
+    b.component("Widget", [], [b.field("items", b.oneOrMore(b.primitive("int")), { default: items })], body);
     const program = prepareNxIrProgram(b.build({ requiredFeatures: [NX_IR_REQUIRED_FEATURE_RANGES_V1] }));
     const error = assertThrows(() => initializeComponent(program, "Widget", {}, { maxRangeLength: 10 }), "maxRangeLength");
     assertEqual(error.diagnostics[0].code, "nx-ir-resource-limit");
@@ -1399,6 +1444,385 @@ test("a feature this runtime does not know is refused by name, and ranges-v1 is 
         assertEqual(future.diagnostics[0].code, "nx-ir-required-feature");
         assertEqual(future.diagnostics[0].message, "Unsupported NX IR required feature 'ranges-v2'.");
     }
+});
+// ------------------------------------------------------------------------------------------------
+// The occurrence model: seq types, the empty value, the presence operators and the {} pattern
+// ------------------------------------------------------------------------------------------------
+/** The `div` (`/`) operator's number, as `docs/nx-ir-format.md` assigns it. */
+const DIV = 3;
+const EQ = 8;
+const AND = 14;
+/** `[15, ref, [[str, node]...], [node...]]`: a record construction with named properties. */
+function recordNode(b, name, properties) {
+    return b.node([nodeKinds.record, ...b.ref(name), ...b.list(properties.map(([key, value]) => b.property(key, value))), ...b.content([])]);
+}
+/** The `{}` value: an empty `array` node, which is also the `{}` match pattern. */
+function emptyNode(b) {
+    return b.node([nodeKinds.array, 0]);
+}
+/**
+ * `type Person = { name:string nick?:string }`, `type Book = { title:string author?:Person
+ * tags?:string+ }` and the functions of the corpus's `occurrences` program that take a `Book`, so a
+ * host value drives each operator: `hasAuthor(b) = b.author?`, `authorName(b) = b.author?.name`,
+ * `nick(b) = b.author?.nick`, `byline(b) = "by " + (b.author?.name ?? "anonymous")`,
+ * `tagged(b) = b.tags?`, `describe(b) = if b.author is { {} => "anonymous" else => b.author.name }`,
+ * plus `orFail(o?:int) = o ?? 1 / 0` and `matchInt(o?:int) = if o is { {} => "none" 1 => "one" else => "other" }`.
+ */
+function occurrencesArtifact() {
+    const b = new ArtifactBuilder("main.nx");
+    const string = b.primitive("string");
+    const int = b.primitive("int");
+    b.record("Person", [b.field("name", string, { required: true }), b.field("nick", b.optional(string))]);
+    b.record("Book", [
+        b.field("title", string, { required: true }),
+        b.field("author", b.optional(b.nominal("Person"))),
+        b.field("tags", b.zeroOrMore(string)),
+    ]);
+    const book = [b.str("b"), b.nominal("Book"), 0];
+    const author = () => b.node([nodeKinds.member, b.node([nodeKinds.slot, 0, b.str("b")]), b.str("author")]);
+    b.fn("hasAuthor", b.node([nodeKinds.exists, author()]), [book]);
+    b.fn("authorName", b.node([nodeKinds.optionalMember, author(), b.str("name")]), [book]);
+    b.fn("nick", b.node([nodeKinds.optionalMember, author(), b.str("nick")]), [book]);
+    const fallback = b.node([nodeKinds.coalesce, b.node([nodeKinds.optionalMember, author(), b.str("name")]), b.string("anonymous")]);
+    b.fn("byline", b.node([nodeKinds.binary, CONCAT, b.string("by "), fallback]), [book]);
+    b.fn("tagged", b.node([nodeKinds.exists, b.node([nodeKinds.member, b.node([nodeKinds.slot, 0, b.str("b")]), b.str("tags")])]), [book]);
+    const describe = b.node([nodeKinds.ifIs, author(), 1, 1, emptyNode(b), b.string("anonymous"), b.node([nodeKinds.member, author(), b.str("name")])]);
+    b.fn("describe", describe, [book]);
+    const o = [b.str("o"), b.optional(int), 2];
+    const slotO = () => b.node([nodeKinds.slot, 0, b.str("o")]);
+    b.fn("orFail", b.node([nodeKinds.coalesce, slotO(), b.node([nodeKinds.binary, DIV, b.int(1), b.int(0)])]), [o]);
+    b.fn("matchInt", b.node([nodeKinds.ifIs, slotO(), 2, 1, emptyNode(b), b.string("none"), 1, b.int(1), b.string("one"), b.string("other")]), [o]);
+    return b.build({ requiredFeatures: [NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1] });
+}
+const ada = { $type: "Person", name: "Ada" };
+const withAuthor = { $type: "Book", title: "A", author: ada, tags: ["x"] };
+const withoutAuthor = { $type: "Book", title: "B" };
+test("exists, optionalMember and coalesce evaluate over the empty value, and a fallback is lazy", () => {
+    const program = prepareNxIrProgram(occurrencesArtifact());
+    assertEqual(evaluateFunction(program, "hasAuthor", [withAuthor]), true);
+    assertEqual(evaluateFunction(program, "hasAuthor", [withoutAuthor]), false);
+    assertEqual(evaluateFunction(program, "authorName", [withAuthor]), "Ada");
+    assertEqual(evaluateFunction(program, "authorName", [withoutAuthor]), []);
+    // The step reads an optional field the record stores no key for as the empty value.
+    assertEqual(evaluateFunction(program, "nick", [withAuthor]), []);
+    assertEqual(evaluateFunction(program, "nick", [{ ...withAuthor, author: { ...ada, nick: "A" } }]), "A");
+    assertEqual(evaluateFunction(program, "byline", [withAuthor]), "by Ada");
+    assertEqual(evaluateFunction(program, "byline", [withoutAuthor]), "by anonymous");
+    // A test on zero-or-more is non-emptiness, whether the host omitted the field or sent `[]`.
+    assertEqual(evaluateFunction(program, "tagged", [withAuthor]), true);
+    assertEqual(evaluateFunction(program, "tagged", [withoutAuthor]), false);
+    assertEqual(evaluateFunction(program, "tagged", [{ ...withoutAuthor, tags: [] }]), false);
+    // The right operand of `??` runs only when the left is empty.
+    assertEqual(evaluateFunction(program, "orFail", [1]), 1);
+    for (const empty of [null, []]) {
+        assertThrows(() => evaluateFunction(program, "orFail", [empty]), "Division by zero");
+    }
+});
+test("the {} pattern matches exactly the empty value", () => {
+    const program = prepareNxIrProgram(occurrencesArtifact());
+    assertEqual(evaluateFunction(program, "describe", [withAuthor]), "Ada");
+    assertEqual(evaluateFunction(program, "describe", [withoutAuthor]), "anonymous");
+    assertEqual(evaluateFunction(program, "matchInt", [null]), "none");
+    assertEqual(evaluateFunction(program, "matchInt", [[]]), "none");
+    // A value that holds an item never matches `{}`, and the empty value matches no other pattern.
+    assertEqual(evaluateFunction(program, "matchInt", [1]), "one");
+    assertEqual(evaluateFunction(program, "matchInt", [2]), "other");
+});
+test("reads a seq type and refuses the retired array and nullable kinds, the null node and a malformed seq", () => {
+    const b = new ArtifactBuilder("main.nx");
+    b.fn("f", b.node([nodeKinds.slot, 0, b.str("xs")]), [[b.str("xs"), b.zeroOrMore(b.primitive("int")), 0]]);
+    const program = prepareNxIrProgram(b.build());
+    const f = program.functionEntrypoints.get("f").kind;
+    if (f.tag !== "function") {
+        throw new Error("f is not a function");
+    }
+    assertEqual(f.params[0].ty, { kind: "seq", item: { kind: "primitive", name: "int" }, mayBeEmpty: true, mayBeMany: true });
+    assertEqual(evaluateFunction(program, "f", [3]), [3]);
+    const refused = (build, message) => {
+        const builder = new ArtifactBuilder("main.nx");
+        build(builder);
+        builder.fn("root", builder.int(1));
+        const result = tryPrepareNxIrModule(builder.build());
+        if (result.ok || !result.diagnostics.some((diagnostic) => diagnostic.code === "nx-ir-malformed" && diagnostic.message.includes(message))) {
+            throw new Error(`expected a malformed diagnostic containing '${message}', got ${result.ok ? "a prepared module" : result.diagnostics.map((diagnostic) => diagnostic.message).join(" ")}`);
+        }
+    };
+    refused((builder) => builder.type([2, builder.primitive("int")]), "Unknown type kind 2 (retired with schema 5)");
+    refused((builder) => builder.type([3, builder.primitive("int")]), "Unknown type kind 3 (retired with schema 5)");
+    refused((builder) => builder.fn("nothing", builder.node([0])), "Unknown node kind 0 (retired with schema 5)");
+    refused((builder) => builder.seq(builder.primitive("int"), 0), "occurrence cell 0");
+    refused((builder) => builder.seq(builder.primitive("int"), 4), "occurrence cell 4");
+    refused((builder) => builder.oneOrMore(builder.optional(builder.primitive("int"))), "itself a seq type");
+});
+test("an operator node or a {} pattern without occurrence-v1 is malformed naming the feature", () => {
+    const coalesce = new ArtifactBuilder("main.nx");
+    coalesce.fn("root", coalesce.node([nodeKinds.coalesce, emptyNode(coalesce), coalesce.int(1)]));
+    const pattern = new ArtifactBuilder("main.nx");
+    pattern.fn("root", pattern.node([nodeKinds.ifIs, pattern.int(1), 1, 1, emptyNode(pattern), pattern.int(0), pattern.int(2)]));
+    for (const [builder, spelling] of [
+        [coalesce, "'coalesce' node"],
+        [pattern, "'{}' pattern"],
+    ]) {
+        const result = tryPrepareNxIrModule(builder.build());
+        if (result.ok || !result.diagnostics.some((diagnostic) => diagnostic.code === "nx-ir-malformed" && diagnostic.message.includes("occurrence-v1") && diagnostic.message.includes(spelling))) {
+            throw new Error(`expected the ${spelling} to be refused naming occurrence-v1`);
+        }
+        // With the feature listed the same image prepares and evaluates.
+        assertEqual(evaluateFunction(prepareNxIrProgram(builder.build({ requiredFeatures: [NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1] })), "root"), builder === coalesce ? 1 : 2);
+    }
+    // A runtime that does not implement a feature refuses the module by name, as for any feature.
+    const future = tryPrepareNxIrProgram(coalesce.build({ requiredFeatures: ["occurrence-v2"] }));
+    assertEqual(future.ok, false);
+    if (!future.ok) {
+        assertEqual(future.diagnostics[0].message, "Unsupported NX IR required feature 'occurrence-v2'.");
+    }
+});
+test("host absence decodes to the empty value where zero is admitted and is rejected where one is required", () => {
+    const b = new ArtifactBuilder("main.nx");
+    const string = b.primitive("string");
+    const props = [
+        b.field("subtitle", b.optional(string)),
+        b.field("tags", b.zeroOrMore(string)),
+        b.field("items", b.oneOrMore(string), { required: true }),
+        b.field("title", string, { required: true }),
+    ];
+    b.component("Card", props, [], -1, { external: true });
+    const program = prepareNxIrProgram(b.build());
+    const base = { title: "T", items: ["a"] };
+    const expected = { $type: "Card", title: "T", items: ["a"] };
+    // `null`, `[]` and a missing key are one empty value at a `?` or `*` site, carried as no key.
+    assertEqual(constructComponentDescriptor(program, "Card", { ...base, subtitle: null, tags: [] }), expected);
+    assertEqual(constructComponentDescriptor(program, "Card", { ...base, subtitle: [], tags: null }), expected);
+    assertEqual(constructComponentDescriptor(program, "Card", base), expected);
+    // A one-element array at a `?` site is its element; a longer one does not fit.
+    assertEqual(fields(constructComponentDescriptor(program, "Card", { ...base, subtitle: ["S"] })).subtitle, "S");
+    assertThrows(() => constructComponentDescriptor(program, "Card", { ...base, subtitle: ["S", "T"] }), "Card props.subtitle to hold at most one value");
+    // A single value at a `+` or `*` site is a sequence of one.
+    const lifted = fields(constructComponentDescriptor(program, "Card", { ...base, items: "a", tags: "t" }));
+    assertEqual(lifted.items, ["a"]);
+    assertEqual(lifted.tags, ["t"]);
+    // A `+` site takes neither `null`, `[]` nor a missing key.
+    for (const empty of [null, []]) {
+        assertThrows(() => constructComponentDescriptor(program, "Card", { title: "T", items: empty }), "Card props.items to hold at least one value");
+    }
+    assertThrows(() => constructComponentDescriptor(program, "Card", { title: "T" }), "Missing required Card props field 'items'");
+    // An exactly-one site refuses `null` and the empty value, and reads a one-element array as its element.
+    assertThrows(() => constructComponentDescriptor(program, "Card", { ...base, title: null }), "Card props.title to hold a value, got null");
+    assertThrows(() => constructComponentDescriptor(program, "Card", { ...base, title: [] }), "Card props.title to hold a value, got the empty value");
+    assertEqual(fields(constructComponentDescriptor(program, "Card", { ...base, title: ["T"] })).title, "T");
+});
+test("an empty optional field is an omitted key, written or not, and reads as the empty value", () => {
+    const b = new ArtifactBuilder("main.nx");
+    const string = b.primitive("string");
+    b.record("Person", [b.field("name", string, { required: true }), b.field("nick", b.optional(string))]);
+    const person = (nick) => recordNode(b, "Person", [["name", b.string("Ada")], ...(nick === undefined ? [] : [["nick", nick]])]);
+    b.fn("omitted", person());
+    b.fn("writtenEmpty", person(emptyNode(b)));
+    b.fn("written", person(b.string("A")));
+    const p = [b.str("p"), b.nominal("Person"), 0];
+    b.fn("nickOf", b.node([nodeKinds.member, b.node([nodeKinds.slot, 0, b.str("p")]), b.str("nick")]), [p]);
+    b.fn("ageOf", b.node([nodeKinds.member, b.node([nodeKinds.slot, 0, b.str("p")]), b.str("age")]), [p]);
+    b.fn("same", b.node([nodeKinds.binary, EQ, person(), person(emptyNode(b))]));
+    const program = prepareNxIrProgram(b.build());
+    assertEqual(evaluateFunction(program, "omitted"), { $type: "Person", name: "Ada" });
+    assertEqual(evaluateFunction(program, "writtenEmpty"), { $type: "Person", name: "Ada" });
+    assertEqual(evaluateFunction(program, "written"), { $type: "Person", name: "Ada", nick: "A" });
+    assertEqual(evaluateFunction(program, "same"), true);
+    // A declared optional field the record stores no key for reads as the empty value; a field the
+    // record does not declare is still an error.
+    assertEqual(evaluateFunction(program, "nickOf", [ada]), []);
+    assertEqual(evaluateFunction(program, "nickOf", [{ ...ada, nick: null }]), []);
+    assertEqual(evaluateFunction(program, "nickOf", [{ ...ada, nick: "A" }]), "A");
+    assertThrows(() => evaluateFunction(program, "ageOf", [ada]), "does not contain member 'age'");
+});
+test("an evaluated update record clears only a clearable field, and apply, diff and changed carry the clearing", () => {
+    const b = new ArtifactBuilder("main.nx");
+    const string = b.primitive("string");
+    b.record("User", [b.field("name", string, { required: true }), b.field("email", b.optional(string))]);
+    b.record("User.Update", [b.field("name", string), b.field("email", b.optional(string))], { updateTarget: b.ref("User") });
+    const ada = () => recordNode(b, "User", [["name", b.string("Ada")], ["email", b.string("a@b")]]);
+    const intrinsic = (op, args, order = []) => b.node([nodeKinds.intrinsic, op, ...b.content(args), ...b.list(order.map((name) => [b.str(name)]))]);
+    b.fn("cleared", recordNode(b, "User.Update", [["email", emptyNode(b)]]));
+    b.fn("renamed", recordNode(b, "User.Update", [["name", b.string("Bo")]]));
+    b.fn("uncleared", recordNode(b, "User.Update", [["name", emptyNode(b)]]));
+    b.fn("applied", intrinsic(0, [ada(), recordNode(b, "User.Update", [["email", emptyNode(b)]])]));
+    b.fn("merged", intrinsic(1, [recordNode(b, "User.Update", [["name", b.string("Bo"),]]), recordNode(b, "User.Update", [["email", emptyNode(b)]])]));
+    b.fn("diffed", intrinsic(2, [ada(), recordNode(b, "User", [["name", b.string("Ada")]])]));
+    b.fn("unchanged", intrinsic(2, [recordNode(b, "User", [["name", b.string("Ada")]]), recordNode(b, "User", [["name", b.string("Ada")], ["email", emptyNode(b)]])]));
+    b.fn("keys", intrinsic(3, [recordNode(b, "User.Update", [["email", emptyNode(b)], ["name", b.string("Bo")]])], ["name", "email"]));
+    const program = prepareNxIrProgram(b.build({ requiredFeatures: ["update-records-v1", "update-intrinsics-v1"] }));
+    // A present empty field is carried as present, and encoded as `null`: the one place the
+    // canonical encoding writes it.
+    assertEqual(evaluateFunction(program, "cleared"), { $type: "User.Update", email: null });
+    assertEqual(evaluateFunction(program, "renamed"), { $type: "User.Update", name: "Bo" });
+    assertThrows(() => evaluateFunction(program, "uncleared"), "User.Update.name to hold a value; an update record clears a field only where the target declares it optional");
+    assertEqual(evaluateFunction(program, "applied"), { $type: "User", name: "Ada" });
+    assertEqual(evaluateFunction(program, "merged"), { $type: "User.Update", name: "Bo", email: null });
+    assertEqual(evaluateFunction(program, "diffed"), { $type: "User.Update", email: null });
+    // An omitted optional and one written empty are the same value on both sides of a diff.
+    assertEqual(evaluateFunction(program, "unchanged"), { $type: "User.Update" });
+    assertEqual(evaluateFunction(program, "keys"), ["name", "email"]);
+});
+test("a present empty value clears an optional state field and is refused for one that is not", () => {
+    const b = new ArtifactBuilder("main.nx");
+    const string = b.primitive("string");
+    const int = b.primitive("int");
+    const body = b.node([nodeKinds.element, 0, b.str("div"), ...b.list([b.property("q", b.node([nodeKinds.slot, 0, b.str("query")]))]), ...b.content([])]);
+    b.component("Search", [], [b.field("query", b.optional(string)), b.field("count", int, { default: b.int(0) })], body);
+    b.record("Search.Update", [b.field("query", b.optional(string)), b.field("count", int)], { updateTarget: b.ref("Search") });
+    const program = prepareNxIrProgram(b.build({ requiredFeatures: ["update-records-v1"] }));
+    // Optional state starts empty, which the state carries no key for and the body reads as empty.
+    const initialized = initializeComponent(program, "Search");
+    assertEqual(initialized.state, { count: 0 });
+    assertEqual(initialized.rendered, { $type: "div", q: [] });
+    assertEqual(applyComponentStatePatch(program, "Search", { query: "docs", count: 1 }, { $type: "Search.Update", query: null }), { count: 1 });
+    assertEqual(applyComponentStatePatch(program, "Search", { query: "docs", count: 1 }, { query: [] }), { count: 1 });
+    assertEqual(applyComponentStatePatch(program, "Search", { count: 1 }, { query: "x" }), { count: 1, query: "x" });
+    for (const empty of [null, []]) {
+        const refused = assertThrows(() => applyComponentStatePatch(program, "Search", { count: 1 }, { count: empty }), "Search state.count");
+        assertEqual(refused.diagnostics[0].code, "nx-ir-boundary-type");
+    }
+    // A complete state may leave an optional field out, or send it as `null`.
+    assertEqual(evaluateComponent(program, "Search", {}, { count: 2 }).rendered, { $type: "div", q: [] });
+    assertEqual(normalizeComponentState(program, "Search", { count: 2, query: null }), { count: 2 });
+    assertEqual(initializeComponent(program, "Search", {}, { state: { count: 2, query: "docs" } }).rendered, { $type: "div", q: "docs" });
+});
+test("a lone content child binds by the declared occurrence", () => {
+    const b = new ArtifactBuilder("main.nx");
+    b.record("Item", [b.field("n", b.primitive("int"), { required: true })]);
+    const item = b.nominal("Item");
+    b.component("One", [b.field("body", item, { required: true, content: true })], [], -1, { external: true });
+    b.component("Maybe", [b.field("body", b.optional(item), { content: true })], [], -1, { external: true });
+    b.component("Many", [b.field("items", b.oneOrMore(item), { required: true, content: true })], [], -1, { external: true });
+    b.component("Any", [b.field("items", b.zeroOrMore(item), { content: true })], [], -1, { external: true });
+    const child = () => recordNode(b, "Item", [["n", b.int(1)]]);
+    const use = (name, children) => b.node([nodeKinds.component, ...b.ref(name), ...b.list([]), ...b.content(children)]);
+    b.fn("one", use("One", [child()]));
+    b.fn("maybe", use("Maybe", [child()]));
+    b.fn("many", use("Many", [child()]));
+    b.fn("any", use("Any", [child()]));
+    b.fn("several", use("Many", [child(), child()]));
+    b.fn("none", use("Any", []));
+    b.fn("noneRequired", use("Many", []));
+    b.fn("emptyBody", use("Any", [emptyNode(b)]));
+    b.fn("emptyBodyRequired", use("Many", [emptyNode(b)]));
+    const program = prepareNxIrProgram(b.build());
+    const one = { $type: "Item", n: 1 };
+    // One child: the child itself at an exactly-one or `?` property, a one-item array at `+` or `*`.
+    assertEqual(evaluateFunction(program, "one"), { $type: "One", body: one });
+    assertEqual(evaluateFunction(program, "maybe"), { $type: "Maybe", body: one });
+    assertEqual(evaluateFunction(program, "many"), { $type: "Many", items: [one] });
+    assertEqual(evaluateFunction(program, "any"), { $type: "Any", items: [one] });
+    assertEqual(evaluateFunction(program, "several"), { $type: "Many", items: [one, one] });
+    // No body leaves an optional property empty and a required one missing; a written body that
+    // produced nothing is the empty value, which a `+` property cannot take.
+    assertEqual(evaluateFunction(program, "none"), { $type: "Any" });
+    assertThrows(() => evaluateFunction(program, "noneRequired"), "Missing required Many props field 'items'");
+    assertEqual(evaluateFunction(program, "emptyBody"), { $type: "Any" });
+    assertThrows(() => evaluateFunction(program, "emptyBodyRequired"), "Many props.items to hold at least one value");
+    // A host's content argument binds by the same rule.
+    assertEqual(fields(constructComponentDescriptor(program, "Many", {}, [one])).items, [one]);
+    assertEqual(fields(constructComponentDescriptor(program, "Maybe", {}, [one])).body, one);
+});
+test("a for over an optional runs once over its item and not at all over the empty value", () => {
+    const b = new ArtifactBuilder("main.nx");
+    const int = b.primitive("int");
+    const loop = b.node([
+        nodeKinds.for,
+        1,
+        b.str("x"),
+        NX_IR_NONE,
+        NX_IR_NONE,
+        b.node([nodeKinds.slot, 0, b.str("o")]),
+        b.node([nodeKinds.binary, 2, b.node([nodeKinds.slot, 1, b.str("x")]), b.int(10)]),
+    ]);
+    b.fn("tenfold", loop, [[b.str("o"), b.optional(int), functionParamOptional]]);
+    const program = prepareNxIrProgram(b.build());
+    // The product of `?` with an exactly-one body is `?`: the body's value is the loop's value, so
+    // an item stays an item rather than becoming a one-element array, as in the interpreter.
+    assertEqual(evaluateFunction(program, "tenfold", [3]), 30);
+    assertEqual(evaluateFunction(program, "tenfold", [[3]]), 30);
+    for (const empty of [null, []]) {
+        assertEqual(evaluateFunction(program, "tenfold", [empty]), []);
+    }
+});
+test("a declared result normalizes the body's value, and an empty optional result reaches the host as null", () => {
+    const b = new ArtifactBuilder("main.nx");
+    const int = b.primitive("int");
+    const untaken = () => b.node([nodeKinds.if, b.node([nodeKinds.bool, 0]), b.int(1), NX_IR_NONE]);
+    // `let many(): int+ = { 5 }`: an item returned where `int+` is declared is a one-item sequence.
+    b.fn("many", b.int(5), [], { result: b.oneOrMore(int) });
+    // `let one(): int? = { [5] }`: a one-item sequence where `int?` is declared is its item.
+    b.fn("one", b.node([nodeKinds.array, ...b.content([b.int(5)])]), [], { result: b.optional(int), optionalResult: true });
+    // `let none(): int? = { if false { 1 } }` and the same result inferred rather than declared.
+    b.fn("none", untaken(), [], { result: b.optional(int), optionalResult: true });
+    b.fn("inferredNone", untaken(), [], { optionalResult: true });
+    // `let noneOfMany(): int* = { if false { 1 } }` keeps `[]`: only a standalone `?` is null.
+    b.fn("noneOfMany", untaken(), [], { result: b.zeroOrMore(int) });
+    // `let tooFew(): int+ = { if false { 1 } }` is refused, as at any `+` site.
+    b.fn("tooFew", untaken(), [], { result: b.oneOrMore(int) });
+    // Inside the program the empty value stays `[]`: a caller of `none` sees it, not null.
+    b.fn("caller", b.node([nodeKinds.call, b.node([nodeKinds.reference, ...b.ref("none")]), ...b.content([])]), [], {
+        result: b.zeroOrMore(int),
+    });
+    const program = prepareNxIrProgram(b.build());
+    assertEqual(evaluateFunction(program, "many"), [5]);
+    assertEqual(evaluateFunction(program, "one"), 5);
+    assertEqual(evaluateFunction(program, "none"), null);
+    assertEqual(evaluateFunction(program, "inferredNone"), null);
+    assertEqual(evaluateFunction(program, "noneOfMany"), []);
+    assertThrows(() => evaluateFunction(program, "tooFew"), "return value for 'tooFew' to hold at least one value");
+    assertEqual(evaluateFunction(program, "caller"), []);
+    assertEqual(callFunction(program, { $type: "Function", module: "main.nx", name: "none" }), null);
+});
+test("every empty is one value under equality, and a condition must be a boolean", () => {
+    const b = new ArtifactBuilder("main.nx");
+    const untaken = () => b.node([nodeKinds.if, b.node([nodeKinds.bool, 0]), b.int(1), NX_IR_NONE]);
+    const loop = b.node([nodeKinds.for, 0, b.str("x"), NX_IR_NONE, NX_IR_NONE, emptyNode(b), b.node([nodeKinds.slot, 0, b.str("x")])]);
+    b.fn("same", b.node([nodeKinds.binary, EQ, emptyNode(b), untaken()]));
+    b.fn("loop", b.node([nodeKinds.binary, EQ, loop, untaken()]));
+    b.fn("notOne", b.node([nodeKinds.binary, EQ, emptyNode(b), b.int(1)]));
+    b.fn("badIf", b.node([nodeKinds.if, b.int(1), b.int(1), NX_IR_NONE]));
+    b.fn("badAnd", b.node([nodeKinds.binary, AND, b.string("x"), b.node([nodeKinds.bool, 1])]));
+    b.fn("badNot", b.node([nodeKinds.unary, 1, emptyNode(b)]));
+    const program = prepareNxIrProgram(b.build());
+    assertEqual(evaluateFunction(program, "same"), true);
+    assertEqual(evaluateFunction(program, "loop"), true);
+    assertEqual(evaluateFunction(program, "notOne"), false);
+    for (const name of ["badIf", "badAnd", "badNot"]) {
+        assertEqual(assertThrows(() => evaluateFunction(program, name), "Expected a boolean").diagnostics[0].code, "nx-ir-type");
+    }
+});
+test("a call by name may leave an optional parameter out, which binds the empty value", () => {
+    const b = new ArtifactBuilder("main.nx");
+    b.fn("f", b.node([nodeKinds.exists, b.node([nodeKinds.slot, 0, b.str("o")])]), [[b.str("o"), b.optional(b.primitive("int")), functionParamOptional]]);
+    const program = prepareNxIrProgram(b.build({ requiredFeatures: [NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1] }));
+    const f = { $type: "Function", module: "main.nx", name: "f" };
+    assertEqual(callFunction(program, f, {}), false);
+    assertEqual(callFunction(program, f, { o: null }), false);
+    assertEqual(callFunction(program, f, { o: 3 }), true);
+    // A positional call may stop before a trailing optional parameter, or supply it empty.
+    assertEqual(evaluateFunction(program, "f", [[]]), false);
+    assertEqual(evaluateFunction(program, "f", []), false);
+    assertThrows(() => evaluateFunction(program, "f", [1, 2]), "expected at most 1 arguments, got 2");
+});
+test("a parameter left out takes the default its function declares, which reads the parameters before it", () => {
+    const b = new ArtifactBuilder("main.nx");
+    const int = b.primitive("int");
+    const a = () => b.node([nodeKinds.slot, 0, b.str("a")]);
+    const total = b.node([nodeKinds.binary, 0, a(), b.node([nodeKinds.slot, 1, b.str("b")])]);
+    const defaultB = b.node([nodeKinds.binary, 0, a(), b.int(10)]);
+    b.fn("add", total, [[b.str("a"), int, 0], [b.str("b"), int, defaultB, 0]]);
+    const add = b.node([nodeKinds.reference, ...b.ref("add")]);
+    b.fn("omitted", b.node([nodeKinds.call, add, 2, b.int(1), NX_IR_NONE]));
+    b.fn("trailing", b.node([nodeKinds.call, add, 1, b.int(1)]));
+    b.fn("written", b.node([nodeKinds.call, add, 2, b.int(1), b.int(2)]));
+    const program = prepareNxIrProgram(b.build());
+    assertEqual(evaluateFunction(program, "omitted"), 12);
+    assertEqual(evaluateFunction(program, "trailing"), 12);
+    assertEqual(evaluateFunction(program, "written"), 3);
+    assertEqual(evaluateFunction(program, "add", [5]), 20);
+    assertThrows(() => evaluateFunction(program, "add", []), "requires argument 'a'");
 });
 let failures = 0;
 for (const [name, run] of tests) {

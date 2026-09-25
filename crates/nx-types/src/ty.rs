@@ -2,6 +2,7 @@
 //!
 //! Defines the core `Type` enum and related types.
 
+pub use nx_hir::ast::Occurrence;
 use nx_hir::{same_declaration, Name};
 use std::fmt;
 use std::hash::{Hash, Hasher};
@@ -40,8 +41,9 @@ pub enum Primitive {
     ///
     /// <para>Inference-internal: it can appear in a diagnostic but is never written in source, and
     /// it has no runtime representation, because no value has bottom type. What it exists for is
-    /// the empty list: `{}` is a `never[]`, and `never` being below every type is what makes that
-    /// one value usable at every list-typed site without the site having to be consulted.</para>
+    /// the empty value: `{}` has type `never?`, rendered `{}`, and `never` being below every type
+    /// is what makes that one value usable at every `?` and `*` site without the site having to be
+    /// consulted.</para>
     Never,
 }
 
@@ -193,19 +195,24 @@ pub enum Type {
     /// Primitive type (int, int32, int64, float32, float64, string, boolean, never)
     Primitive(Primitive),
 
-    /// Sequence type: T[]
+    /// A type under an occurrence: zero or one (`?`), one or more (`+`) or zero or more (`*`)
+    /// values of the item type.
     ///
-    /// <para>A sequence is flat: its element type is an item type, never another sequence. No
-    /// type reference, alias chain, type-argument substitution or inference result produces an
-    /// `Array` whose element is an `Array`.</para>
+    /// <para>Exactly one is the absence of this wrapper, so `occ` is never [`Occurrence::ONE`],
+    /// and the item type is an exactly-one type, never another `Seq`: no type reference, alias
+    /// chain, type-argument substitution or inference result produces a `Seq` whose item is a
+    /// `Seq`. [`Type::seq`] is the one constructor and keeps both invariants.</para>
     ///
-    /// Example: `int[]`, `string?[]`, `string[]?`
-    Array(Box<Type>),
-
-    /// Nullable type: T?
+    /// <para>The empty type — what `{}` has — is the bottom item type under `?`, and renders as
+    /// `{}`.</para>
     ///
-    /// Example: `int?`, `string?`
-    Nullable(Box<Type>),
+    /// Example: `int?`, `string+`, `Person*`
+    Seq {
+        /// The item type.
+        item: Box<Type>,
+        /// How many items the type admits.
+        occ: Occurrence,
+    },
 
     /// Function type: an element function's signature with `function` in the name slot.
     ///
@@ -270,10 +277,13 @@ pub enum Type {
 pub struct FunctionParam {
     /// Parameter name, which arguments bind to.
     pub name: Name,
-    /// Parameter type.
+    /// Parameter type, as declared: the type a caller supplies.
     pub ty: Type,
     /// Whether the parameter receives markup body content.
     pub is_content: bool,
+    /// Whether the parameter carries the `?` mark: a caller may omit it, and the body reads it
+    /// at [`FunctionParam::read_type`].
+    pub optional: bool,
 }
 
 impl FunctionParam {
@@ -283,6 +293,7 @@ impl FunctionParam {
             name: name.into(),
             ty,
             is_content: false,
+            optional: false,
         }
     }
 
@@ -292,8 +303,30 @@ impl FunctionParam {
             name: name.into(),
             ty,
             is_content: true,
+            optional: false,
         }
     }
+
+    /// Marks the parameter optional.
+    pub fn optional(mut self) -> Self {
+        self.optional = true;
+        self
+    }
+
+    /// The type the parameter reads at: its declared type, admitting zero when it is optional.
+    pub fn read_type(&self) -> Type {
+        read_type(&self.ty, self.optional)
+    }
+}
+
+/// The type a property declared `name:T` or `name?:T` reads at: `T` itself, or `T` under the join
+/// of its occurrence with `?` — `T?` for `p?:T`, `T*` for `p?:T+`.
+pub fn read_type(declared: &Type, optional: bool) -> Type {
+    if !optional {
+        return declared.clone();
+    }
+    let (item, occ) = declared.split();
+    Type::seq(item.clone(), occ.join(Occurrence::OPTIONAL))
 }
 
 /// Why a function fails to satisfy a function type.
@@ -375,11 +408,13 @@ pub fn check_function_satisfies(
         if supplied.is_content != declared.is_content {
             return Err(FunctionMismatch::ContentMismatch(declared.name.clone()));
         }
-        if !satisfies(&supplied.ty, &declared.ty) {
+        // What the type supplies is read at the type's own read type, and has to satisfy what the
+        // function declares it reads at.
+        if !satisfies(&supplied.read_type(), &declared.read_type()) {
             return Err(FunctionMismatch::ParameterType {
                 name: declared.name.clone(),
-                supplied: supplied.ty.clone(),
-                declared: declared.ty.clone(),
+                supplied: supplied.read_type(),
+                declared: declared.read_type(),
             });
         }
     }
@@ -409,6 +444,7 @@ fn format_function_type(
             .map(|(param, ty)| nx_hir::ast::SpelledParam {
                 is_content: param.is_content,
                 name: param.name.as_str(),
+                optional: param.optional,
                 ty,
             }),
         &render(ret),
@@ -469,8 +505,8 @@ impl Type {
         })
     }
 
-    /// The first type parameter in this type that `matches`, looking through lists, nullables,
-    /// and function signatures.
+    /// The first type parameter in this type that `matches`, looking through occurrences and
+    /// function signatures.
     pub fn find_parameter(
         &self,
         matches: &impl Fn(&TypeParameterRef) -> bool,
@@ -481,7 +517,7 @@ impl Type {
                 .args()
                 .iter()
                 .find_map(|(_, arg)| arg.find_parameter(matches)),
-            Type::Array(inner) | Type::Nullable(inner) => inner.find_parameter(matches),
+            Type::Seq { item, .. } => item.find_parameter(matches),
             Type::Function { params, ret } => params
                 .iter()
                 .find_map(|param| param.ty.find_parameter(matches))
@@ -490,7 +526,7 @@ impl Type {
         }
     }
 
-    /// Replaces each type parameter `substitute` answers for, keeping every list, nullable, and
+    /// Replaces each type parameter `substitute` answers for, keeping every occurrence and
     /// function layer around it. A parameter it answers `None` for is left as it is.
     pub fn substitute_parameters(
         &self,
@@ -507,8 +543,7 @@ impl Type {
                         .collect(),
                 ),
             ),
-            Type::Array(inner) => Type::array(inner.substitute_parameters(substitute)),
-            Type::Nullable(inner) => Type::nullable(inner.substitute_parameters(substitute)),
+            Type::Seq { item, occ } => Type::seq(item.substitute_parameters(substitute), *occ),
             Type::Function { params, ret } => Type::function(
                 params
                     .iter()
@@ -516,6 +551,7 @@ impl Type {
                         name: param.name.clone(),
                         ty: param.ty.substitute_parameters(substitute),
                         is_content: param.is_content,
+                        optional: param.optional,
                     })
                     .collect(),
                 ret.substitute_parameters(substitute),
@@ -527,7 +563,7 @@ impl Type {
     /// Replaces each type parameter `substitute` answers for, telling it whether the parameter
     /// stands in a covariant position (a value of the type is produced there) or a contravariant
     /// one (a value is consumed there: a function type's parameter). Nesting a function type's
-    /// parameter flips the polarity; its result and every list or nullable layer keep it.
+    /// parameter flips the polarity; its result and every occurrence layer keep it.
     pub fn substitute_parameters_by_variance(
         &self,
         covariant: bool,
@@ -551,12 +587,10 @@ impl Type {
                         .collect(),
                 ),
             ),
-            Type::Array(inner) => {
-                Type::array(inner.substitute_parameters_by_variance(covariant, substitute))
-            }
-            Type::Nullable(inner) => {
-                Type::nullable(inner.substitute_parameters_by_variance(covariant, substitute))
-            }
+            Type::Seq { item, occ } => Type::seq(
+                item.substitute_parameters_by_variance(covariant, substitute),
+                *occ,
+            ),
             Type::Function { params, ret } => Type::function(
                 params
                     .iter()
@@ -566,6 +600,7 @@ impl Type {
                             .ty
                             .substitute_parameters_by_variance(!covariant, substitute),
                         is_content: param.is_content,
+                        optional: param.optional,
                     })
                     .collect(),
                 ret.substitute_parameters_by_variance(covariant, substitute),
@@ -574,14 +609,93 @@ impl Type {
         }
     }
 
-    /// Creates an array type.
-    pub fn array(element: Type) -> Self {
-        Type::Array(Box::new(element))
+    /// Puts `item` under an occurrence: the one constructor of [`Type::Seq`].
+    ///
+    /// <para>[`Occurrence::ONE`] returns `item` itself, since exactly one is the absence of the
+    /// wrapper. An error item stays an error, so nothing downstream reads an error as a sequence.
+    /// An item that is itself a `Seq` is refused: it is a bug in the caller, because every rule
+    /// that produces a type flattens — a spelled nesting is rejected at resolution and an
+    /// inferred one is joined by the lattice — so in a debug build this panics, and in a release
+    /// build the two occurrences are multiplied so the result is still flat.</para>
+    pub fn seq(item: Type, occ: Occurrence) -> Self {
+        if item.is_error() {
+            return item;
+        }
+        if let Type::Seq {
+            item: inner,
+            occ: inner_occ,
+        } = item
+        {
+            debug_assert!(false, "a sequence never contains a sequence");
+            return Type::seq(*inner, inner_occ.product(occ));
+        }
+        if occ.is_one() {
+            return item;
+        }
+        // Only the empty value inhabits `never` under an occurrence that admits zero, so `never*`
+        // is the empty type: a `for` whose body yields nothing is `{}`, not `never*`.
+        let occ = if item == Type::Primitive(Primitive::Never) && occ.admits_zero() {
+            Occurrence::OPTIONAL
+        } else {
+            occ
+        };
+        Type::Seq {
+            item: Box::new(item),
+            occ,
+        }
     }
 
-    /// Creates a nullable type.
-    pub fn nullable(inner: Type) -> Self {
-        Type::Nullable(Box::new(inner))
+    /// Creates a `T?` type.
+    pub fn optional(item: Type) -> Self {
+        Type::seq(item, Occurrence::OPTIONAL)
+    }
+
+    /// Creates a `T+` type.
+    pub fn one_or_more(item: Type) -> Self {
+        Type::seq(item, Occurrence::ONE_OR_MORE)
+    }
+
+    /// Creates a `T*` type.
+    pub fn zero_or_more(item: Type) -> Self {
+        Type::seq(item, Occurrence::ZERO_OR_MORE)
+    }
+
+    /// The empty type: what `{}` has. The bottom item type under `?`, so it satisfies every `?`
+    /// and `*` type and nothing else, and renders as `{}`.
+    pub fn empty() -> Self {
+        Type::optional(Type::never())
+    }
+
+    /// True for the empty type, and for nothing else.
+    pub fn is_empty_type(&self) -> bool {
+        matches!(
+            self,
+            Type::Seq { item, occ }
+                if **item == Type::Primitive(Primitive::Never) && *occ == Occurrence::OPTIONAL
+        )
+    }
+
+    /// The item type and the occurrence: `(T, ?)` for `T?`, `(T, exactly one)` for `T`.
+    pub fn split(&self) -> (&Type, Occurrence) {
+        match self {
+            Type::Seq { item, occ } => (item, *occ),
+            other => (other, Occurrence::ONE),
+        }
+    }
+
+    /// The item type: `T` for `T`, `T?`, `T+` and `T*` alike.
+    pub fn item(&self) -> &Type {
+        self.split().0
+    }
+
+    /// The occurrence: exactly one unless the type carries a suffix.
+    pub fn occurrence(&self) -> Occurrence {
+        self.split().1
+    }
+
+    /// The same item type under `occ`.
+    pub fn with_occurrence(&self, occ: Occurrence) -> Type {
+        Type::seq(self.item().clone(), occ)
     }
 
     /// Creates a function type.
@@ -641,9 +755,14 @@ impl Type {
         matches!(self, Type::Variable(_))
     }
 
-    /// Returns true if this type is nullable.
-    pub fn is_nullable(&self) -> bool {
-        matches!(self, Type::Nullable(_))
+    /// True when the type admits no value: `?` or `*`.
+    pub fn admits_zero(&self) -> bool {
+        self.occurrence().admits_zero()
+    }
+
+    /// True when the type admits more than one value: `+` or `*`.
+    pub fn admits_many(&self) -> bool {
+        self.occurrence().admits_many()
     }
 
     /// Returns true if this is a primitive type.
@@ -651,7 +770,6 @@ impl Type {
         matches!(self, Type::Primitive(_))
     }
 
-    /// Unwraps the inner type if this is nullable, otherwise returns self.
     /// The parameters and result of a function type, or `None` for any other type.
     pub fn function_parts(&self) -> Option<(&[FunctionParam], &Type)> {
         match self {
@@ -660,19 +778,13 @@ impl Type {
         }
     }
 
-    pub fn strip_nullable(&self) -> &Type {
-        match self {
-            Type::Nullable(inner) => inner,
-            _ => self,
-        }
-    }
-
     /// Checks if this type is compatible with another type.
     ///
     /// Compatibility includes:
     /// - Exact equality
     /// - Numeric width promotion within the same category (int32 ↔ int64, float32 ↔ float64)
-    /// - Subtyping (e.g., T is compatible with T?)
+    /// - The occurrence lattice: `T` is compatible with `T?`, `T+` and `T*`, and `T?` and `T+` with
+    ///   `T*`; a type is never compatible with one that admits fewer values
     /// - The bottom type, which is compatible with every type and which nothing else is compatible
     ///   with
     /// - Error types are compatible with everything (for error recovery)
@@ -716,19 +828,17 @@ impl Type {
             }
         }
 
-        // T? is compatible with U? when T is compatible with U: `null` stays `null`, and anything
-        // else converts as T to U does.
-        if let (Type::Nullable(a), Type::Nullable(b)) = (self, other) {
-            if a.is_compatible_with(b) {
-                return true;
+        // Occurrences follow the lattice, and the items follow this relation. An exactly-one
+        // value at a suffixed site is a sequence of one — the one-level lift — which is the
+        // `(item, Seq)` pairing below; a suffixed value never satisfies an exactly-one site.
+        match (self, other) {
+            (Type::Seq { .. }, Type::Seq { .. }) | (_, Type::Seq { .. }) => {
+                let (item, occ) = self.split();
+                let (expected_item, expected_occ) = other.split();
+                return occ.satisfies(expected_occ) && item.is_compatible_with(expected_item);
             }
-        }
-
-        // T is compatible with T?
-        if let Type::Nullable(inner) = other {
-            if self.is_compatible_with(inner.as_ref()) {
-                return true;
-            }
+            (Type::Seq { .. }, _) => return false,
+            _ => {}
         }
 
         // A case satisfies a union only when it is a case of *that* union — the one declared at
@@ -737,11 +847,6 @@ impl Type {
         // two declarations happen to agree on them.
         if let (Type::UnionCase(case), Type::Union(union)) = (self, other) {
             return case.is_case_of(union);
-        }
-
-        // Arrays: T[] is compatible with U[] if T is compatible with U
-        if let (Type::Array(t1), Type::Array(t2)) = (self, other) {
-            return t1.is_compatible_with(t2);
         }
 
         // Functions match by parameter name: every parameter the value declares must be one the
@@ -776,8 +881,9 @@ impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Type::Primitive(p) => write!(f, "{}", p),
-            Type::Array(elem) => write_postfix_type(f, elem, "[]"),
-            Type::Nullable(inner) => write_postfix_type(f, inner, "?"),
+            // The empty type is what `{}` has, and `{}` is the form the author can act on.
+            Type::Seq { .. } if self.is_empty_type() => f.write_str("{}"),
+            Type::Seq { item, occ } => write_postfix_type(f, item, occ.suffix()),
             Type::Function { params, ret } => {
                 f.write_str(&format_function_type(params, ret, &|ty: &Type| {
                     ty.to_string()
@@ -846,7 +952,7 @@ fn collect_nominal_parts<'ty>(
         }
         Type::Union(union_ty) => parts.push((&union_ty.name, union_ty.origin())),
         Type::UnionCase(case_ty) => parts.push((&case_ty.union, case_ty.origin())),
-        Type::Array(inner) | Type::Nullable(inner) => collect_nominal_parts(inner, parts),
+        Type::Seq { item, .. } => collect_nominal_parts(item, parts),
         Type::Function { params, ret } => {
             for param in params {
                 collect_nominal_parts(&param.ty, parts);
@@ -884,8 +990,8 @@ fn qualified_display(ty: &Type) -> String {
                 format_applied_type(&name, named.args(), &qualified_display)
             }
         }
-        Type::Array(inner) => qualified_postfix_display(inner, "[]"),
-        Type::Nullable(inner) => qualified_postfix_display(inner, "?"),
+        Type::Seq { .. } if ty.is_empty_type() => "{}".to_string(),
+        Type::Seq { item, occ } => qualified_postfix_display(item, occ.suffix()),
         Type::Function { params, ret } => format_function_type(params, ret, &qualified_display),
         _ => ty.to_string(),
     }
@@ -1381,17 +1487,58 @@ mod tests {
     }
 
     #[test]
-    fn test_array_type() {
-        let arr = Type::array(Type::int());
-        assert_eq!(arr, Type::Array(Box::new(Type::int())));
-        assert_eq!(arr.to_string(), "int[]");
+    fn test_seq_types() {
+        let plus = Type::one_or_more(Type::int());
+        assert_eq!(
+            plus,
+            Type::Seq {
+                item: Box::new(Type::int()),
+                occ: Occurrence::ONE_OR_MORE
+            }
+        );
+        assert_eq!(plus.to_string(), "int+");
+        assert_eq!(Type::zero_or_more(Type::int()).to_string(), "int*");
+        let optional = Type::optional(Type::string());
+        assert!(optional.admits_zero());
+        assert!(!optional.admits_many());
+        assert_eq!(optional.to_string(), "string?");
+        // Exactly one is the absence of the wrapper.
+        assert_eq!(Type::seq(Type::int(), Occurrence::ONE), Type::int());
+        assert_eq!(Type::int().occurrence(), Occurrence::ONE);
+        assert_eq!(plus.item(), &Type::int());
+        assert_eq!(
+            plus.with_occurrence(Occurrence::OPTIONAL).to_string(),
+            "int?"
+        );
     }
 
     #[test]
-    fn test_nullable_type() {
-        let nullable = Type::nullable(Type::string());
-        assert!(nullable.is_nullable());
-        assert_eq!(nullable.to_string(), "string?");
+    fn the_empty_type_renders_as_the_empty_value() {
+        let empty = Type::empty();
+        assert!(empty.is_empty_type());
+        assert_eq!(empty.to_string(), "{}");
+        assert!(empty.is_compatible_with(&Type::optional(Type::string())));
+        assert!(empty.is_compatible_with(&Type::zero_or_more(Type::string())));
+        assert!(!empty.is_compatible_with(&Type::string()));
+        assert!(!empty.is_compatible_with(&Type::one_or_more(Type::string())));
+        assert!(!Type::optional(Type::int()).is_empty_type());
+        // Only the empty value inhabits `never*`, so it is the empty type.
+        assert!(Type::zero_or_more(Type::never()).is_empty_type());
+        assert_eq!(Type::zero_or_more(Type::never()).to_string(), "{}");
+    }
+
+    #[test]
+    fn a_read_type_admits_zero_only_for_an_optional_property() {
+        assert_eq!(read_type(&Type::int(), false), Type::int());
+        assert_eq!(read_type(&Type::int(), true), Type::optional(Type::int()));
+        assert_eq!(
+            read_type(&Type::one_or_more(Type::int()), true),
+            Type::zero_or_more(Type::int())
+        );
+        assert_eq!(
+            read_type(&Type::one_or_more(Type::int()), false),
+            Type::one_or_more(Type::int())
+        );
     }
 
     #[test]
@@ -1399,13 +1546,13 @@ mod tests {
         let func = Type::function(
             vec![
                 FunctionParam::new("Count", Type::int()),
-                FunctionParam::content("Children", Type::array(Type::string())),
+                FunctionParam::content("Children", Type::one_or_more(Type::string())),
             ],
             Type::boolean(),
         );
         assert_eq!(
             func.to_string(),
-            "<function Count:int content Children:string[] />: boolean"
+            "<function Count:int content Children:string+ />: boolean"
         );
         assert_eq!(
             Type::function(vec![], Type::named("DrawnNode")).to_string(),
@@ -1417,7 +1564,7 @@ mod tests {
     fn test_type_equality() {
         assert_eq!(Type::int(), Type::int());
         assert_ne!(Type::int(), Type::float64());
-        assert_ne!(Type::int(), Type::nullable(Type::int()));
+        assert_ne!(Type::int(), Type::optional(Type::int()));
     }
 
     #[test]
@@ -1428,21 +1575,34 @@ mod tests {
     }
 
     #[test]
-    fn test_is_compatible_nullable() {
-        let t = Type::int();
-        let nullable_t = Type::nullable(Type::int());
+    fn test_is_compatible_follows_the_occurrence_lattice() {
+        let one = Type::int();
+        let optional = Type::optional(Type::int());
+        let plus = Type::one_or_more(Type::int());
+        let star = Type::zero_or_more(Type::int());
 
-        // T is compatible with T?
-        assert!(t.is_compatible_with(&nullable_t));
-
-        // But T? is not compatible with T
-        assert!(!nullable_t.is_compatible_with(&t));
+        // Exactly one satisfies every occurrence: the one-level lift.
+        assert!(one.is_compatible_with(&optional));
+        assert!(one.is_compatible_with(&plus));
+        assert!(one.is_compatible_with(&star));
+        // `?` and `+` satisfy `*` and nothing narrower.
+        assert!(optional.is_compatible_with(&star));
+        assert!(plus.is_compatible_with(&star));
+        assert!(!optional.is_compatible_with(&one));
+        assert!(!optional.is_compatible_with(&plus));
+        assert!(!plus.is_compatible_with(&optional));
+        assert!(!plus.is_compatible_with(&one));
+        assert!(!star.is_compatible_with(&plus));
+        assert!(!star.is_compatible_with(&optional));
     }
 
     #[test]
-    fn test_is_compatible_nullable_with_width_promotion() {
-        // int32 should be compatible with int64? (via promotion + nullable)
-        assert!(Type::int32().is_compatible_with(&Type::nullable(Type::int64())));
+    fn test_is_compatible_optional_with_width_promotion() {
+        assert!(Type::int32().is_compatible_with(&Type::optional(Type::int64())));
+        assert!(Type::optional(Type::int32()).is_compatible_with(&Type::optional(Type::int64())));
+        assert!(
+            Type::one_or_more(Type::int32()).is_compatible_with(&Type::zero_or_more(Type::int64()))
+        );
     }
 
     #[test]
@@ -1457,9 +1617,9 @@ mod tests {
 
     #[test]
     fn test_is_compatible_arrays() {
-        let arr_int = Type::array(Type::int());
-        let arr_int2 = Type::array(Type::int());
-        let arr_string = Type::array(Type::string());
+        let arr_int = Type::one_or_more(Type::int());
+        let arr_int2 = Type::one_or_more(Type::int());
+        let arr_string = Type::one_or_more(Type::string());
 
         assert!(arr_int.is_compatible_with(&arr_int2));
         assert!(!arr_int.is_compatible_with(&arr_string));
@@ -1556,29 +1716,23 @@ mod tests {
         let content = Type::function(
             vec![FunctionParam::content(
                 "Children",
-                Type::array(Type::string()),
+                Type::one_or_more(Type::string()),
             )],
             Type::string(),
         );
-        let plain = function(&[("Children", Type::array(Type::string()))], Type::string());
+        let plain = function(
+            &[("Children", Type::one_or_more(Type::string()))],
+            Type::string(),
+        );
         assert!(content.is_compatible_with(&content));
         assert!(!content.is_compatible_with(&plain));
         assert!(!plain.is_compatible_with(&content));
     }
 
     #[test]
-    fn test_strip_nullable() {
-        let nullable = Type::nullable(Type::int());
-        assert_eq!(nullable.strip_nullable(), &Type::int());
-
-        let non_nullable = Type::string();
-        assert_eq!(non_nullable.strip_nullable(), &Type::string());
-    }
-
-    #[test]
     fn test_type_display() {
-        assert_eq!(Type::array(Type::string()).to_string(), "string[]");
-        assert_eq!(Type::nullable(Type::boolean()).to_string(), "boolean?");
+        assert_eq!(Type::one_or_more(Type::string()).to_string(), "string+");
+        assert_eq!(Type::optional(Type::boolean()).to_string(), "boolean?");
         assert_eq!(
             function(&[("a", Type::int()), ("b", Type::int())], Type::int()).to_string(),
             "<function a:int b:int />: int"
@@ -1591,25 +1745,17 @@ mod tests {
     }
 
     #[test]
-    fn test_nested_types() {
-        let nested = Type::array(Type::nullable(Type::int()));
-        assert_eq!(nested.to_string(), "int?[]");
+    fn test_function_types_under_a_suffix() {
+        let func_seq = Type::one_or_more(function(&[("n", Type::int())], Type::string()));
+        assert_eq!(func_seq.to_string(), "(<function n:int />: string)+");
 
-        let nullable_list = Type::nullable(Type::array(Type::string()));
-        assert_eq!(nullable_list.to_string(), "string[]?");
-        assert!(!nested.is_compatible_with(&nullable_list));
-        assert!(!nullable_list.is_compatible_with(&nested));
-
-        let func_array = Type::array(function(&[("n", Type::int())], Type::string()));
-        assert_eq!(func_array.to_string(), "(<function n:int />: string)[]");
-
-        let nullable_func = Type::nullable(function(&[("n", Type::int())], Type::string()));
-        assert_eq!(nullable_func.to_string(), "(<function n:int />: string)?");
+        let optional_func = Type::optional(function(&[("n", Type::int())], Type::string()));
+        assert_eq!(optional_func.to_string(), "(<function n:int />: string)?");
 
         // A suffix on the result is written on the result, so no parentheses appear.
-        let returns_nullable = function(&[("n", Type::int())], Type::nullable(Type::string()));
-        assert_eq!(returns_nullable.to_string(), "<function n:int />: string?");
-        assert!(!nullable_func.to_string().contains("=>"));
+        let returns_optional = function(&[("n", Type::int())], Type::optional(Type::string()));
+        assert_eq!(returns_optional.to_string(), "<function n:int />: string?");
+        assert!(!optional_func.to_string().contains("=>"));
     }
 
     #[test]
@@ -1628,10 +1774,12 @@ mod tests {
         assert!(!param.is_compatible_with(&other));
         assert!(!Type::named("TItem").is_compatible_with(&param));
 
-        // Composes under `?` and `[]` like any other type.
-        assert!(param.is_compatible_with(&Type::nullable(param.clone())));
-        assert!(Type::array(Type::never()).is_compatible_with(&Type::array(param.clone())));
-        assert!(!Type::array(Type::int()).is_compatible_with(&Type::array(param.clone())));
+        // Composes under an occurrence like any other type.
+        assert!(param.is_compatible_with(&Type::optional(param.clone())));
+        assert!(Type::empty().is_compatible_with(&Type::zero_or_more(param.clone())));
+        assert!(
+            !Type::one_or_more(Type::int()).is_compatible_with(&Type::one_or_more(param.clone()))
+        );
 
         // Joining with anything else is a mismatch: the join is the top type.
         assert_eq!(
@@ -1644,8 +1792,8 @@ mod tests {
     #[test]
     fn a_type_parameter_renders_as_its_name_and_substitutes_under_wrappers() {
         let param = Type::parameter("TItem", None, 0);
-        let ty = Type::nullable(Type::array(param.clone()));
-        assert_eq!(ty.to_string(), "TItem[]?");
+        let ty = Type::zero_or_more(param.clone());
+        assert_eq!(ty.to_string(), "TItem*");
 
         let found = ty.find_parameter(&|candidate| candidate.name.as_str() == "TItem");
         assert_eq!(found.map(|candidate| candidate.ordinal), Some(0));
@@ -1656,7 +1804,7 @@ mod tests {
         let substituted = ty.substitute_parameters(&|candidate| {
             (candidate.name.as_str() == "TItem").then(Type::string)
         });
-        assert_eq!(substituted, Type::nullable(Type::array(Type::string())));
+        assert_eq!(substituted, Type::zero_or_more(Type::string()));
         let untouched = ty.substitute_parameters(&|_| None);
         assert_eq!(untouched, ty);
     }
@@ -1682,15 +1830,15 @@ mod tests {
 
         assert_eq!(ints.to_string(), "<Range T=int/>");
         assert_eq!(
-            Type::nullable(Type::array(ints.clone())).to_string(),
-            "<Range T=int/>[]?"
+            Type::zero_or_more(ints.clone()).to_string(),
+            "<Range T=int/>*"
         );
     }
 
     #[test]
     fn a_type_argument_substitutes_and_is_found_inside_an_instantiation() {
         let param = Type::parameter("TItem", None, 0);
-        let ty = Type::array(Type::Named(NamedType::applied(
+        let ty = Type::one_or_more(Type::Named(NamedType::applied(
             Name::new("Range"),
             None,
             vec![(Name::new("T"), param)],
@@ -1704,7 +1852,7 @@ mod tests {
         });
         assert_eq!(
             substituted,
-            Type::array(Type::Named(NamedType::applied(
+            Type::one_or_more(Type::Named(NamedType::applied(
                 Name::new("Range"),
                 None,
                 vec![(Name::new("T"), Type::int())]

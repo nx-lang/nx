@@ -1,5 +1,5 @@
 use crate::{
-    ast, Component, ComponentEmit, Item, LoweredModule, LoweringDiagnostic, Name, Param,
+    ast, Component, ComponentEmit, FunctionForm, Item, LoweredModule, LoweringDiagnostic, Name,
     RecordField, RecordKind, SourceId, TypeAlias, TypeParameter, UnionCaseDef, UnionCaseField,
     UnionDef, Visibility,
 };
@@ -68,7 +68,18 @@ pub struct InterfaceParam {
     pub name: Name,
     pub ty: ast::TypeRef,
     pub is_content: bool,
+    /// Whether the parameter carries the `?` mark.
+    pub optional: bool,
+    /// Whether the parameter has a default, which the declaring function evaluates.
+    pub has_default: bool,
     pub span: TextSpan,
+}
+
+impl InterfaceParam {
+    /// Whether a caller may leave the parameter out: it is optional or has a default.
+    pub fn is_omissible(&self) -> bool {
+        self.optional || self.has_default
+    }
 }
 
 /// Imported field metadata published through a library interface.
@@ -77,6 +88,8 @@ pub struct InterfaceField {
     pub name: Name,
     pub ty: ast::TypeRef,
     pub is_content: bool,
+    /// Whether the field carries the `?` mark.
+    pub optional: bool,
     pub is_required: bool,
     pub span: TextSpan,
 }
@@ -100,6 +113,7 @@ pub struct ImportedRawRef {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InterfaceItemKind {
     Function {
+        form: FunctionForm,
         params: Vec<InterfaceParam>,
         return_type: ast::TypeRef,
         span: TextSpan,
@@ -759,6 +773,7 @@ pub fn interface_record(item: &InterfaceItem) -> Option<crate::RecordDef> {
                     name: field.name.clone(),
                     ty: field.ty.clone(),
                     is_content: field.is_content,
+                    optional: field.optional,
                     default: None,
                     span: field.span,
                 })
@@ -794,6 +809,7 @@ pub fn interface_component(item: &InterfaceItem) -> Option<Component> {
                     name: field.name.clone(),
                     ty: field.ty.clone(),
                     is_content: field.is_content,
+                    optional: field.optional,
                     default: None,
                     span: field.span,
                 })
@@ -805,6 +821,7 @@ pub fn interface_component(item: &InterfaceItem) -> Option<Component> {
                     name: field.name.clone(),
                     ty: field.ty.clone(),
                     is_content: field.is_content,
+                    optional: field.optional,
                     default: None,
                     span: field.span,
                 })
@@ -840,6 +857,7 @@ pub fn interface_union(item: &InterfaceItem) -> Option<UnionDef> {
                             name: field.name.clone(),
                             ty: field.ty.clone(),
                             is_content: field.is_content,
+                            optional: field.optional,
                             default: None,
                             span: field.span,
                         })
@@ -856,24 +874,25 @@ pub fn interface_union(item: &InterfaceItem) -> Option<UnionDef> {
 /// Converts imported interface metadata into function signature view when possible.
 pub fn interface_function_signature(
     item: &InterfaceItem,
-) -> Option<(Name, Visibility, Vec<Param>, ast::TypeRef, TextSpan)> {
+) -> Option<(
+    Name,
+    Visibility,
+    FunctionForm,
+    Vec<InterfaceParam>,
+    ast::TypeRef,
+    TextSpan,
+)> {
     match &item.item {
         InterfaceItemKind::Function {
+            form,
             params,
             return_type,
             span,
         } => Some((
             Name::new(item.item_name.as_str()),
             item.visibility,
-            params
-                .iter()
-                .map(|param| Param {
-                    name: param.name.clone(),
-                    ty: param.ty.clone(),
-                    is_content: param.is_content,
-                    span: param.span,
-                })
-                .collect(),
+            *form,
+            params.clone(),
             return_type.clone(),
             *span,
         )),

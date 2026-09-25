@@ -1,0 +1,76 @@
+{
+  "main.nx::absentName": "same",
+  "main.nx::absentRead": null,
+  "main.nx::aliasContent": {
+    "$type": "Shelf",
+    "items": [
+      {
+        "$type": "Item",
+        "n": 1
+      }
+    ]
+  },
+  "main.nx::aliasItem": {
+    "$type": "Scores",
+    "values": [
+      3
+    ]
+  },
+  "main.nx::argument": [
+    5
+  ],
+  "main.nx::clearedNick": "same",
+  "main.nx::clearedRead": null,
+  "main.nx::declaredFallback": [
+    5
+  ],
+  "main.nx::declaredMany": [
+    5
+  ],
+  "main.nx::declaredOne": 1,
+  "main.nx::declaredValue": [
+    5
+  ],
+  "main.nx::differentNicks": false,
+  "main.nx::emptyNicks": true,
+  "main.nx::fallbackArgument": [
+    3
+  ],
+  "main.nx::fallbackItem": [
+    5
+  ],
+  "main.nx::fallbackLifted": {
+    "$type": "Scores",
+    "values": [
+      5
+    ]
+  },
+  "main.nx::fallbackLoop": [
+    6
+  ],
+  "main.nx::noInts": [],
+  "main.nx::noString": null,
+  "main.nx::noneInferred": null,
+  "main.nx::optionalAliasItem": {
+    "$type": "Maybe",
+    "values": [
+      3
+    ]
+  },
+  "main.nx::otherPeople": true,
+  "main.nx::presentLifted": [
+    1
+  ],
+  "main.nx::presentWidened": 1.0,
+  "main.nx::root": {
+    "$type": "Scores",
+    "values": [
+      3
+    ]
+  },
+  "main.nx::rowWith": "x-y",
+  "main.nx::rowWithout": "x-none",
+  "main.nx::samePeople": true,
+  "main.nx::updatedName": "Bo",
+  "main.nx::updatedNick": "b"
+}

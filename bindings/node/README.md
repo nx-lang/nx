@@ -192,6 +192,14 @@ as `{ identity, source, version }` and every artifact built from that workspace 
 module table, which is what `@nx-lang/ir-runtime` compares when it links one artifact against
 another.
 
+`evaluateJson()` returns the value in NX's canonical JSON encoding, typed as `NxJsonValue`. NX has
+no `null` of its own: its empty value (`{}` in NX source) is written the way a host spells absence.
+An empty optional field is an omitted key, and an empty result of a function whose result type is
+a standalone `T?` is `null`, which is what typegen's `T | null` expects. A `+` or `*` value is
+always an array, empty or not. The other `null` on the wire is a cleared field of an update record
+(a `$type` ending in `.Update`), where a present `null` means "clear this field" and an absent key
+means "unchanged".
+
 Source convenience APIs build and dispose a short-lived artifact for simple workflows:
 
 ```ts

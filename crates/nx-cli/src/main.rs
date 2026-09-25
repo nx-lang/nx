@@ -22,8 +22,9 @@ use nx_codegen::{
     JsProgramModuleOptions, NxIrEmitOptions,
 };
 use nx_diagnostics::{render_diagnostics_cli, Diagnostic, Severity};
-use nx_hir::{lower_source_module, Item, LoweredModule};
+use nx_hir::{lower_source_module, Item, LoweredModule, Name};
 use nx_interpreter::{Interpreter, Value};
+use nx_types::Type;
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 use std::process::ExitCode;
@@ -283,7 +284,13 @@ fn run_file(path: &PathBuf, format: OutputFormat, output: Option<&PathBuf>) -> E
     let interpreter = Interpreter::from_resolved_program(program.resolved_program.clone());
     match interpreter.execute_resolved_program_function("root", vec![]) {
         Ok(value) => {
-            let output_text = match format_output(&value, format) {
+            let root_type = program
+                .root_modules
+                .first()
+                .and_then(|artifact| artifact.type_env.lookup(&Name::new("root")))
+                .and_then(Type::function_parts)
+                .map(|(_, result)| result);
+            let output_text = match format_output(&value, root_type, format) {
                 Ok(output) => output,
                 Err(e) => {
                     eprintln!("Error: {}", e);
@@ -890,10 +897,16 @@ fn render_codegen_diagnostics(program: &ProgramArtifact, diagnostics: &[Diagnost
     ExitCode::from(1)
 }
 
-fn format_output(value: &Value, format: OutputFormat) -> Result<String, String> {
+/// Formats `root`'s result; `result_type` is its declared or inferred type, which decides the JSON
+/// spelling of an empty result.
+fn format_output(
+    value: &Value,
+    result_type: Option<&Type>,
+    format: OutputFormat,
+) -> Result<String, String> {
     match format {
         OutputFormat::Nx => format::format_value(value),
-        OutputFormat::Json => json::format_value_json_pretty(value),
+        OutputFormat::Json => json::format_value_json_pretty(value, result_type),
     }
 }
 
@@ -1073,7 +1086,10 @@ let root() = { Math.addOne(41) }"#,
             .execute_resolved_program_function("root", vec![])
             .expect("qualified imported function should execute");
 
-        assert_eq!(format_output(&result, OutputFormat::Nx).unwrap(), "42");
+        assert_eq!(
+            format_output(&result, None, OutputFormat::Nx).unwrap(),
+            "42"
+        );
     }
 
     #[test]
@@ -1102,7 +1118,10 @@ let root() = { Ui.title() }"#,
             .execute_resolved_program_function("root", vec![])
             .expect("qualified imported function should execute");
 
-        assert_eq!(format_output(&result, OutputFormat::Nx).unwrap(), "Hello");
+        assert_eq!(
+            format_output(&result, None, OutputFormat::Nx).unwrap(),
+            "Hello"
+        );
     }
 
     #[test]
@@ -1141,7 +1160,7 @@ let root() = { Ui.title() }"#,
 
         assert!(result.is_ok());
         let value = result.unwrap();
-        assert_eq!(format_output(&value, OutputFormat::Nx).unwrap(), "42");
+        assert_eq!(format_output(&value, None, OutputFormat::Nx).unwrap(), "42");
     }
 
     #[test]
@@ -1160,7 +1179,7 @@ let root() = { Ui.title() }"#,
         assert!(result.is_ok());
         let value = result.unwrap();
         assert_eq!(
-            format_output(&value, OutputFormat::Nx).unwrap(),
+            format_output(&value, None, OutputFormat::Nx).unwrap(),
             "Hello, World!"
         );
     }
@@ -1180,7 +1199,7 @@ let root() = { Ui.title() }"#,
 
         assert!(result.is_ok());
         let value = result.unwrap();
-        assert_eq!(format_output(&value, OutputFormat::Nx).unwrap(), "14");
+        assert_eq!(format_output(&value, None, OutputFormat::Nx).unwrap(), "14");
     }
 
     #[test]
@@ -1205,7 +1224,7 @@ let root() = { Ui.title() }"#,
         let result = interpreter.execute_function(&module, "root", vec![]);
 
         assert!(result.is_ok());
-        let output = format_output(&result.unwrap(), OutputFormat::Nx).unwrap();
+        let output = format_output(&result.unwrap(), None, OutputFormat::Nx).unwrap();
         assert!(output.contains("name=\"Alice\""));
         // Numbers are emitted unquoted so the output reads back at an int-typed site.
         assert!(output.contains("age=30"));
@@ -1226,12 +1245,15 @@ let root() = { Ui.title() }"#,
 
         assert!(result.is_ok());
         let value = result.unwrap();
-        assert_eq!(format_output(&value, OutputFormat::Nx).unwrap(), "true");
+        assert_eq!(
+            format_output(&value, None, OutputFormat::Nx).unwrap(),
+            "true"
+        );
     }
 
     #[test]
-    fn test_run_null_result() {
-        let (_dir, path) = create_temp_nx_file("let root() = { null }");
+    fn test_run_empty_result() {
+        let (_dir, path) = create_temp_nx_file("let root() = {}");
 
         let parse_result = parse_file(&path).unwrap();
         assert!(parse_result.is_ok());
@@ -1244,7 +1266,7 @@ let root() = { Ui.title() }"#,
 
         assert!(result.is_ok());
         let value = result.unwrap();
-        assert_eq!(format_output(&value, OutputFormat::Nx).unwrap(), "null");
+        assert_eq!(format_output(&value, None, OutputFormat::Nx).unwrap(), "{}");
     }
 
     // ===== CLI Integration Tests =====
@@ -1316,6 +1338,25 @@ let root() = { Ui.title() }"#,
         let stdout = String::from_utf8_lossy(&output.stdout);
         let value = NxValue::from_json_str(stdout.trim()).unwrap();
         assert_eq!(value, NxValue::String("Hello, World!".to_string()));
+    }
+
+    /// An empty result whose type is a standalone `T?` prints as `null`; an empty `T*` stays `[]`.
+    #[test]
+    fn test_cli_run_json_empty_optional_result_is_null() {
+        for (source, expected) in [
+            ("let root(): string? = { if false { \"a\" } }", "null"),
+            ("let root() = { if false { 1 } }", "null"),
+            ("let root(): int* = { if false { 1 } }", "[]"),
+        ] {
+            let (_dir, path) = create_temp_nx_file(source);
+            let output = run_cli(&["run", path.to_str().unwrap(), "--format", "json"]);
+            assert!(output.status.success(), "{source}");
+            assert_eq!(
+                String::from_utf8_lossy(&output.stdout).trim(),
+                expected,
+                "{source}"
+            );
+        }
     }
 
     #[test]
@@ -1565,7 +1606,7 @@ let root() = { Ui.title() }"#,
         let image = NxIrImage::open(&bytes).unwrap();
 
         assert_eq!(&bytes[..4], b"NXIR");
-        assert_eq!(image.schema_version(), 4);
+        assert_eq!(image.schema_version(), 5);
         let root = image.function_entrypoints().get(0).unwrap();
         assert_eq!(image.declaration_name(root), Some("root"));
         // The CLI's files carry debug data.
@@ -1763,7 +1804,7 @@ let root() = { Ui.title() }"#,
         assert!(!refused.status.success());
         let stderr = String::from_utf8_lossy(&refused.stderr);
         assert!(stderr.contains("schema version 3"), "{stderr}");
-        assert!(stderr.contains("schema version 4"), "{stderr}");
+        assert!(stderr.contains("schema version 5"), "{stderr}");
 
         // A truncated file and a file that is not an image are diagnostics, not panics.
         let image = fs::read(&artifact).unwrap();
@@ -1929,7 +1970,7 @@ let root() = { <SearchBox /> }
             (
                 "main.nx",
                 r#"import { Question } from "./ui.nx"
-external component <ShortTextQuestion extends Question placeholder:string? />
+external component <ShortTextQuestion extends Question placeholder?:string />
 let root() = { <ShortTextQuestion /> }"#,
             ),
             (
@@ -2031,15 +2072,15 @@ let root() = { <ShortTextQuestion /> }"#,
     }
 
     #[test]
-    fn test_cli_typegen_file_preserves_composed_typescript_list_suffixes() {
+    fn test_cli_typegen_file_maps_typescript_occurrences() {
         let source = r#"
-            export type Names = string[]
-            export type MaybeNames = string[]?
-            export type Aliases = string?[]
+            export type MaybeName = string?
+            export type Names = string+
+            export type Tags = string*
             export type Payload = {
-              names:string[]
-              aliases:string?[]
-              maybeNames:string[]?
+              names:string+
+              tags?:string+
+              nick?:string
             }
         "#;
         let (_dir, path) = create_temp_nx_file(source);
@@ -2053,24 +2094,24 @@ let root() = { <ShortTextQuestion /> }"#,
 
         assert!(
             output.status.success(),
-            "CLI should generate composed TypeScript list suffixes for .nx file input"
+            "CLI should map TypeScript occurrences for .nx file input"
         );
         let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("export type MaybeName = string | null;"));
         assert!(stdout.contains("export type Names = string[];"));
-        assert!(stdout.contains("export type MaybeNames = string[] | null;"));
-        assert!(stdout.contains("export type Aliases = (string | null)[];"));
+        assert!(stdout.contains("export type Tags = string[];"));
         assert!(stdout.contains("names: string[];"));
-        assert!(stdout.contains("aliases: (string | null)[];"));
-        assert!(stdout.contains("maybeNames: string[] | null;"));
+        assert!(stdout.contains("tags?: string[];"));
+        assert!(stdout.contains("nick?: string;"));
     }
 
     #[test]
-    fn test_cli_typegen_file_preserves_composed_csharp_list_suffixes() {
+    fn test_cli_typegen_file_maps_csharp_occurrences() {
         let source = r#"
             export type Payload = {
-              names:string[]
-              maybeNames:string[]?
-              aliases:string?[]
+              names:string+
+              tags?:string+
+              nick?:string
             }
         "#;
         let (_dir, path) = create_temp_nx_file(source);
@@ -2086,12 +2127,12 @@ let root() = { <ShortTextQuestion /> }"#,
 
         assert!(
             output.status.success(),
-            "CLI should generate composed C# list suffixes for .nx file input"
+            "CLI should map C# occurrences for .nx file input"
         );
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.contains("public string[] Names { get; set; } = default!;"));
-        assert!(stdout.contains("public string[]? MaybeNames { get; set; }"));
-        assert!(stdout.contains("public string?[] Aliases { get; set; } = default!;"));
+        assert!(stdout.contains("public string[]? Tags { get; set; }"));
+        assert!(stdout.contains("public string? Nick { get; set; }"));
     }
 
     #[test]
@@ -2861,13 +2902,67 @@ let root() = <Box fit=cover shape={<Shape.point />} />
         );
     }
 
+    /// A value produced through every occurrence form — `name?:T` properties, `T?`, `T+` and
+    /// `T*` types, the presence test `x?`, the step `x?.m`, the fallback `x ?? y` (binding above
+    /// `+`), the `{}` pattern and the `{}` value — has a spelling that reads back as itself. An
+    /// optional property that holds the empty value is not stored, so it is simply not written.
+    #[test]
+    fn every_occurrence_form_round_trips() {
+        let preamble = "type Person = { name:string nick?:string tags?:string+ }\n\
+                        type Book = { title:string author?:Person }\n\
+                        type Mode = quiet | loud\n\
+                        external component <div items:Person+ note?:string mode?:Mode who:string label:string flag:boolean tags?:string+ />\n\
+                        let describe(m?:Mode): string = { if m is { {} => \"none\" quiet => \"quiet\" loud => \"loud\" } }\n\
+                        let byline(b:Book): string = { \"by \" + b.author?.nick ?? b.title }\n\
+                        let nickOf(b:Book): string? = { b.author?.nick }\n\
+                        let tagsOf(p:Person): string* = { p.tags }\n\
+                        let hasNick(p:Person): boolean = { p.nick? }\n\
+                        let a = <Person name=\"a\" nick=\"A\" tags={\"x\" \"y\"} />\n\
+                        let b = <Person name=\"b\" />\n\
+                        let k = <Book title=\"T\" author={a} />\n\
+                        let n = <Book title=\"N\" />";
+        let trip = round_trip_root(
+            &[],
+            preamble,
+            "{ <div items={a b} note={nickOf(n)} who={byline(k) + \" \" + byline(n)} \
+             label={describe({})} mode={} flag={hasNick(a)} tags={tagsOf(a)} /> }",
+        );
+
+        let formatted = trip.formatted.trim();
+        assert!(formatted.contains("who=\"by A by N\""), "got `{formatted}`");
+        assert!(formatted.contains("label=\"none\""), "got `{formatted}`");
+        assert!(formatted.contains("flag=true"), "got `{formatted}`");
+        assert!(
+            formatted.contains("tags={\"x\" \"y\"}"),
+            "got `{formatted}`"
+        );
+        assert!(
+            !formatted.contains("note=") && !formatted.contains("mode="),
+            "an absent optional property is not written, got `{formatted}`"
+        );
+        assert!(
+            !formatted.contains("null"),
+            "the empty value has no `null` spelling, got `{formatted}`"
+        );
+        assert!(
+            !formatted.contains("*/>"),
+            "a `*` is never written up against `/>`, got `{formatted}`"
+        );
+        assert_eq!(
+            trip.read_back.as_ref().ok(),
+            Some(&trip.value),
+            "the value must read back as itself, but formatted as `{formatted}` and read back as {:?}",
+            trip.read_back
+        );
+    }
+
     /// A list-valued property must be emitted as a braced sequence, not as an element named after
     /// the property — NX has no property-element syntax, so `<items>` does not read back.
     #[test]
     fn list_valued_property_round_trips() {
         let trip = round_trip_root(
             &[],
-            "type Item = { n: int }\nexternal component <div items:Item[] />",
+            "type Item = { n: int }\nexternal component <div items:Item+ />",
             "<div items={<Item n=1 /> <Item n=2 />} />",
         );
 

@@ -22,17 +22,20 @@ let <UserCard user:User className:string = "card"/> =
 ```
 
 - Attributes in the definition carry type annotations.
-- Default values use `=` just like standard attributes.
+- Default values use `=` just like standard attributes. A call that leaves out `className` gets
+  `"card"`.
 - Invocation reuses the same structure but supplies values instead of types.
+- An element-style function is called only as an element. `UserCard(currentUser)` is rejected: its
+  attributes have no order a caller could rely on.
 
 ## Advanced Parameters
 
 ```nx
 let <DataGrid
-  data:object[]
-  columns:object[]
-  className:string? /> =
-  <table className={if className { className } else { "data-grid" }}>
+  data:object+
+  columns:object+
+  className?:string /> =
+  <table className={className ?? "data-grid"}>
     <thead>
       <tr>
         for column in columns {
@@ -52,8 +55,9 @@ let <DataGrid
   </table>
 ```
 
-- Nullable types (`string?`) make optional props explicit.
-- Complex defaults can reference other parameters or inline expressions.
+- An optional prop is marked on its name (`className?:string`) and reads as `string?` inside the
+  body, so it takes a fallback with `??` or a presence test before it is used as one value.
+- A default can read the parameters declared before it, and anything its own module can see.
 - Iteration and conditionals in the body behave like any other expression.
 
 ## Content-marked Parameters
@@ -142,24 +146,24 @@ type Contact = { name:string }
 
 external component <SkiaLayout
   TItem:type
-  itemsSource:TItem[]?
-  content children:object[]?
+  itemsSource?:TItem+
+  content children?:object+
 />
 
-let contacts:Contact[] = {}
+let contacts:Contact* = {}
 
 <SkiaLayout TItem=Contact itemsSource={contacts} />
 ```
 
-- Inside the signature and the body, `TItem` is a type like any other: `itemsSource:TItem[]?`
-  and a state field `first:TItem? = null` both work. It is distinct from every other type,
+- Inside the signature and the body, `TItem` is a type like any other: `itemsSource?:TItem+`
+  and a state field `first?:TItem` both work. It is distinct from every other type,
   including a same-named type declared outside the component, which it shadows.
 - A use site supplies the type by name, as a bare type name: `TItem=Contact`. Any visible type
   qualifies — a record, a union, an alias, a primitive, or a type parameter of the enclosing
   component (`TItem=TItem` forwards it). Braced, quoted, and conditional forms are rejected.
 - Leave it out when nothing needs it. A use site that binds only `children` writes
   `<SkiaLayout>...</SkiaLayout>` and no argument. A prop typed by an unspecified parameter
-  accepts only an empty list or `null`; binding anything else reports that `TItem` was not
+  accepts only the empty value `{}`; binding anything else reports that `TItem` was not
   specified and shows the `TItem=` form to add.
 - A type parameter is not a prop. It carries no value, has no default, is never required, is
   not a field of the runtime record, and is not a case of the component's property union.
@@ -184,15 +188,15 @@ so `<Range T=int/>` and `<Range T=float64/>` are different types. See
 
 Every record, action, and component with `state` has a derived **update record**, `T.Update`, with
 the same fields as `T` (a component's state fields, never its props), every one optional. An update
-record is a patch: a field it leaves out means "unchanged", and a field set to `null` means "set
-to null", which is allowed only where the field's type is nullable. Constructing one applies no
-defaults and requires nothing.
+record is a patch: a field it leaves out means "unchanged", and a field set to the empty value
+`{}` means "cleared", which is allowed only where the field is optional in `T` (`email?:string`).
+Constructing one applies no defaults and requires nothing.
 
 ```nx
-type User = { name:string = "anon" email:string? }
+type User = { name:string = "anon" email?:string }
 
 let rename = <User.Update name="Ada" />      // only `name`; `email` is untouched
-let clearEmail = <User.Update email={null} /> // `email` becomes null
+let clearEmail = <User.Update email={} />     // `email` is cleared
 let nothing = <User.Update />                 // a valid, empty patch
 ```
 
@@ -253,7 +257,7 @@ invalid update — dispatch fails as a whole and the snapshot the host supplied 
 state. Everything the host passes in — props, explicit state, and the actions in a batch, whether
 or not a handler is bound for them — is checked against its declaration at every depth, so an
 update record nested in a prop, a component value, an array, or an action payload meets the same
-unknown-field and `null` rules as one the type checker saw.
+unknown-field and cleared-field rules as one the type checker saw.
 
 ## Property references
 
@@ -265,7 +269,7 @@ or a validation rule is typed by the fields that exist rather than by `string`.
 ```nx
 type Contact = { title:string subtitle:string }
 
-external component <Table sortBy:Contact.Property columns:Contact.Property[] />
+external component <Table sortBy:Contact.Property columns:Contact.Property+ />
 
 let table = <Table sortBy=subtitle columns={ Contact.Property.title Contact.Property.subtitle } />
 let key: Contact.Property = {Contact.Property.title}
@@ -289,10 +293,10 @@ reserved: they resolve before anything in scope, cannot be shadowed, and a decla
 | `apply(record, update)` | `T`: the record with each present field of the update replaced. |
 | `merge(first, second)` | `T.Update`: every field present in either, the later one winning. |
 | `diff(before, after)` | `T.Update`: exactly the fields whose values differ, taken from `after`. |
-| `changed(update)` | `T.Property[]`: the present fields, in declaration order. |
+| `changed(update)` | `T.Property*`: the present fields, in declaration order. |
 
-Every intrinsic keeps the absent-versus-null rule: a present `null` is carried and an absent field
-is never invented, so `apply(u, merge(a, b))` equals `apply(apply(u, a), b)` and
+Every intrinsic keeps the absent-versus-empty rule: a present empty field is carried and an absent
+field is never invented, so `apply(u, merge(a, b))` equals `apply(apply(u, a), b)` and
 `apply(a, diff(a, b))` equals `b`.
 
 ```nx
@@ -307,7 +311,7 @@ component <Counter step:int = 1 /> = {
   </Row>
 }
 
-let touched(patch:Counter.Update): Counter.Property[] = {changed(patch)}
+let touched(patch:Counter.Update): Counter.Property* = {changed(patch)}
 ```
 
 ## Functions as values
@@ -322,10 +326,10 @@ type Contact = { name:string }
 type RowTemplate = <function Item:Contact Index:int />: DrawnNode
 external component <List extends DrawnNode
   TItem:type
-  ItemsSource:TItem[]?
-  ItemTemplate:(<function Item:TItem Index:int />: DrawnNode)?
+  ItemsSource?:TItem+
+  ItemTemplate?:<function Item:TItem Index:int />: DrawnNode
 />
-external component <Label extends DrawnNode Text:string? />
+external component <Label extends DrawnNode Text?:string />
 
 let <ContactRow Item:Contact Index:int />: DrawnNode = <Label Text={"" + Index + " " + Item.name} />
 let <Compact Item:Contact />: DrawnNode = <Label Text={Item.name} />
@@ -333,7 +337,7 @@ let <Compact Item:Contact />: DrawnNode = <Label Text={Item.name} />
 let contacts = { <Contact name="Ada" /> <Contact name="Kai" /> }
 let full = <List TItem=Contact ItemsSource={contacts} ItemTemplate={ContactRow} />
 let short = <List TItem=Contact ItemsSource={contacts} ItemTemplate={Compact} />
-let rows: RowTemplate[] = { ContactRow Compact }
+let rows: RowTemplate+ = { ContactRow Compact }
 ```
 
 A function value is a reference to its declaration and captures nothing: functions are module-level
@@ -364,12 +368,47 @@ positions would depend on the order of parameters the value's own declaration do
 ## Paren-style Functions
 
 ```nx
-let formatName(name:string, title:string?) : string =
-  if title { `${title} ${name}` } else { name }
+let clamp(value:int, low:int = 0, high:int = 100): int = {
+  if value < low { low } else { if value > high { high } else { value } }
+}
+
+let a = { clamp(150) }                   // 100
+let b = { clamp(-5, -10) }               // -5
+let c = <clamp value=150 high=120 />     // 120: an element call skips `low`
 ```
 
-- Use paren-style `let` functions for utility helpers when markup syntax would add noise.
-- Element-style `let` definitions remain valid for reusable markup without component-specific features.
+Use the paren style for small, general-purpose functions that a program calls in many places and
+that read naturally with parentheses: `min`, `floor`, `rgb`, a formatter. Use the element style for
+everything else, and always for markup. Neither is enforced; they are what the two styles are for.
+
+- A paren-style function is called by position, `clamp(150, 0)`, or as an element,
+  `<clamp value=150 />`, which binds arguments by name. Calling it with parentheses is the usual
+  form.
+- Parameters a caller may omit — optional ones (`title?:string`) and defaulted ones
+  (`low:int = 0`) — come after every required parameter. `let f(a?:int, b:int)` is rejected.
+- A positional call supplies every required parameter and may stop before any of the trailing
+  ones. To skip one in the middle, call the function as an element and name the ones you pass.
+- A parameter a call leaves out takes its default, or `{}` when it is optional.
+
+## Defaults belong to the function
+
+A default is evaluated by the function each time a call leaves its parameter out; it is never
+copied into the calling code. When a library changes a default, every existing caller gets the new
+one. A default sees the parameters declared before it and the declarations of the function's own
+module, including private ones:
+
+```nx
+private let separator = " · "
+
+export let join(first:string, second:string, sep:string = { separator }): string = {
+  first + sep + second
+}
+```
+
+A caller in another module writes `join("a", "b")` without being able to name `separator`. A default
+cannot read a parameter declared after it, and it is checked against its parameter's type. A
+function *type* takes no defaults, since whoever calls a function-typed value supplies every
+parameter the type declares.
 
 ## See also
 - Language Tour: [Functions & Bindings](/language-tour/functions)

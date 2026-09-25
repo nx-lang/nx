@@ -101,15 +101,16 @@ VisibilityModifier ::=
     | "export"
 
 TypeDeclaration ::=
-    PrimitiveType {TypeSuffix}
-    | UserDefinedType {TypeSuffix}
-    | FunctionType {TypeSuffix}
-    | AppliedType {TypeSuffix}
-    | ParenthesizedType {TypeSuffix}
+    PrimitiveType [OccurrenceSuffix]
+    | UserDefinedType [OccurrenceSuffix]
+    | FunctionType [OccurrenceSuffix]
+    | AppliedType [OccurrenceSuffix]
+    | ParenthesizedType [OccurrenceSuffix]
 
-TypeSuffix ::=
-    "?"             (* nullable wrapper *)
-    | "[]"          (* sequence/list wrapper *)
+OccurrenceSuffix ::=
+    "?"             (* zero or one *)
+    | "+"           (* one or more *)
+    | "*"           (* zero or more *)
 
 (* An element function's signature with "function" in the name slot. "function" is a keyword only
    here; elsewhere it is an identifier. *)
@@ -137,31 +138,35 @@ UserDefinedType ::=
     QualifiedName
 ```
 
-Type suffixes compose in source order. `string?[]` means a sequence of nullable strings, while
-`string[]?` means a nullable sequence of strings.
-A nullable suffix may only be applied once per outer type layer. `string?[]?` is valid because
-`[]` introduces a new sequence layer before the final `?`, while `string?[]??` is rejected during
-post-parse validation as a redundant nullable suffix. Parentheses add no layer, so `(string?)?` is
-rejected on the same terms.
-A sequence never contains a sequence, so `[]` applies at most once along a type reference chain.
-`string[][]`, `string[]?[]` and `(string[])[]` are rejected during post-parse validation, and an
-alias that names a sequence is rejected as the base of a further `[]` during type resolution:
-given `type Names = string[]`, `Names[]` is not a type. A function type's result is a layer of its
-own, so `(<function />: string[])[]` is a sequence of functions and is accepted, while
-`<function />: string[][]` is not. Where data has to nest, a record is what nests it.
+A type reference is a base type followed by at most one occurrence suffix, which says how many
+values the type admits: `T` exactly one, `T?` zero or one, `T+` one or more, `T*` zero or more. A
+second suffix is rejected wherever it is written along the chain: `string??`, `string?+` and
+`(string+)*` are rejected during post-parse validation, and an alias whose target already carries
+a suffix is rejected as the base of a further one during type resolution: given
+`type Names = string+`, `Names*` is not a type. Parentheses add no layer, so `(string)+` is
+`string+`. A function type's result is a chain of its own, so `(<function />: string+)+` is a
+sequence of functions and is accepted, while `<function />: string+*` is not. There is no optional
+sequence and no sequence of optionals; where data has to nest, a record is what nests it. The
+former `[]` suffix still parses and is rejected with a diagnostic naming `*` and `+`.
+
+`{}` is the one absent value — the empty sequence — and there is no `null`. A type that admits
+zero is spelled with `?` or `*`; in a property definition the mark moves to the name
+(`subtitle?:string`, see PropertyDefinition), so a `?` or `*` in a property's type slot is a type
+checker diagnostic offering that form.
 
 A function type is spelled as an element function is defined, with `let`, the name and the body
 removed and `function` where the name was: `<function Item:Contact Index:int />: DrawnNode` is the
 type of `let <ContactRow Item:Contact Index:int />: DrawnNode = ...`. Its parameters are property
 definitions — named, `Name:Type`, at most one marked `content` — and may not carry a default or be
 a `type` parameter; the result type is required. A suffix written after the result binds to the
-result (`<function Count:int />: string?` returns a nullable string), so a nullable or list-of
-function type is written with parentheses: `(<function Item:Contact />: DrawnNode)?`. A function
+result (`<function Count:int />: string?` returns zero or one string), so an optional or
+sequence-of function type is written with parentheses: `(<function Item:Contact />: DrawnNode)+`.
+A function
 satisfies a function type by parameter name, and may declare fewer parameters than the type
 supplies; see the language reference on functions.
 
 A type parameter is a property definition whose declared type is the keyword `type`:
-`type Range = { T:type start:T end:T }`, `external component <List TItem:type items:TItem[]? />`.
+`type Range = { T:type start:T end:T }`, `external component <List TItem:type items?:TItem+ />`.
 Every such definition must precede every other property definition of the declaration, carry no
 default and no modifier, and take a name that is neither a primitive nor the built-in `Element`;
 post-parse validation reports each violation, and rejects the form outright anywhere but a
@@ -169,8 +174,8 @@ component signature and a plain `type` record.
 
 An applied type names one instantiation of a generic record: `<Range T=int/>`, or
 `<Range.Update T=int/>` for its derived update companion. The tag is a qualified name and each
-argument binds a parameter by name to any type, in any order. `/>` closes it, so a suffix written
-after it needs no parentheses: `<Range T=int/>[]?` is a nullable list of `<Range T=int/>`. In a
+argument binds a parameter by name to an exactly-one type, in any order. `/>` closes it, so a
+suffix written after it needs no parentheses: `<Range T=int/>+` is one or more `<Range T=int/>`. In a
 type position `function` after `<` is the keyword, so a function type and an applied type split on
 the first token after `<` and never collide.
 
@@ -224,15 +229,22 @@ ParenFunctionDefinition ::=
     [VisibilityModifier] "let" Identifier "(" [PropertyDefinition {"," PropertyDefinition}] ")" [":" TypeDeclaration] "=" RhsExpression
 
 PropertyDefinition ::=
-    ["content"] MarkupIdentifier ":" PropertyType ["=" RhsExpression]
+    ["content"] MarkupIdentifier ["?"] ":" PropertyType ["=" RhsExpression]
 
 (* The "type" keyword declares a type parameter rather than a value. The grammar admits it in
    every property list; post-parse validation restricts it to the leading definitions of a
-   component signature or a plain record declaration. *)
+   component signature or a plain record declaration, and refuses the "?" mark on one. *)
 PropertyType ::=
     TypeDeclaration
     | "type"
 ```
+
+A property, field, state field, emitted-action field or parameter is `name:T`, `name?:T`,
+`name:T+` or `name?:T+`. The `?` on the name makes the property optional: it may be omitted at
+construction, in which case it is the empty value, and reading it yields `T?` (or `T*` for a
+`T+` property). An optional property takes no default — `name?:T = x` is rejected, because the
+default already makes the property omissible — and the type slot takes an exactly-one or `+`
+type, so `name:T?` and `name:T*` are rejected with the `name?:` form as the fix.
 
 ## Components
 
@@ -322,8 +334,8 @@ SignedNumericLiteral ::=
     "-" ( IntegerLiteral | RealLiteral | HexLiteral )
 
 (* A braced expression can be empty, a single value, or multiple, space delimited. `{}` is the
-   empty list; only this rule admits zero items, ElementsBracedExpression and
-   EmbedBracedExpression still require at least one. *)
+   empty value; ElementsBracedExpression and EmbedBracedExpression still require at least one
+   item. *)
 ValuesBracedExpression ::=
     "{" [ValueExpressions] "}"
 
@@ -338,21 +350,23 @@ ValueListItemExpression ::=
     | ValueIfExpression
     | ValueForExpression
     | MemberAccess
+    | OptionalMemberAccess
+    | ExistsExpression
     | ParenFunctionCall
     | Unit
     | ParenthesizedExpression
+    | "{" "}"   (* the empty value is an item and an operand: `{ "a" {} }`, `{ x == {} }` *)
 
 ValueExpression ::=
     ValueListItemExpression
-    | ConditionalExpression
     | PrefixUnaryExpression
     | BinaryExpression
 
 ValueOrValuesBracedExpression ::=
     ( ValueExpression | ValuesBracedExpression )
 
-ConditionalExpression ::=
-    ValueExpression "?" ValueExpression ":" ValueExpression    (* right-associative *)
+(* There is no conditional operator: `c ? a : b` is `if c { a } else { b }`. A `?` after an
+   expression is the presence test, and a `:` after that is a syntax error naming the `if` form. *)
 
 ParenthesizedExpression ::=
     "(" ValueExpression ")"
@@ -384,21 +398,31 @@ ValueForExpression ::=
 PrefixUnaryExpression ::=
     ( "-" | "!" ) ValueExpression
 BinaryExpression ::=
-    ValueExpression ( "+" | "-" | "*" | "/" | "%" | ".." | "..=" | ">" | "<" | ">=" | "<=" | "==" | "!=" | "&&" | "||" ) ValueExpression
+    ValueExpression ( "??" | "+" | "-" | "*" | "/" | "%" | ".." | "..=" | ">" | "<" | ">=" | "<=" | "==" | "!=" | "&&" | "||" ) ValueExpression
     (* ".." and "..=" build the built-in Range record; they bind looser than "+"/"-" and tighter
-       than the comparisons, so `0..n + 1` is `0..(n + 1)`. *)
+       than the comparisons, so `0..n + 1` is `0..(n + 1)`.
+       "??" supplies a fallback for an empty value: `x ?? y` is `x` when `x` holds an item and `y`
+       otherwise. It is right-associative and binds tighter than every binary arithmetic,
+       comparison and logical operator, so `"a" + x ?? "b"` is `"a" + (x ?? "b")`. The prefix
+       operators bind tighter still: `-x ?? 1` is `(-x) ?? 1` and `!x ?? y` is `(!x) ?? y`. *)
 MemberAccess ::=
     ValueExpression "." Identifier  (* includes property/field access and union case shorthand; semantic analysis distinguishes *)
+OptionalMemberAccess ::=
+    ValueExpression "?." Identifier  (* `{}` when the receiver is empty, `x.m` otherwise; "?." is one token *)
+ExistsExpression ::=
+    ValueExpression "?"             (* `true` when the operand holds an item; binds as tightly as member access *)
 (* An argument may be a braced value, so a function takes a list the same way a property is bound
-   one. A ValuesBracedExpression is still not a ValueListItemExpression, so `f({{a} b})` does not
-   parse: a list is not an item of a list. *)
+   one. A non-empty ValuesBracedExpression is still not a ValueListItemExpression, so `f({{a} b})`
+   does not parse: a list is not an item of a list. Only the empty brace `{}` is an item. *)
 ParenFunctionCall ::=
     ValueExpression "(" [ ValueOrValuesBracedExpression { "," ValueOrValuesBracedExpression } ] ")"
 
 Pattern ::=
-    Literal | SignedNumericLiteral | QualifiedName
+    Literal | SignedNumericLiteral | QualifiedName | "{" "}"
     (* A single-segment name in pattern position is a ContextualName resolved against the
-       scrutinee's type, in preference to any lexically visible binding of that name. *)
+       scrutinee's type, in preference to any lexically visible binding of that name. The `{}`
+       pattern matches the empty value; the arms after it, and an `else` arm, read a path
+       scrutinee as present. *)
 
 Unit ::=
     "()"
@@ -409,7 +433,6 @@ Literal ::=
     | RealLiteral
     | HexLiteral
     | BooleanLiteral
-    | NullLiteral
 
 ```
 
@@ -600,8 +623,6 @@ HexDigitsUnderscore  ::=
 
 BooleanLiteral  ::=
     "true" | "false"
-NullLiteral     ::=
-    "null"
 
 TextRun          ::= ( TextChar | Entity | EscapedBrace )+
 EmbedTextRun     ::= ( TextChar | Entity | EscapedBrace | EscapedAtSign )+

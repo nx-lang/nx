@@ -9,18 +9,19 @@ It covers 34 components, 31 unions, 6 record types and 43 emits.
 
 ## Every property is optional
 
-The catalog declares no defaults. DrawnUI's constructors already establish them, and the renderer
-drops null-valued properties, so an unset property is left to the control rather than restated in
-NX.
+The catalog declares no defaults. Every property is marked optional on its name (`MaxLines?:
+float64`, `Shadows?: SkiaShadow+`), DrawnUI's constructors already establish the defaults, and the
+renderer leaves an empty value unset, so an unset property is left to the control rather than
+restated in NX.
 
 The alternative was mirroring each default into the catalog, which the design originally proposed.
 Two things argued against it. Most DrawnUI properties are accessor pairs over private fields, so a
 generator reading initializers recovers some defaults and silently misses others — and a *wrong*
 mirrored default changes what is drawn, with nothing to catch it. And a mirrored default is one more
-thing that can drift from the vendored code between syncs. Nulls cost an author nothing: an omitted
-property behaves exactly as it does in the TypeScript original.
+thing that can drift from the vendored code between syncs. Optionality costs an author nothing: an
+omitted property behaves exactly as it does in the TypeScript original.
 
-The visible consequence is that NX sees `null` where DrawnUI sees `"Absolute"`. Since external
+The visible consequence is that NX sees the empty value where DrawnUI sees `"Absolute"`. Since external
 components are opaque to NX — nothing reads these values back — the difference has no effect beyond
 the wire format.
 
@@ -55,7 +56,7 @@ engine into the catalog: `SkiaEffect` has a `Parent: SkiaControl`, and a `SkiaCo
 
 ## `DrawnNode`, a root DrawnUI does not have
 
-Content properties are typed `DrawnNode[]?`. `DrawnNode` is invented here: `TextSpan` is a legal
+Content properties are typed `content Children?: DrawnNode+`. `DrawnNode` is invented here: `TextSpan` is a legal
 child of `SkiaLabel` but is not a `SkiaControl`, so there is no upstream type that covers both.
 Rooting the hierarchy one level above `SkiaControl` lets `TextSpan` be content without granting it
 the fifty properties `SkiaControl` carries.
@@ -136,8 +137,8 @@ type parameter and two properties:
 export abstract external component
 <SkiaLayoutBase extends SkiaControl
   TItem: type
-  ItemsSource: TItem[]?
-  ItemTemplate: (<function Item:TItem Index:int />: DrawnNode)?
+  ItemsSource?: TItem+
+  ItemTemplate?: <function Item:TItem Index:int />: DrawnNode
   ...
 />
 ```
@@ -200,13 +201,13 @@ A **user-defined component must extend `DrawnNode`** to be usable as content —
 are typed as a list of `DrawnNode`, and a plain `component <Card ... />` is not one:
 
 ```nx
-component <Card extends DrawnNode Title:string content Children:DrawnNode[] /> = { ... }
+component <Card extends DrawnNode Title:string content Children:DrawnNode+ /> = { ... }
 ```
 
-Its content property must be **non-optional** if the component splices it: `DrawnNode[]?` fails with
-`expected DrawnNode[]?, found list object[]`.
+Its content property is `DrawnNode+` — one or more, so a lone child binds a one-item sequence — and
+may be marked optional (`Children?:DrawnNode+`) where a use without children is meant.
 
-Both rules come from how the catalog is shaped, not from NX. See `FINDINGS.md` F15 and F16.
+The rule comes from how the catalog is shaped, not from NX. See `FINDINGS.md` F15 and F16.
 
 ## Edits to the vendored DrawnUI source
 

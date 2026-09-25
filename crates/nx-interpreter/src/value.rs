@@ -21,7 +21,7 @@ use smol_str::SmolStr;
 /// let float_val = Value::Float(3.14);
 /// let string_val = Value::String(SmolStr::new("hello"));
 /// let bool_val = Value::Boolean(true);
-/// let null_val = Value::Null;
+/// let empty = Value::empty();
 /// let array_val = Value::Array(vec![Value::Int(1), Value::Int(2)]);
 /// ```
 #[derive(Debug, Clone, PartialEq)]
@@ -58,14 +58,13 @@ pub enum Value {
     /// Represents true or false logical values
     Boolean(bool),
 
-    /// Null/undefined value
+    /// A sequence of values.
     ///
-    /// Represents the absence of a value
-    Null,
-
-    /// Array of values
-    ///
-    /// Represents a collection of values, used for iteration and collections
+    /// <para>A `+` or `*` value is always one of these. The empty sequence is also the absent
+    /// value — what `{}` evaluates to, what an optional property that was not written holds, and
+    /// what an `if` with no `else` produces when it takes no branch. A `?` value that holds an
+    /// item is the item itself, not a one-element sequence; coercion at a typed site normalizes
+    /// between the two.</para>
     Array(Vec<Value>),
 
     /// Constant union case.
@@ -143,9 +142,14 @@ pub enum Value {
 }
 
 impl Value {
-    /// Check if the value is null
-    pub fn is_null(&self) -> bool {
-        matches!(self, Value::Null)
+    /// The empty value: the empty sequence, which is also the absent value.
+    pub fn empty() -> Self {
+        Value::Array(Vec::new())
+    }
+
+    /// True for the empty value.
+    pub fn is_empty_value(&self) -> bool {
+        matches!(self, Value::Array(elements) if elements.is_empty())
     }
 
     /// Check if the value is any integer type (i32 or i64)
@@ -193,8 +197,8 @@ impl Value {
             Value::Float(_) => "float64",
             Value::String(_) => "string",
             Value::Boolean(_) => "boolean",
-            Value::Null => "null",
-            Value::Array(_) => "array",
+            Value::Array(elements) if elements.is_empty() => "{}",
+            Value::Array(_) => "sequence",
             Value::UnionCase { .. } => "union_case",
             Value::Record { .. } => "record",
             Value::Function { .. } => "function",
@@ -306,7 +310,6 @@ impl std::fmt::Display for Value {
             Value::Float(n) => write!(f, "{}", n),
             Value::String(s) => write!(f, "{}", s),
             Value::Boolean(b) => write!(f, "{}", b),
-            Value::Null => write!(f, "null"),
             Value::Array(elements) => {
                 write!(f, "[")?;
                 for (i, elem) in elements.iter().enumerate() {
@@ -348,7 +351,7 @@ mod tests {
         let int_val = Value::Int(42);
         assert!(int_val.is_int());
         assert!(int_val.is_number());
-        assert!(!int_val.is_null());
+        assert!(!int_val.is_empty_value());
 
         let i32_val = Value::Int32(42);
         assert!(i32_val.is_int());
@@ -368,8 +371,8 @@ mod tests {
         let bool_val = Value::Boolean(true);
         assert!(bool_val.is_boolean());
 
-        let null_val = Value::Null;
-        assert!(null_val.is_null());
+        let empty = Value::empty();
+        assert!(empty.is_empty_value());
     }
 
     #[test]
@@ -427,7 +430,7 @@ mod tests {
 
     #[test]
     fn test_to_text_declines_values_with_no_text_form() {
-        assert_eq!(Value::Null.to_text(), None);
+        assert_eq!(Value::empty().to_text(), None);
         assert_eq!(Value::Array(vec![Value::Int(1)]).to_text(), None);
     }
 
@@ -439,7 +442,7 @@ mod tests {
         assert_eq!(Value::Float(2.5).to_string(), "2.5");
         assert_eq!(Value::String(SmolStr::new("test")).to_string(), "test");
         assert_eq!(Value::Boolean(true).to_string(), "true");
-        assert_eq!(Value::Null.to_string(), "null");
+        assert_eq!(Value::empty().to_string(), "[]");
         assert_eq!(
             Value::UnionCase {
                 union: Name::new("Status"),
@@ -469,7 +472,7 @@ mod tests {
         assert_eq!(Value::Float(2.5).type_name(), "float64");
         assert_eq!(Value::String(SmolStr::new("test")).type_name(), "string");
         assert_eq!(Value::Boolean(true).type_name(), "boolean");
-        assert_eq!(Value::Null.type_name(), "null");
+        assert_eq!(Value::empty().type_name(), "{}");
         assert_eq!(
             Value::Record {
                 type_name: Name::new("result"),

@@ -27,6 +27,34 @@ namespace NxLang.Sdk.Tests.Generated
     }
 
     [MessagePackObject]
+    public sealed class Person
+    {
+        [Key("name")]
+        [JsonPropertyName("name")]
+        public string Name { get; set; } = default!;
+    }
+
+    [MessagePackObject]
+    public sealed class Book
+    {
+        [Key("title")]
+        [JsonPropertyName("title")]
+        public string Title { get; set; } = default!;
+
+        [Key("author")]
+        [JsonPropertyName("author")]
+        public Person? Author { get; set; }
+
+        [Key("tags")]
+        [JsonPropertyName("tags")]
+        public string[]? Tags { get; set; }
+
+        [Key("authors")]
+        [JsonPropertyName("authors")]
+        public Person[] Authors { get; set; } = default!;
+    }
+
+    [MessagePackObject]
     public sealed class Form
     {
         [Key("pending")]
@@ -197,7 +225,8 @@ namespace NxLang.Sdk.Tests.Generated
         public static readonly NxProperty<User, string> Name = new(
             User_propertyWireFormat.Format(User_property.Name),
             record => record.Name,
-            (record, value) => record.Name = value);
+            (record, value) => record.Name = value,
+            clearable: false);
 
         public static readonly NxProperty<User, string?> Email = new(
             User_propertyWireFormat.Format(User_property.Email),
@@ -212,6 +241,149 @@ namespace NxLang.Sdk.Tests.Generated
                     return Name;
                 case User_property.Email:
                     return Email;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(property));
+            }
+        }
+    }
+
+    [JsonConverter(typeof(NxUpdateRecordJsonConverter<Person_update>))]
+    [MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<Person_update>))]
+    public sealed class Person_update : NxUpdate<Person>
+    {
+        private static readonly NxUpdateSchema FieldSchema = new(
+            "Person.Update",
+            PersonProperties.Name);
+
+        public Person_update()
+            : base(FieldSchema)
+        {
+        }
+
+        public string NxType => "Person.Update";
+
+        public NxOptional<string> Name
+        {
+            get => base.Get<string>("name");
+            set => base.Set("name", value);
+        }
+
+        public bool IsSet(Person_property property) => base.IsSet(Person_propertyWireFormat.Format(property));
+
+        public void Unset(Person_property property) => base.Unset(Person_propertyWireFormat.Format(property));
+
+        public Person_property[] Changed() => Array.ConvertAll(base.ChangedNames(), Person_propertyWireFormat.Parse);
+
+        public static Person_update Diff(Person before, Person after) => NxUpdate<Person>.Diff<Person_update>(before, after);
+    }
+
+    public static class PersonProperties
+    {
+        public static readonly NxProperty<Person, string> Name = new(
+            Person_propertyWireFormat.Format(Person_property.Name),
+            record => record.Name,
+            (record, value) => record.Name = value,
+            clearable: false);
+
+        public static NxProperty<Person> Of(Person_property property)
+        {
+            switch (property)
+            {
+                case Person_property.Name:
+                    return Name;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(property));
+            }
+        }
+    }
+
+    [JsonConverter(typeof(NxUpdateRecordJsonConverter<Book_update>))]
+    [MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<Book_update>))]
+    public sealed class Book_update : NxUpdate<Book>
+    {
+        private static readonly NxUpdateSchema FieldSchema = new(
+            "Book.Update",
+            BookProperties.Title,
+            BookProperties.Author,
+            BookProperties.Tags,
+            BookProperties.Authors);
+
+        public Book_update()
+            : base(FieldSchema)
+        {
+        }
+
+        public string NxType => "Book.Update";
+
+        public NxOptional<string> Title
+        {
+            get => base.Get<string>("title");
+            set => base.Set("title", value);
+        }
+
+        public NxOptional<Person?> Author
+        {
+            get => base.Get<Person?>("author");
+            set => base.Set("author", value);
+        }
+
+        public NxOptional<string[]?> Tags
+        {
+            get => base.Get<string[]?>("tags");
+            set => base.Set("tags", value);
+        }
+
+        public NxOptional<Person[]> Authors
+        {
+            get => base.Get<Person[]>("authors");
+            set => base.Set("authors", value);
+        }
+
+        public bool IsSet(Book_property property) => base.IsSet(Book_propertyWireFormat.Format(property));
+
+        public void Unset(Book_property property) => base.Unset(Book_propertyWireFormat.Format(property));
+
+        public Book_property[] Changed() => Array.ConvertAll(base.ChangedNames(), Book_propertyWireFormat.Parse);
+
+        public static Book_update Diff(Book before, Book after) => NxUpdate<Book>.Diff<Book_update>(before, after);
+    }
+
+    public static class BookProperties
+    {
+        public static readonly NxProperty<Book, string> Title = new(
+            Book_propertyWireFormat.Format(Book_property.Title),
+            record => record.Title,
+            (record, value) => record.Title = value,
+            clearable: false);
+
+        public static readonly NxProperty<Book, Person?> Author = new(
+            Book_propertyWireFormat.Format(Book_property.Author),
+            record => record.Author,
+            (record, value) => record.Author = value);
+
+        public static readonly NxProperty<Book, string[]?> Tags = new(
+            Book_propertyWireFormat.Format(Book_property.Tags),
+            record => record.Tags,
+            (record, value) => record.Tags = value);
+
+        public static readonly NxProperty<Book, Person[]> Authors = new(
+            Book_propertyWireFormat.Format(Book_property.Authors),
+            record => record.Authors,
+            (record, value) => record.Authors = value,
+            clearable: false);
+
+        public static NxProperty<Book> Of(Book_property property)
+        {
+            switch (property)
+            {
+                case Book_property.Title:
+                    return Title;
+                case Book_property.Author:
+                    return Author;
+                case Book_property.Tags:
+                    return Tags;
+                case Book_property.Authors:
+                    return Authors;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(property));
             }
@@ -272,7 +444,8 @@ namespace NxLang.Sdk.Tests.Generated
         public static readonly NxProperty<Form, User_update[]> Drafts = new(
             Form_propertyWireFormat.Format(Form_property.Drafts),
             record => record.Drafts,
-            (record, value) => record.Drafts = value);
+            (record, value) => record.Drafts = value,
+            clearable: false);
 
         public static readonly NxProperty<Form, User_property?> SortBy = new(
             Form_propertyWireFormat.Format(Form_property.SortBy),
@@ -301,7 +474,7 @@ namespace NxLang.Sdk.Tests.Generated
     {
         private static readonly NxUpdateSchema FieldSchema = new(
             "Counter.Update",
-            new NxField("count", typeof(long)));
+            new NxField("count", typeof(long), clearable: false));
 
         public Counter_update()
             : base(FieldSchema)
@@ -400,37 +573,44 @@ namespace NxLang.Sdk.Tests.Generated
         public static readonly NxProperty<Clash, bool> Changed = new(
             Clash_propertyWireFormat.Format(Clash_property.Changed),
             record => record.Changed,
-            (record, value) => record.Changed = value);
+            (record, value) => record.Changed = value,
+            clearable: false);
 
         public static readonly NxProperty<Clash, bool> IsSet = new(
             Clash_propertyWireFormat.Format(Clash_property.IsSet),
             record => record.IsSet,
-            (record, value) => record.IsSet = value);
+            (record, value) => record.IsSet = value,
+            clearable: false);
 
         public static readonly NxProperty<Clash, bool> Unset = new(
             Clash_propertyWireFormat.Format(Clash_property.Unset),
             record => record.Unset,
-            (record, value) => record.Unset = value);
+            (record, value) => record.Unset = value,
+            clearable: false);
 
         public static readonly NxProperty<Clash, string> Diff = new(
             Clash_propertyWireFormat.Format(Clash_property.Diff),
             record => record.Diff,
-            (record, value) => record.Diff = value);
+            (record, value) => record.Diff = value,
+            clearable: false);
 
         public static readonly NxProperty<Clash, string> Fields = new(
             Clash_propertyWireFormat.Format(Clash_property.Fields),
             record => record.Fields,
-            (record, value) => record.Fields = value);
+            (record, value) => record.Fields = value,
+            clearable: false);
 
         public static readonly NxProperty<Clash, string> Schema = new(
             Clash_propertyWireFormat.Format(Clash_property.Schema),
             record => record.Schema,
-            (record, value) => record.Schema = value);
+            (record, value) => record.Schema = value,
+            clearable: false);
 
         public static readonly NxProperty<Clash, string> NxType = new(
             Clash_propertyWireFormat.Format(Clash_property.NxType),
             record => record.NxType,
-            (record, value) => record.NxType = value);
+            (record, value) => record.NxType = value,
+            clearable: false);
 
         public static NxProperty<Clash> Of(Clash_property property)
         {
@@ -462,7 +642,7 @@ namespace NxLang.Sdk.Tests.Generated
     {
         private static readonly NxUpdateSchema FieldSchema = new(
             "Shape.Update",
-            new NxField("id", typeof(string)));
+            new NxField("id", typeof(string), clearable: false));
 
         public Shape_update()
             : base(FieldSchema)
@@ -519,7 +699,8 @@ namespace NxLang.Sdk.Tests.Generated
         public static readonly NxProperty<Circle, string> Id = new(
             Circle_propertyWireFormat.Format(Circle_property.Id),
             record => record.Id,
-            (record, value) => record.Id = value);
+            (record, value) => record.Id = value,
+            clearable: false);
 
         public static NxProperty<Circle> Of(Circle_property property)
         {
@@ -568,7 +749,8 @@ namespace NxLang.Sdk.Tests.Generated
         public static readonly NxProperty<Square, string> Id = new(
             Square_propertyWireFormat.Format(Square_property.Id),
             record => record.Id,
-            (record, value) => record.Id = value);
+            (record, value) => record.Id = value,
+            clearable: false);
 
         public static NxProperty<Square> Of(Square_property property)
         {
@@ -617,7 +799,8 @@ namespace NxLang.Sdk.Tests.Generated
         public static readonly NxProperty<Doc, Shape> Shape = new(
             Doc_propertyWireFormat.Format(Doc_property.Shape),
             record => record.Shape,
-            (record, value) => record.Shape = value);
+            (record, value) => record.Shape = value,
+            clearable: false);
 
         public static NxProperty<Doc> Of(Doc_property property)
         {
@@ -666,7 +849,8 @@ namespace NxLang.Sdk.Tests.Generated
         public static readonly NxProperty<Ticker_state, long> Count = new(
             Ticker_propertyWireFormat.Format(Ticker_property.Count),
             record => record.Count,
-            (record, value) => record.Count = value);
+            (record, value) => record.Count = value,
+            clearable: false);
 
         public static NxProperty<Ticker_state> Of(Ticker_property property)
         {
@@ -740,17 +924,20 @@ namespace NxLang.Sdk.Tests.Generated
         public static readonly NxProperty<Range<T>, T> Start = new(
             Range_propertyWireFormat.Format(Range_property.Start),
             record => record.Start,
-            (record, value) => record.Start = value);
+            (record, value) => record.Start = value,
+            clearable: false);
 
         public static readonly NxProperty<Range<T>, T> End = new(
             Range_propertyWireFormat.Format(Range_property.End),
             record => record.End,
-            (record, value) => record.End = value);
+            (record, value) => record.End = value,
+            clearable: false);
 
         public static readonly NxProperty<Range<T>, bool> EndInclusive = new(
             Range_propertyWireFormat.Format(Range_property.EndInclusive),
             record => record.EndInclusive,
-            (record, value) => record.EndInclusive = value);
+            (record, value) => record.EndInclusive = value,
+            clearable: false);
 
         public static NxProperty<Range<T>> Of(Range_property property)
         {
@@ -824,7 +1011,8 @@ namespace NxLang.Sdk.Tests.Generated
         public static readonly NxProperty<Schedule, Range<long>> Week = new(
             Schedule_propertyWireFormat.Format(Schedule_property.Week),
             record => record.Week,
-            (record, value) => record.Week = value);
+            (record, value) => record.Week = value,
+            clearable: false);
 
         public static readonly NxProperty<Schedule, Range<double>[]?> Spans = new(
             Schedule_propertyWireFormat.Format(Schedule_property.Spans),
@@ -834,12 +1022,14 @@ namespace NxLang.Sdk.Tests.Generated
         public static readonly NxProperty<Schedule, Range_update<long>> Patch = new(
             Schedule_propertyWireFormat.Format(Schedule_property.Patch),
             record => record.Patch,
-            (record, value) => record.Patch = value);
+            (record, value) => record.Patch = value,
+            clearable: false);
 
         public static readonly NxProperty<Schedule, Range_update<long>[]> Many = new(
             Schedule_propertyWireFormat.Format(Schedule_property.Many),
             record => record.Many,
-            (record, value) => record.Many = value);
+            (record, value) => record.Many = value,
+            clearable: false);
 
         public static NxProperty<Schedule> Of(Schedule_property property)
         {
@@ -882,6 +1072,63 @@ namespace NxLang.Sdk.Tests.Generated
             {
                 "name" => User_property.Name,
                 "email" => User_property.Email,
+                _ => throw new FormatException("Unknown NX enum member."),
+            };
+    }
+
+    [JsonConverter(typeof(NxEnumJsonConverter<Person_property, Person_propertyWireFormat>))]
+    [MessagePackFormatter(typeof(NxEnumMessagePackFormatter<Person_property, Person_propertyWireFormat>))]
+    public enum Person_property
+    {
+        Name
+    }
+
+    internal sealed class Person_propertyWireFormat : INxEnumWireFormat<Person_property>
+    {
+        public static string Format(Person_property value) =>
+            value switch
+            {
+                Person_property.Name => "name",
+                _ => throw new FormatException("Unknown NX enum value."),
+            };
+
+        public static Person_property Parse(string value) =>
+            value switch
+            {
+                "name" => Person_property.Name,
+                _ => throw new FormatException("Unknown NX enum member."),
+            };
+    }
+
+    [JsonConverter(typeof(NxEnumJsonConverter<Book_property, Book_propertyWireFormat>))]
+    [MessagePackFormatter(typeof(NxEnumMessagePackFormatter<Book_property, Book_propertyWireFormat>))]
+    public enum Book_property
+    {
+        Title,
+        Author,
+        Tags,
+        Authors
+    }
+
+    internal sealed class Book_propertyWireFormat : INxEnumWireFormat<Book_property>
+    {
+        public static string Format(Book_property value) =>
+            value switch
+            {
+                Book_property.Title => "title",
+                Book_property.Author => "author",
+                Book_property.Tags => "tags",
+                Book_property.Authors => "authors",
+                _ => throw new FormatException("Unknown NX enum value."),
+            };
+
+        public static Book_property Parse(string value) =>
+            value switch
+            {
+                "title" => Book_property.Title,
+                "author" => Book_property.Author,
+                "tags" => Book_property.Tags,
+                "authors" => Book_property.Authors,
                 _ => throw new FormatException("Unknown NX enum member."),
             };
     }

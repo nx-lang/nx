@@ -36,10 +36,10 @@ This small example shows the goals working together: unified syntax, UI-first de
 ```nx
 import { Button, Stack } from "./ui"
 
-type <Action label:string href:string? onClick:() => void/>
+type <Action label:string href?:string onClick:() => void/>
 type <Theme primary:string surface:string text:string/>
 
-let <Hero actions:Action[] theme:Theme  content body:Element /> =
+let <Hero actions:Action+ theme:Theme  content body:Element /> =
   <section style=<Style backgroundColor={theme.surface} color={theme.text} />>
     <Stack gap=12>
       {body}
@@ -48,7 +48,7 @@ let <Hero actions:Action[] theme:Theme  content body:Element /> =
           <Button
             href={action.href}
             onClick={action.onClick}
-            tone={if action.href { "link" } else { "primary" }}>
+            tone={if action.href? { "link" } else { "primary" }}>
             {action.label}
           </Button>
         }

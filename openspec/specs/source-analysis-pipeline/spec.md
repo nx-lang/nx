@@ -158,13 +158,13 @@ references SHALL be emitted only after prepared bindings have been constructed.
 
 #### Scenario: Same-library base name is preserved during raw lowering
 - **WHEN** one library contains `base.nx` with `abstract type Field = { label:string }`
-- **AND** `derived.nx` in that same library contains `type TextField extends Field = { placeholder:string? }`
+- **AND** `derived.nx` in that same library contains `type TextField extends Field = { placeholder?:string }`
 - **THEN** raw lowering of `derived.nx` SHALL preserve the `extends Field` declaration without
   requiring `Field` to be present in the raw file-local module
 
 #### Scenario: Imported base name is preserved during raw lowering
 - **WHEN** a host analyzes `app/main.nx` containing `import "../ui"` and
-  `type TextField extends Field = { placeholder:string? }`
+  `type TextField extends Field = { placeholder?:string }`
 - **AND** the supplied `ProgramBuildContext` exposes a loaded `../ui` that exports abstract `Field`
 - **THEN** raw lowering of `app/main.nx` SHALL preserve the `extends Field` declaration without
   requiring `Field` to be present in the raw file-local module
@@ -176,7 +176,7 @@ the prepared binding tables for those names exist. Raw lowering MUST NOT emit th
 
 #### Scenario: Same-library peer declaration resolves during prepared-module validation
 - **WHEN** one library contains `base.nx` with `abstract type Field = { label:string }`
-- **AND** `derived.nx` in that same library contains `type TextField extends Field = { placeholder:string? }`
+- **AND** `derived.nx` in that same library contains `type TextField extends Field = { placeholder?:string }`
 - **THEN** raw lowering of `derived.nx` SHALL preserve the `extends Field` declaration without
   reporting an unresolved-base diagnostic
 - **AND** prepared-module validation of `derived.nx` SHALL resolve `Field` successfully through a
@@ -184,7 +184,7 @@ the prepared binding tables for those names exist. Raw lowering MUST NOT emit th
 
 #### Scenario: Imported library declaration resolves during prepared-module validation
 - **WHEN** a host analyzes `app/main.nx` containing `import "../ui"` and
-  `type TextField extends Field = { placeholder:string? }`
+  `type TextField extends Field = { placeholder?:string }`
 - **AND** the supplied `ProgramBuildContext` exposes a loaded `../ui` that exports abstract `Field`
 - **THEN** raw lowering of `app/main.nx` SHALL preserve the `extends Field` declaration without
   reporting an unresolved-base diagnostic

@@ -9,21 +9,20 @@ type Bounds = {
   endInclusive:boolean = false
 }
 
-// A record may declare more than one, and a parameter composes with the suffixes and with a
-// function type.
+// A record may declare more than one, and a parameter composes with the `+` suffix, with the `?`
+// mark on a field's name, and with a function type.
 type Pair = { TKey:type TValue:type key:TKey value:TValue }
-type Page = { T:type items:T[] next:T? render:(<function item:T />: string)? }
+type Page = { T:type items:T+ next?:T render?:<function item:T />: string }
 
 // A generic record's name alone is not a type. Every type position takes an applied type instead.
 type Schedule = {
   week:<Bounds T=int/>
-  spans:<Bounds T=float64/>[]?
+  spans?:<Bounds T=float64/>+
 }
 
 // An alias names an instantiation, which is also how a construction site writes an argument that
 // is not a bare type name.
 type IntBounds = <Bounds T=int/>
-type MaybeInt = int?
 
 let week:<Bounds T=int/> = <Bounds T=int start={1} end={7} />
 
@@ -31,10 +30,11 @@ let week:<Bounds T=int/> = <Bounds T=int start={1} end={7} />
 let entry:<Pair TValue=int TKey=string/> = <Pair TKey=string TValue=int key="mon" value={1} />
 
 // An applied type nests, and an alias stands in for the argument at the construction site. A type
-// argument is an item type: `int?` is one, and a sequence such as `int[]` is not, since `T[]` in
-// `Page` would then be a sequence of sequences.
-let pages:<Page T=<Bounds T=int/>/> = <Page T=IntBounds items={ week } next={null} render={null} />
-let maybes:<Page T=int?/> = <Page T=MaybeInt items={ 1 null } next={null} render={null} />
+// argument is exactly one value: `<Page T=int?/>` is rejected, since `T+` and `next?:T` in `Page`
+// already say how many of `T` each field admits, and an occurrence inside another is not a type.
+// The optional fields are left unwritten here, so they are empty.
+let pages:<Page T=<Bounds T=int/>/> = <Page T=IntBounds items={ week } />
+let numbered:<Page T=int/> = <Page T=int items={ 1 2 } next={3} />
 
 // Reading a field substitutes the argument: `week.start` is an `int`.
 let firstDay:int = {week.start}

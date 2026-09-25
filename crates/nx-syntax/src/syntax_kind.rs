@@ -89,15 +89,14 @@ pub enum SyntaxKind {
     NUMBER_EXPRESSION,
     STRING_EXPRESSION,
     BOOLEAN_EXPRESSION,
-    NULL_EXPRESSION,
     MEMBER_EXPRESSION,
     MEMBER_ACCESS_EXPRESSION,
+    OPTIONAL_MEMBER_EXPRESSION,
+    EXISTS_EXPRESSION,
     CALL_EXPRESSION,
     UNARY_EXPRESSION,
     PREFIX_UNARY_EXPRESSION,
     BINARY_EXPRESSION,
-    TERNARY_EXPRESSION,
-    CONDITIONAL_EXPRESSION,
     SEQUENCE_EXPRESSION,
     PARENTHESIZED_EXPRESSION,
 
@@ -140,7 +139,6 @@ pub enum SyntaxKind {
     UNIT_LITERAL,
     BOOLEAN_LITERAL,
     BOOL_LITERAL,
-    NULL_LITERAL,
     SIGNED_NUMERIC_LITERAL,
 
     // === Unbraced value forms ===
@@ -180,7 +178,6 @@ pub enum SyntaxKind {
     MATCH,
     TRUE,
     FALSE,
-    NULL_KW,
 
     // === Operators ===
     PLUS,
@@ -201,6 +198,8 @@ pub enum SyntaxKind {
     PIPE,
     BANG,
     QUESTION,
+    QUESTION_DOT,
+    QUESTION_QUESTION,
     FAT_ARROW,
     COLON,
 
@@ -237,7 +236,6 @@ impl SyntaxKind {
                 | SyntaxKind::STRING_LITERAL
                 | SyntaxKind::NUMBER_LITERAL
                 | SyntaxKind::BOOLEAN_LITERAL
-                | SyntaxKind::NULL_LITERAL
                 | SyntaxKind::LET
                 | SyntaxKind::ACTION
                 | SyntaxKind::COMPONENT
@@ -259,7 +257,6 @@ impl SyntaxKind {
                 | SyntaxKind::MATCH
                 | SyntaxKind::TRUE
                 | SyntaxKind::FALSE
-                | SyntaxKind::NULL_KW
                 | SyntaxKind::PLUS
                 | SyntaxKind::MINUS
                 | SyntaxKind::STAR
@@ -278,6 +275,8 @@ impl SyntaxKind {
                 | SyntaxKind::PIPE
                 | SyntaxKind::BANG
                 | SyntaxKind::QUESTION
+                | SyntaxKind::QUESTION_DOT
+                | SyntaxKind::QUESTION_QUESTION
                 | SyntaxKind::FAT_ARROW
                 | SyntaxKind::COLON
                 | SyntaxKind::LPAREN
@@ -333,7 +332,6 @@ impl SyntaxKind {
                 | SyntaxKind::MATCH
                 | SyntaxKind::TRUE
                 | SyntaxKind::FALSE
-                | SyntaxKind::NULL_KW
         )
     }
 
@@ -428,15 +426,14 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "number_expression" => SyntaxKind::NUMBER_EXPRESSION,
         "string_expression" => SyntaxKind::STRING_EXPRESSION,
         "boolean_expression" => SyntaxKind::BOOLEAN_EXPRESSION,
-        "null_expression" => SyntaxKind::NULL_EXPRESSION,
         "member_expression" => SyntaxKind::MEMBER_EXPRESSION,
         "member_access_expression" => SyntaxKind::MEMBER_ACCESS_EXPRESSION,
+        "optional_member_expression" => SyntaxKind::OPTIONAL_MEMBER_EXPRESSION,
+        "exists_expression" => SyntaxKind::EXISTS_EXPRESSION,
         "call_expression" => SyntaxKind::CALL_EXPRESSION,
         "unary_expression" => SyntaxKind::UNARY_EXPRESSION,
         "prefix_unary_expression" => SyntaxKind::PREFIX_UNARY_EXPRESSION,
         "binary_expression" => SyntaxKind::BINARY_EXPRESSION,
-        "ternary_expression" => SyntaxKind::TERNARY_EXPRESSION,
-        "conditional_expression" => SyntaxKind::CONDITIONAL_EXPRESSION,
         "sequence_expression" => SyntaxKind::SEQUENCE_EXPRESSION,
         "parenthesized_expression" => SyntaxKind::PARENTHESIZED_EXPRESSION,
         "value_if_expression" => SyntaxKind::VALUE_IF_EXPRESSION,
@@ -475,7 +472,6 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "unit_literal" => SyntaxKind::UNIT_LITERAL,
         "boolean_literal" => SyntaxKind::BOOLEAN_LITERAL,
         "bool_literal" => SyntaxKind::BOOL_LITERAL,
-        "null_literal" => SyntaxKind::NULL_LITERAL,
         "signed_numeric_literal" => SyntaxKind::SIGNED_NUMERIC_LITERAL,
         "contextual_name" => SyntaxKind::CONTEXTUAL_NAME,
         "identifier" => SyntaxKind::IDENTIFIER,
@@ -510,7 +506,6 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "match" => SyntaxKind::MATCH,
         "true" => SyntaxKind::TRUE,
         "false" => SyntaxKind::FALSE,
-        "null" => SyntaxKind::NULL_KW,
         "+" => SyntaxKind::PLUS,
         "-" => SyntaxKind::MINUS,
         "*" => SyntaxKind::STAR,
@@ -529,6 +524,8 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "|" => SyntaxKind::PIPE,
         "!" => SyntaxKind::BANG,
         "?" => SyntaxKind::QUESTION,
+        "?." => SyntaxKind::QUESTION_DOT,
+        "??" => SyntaxKind::QUESTION_QUESTION,
         "=>" => SyntaxKind::FAT_ARROW,
         ":" => SyntaxKind::COLON,
         "(" => SyntaxKind::LPAREN,

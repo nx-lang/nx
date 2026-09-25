@@ -66,6 +66,22 @@
     },
     {
       "module": "main.nx",
+      "function": "reviewStage"
+    },
+    {
+      "module": "main.nx",
+      "function": "idleLoad"
+    },
+    {
+      "module": "main.nx",
+      "function": "failedLoad"
+    },
+    {
+      "module": "main.nx",
+      "function": "bareFailed"
+    },
+    {
+      "module": "main.nx",
       "function": "doubled"
     },
     {

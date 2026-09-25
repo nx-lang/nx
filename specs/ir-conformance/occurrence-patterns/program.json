@@ -1,0 +1,28 @@
+{
+  "entry": "main.nx",
+  "emit": [
+    "main.nx"
+  ],
+  "entrypoints": [
+    {
+      "module": "main.nx",
+      "function": "withAuthor"
+    },
+    {
+      "module": "main.nx",
+      "function": "withoutAuthor"
+    },
+    {
+      "module": "main.nx",
+      "function": "described"
+    },
+    {
+      "module": "main.nx",
+      "function": "undescribed"
+    },
+    {
+      "module": "main.nx",
+      "function": "root"
+    }
+  ]
+}

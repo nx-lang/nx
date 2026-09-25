@@ -1032,7 +1032,7 @@ public class NxRuntimeComponentTests
             }
 
             type ShortTextQuestion extends Question = {
-              placeholder:string?
+              placeholder?:string
             }
 
             component <QuestionFlow /> = {

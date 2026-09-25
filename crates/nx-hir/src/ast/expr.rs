@@ -1,5 +1,6 @@
 //! Expression AST nodes.
 
+use super::Occurrence;
 use crate::{ElementId, ExprId, LocalDefinitionId, Name};
 use nx_diagnostics::{TextSize, TextSpan};
 use smol_str::SmolStr;
@@ -44,11 +45,6 @@ pub enum Literal {
     ///
     /// Example: `true`, `false`
     Boolean(bool),
-
-    /// Null literal.
-    ///
-    /// Example: `null`
-    Null,
 }
 
 /// Wrapper for f64 that implements Eq and Hash by treating NaN values as equal.
@@ -208,8 +204,17 @@ pub enum Expr {
     /// a constant union case; reaching a site with no expected type is a
     /// diagnostic.
     ///
+    /// <para>`occurrence` is the suffix glued to a name written as a property value: `int?` in
+    /// `<Box T=int? />`. It is always an error, since a type argument is exactly one value and a
+    /// value takes no suffix, but it is kept so the checker can say which. Only the first suffix
+    /// is kept; post-parse validation reports a second, and a suffix outside a property value.</para>
+    ///
     /// Example: `cover` in `<Img fit=cover />`
-    ContextualName { name: Name, span: TextSpan },
+    ContextualName {
+        name: Name,
+        occurrence: Option<Occurrence>,
+        span: TextSpan,
+    },
 
     /// A union case reached by the declaring origin of its union rather than by a visible name.
     ///
@@ -289,9 +294,9 @@ pub enum Expr {
     ///
     /// Never produced by lowering. When type analysis joins an `int` branch with a `float64` one,
     /// the join is a `float64`, and the type checker wraps the narrower branch in this node so the
-    /// value it produces is one too. The type named is the numeric type the join has; a list or a
-    /// nullable value is widened item by item, and `null` is left alone. A runtime that carries
-    /// every number the same way has nothing to do here.
+    /// value it produces is one too. The type named is the numeric type the join has; a sequence
+    /// or an optional value is widened item by item, and the empty value is left alone. A runtime
+    /// that carries every number the same way has nothing to do here.
     ///
     /// Example: what `n` becomes in `if b { n } else { x }`, with `n:int` and `x:float64`
     Widen {
@@ -354,9 +359,11 @@ pub enum Expr {
     /// A sequence of items, written as a braced value list.
     ///
     /// <para>An element whose own type is a sequence contributes its items rather than nesting,
-    /// so `{xs ys}` with two `string[]` values is one `string[]`.</para>
+    /// so `{xs ys}` with two `string+` values is one `string+`. With no elements this is `{}`,
+    /// the empty value — the one spelling of "no value", which the `{}` match pattern also
+    /// lowers to.</para>
     ///
-    /// Example: `{1 2 3}`
+    /// Example: `{1 2 3}`, `{}`
     Array {
         elements: Vec<ExprId>,
         span: TextSpan,
@@ -375,6 +382,31 @@ pub enum Expr {
     Member {
         base: ExprId,
         member: Name,
+        span: TextSpan,
+    },
+
+    /// A step through a receiver that may be empty: `{}` when `base` is empty, `base.member`
+    /// otherwise. The receiver is evaluated once.
+    ///
+    /// Example: `book.author?.name`
+    OptionalMember {
+        base: ExprId,
+        member: Name,
+        span: TextSpan,
+    },
+
+    /// The presence test: `true` when the operand holds at least one item.
+    ///
+    /// Example: `book.author?`
+    Exists { operand: ExprId, span: TextSpan },
+
+    /// The fallback: `left` when it holds an item, `right` otherwise. `right` is evaluated only
+    /// then.
+    ///
+    /// Example: `book.subtitle ?? "none"`
+    Coalesce {
+        left: ExprId,
+        right: ExprId,
         span: TextSpan,
     },
 
@@ -472,6 +504,9 @@ impl Expr {
             Expr::Array { span, .. } => *span,
             Expr::Index { span, .. } => *span,
             Expr::Member { span, .. } => *span,
+            Expr::OptionalMember { span, .. } => *span,
+            Expr::Exists { span, .. } => *span,
+            Expr::Coalesce { span, .. } => *span,
             Expr::RecordLiteral { span, .. } => *span,
             Expr::Element { span, .. } => *span,
             Expr::ActionHandler { span, .. } => *span,
@@ -501,11 +536,6 @@ mod tests {
     fn test_literal_bool() {
         assert_eq!(Literal::Boolean(true), Literal::Boolean(true));
         assert_ne!(Literal::Boolean(true), Literal::Boolean(false));
-    }
-
-    #[test]
-    fn test_literal_null() {
-        assert_eq!(Literal::Null, Literal::Null);
     }
 
     #[test]

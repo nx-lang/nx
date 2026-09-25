@@ -4,7 +4,7 @@
 type Contact = { name:string }
 type RowTemplate = <function Item:Contact Index:int />: string
 
-export external component <List TItem:type ItemsSource:TItem[]? ItemTemplate:(<function Item:TItem Index:int />: string)? />
+export external component <List TItem:type ItemsSource?:TItem+ ItemTemplate?:<function Item:TItem Index:int />: string />
 
 let <ContactRow Item:Contact Index:int />: string = {Item.name + "#" + Index}
 let <Compact Item:Contact />: string = {Item.name}

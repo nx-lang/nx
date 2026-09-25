@@ -1,10 +1,11 @@
 use crate::builder::build_codegen_program;
+use crate::ir::visit_declaration_expressions;
 use crate::model::{
     CodegenComponent, CodegenComponentDescriptor, CodegenComponentField,
     CodegenComponentTargetKind, CodegenDeclaration, CodegenDeclarationKind, CodegenElement,
-    CodegenExpression, CodegenExpressionKind, CodegenModule, CodegenModuleProvenance,
+    CodegenExpression, CodegenExpressionKind, CodegenModule, CodegenModuleProvenance, CodegenParam,
     CodegenProgram, CodegenProperty, CodegenRecordField, CodegenReference, CodegenStatement,
-    CodegenUnionCase,
+    CodegenTypeRef, CodegenUnionCase,
 };
 use crate::options::{
     CodegenError, CodegenOptions, CodegenOutput, CodegenTarget, GeneratedFile,
@@ -14,8 +15,8 @@ use crate::options::{
 use crate::runtime::runtime_helper_source;
 use nx_api::ProgramArtifact;
 use nx_diagnostics::{Diagnostic, Label};
-use nx_hir::ast::{BinOp, Literal, TypeRef, UnOp};
-use nx_hir::UpdateIntrinsic;
+use nx_hir::ast::{BinOp, Literal, Occurrence, TypeRef, UnOp};
+use nx_hir::{is_update_record_name, UpdateIntrinsic};
 use nx_interpreter::{ResolvedItemKind, RuntimeModuleId};
 use nx_types::{Primitive, Type};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -23,6 +24,7 @@ use std::path::{Path, PathBuf};
 
 const JS_PROGRAM_MODULE_MANIFEST_EXPORT_NAME: &str = "nxProgramModuleManifest";
 const JS_PROGRAM_MODULE_RESERVED_RUNTIME_NAMES: &[&str] = &[
+    "NxEmpty",
     "NxResult",
     "NxValue",
     "nxApplyUpdate",
@@ -31,30 +33,40 @@ const JS_PROGRAM_MODULE_RESERVED_RUNTIME_NAMES: &[&str] = &[
     "nxArraySchema",
     "nxBooleanSchema",
     "nxChangedFields",
+    "nxCleared",
+    "nxCoalesce",
     "nxComponentSchema",
     "nxDiagnosticsFromError",
     "nxDiffRecords",
     "nxDiv",
     "nxElement",
+    "nxEmpty",
     "nxEnumSchema",
+    "nxExists",
     "nxExternalComponentSchema",
     "nxField",
     "nxFloat32Schema",
+    "nxForOne",
     "nxFloat32Text",
     "nxIntDiv",
+    "nxItems",
     "nxMod",
     "nxMergeUpdates",
     "nxMissingField",
     "nxNamedRecordSchema",
+    "nxNonEmptyArraySchema",
     "nxNormalizeValue",
-    "nxNullableSchema",
     "nxNumberSchema",
+    "nxOptional",
+    "nxOptionalSchema",
     "nxRejectUnknownFields",
     "nxRangeMap",
     "nxRecordSchema",
     "nxRuntimeError",
+    "nxStep",
     "nxStringSchema",
     "nxUnionSchema",
+    "nxValuesEqual",
 ];
 
 /// Builds and emits executable files directly from a program artifact.
@@ -151,7 +163,10 @@ fn collect_source_codegen_diagnostics(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     match &declaration.kind {
-        CodegenDeclarationKind::Function { body, .. } => {
+        CodegenDeclarationKind::Function { params, body, .. } => {
+            for default in params.iter().filter_map(|param| param.default.as_ref()) {
+                collect_expression_source_codegen_diagnostics(module, default, diagnostics);
+            }
             collect_expression_source_codegen_diagnostics(module, body, diagnostics);
         }
         CodegenDeclarationKind::Value { value, .. } => {
@@ -180,7 +195,7 @@ fn collect_source_codegen_diagnostics(
                 collect_record_field_source_codegen_diagnostics(module, &case.fields, diagnostics);
             }
         }
-        CodegenDeclarationKind::TypeAlias | CodegenDeclarationKind::Unsupported(_) => {}
+        CodegenDeclarationKind::TypeAlias { .. } | CodegenDeclarationKind::Unsupported(_) => {}
     }
 }
 
@@ -249,7 +264,7 @@ fn collect_expression_source_codegen_diagnostics(
         }
         CodegenExpressionKind::Call { callee, args } => {
             collect_expression_source_codegen_diagnostics(module, callee, diagnostics);
-            for arg in args {
+            for arg in args.iter().flatten() {
                 collect_expression_source_codegen_diagnostics(module, arg, diagnostics);
             }
         }
@@ -304,8 +319,16 @@ fn collect_expression_source_codegen_diagnostics(
             collect_expression_source_codegen_diagnostics(module, base, diagnostics);
             collect_expression_source_codegen_diagnostics(module, index, diagnostics);
         }
-        CodegenExpressionKind::Member { base, .. } => {
+        CodegenExpressionKind::Member { base, .. }
+        | CodegenExpressionKind::OptionalMember { base, .. } => {
             collect_expression_source_codegen_diagnostics(module, base, diagnostics);
+        }
+        CodegenExpressionKind::Exists { operand } => {
+            collect_expression_source_codegen_diagnostics(module, operand, diagnostics);
+        }
+        CodegenExpressionKind::Coalesce { lhs, rhs } => {
+            collect_expression_source_codegen_diagnostics(module, lhs, diagnostics);
+            collect_expression_source_codegen_diagnostics(module, rhs, diagnostics);
         }
         CodegenExpressionKind::UnionCase {
             fields,
@@ -406,12 +429,16 @@ impl ExportPolicy<'_> {
 
 struct EmitContext {
     mode: EmitMode,
+    target: CodegenTarget,
     module_files: FxHashMap<RuntimeModuleId, String>,
     modules: FxHashMap<RuntimeModuleId, CodegenModule>,
     declaration_names: FxHashMap<ReferenceKey, String>,
     component_names: FxHashMap<ReferenceKey, ComponentGeneratedNames>,
     schema_declarations: FxHashMap<ReferenceKey, SchemaDeclaration>,
     import_aliases: FxHashMap<ReferenceKey, String>,
+    /// The records and unions that extend an abstract base. TypeScript declares each as an
+    /// interface extending its base, and pins each literal of one to its own type.
+    extending: FxHashSet<ReferenceKey>,
 }
 
 impl EmitContext {
@@ -481,10 +508,18 @@ impl EmitContext {
             }
         }
 
+        let extending = program
+            .modules
+            .iter()
+            .flat_map(|module| &module.declarations)
+            .filter(|declaration| nearest_base(declaration).is_some())
+            .map(|declaration| ReferenceKey::new(&declaration.reference))
+            .collect::<FxHashSet<_>>();
+
         let mut import_aliases = FxHashMap::default();
         if mode == EmitMode::Files {
             for module in &program.modules {
-                let references = collect_module_import_references(module, target);
+                let references = collect_module_import_references(module, target, &extending);
                 for reference in references {
                     import_aliases
                         .entry(ReferenceKey::new(&reference))
@@ -501,12 +536,14 @@ impl EmitContext {
 
         Self {
             mode,
+            target,
             module_files,
             modules,
             declaration_names,
             component_names,
             schema_declarations,
             import_aliases,
+            extending,
         }
     }
 
@@ -540,6 +577,37 @@ impl EmitContext {
                     )
                 })
         }
+    }
+
+    /// The TypeScript type a literal of the record `reference`, or of its union case `case`, is
+    /// pinned to: its own type, when it extends an abstract base.
+    ///
+    /// <para>TypeScript checks a fresh object literal for properties the site's type does not
+    /// declare, so a literal passed straight to a base-typed parameter would be refused for the
+    /// fields the base lacks. `literal satisfies T as T` checks the literal against its own type
+    /// and then hands on a value that is not fresh. A case of another module's union is named
+    /// through the union, which is what that module's import brings in.</para>
+    fn literal_pin(
+        &self,
+        current_module_id: RuntimeModuleId,
+        reference: &CodegenReference,
+        case: Option<&str>,
+    ) -> Option<String> {
+        if !self.target.is_typescript() || !self.extending.contains(&ReferenceKey::new(reference)) {
+            return None;
+        }
+        let name = self.reference_name(current_module_id, reference);
+        Some(match case {
+            None => name,
+            Some(case) if reference.module_id == current_module_id => {
+                union_case_type_name(&name, case)
+            }
+            Some(case) => format!(
+                "Extract<{}, {{ readonly $type: {} }}>",
+                name,
+                js_string(&format!("{}.{}", reference.name, case))
+            ),
+        })
     }
 
     fn declaration_name(&self, reference: &CodegenReference) -> String {
@@ -603,6 +671,33 @@ impl EmitContext {
                             && is_type_reference_kind(declaration.reference.kind)
                     })
                     .map(|declaration| declaration.reference.clone())
+            })
+    }
+
+    /// The `$type` entry of an object literal NX constructs. TypeScript keeps it the literal type
+    /// only where the object is contextually typed, which an item of a conditional or of a
+    /// flattened list is not, so there it is written `as const`.
+    fn type_tag_entry(&self, type_name: &str) -> String {
+        if self.target.is_typescript() {
+            format!("$type: {} as const", js_string(type_name))
+        } else {
+            format!("$type: {}", js_string(type_name))
+        }
+    }
+
+    /// Whether code in `current_module_id` can name the schema of the component `reference`
+    /// names: always within one program module, and otherwise where the module imports it.
+    fn can_reach_component_schema(
+        &self,
+        current_module_id: RuntimeModuleId,
+        reference: &CodegenReference,
+    ) -> bool {
+        self.mode == EmitMode::JsProgramModule
+            || self.module(current_module_id).is_some_and(|module| {
+                module
+                    .imports
+                    .iter()
+                    .any(|import| ReferenceKey::new(import) == ReferenceKey::new(reference))
             })
     }
 
@@ -720,7 +815,7 @@ impl SchemaDeclaration {
             },
             CodegenDeclarationKind::Function { .. }
             | CodegenDeclarationKind::Value { .. }
-            | CodegenDeclarationKind::TypeAlias
+            | CodegenDeclarationKind::TypeAlias { .. }
             | CodegenDeclarationKind::Unsupported(_) => return None,
         };
 
@@ -812,7 +907,7 @@ fn emit_module(
             .iter()
             .map(ReferenceKey::new)
             .collect::<FxHashSet<_>>();
-        for reference in collect_module_type_references(module) {
+        for reference in collect_module_type_references(module, &context.extending) {
             if reference.kind == ResolvedItemKind::Component {
                 let Some(component) = context.component(&reference) else {
                     continue;
@@ -1120,11 +1215,15 @@ fn emit_declaration(
             params,
             body,
             return_type,
+            declared_return_type,
         } => {
+            // A parameter a call may leave out is a JavaScript default parameter, so the
+            // function evaluates its own default, after the parameters before it; a call leaves
+            // one out by passing `undefined` or stopping early.
             let params = params
                 .iter()
                 .map(|param| {
-                    if target.is_typescript() {
+                    let declared = if target.is_typescript() {
                         format!(
                             "{}: {}",
                             safe_identifier(&param.name),
@@ -1132,6 +1231,20 @@ fn emit_declaration(
                         )
                     } else {
                         safe_identifier(&param.name)
+                    };
+                    match &param.default {
+                        Some(default) => format!(
+                            "{declared} = {}",
+                            lift_to_declared_occurrence(
+                                emit_expression(module.id, default, context),
+                                default,
+                                &param.resolved_ty,
+                            )
+                        ),
+                        None if param.optional => {
+                            format!("{declared} = {}", empty_value_at(&param.resolved_ty))
+                        }
+                        None => declared,
                     }
                 })
                 .collect::<Vec<_>>()
@@ -1153,13 +1266,20 @@ fn emit_declaration(
                     export_prefix, name, params
                 ));
             }
+            // The body's value takes the declared result's occurrence, as the interpreter
+            // coerces it there.
             out.push_str(&format!(
                 "  return {};\n",
-                emit_expression(module.id, body, context)
+                emit_declared_result(module.id, body, declared_return_type.as_ref(), context)
             ));
             out.push_str("}\n");
         }
-        CodegenDeclarationKind::Value { value, ty } => {
+        CodegenDeclarationKind::Value {
+            value,
+            ty,
+            declared_ty,
+        } => {
+            let value = emit_declared_result(module.id, value, declared_ty.as_ref(), context);
             if target.is_typescript() {
                 out.push_str(&format!(
                     "{}const {}: {} = {};\n",
@@ -1168,20 +1288,16 @@ fn emit_declaration(
                     ty.as_ref()
                         .map(|ty| emit_type(module.id, ty, module, context))
                         .unwrap_or_else(|| "unknown".to_string()),
-                    emit_expression(module.id, value, context)
+                    value
                 ));
             } else {
-                out.push_str(&format!(
-                    "{}const {} = {};\n",
-                    export_prefix,
-                    name,
-                    emit_expression(module.id, value, context)
-                ));
+                out.push_str(&format!("{}const {} = {};\n", export_prefix, name, value));
             }
         }
         CodegenDeclarationKind::Record {
             fields,
             type_params,
+            is_abstract,
             ..
         } => {
             if target.is_typescript() {
@@ -1190,6 +1306,10 @@ fn emit_declaration(
                         name: &name,
                         runtime_name: &declaration.reference.name,
                         type_params,
+                        is_update: is_update_record_name(&declaration.reference.name),
+                        is_abstract: *is_abstract,
+                        base: nearest_base(declaration)
+                            .map(|base| context.reference_name(module.id, base)),
                     },
                     fields,
                     module,
@@ -1250,6 +1370,7 @@ fn emit_declaration(
                 emit_union_type(
                     &name,
                     &declaration.reference.name,
+                    nearest_base(declaration).map(|base| context.reference_name(module.id, base)),
                     cases,
                     module,
                     context,
@@ -1259,7 +1380,17 @@ fn emit_declaration(
                 out.push('\n');
             }
         }
-        CodegenDeclarationKind::TypeAlias => {}
+        // A signature or field names an alias as written, so TypeScript needs the alias itself.
+        CodegenDeclarationKind::TypeAlias { target: aliased } => {
+            if target.is_typescript() {
+                out.push_str(&format!(
+                    "{}type {} = {};\n",
+                    export_prefix,
+                    name,
+                    emit_type_ref(module.id, aliased, module, context)
+                ));
+            }
+        }
         CodegenDeclarationKind::Unsupported(unsupported) => {
             out.push_str(&format!(
                 "{}const {} = nxRuntimeError({});\n",
@@ -1278,6 +1409,12 @@ struct RecordTypeHeader<'a> {
     runtime_name: &'a str,
     /// Empty for a union case and for a non-generic record.
     type_params: &'a [String],
+    /// Whether this is a `<Target>.Update` companion, whose clearable fields admit `null`.
+    is_update: bool,
+    /// Whether the record is abstract, and so has no values stamped with its own name.
+    is_abstract: bool,
+    /// The TypeScript name of the abstract base the record or case extends directly.
+    base: Option<String>,
 }
 
 fn emit_record_type(
@@ -1292,6 +1429,9 @@ fn emit_record_type(
         name,
         runtime_name,
         type_params,
+        is_update,
+        is_abstract,
+        base,
     } = header;
     // A generic record is a real generic here, with no default: NX never leaves a record's type
     // argument unspecified, so a TypeScript caller should not be able to either.
@@ -1300,23 +1440,53 @@ fn emit_record_type(
     } else {
         format!("<{}>", type_params.join(", "))
     };
-    out.push_str(&format!(
-        "{}type {}{} = {{\n",
-        export_policy.prefix(name),
-        name,
-        generics
-    ));
-    out.push_str(&format!("  readonly $type: {};\n", js_string(runtime_name)));
-    for field in fields {
-        let optional = if field.is_required { "" } else { "?" };
+    // A record in an inheritance hierarchy is an interface, so a record extending an abstract
+    // base is assignable wherever the base is expected. The base's `$type` is any string, the
+    // way a virtual member is; each record extending it narrows it to its own name.
+    let is_interface = is_abstract || base.is_some();
+    if is_interface {
+        let extends = base
+            .map(|base| format!(" extends {base}"))
+            .unwrap_or_default();
         out.push_str(&format!(
-            "  readonly {}{}: {};\n",
-            safe_object_key(&field.name),
-            optional,
-            emit_record_field_type(module, &field.ty, type_params, context)
+            "{}interface {}{}{} {{\n",
+            export_policy.prefix(name),
+            name,
+            generics,
+            extends
+        ));
+    } else {
+        out.push_str(&format!(
+            "{}type {}{} = {{\n",
+            export_policy.prefix(name),
+            name,
+            generics
         ));
     }
-    out.push_str("};\n");
+    let type_tag = if is_abstract {
+        "string".to_string()
+    } else {
+        js_string(runtime_name)
+    };
+    out.push_str(&format!("  readonly $type: {};\n", type_tag));
+    for field in fields {
+        let optional = if field.is_required { "" } else { "?" };
+        // An update companion's clearable field — one whose target is optional — is written
+        // `null` to clear it; every other field carries a value or is absent.
+        let cleared = if is_update && field.optional {
+            " | null"
+        } else {
+            ""
+        };
+        out.push_str(&format!(
+            "  readonly {}{}: {}{};\n",
+            safe_object_key(&field.name),
+            optional,
+            emit_record_field_type(module, &field.ty, type_params, context),
+            cleared
+        ));
+    }
+    out.push_str(if is_interface { "}\n" } else { "};\n" });
 }
 
 /// A record field's type with the record's own type parameters spelled as themselves.
@@ -1330,12 +1500,9 @@ fn emit_record_field_type(
         TypeRef::Name(name) if type_params.iter().any(|param| param == name.as_str()) => {
             name.as_str().to_string()
         }
-        TypeRef::Array(inner) => {
-            emit_array_type(emit_record_field_type(module, inner, type_params, context))
-        }
-        TypeRef::Nullable(inner) => format!(
-            "{} | null",
-            emit_record_field_type(module, inner, type_params, context)
+        TypeRef::Seq { inner, occ } => emit_occurrence_type(
+            emit_record_field_type(module, inner, type_params, context),
+            *occ,
         ),
         TypeRef::Applied { name, args } => {
             emit_applied_type(module, name.as_str(), args, context, &|inner| {
@@ -1377,6 +1544,7 @@ fn emit_applied_type(
 fn emit_union_type(
     name: &str,
     runtime_name: &str,
+    base: Option<String>,
     cases: &[CodegenUnionCase],
     module: &CodegenModule,
     context: &EmitContext,
@@ -1405,6 +1573,9 @@ fn emit_union_type(
                 runtime_name: &format!("{}.{}", runtime_name, case.name),
                 // A union case takes no type parameters.
                 type_params: &[],
+                is_update: false,
+                is_abstract: false,
+                base: base.clone(),
             },
             &case.fields,
             module,
@@ -1592,12 +1763,9 @@ fn emit_generic_prop_type(
             name.as_str().to_string()
         }
         TypeRef::Name(_) => emit_type_ref(module.id, ty, module, context),
-        TypeRef::Array(inner) => {
-            emit_array_type(emit_generic_prop_type(module, inner, component, context))
-        }
-        TypeRef::Nullable(inner) => format!(
-            "{} | null",
-            emit_generic_prop_type(module, inner, component, context)
+        TypeRef::Seq { inner, occ } => emit_occurrence_type(
+            emit_generic_prop_type(module, inner, component, context),
+            *occ,
         ),
         // An applied type's arguments follow the same rule as the prop itself, so a component
         // parameter used as one keeps its name.
@@ -1630,12 +1798,9 @@ fn emit_erased_field_type(
             "unknown".to_string()
         }
         TypeRef::Name(_) => emit_type_ref(module.id, ty, module, context),
-        TypeRef::Array(inner) => {
-            emit_array_type(emit_erased_field_type(module, inner, component, context))
-        }
-        TypeRef::Nullable(inner) => format!(
-            "{} | null",
-            emit_erased_field_type(module, inner, component, context)
+        TypeRef::Seq { inner, occ } => emit_occurrence_type(
+            emit_erased_field_type(module, inner, component, context),
+            *occ,
         ),
         TypeRef::Applied { name, args } => {
             emit_applied_type(module, name.as_str(), args, context, &|inner| {
@@ -1677,7 +1842,12 @@ fn emit_component_props_type(
             "  {}{}: {};\n",
             safe_object_key(&field.name),
             optional,
-            emit_generic_prop_type(module, &field.ty, component, context)
+            emit_generic_prop_type(
+                module,
+                &field.ty.read_type(field.optional),
+                component,
+                context
+            )
         ));
     }
     out.push_str("};\n");
@@ -1707,10 +1877,16 @@ fn emit_component_resolved_props_type(
         resolved_props_type, generics.declaration
     ));
     for field in &component.props {
+        // A resolved prop is read at its read type: `T?` for `p?:T`.
         out.push_str(&format!(
             "  readonly {}: {};\n",
             safe_object_key(&field.name),
-            emit_generic_prop_type(module, &field.ty, component, context)
+            emit_generic_prop_type(
+                module,
+                &field.ty.read_type(field.optional),
+                component,
+                context
+            )
         ));
     }
     out.push_str("};\n");
@@ -1735,9 +1911,11 @@ fn emit_component_element_type(
     ));
     out.push_str(&format!("  readonly $type: {};\n", js_string(runtime_name)));
     for field in &component.props {
+        // An empty optional prop is an omitted key.
         out.push_str(&format!(
-            "  readonly {}: {};\n",
+            "  readonly {}{}: {};\n",
             safe_object_key(&field.name),
+            if field.optional { "?" } else { "" },
             emit_erased_field_type(module, &field.ty, component, context)
         ));
     }
@@ -1761,10 +1939,18 @@ fn emit_component_state_type(
         state_type
     ));
     for field in &component.state {
+        // A state field is read at its read type: `T?` for `s?:T`. An empty optional one is an
+        // omitted key.
         out.push_str(&format!(
-            "  readonly {}: {};\n",
+            "  readonly {}{}: {};\n",
             safe_object_key(&field.name),
-            emit_erased_field_type(module, &field.ty, component, context)
+            if field.optional { "?" } else { "" },
+            emit_erased_field_type(
+                module,
+                &field.ty.read_type(field.optional),
+                component,
+                context
+            )
         ));
     }
     out.push_str("};\n");
@@ -1857,11 +2043,25 @@ fn emit_component_descriptor_factory(
     ));
     out.push_str(&format!("  return {{ $type: {}", js_string(runtime_name)));
     for field in &component.props {
-        out.push_str(&format!(
-            ", {}: resolvedProps{}",
-            safe_object_key(&field.name),
-            member_access(&field.name)
-        ));
+        // An empty optional prop is an omitted key on the descriptor, as it is on a record.
+        if field.optional {
+            out.push_str(&format!(
+                ", ...nxOptional({}, resolvedProps{}{})",
+                js_string(&field.name),
+                member_access(&field.name),
+                if admits_many(&field.resolved_ty) {
+                    ", true"
+                } else {
+                    ""
+                }
+            ));
+        } else {
+            out.push_str(&format!(
+                ", {}: resolvedProps{}",
+                safe_object_key(&field.name),
+                member_access(&field.name)
+            ));
+        }
     }
     out.push_str(" };\n");
     out.push_str("}\n");
@@ -1931,7 +2131,7 @@ fn emit_component_initial_state(
         context,
         out,
     );
-    emit_field_object_return(&component.state, "  ", out);
+    emit_state_object_return(&component.state, out);
     out.push_str("}\n");
 }
 
@@ -1998,18 +2198,17 @@ fn emit_normal_component_render_function(
     }
     for field in &component.state {
         let local_name = safe_identifier(&field.name);
-        if predeclared.contains(&local_name) {
-            out.push_str(&format!(
-                "  {} = state{};\n",
-                local_name,
-                member_access(&field.name)
-            ));
+        // State stores no key for an empty optional field, so its read is the empty value where
+        // the key is absent.
+        let read = if field.optional {
+            format!("(state{} ?? nxEmpty)", member_access(&field.name))
         } else {
-            out.push_str(&format!(
-                "  const {} = state{};\n",
-                local_name,
-                member_access(&field.name)
-            ));
+            format!("state{}", member_access(&field.name))
+        };
+        if predeclared.contains(&local_name) {
+            out.push_str(&format!("  {} = {};\n", local_name, read));
+        } else {
+            out.push_str(&format!("  const {} = {};\n", local_name, read));
         }
     }
     match component.body.as_ref() {
@@ -2020,7 +2219,7 @@ fn emit_normal_component_render_function(
             ));
         }
         None => {
-            out.push_str("  return null;\n");
+            out.push_str("  return [];\n");
         }
     }
     out.push_str("}\n");
@@ -2322,6 +2521,31 @@ fn intrinsic_runtime_helper(intrinsic: UpdateIntrinsic) -> &'static str {
     }
 }
 
+/// The parameters of the function declaration a call's callee names, when it names one.
+fn referenced_function_params<'a>(
+    callee: &CodegenExpression,
+    context: &'a EmitContext,
+) -> Option<&'a [CodegenParam]> {
+    let CodegenExpressionKind::Identifier {
+        reference: Some(reference),
+        ..
+    } = &callee.kind
+    else {
+        return None;
+    };
+    context
+        .module(reference.module_id)?
+        .declarations
+        .iter()
+        .find(|declaration| {
+            ReferenceKey::new(&declaration.reference) == ReferenceKey::new(reference)
+        })
+        .and_then(|declaration| match &declaration.kind {
+            CodegenDeclarationKind::Function { params, .. } => Some(params.as_slice()),
+            _ => None,
+        })
+}
+
 fn referenced_function_return_type(
     expression: &CodegenExpression,
     context: &EmitContext,
@@ -2370,10 +2594,10 @@ fn emit_typed_field_initializers(
             js_string(&field.name)
         ));
         let fallback = typed_field_fallback(current_module_id, field, context);
-        // An optional nullable prop is `T | null | undefined` on the input and `T | null` once
-        // resolved: a key present with no value resolves to `null`, the same as an absent one.
-        let present = if field.default.is_none() && is_nullable_type(&field.ty) {
-            format!("{}{} ?? null", input_name, member_access(&field.name))
+        // An optional prop reads as the empty value when its key is present with no value, the
+        // same as when it is absent.
+        let present = if field.optional && field.default.is_none() {
+            format!("({}{} ?? [])", input_name, member_access(&field.name))
         } else {
             format!("{}{}", input_name, member_access(&field.name))
         };
@@ -2404,7 +2628,9 @@ fn emit_initial_state_field_initializers(
             .default
             .as_ref()
             .map(|default| emit_expression(current_module_id, default, context))
-            .or_else(|| is_nullable_type(&field.ty).then(|| "null".to_string()))
+            // Optional state starts empty, and `nxEmpty` is typed as both the empty `T?` and the
+            // empty `T*`.
+            .or_else(|| field.optional.then(|| "nxEmpty".to_string()))
             .unwrap_or_else(|| {
                 format!(
                     "nxMissingField({}, {})",
@@ -2430,8 +2656,19 @@ fn typed_field_fallback(
     field
         .default
         .as_ref()
-        .map(|default| emit_expression(current_module_id, default, context))
-        .or_else(|| is_nullable_type(&field.ty).then(|| "null".to_string()))
+        .map(|default| {
+            lift_to_declared_occurrence(
+                emit_expression(current_module_id, default, context),
+                default,
+                &field.resolved_ty,
+            )
+        })
+        // An optional prop that was not written is empty.
+        .or_else(|| {
+            field
+                .optional
+                .then(|| empty_value_at(&field.resolved_ty).to_string())
+        })
         .unwrap_or_else(|| format!("{}{}", "props", member_access(&field.name)))
 }
 
@@ -2451,6 +2688,28 @@ fn emit_field_object_return(fields: &[CodegenComponentField], indent: &str, out:
     out.push_str(" };\n");
 }
 
+/// Returns the initial state object. An empty optional state field is an omitted key, as it is on
+/// a record and as every other engine stores it.
+fn emit_state_object_return(fields: &[CodegenComponentField], out: &mut String) {
+    let entries = fields
+        .iter()
+        .enumerate()
+        .map(|(index, field)| {
+            if field.optional {
+                format!(
+                    "...nxOptional({}, __nx_field_{}{})",
+                    js_string(&field.name),
+                    index,
+                    optional_many_argument(&field.resolved_ty)
+                )
+            } else {
+                format!("{}: __nx_field_{}", safe_object_key(&field.name), index)
+            }
+        })
+        .collect::<Vec<_>>();
+    out.push_str(&format!("  return {{ {} }};\n", entries.join(", ")));
+}
+
 fn emit_component_boundary_schema(
     current_module_id: RuntimeModuleId,
     fields: &[CodegenComponentField],
@@ -2461,18 +2720,18 @@ fn emit_component_boundary_schema(
         .iter()
         .map(|field| {
             let is_required = field.is_required
-                || (require_defaulted_fields
-                    && field.default.is_some()
-                    && !is_nullable_type(&field.ty));
+                || (require_defaulted_fields && field.default.is_some() && !field.optional);
             let options = if is_required {
                 String::new()
             } else {
                 ", { required: false }".to_string()
             };
+            // A host value is validated at the read type: `p?:T` admits `null`, `[]` and a
+            // missing key, and `p?:T+` an array that may be empty.
             format!(
                 "{}: nxField({}{})",
                 safe_object_key(&field.name),
-                emit_type_schema(current_module_id, field.owner_module_id, &field.ty, context),
+                emit_type_schema(current_module_id, &field.resolved_ty, context),
                 options
             )
         })
@@ -2481,66 +2740,63 @@ fn emit_component_boundary_schema(
     format!("nxRecordSchema({{ {} }})", fields)
 }
 
+/// The schema a host value is validated by at a site of type `ty`.
+///
+/// <para>The type is the resolved one, so an alias is the type it stands for and `xs?:Ints` for
+/// `type Ints = int+` is validated as `int*`, exactly as `xs?:int+` is. A schema validates the
+/// erased shape: an applied type is its record, and a type parameter is `object`.</para>
 fn emit_type_schema(
     current_module_id: RuntimeModuleId,
-    schema_module_id: RuntimeModuleId,
-    ty: &TypeRef,
+    ty: &CodegenTypeRef,
     context: &EmitContext,
 ) -> String {
     let mut seen = FxHashSet::default();
-    emit_type_schema_inner(current_module_id, schema_module_id, ty, context, &mut seen)
+    emit_type_schema_inner(current_module_id, ty, context, &mut seen)
 }
 
 fn emit_type_schema_inner(
     current_module_id: RuntimeModuleId,
-    schema_module_id: RuntimeModuleId,
-    ty: &TypeRef,
+    ty: &CodegenTypeRef,
     context: &EmitContext,
     seen: &mut FxHashSet<ReferenceKey>,
 ) -> String {
     match ty {
-        // A schema validates a host value against the erased shape, so an applied type is its
-        // record and its arguments contribute nothing.
-        TypeRef::Name(name) | TypeRef::Applied { name, .. } => emit_named_type_schema(
-            current_module_id,
-            schema_module_id,
-            name.as_str(),
-            context,
-            seen,
+        CodegenTypeRef::Primitive { name } => match name.as_str() {
+            "int" | "int32" | "int64" | "float64" => "nxNumberSchema".to_string(),
+            "float32" => "nxFloat32Schema".to_string(),
+            "string" => "nxStringSchema".to_string(),
+            "boolean" => "nxBooleanSchema".to_string(),
+            _ => js_string("any"),
+        },
+        CodegenTypeRef::Nominal { reference, .. } => {
+            emit_named_type_schema(current_module_id, reference, context, seen)
+        }
+        CodegenTypeRef::Seq { item, occ } => format!(
+            "{}({})",
+            occurrence_schema_helper(*occ),
+            emit_type_schema_inner(current_module_id, item, context, seen)
         ),
-        TypeRef::Array(inner) => format!(
-            "nxArraySchema({})",
-            emit_type_schema_inner(current_module_id, schema_module_id, inner, context, seen)
-        ),
-        TypeRef::Nullable(inner) => format!(
-            "nxNullableSchema({})",
-            emit_type_schema_inner(current_module_id, schema_module_id, inner, context, seen)
-        ),
-        TypeRef::Function { .. } => "nxAnySchema".to_string(),
+        CodegenTypeRef::Function { .. } => "nxAnySchema".to_string(),
+    }
+}
+
+/// The schema helper that validates a host value at a suffixed site: `?` admits the empty value
+/// or one item, `*` an array that may be empty, `+` an array that may not.
+fn occurrence_schema_helper(occ: Occurrence) -> &'static str {
+    match (occ.may_be_empty, occ.may_be_many) {
+        (true, false) => "nxOptionalSchema",
+        (false, true) => "nxNonEmptyArraySchema",
+        _ => "nxArraySchema",
     }
 }
 
 fn emit_named_type_schema(
     current_module_id: RuntimeModuleId,
-    schema_module_id: RuntimeModuleId,
-    name: &str,
+    reference: &CodegenReference,
     context: &EmitContext,
     seen: &mut FxHashSet<ReferenceKey>,
 ) -> String {
-    match name {
-        "int" | "int32" | "int64" | "float64" => {
-            return "nxNumberSchema".to_string();
-        }
-        "float32" => return "nxFloat32Schema".to_string(),
-        "string" => return "nxStringSchema".to_string(),
-        "boolean" => return "nxBooleanSchema".to_string(),
-        _ => {}
-    }
-
-    let Some(reference) = resolve_schema_reference(schema_module_id, name, context) else {
-        return js_string("any");
-    };
-    let key = ReferenceKey::new(&reference);
+    let key = ReferenceKey::new(reference);
     if !seen.insert(key) {
         return js_string("any");
     }
@@ -2551,7 +2807,6 @@ fn emit_named_type_schema(
         .map(|declaration| match &declaration.kind {
             SchemaDeclarationKind::Record { fields } => emit_record_schema(
                 current_module_id,
-                declaration.reference.module_id,
                 &declaration.reference.name,
                 fields,
                 context,
@@ -2559,7 +2814,6 @@ fn emit_named_type_schema(
             ),
             SchemaDeclarationKind::Union { cases } => emit_union_schema(
                 current_module_id,
-                declaration.reference.module_id,
                 &declaration.reference.name,
                 cases,
                 context,
@@ -2570,7 +2824,13 @@ fn emit_named_type_schema(
                 is_abstract,
                 ..
             } => {
-                if !*is_abstract && declaration.reference.module_id != current_module_id {
+                // Another module's component is reached through its schema where this module
+                // imports it; one reached only through an alias or another type is not imported,
+                // and its schema is written out here as a same-module one is.
+                if !*is_abstract
+                    && declaration.reference.module_id != current_module_id
+                    && context.can_reach_component_schema(current_module_id, reference)
+                {
                     format!(
                         "{}.element",
                         context.generated_component_name(
@@ -2657,7 +2917,6 @@ fn emit_constant_case_schema(cases: &[String]) -> String {
 
 fn emit_record_schema(
     current_module_id: RuntimeModuleId,
-    schema_module_id: RuntimeModuleId,
     runtime_name: &str,
     fields: &[CodegenRecordField],
     context: &EmitContext,
@@ -2670,12 +2929,14 @@ fn emit_record_schema(
             let default_metadata = field.default.as_ref().map(|default| {
                 emit_schema_field_default(current_module_id, &fields[..index], default, context)
             });
+            // A field is validated at its read type, and an optional one written empty is
+            // dropped, as it is from a record NX builds.
             emit_schema_field(
                 current_module_id,
-                schema_module_id,
                 &field.name,
-                &field.ty,
+                &field.resolved_ty,
                 field.is_required,
+                field.optional,
                 default_metadata,
                 context,
                 seen,
@@ -2692,7 +2953,6 @@ fn emit_record_schema(
 
 fn emit_union_schema(
     current_module_id: RuntimeModuleId,
-    schema_module_id: RuntimeModuleId,
     runtime_name: &str,
     cases: &[CodegenUnionCase],
     context: &EmitContext,
@@ -2717,7 +2977,6 @@ fn emit_union_schema(
             }
             emit_record_schema(
                 current_module_id,
-                schema_module_id,
                 &format!("{}.{}", runtime_name, case.name),
                 &case.fields,
                 context,
@@ -2742,10 +3001,10 @@ fn emit_component_schema(
         .map(|field| {
             emit_schema_field(
                 current_module_id,
-                field.owner_module_id,
                 &field.name,
-                &field.ty,
+                &field.resolved_ty,
                 field.is_required || require_all_fields,
+                field.optional,
                 None,
                 context,
                 seen,
@@ -2762,10 +3021,10 @@ fn emit_component_schema(
 
 fn emit_schema_field(
     current_module_id: RuntimeModuleId,
-    schema_module_id: RuntimeModuleId,
     name: &str,
-    ty: &TypeRef,
+    ty: &CodegenTypeRef,
     is_required: bool,
+    optional: bool,
     default_metadata: Option<String>,
     context: &EmitContext,
     seen: &mut FxHashSet<ReferenceKey>,
@@ -2773,11 +3032,13 @@ fn emit_schema_field(
     let default = default_metadata
         .map(|metadata| format!(", {}", metadata))
         .unwrap_or_default();
+    let optional = if optional { ", optional: true" } else { "" };
     format!(
-        "{{ name: {}, schema: {}, required: {}{} }}",
+        "{{ name: {}, schema: {}, required: {}{}{} }}",
         js_string(name),
-        emit_type_schema_inner(current_module_id, schema_module_id, ty, context, seen),
+        emit_type_schema_inner(current_module_id, ty, context, seen),
         is_required,
+        optional,
         default
     )
 }
@@ -2839,8 +3100,76 @@ fn emit_schema_default_factory(
     )
 }
 
-fn is_nullable_type(ty: &TypeRef) -> bool {
-    matches!(ty, TypeRef::Nullable(_))
+/// The TypeScript spelling of an item type under an occurrence: `T | NxEmpty` for `?`, since an
+/// empty value is `[]` in generated code and may be `null` from a host, and a readonly array for
+/// `+` and `*`.
+fn emit_occurrence_type(item: String, occ: Occurrence) -> String {
+    if occ.may_be_many {
+        emit_array_type(item)
+    } else if item == "unknown" {
+        // An erased type parameter already admits everything.
+        item
+    } else {
+        format!("{item} | NxEmpty")
+    }
+}
+
+/// The empty value at an optional field: `nxEmpty` where the read type is `T?`, and a plain empty
+/// array where it is `T*`, which TypeScript reads as an array.
+fn empty_value_at(declared: &CodegenTypeRef) -> &'static str {
+    if admits_many(declared) {
+        "[]"
+    } else {
+        "nxEmpty"
+    }
+}
+
+/// Lifts a value written at a `+` or `*` site to the sequence the site binds, as the interpreter's
+/// coercion does: an exactly-one value becomes a one-item array, a value that may be empty
+/// becomes its items, and a sequence stays itself.
+fn lift_to_declared_occurrence(
+    value: String,
+    expression: &CodegenExpression,
+    declared: &CodegenTypeRef,
+) -> String {
+    lift_to_many(value, expression, admits_many(declared))
+}
+
+/// A function body or a value's initializer, lifted to the declared type's occurrence where there
+/// is one.
+fn emit_declared_result(
+    current_module_id: RuntimeModuleId,
+    expression: &CodegenExpression,
+    declared: Option<&CodegenTypeRef>,
+    context: &EmitContext,
+) -> String {
+    let value = emit_expression(current_module_id, expression, context);
+    match declared {
+        Some(declared) => lift_to_declared_occurrence(value, expression, declared),
+        None => value,
+    }
+}
+
+/// Whether a resolved type admits more than one item. Aliases are resolved, so `type Ints = int+`
+/// answers as `int+` does.
+fn admits_many(ty: &CodegenTypeRef) -> bool {
+    matches!(ty, CodegenTypeRef::Seq { occ, .. } if occ.admits_many())
+}
+
+/// Lifts a value to a sequence where `many` says the site binds one, and leaves it alone
+/// otherwise; see [`lift_to_declared_occurrence`].
+fn lift_to_many(value: String, expression: &CodegenExpression, many: bool) -> String {
+    if !many {
+        return value;
+    }
+    match expression.ty.as_ref() {
+        // A join of an item with a sequence, `xs ?? 5` or `if c { xs } else { 5 }`, is already a
+        // sequence: the checker wraps the branch that supplies the item as a sequence of one.
+        Some(ty) if ty.admits_many() || ty.is_empty_type() => value,
+        Some(ty) if ty.admits_zero() => format!("[{value}].flat()"),
+        Some(_) => format!("[{value}]"),
+        None => value,
+    }
 }
 
 fn emit_type_ref(
@@ -2856,12 +3185,9 @@ fn emit_type_ref(
                 emit_type_ref(current_module_id, inner, module, context)
             })
         }
-        TypeRef::Array(inner) => {
-            emit_array_type(emit_type_ref(current_module_id, inner, module, context))
-        }
-        TypeRef::Nullable(inner) => format!(
-            "{} | null",
-            emit_type_ref(current_module_id, inner, module, context)
+        TypeRef::Seq { inner, occ } => emit_occurrence_type(
+            emit_type_ref(current_module_id, inner, module, context),
+            *occ,
         ),
         TypeRef::Function {
             params,
@@ -2870,7 +3196,12 @@ fn emit_type_ref(
             params.iter().map(|param| {
                 (
                     param.name.as_str(),
-                    emit_type_ref(current_module_id, &param.ty, module, context),
+                    emit_type_ref(
+                        current_module_id,
+                        &param.ty.read_type(param.optional),
+                        module,
+                        context,
+                    ),
                 )
             }),
             emit_type_ref(current_module_id, return_type, module, context),
@@ -2886,18 +3217,14 @@ fn emit_type(
 ) -> String {
     match ty {
         Type::Primitive(primitive) => emit_primitive_type(*primitive),
-        Type::Array(inner) => emit_array_type(emit_type(current_module_id, inner, module, context)),
-        Type::Nullable(inner) => {
-            format!(
-                "{} | null",
-                emit_type(current_module_id, inner, module, context)
-            )
+        Type::Seq { item, occ } => {
+            emit_occurrence_type(emit_type(current_module_id, item, module, context), *occ)
         }
         Type::Function { params, ret } => emit_function_type(
             params.iter().map(|param| {
                 (
                     param.name.as_str(),
-                    emit_type(current_module_id, &param.ty, module, context),
+                    emit_type(current_module_id, &param.read_type(), module, context),
                 )
             }),
             emit_type(current_module_id, ret, module, context),
@@ -2995,6 +3322,11 @@ fn emit_primitive_type(primitive: Primitive) -> String {
     }
 }
 
+/// True when a `for` iterable's static type holds at most one item (`T` or `T?`).
+fn iterates_at_most_one(iterable: &CodegenExpression) -> bool {
+    iterable.ty.as_ref().is_some_and(|ty| !ty.admits_many())
+}
+
 fn emit_expression(
     current_module_id: RuntimeModuleId,
     expression: &CodegenExpression,
@@ -3033,6 +3365,19 @@ fn emit_expression(
                 text
             }
         }
+        // `==` is structural: sequences compare by their items, records by their fields, an item
+        // equals a sequence of one, and every spelling of the empty value is the one empty. Only
+        // two exactly-one primitives compare as JavaScript's `===` would.
+        CodegenExpressionKind::Binary {
+            lhs,
+            op: op @ (BinOp::Eq | BinOp::Ne),
+            rhs,
+        } if !equality_is_primitive(lhs, rhs) => format!(
+            "{}nxValuesEqual({}, {})",
+            if *op == BinOp::Ne { "!" } else { "" },
+            emit_expression(current_module_id, lhs, context),
+            emit_expression(current_module_id, rhs, context)
+        ),
         CodegenExpressionKind::Binary { lhs, op, rhs } => {
             let text = format!(
                 "({} {} {})",
@@ -3075,14 +3420,32 @@ fn emit_expression(
             },
             emit_expression(current_module_id, expr, context)
         ),
-        CodegenExpressionKind::Call { callee, args } => format!(
-            "{}({})",
-            emit_expression(current_module_id, callee, context),
-            args.iter()
-                .map(|arg| emit_expression(current_module_id, arg, context))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
+        // An argument is lifted to its parameter's occurrence, as the interpreter binds it: an
+        // item passed where the parameter is `+` or `*` becomes a sequence of one.
+        // An argument left out is `undefined`, which a JavaScript default parameter replaces.
+        CodegenExpressionKind::Call { callee, args } => {
+            let params = referenced_function_params(callee, context);
+            format!(
+                "{}({})",
+                emit_expression(current_module_id, callee, context),
+                args.iter()
+                    .enumerate()
+                    .map(|(index, arg)| {
+                        let Some(arg) = arg else {
+                            return "undefined".to_string();
+                        };
+                        let value = emit_expression(current_module_id, arg, context);
+                        match params.and_then(|params| params.get(index)) {
+                            Some(param) => {
+                                lift_to_declared_occurrence(value, arg, &param.resolved_ty)
+                            }
+                            None => value,
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        }
         CodegenExpressionKind::IntrinsicCall {
             intrinsic,
             args,
@@ -3119,8 +3482,9 @@ fn emit_expression(
                 .map(|expr| emit_expression(current_module_id, expr, context))
                 // A missing `else` is an `else { }`, so the untaken branch is the empty sequence.
                 // Where the value is collected, `.flat()` splices it away; where it is bound, an
-                // empty array is what a sequence-typed site expects.
-                .unwrap_or_else(|| "[]".to_string())
+                // empty array is what a sequence-typed site expects. `nxEmpty` is that array typed
+                // `readonly never[]`, which TypeScript drops from `T | NxEmpty` when it infers `T`.
+                .unwrap_or_else(|| "nxEmpty".to_string())
         ),
         // Refused with a diagnostic before emission, in
         // `collect_expression_source_codegen_diagnostics`, so no program that compiled reaches
@@ -3169,10 +3533,15 @@ fn emit_expression(
             // terms as an item of a braced value list: `flatMap` splices a list-valued body and
             // drops an iteration that contributed nothing, and `nxRangeMap` collects results that
             // one `flat` splices the same way.
+            // `nxItems` iterates a sequence's items and an optional's one item, or nothing. A
+            // `for` over a value that holds at most one item yields its body's value unchanged
+            // (`nxForOne`), so an item stays an item rather than a one-element array.
             let (open, close) = if *over_range {
                 ("nxRangeMap(", ", ")
+            } else if iterates_at_most_one(iterable) {
+                ("nxForOne(", ", ")
             } else {
-                ("Array.from(", ").flatMap(")
+                ("nxItems(", ").flatMap(")
             };
             let tail = if *over_range { ".flat()" } else { "" };
             format!(
@@ -3198,12 +3567,35 @@ fn emit_expression(
             .as_ref()
             .map(|reference| context.reference_name(current_module_id, reference))
             .unwrap_or_else(|| {
-                format!(
+                let access = format!(
                     "{}[{}]",
                     emit_expression(current_module_id, base, context),
                     js_string(member)
-                )
+                );
+                // A record carries no key for an empty optional field, so a read of a field
+                // that admits zero is the empty value where the key is absent.
+                if expression.ty.as_ref().is_some_and(Type::admits_zero) {
+                    format!("({access} ?? nxEmpty)")
+                } else {
+                    access
+                }
             }),
+        CodegenExpressionKind::OptionalMember { base, member } => format!(
+            "nxStep({}, {})",
+            emit_expression(current_module_id, base, context),
+            js_string(member)
+        ),
+        CodegenExpressionKind::Exists { operand } => format!(
+            "nxExists({})",
+            emit_expression(current_module_id, operand, context)
+        ),
+        // The fallback is a thunk, so it runs only when the left operand is empty. It is the
+        // value itself, as in the interpreter; a `+` or `*` site it reaches lifts it there.
+        CodegenExpressionKind::Coalesce { lhs, rhs } => format!(
+            "nxCoalesce({}, () => {})",
+            emit_expression(current_module_id, lhs, context),
+            emit_expression(current_module_id, rhs, context)
+        ),
         CodegenExpressionKind::UnionCase {
             union_reference,
             case_name,
@@ -3238,22 +3630,31 @@ fn emit_expression(
         }
         CodegenExpressionKind::Record {
             name,
+            reference,
             fields,
             properties,
             content_field,
             content,
             is_update,
-            ..
-        } => emit_record_object(
-            current_module_id,
-            name,
-            // An update record keeps absent fields absent, so only what was supplied is emitted.
-            if *is_update { &[] } else { fields },
-            properties,
-            content_field.as_deref(),
-            content,
-            context,
-        ),
+        } => {
+            if *is_update {
+                // An update record keeps absent fields absent, so only what was supplied is
+                // emitted, and a present empty field is `null`: the one place the canonical
+                // encoding writes it, because key presence is what carries "cleared".
+                emit_update_record_object(current_module_id, name, fields, properties, context)
+            } else {
+                emit_record_object(
+                    current_module_id,
+                    name,
+                    reference.as_ref(),
+                    fields,
+                    properties,
+                    content_field.as_deref(),
+                    content,
+                    context,
+                )
+            }
+        }
         CodegenExpressionKind::ComponentDescriptor(descriptor) => {
             emit_component_descriptor(current_module_id, descriptor, context)
         }
@@ -3269,25 +3670,59 @@ fn emit_expression(
     }
 }
 
+fn emit_update_record_object(
+    current_module_id: RuntimeModuleId,
+    name: &str,
+    fields: &[CodegenRecordField],
+    properties: &[CodegenProperty],
+    context: &EmitContext,
+) -> String {
+    let mut sorted = properties.iter().collect::<Vec<_>>();
+    sorted.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
+    let mut entries = vec![context.type_tag_entry(name)];
+    entries.extend(sorted.into_iter().map(|property| {
+        let field = fields.iter().find(|field| field.name == property.name);
+        let value = emit_expression(current_module_id, &property.value, context);
+        let value = match field {
+            Some(field) => lift_to_declared_occurrence(value, &property.value, &field.resolved_ty),
+            None => value,
+        };
+        // Only a clearable field — one whose target is optional — can be written empty, and a
+        // present empty field is `null` on the wire.
+        if field.is_none_or(|field| field.optional) {
+            format!("{}: nxCleared({})", safe_object_key(&property.name), value)
+        } else {
+            format!("{}: {}", safe_object_key(&property.name), value)
+        }
+    }));
+    format!("({{ {} }})", entries.join(", "))
+}
+
 fn emit_record_object(
     current_module_id: RuntimeModuleId,
     name: &str,
+    reference: Option<&CodegenReference>,
     fields: &[CodegenRecordField],
     properties: &[CodegenProperty],
     content_field: Option<&str>,
     content: &[CodegenExpression],
     context: &EmitContext,
 ) -> String {
+    let content_binds_many = content_field
+        .and_then(|content_field| fields.iter().find(|field| field.name == content_field))
+        .is_some_and(|field| admits_many(&field.resolved_ty));
     let extra_properties = content_extra_properties(
         current_module_id,
         properties,
         content_field,
         content,
+        content_binds_many,
         context,
     );
     emit_materialized_record_object(
         current_module_id,
         name,
+        reference.and_then(|reference| context.literal_pin(current_module_id, reference, None)),
         fields,
         properties,
         extra_properties,
@@ -3308,9 +3743,18 @@ fn emit_component_descriptor(
                 .iter()
                 .any(|property| property.name == content_field)
         {
+            let binds_many = context
+                .component(&descriptor.component)
+                .and_then(|component| {
+                    component
+                        .props
+                        .iter()
+                        .find(|field| field.name == content_field)
+                })
+                .is_some_and(|field| admits_many(&field.resolved_ty));
             extra_properties.push((
                 content_field.to_string(),
-                emit_content_value(current_module_id, &descriptor.content, context),
+                emit_content_value(current_module_id, &descriptor.content, binds_many, context),
             ));
         }
     }
@@ -3318,6 +3762,12 @@ fn emit_component_descriptor(
         current_module_id,
         &descriptor.properties,
         extra_properties,
+        &|name| {
+            context
+                .component(&descriptor.component)
+                .and_then(|component| component.props.iter().find(|field| field.name == name))
+                .map(|field| field.resolved_ty.clone())
+        },
         context,
     );
     explicit_properties.sort_by(|lhs, rhs| lhs.0.cmp(&rhs.0));
@@ -3343,16 +3793,21 @@ fn emit_union_case_object(
     content: &[CodegenExpression],
     context: &EmitContext,
 ) -> String {
+    let content_binds_many = content_field
+        .and_then(|content_field| fields.iter().find(|field| field.name == content_field))
+        .is_some_and(|field| admits_many(&field.resolved_ty));
     let extra_properties = content_extra_properties(
         current_module_id,
         properties,
         content_field,
         content,
+        content_binds_many,
         context,
     );
     emit_materialized_record_object(
         current_module_id,
         &format!("{}.{}", union_reference.name, case_name),
+        context.literal_pin(current_module_id, union_reference, Some(case_name)),
         fields,
         properties,
         extra_properties,
@@ -3365,6 +3820,7 @@ fn content_extra_properties(
     properties: &[CodegenProperty],
     content_field: Option<&str>,
     content: &[CodegenExpression],
+    content_binds_many: bool,
     context: &EmitContext,
 ) -> Vec<(String, String)> {
     let mut extra_properties = Vec::new();
@@ -3376,7 +3832,7 @@ fn content_extra_properties(
         {
             extra_properties.push((
                 content_field.to_string(),
-                emit_content_value(current_module_id, content, context),
+                emit_content_value(current_module_id, content, content_binds_many, context),
             ));
         }
     }
@@ -3386,13 +3842,24 @@ fn content_extra_properties(
 fn emit_materialized_record_object(
     current_module_id: RuntimeModuleId,
     type_name: &str,
+    pin: Option<String>,
     fields: &[CodegenRecordField],
     properties: &[CodegenProperty],
     extra_properties: Vec<(String, String)>,
     context: &EmitContext,
 ) -> String {
-    let explicit_properties =
-        explicit_property_values(current_module_id, properties, extra_properties, context);
+    let explicit_properties = explicit_property_values(
+        current_module_id,
+        properties,
+        extra_properties,
+        &|name| {
+            fields
+                .iter()
+                .find(|field| field.name == name)
+                .map(|field| field.resolved_ty.clone())
+        },
+        context,
+    );
     let needs_materialization = fields.iter().any(|field| {
         !explicit_properties
             .iter()
@@ -3412,24 +3879,40 @@ fn emit_materialized_record_object(
 
     let mut emitted = FxHashSet::default();
     let mut entries = Vec::new();
-    entries.push(format!("$type: {}", js_string(type_name)));
+    entries.push(context.type_tag_entry(type_name));
 
     for field in fields {
         if let Some((_, value)) = explicit_properties
             .iter()
             .find(|(name, _)| name == &field.name)
         {
-            entries.push(format!("{}: {}", safe_object_key(&field.name), value));
+            // An optional field written empty is not stored: the key is spread in only when
+            // the value holds an item.
+            if field.optional {
+                entries.push(format!(
+                    "...nxOptional({}, {}{})",
+                    js_string(&field.name),
+                    value,
+                    optional_many_argument(&field.resolved_ty)
+                ));
+            } else {
+                entries.push(format!("{}: {}", safe_object_key(&field.name), value));
+            }
             emitted.insert(field.name.clone());
         } else if let Some(default) = field.default.as_ref() {
             entries.push(format!(
                 "{}: {}",
                 safe_object_key(&field.name),
-                emit_expression(current_module_id, default, context)
+                lift_to_declared_occurrence(
+                    emit_expression(current_module_id, default, context),
+                    default,
+                    &field.resolved_ty,
+                )
             ));
             emitted.insert(field.name.clone());
         } else {
-            entries.push(format!("{}: null", safe_object_key(&field.name)));
+            // An optional field that was not written is empty, and an empty optional field is an
+            // omitted key. A required one cannot be absent in checked code.
             emitted.insert(field.name.clone());
         }
     }
@@ -3443,26 +3926,43 @@ fn emit_materialized_record_object(
         entries.push(format!("{}: {}", safe_object_key(name), value));
     }
 
-    format!("({{ {} }})", entries.join(", "))
+    // The materializing function above returns a value that is not fresh, so only a plain
+    // literal needs pinning; see `EmitContext::literal_pin`.
+    match pin {
+        Some(pin) => format!("({{ {} }} satisfies {pin} as {pin})", entries.join(", ")),
+        None => format!("({{ {} }})", entries.join(", ")),
+    }
 }
 
 fn explicit_property_values(
     current_module_id: RuntimeModuleId,
     properties: &[CodegenProperty],
     extra_properties: Vec<(String, String)>,
+    declared_type: &dyn Fn(&str) -> Option<CodegenTypeRef>,
     context: &EmitContext,
 ) -> Vec<(String, String)> {
     let mut values = properties
         .iter()
         .map(|property| {
-            (
-                property.name.clone(),
-                emit_expression(current_module_id, &property.value, context),
-            )
+            let value = emit_expression(current_module_id, &property.value, context);
+            let value = match declared_type(&property.name) {
+                Some(declared) => lift_to_declared_occurrence(value, &property.value, &declared),
+                None => value,
+            };
+            (property.name.clone(), value)
         })
         .collect::<Vec<_>>();
     values.extend(extra_properties);
     values
+}
+
+/// The third argument of `nxOptional` for a field declared `p?:T+`, whose value stays a sequence.
+fn optional_many_argument(declared: &CodegenTypeRef) -> &'static str {
+    if admits_many(declared) {
+        ", true"
+    } else {
+        ""
+    }
 }
 
 fn emit_materialized_record_iife(
@@ -3488,25 +3988,39 @@ fn emit_materialized_record_iife(
             .get(&field.name)
             .cloned()
             .or_else(|| {
-                field
-                    .default
-                    .as_ref()
-                    .map(|default| emit_expression(current_module_id, default, context))
+                field.default.as_ref().map(|default| {
+                    lift_to_declared_occurrence(
+                        emit_expression(current_module_id, default, context),
+                        default,
+                        &field.resolved_ty,
+                    )
+                })
             })
-            .unwrap_or_else(|| "null".to_string());
+            // An optional field that was not written is empty; a later default may read it.
+            .unwrap_or_else(|| empty_value_at(&field.resolved_ty).to_string());
         out.push_str(&format!("const {} = {}; ", field_temp_name, value));
-        field_temps.push((field.name.clone(), field_temp_name));
+        field_temps.push((field.name.clone(), field_temp_name, field));
         emitted.insert(field.name.clone());
     }
 
     let mut entries = Vec::new();
-    entries.push(format!("$type: {}", js_string(type_name)));
-    for (field_name, field_temp_name) in &field_temps {
-        entries.push(format!(
-            "{}: {}",
-            safe_object_key(field_name),
-            field_temp_name
-        ));
+    entries.push(context.type_tag_entry(type_name));
+    for (field_name, field_temp_name, field) in &field_temps {
+        // An empty optional field is an omitted key.
+        if field.optional {
+            entries.push(format!(
+                "...nxOptional({}, {}{})",
+                js_string(field_name),
+                field_temp_name,
+                optional_many_argument(&field.resolved_ty)
+            ));
+        } else {
+            entries.push(format!(
+                "{}: {}",
+                safe_object_key(field_name),
+                field_temp_name
+            ));
+        }
     }
 
     let mut remaining = explicit_properties
@@ -3528,14 +4042,14 @@ fn emit_materialized_record_iife(
 fn emit_content_value(
     current_module_id: RuntimeModuleId,
     content: &[CodegenExpression],
+    binds_many: bool,
     context: &EmitContext,
 ) -> String {
-    // One content expression binds as itself, as it does in the interpreter, which binds a lone
-    // child and then coerces it to the property's type. A conditional needs nothing extra: analysis
-    // lifts a branch the join made a sequence at the source, so a taken `if c { <A/> }` is already
-    // `[A]` and an untaken one `[]`. Splicing a lone child instead would be wrong for a nullable
-    // sequence, turning an absent one into `[null]` where the interpreter binds `null`.
-    if content.len() == 1 {
+    // The one lone-child rule every engine shares: a content property declared `+` or `*` binds
+    // a sequence however many children were supplied, one included, and a property declared
+    // exactly-one or `?` binds a lone child as itself. That is the interpreter's coercion of a
+    // lone child to the property's type, applied here at the source.
+    if content.len() == 1 && !binds_many {
         emit_expression(current_module_id, &content[0], context)
     } else {
         emit_sequence_items(current_module_id, content, context)
@@ -3584,8 +4098,9 @@ fn item_can_splice(item: &CodegenExpression) -> bool {
 
 fn type_can_hold_a_sequence(ty: &Type) -> bool {
     match ty {
-        Type::Array(_) => true,
-        Type::Nullable(inner) => type_can_hold_a_sequence(inner),
+        // Any occurrence: a `?` item contributes its item when it holds one and nothing when it
+        // is empty, and only flattening removes the empty array it is then.
+        Type::Seq { .. } => true,
         Type::Named(named) => named.name.as_str() == "object",
         Type::Primitive(_) | Type::Union(_) | Type::UnionCase(_) | Type::Function { .. } => false,
         // A type parameter, an error, an unresolved variable: nothing here says it cannot.
@@ -3631,7 +4146,7 @@ fn emit_block(
             "return {}; ",
             emit_expression(current_module_id, expression, context)
         )),
-        None => out.push_str("return null; "),
+        None => out.push_str("return []; "),
     }
     out.push_str("})()");
     out
@@ -3735,11 +4250,12 @@ fn emit_index(program: &CodegenProgram, context: &EmitContext, target: CodegenTa
 fn collect_module_import_references(
     module: &CodegenModule,
     target: CodegenTarget,
+    extending: &FxHashSet<ReferenceKey>,
 ) -> Vec<CodegenReference> {
     let mut references = Vec::new();
     references.extend(collect_module_value_references(module));
     if target.is_typescript() {
-        references.extend(collect_module_type_references(module));
+        references.extend(collect_module_type_references(module, extending));
     }
     sort_and_dedup_references(&mut references);
     references
@@ -3754,13 +4270,48 @@ fn collect_module_value_references(module: &CodegenModule) -> Vec<CodegenReferen
     references
 }
 
-fn collect_module_type_references(module: &CodegenModule) -> Vec<CodegenReference> {
+fn collect_module_type_references(
+    module: &CodegenModule,
+    extending: &FxHashSet<ReferenceKey>,
+) -> Vec<CodegenReference> {
     let mut references = Vec::new();
     for declaration in &module.declarations {
         collect_declaration_type_references(module, declaration, &mut references);
+        // A declaration names its base in its `extends` clause.
+        if let Some(base) = nearest_base(declaration) {
+            if base.module_id != module.id {
+                references.push(base.clone());
+            }
+        }
+        // A literal of a record or union case that extends a base is pinned to its own type,
+        // which names the record, or the union the case is reached through.
+        visit_declaration_expressions(declaration, &mut |expression| {
+            let pinned = match &expression.kind {
+                CodegenExpressionKind::Record {
+                    reference: Some(reference),
+                    ..
+                } => reference,
+                CodegenExpressionKind::UnionCase {
+                    union_reference, ..
+                } => union_reference,
+                _ => return,
+            };
+            if pinned.module_id != module.id && extending.contains(&ReferenceKey::new(pinned)) {
+                references.push(pinned.clone());
+            }
+        });
     }
     sort_and_dedup_references(&mut references);
     references
+}
+
+/// The abstract base a record or union extends directly, if it extends one.
+fn nearest_base(declaration: &CodegenDeclaration) -> Option<&CodegenReference> {
+    match &declaration.kind {
+        CodegenDeclarationKind::Record { bases, .. }
+        | CodegenDeclarationKind::Union { bases, .. } => bases.first(),
+        _ => None,
+    }
 }
 
 fn sort_and_dedup_references(references: &mut Vec<CodegenReference>) {
@@ -3780,7 +4331,10 @@ fn collect_declaration_value_references(
     output: &mut Vec<CodegenReference>,
 ) {
     match &declaration.kind {
-        CodegenDeclarationKind::Function { body, .. } => {
+        CodegenDeclarationKind::Function { params, body, .. } => {
+            for default in params.iter().filter_map(|param| param.default.as_ref()) {
+                collect_expression_value_references(module.id, default, output);
+            }
             collect_expression_value_references(module.id, body, output);
         }
         CodegenDeclarationKind::Value { value, .. } => {
@@ -3792,7 +4346,7 @@ fn collect_declaration_value_references(
         CodegenDeclarationKind::Unsupported(_) => {}
         CodegenDeclarationKind::Record { .. }
         | CodegenDeclarationKind::Union { .. }
-        | CodegenDeclarationKind::TypeAlias => {}
+        | CodegenDeclarationKind::TypeAlias { .. } => {}
     }
 }
 
@@ -3845,7 +4399,10 @@ fn collect_declaration_type_references(
                 collect_expression_render_type_references(module.id, body, output);
             }
         }
-        CodegenDeclarationKind::TypeAlias | CodegenDeclarationKind::Unsupported(_) => {}
+        CodegenDeclarationKind::TypeAlias { target } => {
+            collect_type_ref_references(module, target, output);
+        }
+        CodegenDeclarationKind::Unsupported(_) => {}
     }
 }
 
@@ -3891,7 +4448,7 @@ fn collect_type_ref_schema_value_references(
                 output.push(reference.clone());
             }
         }
-        TypeRef::Array(inner) | TypeRef::Nullable(inner) => {
+        TypeRef::Seq { inner, .. } => {
             collect_type_ref_schema_value_references(module, inner, output);
         }
         TypeRef::Function {
@@ -3919,7 +4476,7 @@ fn collect_type_ref_references(
                 collect_type_ref_references(module, arg, output);
             }
         }
-        TypeRef::Array(inner) | TypeRef::Nullable(inner) => {
+        TypeRef::Seq { inner, .. } => {
             collect_type_ref_references(module, inner, output);
         }
         TypeRef::Function {
@@ -3952,8 +4509,8 @@ fn emit_function_type<'a>(
 
 fn collect_type_references(module: &CodegenModule, ty: &Type, output: &mut Vec<CodegenReference>) {
     match ty {
-        Type::Array(inner) | Type::Nullable(inner) => {
-            collect_type_references(module, inner, output);
+        Type::Seq { item, .. } => {
+            collect_type_references(module, item, output);
         }
         Type::Function { params, ret } => {
             for param in params {
@@ -4074,7 +4631,7 @@ fn collect_expression_value_references(
         }
         CodegenExpressionKind::Call { callee, args } => {
             collect_expression_value_references(current_module_id, callee, output);
-            for arg in args {
+            for arg in args.iter().flatten() {
                 collect_expression_value_references(current_module_id, arg, output);
             }
         }
@@ -4151,8 +4708,16 @@ fn collect_expression_value_references(
             collect_expression_value_references(current_module_id, base, output);
             collect_expression_value_references(current_module_id, index, output);
         }
-        CodegenExpressionKind::Member { base, .. } => {
+        CodegenExpressionKind::Member { base, .. }
+        | CodegenExpressionKind::OptionalMember { base, .. } => {
             collect_expression_value_references(current_module_id, base, output);
+        }
+        CodegenExpressionKind::Exists { operand } => {
+            collect_expression_value_references(current_module_id, operand, output);
+        }
+        CodegenExpressionKind::Coalesce { lhs, rhs } => {
+            collect_expression_value_references(current_module_id, lhs, output);
+            collect_expression_value_references(current_module_id, rhs, output);
         }
         CodegenExpressionKind::Record {
             fields,
@@ -4231,7 +4796,9 @@ fn collect_module_runtime_helpers(
     let mut output = JS_PROGRAM_MODULE_RESERVED_RUNTIME_NAMES
         .iter()
         .copied()
-        .filter(|helper| target.is_typescript() || !matches!(*helper, "NxResult" | "NxValue"))
+        .filter(|helper| {
+            target.is_typescript() || !matches!(*helper, "NxEmpty" | "NxResult" | "NxValue")
+        })
         .filter(|helper| helpers.contains(*helper))
         .collect::<Vec<_>>();
     output.sort();
@@ -4260,16 +4827,57 @@ fn collect_declaration_runtime_helpers(
     output: &mut FxHashSet<&'static str>,
 ) {
     match &declaration.kind {
-        CodegenDeclarationKind::Function { body, .. } => {
+        CodegenDeclarationKind::Function {
+            body,
+            params,
+            return_type,
+            ..
+        } => {
             collect_expression_runtime_helpers(body, output);
+            for param in params {
+                match &param.default {
+                    Some(default) => collect_expression_runtime_helpers(default, output),
+                    None if param.optional && !admits_many(&param.resolved_ty) => {
+                        output.insert("nxEmpty");
+                    }
+                    None => {}
+                }
+            }
+            if params.iter().any(|param| type_ref_has_optional(&param.ty))
+                || return_type.as_ref().is_some_and(type_has_optional)
+            {
+                output.insert("NxEmpty");
+            }
         }
-        CodegenDeclarationKind::Value { value, .. } => {
+        CodegenDeclarationKind::Value { value, ty, .. } => {
             collect_expression_runtime_helpers(value, output);
+            if ty.as_ref().is_some_and(type_has_optional) {
+                output.insert("NxEmpty");
+            }
         }
         CodegenDeclarationKind::Unsupported(_) => {
             output.insert("nxRuntimeError");
         }
         CodegenDeclarationKind::Component(component) => {
+            if component
+                .props
+                .iter()
+                .chain(&component.state)
+                .any(|field| field.optional)
+            {
+                output.insert("nxOptional");
+            }
+            if component.state.iter().any(|field| field.optional) {
+                output.insert("nxEmpty");
+            }
+            if component
+                .props
+                .iter()
+                .chain(&component.state)
+                .any(|field| type_ref_has_optional(&field.ty.read_type(field.optional)))
+            {
+                output.insert("NxEmpty");
+            }
             if !component.is_abstract {
                 if component.is_external {
                     output.insert("nxExternalComponentSchema");
@@ -4282,7 +4890,7 @@ fn collect_declaration_runtime_helpers(
             }
             if component.state.iter().any(|field| {
                 field.default.is_none()
-                    && !is_nullable_type(&field.ty)
+                    && !field.optional
                     && !component.is_external
                     && !component.is_abstract
             }) {
@@ -4292,9 +4900,58 @@ fn collect_declaration_runtime_helpers(
                 collect_expression_runtime_helpers(body, output);
             }
         }
-        CodegenDeclarationKind::Record { .. }
-        | CodegenDeclarationKind::Union { .. }
-        | CodegenDeclarationKind::TypeAlias => {}
+        CodegenDeclarationKind::Record { fields, .. } => {
+            if fields.iter().any(|field| type_ref_has_optional(&field.ty)) {
+                output.insert("NxEmpty");
+            }
+        }
+        CodegenDeclarationKind::Union { cases, .. } => {
+            if cases
+                .iter()
+                .flat_map(|case| case.fields.iter())
+                .any(|field| type_ref_has_optional(&field.ty))
+            {
+                output.insert("NxEmpty");
+            }
+        }
+        CodegenDeclarationKind::TypeAlias { target } => {
+            if type_ref_has_optional(target) {
+                output.insert("NxEmpty");
+            }
+        }
+    }
+}
+
+/// Whether a type reference spells a `?` occurrence anywhere, which the TypeScript emitter writes
+/// as `T | NxEmpty`.
+fn type_ref_has_optional(ty: &TypeRef) -> bool {
+    match ty {
+        TypeRef::Name(_) => false,
+        TypeRef::Seq { inner, occ } => !occ.may_be_many || type_ref_has_optional(inner),
+        TypeRef::Applied { args, .. } => args.iter().any(|(_, arg)| type_ref_has_optional(arg)),
+        TypeRef::Function {
+            params,
+            return_type,
+        } => {
+            params
+                .iter()
+                .any(|param| type_ref_has_optional(&param.ty.read_type(param.optional)))
+                || type_ref_has_optional(return_type)
+        }
+    }
+}
+
+/// The [`Type`] form of [`type_ref_has_optional`].
+fn type_has_optional(ty: &Type) -> bool {
+    match ty {
+        Type::Seq { item, occ } => !occ.may_be_many || type_has_optional(item),
+        Type::Function { params, ret } => {
+            params
+                .iter()
+                .any(|param| type_has_optional(&param.read_type()))
+                || type_has_optional(ret)
+        }
+        _ => false,
     }
 }
 
@@ -4302,11 +4959,11 @@ fn collect_component_schema_runtime_helpers(
     component: &CodegenComponent,
     output: &mut FxHashSet<&'static str>,
 ) {
-    for field in &component.props {
-        collect_type_ref_schema_runtime_helpers(&field.ty, output);
-    }
-    for field in &component.state {
-        collect_type_ref_schema_runtime_helpers(&field.ty, output);
+    for field in component.props.iter().chain(&component.state) {
+        collect_type_ref_schema_runtime_helpers(&field.ty.read_type(field.optional), output);
+        if field.optional && field.default.is_none() {
+            output.insert("nxEmpty");
+        }
     }
 }
 
@@ -4332,19 +4989,16 @@ fn collect_type_ref_schema_runtime_helpers(ty: &TypeRef, output: &mut FxHashSet<
                 output.insert("nxUnionSchema");
                 output.insert("nxAnySchema");
                 output.insert("nxArraySchema");
+                output.insert("nxNonEmptyArraySchema");
                 output.insert("nxBooleanSchema");
                 output.insert("nxFloat32Schema");
-                output.insert("nxNullableSchema");
+                output.insert("nxOptionalSchema");
                 output.insert("nxNumberSchema");
                 output.insert("nxStringSchema");
             }
         },
-        TypeRef::Array(inner) => {
-            output.insert("nxArraySchema");
-            collect_type_ref_schema_runtime_helpers(inner, output);
-        }
-        TypeRef::Nullable(inner) => {
-            output.insert("nxNullableSchema");
+        TypeRef::Seq { inner, occ } => {
+            output.insert(occurrence_schema_helper(*occ));
             collect_type_ref_schema_runtime_helpers(inner, output);
         }
         TypeRef::Function { .. } => {
@@ -4371,6 +5025,10 @@ fn collect_expression_runtime_helpers(
         } => {
             if *over_range {
                 output.insert("nxRangeMap");
+            } else if iterates_at_most_one(iterable) {
+                output.insert("nxForOne");
+            } else {
+                output.insert("nxItems");
             }
             collect_expression_runtime_helpers(iterable, output);
             collect_expression_runtime_helpers(body, output);
@@ -4402,6 +5060,9 @@ fn collect_expression_runtime_helpers(
                 BinOp::Div => {
                     output.insert("nxDiv");
                 }
+                BinOp::Eq | BinOp::Ne if !equality_is_primitive(lhs, rhs) => {
+                    output.insert("nxValuesEqual");
+                }
                 _ => {}
             }
             collect_expression_runtime_helpers(lhs, output);
@@ -4422,7 +5083,7 @@ fn collect_expression_runtime_helpers(
         }
         CodegenExpressionKind::Call { callee, args } => {
             collect_expression_runtime_helpers(callee, output);
-            for arg in args {
+            for arg in args.iter().flatten() {
                 collect_expression_runtime_helpers(arg, output);
             }
         }
@@ -4448,8 +5109,11 @@ fn collect_expression_runtime_helpers(
         } => {
             collect_expression_runtime_helpers(condition, output);
             collect_expression_runtime_helpers(then_branch, output);
-            if let Some(else_branch) = else_branch {
-                collect_expression_runtime_helpers(else_branch, output);
+            match else_branch {
+                Some(else_branch) => collect_expression_runtime_helpers(else_branch, output),
+                None => {
+                    output.insert("nxEmpty");
+                }
             }
         }
         CodegenExpressionKind::Match {
@@ -4495,14 +5159,39 @@ fn collect_expression_runtime_helpers(
             collect_expression_runtime_helpers(index, output);
         }
         CodegenExpressionKind::Member { base, .. } => {
+            if expression.ty.as_ref().is_some_and(Type::admits_zero) {
+                output.insert("nxEmpty");
+            }
             collect_expression_runtime_helpers(base, output);
+        }
+        CodegenExpressionKind::OptionalMember { base, .. } => {
+            output.insert("nxStep");
+            collect_expression_runtime_helpers(base, output);
+        }
+        CodegenExpressionKind::Exists { operand } => {
+            output.insert("nxExists");
+            collect_expression_runtime_helpers(operand, output);
+        }
+        CodegenExpressionKind::Coalesce { lhs, rhs } => {
+            output.insert("nxCoalesce");
+            collect_expression_runtime_helpers(lhs, output);
+            collect_expression_runtime_helpers(rhs, output);
         }
         CodegenExpressionKind::Record {
             fields,
             properties,
             content,
+            is_update,
             ..
         } => {
+            if *is_update {
+                if fields.is_empty() || fields.iter().any(|field| field.optional) {
+                    output.insert("nxCleared");
+                }
+            } else if fields.iter().any(|field| field.optional) {
+                output.insert("nxOptional");
+                output.insert("nxEmpty");
+            }
             for field in fields {
                 if let Some(default) = field.default.as_ref() {
                     collect_expression_runtime_helpers(default, output);
@@ -4572,12 +5261,15 @@ fn emit_literal(literal: &Literal) -> String {
         Literal::Float(value) | Literal::Float32(value) => {
             if value.0.is_finite() {
                 value.0.to_string()
+            } else if value.0.is_nan() {
+                "NaN".to_string()
+            } else if value.0 > 0.0 {
+                "Infinity".to_string()
             } else {
-                "null".to_string()
+                "-Infinity".to_string()
             }
         }
         Literal::Boolean(value) => value.to_string(),
-        Literal::Null => "null".to_string(),
     }
 }
 
@@ -4588,6 +5280,12 @@ fn is_integer_type(ty: Option<&Type>) -> bool {
             Primitive::Int | Primitive::Int32 | Primitive::Int64
         ))
     )
+}
+
+/// Whether both operands of an `==` or `!=` are exactly-one primitives, which JavaScript's `===`
+/// compares as NX does.
+fn equality_is_primitive(lhs: &CodegenExpression, rhs: &CodegenExpression) -> bool {
+    matches!(lhs.ty, Some(Type::Primitive(_))) && matches!(rhs.ty, Some(Type::Primitive(_)))
 }
 
 fn binop_text(op: BinOp) -> &'static str {

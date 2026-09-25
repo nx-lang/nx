@@ -41,8 +41,8 @@ public abstract class NxUpdate<TRecord> : NxUpdateRecord
     }
 
     /// <summary>
-    /// Writes the field <paramref name="property"/> names, with the key's value type. An unset value removes the
-    /// field.
+    /// Writes the field <paramref name="property"/> names, with the key's value type. A <see langword="null"/>
+    /// clears the field, which only a clearable field allows; an unset value removes the field.
     /// </summary>
     /// <typeparam name="TValue">The field's value type.</typeparam>
     /// <param name="property">The field's key.</param>
@@ -75,7 +75,8 @@ public abstract class NxUpdate<TRecord> : NxUpdateRecord
 
     /// <summary>
     /// Returns a new record equal to <paramref name="record"/> except for the fields the patch carries, where a
-    /// carried <see langword="null"/> sets the field to <see langword="null"/>. <paramref name="record"/> is not
+    /// carried <see langword="null"/> clears the field: the record's property becomes <see langword="null"/>, the
+    /// .NET reading of the empty value, which serializes as an omitted key. <paramref name="record"/> is not
     /// modified.
     /// </summary>
     /// <remarks>
@@ -99,16 +100,21 @@ public abstract class NxUpdate<TRecord> : NxUpdateRecord
 
     /// <summary>
     /// Returns a patch carrying exactly the fields whose values differ between <paramref name="before"/> and
-    /// <paramref name="after"/>, each set to its value in <paramref name="after"/>.
+    /// <paramref name="after"/>, each set to its value in <paramref name="after"/>. A field that is empty in
+    /// <paramref name="after"/> and not in <paramref name="before"/> is carried cleared, as
+    /// <see langword="null"/>, whether <paramref name="after"/> holds <see langword="null"/> or an empty array.
     /// </summary>
     /// <remarks>
     /// This is the NX <c>diff</c> intrinsic, with the comparison the TypeScript runtime's <c>nxValuesEqual</c>
-    /// makes: arrays compare element-wise and nested records structurally. A generated DTO wraps it as a
-    /// non-generic <c>Diff(before, after)</c>.
+    /// makes: an empty field reads as the empty value whether it holds <see langword="null"/> or an empty array,
+    /// arrays compare element-wise and nested records structurally. A generated DTO wraps it as a non-generic
+    /// <c>Diff(before, after)</c>.
     /// </remarks>
     /// <typeparam name="TUpdate">The generated update DTO type to produce.</typeparam>
     /// <param name="before">The earlier record.</param>
     /// <param name="after">The later record.</param>
+    /// <exception cref="InvalidOperationException">Thrown when a field that cannot be cleared is empty in
+    /// <paramref name="after"/> and not in <paramref name="before"/>, which a valid record never is.</exception>
     public static TUpdate Diff<TUpdate>(TRecord before, TRecord after)
         where TUpdate : NxUpdate<TRecord>, new()
     {
@@ -121,7 +127,10 @@ public abstract class NxUpdate<TRecord> : NxUpdateRecord
             object? next = property.GetValue(after);
             if (!NxValueEquality.ValuesEqual(property.GetValue(before), next))
             {
-                diff.SetFieldValue(property.Name, next);
+                // An emptied field is carried cleared, as the TypeScript runtime's nxCleared carries it.
+                object? carried = NxValueEquality.IsEmpty(next) ? null : next;
+                property.CheckClearable(carried, diff.Schema.NxType);
+                diff.SetFieldValue(property.Name, carried);
             }
         }
 

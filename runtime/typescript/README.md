@@ -1,7 +1,7 @@
 # @nx-lang/ir-runtime
 
 Evaluates persisted NX IR in JavaScript, in a browser or under Node, with no compiler and no NX
-checkout. The IR is the schema 4 image `@nx-lang/sdk-wasm`, `@nx-lang/sdk-node`, the .NET SDK
+checkout. The IR is the schema 5 image `@nx-lang/sdk-wasm`, `@nx-lang/sdk-node`, the .NET SDK
 and the `nxlang` CLI emit for one module of a compiled program: a binary a runtime reads in place.
 This package links images by name and turns them into values.
 
@@ -172,7 +172,7 @@ runtime never reads a source file.
 | `prepareNxIrModule`, `tryPrepareNxIrModule` | Validate and index one artifact. |
 | `linkNxIrProgram`, `tryLinkNxIrProgram` | Link a prepared entry module against resolved modules. |
 | `prepareNxIrProgram`, `tryPrepareNxIrProgram` | Prepare and link a self-contained artifact. |
-| `evaluateFunction` | Evaluate a function entrypoint by name with arguments. |
+| `evaluateFunction` | Evaluate a function entrypoint by name with positional arguments. The arguments may stop before trailing parameters that are optional or have a default; the function fills those itself. |
 | `constructComponentDescriptor`, `initializeComponent`, `evaluateComponent` | Build a component's descriptor, initialize it into an instance, and evaluate it from explicit state. |
 | `dispatchComponentActions` | Run a batch of actions and handler invocations against an instance. |
 | `callFunction` | Call the function a `{ $type: "Function", module, name }` record names — a rendered template, say — with arguments keyed by parameter name; an argument the function does not declare is dropped, a parameter it declares and the arguments lack is a diagnostic naming it. |

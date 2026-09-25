@@ -9,8 +9,8 @@ use nx_interpreter::{Interpreter, ResolvedProgram, Value};
 #[test]
 fn the_runtime_record_has_no_type_parameter_field() {
     let source = "type Contact = { name:string }\n\
-                  external component <SkiaLayout TItem:type itemsSource:TItem[]? />\n\
-                  let root() = { <SkiaLayout TItem=Contact itemsSource={} /> }";
+                  external component <SkiaLayout TItem:type itemsSource?:TItem+ />\n\
+                  let root() = { <SkiaLayout TItem=Contact itemsSource={<Contact name=\"Ada\" />} /> }";
     let result = nx_types::check_str(source, "type-parameters.nx");
     assert!(
         result.errors().is_empty(),

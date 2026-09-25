@@ -383,8 +383,13 @@ impl<'a> UndefinedIdentifierChecker<'a> {
         }
     }
 
+    /// Defines a function's parameters in order, checking each default before its own
+    /// parameter is defined: a default sees the parameters before it and nothing later.
     fn define_params(&mut self, scope: ScopeId, params: &[crate::Param]) {
         for param in params {
+            if let Some(default) = param.default {
+                self.check_expr(default, scope);
+            }
             self.scope_manager_define(scope, param.name.clone(), SymbolKind::Parameter, param.span);
         }
     }
@@ -502,6 +507,16 @@ impl<'a> UndefinedIdentifierChecker<'a> {
             ast::Expr::Index { base, index, .. } => {
                 self.check_expr(*base, scope);
                 self.check_expr(*index, scope);
+            }
+            ast::Expr::OptionalMember { base, .. } => {
+                self.check_expr(*base, scope);
+            }
+            ast::Expr::Exists { operand, .. } => {
+                self.check_expr(*operand, scope);
+            }
+            ast::Expr::Coalesce { left, right, .. } => {
+                self.check_expr(*left, scope);
+                self.check_expr(*right, scope);
             }
             ast::Expr::Member { base, .. } => {
                 let flattened = self.flattened_expr_name(expr_id);
@@ -918,10 +933,13 @@ mod tests {
             definition_id: LocalDefinitionId::new(0),
             visibility: Visibility::Export,
             item: InterfaceItemKind::Function {
+                form: crate::FunctionForm::Paren,
                 params: vec![InterfaceParam {
                     name: Name::new("n"),
                     ty: ast::TypeRef::name("int"),
                     is_content: false,
+                    optional: false,
+                    has_default: false,
                     span: TextSpan::default(),
                 }],
                 return_type: ast::TypeRef::name("int"),

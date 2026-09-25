@@ -47,25 +47,25 @@ export abstract external component <UiCommon
   height: Length = auto
   minWidth: float64 = 0
   minHeight: float64 = 0
-  maxWidth: float64?                // null means unbounded
-  maxHeight: float64?
-  margin: Insets?
-  padding: Insets?
+  maxWidth?: float64                // omitted means unbounded
+  maxHeight?: float64
+  margin?: Insets
+  padding?: Insets
   alignSelf: AlignSelf = auto       // vertical (block) axis
   justifySelf: AlignSelf = auto     // horizontal (inline) axis
   grow: float64 = 0
   shrink: float64 = 1
-  gridColumn: int?                  // zero-based; set both gridColumn and gridRow, or neither
-  gridRow: int?
+  gridColumn?: int                  // zero-based; set both gridColumn and gridRow, or neither
+  gridRow?: int
   columnSpan: int = 1
   rowSpan: int = 1
   background: Paint = none
-  border: Border?
-  cornerRadius: CornerRadii?
-  shadows: Shadow[]?
+  border?: Border
+  cornerRadius?: CornerRadii
+  shadows?: Shadow+
   clip: boolean = false
   opacity: float64 = 1              // 0..1; applies to the component's whole subtree
-  accessibility: Accessibility?     // null means derived from the component type and content
+  accessibility?: Accessibility     // omitted means derived from the component type and content
 />
 
 // §7.2 — horizontal flow container. `justify` distributes only the free space left after `grow` has
@@ -76,7 +76,7 @@ export external component <HStack extends UiCommon
   justify: Distribution = start     // horizontal main axis
   align: Alignment = stretch        // vertical cross axis
   wrap: boolean = false
-  content children: Element[]?
+  content children?: Element+
 />
 
 // §7.3 — vertical flow container. Named for its axis, following SwiftUI and Tamagui, so that `row`
@@ -86,7 +86,7 @@ export external component <VStack extends UiCommon
   justify: Distribution = start     // vertical main axis
   align: Alignment = stretch        // horizontal cross axis
   wrap: boolean = false
-  content children: Element[]?
+  content children?: Element+
 />
 
 // §7.4 — two-dimensional container, a subset of CSS Grid. Children place themselves with
@@ -94,13 +94,13 @@ export external component <VStack extends UiCommon
 // over the free cells. Explicit placements may overlap, and overlapping children paint in child
 // order, like a ZStack.
 export external component <Grid extends UiCommon
-  columns: TrackSize[]              // at least one
-  rows: TrackSize[]?                // omitted rows are created as `auto`
+  columns: TrackSize+              // at least one
+  rows?: TrackSize+                // omitted rows are created as `auto`
   columnGap: float64 = 0
   rowGap: float64 = 0
   justifyItems: Alignment = stretch
   alignItems: Alignment = stretch
-  content children: Element[]?
+  content children?: Element+
 />
 
 // §7.5 — z-order overlay and nothing else: children share one box, and later children paint above
@@ -110,7 +110,7 @@ export external component <Grid extends UiCommon
 export external component <ZStack extends UiCommon
   justifyItems: Alignment = stretch
   alignItems: Alignment = stretch
-  content children: Element[]?
+  content children?: Element+
 />
 
 // §7.6 — viewport for exactly one child. The child is measured unbounded along each scrollable axis
@@ -140,7 +140,7 @@ export external component <Card extends UiCommon
 // `background` and `border` are ignored.
 export external component <Divider extends UiCommon
   axis: Axis = horizontal
-  color: Color?                     // null means the theme divider color
+  color?: Color                     // omitted means the theme divider color
   thickness: float64 = 1
 />
 
@@ -153,15 +153,15 @@ export external component <Divider extends UiCommon
 export external component <Text extends UiCommon
   format: TextFormat = plain
   variant: TextVariant = body
-  color: Color?
-  fontFamily: string?
-  fontSize: float64?
-  fontWeight: float64?              // 1..1000
+  color?: Color
+  fontFamily?: string
+  fontSize?: float64
+  fontWeight?: float64              // 1..1000
   fontStyle: FontStyle = normal
   textAlign: TextAlign = start
-  lineHeight: float64?              // unitless multiplier
+  lineHeight?: float64              // unitless multiplier
   letterSpacing: float64 = 0
-  maxLines: int?                    // >= 1; null 
+  maxLines?: int                    // >= 1; omitted means no limit
   overflow: TextOverflow = clip
   content text: string
 />
@@ -173,7 +173,7 @@ export external component <Image extends UiCommon
   source: ImageSource
   alt: string
   fit: ObjectFit = contain
-  aspectRatio: float64?             // intrinsic ratio when the dimensions do not establish one
+  aspectRatio?: float64             // intrinsic ratio when the dimensions do not establish one
 />
 
 // §7.12 — host-provided symbolic icon, from a negotiated icon catalog; unknown names use a
@@ -182,7 +182,7 @@ export external component <Image extends UiCommon
 export external component
 <Icon extends UiCommon
   name: string
-  set: string?                      // null means the host default icon set
-  size: float64?                    // sets both dimensions; explicit width/height wins over it
-  color: Color?
+  set?: string                      // omitted means the host default icon set
+  size?: float64                    // sets both dimensions; explicit width/height wins over it
+  color?: Color
 />

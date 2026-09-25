@@ -6,18 +6,6 @@ use nx_hir::ast::BinOp;
 
 /// Evaluate an arithmetic binary operation
 pub fn eval_arithmetic_op(lhs: Value, op: BinOp, rhs: Value) -> Result<Value, RuntimeError> {
-    // Check for null operands
-    if lhs.is_null() {
-        return Err(RuntimeError::new(RuntimeErrorKind::NullOperation {
-            operation: format!("{:?}", op),
-        }));
-    }
-    if rhs.is_null() {
-        return Err(RuntimeError::new(RuntimeErrorKind::NullOperation {
-            operation: format!("{:?}", op),
-        }));
-    }
-
     match op {
         BinOp::Add => eval_add(lhs, rhs),
         BinOp::Sub => eval_sub(lhs, rhs),
@@ -389,8 +377,17 @@ mod tests {
     }
 
     #[test]
-    fn test_null_operand() {
-        let result = eval_add(Value::Null, Value::Int(5));
-        assert!(result.is_err());
+    fn test_empty_operand_is_a_type_mismatch() {
+        let result = eval_add(Value::empty(), Value::Int(5)).unwrap_err();
+        assert!(matches!(
+            result.kind(),
+            RuntimeErrorKind::TypeMismatch { .. }
+        ));
+
+        let result = eval_mul(Value::Int(5), Value::empty()).unwrap_err();
+        assert!(matches!(
+            result.kind(),
+            RuntimeErrorKind::TypeMismatch { .. }
+        ));
     }
 }
