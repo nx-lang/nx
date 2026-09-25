@@ -947,23 +947,13 @@ track for the workspace packages. The items below were deliberately left out.
 
 ### Removing DrawnUI from the playground
 
-The playground still vendors DrawnUi.React and keeps its own catalog, generator, coercion and
-renderer under `sites/playground`, duplicating what the fiddle now owns. With the fiddle as the
+The playground draws with the same `drawnui-react` package as the fiddle, and its catalog generator
+is a copy of the fiddle's (`update-fiddle-to-nx-occurrences`). It still keeps its own coercion and
+renderer under `sites/playground`, duplicating what the fiddle owns. With the fiddle as the
 public DrawnUI playground for NX, the playground can drop its DrawnUI target and become a
 general-purpose site. Blocked on deciding what a general-purpose playground draws instead — the
 examples, the gallery and the renderer all assume DrawnUI — which is a change of its own rather
 than a deletion.
-
-### The catalog as a library artifact, for shares
-
-Every NX share artifact carries the whole program's IR, and the program is the snippet plus the
-flattened catalog: about 880 KB of compact JSON for a snippet of a few lines, of which the snippet
-is a few kilobytes. Shipping the catalog's IR once with the fiddle's runtime bundle and storing
-only the snippet's in the share needs the IR to reference declarations across artifacts, which is
-the library-artifact work above: an imported external component must keep its defaults and
-inherited properties (NXE12/NXE13) before the catalog can be a library, and the runtime must link
-two IR documents before a share can be one of them. Until then compact JSON is the mitigation, and
-the private backend's artifact limit decides whether NX shares can be opened to the public.
 
 ### The fiddle's compile in a Web Worker
 
@@ -974,6 +964,26 @@ compiler hang — none is known; the compiler is a type checker and code generat
 non-terminating paths — would freeze the tab. Blocked on nothing but a reason: the worker's
 message protocol, the deadline and the crash handling are the playground's `src/worker`, and
 moving them to the fiddle is a port that adds a thread hop to every compile and every hover.
+
+### An old `T[]` property is reported twice
+
+Found by `update-fiddle-to-nx-occurrences`, compiling a share saved under NX 0.3.0. The source
+`type Plan = { colors: string[] }` gets two errors on one line:
+
+```
+L4: `[]` is not a type suffix; a sequence is written `*` or `+`
+L4: Property 'colors' has type string*, which admits zero; a property admits zero only through the `?` mark on its name: write `colors?:string+`
+```
+
+The first comes from `removed-list-suffix` in `crates/nx-syntax/src/validation.rs`. Lowering then
+reads `[]` as `*`, so `optional-in-type-slot` in `crates/nx-types/src/infer.rs`
+(`check_property_slot`) reports the recovered type as well. The second message is the complete
+fix-it, and the first only half of one. In a property slot, one diagnostic would be better: the
+`name?:T+` fix-it at the `[]`. Outside a property slot, the first message alone is right.
+
+Fixing it touches two crates, since the syntax check does not know it is in a property slot and the
+type checker does not know the `*` was written `[]`. So it waits. No workaround is needed: the
+second message already says what to write, and a migrated source compiles.
 
 ## Logical operands: the IR runtime coerces, the interpreter demands a boolean
 
