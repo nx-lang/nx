@@ -21,7 +21,7 @@ impl<'tree> SyntaxNode<'tree> {
 
     /// Returns the kind of this syntax node.
     pub fn kind(&self) -> SyntaxKind {
-        syntax_kind_from_id(self.node.kind_id(), self.node.kind())
+        syntax_kind_from_id(self.node.kind_id())
     }
 
     /// Returns the source text for this node.

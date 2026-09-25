@@ -814,8 +814,8 @@ public class NxUpdateRecordTests
 
     /// <summary>
     /// <see langword="null"/> is the .NET spelling of a cleared field: it crosses the boundary as
-    /// <see langword="null"/>, the NX runtime reads it as the empty value for the optional <c>author</c>, and it
-    /// comes back as a carried <see langword="null"/>.
+    /// <see langword="null"/>, the NX runtime reads it as the empty value for the optional <c>author</c>, and it comes
+    /// back as a carried <see langword="null"/>.
     /// </summary>
     [Fact]
     public void ClearedOptionalField_RoundTripsAsNullThroughTheRuntime()

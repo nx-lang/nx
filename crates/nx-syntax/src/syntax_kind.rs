@@ -546,8 +546,8 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
 ///
 /// Every validation pass reads the kind of every node it visits, so the name match above is made
 /// once per kind the grammar declares rather than once per visit. An id outside the grammar's
-/// table, such as the one tree-sitter gives an ERROR node, falls back to the name.
-pub(crate) fn syntax_kind_from_id(id: u16, kind: &str) -> SyntaxKind {
+/// table is the one tree-sitter gives an ERROR node, so it reads as ERROR.
+pub(crate) fn syntax_kind_from_id(id: u16) -> SyntaxKind {
     static KINDS: OnceLock<Vec<SyntaxKind>> = OnceLock::new();
     let kinds = KINDS.get_or_init(|| {
         let language = crate::language();
@@ -562,7 +562,7 @@ pub(crate) fn syntax_kind_from_id(id: u16, kind: &str) -> SyntaxKind {
     kinds
         .get(usize::from(id))
         .copied()
-        .unwrap_or_else(|| syntax_kind_from_str(kind))
+        .unwrap_or(SyntaxKind::ERROR)
 }
 
 #[cfg(test)]
