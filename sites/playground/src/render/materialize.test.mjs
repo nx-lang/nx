@@ -96,7 +96,7 @@ test("materialize leaves a handler unbound and reports it inert, and reports an 
 const TEMPLATED_LIST = `
   type Contact = { Id:int Title:string }
   let <ContactCell Item:Contact Index:int />: DrawnNode =
-    <SkiaStack BackgroundColor={Index % 2 == 1 ? "#0B1220" : "#111827"}>
+    <SkiaStack BackgroundColor={if Index % 2 == 1 { "#0B1220" } else { "#111827" }}>
       <SkiaLabel Text={Item.Title} />
       <SkiaLabel Text={"#" + Index} />
     </SkiaStack>

@@ -83,6 +83,29 @@ fn an_alias_that_carries_zero_is_rejected_in_the_type_slot() {
     );
 }
 
+/// The fix-it says to mark the name, so the property reads as marked: a use that leaves it out is
+/// not reported again. A file that wrote the old spelling on five properties, used a dozen times,
+/// would otherwise report sixty errors for five mistakes.
+#[test]
+fn a_property_rejected_in_the_type_slot_is_not_reported_again_where_it_is_left_out() {
+    for source in [
+        "abstract external component <Element />\n\
+         external component <Label text:string />\n\
+         component <Box width:float64? /> = { <Label text=\"x\" /> }\n\
+         let a = <Box />\nlet b = <Box />",
+        "let <Row gap:float64? /> = { \"row\" }\nlet a = <Row />\nlet b = <Row />",
+        "type Book = { title:string tags:string* }\nlet a = <Book title=\"a\" />\nlet b = <Book title=\"b\" />",
+    ] {
+        let errors = errors(source);
+        assert_eq!(errors.len(), 1, "{source}\n{errors:?}");
+        assert!(errors[0].contains("admits zero only"), "{errors:?}");
+    }
+
+    // A value written for it is still checked against the type it names.
+    let errors = errors("let <Row gap:float64? /> = { \"row\" }\nlet a = <Row gap=\"wide\" />");
+    assert_eq!(errors.len(), 2, "{errors:?}");
+}
+
 #[test]
 fn every_declaration_site_takes_the_mark() {
     assert_clean(

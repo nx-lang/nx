@@ -2305,9 +2305,15 @@ fn property_completion_items(context: PropertyCompletionContext) -> Vec<Completi
         .into_iter()
         .filter(|property| !context.supplied.contains(&property.name))
         .map(|property| CompletionItem {
-            // The detail is the property's declared type, which is what hover reports at the same
-            // position. One fact, spelled once, so the two cannot drift apart.
-            detail: Some(property.display_type),
+            // The detail is the property as hover reports it at the same position, less hover's
+            // qualifier. The name is part of it because optionality is marked on the name, not in
+            // the type.
+            detail: Some(format!(
+                "{}{}: {}",
+                property.name,
+                hover::optional_mark(property.optional),
+                property.display_type
+            )),
             label: property.name,
             kind: CompletionItemKind::Property,
         })
@@ -4626,6 +4632,43 @@ component <SearchBox placeholder:string /> = {
 
         assert!(!labels.contains(&"title".to_string()), "got: {labels:?}");
         assert!(labels.contains(&"subtitle".to_string()), "got: {labels:?}");
+    }
+
+    /// Optionality is on a property's name now, not in its type, so the detail has to carry the
+    /// name for the `?` to survive. It reads as hover does, less hover's qualifier.
+    #[test]
+    fn a_property_completion_detail_marks_an_optional_property_as_hover_does() {
+        let (source, position) = position_for(
+            "\nlet <Card title:string subtitle?:string tags?:string+ /> = <div>{title}</div>\n<Card ⟨cursor⟩/>\n",
+            CURSOR,
+        );
+        let snapshot = snapshot_for("nx://tenant/form.nx", &source, 1);
+        assert_fixture_parses(&snapshot, &source);
+
+        let details = snapshot
+            .completions(&DocumentUri::from("nx://tenant/form.nx"), position)
+            .expect("completions")
+            .items
+            .into_iter()
+            .filter(|item| item.kind == CompletionItemKind::Property)
+            .map(|item| (item.label, item.detail))
+            .collect::<Vec<_>>();
+
+        assert!(
+            details.contains(&("title".to_string(), Some("title: string".to_string()))),
+            "got: {details:?}"
+        );
+        assert!(
+            details.contains(&(
+                "subtitle".to_string(),
+                Some("subtitle?: string".to_string())
+            )),
+            "got: {details:?}"
+        );
+        assert!(
+            details.contains(&("tags".to_string(), Some("tags?: string+".to_string()))),
+            "got: {details:?}"
+        );
     }
 
     // ---------------------------------------------------------------------------------------------

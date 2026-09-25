@@ -2949,18 +2949,33 @@ impl<'a> InferenceContext<'a> {
             }
 
             // A field that is not written binds its default, or the empty value when it is
-            // optional; otherwise it is missing.
+            // optional; otherwise it is missing. A field whose declared type admits zero was
+            // rejected at the declaration and reads as marked, as an element's property does.
             let required: Vec<Name> = match effective_shape.as_ref() {
                 Some(shape) => shape
                     .fields
                     .iter()
-                    .filter(|field| field.is_required)
+                    .filter(|field| {
+                        field.is_required
+                            && !self
+                                .type_from_type_ref_in_quietly(
+                                    Some(&field.module_identity),
+                                    &field.ty,
+                                )
+                                .admits_zero()
+                    })
                     .map(|field| field.name.clone())
                     .collect(),
                 None => record_def
                     .properties
                     .iter()
-                    .filter(|field| field.default.is_none() && !field.optional)
+                    .filter(|field| {
+                        field.default.is_none()
+                            && !field.optional
+                            && !self
+                                .type_from_type_ref_in_quietly(None, &field.ty)
+                                .admits_zero()
+                    })
                     .map(|field| field.name.clone())
                     .collect(),
             };
@@ -4762,6 +4777,11 @@ impl<'a> InferenceContext<'a> {
 
         for (name, ty_ref, is_content, is_required, optional) in bindings {
             let ty = self.type_from_type_ref_in_quietly(declaring_module, ty_ref);
+            // A declared type that admits zero was rejected at the declaration, whose fix-it is to
+            // mark the name. It is read as marked, so a use that leaves it out is not a second
+            // report of the same mistake. A type argument is exactly one, so nothing else admits
+            // zero here.
+            let is_required = is_required && !ty.admits_zero();
             if is_content {
                 content_property = Some(name.clone());
             }

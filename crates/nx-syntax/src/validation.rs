@@ -498,9 +498,7 @@ fn first_item_len(text: &str) -> usize {
         return text.len();
     }
     match braced.named_child(0) {
-        Some(item) if item.kind() == "value_list_item_expression" => {
-            item.end_byte() - PREFIX.len()
-        }
+        Some(item) if item.kind() == "value_list_item_expression" => item.end_byte() - PREFIX.len(),
         _ => text.len(),
     }
 }

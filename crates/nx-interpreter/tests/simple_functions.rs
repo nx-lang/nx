@@ -373,7 +373,10 @@ fn test_union_match_selects_a_qualified_constant_case() {
     };
 
     // A fieldless case is a constant, so a qualified pattern naming one matches by value.
-    assert_eq!(call("stage", case("DealStage", "draft")), Value::String(SmolStr::new("draft")));
+    assert_eq!(
+        call("stage", case("DealStage", "draft")),
+        Value::String(SmolStr::new("draft"))
+    );
     assert_eq!(
         call("stage", case("DealStage", "pending_review")),
         Value::String(SmolStr::new("review"))
@@ -382,7 +385,10 @@ fn test_union_match_selects_a_qualified_constant_case() {
         call("stage", case("DealStage", "approved")),
         Value::String(SmolStr::new("approved"))
     );
-    assert_eq!(call("load", case("LoadState", "idle")), Value::String(SmolStr::new("idle")));
+    assert_eq!(
+        call("load", case("LoadState", "idle")),
+        Value::String(SmolStr::new("idle"))
+    );
 }
 
 // ============================================================================

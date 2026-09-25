@@ -2966,12 +2966,10 @@ fn emitted_runtime_equality_treats_an_item_as_a_sequence_of_one() {
     for target in [CodegenTarget::JavaScript, CodegenTarget::TypeScript] {
         let output = execute_script_against_emitted_runtime(
             target,
-            &format!(
-                "import {{ nxValuesEqual as eq }} from './nx-runtime.js';\n\
-                 console.log(JSON.stringify([eq(1, [1]), eq([1], 1), eq(1, [1, 1]), eq([], null), \
-                 eq(undefined, []), eq([], [[]]), eq({{ $type: 'P', a: 1 }}, {{ $type: 'P', a: [1] }}), \
-                 eq({{ $type: 'P' }}, {{ $type: 'P', a: 1 }})]));"
-            ),
+            "import { nxValuesEqual as eq } from './nx-runtime.js';\n\
+             console.log(JSON.stringify([eq(1, [1]), eq([1], 1), eq(1, [1, 1]), eq([], null), \
+             eq(undefined, []), eq([], [[]]), eq({ $type: 'P', a: 1 }, { $type: 'P', a: [1] }), \
+             eq({ $type: 'P' }, { $type: 'P', a: 1 })]));",
         );
         assert_json_values_eq(
             &output,
