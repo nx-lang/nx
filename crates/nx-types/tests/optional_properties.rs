@@ -95,6 +95,7 @@ fn a_property_rejected_in_the_type_slot_is_not_reported_again_where_it_is_left_o
          let a = <Box />\nlet b = <Box />",
         "let <Row gap:float64? /> = { \"row\" }\nlet a = <Row />\nlet b = <Row />",
         "type Book = { title:string tags:string* }\nlet a = <Book title=\"a\" />\nlet b = <Book title=\"b\" />",
+        "let f(a:int, b:int?) = { a }\nlet root() = { f(1) + f(2) }",
     ] {
         let errors = errors(source);
         assert_eq!(errors.len(), 1, "{source}\n{errors:?}");
@@ -102,8 +103,13 @@ fn a_property_rejected_in_the_type_slot_is_not_reported_again_where_it_is_left_o
     }
 
     // A value written for it is still checked against the type it names.
-    let errors = errors("let <Row gap:float64? /> = { \"row\" }\nlet a = <Row gap=\"wide\" />");
-    assert_eq!(errors.len(), 2, "{errors:?}");
+    for source in [
+        "let <Row gap:float64? /> = { \"row\" }\nlet a = <Row gap=\"wide\" />",
+        "let f(a:int, b:int?) = { a }\nlet root() = { f(2, \"x\") }",
+    ] {
+        let errors = errors(source);
+        assert_eq!(errors.len(), 2, "{source}\n{errors:?}");
+    }
 }
 
 #[test]

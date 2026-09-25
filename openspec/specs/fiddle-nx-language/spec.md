@@ -179,6 +179,14 @@ backend's limit.
 - **WHEN** an NX share is opened on a host that has not registered NX
 - **THEN** the host SHALL show the source and say the language is unknown rather than failing
 
+#### Scenario: A share from another NX IR schema is reported
+- **WHEN** the player opens a share whose NX IR image was written under a schema version other than
+  the one the NX runtime bundle reads
+- **THEN** the player SHALL draw the engine's failure label naming both schema versions, and SHALL
+  NOT attempt to link or draw the share
+- **AND** the share's editor link SHALL still open the stored source in NX, where compiling it
+  reports whatever the current language rejects in the snippet's own line numbers
+
 ### Requirement: The engine lets a language prepare its runtime
 The engine's React surface SHALL let a registered language declare a preparation step, and SHALL
 await it before the language's first compile in the editor and before the player runs a share in

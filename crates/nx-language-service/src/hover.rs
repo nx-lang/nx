@@ -64,6 +64,12 @@ pub(crate) fn optional_mark(optional: bool) -> &'static str {
     }
 }
 
+/// `subtitle?: string`: one property or parameter as hover and completion show it, with the mark on
+/// the name. Both call this, so the two cannot drift apart.
+pub(crate) fn signature(name: &str, optional: bool, ty: &str) -> String {
+    format!("{}{}: {}", name, optional_mark(optional), ty)
+}
+
 /// A declaration spelled the way its author wrote it, read from HIR.
 ///
 /// <para>The item is the declaration itself, so this is the one place that knows an element-style
@@ -228,11 +234,10 @@ fn record_signature(record: &RecordDef) -> String {
 /// literal ones would make the hover's fidelity depend on what the default happens to be. The
 /// omission is uniform instead.</para>
 fn field_signature(field: &RecordField) -> String {
-    format!(
-        "{}{}: {}",
+    signature(
         field.name.as_str(),
-        optional_mark(field.optional),
-        type_ref_display(&field.ty)
+        field.optional,
+        &type_ref_display(&field.ty),
     )
 }
 
@@ -290,10 +295,7 @@ fn union_signature(union_def: &UnionDef) -> String {
 
 /// `(parameter) count: int`, or `(parameter) count?: int` for an optional parameter.
 pub(crate) fn parameter(name: &str, optional: bool, ty: &str) -> String {
-    prefixed(
-        "parameter",
-        format!("{}{}: {}", name, optional_mark(optional), ty),
-    )
+    prefixed("parameter", signature(name, optional, ty))
 }
 
 /// `(property) User.name: string`, or `(property) User.subtitle?: string` for an optional one.
@@ -302,10 +304,7 @@ pub(crate) fn property(qualifier: Option<&str>, name: &str, optional: bool, ty: 
         Some(qualifier) => format!("{}.{}", qualifier, name),
         None => name.to_string(),
     };
-    prefixed(
-        "property",
-        format!("{}{}: {}", name, optional_mark(optional), ty),
-    )
+    prefixed("property", signature(&name, optional, ty))
 }
 
 /// `(type parameter) Range.T`.

@@ -1173,11 +1173,30 @@ impl<'a> InferenceContext<'a> {
             // The body reads an optional parameter at a type that admits zero.
             self.env
                 .bind(param.name.clone(), read_type(&param_ty, param.optional));
+            // A parameter rejected for a type that admits zero stays an error in the body, but the
+            // signature reads it as the fix-it writes it, `b?:T` for `b:T?`, so a call still checks
+            // the argument written for it, as an element's property does.
+            let (signature_ty, optional) = match param_ty {
+                Type::Error => {
+                    let declared = self.type_from_type_ref_in_quietly(None, &param.ty);
+                    if declared.admits_zero() {
+                        let marked = if declared.admits_many() {
+                            Occurrence::ONE_OR_MORE
+                        } else {
+                            Occurrence::ONE
+                        };
+                        (declared.with_occurrence(marked), true)
+                    } else {
+                        (Type::Error, param.optional)
+                    }
+                }
+                ty => (ty, param.optional),
+            };
             param_types.push(FunctionParam {
                 name: param.name.clone(),
-                ty: param_ty,
+                ty: signature_ty,
                 is_content: param.is_content,
-                optional: param.optional,
+                optional,
             });
         }
 
@@ -6938,39 +6957,60 @@ impl<'a> InferenceContext<'a> {
 
     /// The form and parameters of a call's callee when it names a declared function under its
     /// own name, each parameter as its name and whether a caller may omit it.
-    fn declared_function_callee(&self, callee: ExprId) -> Option<DeclaredCallee> {
+    fn declared_function_callee(&mut self, callee: ExprId) -> Option<DeclaredCallee> {
         let ast::Expr::Ident(name) = self.module.raw_module().expr(callee) else {
             return None;
         };
         if self.env.binding_depth(name).is_some_and(|depth| depth > 1) {
             return None;
         }
-        match self.resolve_function_definition(name)? {
+        let resolved = self.resolve_function_definition(name)?;
+        let (form, params) = match &resolved {
             ResolvedPreparedItem::Raw {
                 item: Item::Function(function),
                 ..
-            } => Some(DeclaredCallee {
-                name: name.clone(),
-                form: function.form,
-                params: function
+            } => (
+                function.form,
+                function
                     .params
                     .iter()
-                    .map(|param| (param.name.clone(), param.is_omissible()))
-                    .collect(),
-            }),
+                    .map(|param| (param.name.clone(), param.ty.clone(), param.is_omissible()))
+                    .collect::<Vec<_>>(),
+            ),
             ResolvedPreparedItem::Imported { item, .. } => {
-                let (_, _, form, params, _, _) = interface_function_signature(&item)?;
-                Some(DeclaredCallee {
-                    name: name.clone(),
+                let (_, _, form, params, _, _) = interface_function_signature(item)?;
+                (
                     form,
-                    params: params
-                        .iter()
-                        .map(|param| (param.name.clone(), param.is_omissible()))
-                        .collect(),
-                })
+                    params
+                        .into_iter()
+                        .map(|param| {
+                            let omissible = param.is_omissible();
+                            (param.name, param.ty, omissible)
+                        })
+                        .collect::<Vec<_>>(),
+                )
             }
-            _ => None,
-        }
+            _ => return None,
+        };
+        // A parameter whose declared type admits zero was rejected at the declaration and reads as
+        // marked, as an element's property does, so a call that leaves it off is not a second
+        // report of the same mistake.
+        let module_identity = resolved.module_identity().to_string();
+        let params = params
+            .into_iter()
+            .map(|(param_name, ty, omissible)| {
+                let omissible = omissible
+                    || self
+                        .type_from_type_ref_in_quietly(Some(&module_identity), &ty)
+                        .admits_zero();
+                (param_name, omissible)
+            })
+            .collect();
+        Some(DeclaredCallee {
+            name: name.clone(),
+            form,
+            params,
+        })
     }
 
     // The `Err` is large for the reason `RecordResolutionError` records: it carries the spans its

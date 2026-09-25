@@ -320,6 +320,12 @@ declaration name against an authored tag as plain text.
 - **THEN** the language service SHALL include undeclared properties accepted by that component
 - **AND** it SHALL NOT include properties already supplied in that opening tag
 
+#### Scenario: A property completion's detail shows the property as hover does
+- **WHEN** a client requests completions inside an opening tag for `<Card title:string subtitle?:string tags?:string+ />`
+- **THEN** the detail of `title` SHALL be `title: string`
+- **AND** the detail of `subtitle` SHALL be `subtitle?: string`, keeping the mark on the name
+- **AND** the detail of `tags` SHALL be `tags?: string+`
+
 #### Scenario: Property value position includes contextual member completions
 - **WHEN** a client requests completions immediately after `=` in a property value position whose
   declared type is a discriminated union

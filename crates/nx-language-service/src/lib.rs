@@ -2308,11 +2308,10 @@ fn property_completion_items(context: PropertyCompletionContext) -> Vec<Completi
             // The detail is the property as hover reports it at the same position, less hover's
             // qualifier. The name is part of it because optionality is marked on the name, not in
             // the type.
-            detail: Some(format!(
-                "{}{}: {}",
-                property.name,
-                hover::optional_mark(property.optional),
-                property.display_type
+            detail: Some(hover::signature(
+                &property.name,
+                property.optional,
+                &property.display_type,
             )),
             label: property.name,
             kind: CompletionItemKind::Property,

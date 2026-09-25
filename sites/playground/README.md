@@ -116,11 +116,14 @@ is one reviewable diff:
 pnpm add drawnui-react@<version> --save-exact   # move the pin
 pnpm run generate-catalog                        # regenerate the catalog from the new declarations
 pnpm run sync-drawnui                            # copy the assets from ~/src/DrawnUi.React at v<version>
-pnpm run sync-drawnui -- --source /path/to/DrawnUi.React
 ```
 
-`catalog/catalog-meta.json` records the version the catalog was generated from, and `pnpm test`
-fails when it differs from the pin, naming both.
+The sync reads `~/src/DrawnUi.React` by default. For a checkout elsewhere, pass
+`pnpm run sync-drawnui -- --source /path/to/DrawnUi.React`.
+
+`catalog/catalog-meta.json` records the version the catalog was generated from, and
+`docs/UPSTREAM.md` the release the assets were copied from. `pnpm test` fails when either differs
+from the pin, naming both versions and the command that brings it level.
 
 The package ships only its compiled runtime. The asset trees the examples read are not in it, so the
 sync copies them: `fonts/`, `images/`, `lottie/` (Skottie animations), `anims/` (sprite sheets) and
@@ -171,9 +174,10 @@ component <Page /> = {
 DrawnUI's own behavior works as before: scroll regions scroll, carousels swipe, drawers drag,
 ripples play, switches toggle, sliders drag, whether or not a handler is bound.
 
-All twenty demo pages DrawnUI had at 0.1.0-preview.4 are ported, and each says where it stands: **complete** (no note), **static** (drawn correctly, with some of the original's
-motion or interaction absent), or **reduced** (scaled down, because NX cannot express the mechanism
-the original demonstrates). SVG, Text, Shapes and Common Controls are complete; the rest gained
+All twenty demo pages DrawnUI had at 0.1.0-preview.4 are ported, and each says where it stands:
+**complete** (no note), **static** (drawn correctly, with some of the original's motion or
+interaction absent), or **reduced** (scaled down, because NX cannot express the mechanism the
+original demonstrates). SVG, Text, Shapes and Common Controls are complete; the rest gained
 interaction or code-driven mechanisms upstream and say so. Every non-complete example names its gap
 from a fixed vocabulary, and the vocabulary separates what NX lacks from what a port has not used:
 `animation` and `code-behind` (an engine object built, driven or read from code: a shader effect,

@@ -23,6 +23,12 @@ with the same base type. A type parameter definition (`T:type`) SHALL NOT take t
 - **AND** the diagnostic for `subtitle` SHALL show `subtitle?:string`
 - **AND** the diagnostic for `tags` SHALL show `tags?:string+`
 
+#### Scenario: A property rejected in the type slot is not reported again where it is left out
+- **WHEN** a file declares `component <Box width:float64? />`, `let <Row gap:float64? />`, `type Book = { title:string tags:string* }` or `let f(a:int, b:int?)`, and writes `<Box />`, `<Row />`, `<Book title="a" />` or `f(1)` twice
+- **THEN** type checking SHALL report the declaration once, with its `name?:` fix-it
+- **AND** SHALL NOT also report the property as required at either use
+- **AND** SHALL still check a value written for it against the type it names
+
 #### Scenario: An alias that carries zero is rejected in the type slot
 - **WHEN** a file contains `type Maybe = string?` and `type Book = { subtitle:Maybe }`
 - **THEN** type checking SHALL reject `subtitle`, naming `Maybe` as carrying an occurrence that admits zero
