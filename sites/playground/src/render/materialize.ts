@@ -10,9 +10,8 @@
  * not an instance of the tree — so it is left unbound and reported once as inert.</para>
  */
 import { initializeComponent, type NxCanonicalValue } from "@nx-lang/ir-runtime";
-import type { SkiaControl } from "../drawnui/core/SkiaControl";
-import { SkiaLabel } from "../drawnui/controls/SkiaLabel";
-import { Registry, applyProps } from "../drawnui/react/registry";
+import * as DrawnUi from "drawnui-react/core";
+import { SkiaLabel, type SkiaControl } from "drawnui-react/core";
 import { isAuthoredComponent, type Program } from "./evaluate";
 import { stripInertHandlers } from "./instances";
 import { childrenOf, coerceProps, components, type BindTemplate, type NxObject, type NxValue } from "./values";
@@ -65,12 +64,12 @@ export function materialize(value: NxValue, context: MaterializeContext): SkiaCo
     return [];
   }
 
-  const ctor = Registry[type];
+  const ctor = controlClass(type);
   if (ctor === undefined) {
     context.reportUnknown(type);
     return [];
   }
-  const control = new ctor() as SkiaControl;
+  const control = new ctor();
   control.ApplyInitialStyles?.(true);
   const props = coerceProps(
     node,
@@ -80,11 +79,38 @@ export function materialize(value: NxValue, context: MaterializeContext): SkiaCo
     },
     context.bindTemplate,
   );
-  applyProps(control, null, props);
+  applyProps(control, props);
   for (const child of childrenOf(node)) {
     for (const built of materialize(child, context)) {
       control.AddSubView(built);
     }
   }
   return [control];
+}
+
+/**
+ * The class a tag builds. DrawnUI names each tag's class after the tag, and `drawnui-react/core`
+ * exports every one of them, including the layout presets (`SkiaStack`, `SkiaGrid` and the rest) and
+ * `TextSpan`. So the package's own `Registry`, which it does not export, is not needed.
+ */
+function controlClass(type: string): (new () => SkiaControl) | undefined {
+  const candidate = (DrawnUi as Record<string, unknown>)[type];
+  return typeof candidate === "function" ? (candidate as new () => SkiaControl) : undefined;
+}
+
+/** What React never hands a control: the reconciler skips these in its own `applyProps`. */
+const RESERVED = new Set(["children", "key", "ref"]);
+
+/**
+ * Sets each prop on the control under its own name, as DrawnUI's reconciler does when it creates
+ * a control (`applyProps` in `src/react/reconciler.ts`, v0.1.0-preview.12). A new control has no
+ * earlier props, so the reconciler's update path does not apply: resetting a removed prop to its
+ * default, then `Update` or `RepaintComposition`. A cell is rebuilt, never patched.
+ */
+function applyProps(control: SkiaControl, props: Record<string, unknown>): void {
+  for (const [name, value] of Object.entries(props)) {
+    if (!RESERVED.has(name)) {
+      (control as unknown as Record<string, unknown>)[name] = value;
+    }
+  }
 }

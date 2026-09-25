@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Compile } from "../compile";
-import { Canvas } from "../drawnui/react/index";
+import { Canvas } from "drawnui-react";
 import { EXAMPLES, coverageNote, type Example } from "../examples";
 import { useNxDrawing } from "../render/useNxDrawing";
 
@@ -71,7 +71,7 @@ export interface GalleryProps {
  * projects the cards are ported from, so that when a second target joins, the subtitle and the
  * cards change and the identity does not.
  *
- * Every card draws through the app's own pipeline rather than rendering the vendored TSX page, so a
+ * Every card draws through the app's own pipeline rather than rendering the original TSX page, so a
  * gap in the catalog or the renderer shows up here as a broken card instead of hiding behind a
  * picture that was always going to look right.
  */

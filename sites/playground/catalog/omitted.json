@@ -36,6 +36,11 @@
   },
   {
     "owner": "SkiaControl",
+    "property": "PendingUnattachedAnimators",
+    "reason": "AnimatorBase[]"
+  },
+  {
+    "owner": "SkiaControl",
     "property": "Tapped",
     "parameter": "e",
     "reason": "ControlTappedEventArgs"

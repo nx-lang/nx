@@ -1,8 +1,11 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-/** The extensions Vite adds to a bare relative import, tried in its order. */
-const EXTENSIONS = [".ts", ".tsx", "/index.ts", "/index.tsx"];
+/**
+ * The extensions Vite adds to a bare relative import, tried in its order. The `.js` forms are for
+ * drawnui-react, whose `dist` imports its own modules without an extension.
+ */
+const EXTENSIONS = [".ts", ".tsx", ".js", "/index.ts", "/index.tsx", "/index.js"];
 
 export async function resolve(specifier, context, next) {
   if (specifier.endsWith("?url")) {

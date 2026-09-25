@@ -1,5 +1,5 @@
 import meta from "../../catalog/catalog-meta.json" with { type: "json" };
-import { CornerRadius, SkiaBevel, SkiaPoint, SkiaShadow, Thickness } from "../drawnui/index";
+import { CornerRadius, SkiaBevel, SkiaPoint, SkiaShadow, Thickness } from "drawnui-react/core";
 import { isHandlerRecord, type HandlerRecord } from "./instances";
 
 /** Anything the IR runtime can hand back. */

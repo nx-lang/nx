@@ -24,6 +24,7 @@
     "@nx-lang/sdk-wasm": "workspace:*",
     "@shikijs/monaco": "^4.4.3",
     "canvaskit-wasm": "^0.42.0",
+    "drawnui-react": "0.1.0-preview.12",
     "monaco-editor": "^0.56.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

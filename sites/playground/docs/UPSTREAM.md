@@ -1,18 +1,17 @@
-# Vendored DrawnUI source
+# DrawnUI assets
 
-Copied by `npm run sync-drawnui`. Do not treat this tree as read-only: edits that improve NX
-compatibility are expected, and `docs/CATALOG.md` records them. Re-running the sync overwrites
-those edits, so re-apply them from that list.
+Copied by `pnpm run sync-drawnui` from the DrawnUI release the site pins. The runtime itself is the
+`drawnui-react` npm package. These trees are what that package does not ship. Do not edit them:
+the next sync overwrites them.
 
 | | |
 |---|---|
-| Upstream | `/home/bret/src/DrawnUi.React` |
-| Commit | `f617e070e26502fc55b565986bf2547f83aaf224` |
-| Copied | 2026-09-08 |
+| Package | `drawnui-react` 0.1.0-preview.12 |
+| Tag | `v0.1.0-preview.12` |
+| Commit | `890e9104bc44e18229587fe3a6a8a3949f5bbe2d` |
 
 Trees copied:
 
-- `src` → `src/drawnui` — runtime source
 - `samples/demo/pages` → `reference/demo-pages` — demo pages (reference only)
 - `samples/public/fonts` → `public/fonts` — shared fonts
 - `samples/public/images` → `public/images` — shared images

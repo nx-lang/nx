@@ -48,7 +48,7 @@ const SOURCES: Record<string, string> = {
 /**
  * The example set, in the order the DrawnUI demo site lists it, with the names it gives them.
  *
- * Every entry is NX compiled through the app's own pipeline — never the vendored TSX page rendered
+ * Every entry is NX compiled through the app's own pipeline — never the original TSX page rendered
  * natively. A gallery of originals would always look right while proving nothing; compiling the
  * ports means a gap in the catalog or the renderer shows up as a broken example, which is the
  * feedback this app exists to produce. For the same reason an entry with no NX behind it is a

@@ -59,9 +59,9 @@ function siteBase(): Plugin {
 }
 
 /**
- * The vendored DrawnUI source is a Vite project: it imports the CanvasKit wasm binary with `?url`
- * and loads its fonts from `publicDir`. The `build` and `fs` settings below mirror
- * `samples/vite.shared.ts` upstream so the vendored tree runs unmodified.
+ * drawnui-react is built for Vite: its `dist` imports the CanvasKit wasm binary with `?url`, and
+ * the fonts it is configured with load from `publicDir`. The `build` and `fs` settings below mirror
+ * `samples/vite.shared.ts` upstream, so the package runs as it does there.
  *
  * `base` is the site's prefix: every asset URL Vite emits and `import.meta.env.BASE_URL` in the
  * client carry it, and the dev server serves the app at the same address production does, so a

@@ -63,6 +63,28 @@ test("materialize builds a nested layout with its props and children in order", 
   assert.deepEqual(reports, { unknown: [], inert: [], failures: [] });
 });
 
+test("every control the catalog declares is built from the drawnui-react class of its tag's name", () => {
+  const { program, root } = open(`
+    <SkiaLayer>
+      ${Object.keys(components).filter((tag) => tag !== "TextSpan").map((tag) => `<${tag} />`).join("\n      ")}
+    </SkiaLayer>
+  `);
+  const { reports, context } = reporting();
+  const [layer] = materialize(root, { program, ...context });
+  assert.deepEqual(reports, { unknown: [], inert: [], failures: [] });
+  assert.deepEqual(
+    layer.Views.map((view) => view.constructor.name),
+    Object.keys(components).filter((tag) => tag !== "TextSpan"),
+  );
+  // A layout preset is its own class, carrying its Type, as the reconciler builds it.
+  assert.equal(layer.Views.find((view) => view.constructor.name === "SkiaGrid").Type, "Grid");
+
+  // TextSpan is not a control, and is built as the span of the label that holds it.
+  const spanned = open(`<SkiaLabel><TextSpan Text="span" /></SkiaLabel>`);
+  const [label] = materialize(spanned.root, { program: spanned.program, ...context });
+  assert.deepEqual(label.Spans.map((span) => [span.constructor.name, span.Text]), [["TextSpan", "span"]]);
+});
+
 test("materialize initializes an authored component and builds what it rendered", () => {
   const { program, root } = open(`
     component <Card extends DrawnNode Title:string /> = {

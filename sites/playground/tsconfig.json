@@ -24,8 +24,6 @@
     "src"
   ],
   "exclude": [
-    "src/drawnui/**/*.test.ts",
-    "src/drawnui/vite",
     "reference"
   ]
 }

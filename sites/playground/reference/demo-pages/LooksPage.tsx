@@ -29,14 +29,20 @@ function Card({ title, style, log }: { title: string; style: PrebuiltControlStyl
   );
 }
 
+const STYLES: PrebuiltControlStyle[] = ["Unset", "Windows", "Cupertino", "Material", "Material3"];
+
 export function LooksPage() {
   const [last, setLast] = useState("interact with any control");
+  // a live card: ControlStyle changes on an already built tree rebuild the default content (C# RebuildDefaultContent)
+  const [live, setLive] = useState(0);
   return (
     <SkiaScroll Orientation="Vertical">
       <SkiaStack Spacing={16} Padding={new Thickness(16)} HorizontalOptions="Center" MaximumWidthRequest={720}>
         <SkiaLabel Text="Common Controls" FontSize={24} TextColor="#FFFFFF" HorizontalOptions="Center" />
         <SkiaLabel Text="SkiaSwitch, SkiaCheckbox, SkiaRadioButton, SkiaButton, SkiaProgress, SkiaSlider — the same tree per card, only ControlStyle changes (the Fiddle 'Looks' snippet)." FontSize={13} TextColor="#ADB5BD" HorizontalOptions="Fill" HorizontalTextAlignment="Center" />
         <SkiaLabel Text={`Last: ${last}`} FontSize={13} TextColor="#6EA8FE" HorizontalOptions="Center" />
+        <SkiaButton Text={`Live card: ${STYLES[live]} — tap to switch style`} HorizontalOptions="Center" Tapped={() => setLive((i) => (i + 1) % STYLES.length)} />
+        <Card title={`Live — ${STYLES[live]}`} style={STYLES[live]} log={setLast} />
         <Card title="Default" style="Unset" log={setLast} />
         <Card title="Windows — Fluent" style="Windows" log={setLast} />
         <Card title="Cupertino — iOS" style="Cupertino" log={setLast} />

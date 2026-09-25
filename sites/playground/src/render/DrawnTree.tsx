@@ -1,5 +1,5 @@
 import { createElement, type ReactNode } from "react";
-import { SkiaLabel, SkiaStack } from "../drawnui/react/index";
+import { SkiaLabel, SkiaStack } from "drawnui-react";
 import { isAuthoredComponent } from "./evaluate";
 import type { InstanceNode, InstanceTree } from "./instances";
 import { templateFactory, type TemplateCellContext } from "./templateCell";
