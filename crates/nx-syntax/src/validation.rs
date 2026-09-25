@@ -279,6 +279,11 @@ fn validate_removed_conditional_operator(
     file_name: &str,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    // The shape only ever parses into an error node, and a tree without one is the common case.
+    if !tree.root().has_error() {
+        return;
+    }
+
     let source = tree.source();
     // The tokens the parser salvaged inside an error node say nothing about what the author
     // wrote there, so prose is collected from the well-formed part of the tree only.

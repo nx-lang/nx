@@ -70,7 +70,7 @@ public sealed class DriftedEditorProps
 
 /// <summary>
 /// A hand-written patch that clears <c>name</c>, which <c>User</c> declares required: the payload the generated
-/// companion's non-nullable <c>Name</c> accessor keeps a C# caller from building.
+/// companion's non-nullable accessor for it keeps a C# caller from building.
 /// </summary>
 [MessagePackObject]
 public sealed class ClearingUserPatch
@@ -126,7 +126,7 @@ public sealed class PersonRecord
 
 /// <summary>
 /// A hand-written <c>Book</c> that carries its <c>$type</c> and writes its optional fields as they are set: a
-/// <c>null</c> is nil on the wire, an empty array is an empty array.
+/// <see langword="null"/> is nil on the wire, an empty array is an empty array.
 /// </summary>
 [MessagePackObject]
 public sealed class BookRecord
@@ -813,8 +813,9 @@ public class NxUpdateRecordTests
         """;
 
     /// <summary>
-    /// <c>null</c> is the .NET spelling of a cleared field: it crosses the boundary as <c>null</c>, the NX runtime
-    /// reads it as the empty value for the optional <c>author</c>, and it comes back as a carried <c>null</c>.
+    /// <see langword="null"/> is the .NET spelling of a cleared field: it crosses the boundary as
+    /// <see langword="null"/>, the NX runtime reads it as the empty value for the optional <c>author</c>, and it
+    /// comes back as a carried <see langword="null"/>.
     /// </summary>
     [Fact]
     public void ClearedOptionalField_RoundTripsAsNullThroughTheRuntime()
@@ -912,8 +913,8 @@ public class NxUpdateRecordTests
     }
 
     /// <summary>
-    /// A decoded optional sequence may read as <c>null</c> or as an empty array depending on where it came from;
-    /// <c>diff</c> sees one empty value either way, and carries a field that becomes empty as cleared.
+    /// A decoded optional sequence may read as <see langword="null"/> or as an empty array depending on where it came
+    /// from; <c>diff</c> sees one empty value either way, and carries a field that becomes empty as cleared.
     /// </summary>
     [Fact]
     public void Diff_ReadsNullAndAnEmptyArrayAsOneEmptyValue()
@@ -959,8 +960,8 @@ public class NxUpdateRecordTests
     /// <summary>
     /// The schema knows a field cannot be cleared when the key says so, as every generated key does for a field
     /// its target does not declare optional and the prelude's hand-written range keys do; a field whose key does
-    /// not say counts as clearable unless its CLR type cannot hold <c>null</c>, and the runtime is what refuses a
-    /// <c>null</c> for it.
+    /// not say counts as clearable unless its CLR type cannot hold <see langword="null"/>, and the runtime is what
+    /// refuses a <see langword="null"/> for it.
     /// </summary>
     [Fact]
     public void Schema_KnowsWhichFieldsCanBeCleared()

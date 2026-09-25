@@ -1,6 +1,7 @@
 //! Syntax node and token kinds for the NX language.
 
 use std::fmt;
+use std::sync::OnceLock;
 
 /// Represents the kind of a syntax node or token in the NX CST.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -539,6 +540,29 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "=" => SyntaxKind::EQ,
         _ => SyntaxKind::ERROR,
     }
+}
+
+/// Converts a tree-sitter node kind id to a SyntaxKind.
+///
+/// Every validation pass reads the kind of every node it visits, so the name match above is made
+/// once per kind the grammar declares rather than once per visit. An id outside the grammar's
+/// table, such as the one tree-sitter gives an ERROR node, falls back to the name.
+pub(crate) fn syntax_kind_from_id(id: u16, kind: &str) -> SyntaxKind {
+    static KINDS: OnceLock<Vec<SyntaxKind>> = OnceLock::new();
+    let kinds = KINDS.get_or_init(|| {
+        let language = crate::language();
+        (0..language.node_kind_count())
+            .map(|id| {
+                language
+                    .node_kind_for_id(id as u16)
+                    .map_or(SyntaxKind::ERROR, syntax_kind_from_str)
+            })
+            .collect()
+    });
+    kinds
+        .get(usize::from(id))
+        .copied()
+        .unwrap_or_else(|| syntax_kind_from_str(kind))
 }
 
 #[cfg(test)]
