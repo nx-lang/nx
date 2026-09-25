@@ -14,9 +14,9 @@ namespace NxLang.Nx;
 internal static class NxValueEquality
 {
     /// <summary>
-    /// Compares two field values as NX does: <see langword="null"/> equals only <see langword="null"/>, arrays
-    /// compare element-wise, update records compare by the fields they carry, and any other record compares
-    /// structurally once its runtime type matches.
+    /// Compares two field values as NX does: the empty value, read as <see langword="null"/> or as an empty
+    /// array, equals only the empty value; arrays compare element-wise, update records compare by the fields they
+    /// carry, and any other record compares structurally once its runtime type matches.
     /// </summary>
     /// <remarks>
     /// A generated record class has no structural <c>Equals</c>, and the SDK does not reflect over its members, so
@@ -27,7 +27,7 @@ internal static class NxValueEquality
     {
         if (left is null || right is null)
         {
-            return left is null && right is null;
+            return IsEmpty(left) && IsEmpty(right);
         }
 
         if (left is Array || right is Array)
@@ -86,4 +86,11 @@ internal static class NxValueEquality
         ReadOnlySpan<byte> rightJson = JsonSerializer.SerializeToUtf8Bytes(right, right.GetType());
         return leftJson.SequenceEqual(rightJson);
     }
+
+    /// <summary>
+    /// Returns whether <paramref name="value"/> is a .NET reading of the NX empty value: <see langword="null"/>,
+    /// which an omitted optional field decodes to, or an empty array, which an empty <c>*</c> value decodes to.
+    /// Two empty arrays meet in the array comparison above and compare equal there.
+    /// </summary>
+    public static bool IsEmpty(object? value) => value is null || value is Array { Length: 0 };
 }

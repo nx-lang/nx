@@ -209,40 +209,55 @@ impl<'a> Explainer<'a> {
                 self.int_operand(entry, 1, "nominal type")?,
                 self.int_operand(entry, 2, "nominal type")?,
             )?,
-            kinds::ty::ARRAY => {
+            kinds::ty::SEQ => {
+                let cell = self.int_operand(entry, 2, "seq type")?;
+                let occ = kinds::ty::occurrence_from_cell(cell)
+                    .ok_or_else(|| self.malformed(format!("unknown occurrence {cell}")))?;
                 format!(
-                    "{}[]",
-                    self.ty_under_suffix(self.int_operand(entry, 1, "array type")?)?
+                    "{}{occ}",
+                    self.ty_under_suffix(self.int_operand(entry, 1, "seq type")?)?
                 )
             }
-            kinds::ty::NULLABLE => format!(
-                "{}?",
-                self.ty_under_suffix(self.int_operand(entry, 1, "nullable type")?)?
-            ),
+            // Retired with schema 5; a schema-5 image never carries them.
+            kinds::ty::ARRAY | kinds::ty::NULLABLE => {
+                return Err(self.malformed(format!(
+                    "type kind {kind} was retired with schema 5; a sequence is the seq kind"
+                )))
+            }
             kinds::ty::FUNCTION => {
                 // The parts are read here; the spelling is `nx-hir`'s, shared with the checker's
                 // diagnostics and the editor's hovers.
-                let mut params: Vec<(bool, String, String)> = Vec::new();
+                let mut params: Vec<(bool, String, bool, String)> = Vec::new();
                 for param in self.list_operand(entry, 2, "function type")? {
                     let param = self.list(param, "function type parameter")?;
                     let name = self.string(self.int_operand(param, 0, "parameter name")?)?;
                     let ty = self.ty(self.int_operand(param, 1, "parameter type")?)?;
                     let flags = self.int_operand(param, 2, "parameter flags")?;
+                    let optional = flags & kinds::ty::FUNCTION_PARAM_OPTIONAL != 0;
+                    // The artifact records an optional parameter's read type; source spells the
+                    // declared type after `name?:`, so the zero the mark adds comes back off.
+                    let ty = if optional {
+                        declared_from_read_type(&ty)
+                    } else {
+                        ty
+                    };
                     params.push((
                         flags & kinds::ty::FUNCTION_PARAM_CONTENT != 0,
                         name.to_string(),
+                        optional,
                         ty,
                     ));
                 }
                 let result = self.ty(self.int_operand(entry, 1, "function result")?)?;
                 nx_hir::ast::spell_function_type(
-                    params
-                        .iter()
-                        .map(|(is_content, name, ty)| nx_hir::ast::SpelledParam {
+                    params.iter().map(|(is_content, name, optional, ty)| {
+                        nx_hir::ast::SpelledParam {
                             is_content: *is_content,
                             name,
+                            optional: *optional,
                             ty,
-                        }),
+                        }
+                    }),
                     &result,
                 )
             }
@@ -250,7 +265,7 @@ impl<'a> Explainer<'a> {
         })
     }
 
-    /// A type under a `[]` or `?` suffix, parenthesized when it is a function type, because a
+    /// A type under an occurrence suffix, parenthesized when it is a function type, because a
     /// suffix written after a function type's result binds to the result.
     fn ty_under_suffix(&self, index: i64) -> Result<String, ExplainError> {
         let text = self.ty(index)?;
@@ -301,23 +316,48 @@ impl<'a> Explainer<'a> {
                     .iter()
                     .map(|param| {
                         let param = self.list(param, "parameter")?;
-                        let content = if self.int_operand(param, 2, "parameter")? != 0 {
+                        let default = self.int_operand(param, 2, "parameter")?;
+                        let flags = self.int_operand(param, 3, "parameter")?;
+                        let content = if flags & kinds::ty::FUNCTION_PARAM_CONTENT != 0 {
                             "content "
                         } else {
                             ""
                         };
+                        // The parameter is typed by its read type; an optional one is shown as
+                        // source declares it, `name?: T`.
+                        let ty = self.ty(self.int_operand(param, 1, "parameter")?)?;
+                        let (mark, ty) = if flags & kinds::ty::FUNCTION_PARAM_OPTIONAL != 0 {
+                            ("?", declared_from_read_type(&ty))
+                        } else {
+                            ("", ty)
+                        };
+                        let default = if default >= 0 {
+                            format!(" = {}", self.node(default)?.join(" "))
+                        } else {
+                            String::new()
+                        };
                         Ok(format!(
-                            "{content}{}: {}",
+                            "{content}{}{mark}: {ty}{default}",
                             self.string(self.int_operand(param, 0, "parameter")?)?,
-                            self.ty(self.int_operand(param, 1, "parameter")?)?
                         ))
                     })
                     .collect::<Result<Vec<_>, ExplainError>>()?;
-                lines.push(format!("function {name}({}){span} =", params.join(", ")));
+                let flags = self.int_operand(entry, 5, "function")?;
+                let optional = if flags & kinds::declaration::RESULT_OPTIONAL != 0 {
+                    " (optional result)"
+                } else {
+                    ""
+                };
+                let result = format!("{}{optional}", self.declared_suffix(entry, 4, "function")?);
+                lines.push(format!(
+                    "function {name}({}){result}{span} =",
+                    params.join(", ")
+                ));
                 lines.extend(indent(self.node(self.int_operand(entry, 3, "function")?)?));
             }
             kinds::declaration::VALUE => {
-                lines.push(format!("value {name}{span} ="));
+                let result = self.declared_suffix(entry, 3, "value")?;
+                lines.push(format!("value {name}{result}{span} ="));
                 lines.extend(indent(self.node(self.int_operand(entry, 2, "value")?)?));
             }
             kinds::declaration::RECORD => {
@@ -397,6 +437,19 @@ impl<'a> Explainer<'a> {
         Ok(lines)
     }
 
+    /// `: T` for the declared type at `at`, or nothing when the declaration declares none.
+    fn declared_suffix(
+        &self,
+        entry: &[IrItem],
+        at: usize,
+        what: &str,
+    ) -> Result<String, ExplainError> {
+        match self.int_operand(entry, at, what)? {
+            -1 => Ok(String::new()),
+            declared => Ok(format!(": {}", self.ty(declared)?)),
+        }
+    }
+
     fn references_suffix(&self, references: &[IrItem]) -> Result<String, ExplainError> {
         if references.is_empty() {
             return Ok(String::new());
@@ -466,7 +519,10 @@ impl<'a> Explainer<'a> {
         let entry = self.node_entry(index)?;
         let kind = self.int_operand(entry, 0, "node")?;
         Ok(match kind {
-            kinds::node::NULL => vec!["null".to_string()],
+            // Retired with schema 5: the language has no null value.
+            kinds::node::NULL => return Err(self.malformed(
+                "node kind 0 (null) was retired with schema 5; the empty value is an empty array",
+            )),
             kinds::node::BOOL => vec![if self.int_operand(entry, 1, "bool")? != 0 {
                 "true".to_string()
             } else {
@@ -503,9 +559,17 @@ impl<'a> Explainer<'a> {
                 let ty = self.string(self.int_operand(entry, 2, "text")?)?;
                 call_like(format!("text<{ty}>"), vec![operand])
             }
+            // An argument the call left out is shown as `_`; the function fills it.
             kinds::node::CALL => {
                 let callee = self.node(self.int_operand(entry, 1, "call")?)?;
-                let args = self.nodes(self.list_operand(entry, 2, "call")?)?;
+                let args = self
+                    .list_operand(entry, 2, "call")?
+                    .iter()
+                    .map(|arg| match self.int(arg, "node index")? {
+                        -1 => Ok(vec!["_".to_string()]),
+                        index => self.node(index),
+                    })
+                    .collect::<Result<Vec<_>, ExplainError>>()?;
                 let callee = callee.join(" ");
                 call_like(callee, args)
             }
@@ -575,7 +639,13 @@ impl<'a> Explainer<'a> {
             }
             kinds::node::ARRAY => {
                 let elements = self.nodes(self.list_operand(entry, 1, "array")?)?;
-                join_inline(&elements, "[", ", ", "]")
+                // An array with no elements is the empty value, spelled as source spells it, and
+                // as the `{}` pattern it also is.
+                if elements.is_empty() {
+                    vec!["{}".to_string()]
+                } else {
+                    join_inline(&elements, "[", ", ", "]")
+                }
             }
             // A range loop reads as a `for` over a range, because that is what it is: the kind
             // says what the iterable evaluates to, not how the loop is written.
@@ -603,6 +673,25 @@ impl<'a> Explainer<'a> {
                 let last = lines.len() - 1;
                 let _ = write!(lines[last], ".{member}");
                 lines
+            }
+            kinds::node::OPTIONAL_MEMBER => {
+                let base = self.node(self.int_operand(entry, 1, "optionalMember")?)?;
+                let member = self.string(self.int_operand(entry, 2, "optionalMember")?)?;
+                let mut lines = base;
+                let last = lines.len() - 1;
+                let _ = write!(lines[last], "?.{member}");
+                lines
+            }
+            kinds::node::EXISTS => {
+                let mut lines = self.node(self.int_operand(entry, 1, "exists")?)?;
+                let last = lines.len() - 1;
+                lines[last].push('?');
+                lines
+            }
+            kinds::node::COALESCE => {
+                let lhs = self.node(self.int_operand(entry, 1, "coalesce")?)?;
+                let rhs = self.node(self.int_operand(entry, 2, "coalesce")?)?;
+                join_inline(&[lhs, vec!["??".to_string()], rhs], "(", " ", ")")
             }
             kinds::node::RECORD => {
                 let name = self.reference(
@@ -822,4 +911,22 @@ fn line_column(source: &str, offset: usize) -> (usize, usize) {
         .unwrap_or(0)
         + 1;
     (line, column)
+}
+
+/// The declared type of an optional parameter, spelled, from its spelled read type: `T` from
+/// `T?`, `T+` from `T*`. A function type under the suffix loses the parentheses the suffix needed.
+fn declared_from_read_type(read: &str) -> String {
+    let (base, suffix) = if let Some(base) = read.strip_suffix('?') {
+        (base, "")
+    } else if let Some(base) = read.strip_suffix('*') {
+        (base, "+")
+    } else {
+        return read.to_string();
+    };
+    let base = if suffix.is_empty() && base.starts_with("(<function") && base.ends_with(')') {
+        &base[1..base.len() - 1]
+    } else {
+        base
+    };
+    format!("{base}{suffix}")
 }

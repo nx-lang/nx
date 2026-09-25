@@ -1,5 +1,5 @@
 import meta from "../../catalog/catalog-meta.json" with { type: "json" };
-import { CornerRadius, SkiaBevel, SkiaPoint, SkiaShadow, Thickness } from "../drawnui/index";
+import { CornerRadius, SkiaBevel, SkiaPoint, SkiaShadow, Thickness } from "drawnui-react/core";
 import { isHandlerRecord, type HandlerRecord } from "./instances";
 
 /** Anything the IR runtime can hand back. */
@@ -78,6 +78,15 @@ export function isFunctionRecord(value: NxValue | undefined): value is FunctionR
   );
 }
 
+/**
+ * Whether a value is NX's empty value: an absent optional, an untaken branch or an empty `for`.
+ * The runtime leaves such a field out of the element it evaluates, so this only catches what it
+ * writes explicitly.
+ */
+function isEmpty(value: NxValue | undefined): value is null | undefined | [] {
+  return value === null || value === undefined || (Array.isArray(value) && value.length === 0);
+}
+
 function isObject(value: NxValue): value is NxObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -127,7 +136,7 @@ export function coerce(value: NxValue): unknown {
       const fields: Record<string, unknown> = {};
       for (const name of record.fields) {
         const field = value[name];
-        if (field !== null && field !== undefined) {
+        if (!isEmpty(field)) {
           fields[name] = coerce(field);
         }
       }
@@ -144,7 +153,8 @@ export function coerce(value: NxValue): unknown {
 }
 
 /**
- * The properties of a control, coerced, with nulls dropped so DrawnUI's own defaults survive.
+ * The properties of a control, coerced, with the empty value dropped so DrawnUI's own defaults
+ * survive.
  *
  * A handler record under `on<Event>` is not a value the control takes: it becomes the callback
  * DrawnUI fires for `<Event>`, through `bind`, and is dropped when `bind` gives none. A function
@@ -157,7 +167,7 @@ export function coerceProps(value: NxObject, bind?: BindHandler, bindTemplate?: 
   const component = typeof value.$type === "string" ? components[value.$type] : undefined;
   const events = component?.events;
   for (const [name, item] of Object.entries(value)) {
-    if (name === "$type" || name === contentProperty || item === null || item === undefined) {
+    if (name === "$type" || name === contentProperty || isEmpty(item)) {
       continue;
     }
     if (isHandlerRecord(item)) {
@@ -190,7 +200,7 @@ export function coerceProps(value: NxObject, bind?: BindHandler, bindTemplate?: 
 /** The children of a control: always a list, or none. */
 export function childrenOf(value: NxObject): readonly NxValue[] {
   const content = value[contentProperty];
-  if (content === null || content === undefined) {
+  if (isEmpty(content)) {
     return [];
   }
   return Array.isArray(content) ? content : [content];

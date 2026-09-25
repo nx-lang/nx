@@ -29,7 +29,7 @@ record-compatible targets.
 - **THEN** type checking SHALL reject `source` because it is not a field of `SearchSubmitted`
 
 #### Scenario: Inherited record construction accepts inherited fields and rejects unrelated fields
-- **WHEN** source contains `abstract type AppearanceBase = { variant:string } type SplitAppearance extends AppearanceBase = { links:string[]? } let appearance = <SplitAppearance variant={"split"} links={ "docs" } accentColor={"#3b82f6"} />`
+- **WHEN** source contains `abstract type AppearanceBase = { variant:string } type SplitAppearance extends AppearanceBase = { links?:string+ } let appearance = <SplitAppearance variant={"split"} links={ "docs" } accentColor={"#3b82f6"} />`
 - **THEN** type checking SHALL accept inherited field `variant`
 - **AND** type checking SHALL reject `accentColor` because it is not in the effective field set of
   `SplitAppearance`
@@ -43,7 +43,8 @@ record-compatible targets.
 
 ### Requirement: Strict record construction preserves defaults and required-field checks
 Strict unknown-field validation SHALL NOT remove existing record construction behavior for known
-fields. The system SHALL continue to apply defaults, require non-defaulted non-nullable fields, and
+fields. The system SHALL continue to apply defaults, require non-defaulted, non-optional fields, bind
+the empty value to an optional field that is not written as `optional-properties` defines, and
 coerce compatible values for declared fields after all supplied field names have been validated.
 
 #### Scenario: Defaulted known field still applies
@@ -54,6 +55,11 @@ coerce compatible values for declared fields after all supplied field names have
 #### Scenario: Missing required known field remains rejected
 - **WHEN** source contains `type User = { name:string role:string } let user = <User name={"Ava"} />`
 - **THEN** type checking SHALL reject the construction because required field `role` is missing
+
+#### Scenario: Omitted optional known field is empty
+- **WHEN** source contains `type User = { name:string nickname?:string } let user = <User name={"Ava"} />`
+- **THEN** type checking SHALL accept the construction
+- **AND** `user.nickname` SHALL evaluate to the empty value
 
 #### Scenario: Known field type checking still runs after field-name validation
 - **WHEN** source contains `type User = { name:string age:int } let user = <User name={"Ava"} age={"old"} />`

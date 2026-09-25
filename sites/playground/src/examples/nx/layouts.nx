@@ -9,7 +9,7 @@
 // classes built in code and change Split from buttons (code-behind, event handlers); here the same
 // layouts hold static children.
 
-component <Card extends DrawnNode Title:string content Children:DrawnNode[] /> = {
+component <Card extends DrawnNode Title:string content Children:DrawnNode+ /> = {
   <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=8 />
     BackgroundColor="#2B3035" HorizontalOptions=Fill>
     <SkiaStack Padding=<Thickness Left=16 Top=12 Right=16 Bottom=12 /> Spacing=10>
@@ -25,10 +25,10 @@ component <Cell
   extends DrawnNode
   Text: string
   Color: string
-  Column: float64?
-  Row: float64?
-  ColumnSpan: float64?
-  RowSpan: float64?
+  Column?: float64
+  Row?: float64
+  ColumnSpan?: float64
+  RowSpan?: float64
 /> = {
   <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> BackgroundColor={Color}
     HorizontalOptions=Fill VerticalOptions=Fill
@@ -44,11 +44,11 @@ component <Box
   extends DrawnNode
   Text: string
   Color: string
-  Width: float64?
-  Height: float64?
-  Horizontal: LayoutOptions?
-  Vertical: LayoutOptions?
-  BoxMargin: Thickness?
+  Width?: float64
+  Height?: float64
+  Horizontal?: LayoutOptions
+  Vertical?: LayoutOptions
+  BoxMargin?: Thickness
 /> = {
   <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> BackgroundColor={Color}
     WidthRequest={Width} HeightRequest={Height}
@@ -65,7 +65,7 @@ component <Heading extends DrawnNode Text:string /> = {
 }
 
 // The original's ChipCell, a recycled SkiaDynamicDrawnCell bound per item; here a plain component.
-component <ItemChip extends DrawnNode Text:string Color:string Column:float64? Row:float64? /> = {
+component <ItemChip extends DrawnNode Text:string Color:string Column?:float64 Row?:float64 /> = {
   <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=10 /> BackgroundColor={Color}
     HorizontalOptions=Fill Column={Column} Row={Row}>
     <SkiaLabel Text={Text} FontSize=13 TextColor="#DEE2E6" HorizontalOptions=Center

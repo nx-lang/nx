@@ -3,7 +3,7 @@ import "./ui" as UiComponents
 import "./utils" as UtilsFormatting
 
 type TodoItem = object
-type TodoList = TodoItem[]
+type TodoList = TodoItem+
 
 let <TodoApp
   todos:TodoList
@@ -67,7 +67,7 @@ let <TodoItem
     }
   >
     <input type="checkbox" checked={item.completed} />
-    <span class={item.completed ? "completed" : "active"}>
+    <span class={if item.completed { "completed" } else { "active" }}>
       {item.text}
     </span>
     <button: class="delete">Delete</button>
@@ -84,7 +84,7 @@ let <TodoFilters
   <div class="filters">
     for filter in statusTypes {
       <button
-        class={filter == current ? "active" : ""}
+        class={if filter == current { "active" } else { "" }}
         dataFilter={filter}
       >
         {filter}

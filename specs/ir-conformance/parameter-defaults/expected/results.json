@@ -1,0 +1,14 @@
+{
+  "app/main.nx::allArguments": 6,
+  "app/main.nx::elementDefaults": "x:6",
+  "app/main.nx::elementSkip": "x:6!",
+  "app/main.nx::emptyOptional": 4,
+  "app/main.nx::importedAll": "Ms. Ada!",
+  "app/main.nx::importedDefault": "Dr. Ada",
+  "app/main.nx::liftedDefault": [
+    7
+  ],
+  "app/main.nx::oneArgument": 11,
+  "app/main.nx::skipMiddle": 16,
+  "app/main.nx::twoArguments": 3
+}

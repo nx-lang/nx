@@ -1,8 +1,8 @@
 use crate::typegen::model::{
     erase_field_type_parameters, update_companion_type_params, ExportedAlias,
-    ExportedExternalState, ExportedModule, ExportedPolymorphicDescendant, ExportedRecord,
-    ExportedType, ExportedTypeDecl, ExportedTypeGraph, ExportedUnion, ExportedUnionCase,
-    ExportedUpdate, ImportedType, ModuleTypes,
+    ExportedExternalState, ExportedModule, ExportedRecord, ExportedRecordField, ExportedType,
+    ExportedTypeDecl, ExportedTypeGraph, ExportedUnion, ExportedUnionCase, ExportedUpdate,
+    ImportedType, ModuleTypes,
 };
 use crate::typegen::writer::CodeWriter;
 use crate::typegen::{GenerateTypesOptions, GeneratedFile};
@@ -354,12 +354,47 @@ fn emit_alias(writer: &mut CodeWriter, alias: &ExportedAlias, types: ModuleTypes
     ));
 }
 
+/// Emits a record as an interface.
+///
+/// <para>An abstract record is an open contract, as it is in NX and in generated C#: its `$type` is
+/// any string, and every record or union case extending it narrows `$type` to its own name. A
+/// closed set of records is an NX union, which is emitted as a TypeScript union.</para>
 fn emit_record(writer: &mut CodeWriter, record: &ExportedRecord, types: ModuleTypes<'_>) {
-    if record.is_abstract {
-        emit_abstract_record(writer, record, types);
-    } else {
-        emit_concrete_record(writer, record, types);
-    }
+    let base = record_base_type(record, types);
+    let extends = match &base {
+        Some(base) => base.clone(),
+        None if record.is_abstract => "NxRecord".to_string(),
+        None => format!("NxRecord<\"{}\">", escape_ts_string(&record.name)),
+    };
+    let header = format!(
+        "export interface {}{} extends {}",
+        sanitize_ts_type_name(&record.name),
+        ts_generic_declaration(record),
+        extends
+    );
+
+    writer.block(&header, |writer| {
+        if base.is_some() && !record.is_abstract {
+            writer.line(&format!("$type: \"{}\";", escape_ts_string(&record.name)));
+        }
+        for field in &record.fields {
+            writer.line(&ts_field_line(field, types));
+        }
+    });
+}
+
+/// The TypeScript type a record's `extends` clause names for its base, with the base's type
+/// arguments. A base from a dependency library is named as the library exports it.
+fn record_base_type(record: &ExportedRecord, types: ModuleTypes<'_>) -> Option<String> {
+    let base_name = record.base.as_deref()?;
+    Some(match types.graph().resolve_record(base_name) {
+        Some(base_record) => format!(
+            "{}{}",
+            sanitize_ts_type_name(&base_record.name),
+            ts_generic_arguments(base_record)
+        ),
+        None => ts_type_name(base_name),
+    })
 }
 
 /// The generic parameter list an exported contract with type parameters declares, and the
@@ -396,83 +431,6 @@ fn ts_generic_arguments(record: &ExportedRecord) -> String {
         return String::new();
     }
     format!("<{}>", record.type_params.join(", "))
-}
-
-fn emit_abstract_record(writer: &mut CodeWriter, record: &ExportedRecord, types: ModuleTypes<'_>) {
-    let base_contract_name = ts_base_contract_name(&record.name);
-    let generics = ts_generic_declaration(record);
-    let header = if let Some(base_record) = types.graph().resolved_record_base(record) {
-        format!(
-            "export interface {}{} extends {}{}",
-            base_contract_name,
-            generics,
-            ts_base_contract_name(&base_record.name),
-            ts_generic_arguments(base_record)
-        )
-    } else {
-        format!("export interface {}{}", base_contract_name, generics)
-    };
-
-    writer.block(&header, |writer| {
-        for field in &record.fields {
-            let key = ts_property_key(&field.name);
-            let ty = ts_type(&field.ty, types);
-            writer.line(&format!("{key}: {ty};"));
-        }
-    });
-
-    writer.blank_line();
-
-    let descendants = types.graph().polymorphic_descendants(&record.name);
-    let runtime_surface = if descendants.is_empty() {
-        base_contract_name
-    } else {
-        descendants
-            .iter()
-            .map(ts_polymorphic_descendant_type_name)
-            .collect::<Vec<_>>()
-            .join(" | ")
-    };
-
-    let (declaration, arguments) = if descendants.is_empty() {
-        (ts_generic_declaration(record), ts_generic_arguments(record))
-    } else {
-        (String::new(), String::new())
-    };
-    writer.line(&format!(
-        "export type {}{} = {}{};",
-        sanitize_ts_type_name(&record.name),
-        declaration,
-        runtime_surface,
-        arguments
-    ));
-}
-
-fn emit_concrete_record(writer: &mut CodeWriter, record: &ExportedRecord, types: ModuleTypes<'_>) {
-    let mut bases = Vec::new();
-    if let Some(base_record) = types.graph().resolved_record_base(record) {
-        bases.push(format!(
-            "{}{}",
-            ts_base_contract_name(&base_record.name),
-            ts_generic_arguments(base_record)
-        ));
-    }
-    bases.push(format!("NxRecord<\"{}\">", escape_ts_string(&record.name)));
-
-    let header = format!(
-        "export interface {}{} extends {}",
-        sanitize_ts_type_name(&record.name),
-        ts_generic_declaration(record),
-        bases.join(", ")
-    );
-
-    writer.block(&header, |writer| {
-        for field in &record.fields {
-            let key = ts_property_key(&field.name);
-            let ty = ts_type(&field.ty, types);
-            writer.line(&format!("{key}: {ty};"));
-        }
-    });
 }
 
 fn emit_union(writer: &mut CodeWriter, union_def: &ExportedUnion, types: ModuleTypes<'_>) {
@@ -540,31 +498,37 @@ fn emit_union_case(
     case: &ExportedUnionCase,
     types: ModuleTypes<'_>,
 ) {
-    let mut bases = Vec::new();
-    if let Some(base_name) = union_def.base.as_deref() {
-        if let Some(base_record) = types.graph().resolve_record(base_name) {
-            bases.push(ts_base_contract_name(&base_record.name));
-        } else {
-            bases.push(ts_type_name(base_name));
-        }
-    }
-    bases.push(format!(
-        "NxRecord<\"{}.{}\">",
+    let type_name = format!(
+        "{}.{}",
         escape_ts_string(&union_def.name),
         escape_ts_string(&case.name)
-    ));
+    );
+    let base =
+        union_def
+            .base
+            .as_deref()
+            .map(|base_name| match types.graph().resolve_record(base_name) {
+                Some(base_record) => sanitize_ts_type_name(&base_record.name),
+                None => ts_type_name(base_name),
+            });
+    let extends = match &base {
+        Some(base) => base.clone(),
+        None => format!("NxRecord<\"{type_name}\">"),
+    };
 
     let header = format!(
         "export interface {} extends {}",
         ts_union_case_type_name(&union_def.name, &case.name),
-        bases.join(", ")
+        extends
     );
 
     writer.block(&header, |writer| {
+        // A case extending a base narrows the base's `$type` to its own name.
+        if base.is_some() {
+            writer.line(&format!("$type: \"{type_name}\";"));
+        }
         for field in &case.fields {
-            let key = ts_property_key(&field.name);
-            let ty = ts_type(&field.ty, types);
-            writer.line(&format!("{key}: {ty};"));
+            writer.line(&ts_field_line(field, types));
         }
     });
 }
@@ -582,16 +546,15 @@ fn emit_external_state(
         &format!("export interface {}", sanitize_ts_type_name(&state.name)),
         |writer| {
             for field in fields.iter() {
-                let key = ts_property_key(&field.name);
-                let ty = ts_type(&field.ty, types);
-                writer.line(&format!("{key}: {ty};"));
+                writer.line(&ts_field_line(field, types));
             }
         },
     );
 }
 
 /// Emits an update companion: every property optional, so an absent key means "unchanged", and a
-/// nullable field typed `| null`, so a present `null` means "set to null".
+/// clearable field — one the target declares `name?:T` — typed `| null`, so a present `null` means
+/// "cleared". A field the target requires has no `| null`: it cannot be cleared.
 ///
 /// <para>A generic record's companion declares the record's parameters and types its fields by
 /// them, so a patch of a `Range<number>` reads as one. A state-derived field typed by the
@@ -623,6 +586,7 @@ fn emit_update(writer: &mut CodeWriter, update: &ExportedUpdate, types: ModuleTy
             for field in fields.iter() {
                 let key = ts_property_key(&field.name);
                 let ty = ts_type(&field.ty, types);
+                let ty = if field.optional { ts_nullable(ty) } else { ty };
                 writer.line(&format!("{key}?: {ty};"));
             }
         },
@@ -635,8 +599,9 @@ fn module_needs_nx_record(module: &ExportedModule) -> bool {
         .iter()
         .any(|declaration| match &declaration.item {
             // A constant union emits only string literals, so it needs no discriminator type.
-            ExportedType::Union(union_def) => !union_def.is_constant(),
-            ExportedType::Record(record) => !record.is_abstract,
+            // A record or case extending a base is an `NxRecord` through the base.
+            ExportedType::Union(union_def) => !union_def.is_constant() && union_def.base.is_none(),
+            ExportedType::Record(record) => record.base.is_none(),
             _ => false,
         })
 }
@@ -746,7 +711,7 @@ fn all_referenced_prelude_declarations(
 /// literals.</para>
 fn prelude_declarations_need_nx_record(declarations: &[&ExportedTypeDecl]) -> bool {
     declarations.iter().any(|declaration| {
-        matches!(&declaration.item, ExportedType::Record(record) if !record.is_abstract)
+        matches!(&declaration.item, ExportedType::Record(record) if record.base.is_none())
     })
 }
 
@@ -763,23 +728,7 @@ fn collect_module_imports(
             }
             ExportedType::Union(union_def) => {
                 if let Some(base_name) = union_def.base.as_deref() {
-                    if let Some(base_record) = context.graph.resolve_record(base_name) {
-                        add_imported_symbol(
-                            module,
-                            context,
-                            &base_record.name,
-                            ts_base_contract_name(&base_record.name),
-                            &mut imports,
-                        );
-                    } else {
-                        add_imported_symbol(
-                            module,
-                            context,
-                            base_name,
-                            ts_type_name(base_name),
-                            &mut imports,
-                        );
-                    }
+                    add_base_import(module, context, base_name, &mut imports);
                 }
 
                 for case in &union_def.cases {
@@ -789,29 +738,12 @@ fn collect_module_imports(
                 }
             }
             ExportedType::Record(record) => {
-                if let Some(base_record) = context.graph.resolved_record_base(record) {
-                    add_imported_symbol(
-                        module,
-                        context,
-                        &base_record.name,
-                        ts_base_contract_name(&base_record.name),
-                        &mut imports,
-                    );
+                if let Some(base_name) = record.base.as_deref() {
+                    add_base_import(module, context, base_name, &mut imports);
                 }
 
                 for field in &record.fields {
                     add_type_ref_imports(module, context, &field.ty, &mut imports);
-                }
-
-                if record.is_abstract {
-                    for descendant in context.graph.polymorphic_descendants(&record.name) {
-                        add_polymorphic_descendant_import(
-                            module,
-                            context,
-                            &descendant,
-                            &mut imports,
-                        );
-                    }
                 }
             }
             ExportedType::ExternalState(state) => {
@@ -830,28 +762,22 @@ fn collect_module_imports(
     imports
 }
 
-fn add_polymorphic_descendant_import(
+/// Imports the base a record or union case extends, when another module or library declares it.
+fn add_base_import(
     module: &ExportedModule,
     context: &TypeScriptImportContext<'_>,
-    descendant: &ExportedPolymorphicDescendant,
+    base_name: &str,
     imports: &mut BTreeMap<String, BTreeSet<TypeScriptImportSpecifier>>,
 ) {
-    match descendant {
-        ExportedPolymorphicDescendant::Record { name } => {
-            add_imported_symbol(module, context, name, sanitize_ts_type_name(name), imports);
-        }
-        ExportedPolymorphicDescendant::UnionCase {
-            union_name,
-            case_name,
-        } => {
-            add_imported_symbol(
-                module,
-                context,
-                union_name,
-                ts_union_case_type_name(union_name, case_name),
-                imports,
-            );
-        }
+    match context.graph.resolve_record(base_name) {
+        Some(base_record) => add_imported_symbol(
+            module,
+            context,
+            &base_record.name,
+            sanitize_ts_type_name(&base_record.name),
+            imports,
+        ),
+        None => add_imported_symbol(module, context, base_name, ts_type_name(base_name), imports),
     }
 }
 
@@ -916,20 +842,6 @@ fn add_imported_symbol(
         });
 }
 
-fn ts_base_contract_name(name: &str) -> String {
-    format!("{}Base", sanitize_ts_type_name(name))
-}
-
-fn ts_polymorphic_descendant_type_name(descendant: &ExportedPolymorphicDescendant) -> String {
-    match descendant {
-        ExportedPolymorphicDescendant::Record { name } => sanitize_ts_type_name(name),
-        ExportedPolymorphicDescendant::UnionCase {
-            union_name,
-            case_name,
-        } => ts_union_case_type_name(union_name, case_name),
-    }
-}
-
 fn ts_union_case_type_name(union_name: &str, case_name: &str) -> String {
     format!(
         "{}{}",
@@ -966,22 +878,16 @@ fn ts_type(ty: &TypeRef, types: ModuleTypes<'_>) -> String {
                 format!("{base}<{}>", rendered.join(", "))
             }
         }
-        TypeRef::Array(inner) => {
+        // `T?` in a type position is `T | null`; `T+` and `T*` are both `T[]`, since TypeScript
+        // has no static spelling for non-emptiness — the runtime checks that at the NX boundary.
+        TypeRef::Seq { inner, occ } if !occ.admits_many() => ts_nullable(ts_type(inner, types)),
+        TypeRef::Seq { inner, .. } => {
             let inner = ts_type(inner, types);
-            let needs_parens = inner.contains('|') || inner.contains("=>");
-            if needs_parens {
+            // `(args) => string[]` would make the result an array, not the function.
+            if inner.contains("=>") {
                 format!("({inner})[]")
             } else {
                 format!("{inner}[]")
-            }
-        }
-        TypeRef::Nullable(inner) => {
-            let inner = ts_type(inner, types);
-            // `(args) => string | null` would make the result nullable, not the function.
-            if inner.contains("=>") {
-                format!("({inner}) | null")
-            } else {
-                format!("{inner} | null")
             }
         }
         // NX arguments bind by name, so a function type takes one object of named arguments.
@@ -994,11 +900,42 @@ fn ts_type(ty: &TypeRef, types: ModuleTypes<'_>) -> String {
             }
             let params = params
                 .iter()
-                .map(|param| format!("{}: {}", param.name.as_str(), ts_type(&param.ty, types)))
+                .map(|param| {
+                    // An optional parameter (`Index?:int`) may be omitted, as an optional
+                    // property may.
+                    let mark = if param.optional { "?" } else { "" };
+                    format!(
+                        "{}{mark}: {}",
+                        param.name.as_str(),
+                        ts_type(&param.ty, types)
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join("; ");
             format!("(args: {{ {params} }}) => {}", ts_type(return_type, types))
         }
+    }
+}
+
+/// `inner | null`, parenthesizing a function type so the `| null` applies to the function rather
+/// than to its result.
+fn ts_nullable(inner: String) -> String {
+    if inner.contains("=>") {
+        format!("({inner}) | null")
+    } else {
+        format!("{inner} | null")
+    }
+}
+
+/// One field of a generated record-like type: `name?: T` for a field declared `name?:T`, which may
+/// be absent, and `name: T` otherwise.
+fn ts_field_line(field: &ExportedRecordField, types: ModuleTypes<'_>) -> String {
+    let key = ts_property_key(&field.name);
+    let ty = ts_type(&field.ty, types);
+    if field.optional {
+        format!("{key}?: {ty};")
+    } else {
+        format!("{key}: {ty};")
     }
 }
 

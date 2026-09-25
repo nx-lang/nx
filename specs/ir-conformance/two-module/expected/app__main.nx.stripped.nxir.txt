@@ -10,7 +10,7 @@ record Local extends shared/model.nx:Base
 function total() =
   (shared/model.nx:answer() add 1)
 
-function user() =
+function user(): shared/model.nx:User =
   shared/model.nx:makeUser(1, "Ada")
 
 function card() =

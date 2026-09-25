@@ -114,22 +114,26 @@ namespace NxLang.Sdk.Tests.Generated
         public static readonly NxProperty<Patch, global::NxLang.Nx.NxRange<long>> Span = new(
             Patch_propertyWireFormat.Format(Patch_property.Span),
             record => record.Span,
-            (record, value) => record.Span = value);
+            (record, value) => record.Span = value,
+            clearable: false);
 
         public static readonly NxProperty<Patch, global::NxLang.Nx.NxRange_update<long>> Change = new(
             Patch_propertyWireFormat.Format(Patch_property.Change),
             record => record.Change,
-            (record, value) => record.Change = value);
+            (record, value) => record.Change = value,
+            clearable: false);
 
         public static readonly NxProperty<Patch, global::NxLang.Nx.NxRange_property> Which = new(
             Patch_propertyWireFormat.Format(Patch_property.Which),
             record => record.Which,
-            (record, value) => record.Which = value);
+            (record, value) => record.Which = value,
+            clearable: false);
 
         public static readonly NxProperty<Patch, global::NxLang.Nx.NxRange_update<double>> Wide = new(
             Patch_propertyWireFormat.Format(Patch_property.Wide),
             record => record.Wide,
-            (record, value) => record.Wide = value);
+            (record, value) => record.Wide = value,
+            clearable: false);
 
         public static NxProperty<Patch> Of(Patch_property property)
         {

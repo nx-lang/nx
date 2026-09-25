@@ -1,17 +1,19 @@
 /**
- * Re-copies DrawnUI's source, demo pages, and shared assets into this app.
+ * Copies DrawnUI's shared assets and demo pages into this app from the upstream tag matching the
+ * pinned `drawnui-react` package.
  *
- * Upstream is a private, unbuilt package, so there is nothing to depend on and the tree is
- * vendored instead. Local edits to the copy are allowed where they improve NX compatibility, so
- * the point of this script is less "stay in sync" than "record what was copied and from where":
- * it writes the upstream commit into src/drawnui/UPSTREAM.md, and a sync that changes the catalog
- * then shows up as a reviewable diff.
+ * The runtime is the npm package. It ships only its `dist`, so the fonts, images, Lottie files,
+ * sprite sheets and shaders the examples load, and the demo pages they were ported from, still come
+ * from the upstream repository. They are read at the tag `v<pin>` with `git archive`, so they
+ * match the code that draws them. The upstream working tree and its `HEAD` are never touched.
+ * The tag and commit are written to docs/UPSTREAM.md, and a sync that changes an asset shows up as
+ * a reviewable diff.
  *
- * Usage: npm run sync-drawnui [-- --source <path>]
+ * Usage: pnpm run sync-drawnui [-- --source <path>]
  */
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -21,7 +23,6 @@ const DEFAULT_SOURCE = join(homedir(), "src", "DrawnUi.React");
 
 /** The trees copied, each `from` relative to the upstream root and `to` relative to this app. */
 const COPIES = [
-  { from: "src", to: "src/drawnui", what: "runtime source" },
   { from: "samples/demo/pages", to: "reference/demo-pages", what: "demo pages (reference only)" },
   { from: "samples/public/fonts", to: "public/fonts", what: "shared fonts" },
   { from: "samples/public/images", to: "public/images", what: "shared images" },
@@ -42,60 +43,78 @@ function parseSource(argv) {
   return resolve(process.env.DRAWNUI_SOURCE ?? DEFAULT_SOURCE);
 }
 
-function upstreamRevision(source) {
-  const result = spawnSync("git", ["-C", source, "rev-parse", "HEAD"], { encoding: "utf8" });
+function git(source, args, options = {}) {
+  const result = spawnSync("git", ["-C", source, ...args], { maxBuffer: 1 << 30, ...options });
   if (result.status !== 0) {
-    return { commit: "unknown", dirty: false };
+    throw new Error(`git ${args.join(" ")} failed in ${source}:\n${result.stderr}`);
   }
-  const status = spawnSync("git", ["-C", source, "status", "--porcelain"], { encoding: "utf8" });
-  return {
-    commit: result.stdout.trim(),
-    dirty: status.status === 0 && status.stdout.trim().length > 0,
-  };
+  return result.stdout;
+}
+
+/** The commit of the tag for the pinned package, or a failure that says how to get it. */
+function taggedCommit(source, tag) {
+  const result = spawnSync("git", ["-C", source, "rev-parse", "--verify", "--quiet", `refs/tags/${tag}^{commit}`], {
+    encoding: "utf8",
+  });
+  if (result.status !== 0) {
+    throw new Error(
+      `${source} has no tag ${tag}, the release of the pinned drawnui-react. Run \`git -C ${source} fetch --tags\` and sync again.`,
+    );
+  }
+  return result.stdout.trim();
 }
 
 function main() {
   const source = parseSource(process.argv.slice(2));
   if (!existsSync(source)) {
-    throw new Error(
-      `DrawnUI source not found at ${source}. Pass --source <path> or set DRAWNUI_SOURCE.`,
-    );
+    throw new Error(`DrawnUI source not found at ${source}. Pass --source <path> or set DRAWNUI_SOURCE.`);
   }
+  const pin = JSON.parse(readFileSync(join(appRoot, "package.json"), "utf8")).dependencies["drawnui-react"];
+  const tag = `v${pin}`;
+  const commit = taggedCommit(source, tag);
 
-  for (const copy of COPIES) {
-    const from = join(source, copy.from);
-    if (!existsSync(from)) {
-      throw new Error(`Expected ${from} to exist in the DrawnUI source tree.`);
+  const staging = mkdtempSync(join(tmpdir(), "sync-drawnui-"));
+  try {
+    const archive = git(source, ["archive", "--format=tar", tag, ...COPIES.map((copy) => copy.from)]);
+    const untar = spawnSync("tar", ["-x", "-C", staging], { input: archive });
+    if (untar.status !== 0) {
+      throw new Error(`tar could not unpack the archive of ${tag}:\n${untar.stderr}`);
     }
-    const to = join(appRoot, copy.to);
-    rmSync(to, { force: true, recursive: true });
-    mkdirSync(dirname(to), { recursive: true });
-    cpSync(from, to, { recursive: true });
-    console.log(`copied ${copy.from} -> ${copy.to} (${copy.what})`);
+    for (const copy of COPIES) {
+      const from = join(staging, copy.from);
+      if (!existsSync(from)) {
+        throw new Error(`Expected ${copy.from} to exist in DrawnUI at ${tag}.`);
+      }
+      const to = join(appRoot, copy.to);
+      rmSync(to, { force: true, recursive: true });
+      mkdirSync(dirname(to), { recursive: true });
+      cpSync(from, to, { recursive: true });
+      console.log(`copied ${copy.from} -> ${copy.to} (${copy.what})`);
+    }
+  } finally {
+    rmSync(staging, { force: true, recursive: true });
   }
 
-  const revision = upstreamRevision(source);
-  const stamp = new Date().toISOString().slice(0, 10);
   writeFileSync(
-    join(appRoot, "src/drawnui/UPSTREAM.md"),
-    `# Vendored DrawnUI source
+    join(appRoot, "docs/UPSTREAM.md"),
+    `# DrawnUI assets
 
-Copied by \`npm run sync-drawnui\`. Do not treat this tree as read-only: edits that improve NX
-compatibility are expected, and \`docs/CATALOG.md\` records them. Re-running the sync overwrites
-those edits, so re-apply them from that list.
+Copied by \`pnpm run sync-drawnui\` from the DrawnUI release the site pins. The runtime itself is the
+\`drawnui-react\` npm package. These trees are what that package does not ship. Do not edit them:
+the next sync overwrites them.
 
 | | |
 |---|---|
-| Upstream | \`${source}\` |
-| Commit | \`${revision.commit}\`${revision.dirty ? " (working tree was dirty)" : ""} |
-| Copied | ${stamp} |
+| Package | \`drawnui-react\` ${pin} |
+| Tag | \`${tag}\` |
+| Commit | \`${commit}\` |
 
 Trees copied:
 
 ${COPIES.map((copy) => `- \`${copy.from}\` → \`${copy.to}\` — ${copy.what}`).join("\n")}
 `,
   );
-  console.log(`recorded upstream commit ${revision.commit}${revision.dirty ? " (dirty)" : ""}`);
+  console.log(`recorded ${tag} (${commit})`);
 }
 
 main();

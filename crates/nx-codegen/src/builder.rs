@@ -165,6 +165,20 @@ fn referenced_derived_declarations(artifact: &ProgramArtifact) -> FxHashSet<Upda
                 names.extend(nx_hir::type_ref_names(ty).into_iter().cloned());
             }
         }
+        // A binding with no annotation is emitted at its inferred type, which can name a derived
+        // declaration the source never spells: `changed(p)` is a `Person.Property*`.
+        if let Some(module_artifact) = module_artifact_for(artifact, module) {
+            for item in lowered_module.items() {
+                let name = match item {
+                    Item::Function(function) => &function.name,
+                    Item::Value(value) => &value.name,
+                    _ => continue,
+                };
+                if let Some(ty) = module_artifact.type_env.lookup(name) {
+                    type_names(ty, &mut names);
+                }
+            }
+        }
 
         for name in names {
             let Some(reference) = resolve_visible_reference(artifact, module.id, name.as_str())
@@ -181,6 +195,24 @@ fn referenced_derived_declarations(artifact: &ProgramArtifact) -> FxHashSet<Upda
         }
     }
     referenced
+}
+
+/// Collects the declaration names a checker type mentions, through its occurrence and function
+/// parts.
+fn type_names(ty: &Type, names: &mut Vec<Name>) {
+    match ty {
+        Type::Named(named) => names.push(named.name.clone()),
+        Type::Union(union_ty) => names.push(union_ty.name.clone()),
+        Type::UnionCase(case_ty) => names.push(case_ty.union.clone()),
+        Type::Seq { item, .. } => type_names(item, names),
+        Type::Function { params, ret } => {
+            for param in params {
+                type_names(&param.ty, names);
+            }
+            type_names(ret, names);
+        }
+        _ => {}
+    }
 }
 
 /// The dotted spelling of an identifier and member-access chain, if the expression is one.
@@ -376,8 +408,23 @@ fn build_declaration(
     let span = item_span(item);
     let kind = match item {
         Item::Function(function) => {
+            // Each default is built with only the parameters before it in scope, as it reads them.
             let mut scope = LexicalScope::new();
+            let mut defaults = Vec::with_capacity(function.params.len());
             for param in &function.params {
+                defaults.push(match param.default {
+                    Some(default) => Some(build_expression(
+                        artifact,
+                        resolved_module,
+                        prepared_cache,
+                        lowered_module,
+                        type_env,
+                        default,
+                        &mut scope,
+                        diagnostics,
+                    )?),
+                    None => None,
+                });
                 scope.insert(param.name.as_str());
             }
             let body = build_expression(
@@ -390,16 +437,35 @@ fn build_declaration(
                 &mut scope,
                 diagnostics,
             )?;
-            CodegenDeclarationKind::Function {
-                params: build_params(
+            let declared_return_type = match function.return_type.as_ref() {
+                Some(ty) => Some(build_type_ref(
                     artifact,
                     resolved_module,
                     prepared_cache,
-                    &function.params,
+                    ty,
                     diagnostics,
-                )?,
+                )?),
+                None => None,
+            };
+            let mut params = build_params(
+                artifact,
+                resolved_module,
+                prepared_cache,
+                &function.params,
+                diagnostics,
+            )?;
+            for (param, default) in params.iter_mut().zip(defaults) {
+                param.default = default;
+            }
+            CodegenDeclarationKind::Function {
+                params,
                 body,
-                return_type: type_env.get_expr_type(function.body).cloned(),
+                return_type: type_env
+                    .lookup(&function.name)
+                    .and_then(Type::function_parts)
+                    .map(|(_, result)| result.clone())
+                    .or_else(|| type_env.get_expr_type(function.body).cloned()),
+                declared_return_type,
             }
         }
         Item::Value(value) => {
@@ -414,9 +480,23 @@ fn build_declaration(
                 &mut scope,
                 diagnostics,
             )?;
+            let declared_ty = match value.ty.as_ref() {
+                Some(ty) => Some(build_type_ref(
+                    artifact,
+                    resolved_module,
+                    prepared_cache,
+                    ty,
+                    diagnostics,
+                )?),
+                None => None,
+            };
             CodegenDeclarationKind::Value {
                 value: expr,
-                ty: type_env.get_expr_type(value.value).cloned(),
+                ty: type_env
+                    .lookup(&value.name)
+                    .cloned()
+                    .or_else(|| type_env.get_expr_type(value.value).cloned()),
+                declared_ty,
             }
         }
         Item::Record(record) => {
@@ -511,7 +591,9 @@ fn build_declaration(
                 )?,
             }
         }
-        Item::TypeAlias(_) => CodegenDeclarationKind::TypeAlias,
+        Item::TypeAlias(alias) => CodegenDeclarationKind::TypeAlias {
+            target: alias.ty.clone(),
+        },
         Item::Component(component) => CodegenDeclarationKind::Component(build_component(
             artifact,
             resolved_module,
@@ -682,17 +764,21 @@ fn build_params(
     params
         .iter()
         .map(|param| {
+            // A parameter declared `p?:T` is typed by its read type, `T?`.
+            let ty = param.ty.read_type(param.optional);
             Some(CodegenParam {
                 name: param.name.as_str().to_string(),
-                ty: param.ty.clone(),
                 resolved_ty: build_type_ref(
                     artifact,
                     resolved_module,
                     prepared_cache,
-                    &param.ty,
+                    &ty,
                     diagnostics,
                 )?,
+                ty,
                 is_content: param.is_content,
+                optional: param.optional,
+                default: None,
                 span: param.span,
             })
         })
@@ -740,10 +826,11 @@ fn build_effective_component_fields(
                 artifact,
                 owner_module,
                 prepared_cache,
-                &nx_hir::erase_type_parameters(&field.ty, type_params),
+                &nx_hir::erase_type_parameters(&field.ty, type_params).read_type(field.optional),
                 diagnostics,
             )?,
             is_content: field.is_content,
+            optional: field.optional,
             is_required: field.is_required,
             default,
             owner_module_id: owner_module.id,
@@ -787,11 +874,12 @@ fn build_declared_component_fields(
                 artifact,
                 resolved_module,
                 prepared_cache,
-                &nx_hir::erase_type_parameters(&field.ty, type_params),
+                &nx_hir::erase_type_parameters(&field.ty, type_params).read_type(field.optional),
                 diagnostics,
             )?,
             is_content: field.is_content,
-            is_required: field.default.is_none() && !matches!(field.ty, ast::TypeRef::Nullable(_)),
+            optional: field.optional,
+            is_required: field.default.is_none() && !field.optional,
             default,
             owner_module_id: resolved_module.id,
             span: field.span,
@@ -968,6 +1056,7 @@ fn effective_union_case_fields(
                 name: field.name.clone(),
                 ty: field.ty.clone(),
                 is_content: field.is_content,
+                optional: field.optional,
                 default: field.default,
                 span: field.span,
             },
@@ -1063,10 +1152,11 @@ fn build_effective_record_fields(
                 artifact,
                 owner_module,
                 prepared_cache,
-                &field.ty,
+                &field.ty.read_type(field.optional),
                 diagnostics,
             )?,
             is_content: field.is_content,
+            optional: field.optional,
             is_required: field.is_required,
             default,
             owner_module_id: owner_module.id,
@@ -1338,7 +1428,7 @@ fn build_expression(
             )?;
             let mut mapped_args = Vec::with_capacity(args.len());
             for arg in args {
-                mapped_args.push(build_expression(
+                mapped_args.push(Some(build_expression(
                     artifact,
                     resolved_module,
                     prepared_cache,
@@ -1347,7 +1437,7 @@ fn build_expression(
                     *arg,
                     scope,
                     diagnostics,
-                )?);
+                )?));
             }
             CodegenExpressionKind::Call {
                 callee: Box::new(callee),
@@ -1724,6 +1814,53 @@ fn build_expression(
                 reference: combined_reference,
             }
         }
+        ast::Expr::OptionalMember { base, member, .. } => CodegenExpressionKind::OptionalMember {
+            base: Box::new(build_expression(
+                artifact,
+                resolved_module,
+                prepared_cache,
+                lowered_module,
+                type_env,
+                *base,
+                scope,
+                diagnostics,
+            )?),
+            member: member.as_str().to_string(),
+        },
+        ast::Expr::Exists { operand, .. } => CodegenExpressionKind::Exists {
+            operand: Box::new(build_expression(
+                artifact,
+                resolved_module,
+                prepared_cache,
+                lowered_module,
+                type_env,
+                *operand,
+                scope,
+                diagnostics,
+            )?),
+        },
+        ast::Expr::Coalesce { left, right, .. } => CodegenExpressionKind::Coalesce {
+            lhs: Box::new(build_expression(
+                artifact,
+                resolved_module,
+                prepared_cache,
+                lowered_module,
+                type_env,
+                *left,
+                scope,
+                diagnostics,
+            )?),
+            rhs: Box::new(build_expression(
+                artifact,
+                resolved_module,
+                prepared_cache,
+                lowered_module,
+                type_env,
+                *right,
+                scope,
+                diagnostics,
+            )?),
+        },
         ast::Expr::RecordLiteral {
             record, properties, ..
         } => {
@@ -2083,7 +2220,6 @@ fn build_element_expression(
                 ResolvedItemKind::Function => build_function_element_call(
                     artifact,
                     resolved_module,
-                    prepared_cache,
                     element.span,
                     reference,
                     mapped.properties,
@@ -2131,7 +2267,6 @@ fn build_element_expression(
 fn build_function_element_call(
     artifact: &ProgramArtifact,
     resolved_module: &ResolvedModule,
-    prepared_cache: &mut PreparedModuleCache,
     element_span: TextSpan,
     function_reference: CodegenReference,
     properties: Vec<CodegenProperty>,
@@ -2141,33 +2276,37 @@ fn build_function_element_call(
     let params = function_params_from_reference(
         artifact,
         resolved_module,
-        prepared_cache,
         &function_reference,
         diagnostics,
     )?;
 
+    // Arguments bind by name and travel by position. A parameter left out travels as `None`,
+    // and the function fills it — with its default, or with empty — so the default a caller
+    // gets is the one the function declares.
     let mut consumed = FxHashSet::default();
     let mut args = Vec::with_capacity(params.len());
-    for param in &params {
-        if let Some(property) = properties
-            .iter()
-            .find(|property| property.name == param.name)
-        {
+    for (name, is_content, omissible) in &params {
+        if let Some(property) = properties.iter().find(|property| &property.name == name) {
             consumed.insert(property.name.clone());
-            args.push(property.value.clone());
-        } else if param.is_content && !content.is_empty() {
-            args.push(content_expression(content.clone(), element_span));
+            args.push(Some(property.value.clone()));
+        } else if *is_content && !content.is_empty() {
+            args.push(Some(content_expression(content.clone(), element_span)));
+        } else if *omissible {
+            args.push(None);
         } else {
             diagnostics.push(unsupported_diagnostic(
                 resolved_module,
                 element_span,
                 format!(
                     "function element call '{}' is missing argument '{}'",
-                    function_reference.name, param.name
+                    function_reference.name, name
                 ),
             ));
             return None;
         }
+    }
+    while matches!(args.last(), Some(None)) {
+        args.pop();
     }
 
     if let Some(property) = properties
@@ -2269,13 +2408,14 @@ fn build_component_descriptor_expression(
     ))
 }
 
+/// The parameters of the function declaration `reference` names, each as its name, whether it
+/// receives body content, and whether a call may leave it out.
 fn function_params_from_reference(
     artifact: &ProgramArtifact,
     resolved_module: &ResolvedModule,
-    prepared_cache: &mut PreparedModuleCache,
     reference: &CodegenReference,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Option<Vec<CodegenParam>> {
+) -> Option<Vec<(String, bool, bool)>> {
     let Some(target_module) = artifact.resolved_program.module(reference.module_id) else {
         diagnostics.push(missing_semantic_data_diagnostic(
             resolved_module,
@@ -2296,25 +2436,19 @@ fn function_params_from_reference(
         return None;
     };
 
-    function
-        .params
-        .iter()
-        .map(|param| {
-            Some(CodegenParam {
-                name: param.name.as_str().to_string(),
-                ty: param.ty.clone(),
-                resolved_ty: build_type_ref(
-                    artifact,
-                    target_module,
-                    prepared_cache,
-                    &param.ty,
-                    diagnostics,
-                )?,
-                is_content: param.is_content,
-                span: param.span,
+    Some(
+        function
+            .params
+            .iter()
+            .map(|param| {
+                (
+                    param.name.as_str().to_string(),
+                    param.is_content,
+                    param.is_omissible(),
+                )
             })
-        })
-        .collect::<Option<Vec<_>>>()
+            .collect(),
+    )
 }
 
 fn content_expression(content: Vec<CodegenExpression>, span: TextSpan) -> CodegenExpression {
@@ -2817,26 +2951,32 @@ fn build_type_ref_resolving_aliases(
             aliases,
             diagnostics,
         ),
-        ast::TypeRef::Array(element) => Some(CodegenTypeRef::Array {
-            element: Box::new(build_type_ref_resolving_aliases(
-                artifact,
-                resolved_module,
-                prepared_cache,
-                element,
-                aliases,
-                diagnostics,
-            )?),
-        }),
-        ast::TypeRef::Nullable(inner) => Some(CodegenTypeRef::Nullable {
-            inner: Box::new(build_type_ref_resolving_aliases(
+        ast::TypeRef::Seq { inner, occ } => {
+            let item = build_type_ref_resolving_aliases(
                 artifact,
                 resolved_module,
                 prepared_cache,
                 inner,
                 aliases,
                 diagnostics,
-            )?),
-        }),
+            )?;
+            // An alias is transparent, so `type Ints = int+` used as `Ints?` would nest; the
+            // checker has rejected that already, and the occurrences are multiplied here so the
+            // IR never carries a `seq` whose item is a `seq`.
+            Some(match item {
+                CodegenTypeRef::Seq {
+                    item,
+                    occ: inner_occ,
+                } => CodegenTypeRef::Seq {
+                    item,
+                    occ: inner_occ.product(*occ),
+                },
+                item => CodegenTypeRef::Seq {
+                    item: Box::new(item),
+                    occ: *occ,
+                },
+            })
+        }
         ast::TypeRef::Function {
             params,
             return_type,
@@ -2850,11 +2990,12 @@ fn build_type_ref_resolving_aliases(
                             artifact,
                             resolved_module,
                             prepared_cache,
-                            &param.ty,
+                            &param.ty.read_type(param.optional),
                             aliases,
                             diagnostics,
                         )?,
                         is_content: param.is_content,
+                        optional: param.optional,
                     });
                 }
                 mapped

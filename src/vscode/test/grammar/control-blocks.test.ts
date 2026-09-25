@@ -272,7 +272,7 @@ describe('NX control blocks', () => {
 
   it('keeps a keyword-spelled name in a condition-list arm out of the keyword scope', () => {
     // The arm list included all of `#attributes`, whose `#keywords-core` fallback claimed any name
-    // that was not followed by `=`. Only `true`, `false`, and `null` are reserved.
+    // that was not followed by `=`. Only `true` and `false` are reserved.
     const arm = '<Notice if { state => tone="danger" } />';
     expect(scopesForSubstring(arm, 'state', grammar)).to.not.include('keyword.declaration.state.nx');
     expect(scopesForSubstring(arm, '=>', grammar)).to.include('keyword.operator.arrow.nx');

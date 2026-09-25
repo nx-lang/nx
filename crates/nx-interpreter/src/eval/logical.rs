@@ -6,18 +6,6 @@ use nx_hir::ast::{BinOp, UnOp};
 
 /// Evaluate a comparison binary operation (T036)
 pub fn eval_comparison_op(lhs: Value, op: BinOp, rhs: Value) -> Result<Value, RuntimeError> {
-    // Check for null operands
-    if lhs.is_null() {
-        return Err(RuntimeError::new(RuntimeErrorKind::NullOperation {
-            operation: format!("{:?}", op),
-        }));
-    }
-    if rhs.is_null() {
-        return Err(RuntimeError::new(RuntimeErrorKind::NullOperation {
-            operation: format!("{:?}", op),
-        }));
-    }
-
     match op {
         BinOp::Eq => eval_eq(lhs, rhs),
         BinOp::Ne => eval_ne(lhs, rhs),
@@ -131,9 +119,11 @@ fn eval_eq(lhs: Value, rhs: Value) -> Result<Value, RuntimeError> {
 ///
 /// <para>A record equals another of the same type whose every field is equal, and a list equals
 /// another of the same length whose elements are equal in order. A function value equals another
-/// exactly when both name the same declaration, which is its whole identity. `null` equals only
-/// `null`. This is the one equality `==`, match patterns, and `diff` share, so what an author can
-/// test by hand is what every other comparison sees.</para>
+/// exactly when both name the same declaration, which is its whole identity. Every value compares
+/// as a sequence, so an item equals a one-element list of an equal item, and the empty value
+/// equals only the empty value, being the empty sequence. This is the one equality `==`, match
+/// patterns, and `diff` share, so what an author can test by hand is what every other comparison
+/// sees.</para>
 pub fn values_equal(lhs: &Value, rhs: &Value) -> bool {
     if let Some(pair) = numeric_pair(lhs, rhs) {
         return match pair {
@@ -154,7 +144,6 @@ pub fn values_equal(lhs: &Value, rhs: &Value) -> bool {
                 case: b_case,
             },
         ) => a_union == b_union && a_case == b_case,
-        (Value::Null, Value::Null) => true,
         (
             Value::Function {
                 module: a_module,
@@ -167,6 +156,10 @@ pub fn values_equal(lhs: &Value, rhs: &Value) -> bool {
         ) => a_module == b_module && a_name == b_name,
         (Value::Array(a), Value::Array(b)) => {
             a.len() == b.len() && a.iter().zip(b).all(|(a, b)| values_equal(a, b))
+        }
+        // Every value compares as a sequence: an item is a sequence of one.
+        (Value::Array(items), item) | (item, Value::Array(items)) => {
+            items.len() == 1 && values_equal(&items[0], item)
         }
         (
             Value::Record {
@@ -417,20 +410,26 @@ mod tests {
     }
 
     #[test]
-    fn test_null_comparison() {
-        let result = eval_eq(Value::Null, Value::Null).unwrap();
-        assert_eq!(result, Value::Boolean(true));
-    }
-
-    #[test]
-    fn test_null_operation_error() {
-        let result = eval_lt(Value::Null, Value::Int(5));
-        assert!(result.is_err());
-    }
-
-    #[test]
     fn test_type_mismatch_logical() {
         let result = eval_and(Value::Int(1), Value::Boolean(true));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_empty_values_compare_equal_only_to_each_other() {
+        let result = eval_eq(Value::empty(), Value::empty()).unwrap();
+        assert_eq!(result, Value::Boolean(true));
+
+        let result = eval_eq(Value::empty(), Value::Int(5)).unwrap();
+        assert_eq!(result, Value::Boolean(false));
+    }
+
+    #[test]
+    fn test_empty_operand_in_an_ordering_is_a_type_mismatch() {
+        let result = eval_lt(Value::empty(), Value::Int(5)).unwrap_err();
+        assert!(matches!(
+            result.kind(),
+            RuntimeErrorKind::TypeMismatch { .. }
+        ));
     }
 }

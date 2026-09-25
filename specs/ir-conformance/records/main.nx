@@ -1,8 +1,8 @@
 // Records, unions, aliases, construction, member access and the derived declarations.
 export abstract type Named = { name:string }
-export type User extends Named = { email:string? age:int = 30 }
+export type User extends Named = { email?:string age:int = 30 }
 export type Line = { text:string }
-export type Address = { city:string content lines:Line[] }
+export type Address = { city:string content lines:Line+ }
 export type LoadState =
   | idle
   | loading
@@ -21,7 +21,7 @@ let userName() = { nameOf(ada()) }
 let userAge() = { ageOf(ada()) }
 let cityOf(address:Address) = { address.city }
 let city() = { cityOf(home()) }
-let patch() = <User.Update email={null} />
+let patch() = <User.Update email={} />
 let applied() = { apply(ada(), patch()) }
 let merged() = { merge(<User.Update name="Bo" />, patch()) }
 let changedKeys() = { changed(diff(ada(), applied())) }

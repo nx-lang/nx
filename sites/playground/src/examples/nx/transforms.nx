@@ -10,7 +10,7 @@
 // RotateToAsync and the spin toggle — needs animation, which NX lacks; the logo below is drawn at
 // rest where the original animates it.
 
-component <Card extends DrawnNode Title:string content Children:DrawnNode[] /> = {
+component <Card extends DrawnNode Title:string content Children:DrawnNode+ /> = {
   <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=8 />
     BackgroundColor="#2B3035" HorizontalOptions=Fill>
     <SkiaStack Padding=<Thickness Left=16 Top=12 Right=16 Bottom=12 /> Spacing=10>
@@ -25,14 +25,14 @@ component <Card extends DrawnNode Title:string content Children:DrawnNode[] /> =
 component <Tile
   extends DrawnNode
   Text: string
-  Rotation: float64?
-  ScaleX: float64?
-  ScaleY: float64?
-  SkewX: float64?
-  TranslationY: float64?
-  Opacity: float64?
-  AnchorX: float64?
-  AnchorY: float64?
+  Rotation?: float64
+  ScaleX?: float64
+  ScaleY?: float64
+  SkewX?: float64
+  TranslationY?: float64
+  Opacity?: float64
+  AnchorX?: float64
+  AnchorY?: float64
 /> = {
   <SkiaStack Padding=<Thickness Top=12 Bottom=12 /> Spacing=6 WidthRequest=120>
     <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=10 />

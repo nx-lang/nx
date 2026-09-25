@@ -185,6 +185,9 @@ importers:
       canvaskit-wasm:
         specifier: ^0.42.0
         version: 0.42.0
+      drawnui-react:
+        specifier: 0.1.0-preview.12
+        version: 0.1.0-preview.12(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vite@7.3.6(@types/node@24.13.3)(tsx@4.23.13))
       monaco-editor:
         specifier: ^0.56.0
         version: 0.56.0
@@ -1397,6 +1400,19 @@ packages:
 
   dompurify@3.4.8:
     resolution: {integrity: sha512-yb1cEmaOum7wFvOCSQxyfgVlv5D47Rc30iZWoMpbDIWTnJ6grDDQyu2KFJzB2k7u0pMuJcQ1zphH//fFnw2tjQ==}
+
+  drawnui-react@0.1.0-preview.12:
+    resolution: {integrity: sha512-sJktLRVD9kCaDzhWR9QlUFZn/3vSn0lKlWZoEXWz1pD3G249GH4Y5WGz8whycyce4DnY65ae7e/p9v4sbOm69A==}
+    peerDependencies:
+      playwright-core: '>=1.40'
+      react: ^18.2.0 || ^19.0.0
+      react-dom: ^18.2.0 || ^19.0.0
+      vite: '>=5'
+    peerDependenciesMeta:
+      playwright-core:
+        optional: true
+      vite:
+        optional: true
 
   electron-to-chromium@1.5.422:
     resolution: {integrity: sha512-UvA/32XqrLDdZSn7Jllo1AYNcWji/G0d5M0GTViE7KoGBiMunw3a34Sb2KO4ZZyrSEhqsxFoVhWWJshdyfKqJA==}
@@ -2843,6 +2859,15 @@ snapshots:
   dompurify@3.4.8:
     optionalDependencies:
       '@types/trusted-types': 2.0.7
+
+  drawnui-react@0.1.0-preview.12(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vite@7.3.6(@types/node@24.13.3)(tsx@4.23.13)):
+    dependencies:
+      canvaskit-wasm: 0.42.0
+      react: 19.2.8
+      react-dom: 19.2.8(react@19.2.8)
+      react-reconciler: 0.33.0(react@19.2.8)
+    optionalDependencies:
+      vite: 7.3.6(@types/node@24.13.3)(tsx@4.23.13)
 
   electron-to-chromium@1.5.422: {}
 

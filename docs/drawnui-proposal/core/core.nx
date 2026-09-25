@@ -38,10 +38,10 @@ export type ElementId = string      // ^[A-Za-z_][A-Za-z0-9_.-]{0,63}$
 export type NxUiDocument = {
   format: string = "nx-ui-json"
   schemaVersion: string = "0.1.0"
-  catalogs: CatalogUse[]
+  catalogs: CatalogUse+
   root: ElementId
-  elements: Element[]
-  metadata: DocumentMetadata?
+  elements: Element+
+  metadata?: DocumentMetadata
 }
 
 export type CatalogUse = {
@@ -50,9 +50,9 @@ export type CatalogUse = {
 }
 
 export type DocumentMetadata = {
-  title: string?
-  description: string?
-  generator: string?
+  title?: string
+  description?: string
+  generator?: string
 }
 
 // `Element` has no NX declaration (§4.4): an element *is* a component invocation, and the
@@ -141,16 +141,16 @@ export type Paint =
       x2: float64
       y2: float64
       units: GradientUnits = objectBoundingBox
-      stops: GradientStop[]
+      stops: GradientStop+
     }
   | radialGradient {
       cx: float64
       cy: float64
       r: float64
-      fx: float64?
-      fy: float64?
+      fx?: float64
+      fy?: float64
       units: GradientUnits = objectBoundingBox
-      stops: GradientStop[]
+      stops: GradientStop+
     }
 
 
@@ -164,15 +164,15 @@ export type LineJoin = miter | round | bevel
 // A stroke is scaled by the transforms in effect, as in SVG; there is no MVP equivalent of
 // `vector-effect: non-scaling-stroke`.
 //
-// NX gap: `T[]?` rather than `T[] = []` here and throughout — NX has no empty-sequence literal, in
-// any position, so "defaults to empty" is spelled nullable.
+// `name?: T+` here and throughout: an optional sequence field that is omitted, or written `{}`,
+// is the empty value, which is how "defaults to empty" is spelled.
 export type Stroke = {
   paint: Paint
   width: float64 = 1
   lineCap: LineCap = butt
   lineJoin: LineJoin = miter
   miterLimit: float64 = 4
-  dashArray: float64[]?
+  dashArray?: float64+
   dashOffset: float64 = 0
 }
 
@@ -190,7 +190,7 @@ export type Shadow = {
 // NX gap: a default cannot reference a sibling property, so `scale.y` cannot default to `scale.x`.
 export type Transform =
   | translate { x: float64 y: float64 }
-  | scale { x: float64 y: float64? }        // null y means uniform scale
+  | scale { x: float64 y?: float64 }        // an omitted y means uniform scale
   | rotate { degrees: float64 cx: float64 = 0 cy: float64 = 0 }
   | skewX { degrees: float64 }
   | skewY { degrees: float64 }
@@ -215,7 +215,7 @@ export type ImageSource =
 
 // Renderers derive semantic roles from component types; the MVP allows no arbitrary ARIA roles.
 export type Accessibility = {
-  label: string?
-  description: string?
+  label?: string
+  description?: string
   hidden: boolean = false           // true means decorative / ignored by accessibility APIs
 }

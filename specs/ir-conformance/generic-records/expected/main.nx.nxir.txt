@@ -1,4 +1,4 @@
-module main.nx fingerprint 3828358598909838332
+module main.nx fingerprint 16816728614731363917
 requires update-records-v1 update-intrinsics-v1
 entrypoints functions [ints names startOf endOf first patch moved span plan root] components []
 
@@ -10,8 +10,8 @@ record Pair @3:1-3:67
   key: object required
   value: object required
 
-record Schedule @4:1-4:63
-  slots: Range[] required
+record Schedule @4:1-4:62
+  slots: Range+ required
   label: string required
 
 function ints() @6:1-6:47 =

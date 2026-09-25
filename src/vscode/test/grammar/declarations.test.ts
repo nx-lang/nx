@@ -68,8 +68,10 @@ describe('NX element-shaped declarations', function () {
       'export external component <Text extends UiCommon',
       '  format: TextFormat = plain',
       '  letterSpacing: float64 = 0.0',
-      '  color: Color?',
-      '  items: string[]?',
+      '  colors: Color+',
+      '  tags: string*',
+      '  color?: Color',
+      '  items?: string+',
       '  content text: string',
       '/>'
     ];
@@ -100,11 +102,27 @@ describe('NX element-shaped declarations', function () {
     it('scopes type suffixes', function () {
       const result = tokenizeLines(grammar, signature);
 
-      expectScopes(scopesAt(result, 'color:', 'Color'), 'Color').toInclude('entity.name.type.nx');
-      expectScopes(scopesAt(result, 'color:', '?'), '? after Color').toInclude('keyword.operator.type-modifier.nx');
-      expectScopes(scopesAt(result, 'items:', 'string'), 'string').toInclude('support.type.primitive.nx');
-      expectScopes(scopesAt(result, 'items:', '[]'), '[]').toInclude('keyword.operator.type-modifier.nx');
-      expectScopes(scopesAt(result, 'items:', '?'), '? after []').toInclude('keyword.operator.type-modifier.nx');
+      expectScopes(scopesAt(result, 'colors:', 'Color'), 'Color').toInclude('entity.name.type.nx');
+      expectScopes(scopesAt(result, 'colors:', '+'), '+ after Color').toInclude('keyword.operator.type-modifier.nx');
+      expectScopes(scopesAt(result, 'tags:', 'string'), 'string').toInclude('support.type.primitive.nx');
+      expectScopes(scopesAt(result, 'tags:', '*'), '* after string').toInclude('keyword.operator.type-modifier.nx');
+    });
+
+    it('scopes the optional mark as its own token between the name and the colon', function () {
+      const result = tokenizeLines(grammar, signature);
+
+      for (const [line, name] of [['color?:', 'color'], ['items?:', 'items']]) {
+        expectScopes(scopesAt(result, line, name), name).toInclude('variable.other.property.nx');
+        expect(tokenTextAt(result, line, name), `${name} token span`).to.equal(name);
+        expectScopes(scopesAt(result, line, '?'), `? after ${name}`)
+          .toInclude('keyword.operator.optional.nx')
+          .toNotInclude('keyword.operator.type-modifier.nx');
+        expectScopes(scopesAt(result, line, ':'), `colon after ${name}`)
+          .toInclude('punctuation.separator.type.annotation.nx');
+        expect(tokenTextAt(result, line, ':'), `colon token span after ${name}`).to.equal(':');
+      }
+      expectScopes(scopesAt(result, 'items?:', 'string'), 'string').toInclude('support.type.primitive.nx');
+      expectScopes(scopesAt(result, 'items?:', '+'), '+ after string').toInclude('keyword.operator.type-modifier.nx');
     });
 
     it('scopes a content-marked property', function () {
@@ -141,7 +159,7 @@ describe('NX element-shaped declarations', function () {
     it('scopes a comment containing signature-terminating characters', function () {
       const result = tokenizeLines(grammar, [
         'export external component <Text extends UiCommon',
-        '  maxLines: int?                    // >= 1; null',
+        '  maxLines?: int                    // >= 1; null',
         '  overflow: TextOverflow = clip',
         '/>'
       ]);

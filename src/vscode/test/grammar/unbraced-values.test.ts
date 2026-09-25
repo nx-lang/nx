@@ -23,15 +23,26 @@ describe('NX unbraced property values', function () {
     );
   });
 
-  it('keeps true, false, and null as literals rather than bare names', function () {
-    const line = '<C flag=true other=false opt=null />';
+  it('keeps true and false as literals rather than bare names', function () {
+    const line = '<C flag=true other=false />';
     const { tokens } = grammar.tokenizeLine(line, null);
 
-    for (const literal of ['true', 'false', 'null']) {
+    for (const literal of ['true', 'false']) {
       expect(scopesForSubstring(line, tokens, literal)).to.not.include(
         'variable.other.enummember.nx'
       );
     }
+  });
+
+  it('scopes null as the bare name its position gives it, not as a literal', function () {
+    // The language has no `null`: the absent value is `{}`, so `null` here is a contextual name
+    // like any other word.
+    const line = '<C opt=null />';
+    const { tokens } = grammar.tokenizeLine(line, null);
+
+    expect(scopesForSubstring(line, tokens, 'null'))
+      .to.include('variable.other.enummember.nx')
+      .and.not.include('constant.language.null.nx');
   });
 
   it('scopes a signed numeric literal as a number', function () {

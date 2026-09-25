@@ -141,7 +141,7 @@ let root(): int = { 1 / 0 }
 withSource(
   `
 external component <Item label:string />
-external component <Stack content Children:Item[] />
+external component <Stack content Children:Item+ />
 let root() = { <Stack><Item label="only" /></Stack> }
 `,
   (dir, sourcePath) => {
@@ -154,7 +154,7 @@ let root() = { <Stack><Item label="only" /></Stack> }
 withSource(
   `
 type Shadow = { Y:float64 = 0.0 }
-external component <Shape shadows:Shadow[]? sizes:float64[]? />
+external component <Shape shadows?:Shadow+ sizes?:float64+ />
 let root() = { <Shape shadows={ <Shadow Y=6.0 /> } sizes={3.0} /> }
 `,
   (dir, sourcePath) => {
@@ -166,8 +166,8 @@ let root() = { <Shape shadows={ <Shadow Y=6.0 /> } sizes={3.0} /> }
 
 withSource(
   `
-type User = { name:string = "anon" email:string? }
-let root(): User.Update = { <User.Update email={null} /> }
+type User = { name:string = "anon" email?:string }
+let root(): User.Update = { <User.Update email={} /> }
 `,
   (dir, sourcePath) => {
     const ir = emitIr(dir, sourcePath);
@@ -242,13 +242,12 @@ let root() = { <Frame held={<Figure.circle r=2 />} /> }
 
 withSource(
   `
-type Ints = int[]
+type Ints = int+
 type AlsoInts = Ints
 abstract external component <Item />
 external component <Leaf extends Item />
-type Items = Item[]
-type MaybeItems = Items?
-external component <Box xs:AlsoInts? content items:MaybeItems />
+type Items = Item+
+external component <Box xs?:AlsoInts content items?:Items />
 let root() = { <Box xs={3}><Leaf /></Box> }
 `,
   (dir, sourcePath) => {
@@ -261,7 +260,7 @@ let root() = { <Box xs={3}><Leaf /></Box> }
 withSource(
   `
 type Thickness = { Left:float64 = 0.0  Top:float64 = 0.0 }
-abstract external component <Control Padding:Thickness = {<Thickness />} content Children:Control[]? />
+abstract external component <Control Padding:Thickness = {<Thickness />} content Children?:Control+ />
 external component <Panel extends Control />
 let root() = { <Panel Padding={<Thickness Left=4.0 />}><Panel /></Panel> }
 `,
@@ -348,10 +347,10 @@ console.log(JSON.stringify({ ints: ints(), first: first(), moved: moved() }));
 
 withSource(
   `
-type User = { name:string email:string? age:int? }
+type User = { name:string email?:string age?:int }
 let key(): User.Property = { User.Property.email }
-let root(): User = { apply(<User name="Ada" email="x@y" />, <User.Update email={null} />) }
-let keys(): User.Property[] = { changed(<User.Update age={null} name="Ada" />) }
+let root(): User = { apply(<User name="Ada" email="x@y" />, <User.Update email={} />) }
+let keys(): User.Property* = { changed(<User.Update age={} name="Ada" />) }
 `,
   (dir, sourcePath) => {
     const ir = emitIr(dir, sourcePath);
@@ -405,7 +404,7 @@ withSource(
 type Contact = { name:string }
 let <ContactRow Item:Contact Index:int />: string = {Item.name + "#" + Index}
 let <Compact Item:Contact />: string = {Item.name}
-external component <List TItem:type ItemsSource:TItem[]? ItemTemplate:(<function Item:TItem Index:int />: string)? />
+external component <List TItem:type ItemsSource?:TItem+ ItemTemplate?:<function Item:TItem Index:int />: string />
 component <Section Item:Contact Row:<function Item:Contact Index:int />: string /> = { <Row Item={Item} Index=2 /> }
 let root() = <List TItem=Contact ItemsSource={ <Contact name="Ada" /> } ItemTemplate={ContactRow} />
 `,
@@ -429,7 +428,7 @@ let root() = <List TItem=Contact ItemsSource={ <Contact name="Ada" /> } ItemTemp
 
 withSource(
   `
-external component <Box Label:string? Same:boolean? Other:boolean? />
+external component <Box Label?:string Same?:boolean Other?:boolean />
 let <Wrap Item:object />: string = "w"
 let <Plain Item:object />: string = "p"
 let F: <function Item:object />: string = {Wrap}
@@ -449,10 +448,10 @@ let root() = <Box Label=<F Item="x" /> Same={F == G} Other={F == H} />
 withSource(
   `
 type Item = { n:int }
-external component <Stack content Children:Item[] />
+external component <Stack content Children:Item+ />
 let xs = { 1 2 3 }
-let <Items content Items:Item[] />: Item[] = {Items}
-let <Shift Items:Item[] By:int />: Item[] = { for i in Items { <Item n={i.n + By} /> } }
+let <Items content Items:Item+ />: Item+ = {Items}
+let <Shift Items:Item+ By:int />: Item+ = { for i in Items { <Item n={i.n + By} /> } }
 let seed = { for x in xs { <Item n={x} /> } }
 let viaComponent() = <Stack> for x in xs { <Item n={x} /> } for x in xs { <Item n={x + 10} /> } </Stack>
 let viaFunction() = <Items> <Shift Items={seed} By=0 /> <Shift Items={seed} By=10 /> </Items>
@@ -464,7 +463,393 @@ let root() = { viaComponent() viaFunction() }
     assertEqual(root, nativeJson(sourcePath));
     // Two `for` loops side by side, and two list-returning calls, each read as one list of children.
     assertEqual(root[0].Children.length, 6);
-    assertEqual(root[1].length, 6);
+    // The braced value at the top splices too, so the six items of `viaFunction()` sit beside the
+    // one element of `viaComponent()` rather than nested inside a list of their own.
+    assertEqual(root.length, 7);
     console.log("ok - list-valued content children are spliced as the native interpreter splices them");
+  },
+);
+
+withSource(
+  `
+let xs:string+ = {"a" "b"}
+let ys:string+ = {"c"}
+let root(): string+ = { xs ys }
+`,
+  (dir, sourcePath) => {
+    const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
+    const root = evaluateFunction(prepared, "root");
+    assertEqual(root, nativeJson(sourcePath));
+    assertEqual(root, ["a", "b", "c"]);
+    console.log("ok - two sequences in a braced value concatenate as the native interpreter concatenates them");
+  },
+);
+
+withSource(
+  `
+type Row = { cells:int+ }
+let rows:Row+ = { <Row cells={1 2}/> <Row cells={3 4}/> }
+let flat(): int+ = { for r in rows { r.cells } }
+let evens(): int* = { for n in 1..=4 { if (n % 2 == 0) { n } } }
+let root() = { flat() evens() }
+`,
+  (dir, sourcePath) => {
+    const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
+    const root = evaluateFunction(prepared, "root");
+    assertEqual(root, nativeJson(sourcePath));
+    // A list-yielding body concatenates, and an iteration whose conditional is not taken
+    // contributes nothing.
+    assertEqual(root, [1, 2, 3, 4, 2, 4]);
+    console.log("ok - a list-yielding and a conditional `for` body match the native interpreter");
+  },
+);
+
+withSource(
+  `
+type A = { n:int = 1 }
+type Box = { content items:A+ }
+let c = false
+let root(): Box = { <Box><A/>{if c { <A/> }}</Box> }
+`,
+  (dir, sourcePath) => {
+    const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
+    const root = evaluateFunction(prepared, "root");
+    assertEqual(root, nativeJson(sourcePath));
+    // A conditional child that does not fire contributes no items, and never a null.
+    assertEqual(root.items, [{ $type: "A", n: 1 }]);
+    console.log("ok - an untaken conditional child contributes no items, as in the native interpreter");
+  },
+);
+
+// The flat sequence model, checked in all three engines at once: a spliced braced value, a
+// list-yielding `for` and an untaken conditional child have to produce one value, with no nested
+// list and no null item, in the interpreter, the IR runtime and generated JavaScript alike.
+withSource(
+  `
+type Badge = { n:int = 1 }
+type Row = { cells:int+ }
+type Box = { content items:Badge+ }
+type Result = { spliced:Badge+ values:string+ flat:int+ boxed:Box }
+let some:Badge+ = { <Badge/> <Badge/> }
+let xs:string+ = {"a" "b"}
+let rows:Row+ = { <Row cells={1 2}/> <Row cells={3 4}/> }
+let c = false
+let root(): Result = <Result
+  spliced={some <Badge/>}
+  values={ xs "c" }
+  flat={for r in rows { r.cells }}
+  boxed={<Box><Badge/>{if c { <Badge/> }}</Box>}
+/>
+`,
+  (dir, sourcePath) => {
+    const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
+    const generatedPath = join(dir, "js");
+    runNxCli(["codegen", sourcePath, "--target", "javascript", "--output", generatedPath]);
+    const indexUrl = pathToFileURL(join(generatedPath, "index.js")).href;
+    const generated = generatedJsJson(
+      generatedPath,
+      `
+import { root } from ${JSON.stringify(indexUrl)};
+console.log(JSON.stringify(root()));
+`,
+    );
+
+    const viaIr = evaluateFunction(prepared, "root");
+    assertEqual(viaIr, nativeJson(sourcePath));
+    assertEqual(viaIr, generated);
+    assertEqual(viaIr.spliced.length, 3);
+    assertEqual(viaIr.values, ["a", "b", "c"]);
+    assertEqual(viaIr.flat, [1, 2, 3, 4]);
+    // The conditional child did not fire, so it contributed no items and no null.
+    assertEqual(viaIr.boxed.items.length, 1);
+    console.log("ok - splicing and untaken conditionals agree in the interpreter, the IR runtime and generated JavaScript");
+  },
+);
+
+// The contribution rule applies again to whatever a taken branch is, so a conditional nested in a
+// conditional contributes an item or nothing -- never the `null` its value form would have. Each
+// engine resolves the branch and then asks the same question of it, so this is where the three
+// would drift apart if one of them evaluated the item whole instead.
+withSource(
+  `
+type Badge = { n:int = 1 }
+type Box = { content items:Badge+ }
+type Loose = { content items?:Badge+ }
+type Nested = { openInOpen:Box takenInner:Box closedOverOpen:Loose }
+let yes = true
+let no = false
+let root(): Nested = <Nested
+  openInOpen={<Box><Badge/>{if yes { if no { <Badge n=2 /> } }}</Box>}
+  takenInner={<Box><Badge/>{if yes { if yes { <Badge n=5 /> } }}</Box>}
+  closedOverOpen={<Loose><Badge/><Badge n=6 />{if yes { if no { <Badge n=3 /> } } else { <Badge n=4 /> }}</Loose>}
+/>
+`,
+  (dir, sourcePath) => {
+    const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
+    const generatedPath = join(dir, "js");
+    runNxCli(["codegen", sourcePath, "--target", "javascript", "--output", generatedPath]);
+    const indexUrl = pathToFileURL(join(generatedPath, "index.js")).href;
+    const generated = generatedJsJson(
+      generatedPath,
+      `
+import { root } from ${JSON.stringify(indexUrl)};
+console.log(JSON.stringify(root()));
+`,
+    );
+
+    const viaIr = evaluateFunction(prepared, "root");
+    assertEqual(viaIr, nativeJson(sourcePath));
+    assertEqual(viaIr, generated);
+    // The inner conditional was not taken, so the outer one contributed nothing at all.
+    assertEqual(viaIr.openInOpen.items.length, 1);
+    // Both taken: the inner conditional's item arrives through the outer one.
+    assertEqual(viaIr.takenInner.items.length, 2);
+    assertEqual(viaIr.takenInner.items[1].n, 5);
+    // An `else` on the outer conditional does not make the untaken inner one contribute an empty
+    // item: the branch that was taken is itself the thing that contributes nothing.
+    assertEqual(viaIr.closedOverOpen.items.length, 2);
+    console.log("ok - a conditional nested in a conditional contributes nothing in all three engines");
+  },
+);
+
+// A body that was written and produced nothing is not the same as no body at all. The first binds
+// the empty value; only the second leaves the content property to its declared default. A body that
+// may produce nothing is admitted only at an optional content property, which has no default, so
+// the two are told apart across two types: `Open` binds the empty value — an omitted key — however
+// the body came to produce nothing, and `Box` takes its default only when no body was written.
+withSource(
+  `
+type Badge = { n:int = 1 }
+type Box = { content items:Badge+ = { <Badge n=9 /> } }
+type Open = { content items?:Badge+ }
+type Defaults = { untaken:Open empty:Open noIterations:Open absent:Box }
+let c = false
+let none:Badge* = { }
+let root(): Defaults = <Defaults
+  untaken={<Open>{if c { <Badge n=2 /> }}</Open>}
+  empty={<Open>{}</Open>}
+  noIterations={<Open>{for b in none { b }}</Open>}
+  absent={<Box/>}
+/>
+`,
+  (dir, sourcePath) => {
+    const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
+    const generatedPath = join(dir, "js");
+    runNxCli(["codegen", sourcePath, "--target", "javascript", "--output", generatedPath]);
+    const indexUrl = pathToFileURL(join(generatedPath, "index.js")).href;
+    const generated = generatedJsJson(
+      generatedPath,
+      `
+import { root } from ${JSON.stringify(indexUrl)};
+console.log(JSON.stringify(root()));
+`,
+    );
+
+    const viaIr = evaluateFunction(prepared, "root");
+    assertEqual(viaIr, nativeJson(sourcePath));
+    assertEqual(viaIr, generated);
+    // A body that produced nothing binds the empty value, however it came to produce nothing, and
+    // an empty optional field is an omitted key.
+    for (const field of ["untaken", "empty", "noIterations"]) {
+      assertEqual("items" in viaIr[field], false);
+      assertEqual("items" in generated[field], false);
+    }
+    // No body at all is the one case the declared default is for.
+    assertEqual(viaIr.absent.items.length, 1);
+    assertEqual(viaIr.absent.items[0].n, 9);
+    console.log("ok - a body that produced nothing binds the empty value rather than the declared default");
+  },
+);
+
+// A conditional with no `else` carries an implicit `else { }`, so it admits zero in its own right
+// and needs no rule of its own in any engine: an empty arm written out and a missing one agree, and
+// a conditional alone in its braces behaves as it does beside other items.
+withSource(
+  `
+type Badge = { n:int = 1 }
+type Box = { content items:Badge+ }
+type Implicit = { emptyArm:Box missingArm:Box alone?:int beside:int+ taken?:int }
+let c = false
+let t = true
+let root(): Implicit = <Implicit
+  emptyArm={<Box><Badge/>{if c { <Badge n=2 /> } else { }}</Box>}
+  missingArm={<Box><Badge/>{if c { <Badge n=2 /> }}</Box>}
+  alone={if c { 1 }}
+  beside={if c { 1 } 2}
+  taken={if t { 1 }}
+/>
+`,
+  (dir, sourcePath) => {
+    const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
+    const generatedPath = join(dir, "js");
+    runNxCli(["codegen", sourcePath, "--target", "javascript", "--output", generatedPath]);
+    const indexUrl = pathToFileURL(join(generatedPath, "index.js")).href;
+    const generated = generatedJsJson(
+      generatedPath,
+      `
+import { root } from ${JSON.stringify(indexUrl)};
+console.log(JSON.stringify(root()));
+`,
+    );
+
+    const viaIr = evaluateFunction(prepared, "root");
+    assertEqual(viaIr, nativeJson(sourcePath));
+    // The written empty arm and the missing one are the same thing.
+    assertEqual(viaIr.emptyArm, viaIr.missingArm);
+    assertEqual(viaIr.emptyArm.items.length, 1);
+    // Alone in its braces an untaken conditional is the empty value, an omitted key at an optional
+    // field; beside another item it contributes nothing.
+    assertEqual("alone" in viaIr, false);
+    assertEqual(viaIr.beside, [2]);
+    // A taken conditional is its branch: a `?` value that holds an item is the item itself.
+    assertEqual(viaIr.taken, 1);
+    assertEqual(generated, viaIr);
+    console.log("ok - a conditional with no else admits zero in all three engines, alone or beside other items");
+  },
+);
+
+// A taken conditional's value has to be what its type claims, or code that consumes it breaks
+// differently in each engine. Iterating it is the sharpest test: a `for` over a `?` value that
+// holds an item runs once over that item — before this was pinned, the interpreter raised, the IR
+// runtime threw, and generated JavaScript iterated a string's characters, so `"new"` became
+// `"n!" "e!" "w!"`.
+withSource(
+  `
+type Out = { counted?:int tagged?:string mixed:int+ }
+let c = true
+let v = { if c { 1 } }
+let tags:string? = { if c { "new" } }
+let xs:int+ = {5 6}
+let either = { if c { 1 } else { xs } }
+let root(): Out = <Out
+  counted={for x in v { x * 10 }}
+  tagged={for t in tags { t + "!" }}
+  mixed={for x in either { x }}
+/>
+`,
+  (dir, sourcePath) => {
+    const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
+    const generatedPath = join(dir, "js");
+    runNxCli(["codegen", sourcePath, "--target", "javascript", "--output", generatedPath]);
+    const indexUrl = pathToFileURL(join(generatedPath, "index.js")).href;
+    const generated = generatedJsJson(
+      generatedPath,
+      `
+import { root } from ${JSON.stringify(indexUrl)};
+console.log(JSON.stringify(root()));
+`,
+    );
+
+    const viaIr = evaluateFunction(prepared, "root");
+    assertEqual(viaIr, nativeJson(sourcePath));
+    assertEqual(viaIr, generated);
+    // A `for` over a `?` value yields a `?` value, so the one item is the value itself.
+    assertEqual(viaIr.counted, 10);
+    assertEqual(viaIr.tagged, "new!");
+    assertEqual(viaIr.mixed, [1]);
+    console.log("ok - a taken conditional iterates as the value its type says, in all three engines");
+  },
+);
+
+// A conditional whose branches join to a sequence that admits zero has to work beside a sequence as
+// well as beside a scalar: an untaken branch is the empty value, never `[[]]` or a null item, and an
+// empty optional field is an omitted key. `xs` holds two items on purpose: a one-item `{"a"}` at the
+// `let xs:string+` annotation meets the separate single-item-lift gap in generated code, which this
+// case is not about.
+withSource(
+  `
+type Out = { absent?:string+ present?:string+ reversed?:string+ }
+let no = false
+let yes = true
+let xs:string+ = {"a" "b"}
+let none:string* = {}
+let root(): Out = <Out
+  absent={if no { xs }}
+  present={if yes { xs }}
+  reversed={if yes { none } else { xs }}
+/>
+`,
+  (dir, sourcePath) => {
+    const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
+    const generatedPath = join(dir, "js");
+    runNxCli(["codegen", sourcePath, "--target", "javascript", "--output", generatedPath]);
+    const indexUrl = pathToFileURL(join(generatedPath, "index.js")).href;
+    const generated = generatedJsJson(
+      generatedPath,
+      `
+import { root } from ${JSON.stringify(indexUrl)};
+console.log(JSON.stringify(root()));
+`,
+    );
+
+    const viaIr = evaluateFunction(prepared, "root");
+    assertEqual(viaIr, nativeJson(sourcePath));
+    assertEqual(viaIr, generated);
+    assertEqual(viaIr.present, ["a", "b"]);
+    // An empty optional field is an omitted key in canonical output, never `[]` or `[null]`.
+    assertEqual("absent" in viaIr, false);
+    assertEqual("reversed" in viaIr, false);
+    console.log("ok - an untaken branch beside a sequence is an empty optional sequence in all three engines");
+  },
+);
+
+// A lone content child binds as the child's value lifted once to the property's declared type,
+// the one lone-child rule every engine shares. So an empty sequence alone in a body binds the empty
+// value at an optional content property — an omitted key — in the interpreter, generated JavaScript
+// and the IR runtime alike; the IR runtime once spliced a lone child at any list-typed property and
+// then rejected the null it found, which is why it was left out of this comparison before.
+withSource(
+  `
+type A = { n:int = 1 }
+type Box = { content items?:A+ }
+let c = false
+let as2:A+ = { <A/> <A n=2 /> }
+let root() = { <Box>{if c { as2 }}</Box> }
+`,
+  (dir, sourcePath) => {
+    const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
+    const generatedPath = join(dir, "js");
+    runNxCli(["codegen", sourcePath, "--target", "javascript", "--output", generatedPath]);
+    const indexUrl = pathToFileURL(join(generatedPath, "index.js")).href;
+    const generated = generatedJsJson(
+      generatedPath,
+      `
+import { root } from ${JSON.stringify(indexUrl)};
+console.log(JSON.stringify(root()));
+`,
+    );
+    const native = nativeJson(sourcePath);
+    assertEqual(generated, native);
+    assertEqual(evaluateFunction(prepared, "root"), native);
+    assertEqual("items" in native, false);
+    console.log("ok - a lone empty sequence binds an empty optional content property in all three engines");
+  },
+);
+
+// The same lone-child rule at an optional `+` content property, whose read type is `*`: one child
+// binds a one-item array, as it does at a required `+` property, in every engine.
+withSource(
+  `
+type A = { n:int = 1 }
+type Box = { content items?:A+ }
+let root() = { <Box><A/></Box> }
+`,
+  (dir, sourcePath) => {
+    const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
+    const generatedPath = join(dir, "js");
+    runNxCli(["codegen", sourcePath, "--target", "javascript", "--output", generatedPath]);
+    const indexUrl = pathToFileURL(join(generatedPath, "index.js")).href;
+    const generated = generatedJsJson(
+      generatedPath,
+      `
+import { root } from ${JSON.stringify(indexUrl)};
+console.log(JSON.stringify(root()));
+`,
+    );
+    const native = nativeJson(sourcePath);
+    assertEqual(native.items, [{ $type: "A", n: 1 }]);
+    assertEqual(evaluateFunction(prepared, "root"), native);
+    assertEqual(generated, native);
+    console.log("ok - a lone child at an optional plus content property binds a one-item array in all three engines");
   },
 );

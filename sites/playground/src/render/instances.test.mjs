@@ -191,7 +191,7 @@ test("a drawing pass that throws inside a transaction leaves the tree as it was"
 });
 
 const CONTENT = `
-component <Box extends DrawnNode content Children:DrawnNode[] /> = {
+component <Box extends DrawnNode content Children:DrawnNode+ /> = {
   state { opened:int = 0 }
   <SkiaStack>
     <SkiaButton Text="Open" onTapped=<Update opened={opened + 1} /> />
@@ -287,7 +287,7 @@ let root() = { <Counter /> }
 test("a handler bound outside any component carries no token, and is stripped and reported as inert", () => {
   const { tree, root } = open(`
 action Log = { }
-component <Page extends DrawnNode content Children:DrawnNode[] /> = { <SkiaStack>{Children}</SkiaStack> }
+component <Page extends DrawnNode content Children:DrawnNode+ /> = { <SkiaStack>{Children}</SkiaStack> }
 let root() = { <Page><SkiaButton Text="Log" onTapped=<Log /> /></Page> }
 `);
   const record = find(root.descriptor, control("SkiaButton")).onTapped;

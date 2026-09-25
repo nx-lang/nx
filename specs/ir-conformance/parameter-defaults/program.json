@@ -1,0 +1,49 @@
+{
+  "entry": "app/main.nx",
+  "emit": [
+    "app/main.nx",
+    "lib/text.nx"
+  ],
+  "entrypoints": [
+    {
+      "module": "app/main.nx",
+      "function": "oneArgument"
+    },
+    {
+      "module": "app/main.nx",
+      "function": "twoArguments"
+    },
+    {
+      "module": "app/main.nx",
+      "function": "allArguments"
+    },
+    {
+      "module": "app/main.nx",
+      "function": "skipMiddle"
+    },
+    {
+      "module": "app/main.nx",
+      "function": "emptyOptional"
+    },
+    {
+      "module": "app/main.nx",
+      "function": "liftedDefault"
+    },
+    {
+      "module": "app/main.nx",
+      "function": "importedDefault"
+    },
+    {
+      "module": "app/main.nx",
+      "function": "importedAll"
+    },
+    {
+      "module": "app/main.nx",
+      "function": "elementDefaults"
+    },
+    {
+      "module": "app/main.nx",
+      "function": "elementSkip"
+    }
+  ]
+}

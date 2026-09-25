@@ -19,18 +19,19 @@ let volume = <Slider range={0..1} />
 // A range of any type is constructible with the element form; only an integer range iterates.
 let letters = <Range T=string start="a" end="f" endInclusive={true} />
 
-// `for` counts over an integer range, with the optional index counting from zero.
-let squares:int[] = { for i in 0..4 { i * i } }
-let pages:int[] = { for page in 1..=3 { page } }
-let pairs:int[] = { for value, index in 5..8 { value * 10 + index } }
+// `for` counts over an integer range, with the optional index counting from zero. A range may be
+// empty, so what a `for` over one yields is zero or more.
+let squares:int* = { for i in 0..4 { i * i } }
+let pages:int* = { for page in 1..=3 { page } }
+let pairs:int* = { for value, index in 5..8 { value * 10 + index } }
 
 // An empty or reversed range yields nothing, and constructing one never fails.
-let none:int[] = { for i in 5..2 { i } }
+let none:int* = { for i in 5..2 { i } }
 let reversed:<Range T=int/> = {5..2}
 
 // A range value from anywhere iterates, not only one the operators wrote.
 let span:<Range T=int/> = <Range T=int start={2} end={4} endInclusive={true} />
-let counted:int[] = { for i in span { i } }
+let counted:int* = { for i in span { i } }
 
 // Reading a field and patching a range work as they do for any record.
 let first:int = {half.start}

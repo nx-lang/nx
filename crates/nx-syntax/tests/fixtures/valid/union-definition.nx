@@ -12,7 +12,7 @@ type LoadState =
       retryable: boolean = true
     }
   | loaded {
-      items: string[]
+      items: string+
     }
 
 export type UiEvent extends EventBase =

@@ -6,6 +6,6 @@ let <MathDemo
   <div>
     <p:>Sum: {x + y}</p>
     <p:>Product: {x * y}</p>
-    <p:>Comparison: {x < y ? "x is less" : "x is greater or equal"}</p>
+    <p:>Comparison: {if x < y { "x is less" } else { "x is greater or equal" }}</p>
     <p:>Logical: {x > 0 && y > 0}</p>
   </div>

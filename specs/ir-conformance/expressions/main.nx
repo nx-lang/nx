@@ -2,7 +2,6 @@
 let answer = 42
 let name = "Ada"
 let flag = true
-let nothing = null
 let items = { 1 2 3 }
 let zero = 0
 
@@ -24,7 +23,7 @@ let orTakesRight() = { answer < 0 || answer == 42 }
 let negation() = { -answer }
 let logicalNot() = { !flag }
 let greeting() = { "Hello, " + name }
-let chooseBig(x:int) = { x > 10 ? "big" : "small" }
+let chooseBig(x:int) = { if x > 10 { "big" } else { "small" } }
 let small() = { chooseBig(3) }
 let classify(x:int) = {
   if x is {
@@ -34,9 +33,20 @@ let classify(x:int) = {
   }
 }
 let classified() = { classify(2) }
+// A pattern naming a case without fields matches that constant; one naming a case with fields
+// matches every record of that case, whether the name is qualified or bare.
+type Stage = draft | review | done
+type Load = idle | failed { message:string }
+let stageLabel(s:Stage) = { if s is { Stage.draft => "draft"  Stage.review => "review"  else => "done" } }
+let reviewStage() = { stageLabel(Stage.review) }
+let loadLabel(l:Load) = { if l is { Load.idle => "idle"  Load.failed => l.message } }
+let idleLoad() = { loadLabel(Load.idle) }
+let failedLoad() = { loadLabel(<Load.failed message="Offline" />) }
+let bareLabel(l:Load) = { if l is { idle => "idle"  failed => l.message } }
+let bareFailed() = { bareLabel(<Load.failed message="Offline" />) }
 let doubled() = { for item, index in items { item * 2 + index } }
 let squares() = { for item in items { item * item } }
 let big() = { 9007199254740993 }
-let maybe() = { flag ? name : "nobody" }
+let maybe() = { if flag { name } else { "nobody" } }
 let element() = <div class="box" count={answer}><span /></div>
 let root() = { arithmetic() }

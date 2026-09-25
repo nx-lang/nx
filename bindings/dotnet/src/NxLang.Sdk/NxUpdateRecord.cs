@@ -10,13 +10,17 @@ namespace NxLang.Nx;
 /// The base of every generated update record DTO: a patch of one record, stored as a map from wire name to value.
 /// </summary>
 /// <remarks>
-/// <para>A field the map carries is set, even when its value is <see langword="null"/>, and means "set this
-/// field to the value"; a field it does not carry is unset and means "leave this field unchanged". The generated
-/// class exposes each field as an <see cref="NxOptional{T}"/> property over <see cref="Get{T}"/> and
-/// <see cref="Set{T}"/>, and this class exposes the map itself through <see cref="Fields"/>, <see cref="IsSet"/>,
-/// and <see cref="Unset"/>.</para>
+/// <para>A field the map carries is set and means "set this field to the value"; a field it does not carry is
+/// unset and means "leave this field unchanged". A set field whose value is <see langword="null"/> is cleared:
+/// <see langword="null"/> is the .NET spelling of the NX empty value, and clearing is legal only for a field the
+/// target declares optional (<c>name?:T</c>), which the schema records as <see cref="NxField.Clearable"/>. The
+/// generated class exposes each field as an <see cref="NxOptional{T}"/> property over <see cref="Get{T}"/> and
+/// <see cref="Set{T}"/>, whose value type is nullable only for a clearable field, and this class exposes the map
+/// itself through <see cref="Fields"/>, <see cref="IsSet"/>, and <see cref="Unset"/>.</para>
 /// <para>Serialization is driven by <see cref="Schema"/> in both formats: <c>$type</c> first, then the set fields
-/// in ordinal key order. A key the schema does not declare is rejected on read.</para>
+/// in ordinal key order, with a cleared field written as <see langword="null"/>. A key the schema does not
+/// declare is rejected on read, and so is a <see langword="null"/> for a field the schema knows cannot be
+/// cleared.</para>
 /// </remarks>
 public abstract class NxUpdateRecord
 {
@@ -37,8 +41,8 @@ public abstract class NxUpdateRecord
     public NxUpdateSchema Schema { get; }
 
     /// <summary>
-    /// Gets the fields the patch carries, by wire name. A field set to <see langword="null"/> is present with a
-    /// <see langword="null"/> value; an unset field is absent.
+    /// Gets the fields the patch carries, by wire name. A cleared field is present with a <see langword="null"/>
+    /// value; an unset field is absent.
     /// </summary>
     public IReadOnlyDictionary<string, object?> Fields => _fields;
 
@@ -117,16 +121,25 @@ public abstract class NxUpdateRecord
         _fields.TryGetValue(name, out object? value) ? new NxOptional<T>((T)value!) : default;
 
     /// <summary>
-    /// Writes the field named <paramref name="name"/>: a set value is stored, including <see langword="null"/>,
-    /// and an unset value removes the field.
+    /// Writes the field named <paramref name="name"/>: a set value is stored, where <see langword="null"/> clears
+    /// the field, and an unset value removes the field.
     /// </summary>
     /// <typeparam name="T">The field's value type.</typeparam>
     /// <param name="name">The field's wire name.</param>
     /// <param name="value">The value to store, or unset to remove the field.</param>
+    /// <exception cref="ArgumentException">Thrown when the schema does not declare the field.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the value is <see langword="null"/> and the schema
+    /// knows the field cannot be cleared.</exception>
     protected void Set<T>(string name, NxOptional<T> value)
     {
+        if (!Schema.TryGetField(name, out NxField? field))
+        {
+            throw new ArgumentException($"'{name}' is not a field of '{Schema.NxType}'.", nameof(name));
+        }
+
         if (value.HasValue)
         {
+            field.CheckClearable(value.Value, Schema.NxType);
             _fields[name] = value.Value;
         }
         else
@@ -137,7 +150,7 @@ public abstract class NxUpdateRecord
 
     /// <summary>
     /// Stores an untyped value read from the wire or computed by a helper. The caller has already checked the
-    /// name against the schema.
+    /// name against the schema and, for a <see langword="null"/>, that the field is clearable.
     /// </summary>
     internal void SetFieldValue(string name, object? value) => _fields[name] = value;
 }

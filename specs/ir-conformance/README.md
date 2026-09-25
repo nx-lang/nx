@@ -8,7 +8,9 @@ overwrite of them; a second runtime starts here. Together the programs cover eve
 constant and declaration kind of the schema, every binary operator and intrinsic, a program
 spanning two images, derived declarations, a snippet compiled against an implicitly imported
 catalog, a document that is a single trailing element, components that bind action handlers, and
-a program that declares a function type, passes functions as values and calls them by name.
+a program that declares a function type, passes functions as values and calls them by name, and
+one whose calls leave parameters out for the function to fill, including a default that reads a
+value private to the called function's module.
 
 Each program is a directory:
 
@@ -33,6 +35,14 @@ rendered output reflects it.
 
 `manifest.json` at the root lists the programs and which kinds each covers; the emitter's tests
 fail when a kind is covered by none.
+
+Generated JavaScript is the third engine held to `results.json`: the emitter's tests generate each
+program as JavaScript and run every entrypoint of its entry module, whose value must equal the
+recorded one. A program executable source codegen refuses (a match expression, a call of a
+function-typed value, an action handler) is skipped, and so is an entrypoint that reaches such a
+construct at run time. `occurrences` and `occurrence-lifting` avoid all of them so that the
+occurrence rules are checked in all three engines, which is why the `{}` pattern has a program of
+its own, `occurrence-patterns`.
 
 The size budget lives here too: every image emitted without its debug section is at most six
 times the UTF-8 length of its module's source. The images are marked binary in `.gitattributes`;

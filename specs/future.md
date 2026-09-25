@@ -62,7 +62,7 @@ by the design:
   useful beyond carrying bounds.
 - **Step**: a third bound, `0..10 by 2`, and with it a descending form. `for` over a
   range deliberately has neither today rather than guessing.
-- **Open-ended ranges**: `2..` and `..5`, which want a separate type or a nullable bound.
+- **Open-ended ranges**: `2..` and `..5`, which want a separate type or an optional bound.
 - **Range patterns**: `if n is { 1..=5 => … }`, which is the pattern-position counterpart
   of the range type above.
 
@@ -408,6 +408,36 @@ If this is revisited in the future:
   runtimes is asserted value-for-value by `runtime/typescript/test/emitted-ir.test.mjs`, so a change
   to the stamped form in one is a change in both.
 
+### Aliased imports: the interpreter looks a value's type up in the wrong module
+
+A narrower failure, and one the IR runtime does not share. The interpreter stamps a value with its
+declaring name (`User`, `Load.failed`) and later resolves that name, and the name a type annotation
+or pattern is spelled with, in the module doing the checking. Under `import "../lib" as S`, `User`
+is not visible in the importing module and `S.User` is not what the value carries, so programs that
+type-check fail at run time:
+
+- `let n(u:S.User) = { u.name }` called with `S.ada()` fails: "expected S.User, got User". The same
+  happens for a union: `f(S.make())` and `f(S.Load.idle)` at an `S.Load` parameter.
+- `n(<S.User name="Bo" />)`, built in the importing module itself, fails: "Record type not found:
+  User".
+- `if S.make() is { S.Load.failed => … else => … }` takes `else`: the pattern flattens to
+  `S.Load.failed` and the value says `Load.failed`.
+
+A plain `import "../lib"` works, since both spellings agree, and so does a bare pattern (`failed =>`),
+which the checker resolves to its declaration. The union failures reproduce on c197f4e, before
+`occurrence-cardinality`; they were found as RF57 of that change's review.
+
+This does not need the wire-format decision above. It is enough for the interpreter to resolve a
+spelled type name to its declaring module and local name before comparing, as
+`Expr::ResolvedUnionCase` already does for a bare case name, and to resolve a stamped name against
+the module that declared it rather than the one that holds the value. The comparisons live in
+`coerce_value_to_resolved_type`, `record_value_matches_expected_type`,
+`union_case_value_matches_expected_type` and `eval_match_pattern`
+(`crates/nx-interpreter/src/interpreter.rs`), and record construction resolves its type name the
+same way. It spans every place the interpreter turns a name back into a declaration, so it wants its
+own change, with an aliased-import case in an `nx-api` workspace test and in a multi-module IR
+corpus program so both engines are held to it.
+
 ## A Declaration Named After A Primitive Is Constructible But Unnameable
 
 NX lets a module declare a type whose name is a primitive's. `type string = { id:int }` parses,
@@ -482,7 +512,7 @@ How it is used today:
   the resolver has no entry for it; the special cases above are the whole of its definition.
 - **It is the standard type for content props.** `content body:Element` appears throughout the
   docs (`reference/syntax/functions.md`, `reference/syntax/elements.md`, `language-tour/elements.md`,
-  `overview/design-goals.md`, both tutorials) and in the example library as `content:Element[]`
+  `overview/design-goals.md`, both tutorials) and in the example library as `content:Element+`
   (`examples/nx/ui/components.nx`, `examples/nx/core/html.nx`). The `content-properties` spec is
   written in terms of it, and `reference/syntax/types.md` uses it as a function return type
   (`type ItemRenderer = (User) => Element`). Lowering keeps it as an element function's return
@@ -518,6 +548,73 @@ If this is revisited in the future:
   spelling an author has for "a list of elements".
 - Whatever is chosen, give it a declaration site or reserve the name. The current state, where a
   built-in has neither, is what made RF7 and RF9 a question rather than a lookup.
+
+## `never` Renders As A Name A User Declaration Can Take
+
+`flat-sequences` retired the unit type, and with it the `void` rendering that let
+`expects void, found void` name two different types. The `conditional-result-types` requirement
+"No diagnostic names the unit type" closed that door with a general rule: an internal type with no
+source spelling that must still be rendered in a message SHALL NOT render as a legal identifier.
+
+The bottom type breaks that rule today. `Display` renders it as `never`
+(`crates/nx-types/src/ty.rs:59`), and `primitive-type-names` ("The bottom type is
+inference-internal and has no source spelling") both forbids writing it and explicitly grants
+`type never = { value:int }` to user declarations. The same name can therefore stand for two
+different types in one message, which is what the rule exists to prevent.
+
+For now the collision is latent rather than reachable. With `type never = { value:int }` declared,
+none of these attempts got a message to print the bottom type as `never`. An unannotated empty list
+bound to a name, or returned from a function, is rejected with "Cannot determine the element type".
+A `{}` the author wrote is spelled `{}`, and an unspecified type parameter is named with `Name=`. So
+the rendering exists in `Display`, and each path that would reach a message is currently
+intercepted first. The next inference change that lets a bottom type survive to a mismatch will
+expose it, and nothing in the specs guards against that.
+
+The same probe turned up a sibling: an unannotated function whose body is `{}`
+(`let f(a:int) = {}`) reports `expects int, found T0` at a caller. That renders an inference
+variable, and `T0` is a legal identifier, so a user `type T0` would produce the identical
+ambiguity. That is a live violation of the same rule. It probably belongs to
+`infer-unannotated-return-types`, which is the change that touches that path.
+
+The two requirements were left contradicting each other when `flat-sequences` was archived,
+because either fix is substantive.
+
+The options:
+- **Narrow the rule to the unit type.** Keeps everything as it is and accepts the collision for
+  `never`. Cheapest, but it re-admits exactly the ambiguity the rule was written to exclude, and the
+  only reason it would be tolerable is that a user type named `never` is rare.
+- **Render the bottom type as a non-identifier** (`⊥`, `{}`'s element type, or similar). Satisfies
+  the rule as written, but every message about an empty list would then name a type no author has
+  seen, and the TypeScript targets (`crates/nx-codegen/src/emit.rs:2994`,
+  `crates/nx-cli/src/typegen/languages/typescript.rs:513`) emit `never` regardless, so the
+  diagnostic and the generated code would disagree about what the type is called.
+- **Make `never` a predefined type name.** Reserve it the way the seven true primitives are
+  reserved, and let it resolve to the bottom type where it is written.
+
+Suggestion: make `never` predefined. The rendering already reads well and matches TypeScript,
+which is where most authors will have met the concept and where the generated code already says
+`never`. Reserving the name is what makes that rendering unambiguous: once no user declaration can
+take it, `never` names one type everywhere, and the bottom type stops being "an internal type with
+no source spelling", so the conditional-result-types rule no longer applies to it and needs no
+exception. Being writable costs little. `never*` as an annotation means "only the empty value",
+which is honest; a field typed `never` makes its record unconstructible, which TypeScript also
+permits and which could be warned on later if it turns out to catch real mistakes.
+
+If this is revisited in the future:
+- Settle it alongside "Reconsider `Element` As A Built-In Type Name" and "A Declaration Named After
+  A Primitive Is Constructible But Unnameable" above. Reserving `never` moves it from the group that
+  shadows (`object`, `Element`) to the group that is reserved, and the second of those sections
+  already says the precedence rule should be one rule for every built-in name.
+- The spec changes are all in `primitive-type-names`: the bottom-type requirement drops "no source
+  spelling", and its scenarios "The bottom type cannot be written in source" and "A user declaration
+  may take the name `never`" invert. Decide whether `never` joins the primitive completions and
+  highlighting or stays a separate built-in like `Element`; the requirement currently pins "the
+  eight names above" as the whole primitive set.
+- Reserving the name removes a permission, so check the corpus for `type never` first, and add the
+  validation rule that already refuses primitive-named type parameters
+  (`crates/nx-syntax/src/validation.rs`) for `never` as a module-level declaration name too.
+- The unspecified-type-parameter scenario must keep its rule that the diagnostic names `TItem=`
+  rather than `never*`. Making `never` writable does not make it the actionable spelling there.
 
 ## Built-In Element Content And Property Values Are Never Type-Checked
 
@@ -687,10 +784,8 @@ reason that has nothing to do with the position.
   an unbraced `|-42` answers only because whitespace is no node and nothing competes — so changing it
   is not local. Widening the literal rule to also accept a node the offset merely abuts would fix
   this one position and would need re-measuring against every boundary case the resolver tests.
-- **`null`.** It infers as `T0?`, an unsolved inference variable, so hover declines rather than
-  render a variable id at a reader. It is the one literal form with no context-free type; answering
-  it means either solving the variable from the binding site before hover reads it, or deciding
-  in the renderer that an unsolved nullable spells `null`.
+- **`{}`.** The empty value has the type `never?`, which renders as `{}`. Hover prints that, and
+  whether it should say more is recorded under "Removing `null`" below.
 - **A unit literal.** `let value = {(|) 2}` reports nothing, where the `2` beside it reports `int`.
   `()` is valid only as an item of a list or value list (`grammar.js`), and it lowers to no literal
   expression, so unlike the cases above there is nothing recorded for a lookup to find.
@@ -852,23 +947,13 @@ track for the workspace packages. The items below were deliberately left out.
 
 ### Removing DrawnUI from the playground
 
-The playground still vendors DrawnUi.React and keeps its own catalog, generator, coercion and
-renderer under `sites/playground`, duplicating what the fiddle now owns. With the fiddle as the
+The playground draws with the same `drawnui-react` package as the fiddle, and its catalog generator
+is a copy of the fiddle's (`update-fiddle-to-nx-occurrences`). It still keeps its own coercion and
+renderer under `sites/playground`, duplicating what the fiddle owns. With the fiddle as the
 public DrawnUI playground for NX, the playground can drop its DrawnUI target and become a
 general-purpose site. Blocked on deciding what a general-purpose playground draws instead — the
 examples, the gallery and the renderer all assume DrawnUI — which is a change of its own rather
 than a deletion.
-
-### The catalog as a library artifact, for shares
-
-Every NX share artifact carries the whole program's IR, and the program is the snippet plus the
-flattened catalog: about 880 KB of compact JSON for a snippet of a few lines, of which the snippet
-is a few kilobytes. Shipping the catalog's IR once with the fiddle's runtime bundle and storing
-only the snippet's in the share needs the IR to reference declarations across artifacts, which is
-the library-artifact work above: an imported external component must keep its defaults and
-inherited properties (NXE12/NXE13) before the catalog can be a library, and the runtime must link
-two IR documents before a share can be one of them. Until then compact JSON is the mitigation, and
-the private backend's artifact limit decides whether NX shares can be opened to the public.
 
 ### The fiddle's compile in a Web Worker
 
@@ -879,6 +964,26 @@ compiler hang — none is known; the compiler is a type checker and code generat
 non-terminating paths — would freeze the tab. Blocked on nothing but a reason: the worker's
 message protocol, the deadline and the crash handling are the playground's `src/worker`, and
 moving them to the fiddle is a port that adds a thread hop to every compile and every hover.
+
+### An old `T[]` property is reported twice
+
+Found by `update-fiddle-to-nx-occurrences`, compiling a share saved under NX 0.3.0. The source
+`type Plan = { colors: string[] }` gets two errors on one line:
+
+```
+L4: `[]` is not a type suffix; a sequence is written `*` or `+`
+L4: Property 'colors' has type string*, which admits zero; a property admits zero only through the `?` mark on its name: write `colors?:string+`
+```
+
+The first comes from `removed-list-suffix` in `crates/nx-syntax/src/validation.rs`. Lowering then
+reads `[]` as `*`, so `optional-in-type-slot` in `crates/nx-types/src/infer.rs`
+(`check_property_slot`) reports the recovered type as well. The second message is the complete
+fix-it, and the first only half of one. In a property slot, one diagnostic would be better: the
+`name?:T+` fix-it at the `[]`. Outside a property slot, the first message alone is right.
+
+Fixing it touches two crates, since the syntax check does not know it is in a property slot and the
+type checker does not know the `*` was written `[]`. So it waits. No workaround is needed: the
+second message already says what to write, and a migrated source compiles.
 
 ## Logical operands: the IR runtime coerces, the interpreter demands a boolean
 
@@ -1067,3 +1172,208 @@ generating this source should report, not produce a file.
 
 **Related.** "A dependency's generic record can be named but not patched" above is the other half of
 what a probe of generic companions across library boundaries turned up.
+
+## Inference invents `object` where it should ask
+
+**Observed.** The join has exactly one fallback. `common_supertype`
+(`crates/nx-types/src/semantics.rs:36`) tries each side against the other and, when neither
+satisfies the other, answers `Type::named("object")`. The inference context's own
+`common_supertype` (`crates/nx-types/src/infer.rs`) recurses through records and sequences,
+joins their occurrences, and then delegates to that same fallback. So a join that failed and a join that
+genuinely landed on `object` are the same answer, and nothing downstream can tell them apart:
+
+```nx
+let v = { if c { 1 } else { names } }   // object
+let xs = { 1 "two" }                    // object+
+```
+
+The value of this is that a declared `object` still works, because a declared type does not go
+through the join at all. Each of these is accepted today, and would keep working under the stricter
+rule below — the expected type is pushed to the items or the value, and each is checked against
+`object` individually:
+
+```nx
+let xs:object+ = { 1 "two" }
+<Box items={1 "two"} />                                    // items:object+
+let pick(c:boolean, n:int, s:string): object = { if c { n } else { s } }
+```
+
+That matters because it means the stricter rule needs no cast expression to escape to, which is the
+usual reason a rule like this is deferred. NX has no cast today and would not need one for this.
+
+**Why it might matter.** An inferred `object` is a failure reported as a success, and the
+diagnostic then surfaces at the *consumer* rather than at the line that wrote the mismatch. RF8 in
+the `flat-sequences` review is the shape of it: an empty match arm joined with an element produced
+`object`, and what the author saw was `expects A+, found object+` at the binding, several lines
+from the conditional that caused it.
+
+The rule worth adopting: **inference never invents `object`; a site may always ask for it.** Where
+the join has nothing better than `object`, that is an error naming both types, and the author
+answers it with an annotation — which is a thing they can already write.
+
+**What would settle it.** Not a change to the fallback on its own. Today an `if` computes
+`common_supertype(then, else)` and only then compares the result to the expected type, so making
+the join error would reject the annotated `pick` above along with the unannotated cases. The
+expected type has to be pushed down into the branches and each branch checked against it, with the
+join used only where there is no expected type. That is bidirectional checking for conditionals,
+and it touches every join site rather than the sequence-shaped ones.
+
+Before flipping it, survey where an inferred `object` legitimately arises: `examples/`,
+`sites/playground/src/examples/nx`, `docs/drawnui-proposal`, and the fiddle catalogue. Note that
+`object` has three other sources that this rule does not touch and must not disturb — a declared
+annotation, the host boundary, and codegen's erasure of `Element` and of component type parameters
+(`crates/nx-codegen/src/builder.rs`).
+
+**Related.** `flat-sequences` made the join lift an item to a sequence, so a failed join between an
+item and a sequence now surfaces as `object+` where it used to surface as `object`. Both are the
+same "the join gave up" answer and this rule would treat them alike. "A Declaration Named After A
+Primitive Is Constructible But Unnameable" above covers `object` from the other side: it is a
+`Type::Named` rather than a `Type::Primitive`, which is why a user declaration can shadow it.
+
+## Removing `null`: what `occurrence-cardinality` settled and what it left open
+
+**Done.** The `occurrence-cardinality` change (v0.4.0) removed `null` and `T[]`. A type reference is
+a base type with at most one occurrence suffix — `T`, `T?`, `T+`, `T*` — `{}` is the one absent
+value, a property admits zero only through `name?:T`, type arguments are exactly-one types, the
+ternary is gone, and `x?`, `x?.m` and `x ?? y` are the presence test, the step and the fallback.
+The three behaviours the `flat-sequences` review left for it — a null's type deciding its shape
+beside a sequence, an absent sequence contributing one null item, and the lone content child with
+no shared rule — all went with the null value: an absent `T?` is zero items, and a lone child binds
+by the declared occurrence in the checker and all three engines, pinned by the `occurrences`
+conformance program. `openspec/specs/occurrence-types`, `optional-properties`, `presence-operators`
+and `sequence-model` are the record; `type-reference-suffixes` was deleted with it.
+
+**Deliberately left open.**
+
+- **Mapping `?.` over a sequence.** `xs?.name` on a `+` or `*` receiver is rejected naming `for`.
+  XPath maps a step over every item; NX may want that, but it is a second meaning for `?.` and it
+  was not needed by any corpus file.
+- **`T*` in a property slot.** `items:T*` is rejected with the fix-it `items?:T+`, so that every
+  way to admit zero is the mark on the name. A slot spelling `T*` would read the same and save a
+  rewrite for hosts whose lists are naturally empty; it was kept out so the rule stays one rule.
+- **Hover rendering of `{}`.** The type of `{}` renders as `{}` in diagnostics. Whether a hover over
+  a `{}` expression, or over a binding whose type is `never?`, should say the same, `{}` with a
+  note, or nothing, was not decided; the language service prints whatever `Type`'s `Display` prints.
+- **The `object?` ambiguity.** `object` is exactly one value and admits a `+`/`*` value only at an
+  `object*` site. A value typed `object?` therefore cannot hold a sequence, which is right for the
+  lattice but means there is no single type that admits "anything at all"; whether one is wanted
+  belongs with the `Element`/`object` naming questions.
+- **`never` as a writable name.** `{}` has type `never?`, and `never` still renders as a name a
+  user declaration could take ("`never` Renders As A Name A User Declaration Can Take" above).
+  Making it a keyword, or hiding it behind `{}` everywhere, is unchanged by this work.
+- **A space before a suffix.** In an unbraced type argument or property value, a suffix must touch
+  the name (`T=int?`); `T=int ?` is a syntax error, so that `a=n + 1` and `a=c ? 1 : 2` are never
+  read as suffixes. A type position still accepts the space: `x: int ?` is `x: int?`. Requiring
+  the attached spelling there too would give one spelling everywhere, at the cost of breaking
+  sources that use the space. No example or conformance program does.
+- **A bare name with no checked contract.** An unbraced bare name is a contextual name, not a
+  variable reference. An element with no declared contract (`<Div x=a />`) and an unbraced markup
+  body (`let root() = a`) leave it unchecked. The checker reports nothing, and run time fails with
+  "Undefined variable: a" even when a `let a` is in scope. A suffix there (`<Div x=a? />`) is
+  ignored the same way. Reporting an unresolvable contextual name statically, with the fix-it
+  `x={a}`, would cover both. Found by the `occurrence-cardinality` review (RF17).
+
+## Function parameters: what the call rules leave for later
+
+The `function-parameters` capability (added by `occurrence-cardinality`) settled how a `let`
+function is called. A paren-style function is called by position or as an element, and an
+element-style function only as an element. A paren-style signature lists the parameters a caller may
+omit (`?` or defaulted) last. A positional call may stop before them, and an element call may skip
+any of them. The function evaluates its own defaults, which may read the parameters before them and
+its module's private declarations. These are not done yet:
+
+- **A function with extra omissible parameters as a function value.** A function may be bound
+  where a function type is expected only when every parameter it declares is one the type
+  supplies. One that declares an extra optional or defaulted parameter is refused on purpose,
+  although every runtime would fill that parameter. Parameters match by name and a function may
+  ignore a supplied one, so accepting it would let a misspelled name on either side compile
+  silently: `Idx:int = 0` against a type supplying `Index` would always read 0. The cost is that
+  giving a function a new defaulted option breaks callers that pass it as a value. Dart,
+  TypeScript and Kotlin accept the extra parameter for that reason; C#, Swift and Scala do not.
+  Relax it if templates need to grow options without breaking such callers. The version to ship
+  then accepts the extra parameter but rejects a match where an unsupplied omissible parameter's
+  name is a near miss of an ignored supplied one (differing only in case, or within an edit
+  distance of 2), with "did you mean `Index`?". `function-types` would need an amended requirement
+  and scenarios, and a corpus program should call through the function value in all three
+  engines. Decided in the `occurrence-cardinality` review (RF52).
+- **The style guidelines are not checked.** The paren style is meant for small (about four
+  parameters or fewer), general-purpose functions called in many places, returning a simple value
+  rather than markup. Nothing enforces or warns about this. A lint could, if the guideline turns out
+  to matter in practice.
+- **Editor surfaces do not show defaults.** Hover and completion render a parameter as
+  `name:T` / `name?:T` without its `= default`, as they do for record and component fields.
+  Showing the default text needs the source of the default expression, which the language service
+  no longer reads for functions.
+- **Generated JavaScript fills a parameter only for `undefined`.** A JavaScript default parameter
+  fires when the argument is `undefined`, so a host that calls a generated function directly and
+  passes `null` for an optional parameter gets `null` in the body, not the empty value. NX callers
+  never pass `null`, and the interpreter and the IR runtime decode it at the boundary. Generated
+  code has no such boundary for positional host calls.
+
+### Language refinements to consider
+
+**Named arguments in a paren call, instead of element-calling a paren function.** A paren-style
+function is now called by position or as an element. The alternative gives each definition style
+exactly one call form: an element-style function as an element, and a paren-style function by
+position with trailing named arguments, `clamp(150, high: 120)`, as in Kotlin, Swift and C#.
+
+- **What it would gain.** "Definition mirrors invocation" would hold strictly. Skipping a
+  middle parameter of a value helper would no longer need markup; `<clamp value=150 high=120 />`
+  returning an `int` reads oddly.
+- **Why it was not done now.** It adds a second named-argument syntax. Function values still need
+  an element call of a paren function, since a function type `<function Item:T />` is always
+  called in element form. And skipping a middle parameter should be rare if paren functions stay
+  small.
+- **When to revisit.** If programs often call value helpers as elements just to skip a parameter,
+  add trailing named arguments to paren calls then.
+
+**A naming convention for the two styles.** PascalCase for element-style functions, camelCase for
+paren-style ones. A lowercase tag such as `<label ... />` reads as a host element, so
+element-calling a lowercase paren function blurs markup with a helper call. This could start as a
+lint, alongside the unchecked style guidelines above.
+
+**No `content` parameter on a paren-style function.** A `content` parameter means something only
+in an element call. That is harmless today, but if paren functions stay value helpers, rejecting
+`content` in a paren signature would make the split between the styles clearer. This one is
+optional.
+
+## A record default that reads a later field passes the checker and fails at run time
+
+`type R = { b:int = { a + 1 } a:int }` type-checks, and `<R a=1 />` then fails at run time with
+"Undefined variable: a". A union case's fields behave the same (`type U = | c { b:int = { a + 1 }
+a:int }`). Every runtime builds a record's fields in declaration order, binding each field as it
+goes, so a default can only read the fields declared before it. The checker does not enforce that
+order for records.
+
+Component props and state, and function parameters, already enforce it. The undefined-identifier
+check (`crates/nx-hir/src/scope.rs`) defines them in order and checks each default before its own
+name is defined, so `component <C b:int = { a + 1 } a:int />` and `let f(a:int = { b }, b:int = 1)`
+report `Undefined identifier` at the default. The fix is to walk record and union-case fields the
+same way. An inherited field counts as declared before the record's own fields, as it is in the
+flattened order the runtimes use.
+
+## HIR type references carry no span and no error form
+
+HIR's `ast::TypeRef` has no source span and no way to say "this reference is malformed". Both
+gaps show up as diagnostics that are harder to read than they need to be.
+
+**Diagnostics underline the whole declaration.** A diagnostic about a type reference points at
+the declaration or slot that holds it rather than at the reference itself.
+`let b:<Box T=int?/> = <Box T=int value=1 />` underlines the whole `let` for "A type argument must
+be exactly one value", and `type Bad = <Box T=int+/>` underlines the whole alias declaration. The
+checker reports at `type_ref_span`, which the caller sets to the enclosing declaration's span
+(`crates/nx-types/src/infer.rs`: `resolve_local_alias_target`, `property_slot_type_in` and the
+value-binding annotation).
+
+**A malformed reference is lowered to a well-formed one.** `x:string??` is reported by post-parse
+validation ("Type already carries an occurrence"). Lowering then keeps the first suffix, so the
+checker sees `x:string?` and also reports the property-slot rule ("admits zero; write
+`x?:string`"). A type node that failed to parse fares worse: it lowers to `TypeRef::name("error")`,
+which resolves as an unknown named type and can produce messages such as "expects error, found
+string". An error form, lowered for either case and resolved by the checker to `Type::Error`,
+would silence everything downstream of a reference that was already reported.
+
+The fix for both is the same rework: give `TypeRef` (or each of its name and argument nodes) a
+span and an `Error` variant when lowering it, and report at that span. Every crate that builds or
+matches a `TypeRef` changes with it: the checker, codegen, typegen and the language service, about
+a dozen files. Found by the `occurrence-cardinality` review (RF39, RF48).

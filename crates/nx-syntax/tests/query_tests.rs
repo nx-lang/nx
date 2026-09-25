@@ -122,7 +122,7 @@ fn highlights_do_not_treat_the_identifier_function_as_a_keyword() {
 
 #[test]
 fn highlights_capture_the_parts_of_an_applied_type() {
-    let captures = highlight_captures("type Slots = { s:<Range.Update T=int/>[] }");
+    let captures = highlight_captures("type Slots = { s:<Range.Update T=int/>+ }");
     let has = |name: &str, text: &str| captures.iter().any(|(n, t)| n == name && t == text);
     assert!(has("type", "Range"), "{captures:?}");
     assert!(has("type", "Update"), "{captures:?}");

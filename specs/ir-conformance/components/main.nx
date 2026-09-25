@@ -1,7 +1,7 @@
 // Components: external, abstract, inherited defaults, state, content and descriptors.
 export abstract external component <Node />
 export external component <Label extends Node Text:string FontSize:int = 14 />
-export external component <Stack extends Node Spacing:int = 4 content Children:Node[] />
+export external component <Stack extends Node Spacing:int = 4 content Children:Node+ />
 export component <Greeting extends Node name:string = "world" /> = {
   state { count:int = 0 }
   <Stack>

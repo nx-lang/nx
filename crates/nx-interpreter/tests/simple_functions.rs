@@ -154,7 +154,7 @@ fn test_payload_union_case_construction_applies_defaults() {
           | failed {
               message: string
               retryable: boolean = true
-              code: int?
+              code?: int
             }
 
         let make(): LoadState = { <LoadState.failed message={"Offline"} /> }
@@ -172,7 +172,11 @@ fn test_payload_union_case_construction_applies_defaults() {
         Some(&Value::String(SmolStr::new("Offline")))
     );
     assert_eq!(fields.get("retryable"), Some(&Value::Boolean(true)));
-    assert_eq!(fields.get("code"), Some(&Value::Null));
+    assert_eq!(
+        fields.get("code"),
+        None,
+        "An empty optional field is not stored"
+    );
 }
 
 #[test]
@@ -199,7 +203,7 @@ fn test_union_case_inherits_abstract_base_defaults() {
     let source = r#"
         abstract type EventBase = {
           source: string = "ui"
-          correlation: string?
+          correlation?: string
         }
         type UiEvent extends EventBase = | clicked { x:int }
 
@@ -217,16 +221,21 @@ fn test_union_case_inherits_abstract_base_defaults() {
         fields.get("source"),
         Some(&Value::String(SmolStr::new("ui")))
     );
-    assert_eq!(fields.get("correlation"), Some(&Value::Null));
+    assert_eq!(
+        fields.get("correlation"),
+        None,
+        "An empty optional field is not stored"
+    );
     assert_eq!(fields.get("x"), Some(&Value::Int(1)));
 }
 
 #[test]
-fn test_omitted_nullable_union_field_materializes_null() {
+fn test_omitted_optional_union_field_is_not_stored() {
     let source = r#"
         type FlowCompletion = continue | end { message:string }
-        type QuestionFlow = { completion:FlowCompletion? }
+        type QuestionFlow = { completion?:FlowCompletion }
         let make(): QuestionFlow = { <QuestionFlow /> }
+        let read(): FlowCompletion? = { <QuestionFlow />.completion }
     "#;
 
     let result = execute_function(source, "make", vec![])
@@ -236,15 +245,19 @@ fn test_omitted_nullable_union_field_materializes_null() {
         panic!("Expected QuestionFlow record value");
     };
     assert_eq!(type_name.as_str(), "QuestionFlow");
-    assert_eq!(fields.get("completion"), Some(&Value::Null));
+    assert_eq!(fields.get("completion"), None);
+
+    let read = execute_function(source, "read", vec![])
+        .unwrap_or_else(|err| panic!("Function execution failed:\n{}", err));
+    assert_eq!(read, Value::empty());
 }
 
 #[test]
-fn test_explicit_null_nullable_union_field_materializes_null() {
+fn test_explicit_empty_optional_union_field_is_not_stored() {
     let source = r#"
         type FlowCompletion = continue | end { message:string }
-        type QuestionFlow = { completion:FlowCompletion? }
-        let make(): QuestionFlow = { <QuestionFlow completion={null} /> }
+        type QuestionFlow = { completion?:FlowCompletion }
+        let make(): QuestionFlow = { <QuestionFlow completion={} /> }
     "#;
 
     let result = execute_function(source, "make", vec![])
@@ -254,7 +267,7 @@ fn test_explicit_null_nullable_union_field_materializes_null() {
         panic!("Expected QuestionFlow record value");
     };
     assert_eq!(type_name.as_str(), "QuestionFlow");
-    assert_eq!(fields.get("completion"), Some(&Value::Null));
+    assert_eq!(fields.get("completion"), None);
 }
 
 /// A fieldless case of a union that declares a base is **not** constant: it carries the base's
@@ -284,7 +297,7 @@ fn test_fieldless_case_of_a_based_union_keeps_the_record_shape() {
 }
 
 #[test]
-fn test_constant_union_case_remains_distinct_from_null() {
+fn test_constant_union_case_remains_distinct_from_the_empty_value() {
     let source = r#"
         type FlowCompletion = continue | end { message:string }
         let make(): FlowCompletion = { FlowCompletion.continue }
@@ -300,6 +313,7 @@ fn test_constant_union_case_remains_distinct_from_null() {
     };
     assert_eq!(union.as_str(), "FlowCompletion");
     assert_eq!(case.as_str(), "continue");
+    assert!(!Value::UnionCase { union, case }.is_empty_value());
 }
 
 #[test]
@@ -327,6 +341,54 @@ fn test_union_match_compares_case_discriminator() {
     let result = execute_function(source, "view", vec![failed])
         .unwrap_or_else(|err| panic!("Function execution failed:\n{}", err));
     assert_eq!(result, Value::String(SmolStr::new("Offline")));
+}
+
+#[test]
+fn test_union_match_selects_a_qualified_constant_case() {
+    let source = r#"
+        type DealStage = draft | pending_review | approved
+        type LoadState = idle | failed { message:string }
+        let stage(s: DealStage): string = {
+            if s is {
+                DealStage.draft => "draft"
+                DealStage.pending_review => "review"
+                else => "approved"
+            }
+        }
+        let load(state: LoadState): string = {
+            if state is {
+                LoadState.idle => "idle"
+                LoadState.failed => state.message
+            }
+        }
+    "#;
+
+    let case = |union: &str, case: &str| Value::UnionCase {
+        union: nx_hir::Name::new(union),
+        case: SmolStr::new(case),
+    };
+    let call = |function: &str, arg: Value| {
+        execute_function(source, function, vec![arg])
+            .unwrap_or_else(|err| panic!("Function execution failed:\n{}", err))
+    };
+
+    // A fieldless case is a constant, so a qualified pattern naming one matches by value.
+    assert_eq!(
+        call("stage", case("DealStage", "draft")),
+        Value::String(SmolStr::new("draft"))
+    );
+    assert_eq!(
+        call("stage", case("DealStage", "pending_review")),
+        Value::String(SmolStr::new("review"))
+    );
+    assert_eq!(
+        call("stage", case("DealStage", "approved")),
+        Value::String(SmolStr::new("approved"))
+    );
+    assert_eq!(
+        call("load", case("LoadState", "idle")),
+        Value::String(SmolStr::new("idle"))
+    );
 }
 
 // ============================================================================
@@ -546,32 +608,7 @@ fn test_derived_record_return_satisfies_abstract_ancestor_return_type() {
 }
 
 #[test]
-fn test_record_missing_field_errors() {
-    let source = r#"
-        type User = { name: string }
-        let missing(user:User) = { user.email }
-    "#;
-
-    let mut record = FxHashMap::default();
-    record.insert(SmolStr::new("name"), Value::String(SmolStr::new("Ada")));
-
-    let result = execute_function(
-        source,
-        "missing",
-        vec![Value::Record {
-            type_name: nx_hir::Name::new("User"),
-            fields: record,
-        }],
-    );
-    assert!(result.is_err());
-    assert!(
-        result.unwrap_err().contains("no field"),
-        "Expected missing field error"
-    );
-}
-
-#[test]
-fn test_host_supplied_record_defaults_are_not_applied_during_argument_coercion() {
+fn test_host_supplied_record_defaults_are_applied_during_argument_coercion() {
     let source = r#"
         type User = { name: string = "Anon" age: int }
         let echo(user:User) = { user }
@@ -588,22 +625,25 @@ fn test_host_supplied_record_defaults_are_not_applied_during_argument_coercion()
             fields: record,
         }],
     )
-    .unwrap_or_else(|err| panic!("host-supplied record should pass through:\n{}", err));
+    .unwrap_or_else(|err| panic!("host-supplied record should be constructed:\n{}", err));
 
     match result {
         Value::Record { type_name, fields } => {
             assert_eq!(type_name.as_str(), "User");
             assert_eq!(fields.get("age"), Some(&Value::Int(32)));
-            assert!(!fields.contains_key("name"));
+            assert_eq!(
+                fields.get("name"),
+                Some(&Value::String(SmolStr::new("Anon")))
+            );
         }
         other => panic!("expected Record, got {:?}", other),
     }
 }
 
 #[test]
-fn test_host_supplied_nullable_record_field_remains_absent() {
+fn test_host_supplied_record_with_an_absent_optional_field_reads_as_empty() {
     let source = r#"
-        type User = { email: string? }
+        type User = { email?: string }
         let getEmail(user:User): string? = { user.email }
     "#;
 
@@ -614,19 +654,18 @@ fn test_host_supplied_nullable_record_field_remains_absent() {
             type_name: nx_hir::Name::new("User"),
             fields: FxHashMap::default(),
         }],
-    );
+    )
+    .unwrap_or_else(|err| panic!("Reading an absent optional field failed:\n{}", err));
 
-    assert!(result.is_err());
-    assert!(
-        result
-            .unwrap_err()
-            .contains("Record 'user' has no field named 'email'"),
-        "Expected missing optional field to remain absent on external records"
+    assert_eq!(
+        result,
+        Value::empty(),
+        "An optional field a host left out reads as the empty value"
     );
 }
 
 #[test]
-fn test_host_supplied_record_missing_required_field_does_not_fail_before_body() {
+fn test_host_supplied_record_missing_required_field_is_rejected_at_the_boundary() {
     let source = r#"
         type User = { name: string age: int }
         let noop(user:User): int = { 0 }
@@ -635,15 +674,19 @@ fn test_host_supplied_record_missing_required_field_does_not_fail_before_body() 
     let mut record = FxHashMap::default();
     record.insert(SmolStr::new("name"), Value::String(SmolStr::new("Ada")));
 
-    let result = execute_function(
+    let error = execute_function(
         source,
         "noop",
         vec![Value::Record {
             type_name: nx_hir::Name::new("User"),
             fields: record,
         }],
+    )
+    .expect_err("a missing required field is rejected before the body runs");
+    assert!(
+        error.contains("age"),
+        "Expected the missing field named: {error}"
     );
-    assert_eq!(result, Ok(Value::Int(0)));
 }
 
 #[test]
@@ -824,7 +867,7 @@ fn test_strict_record_construction_still_applies_defaults_runtime() {
 #[test]
 fn test_action_record_literal_uses_defaults() {
     let source = r#"
-        action SaveRequested = { value: string = "Anon" source: string? }
+        action SaveRequested = { value: string = "Anon" source?: string }
         let getValue(): string = { <SaveRequested />.value }
     "#;
 
@@ -836,7 +879,7 @@ fn test_action_record_literal_uses_defaults() {
 #[test]
 fn test_action_record_defaults_instantiation() {
     let source = r#"
-        action SaveRequested = { value: string = "Anon" source: string? }
+        action SaveRequested = { value: string = "Anon" source?: string }
         let getValue(): string = { <SaveRequested />.value }
     "#;
 
@@ -948,9 +991,9 @@ fn test_record_return_type_and_collection() {
 }
 
 #[test]
-fn test_optional_record_field_defaults_to_null() {
+fn test_optional_record_field_defaults_to_empty() {
     let source = r#"
-        type User = { email: string? }
+        type User = { email?: string }
         let getEmail(user:User) = { user.email }
     "#;
 
@@ -959,14 +1002,14 @@ fn test_optional_record_field_defaults_to_null() {
     assert!(parse.errors.is_empty());
     let module = lower(parse.root().unwrap(), SourceId::new(0));
 
-    // instantiate with defaults (null for optional field)
+    // instantiate with defaults (the optional field is left empty)
     let record = interpreter
         .instantiate_record_defaults(&module, "User")
         .unwrap();
     let result = interpreter
         .execute_function(&module, "getEmail", vec![record])
         .unwrap();
-    assert_eq!(result, Value::Null);
+    assert_eq!(result, Value::empty());
 }
 
 #[test]
@@ -998,7 +1041,7 @@ fn test_record_all_fields_have_defaults() {
 }
 
 #[test]
-fn test_external_record_argument_does_not_evaluate_definition_defaults() {
+fn test_external_record_argument_evaluates_definition_defaults() {
     let source = r#"
         let defaultTimeout = 30
         type Config = { timeout:int = { defaultTimeout } }
@@ -1013,15 +1056,12 @@ fn test_external_record_argument_does_not_evaluate_definition_defaults() {
             fields: FxHashMap::default(),
         }],
     )
-    .unwrap_or_else(|err| panic!("External record argument should pass through:\n{}", err));
+    .unwrap_or_else(|err| panic!("External record argument should be constructed:\n{}", err));
 
     match result {
         Value::Record { type_name, fields } => {
             assert_eq!(type_name.as_str(), "Config");
-            assert!(
-                fields.is_empty(),
-                "Expected external record fields to be preserved"
-            );
+            assert_eq!(fields.get("timeout"), Some(&Value::Int(30)));
         }
         other => panic!("expected Record, got {:?}", other),
     }
@@ -1075,8 +1115,8 @@ fn test_paren_call_constructs_record_type_positionally() {
 #[test]
 fn test_element_call_passes_content_to_paren_function() {
     let source = r#"
-        let collect(content items:object[]): object[] = { items }
-        let root(): object[] = { <collect><div /><span /></collect> }
+        let collect(content items:object+): object+ = { items }
+        let root(): object+ = { <collect><div /><span /></collect> }
     "#;
 
     let result = execute_function(source, "root", vec![])
@@ -1129,8 +1169,8 @@ fn test_element_call_constructs_record_via_type_alias() {
 #[test]
 fn test_element_call_content_is_injected_for_element_defined_function() {
     let source = r#"
-        let <collect content items: object[] />: object[] = { items }
-        let root(): object[] = { <collect><div /><span /></collect> }
+        let <collect content items: object+ />: object+ = { items }
+        let root(): object+ = { <collect><div /><span /></collect> }
     "#;
 
     let result = execute_function(source, "root", vec![])
@@ -1185,8 +1225,8 @@ fn test_element_call_scalar_value_child_passes_to_scalar_content_parameter() {
 #[test]
 fn test_element_call_scalar_value_child_coerces_to_list_content_parameter() {
     let source = r#"
-        let <collect content items: int[] />: int[] = { items }
-        let root(): int[] = { <collect>{1}</collect> }
+        let <collect content items: int+ />: int+ = { items }
+        let root(): int+ = { <collect>{1}</collect> }
     "#;
 
     let result = execute_function(source, "root", vec![]).unwrap_or_else(|err| {
@@ -1235,8 +1275,8 @@ fn test_intrinsic_element_named_and_body_content_conflict_is_rejected() {
 #[test]
 fn test_element_call_braced_child_list_flattens_content_array() {
     let source = r#"
-        let <collect content items: object[] />: object[] = { items }
-        let root(): object[] = { <collect>{<div /> <span />}</collect> }
+        let <collect content items: object+ />: object+ = { items }
+        let root(): object+ = { <collect>{<div /> <span />}</collect> }
     "#;
 
     let result = execute_function(source, "root", vec![])
@@ -1259,8 +1299,8 @@ fn test_element_call_braced_child_list_flattens_content_array() {
 #[test]
 fn test_element_call_conditional_content_expression_preserves_selected_element() {
     let source = r#"
-        let <collect content items: object[] />: object[] = { items }
-        let root(flag: boolean): object[] = { <collect>if flag { <A /> } else { <B /> }</collect> }
+        let <collect content items: object+ />: object+ = { items }
+        let root(flag: boolean): object+ = { <collect>if flag { <A /> } else { <B /> }</collect> }
     "#;
 
     let true_result = execute_function(source, "root", vec![Value::Boolean(true)])
@@ -1287,8 +1327,8 @@ fn test_element_call_conditional_content_expression_preserves_selected_element()
 #[test]
 fn test_element_call_for_content_expression_flattens_element_results() {
     let source = r#"
-        let <collect content items: object[] />: object[] = { items }
-        let root(items: object[]): object[] = { <collect>for item in items { <Row /> }</collect> }
+        let <collect content items: object+ />: object+ = { items }
+        let root(items: object+): object+ = { <collect>for item in items { <Row /> }</collect> }
     "#;
 
     let items = Value::Array(vec![Value::Int(1), Value::Int(2), Value::Int(3)]);
@@ -1337,13 +1377,13 @@ fn test_multi_value_element_brace_list_returns_array_runtime() {
 }
 
 #[test]
-fn test_scalar_brace_return_is_wrapped_for_list_annotation_runtime() {
+fn test_scalar_brace_return_is_wrapped_for_sequence_annotation_runtime() {
     let source = r#"
-        let values(): int[] = { 1 }
+        let values(): int+ = { 1 }
     "#;
 
     let result = execute_function(source, "values", vec![])
-        .unwrap_or_else(|err| panic!("Scalar-to-list return coercion failed:\n{}", err));
+        .unwrap_or_else(|err| panic!("Scalar-to-sequence return coercion failed:\n{}", err));
 
     assert_eq!(result, Value::Array(vec![Value::Int(1)]));
 }
@@ -1365,18 +1405,18 @@ fn test_multi_value_brace_return_is_rejected_for_scalar_annotation_runtime() {
 }
 
 #[test]
-fn test_nullable_list_let_binding_preserves_supplied_list_runtime() {
+fn test_zero_or_more_let_binding_preserves_supplied_sequence_runtime() {
     let source = r#"
         type ChatBrandLink = { label: string = "docs" }
-        let links: ChatBrandLink[]? = { <ChatBrandLink label={"docs"} /> <ChatBrandLink label={"api"} /> }
-        let root(): object[] = { links }
+        let links: ChatBrandLink* = { <ChatBrandLink label={"docs"} /> <ChatBrandLink label={"api"} /> }
+        let root(): object+ = { links }
     "#;
 
     let result = execute_function(source, "root", vec![])
-        .unwrap_or_else(|err| panic!("Nullable-list let binding failed:\n{}", err));
+        .unwrap_or_else(|err| panic!("Zero-or-more let binding failed:\n{}", err));
 
     let Value::Array(items) = result else {
-        panic!("Expected supplied links to remain a list");
+        panic!("Expected supplied links to remain a sequence");
     };
     assert_eq!(items.len(), 2);
     assert!(items.iter().all(|item| matches!(
@@ -1386,18 +1426,18 @@ fn test_nullable_list_let_binding_preserves_supplied_list_runtime() {
 }
 
 #[test]
-fn test_nullable_list_record_field_preserves_supplied_list_runtime() {
+fn test_optional_sequence_record_field_preserves_supplied_sequence_runtime() {
     let source = r#"
         type ChatBrandLink = { label: string = "docs" }
-        type Brand = { links: ChatBrandLink[]? }
-        let root(): object[] = { <Brand links={ <ChatBrandLink label={"docs"} /> <ChatBrandLink label={"api"} /> } />.links }
+        type Brand = { links?: ChatBrandLink+ }
+        let root(): object+ = { <Brand links={ <ChatBrandLink label={"docs"} /> <ChatBrandLink label={"api"} /> } />.links }
     "#;
 
     let result = execute_function(source, "root", vec![])
-        .unwrap_or_else(|err| panic!("Nullable-list record field failed:\n{}", err));
+        .unwrap_or_else(|err| panic!("Optional-sequence record field failed:\n{}", err));
 
     let Value::Array(items) = result else {
-        panic!("Expected supplied links to remain a list");
+        panic!("Expected supplied links to remain a sequence");
     };
     assert_eq!(items.len(), 2);
     assert!(items.iter().all(|item| matches!(
@@ -1409,8 +1449,8 @@ fn test_nullable_list_record_field_preserves_supplied_list_runtime() {
 #[test]
 fn test_element_call_content_conflict_is_error_for_function() {
     let source = r#"
-        let collect(content items: object[]): object[] = { items }
-        let root(): object[] = { <collect items={null}><div /></collect> }
+        let collect(content items?: object+): object* = { items }
+        let root(): object* = { <collect items={}><div /></collect> }
     "#;
 
     let result = execute_function(source, "root", vec![]);
@@ -1427,9 +1467,9 @@ fn test_element_call_content_conflict_is_error_for_function() {
 #[test]
 fn test_element_call_content_conflict_is_error_for_record() {
     let source = r#"
-        type Container = { content items: object[] }
+        type Container = { content items?: object+ }
         type Box = Container
-        let root(): object = { <Box items={null}><div /></Box> }
+        let root(): object = { <Box items={}><div /></Box> }
     "#;
 
     let result = execute_function(source, "root", vec![]);
@@ -1464,9 +1504,9 @@ fn test_element_call_body_is_error_for_record_without_content_field() {
 #[test]
 fn test_element_call_body_populates_record_content_field() {
     let source = r#"
-        type Container = { content items: object[] }
+        type Container = { content items: object+ }
         type Box = Container
-        let root(): object[] = { <Box><div /><span /></Box>.items }
+        let root(): object+ = { <Box><div /><span /></Box>.items }
     "#;
 
     let result = execute_function(source, "root", vec![])

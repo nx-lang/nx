@@ -1,0 +1,43 @@
+module app/main.nx fingerprint 12159243630819413134
+links lib/text.nx version "" fingerprint 3894438921611365002
+requires occurrence-v1
+entrypoints functions [add oneArgument twoArguments allArguments skipMiddle fallback emptyOptional count liftedDefault importedDefault importedAll elementDefaults elementSkip] components []
+
+function add(a: int, b: int = (a mul 10), c?: int) =
+  ((a add b) add (c ?? 0))
+
+function oneArgument() =
+  add(1)
+
+function twoArguments() =
+  add(1, 2)
+
+function allArguments() =
+  add(1, 2, 3)
+
+function skipMiddle() =
+  add(1, _, 5)
+
+function fallback(a: int, b?: int) =
+  (b ?? a)
+
+function emptyOptional() =
+  fallback(4)
+
+function count(xs: int+ = 7) =
+  xs
+
+function liftedDefault() =
+  count()
+
+function importedDefault() =
+  lib/text.nx:title("Ada")
+
+function importedAll() =
+  lib/text.nx:title("Ada", "Ms.", "!")
+
+function elementDefaults() =
+  lib/text.nx:Badge("x")
+
+function elementSkip() =
+  lib/text.nx:Badge("x", _, "!")

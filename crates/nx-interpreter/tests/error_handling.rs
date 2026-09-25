@@ -43,6 +43,7 @@ fn test_division_by_zero_int() {
     let func = Function {
         name: Name::new("divide_by_zero"),
         visibility: nx_hir::Visibility::Export,
+        form: nx_hir::FunctionForm::Paren,
         params: vec![],
         return_type: None,
         body: div_expr,
@@ -91,6 +92,7 @@ fn test_paren_function_parameter_count_mismatch() {
             expected,
             actual,
             function,
+            ..
         } => {
             assert_eq!(*expected, 1);
             assert_eq!(*actual, 2);
@@ -143,6 +145,7 @@ fn test_paren_function_invalid_return_type_usage() {
     let func = Function {
         name: Name::new("select"),
         visibility: nx_hir::Visibility::Export,
+        form: nx_hir::FunctionForm::Paren,
         params: vec![param],
         return_type: None,
         body: if_expr,
@@ -181,6 +184,7 @@ fn test_undeclared_union_runtime_error() {
     let func = Function {
         name: Name::new("getDirection"),
         visibility: nx_hir::Visibility::Export,
+        form: nx_hir::FunctionForm::Paren,
         params: Vec::new(),
         return_type: None,
         body: member,

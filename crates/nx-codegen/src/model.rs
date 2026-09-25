@@ -1,5 +1,5 @@
 use nx_diagnostics::TextSpan;
-use nx_hir::{ast, ElementId, ExprId, LocalDefinitionId, Name, UpdateIntrinsic};
+use nx_hir::{ast, ast::Occurrence, ElementId, ExprId, LocalDefinitionId, Name, UpdateIntrinsic};
 use nx_interpreter::{ModuleQualifiedItemRef, ResolvedItemKind, RuntimeModuleId};
 use nx_types::Type;
 use std::path::PathBuf;
@@ -99,11 +99,19 @@ pub enum CodegenDeclarationKind {
     Function {
         params: Vec<CodegenParam>,
         body: CodegenExpression,
+        /// The result type, declared or inferred, as the checker bound it.
         return_type: Option<Type>,
+        /// The declared result type, which a runtime normalizes the body's value to; `None` for a
+        /// function that declares none, whose result is the body's value as it is.
+        declared_return_type: Option<CodegenTypeRef>,
     },
     Value {
         value: CodegenExpression,
+        /// The value's type, declared or inferred, as the checker bound it.
         ty: Option<Type>,
+        /// The declared type, which a runtime normalizes the value to; `None` for a value that
+        /// declares none.
+        declared_ty: Option<CodegenTypeRef>,
     },
     Record {
         fields: Vec<CodegenRecordField>,
@@ -141,17 +149,27 @@ pub enum CodegenDeclarationKind {
         /// of. Present only on property unions, whose cases are all constant.
         property_target: Option<CodegenReference>,
     },
-    TypeAlias,
+    /// A type alias. TypeScript output declares it as a type alias of its own; JavaScript and
+    /// the IR resolve it away.
+    TypeAlias {
+        /// The aliased type, as written in the declaring module.
+        target: ast::TypeRef,
+    },
     Unsupported(CodegenUnsupportedConstruct),
 }
 
 /// Function parameter metadata.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CodegenParam {
     pub name: String,
     pub ty: ast::TypeRef,
     pub resolved_ty: CodegenTypeRef,
     pub is_content: bool,
+    /// Whether the parameter carries the `?` mark, so a call may leave it out.
+    pub optional: bool,
+    /// The value the function gives the parameter when a call leaves it out. It is built in the
+    /// declaring function, where it may read the parameters before it.
+    pub default: Option<CodegenExpression>,
     pub span: TextSpan,
 }
 
@@ -165,11 +183,10 @@ pub enum CodegenTypeRef {
         reference: CodegenReference,
         display: String,
     },
-    Array {
-        element: Box<CodegenTypeRef>,
-    },
-    Nullable {
-        inner: Box<CodegenTypeRef>,
+    /// An exactly-one item type under an occurrence: `?`, `+` or `*`.
+    Seq {
+        item: Box<CodegenTypeRef>,
+        occ: Occurrence,
     },
     Function {
         params: Vec<CodegenFunctionParam>,
@@ -181,17 +198,25 @@ pub enum CodegenTypeRef {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodegenFunctionParam {
     pub name: String,
+    /// The parameter's read type: `T?` for a parameter declared `p?:T`.
     pub ty: CodegenTypeRef,
     pub is_content: bool,
+    pub optional: bool,
 }
 
 /// Record field metadata preserved for strongly typed target emission.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CodegenRecordField {
     pub name: String,
+    /// The field's declared type, as source wrote it.
     pub ty: ast::TypeRef,
+    /// The field's read type, resolved: `T?` for a field declared `p?:T`, `T*` for `p?:T+`. This
+    /// is what IR types the field by, so a runtime normalizes an omitted optional field to the
+    /// empty value with no second flag.
     pub resolved_ty: CodegenTypeRef,
     pub is_content: bool,
+    /// Whether the field carries the `?` mark.
+    pub optional: bool,
     pub is_required: bool,
     pub default: Option<CodegenExpression>,
     /// The module that declared the field, which is the module its default's spans belong to.
@@ -226,9 +251,13 @@ pub struct CodegenComponentEmit {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CodegenComponentField {
     pub name: String,
+    /// The field's declared type, as source wrote it.
     pub ty: ast::TypeRef,
+    /// The field's read type, resolved; see [`CodegenRecordField::resolved_ty`].
     pub resolved_ty: CodegenTypeRef,
     pub is_content: bool,
+    /// Whether the field carries the `?` mark.
+    pub optional: bool,
     pub is_required: bool,
     pub default: Option<CodegenExpression>,
     pub owner_module_id: RuntimeModuleId,
@@ -288,9 +317,12 @@ pub enum CodegenExpressionKind {
         expr: Box<CodegenExpression>,
         ty: ast::PrimitiveType,
     },
+    /// A call of a declared function with its arguments by position. `None` is a parameter the
+    /// caller left out, which the function fills with its default, or with empty; a call may
+    /// also stop before the trailing parameters it leaves out.
     Call {
         callee: Box<CodegenExpression>,
-        args: Vec<CodegenExpression>,
+        args: Vec<Option<CodegenExpression>>,
     },
     /// A call of a function-typed value — a parameter, a prop or a local holding a function — with
     /// its arguments by name, `<Row Item={c} Index={i} />`. The callee's declaration is known only
@@ -349,6 +381,20 @@ pub enum CodegenExpressionKind {
         member: String,
         reference: Option<CodegenReference>,
     },
+    /// `x?.m`: the empty value when the receiver is empty, the member otherwise.
+    OptionalMember {
+        base: Box<CodegenExpression>,
+        member: String,
+    },
+    /// `x?`: true when the operand holds at least one item.
+    Exists {
+        operand: Box<CodegenExpression>,
+    },
+    /// `x ?? y`: the left operand when it holds an item, else the right, evaluated only then.
+    Coalesce {
+        lhs: Box<CodegenExpression>,
+        rhs: Box<CodegenExpression>,
+    },
     UnionCase {
         union_reference: CodegenReference,
         case_name: String,
@@ -374,8 +420,8 @@ pub enum CodegenExpressionKind {
         content: Vec<CodegenExpression>,
         /// Whether this constructs a derived update record, whose absent fields stay absent.
         ///
-        /// <para>Every other record fills an absent field from its default or with `null`; a patch
-        /// must not, because an absent field means "unchanged".</para>
+        /// <para>Every other record fills an absent field from its default, or leaves an absent
+        /// optional field empty; a patch must not, because an absent field means "unchanged".</para>
         is_update: bool,
     },
     ComponentDescriptor(CodegenComponentDescriptor),

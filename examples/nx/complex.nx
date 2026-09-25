@@ -7,10 +7,11 @@ type Todo = {
   status: string
   completed: boolean = false
 }
-type TodoList = Todo[]
+type TodoList = Todo+
 
+// A list that may be empty is an optional property of a one-or-more type.
 let <TodoApp
-  todos:TodoList
+  todos?:TodoList
   filter:string="all"
 /> =
   <UiComponents.AppShell class="todo-app">
@@ -29,7 +30,7 @@ let <TodoApp
   </UiComponents.AppShell>
 
 let <TodoStats
-  items:Todo[]
+  items?:Todo+
 /> =
   <div class="stats">
     if {
@@ -40,7 +41,7 @@ let <TodoStats
   </div>
 
 let <TodoList
-  items:Todo[]
+  items?:Todo+
   filter:string
 /> =
   <ul class="todo-list">
@@ -71,7 +72,7 @@ let <TodoItem
     }
   >
     <input type="checkbox" checked={item.completed} />
-    <span class={item.completed ? <:>completed</> : "active"}>
+    <span class={if item.completed { "completed" } else { "active" }}>
       {item.text}
     </span>
     <button: class="delete">Delete</button>
@@ -81,9 +82,9 @@ let <TodoFilters
   current:string
 /> =
   <div class="filters">
-    for filter in ["all", "active", "completed"] {
+    for filter in { "all" "active" "completed" } {
       <button
-        class={filter == current ? "active" : ""}
+        class={if filter == current { "active" } else { "" }}
         data-filter={filter}
       >
         {filter}

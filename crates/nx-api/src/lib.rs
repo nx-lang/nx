@@ -53,7 +53,7 @@ pub use eval::{
     eval_program_artifact, eval_program_artifact_function, eval_source,
     load_library_artifact_from_directory, load_program_artifact_from_source, EvalResult,
 };
-pub use value::{from_nx_value, to_nx_value, FromNxValueError};
+pub use value::{entry_result_to_nx_value, from_nx_value, to_nx_value, FromNxValueError};
 pub use workspace::{
     NxWorkspace, NxWorkspaceDirectoryError, NxWorkspaceInputError, NxWorkspaceModule,
 };

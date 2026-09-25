@@ -573,18 +573,24 @@ opaque snapshot. Raw JSON and MessagePack dispatch workflows SHALL expose the sa
 - **AND** SHALL NOT return a partial result
 
 ### Requirement: Managed typed models can express absence in update records
-The managed SDK SHALL let a generated update DTO distinguish a field that is unset from one set to
-`null`, and SHALL ship JSON and MessagePack serialization for update DTOs that omits unset fields on
-write and leaves missing keys unset on read. A typed accessor on a generated update DTO SHALL expose
-a field as an optional value that is either unset or set to a value, including `null`. Constructing
-an update DTO with an object initializer SHALL remain the supported way to build one, so
-`new User_update { Email = null }` SHALL mean "set email to null" and SHALL leave every other field
-unset. Serialization SHALL be driven by the DTO's declared field schema rather than by runtime
-reflection over its members. Raw-value workflows SHALL see an absent field as a missing key and a
-present `null` as a `null` value, consistent with the canonical encoding.
+The managed SDK SHALL let a generated update DTO distinguish a field that is unset from one that is
+cleared, and SHALL ship JSON and MessagePack serialization for update DTOs that omits unset fields
+on write and leaves missing keys unset on read. `null` is the .NET spelling of a cleared field —
+the NX empty value — and a cleared field is legal only for a field that is optional (`?:`) in the
+target, as `update-records` requires. A typed accessor on a generated update DTO SHALL expose a
+field as an optional value that is either unset or set to a value, where the value type is nullable
+only for a clearable field. Constructing an update DTO with an object initializer SHALL remain the
+supported way to build one, so `new User_update { Email = null }` SHALL mean "clear email" and
+SHALL leave every other field unset. Because a non-clearable field's value type is non-nullable, a
+`null` for one is a nullability diagnostic in C#; a `null` that reaches the NX runtime for such a
+field anyway SHALL be rejected when the `T.Update` value is constructed, naming the field, as the
+language requires. Serialization SHALL be driven by the DTO's declared field schema rather than by
+runtime reflection over its members. Raw-value workflows SHALL see an absent field as a missing key
+and a cleared field as a `null` value, consistent with the canonical encoding, which writes `null`
+only there.
 
 #### Scenario: Typed update DTO round-trips absence through JSON
-- **WHEN** a C# caller serializes a generated `User_update` with only `Email` set to `null`
+- **WHEN** a C# caller serializes a generated `User_update`, for `export type User = { name:string email?:string }`, with only `Email` set to `null`
 - **THEN** the JSON SHALL contain `"$type"` and `"email": null` and SHALL NOT contain `"name"`
 - **AND** deserializing that JSON SHALL yield `Name` unset and `Email` set to `null`
 
@@ -596,6 +602,11 @@ present `null` as a `null` value, consistent with the canonical encoding.
 - **WHEN** a dispatch returns an update record effect with one present field
 - **THEN** the raw JSON effect payload SHALL contain only `$type` and that field
 
+#### Scenario: A cleared field is rejected where the target cannot be cleared
+- **WHEN** a C# caller passes a `User_update` payload carrying `"name": null` to the native runtime, for a `User` whose `name` is `string`
+- **THEN** the runtime SHALL reject it with a diagnostic naming `name`
+- **AND** the same payload carrying `"email": null` for `email?:string` SHALL be accepted as a cleared `email`
+
 #### Scenario: Update DTO serialization does not reflect over the generated type
 - **WHEN** an update DTO is serialized or deserialized in either format
 - **THEN** the SDK SHALL read the field names and value types from the DTO's declared schema
@@ -604,9 +615,10 @@ present `null` as a `null` value, consistent with the canonical encoding.
 ### Requirement: Managed update records expose the fields they carry
 A generated update DTO SHALL let a host read which fields the patch carries without knowing them at
 compile time: enumerate the set fields with their values, test whether a named field is set, and
-unset a field that is set. Unsetting a field SHALL be indistinguishable from never having set it,
-in memory and on the wire. Reading or enumerating fields SHALL NOT resurrect a field the patch does
-not carry.
+unset a field that is set. A field set to `null` is a carried field: `null` is how .NET spells a
+cleared field, and clearing is a change the patch carries. Unsetting a field SHALL be
+indistinguishable from never having set it, in memory and on the wire. Reading or enumerating
+fields SHALL NOT resurrect a field the patch does not carry.
 
 #### Scenario: Enumerating a partly filled patch yields only its set fields
 - **WHEN** a C# caller builds a `User_update` with `Name` set to `"Ada"` and `Email` left alone
@@ -614,7 +626,7 @@ not carry.
 - **AND** testing whether `email` is set SHALL report that it is not
 
 #### Scenario: A field set to null is a carried field
-- **WHEN** a C# caller builds a `User_update` with `Email` set to `null`
+- **WHEN** a C# caller builds a `User_update` with `Email` set to `null`, for a `User` whose `email` is `?:string`
 - **THEN** enumerating its fields SHALL yield an entry for `email` whose value is `null`
 - **AND** testing whether `email` is set SHALL report that it is
 
@@ -644,7 +656,7 @@ the key's value type, so no cast is required and a mistyped value is a compile e
 
 #### Scenario: Accessing a patch through a typed key preserves the field's type
 - **WHEN** a C# caller assigns `"Ada"` through the `name` key of a `User_update` and reads the `email` key back
-- **THEN** the assignment SHALL type check against `string` and the read SHALL yield an optional nullable `string`
+- **THEN** the assignment SHALL type check against `string` and the read SHALL yield an unset optional whose value type is the C# nullable `string`, since `email` is clearable
 - **AND** the patch SHALL then carry `name` and SHALL NOT carry `email`
 
 #### Scenario: A property companion value resolves to its key
@@ -657,11 +669,12 @@ The managed SDK SHALL offer the four update operations the NX language and the T
 offer, with the same results for the same inputs.
 
 - Applying a patch to a record SHALL return a record equal to the original except for the fields the
-  patch carries, where a carried `null` sets the field to `null`.
+  patch carries, where a carried `null` clears the field: the record's property becomes `null`, the
+  .NET reading of the empty value, which serializes as an omitted key.
 - Merging two patches SHALL return a patch carrying every field either carries, with the second
   patch winning a field both carry.
-- Diffing two records SHALL return a patch carrying exactly the fields whose values differ, comparing
-  a field either record leaves out as `null`, and treating a field whose value changes to a
+- Diffing two records SHALL return a patch carrying exactly the fields whose values differ, reading
+  a field either record leaves out as the empty value, and treating a field whose value changes to a
   different concrete type as differing even when the two values have equal fields.
 - Asking which fields a patch changed SHALL return the carried fields as `<T>_property` values, in
   the record's declared field order.
@@ -674,6 +687,7 @@ have no instantiable one.
 #### Scenario: Apply overwrites only the carried fields
 - **WHEN** a C# caller applies a `User_update` carrying only `Email` set to `null` to a `User` with a name and an email
 - **THEN** the result SHALL carry the original name and a `null` email
+- **AND** serializing the result SHALL omit the `email` key
 
 #### Scenario: Merge lets the later patch win
 - **WHEN** a C# caller merges a patch setting `Name` to `"Ada"` with a patch setting `Name` to `"Grace"` and `Email` to `null`
@@ -714,7 +728,7 @@ neither format can serialize. Calling a function value from .NET is out of scope
 which function it was handed and passes the record on.
 
 #### Scenario: A rendered function-typed property is read as a function reference
-- **WHEN** a C# caller evaluates a module `templates.nx` that declares `external component <List ItemTemplate:(<function Item:object Index:int />: string)? /> let <Row Item:object Index:int />: string = "r" let root() = <List ItemTemplate={Row} />` into a typed element whose `ItemTemplate` property is typed as the managed function reference type
+- **WHEN** a C# caller evaluates a module `templates.nx` that declares `external component <List ItemTemplate?:<function Item:object Index:int />: string /> let <Row Item:object Index:int />: string = "r" let root() = <List ItemTemplate={Row} />` into a typed element whose `ItemTemplate` property is typed as the managed function reference type
 - **THEN** the property SHALL expose the module `templates.nx` and the name `Row`
 - **AND** the same evaluation as JSON SHALL render `ItemTemplate` as a `Function` record with those
   two fields
@@ -723,11 +737,12 @@ which function it was handed and passes the record on.
 - **WHEN** a typed element with a function-typed property is serialized and deserialized through
   MessagePack and through JSON
 - **THEN** both round trips SHALL preserve the module and the name
-- **AND** both SHALL succeed when the property is null, because a member type that cannot be
-  resolved would otherwise make the whole containing contract unserializable
+- **AND** both SHALL succeed when the property is `null` — the .NET reading of an optional property
+  the element omits — because a member type that cannot be resolved would otherwise make the whole
+  containing contract unserializable
 
 #### Scenario: Generated C# types a function-typed member as the function reference
-- **WHEN** C# types are generated for `export external component <DataTable RowTemplate:(<function Item:object Index:int />: string)? />`
+- **WHEN** C# types are generated for `export external component <DataTable RowTemplate?:<function Item:object Index:int />: string />`
 - **THEN** the generated member SHALL be the managed function reference type
 - **AND** SHALL NOT be a host delegate type
 

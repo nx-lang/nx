@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 - Add Rust `nx-lsp` language server integration for diagnostics, symbols, hover, and completions
+
+### Syntax highlighting
+The grammar follows the occurrence-cardinality change to the language:
+- A type carries at most one occurrence suffix, and `?`, `+` and `*` after a type are each scoped
+  `keyword.operator.type-modifier.nx`; `[]` is no longer a type suffix and carries no scope
+- The `?` between a property name and its colon (`subtitle?: string`) is the optional mark, a token
+  of its own scoped `keyword.operator.optional.nx`
+- The presence operators are scoped as operators: `x?` as `keyword.operator.presence.nx`, `?.` as
+  one token `keyword.operator.optional-access.nx`, and `??` as one token
+  `keyword.operator.coalesce.nx`
+- The language has no conditional operator and no `null`, so `keyword.operator.conditional.nx`,
+  `punctuation.separator.conditional.nx` and `constant.language.null.nx` are gone; `null` is an
+  ordinary name
+- Hover annotation lines such as `(property) ShapeCommon.shadows?: Shadow+` scope the optional
+  mark and the suffix as a declaration does
 - Add extension activation code, packaged server path resolution, and `nx.server.path`
 - Add package verification for compiled client runtime and native server assets
 

@@ -24,7 +24,7 @@ component <AspectTile extends DrawnNode Demo:AspectDemo /> = {
 }
 
 // A captioned tile for the effect grid, where each image sets different properties.
-component <Tile extends DrawnNode Title:string content Children:DrawnNode[] /> = {
+component <Tile extends DrawnNode Title:string content Children:DrawnNode+ /> = {
   <SkiaStack Spacing=4 WidthRequest=160>
     {Children}
     <SkiaLabel Text={Title} FontSize=12 TextColor="#94A3B8" />

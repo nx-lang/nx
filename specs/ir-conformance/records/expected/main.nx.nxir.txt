@@ -1,4 +1,4 @@
-module main.nx fingerprint 9537757277585525843
+module main.nx fingerprint 17783765470704069141
 requires update-records-v1 property-unions-v1 update-intrinsics-v1
 entrypoints functions [ada home failure idle cover nameOf ageOf userName userAge cityOf city patch applied merged changedKeys key root] components []
 
@@ -13,9 +13,9 @@ record User extends Named @3:1-3:64
 record Line @4:1-4:35
   text: string required
 
-record Address @5:1-5:59
+record Address @5:1-5:58
   city: string required
-  content lines: Line[] required
+  content lines: Line+ required
 
 union LoadState @6:1-9:30
   case idle constant
@@ -66,8 +66,8 @@ function cityOf(address: Address) @22:1-22:47 =
 function city() @23:1-23:32 =
   cityOf(home())
 
-function patch() @24:1-24:43 =
-  <User.Update email=null />
+function patch() @24:1-24:39 =
+  <User.Update email={} />
 
 function applied() @25:1-25:42 =
   apply(ada(), patch())

@@ -4,7 +4,7 @@
 //! one renderer of that meaning, so a test reads its output the way a person would read
 //! `nxlang ir explain`, and a change to the encoding that keeps the meaning changes no test here.
 
-use crate::ir::{kinds, NxIrArtifact, NxIrEmitOptions};
+use crate::ir::{kinds, NxIrArtifact, NxIrEmitOptions, NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1};
 use crate::ir_image::{write_nx_ir_image, NxIrImage};
 use crate::{
     build_nx_ir_artifacts, emit_nx_ir, explain_nx_ir, explain_nx_ir_image, ExplainError,
@@ -591,11 +591,11 @@ fn explain_refuses_another_schema_version_naming_both() {
         error,
         ExplainError::SchemaVersion {
             found: 3,
-            supported: 4
+            supported: 5
         }
     );
     assert!(error.to_string().contains("schema version 3"));
-    assert!(error.to_string().contains("schema version 4"));
+    assert!(error.to_string().contains("schema version 5"));
 }
 
 #[test]
@@ -741,7 +741,7 @@ fn a_default_naming_a_field_declared_after_it_is_refused() {
 /// both spellings of the case emit the same thing.
 #[test]
 fn a_bare_case_in_a_component_body_emits_like_the_qualified_form() {
-    let preamble = "type Fit = fill | contain | cover\nexternal component <Img fit:Fit? />\nabstract external component <Node />\n";
+    let preamble = "type Fit = fill | contain | cover\nexternal component <Img fit?:Fit />\nabstract external component <Node />\n";
     let bare = explain_source(&format!(
         "{preamble}component <A extends Node /> = {{ <Img fit=cover /> }}\nlet root() = {{ <A /> }}"
     ));
@@ -820,7 +820,10 @@ fn nominal_type_references_name_their_declaring_module() {
         ],
         "app/main.nx",
     );
-    assert_line(&text, "function root(user: shared/model.nx:User) =");
+    assert_line(
+        &text,
+        "function root(user: shared/model.nx:User): shared/model.nx:User =",
+    );
 }
 
 #[test]
@@ -835,7 +838,10 @@ fn a_declared_element_type_is_not_shadowed_by_the_builtin_element_supertype() {
         ],
         "app/main.nx",
     );
-    assert_line(&text, "function root(value: shared/model.nx:Element) =");
+    assert_line(
+        &text,
+        "function root(value: shared/model.nx:Element): shared/model.nx:Element =",
+    );
 }
 
 #[test]
@@ -900,7 +906,7 @@ fn directory_loaded_cross_library_type_references_survive_per_module_emission() 
 }
 
 #[test]
-fn nullable_unions_content_fields_and_descriptors_read_as_written() {
+fn optional_unions_content_fields_and_descriptors_read_as_written() {
     let temp = TempDir::new().expect("temp dir");
     let flow_dir = temp.path().join("flow");
     let ui_dir = temp.path().join("ui");
@@ -908,7 +914,7 @@ fn nullable_unions_content_fields_and_descriptors_read_as_written() {
     fs::create_dir_all(&ui_dir).expect("ui dir");
     fs::write(
         flow_dir.join("Flow.nx"),
-        "export type FlowCompletion = continue | end { message:string }\nexport type QuestionFlow = {\n  completion:FlowCompletion?\n  content steps:Element\n}",
+        "export type FlowCompletion = continue | end { message:string }\nexport type QuestionFlow = {\n  completion?:FlowCompletion\n  content steps:Element\n}",
     )
     .expect("flow source");
     fs::write(
@@ -926,7 +932,7 @@ fn nullable_unions_content_fields_and_descriptors_read_as_written() {
     let artifact = artifact_from_workspace_with(
         &[(
             "app/main.nx",
-            "import { QuestionFlow } from \"../flow\"\nimport { Panel } from \"../ui\"\nlet omitted(): QuestionFlow = { <QuestionFlow><Panel><span /></Panel></QuestionFlow> }\nlet explicit(): QuestionFlow = { <QuestionFlow completion={null}><Panel><span /></Panel></QuestionFlow> }\nlet root(): QuestionFlow[] = { omitted() explicit() }",
+            "import { QuestionFlow } from \"../flow\"\nimport { Panel } from \"../ui\"\nlet omitted(): QuestionFlow = { <QuestionFlow><Panel><span /></Panel></QuestionFlow> }\nlet explicit(): QuestionFlow = { <QuestionFlow completion={}><Panel><span /></Panel></QuestionFlow> }\nlet root(): QuestionFlow+ = { omitted() explicit() }",
         )],
         "app/main.nx",
         &registry.build_context(),
@@ -946,7 +952,9 @@ fn nullable_unions_content_fields_and_descriptors_read_as_written() {
     assert_contains(&main, "Flow.nx:QuestionFlow>");
     assert_contains(&main, "Panel.nx:Panel>");
     assert_line(&main, "      <span />");
-    assert_contains(&main, "Flow.nx:QuestionFlow completion=null>");
+    // A written empty value is the empty sequence, not a value of its own.
+    assert_contains(&main, "Flow.nx:QuestionFlow completion={}>");
+    assert!(!main.contains("null"), "{main}");
 }
 
 #[test]
@@ -974,7 +982,7 @@ fn an_inherited_default_carries_no_span_into_the_artifact() {
         &[
             (
                 "app/main.nx",
-                "import { Question } from \"../shared/ui.nx\"\nexternal component <ShortTextQuestion extends Question placeholder:string? />\nlet root() = { <ShortTextQuestion /> }",
+                "import { Question } from \"../shared/ui.nx\"\nexternal component <ShortTextQuestion extends Question placeholder?:string />\nlet root() = { <ShortTextQuestion /> }",
             ),
             (
                 "shared/ui.nx",
@@ -1009,7 +1017,7 @@ fn an_inherited_default_carries_no_span_into_the_artifact() {
 #[test]
 fn loops_matches_union_cases_and_big_integers_read_as_written() {
     let loops =
-        explain_source("let <Labels items:int[] /> = {for item, index in items { item + index }}");
+        explain_source("let <Labels items:int+ /> = {for item, index in items { item + index }}");
     assert_line(&loops, "  for item, index in items yield");
     assert_line(&loops, "    (item add index)");
 
@@ -1081,7 +1089,7 @@ fn an_int_literal_at_a_float_site_emits_the_same_ir_as_a_real_literal() {
     );
     let lists = |x: &str, items: &str| {
         format!(
-            "type Opts = {{ x:float64 = {x} }}\nexternal component <B v:float64[] />\nlet root() = {{ <B v={{{items}}} /> }}\n"
+            "type Opts = {{ x:float64 = {x} }}\nexternal component <B v:float64+ />\nlet root() = {{ <B v={{{items}}} /> }}\n"
         )
     };
     assert_eq!(
@@ -1122,7 +1130,7 @@ fn a_component_reads_with_its_props_state_and_body() {
 #[test]
 fn slots_are_declaration_local_integers() {
     let artifact = entry_artifact(&artifact_from_source(
-        "let f(a:int[], b:int) = { for x in a { x + b } }\nlet g(c:int) = { c }",
+        "let f(a:int+, b:int) = { for x in a { x + b } }\nlet g(c:int) = { c }",
     ));
     let slots = artifact
         .nodes
@@ -1151,7 +1159,7 @@ fn slots_are_declaration_local_integers() {
 
 #[test]
 fn a_name_and_a_type_are_written_once() {
-    let source = "external component <Label Text:string? />\nlet root() = { <Label Text=\"a\" /> <Label Text=\"b\" /> <Label Text=\"c\" /> }";
+    let source = "external component <Label Text?:string />\nlet root() = { <Label Text=\"a\" /> <Label Text=\"b\" /> <Label Text=\"c\" /> }";
     let artifact = entry_artifact(&artifact_from_source(source));
     assert_eq!(
         artifact
@@ -1161,12 +1169,398 @@ fn a_name_and_a_type_are_written_once() {
             .count(),
         1
     );
-    let nullable_strings = artifact
+    // The prop's read type `string?` is one `seq` entry, however many props are typed by it.
+    let optional_strings = artifact
         .types
         .iter()
-        .filter(|ty| ty.as_list().and_then(|entry| entry[0].as_int()) == Some(kinds::ty::NULLABLE))
+        .filter(|ty| ty.as_list().and_then(|entry| entry[0].as_int()) == Some(kinds::ty::SEQ))
         .count();
-    assert_eq!(nullable_strings, 1);
+    assert_eq!(optional_strings, 1);
+}
+
+// ------------------------------------------------------------------------------------------------
+// Occurrences and the presence operators
+// ------------------------------------------------------------------------------------------------
+
+/// The `seq` entries of a type table, as their occurrence cells.
+fn seq_occurrence_cells(artifact: &NxIrArtifact) -> Vec<i64> {
+    let mut cells = artifact
+        .types
+        .iter()
+        .filter_map(|ty| {
+            let entry = ty.as_list()?;
+            (entry[0].as_int()? == kinds::ty::SEQ).then(|| entry[2].as_int().unwrap())
+        })
+        .collect::<Vec<_>>();
+    cells.sort_unstable();
+    cells
+}
+
+/// The index of the first node of `kind`, if any.
+fn node_index_of_kind(artifact: &NxIrArtifact, kind: i64) -> Option<usize> {
+    artifact.nodes.iter().position(|node| {
+        node.as_list()
+            .and_then(|entry| entry.first())
+            .and_then(crate::ir::IrItem::as_int)
+            == Some(kind)
+    })
+}
+
+#[test]
+fn each_occurrence_is_one_seq_type() {
+    assert_eq!(kinds::ty::SEQ, 5);
+    assert_eq!(kinds::name(kinds::ty::NAMES, kinds::ty::SEQ), Some("seq"));
+    // The retired kinds keep their numbers so no later kind reuses them, and are not named.
+    assert_eq!(kinds::ty::ARRAY, 2);
+    assert_eq!(kinds::ty::NULLABLE, 3);
+    assert_eq!(kinds::node::NULL, 0);
+    assert_eq!(kinds::name(kinds::ty::NAMES, kinds::ty::ARRAY), None);
+    assert_eq!(kinds::name(kinds::ty::NAMES, kinds::ty::NULLABLE), None);
+    assert_eq!(kinds::name(kinds::node::NAMES, kinds::node::NULL), None);
+
+    let artifact = entry_artifact(&artifact_from_source(
+        "type Person = { name:string }\n\
+         type Book = { title:string subtitle?:string authors:Person+ tags?:string+ }\n\
+         let root() = { 1 }",
+    ));
+    let text = explain(&artifact);
+    // A field is typed by its read type: `subtitle?:string` reads as `string?`, `tags?:string+`
+    // as `string*`, and neither is `required`.
+    assert_line(&text, "  title: string required");
+    assert_line(&text, "  subtitle: string?");
+    assert_line(&text, "  authors: Person+ required");
+    assert_line(&text, "  tags: string*");
+    assert_eq!(
+        seq_occurrence_cells(&artifact),
+        [
+            kinds::ty::OCCURRENCE_EMPTY,
+            kinds::ty::OCCURRENCE_MANY,
+            kinds::ty::OCCURRENCE_EMPTY | kinds::ty::OCCURRENCE_MANY,
+        ],
+        "one seq entry per occurrence: {:?}",
+        artifact.types
+    );
+    let field_lines = text
+        .lines()
+        .filter(|line| line.starts_with("  "))
+        .collect::<Vec<_>>()
+        .join("\n");
+    for word in ["nullable", "null", "[]"] {
+        assert!(!field_lines.contains(word), "no {word:?} in:\n{text}");
+    }
+    assert!(
+        artifact.required_features.is_empty(),
+        "a seq type needs no feature: {:?}",
+        artifact.required_features
+    );
+}
+
+#[test]
+fn the_presence_operators_are_nodes_behind_a_feature() {
+    assert_eq!(kinds::node::EXISTS, 23);
+    assert_eq!(kinds::node::OPTIONAL_MEMBER, 24);
+    assert_eq!(kinds::node::COALESCE, 25);
+    assert_eq!(
+        kinds::name(kinds::node::NAMES, kinds::node::EXISTS),
+        Some("exists")
+    );
+    assert_eq!(
+        kinds::name(kinds::node::NAMES, kinds::node::OPTIONAL_MEMBER),
+        Some("optionalMember")
+    );
+    assert_eq!(
+        kinds::name(kinds::node::NAMES, kinds::node::COALESCE),
+        Some("coalesce")
+    );
+
+    let artifact = artifact_from_source(
+        "type Person = { name:string }\n\
+         type Book = { author?:Person }\n\
+         let byline(b:Book): string = { if b.author? { b.author.name } else { b.author?.name ?? \"anonymous\" } }\n\
+         let root() = { 1 }",
+    );
+    let model = entry_artifact(&artifact);
+    let text = explain(&model);
+    assert_line(&text, "  if b.author? then");
+    assert_line(&text, "    b.author.name");
+    assert_line(&text, "    (b.author?.name ?? \"anonymous\")");
+    assert_eq!(
+        model.required_features,
+        [NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1],
+        "{:?}",
+        model.required_features
+    );
+
+    // `[23, operand]`, `[24, base, member]` and `[25, lhs, rhs]`.
+    let exists = node_of_kind(&model, kinds::node::EXISTS);
+    assert_eq!(exists.len(), 2);
+    let step = node_of_kind(&model, kinds::node::OPTIONAL_MEMBER);
+    assert_eq!(step.len(), 3);
+    assert_eq!(model.strings[step[2].as_int().unwrap() as usize], "name");
+    let coalesce = node_of_kind(&model, kinds::node::COALESCE);
+    assert_eq!(coalesce.len(), 3);
+    assert_eq!(
+        coalesce[1].as_int(),
+        Some(node_index_of_kind(&model, kinds::node::OPTIONAL_MEMBER).unwrap() as i64),
+        "the fallback's left operand is the step"
+    );
+
+    let bytes = image_bytes(&artifact);
+    let image = NxIrImage::open(&bytes).expect("a valid image");
+    assert_eq!(
+        image.required_features().collect::<Vec<_>>(),
+        [NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1]
+    );
+    assert_eq!(read_back(&bytes), model);
+    assert_eq!(explain_nx_ir_image(&bytes).expect("explain"), text);
+}
+
+#[test]
+fn the_empty_pattern_is_a_pattern_form() {
+    let artifact = artifact_from_source(
+        "let f(o?:int): int = { if o is { {} => 0 else => o } }\nlet root() = { f(1) }",
+    );
+    let model = entry_artifact(&artifact);
+    let text = explain(&model);
+    assert_line(&text, "  if o is");
+    assert_line(&text, "    {} =>");
+    assert_line(&text, "      0");
+    assert_line(&text, "    else =>");
+    assert_line(&text, "      o");
+    assert_eq!(
+        model.required_features,
+        [NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1],
+        "{:?}",
+        model.required_features
+    );
+    // The pattern is the empty `array` node; no node kind stands for a null value.
+    assert!(
+        model.nodes.iter().any(|node| {
+            node.as_list().is_some_and(|entry| {
+                entry[0].as_int() == Some(kinds::node::ARRAY) && entry.len() == 2
+            })
+        }),
+        "{:?}",
+        model.nodes
+    );
+    assert!(node_index_of_kind(&model, kinds::node::NULL).is_none());
+    assert_eq!(read_back(&image_bytes(&artifact)), model);
+}
+
+/// A parameter declared `p?:T` is typed by its read type, `T?`, like a field or a prop, so a
+/// runtime normalizes an omitted argument to the empty value.
+#[test]
+fn an_optional_parameter_is_typed_by_its_read_type() {
+    let artifact = entry_artifact(&artifact_from_source(
+        "let f(o?:int): int = { o ?? 0 }\nlet root() = { f(1) }",
+    ));
+    let text = explain(&artifact);
+    assert_contains(&text, "function f(o?: int): int =");
+    assert_eq!(
+        seq_occurrence_cells(&artifact),
+        [kinds::ty::OCCURRENCE_EMPTY]
+    );
+}
+
+/// A function or value carries its declared result type, which a runtime normalizes the result
+/// to, and marks a result whose type, declared or inferred, is a standalone `T?`, which an entry
+/// call returns to the host as `null`.
+#[test]
+fn a_declaration_carries_its_declared_result_and_whether_it_is_optional() {
+    let artifact = entry_artifact(&artifact_from_source(
+        "let many(): int+ = { 5 }
+         let maybe(): string? = { if false { \"a\" } }
+         let inferred() = { if false { 1 } }
+         let plain() = { 1 }
+         let ones: int* = { 1 }
+         let root() = { many() }",
+    ));
+    let text = explain(&artifact);
+    assert_line(&text, "function many(): int+ =");
+    assert_line(&text, "function maybe(): string? (optional result) =");
+    assert_line(&text, "function inferred() (optional result) =");
+    assert_line(&text, "function plain() =");
+    assert_line(&text, "value ones: int* =");
+    let image = image_bytes(&artifact_from_source(
+        "let maybe(): string? = { {} }\nlet root() = { maybe() }",
+    ));
+    let read = read_back(&image);
+    let maybe = read
+        .declarations
+        .iter()
+        .filter_map(crate::ir::IrItem::as_list)
+        .find(|entry| {
+            entry[1]
+                .as_int()
+                .is_some_and(|index| read.strings[index as usize] == "maybe")
+        })
+        .expect("function declaration");
+    assert_eq!(maybe[5].as_int(), Some(kinds::declaration::RESULT_OPTIONAL));
+}
+
+/// The flags cells of each parameter of the declaration named `name`.
+fn declaration_param_flags(artifact: &NxIrArtifact, name: &str) -> Vec<i64> {
+    let entry = artifact
+        .declarations
+        .iter()
+        .filter_map(crate::ir::IrItem::as_list)
+        .find(|entry| {
+            entry[0].as_int() == Some(kinds::declaration::FUNCTION)
+                && entry[1]
+                    .as_int()
+                    .is_some_and(|index| artifact.strings[index as usize] == name)
+        })
+        .expect("function declaration");
+    entry[2]
+        .as_list()
+        .expect("parameter list")
+        .iter()
+        .map(|param| {
+            param.as_list().expect("parameter")[3]
+                .as_int()
+                .expect("flags")
+        })
+        .collect()
+}
+
+/// A declaration's parameter carries the flags a function type's parameter does, so a runtime
+/// binding a call by name knows an optional parameter may be left out.
+#[test]
+fn a_function_parameter_carries_its_optional_and_content_flags() {
+    let artifact = entry_artifact(&artifact_from_source(
+        "let <Row Item:string Note?:string content Body?:string />: string = { Item }\n\
+         let root() = { <Row Item=\"x\" /> }",
+    ));
+    assert_eq!(
+        declaration_param_flags(&artifact, "Row"),
+        [
+            0,
+            kinds::ty::FUNCTION_PARAM_OPTIONAL,
+            kinds::ty::FUNCTION_PARAM_CONTENT | kinds::ty::FUNCTION_PARAM_OPTIONAL,
+        ]
+    );
+}
+
+/// A parameter's default is a node of the declaring function, and an element call that leaves a
+/// parameter out passes `-1` in its place, so the function fills it with the default it declares.
+#[test]
+fn a_parameter_default_is_the_functions_and_a_call_leaves_the_parameter_out() {
+    let artifact = entry_artifact(&artifact_from_source(
+        "let f(a:int, b:int = { a + 1 }, c?:int) = { a }\n\
+         let root() = { <f a=1 c=2 /> }",
+    ));
+    let entry = artifact
+        .declarations
+        .iter()
+        .filter_map(crate::ir::IrItem::as_list)
+        .find(|entry| {
+            entry[0].as_int() == Some(kinds::declaration::FUNCTION)
+                && entry[1]
+                    .as_int()
+                    .is_some_and(|index| artifact.strings[index as usize] == "f")
+        })
+        .expect("function declaration");
+    let defaults = entry[2]
+        .as_list()
+        .expect("parameter list")
+        .iter()
+        .map(|param| {
+            param.as_list().expect("parameter")[2]
+                .as_int()
+                .expect("default")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(defaults[0], -1);
+    assert!(defaults[1] >= 0, "b's default is a node");
+    assert_eq!(defaults[2], -1);
+
+    let call_args = artifact
+        .nodes
+        .iter()
+        .filter_map(crate::ir::IrItem::as_list)
+        .find(|node| node[0].as_int() == Some(kinds::node::CALL))
+        .map(|node| {
+            node[2]
+                .as_list()
+                .expect("arguments")
+                .iter()
+                .map(|arg| arg.as_int().expect("argument"))
+                .collect::<Vec<_>>()
+        })
+        .expect("call node");
+    assert_eq!(call_args.len(), 3);
+    assert_eq!(call_args[1], -1);
+}
+
+#[test]
+fn a_program_without_the_operators_lists_no_occurrence_feature() {
+    let artifact = entry_artifact(&artifact_from_source(
+        "type Book = { subtitle?:string tags:string+ }\nlet root() = { <Book tags={\"a\"} /> }",
+    ));
+    assert!(
+        artifact.required_features.is_empty(),
+        "{:?}",
+        artifact.required_features
+    );
+    assert_eq!(
+        seq_occurrence_cells(&artifact),
+        [kinds::ty::OCCURRENCE_EMPTY, kinds::ty::OCCURRENCE_MANY]
+    );
+}
+
+/// A written `{}` is the empty `array` node wherever it appears, and reads back as `{}`.
+#[test]
+fn a_written_empty_value_is_an_empty_array_node() {
+    let text = explain_source(
+        "type Book = { title:string author?:string tags?:string+ }\n\
+         let root() = <Book title=\"C\" author={} tags={} />",
+    );
+    assert_line(&text, "  <Book author={} tags={} title=\"C\" />");
+    assert!(!text.contains("null"), "{text}");
+}
+
+/// The retired kinds are not laid out by schema 5: a model carrying one cannot be written, and the
+/// explainer reports it as malformed rather than rendering it.
+#[test]
+fn the_retired_kinds_are_refused_as_malformed() {
+    let model = entry_artifact(&artifact_from_source(
+        "type Book = { tags:string+ }\nlet root() = { 1 }",
+    ));
+    let seq_index = model
+        .types
+        .iter()
+        .position(|ty| ty.as_list().and_then(|entry| entry[0].as_int()) == Some(kinds::ty::SEQ))
+        .expect("the seq type");
+    let item = model.types[seq_index].as_list().unwrap()[1]
+        .as_int()
+        .unwrap();
+
+    for retired in [kinds::ty::ARRAY, kinds::ty::NULLABLE] {
+        let mut doctored = model.clone();
+        doctored.types[seq_index] = crate::IrItem::ints([retired, item]);
+        let error = write_nx_ir_image(&doctored).expect_err("a retired type kind is not written");
+        assert!(
+            error.to_string().contains(&format!("kind {retired}")),
+            "{error}"
+        );
+        let error = explain_nx_ir(&doctored).expect_err("a retired type kind is malformed");
+        assert!(
+            matches!(&error, ExplainError::Malformed(message) if message.contains("retired")),
+            "{error}"
+        );
+    }
+
+    let number_index =
+        node_index_of_kind(&model, kinds::node::NUMBER).expect("the literal 1 is a number node");
+    let mut doctored = model.clone();
+    doctored.nodes[number_index] = crate::IrItem::ints([kinds::node::NULL]);
+    let error = write_nx_ir_image(&doctored).expect_err("a null node is not written");
+    assert!(error.to_string().contains("kind 0"), "{error}");
+    let error = explain_nx_ir(&doctored).expect_err("a null node is malformed");
+    assert!(
+        matches!(&error, ExplainError::Malformed(message) if message.contains("retired")),
+        "{error}"
+    );
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -1176,12 +1570,13 @@ fn a_name_and_a_type_are_written_once() {
 #[test]
 fn a_referenced_update_record_is_declared_with_its_own_schema() {
     let artifact = artifact_from_source(
-        "type User = { name:string = \"anon\" email:string? }\nlet patch() = <User.Update email={null} />",
+        "type User = { name:string = \"anon\" email?:string }\nlet patch() = <User.Update email={} />",
     );
     let entry = entry_artifact(&artifact);
     let text = explain(&entry);
     assert_line(&text, "record User.Update update of User");
-    // Every update field is optional and none has a default, so the lines carry neither.
+    // Every update field may be absent and none has a default, so the lines carry neither; the
+    // `?` on `email` is the clearable mark copied from the target's optional field.
     let update_lines = text
         .lines()
         .skip_while(|line| *line != "record User.Update update of User")
@@ -1189,7 +1584,7 @@ fn a_referenced_update_record_is_declared_with_its_own_schema() {
         .take_while(|line| line.starts_with("  "))
         .collect::<Vec<_>>();
     assert_eq!(update_lines, vec!["  name: string", "  email: string?"]);
-    assert_line(&text, "  <User.Update email=null />");
+    assert_line(&text, "  <User.Update email={} />");
     assert!(entry
         .required_features
         .contains(&NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1.to_string()));
@@ -1222,7 +1617,7 @@ fn an_update_construction_names_the_update_record() {
 #[test]
 fn a_referenced_property_union_is_declared_with_its_target_and_cases() {
     let entry = entry_artifact(&artifact_from_source(
-        "abstract type Named = { name:string }\ntype User extends Named = { email:string? }\nlet key() = {User.Property.email}",
+        "abstract type Named = { name:string }\ntype User extends Named = { email?:string }\nlet key() = {User.Property.email}",
     ));
     let text = explain(&entry);
     assert_line(&text, "union User.Property property of User");
@@ -1279,17 +1674,18 @@ fn an_intrinsic_call_is_distinct_from_a_function_call() {
 #[test]
 fn a_component_type_parameter_is_erased() {
     let text = explain_source(
-        "type Contact = { name:string }\nexternal component <SkiaLayout TItem:type itemsSource:TItem[]? />\nlet v = <SkiaLayout TItem=Contact itemsSource={} />\nlet root() = { v }",
+        "type Contact = { name:string }\nexternal component <SkiaLayout TItem:type itemsSource?:TItem+ />\nlet v = <SkiaLayout TItem=Contact itemsSource={} />\nlet root() = { v }",
     );
-    assert_line(&text, "    itemsSource: object[]?");
-    assert_line(&text, "  <SkiaLayout itemsSource=[] />");
+    // The prop is typed by its read type: `?:TItem+` reads as `TItem*`, erased to `object*`.
+    assert_line(&text, "    itemsSource: object*");
+    assert_line(&text, "  <SkiaLayout itemsSource={} />");
     assert!(!text.contains("TItem"), "{text}");
 }
 
 #[test]
 fn an_update_record_of_a_generic_component_erases_the_parameter() {
     let text = explain_source(
-        "external component <Label text:string? />\ncomponent <List TItem:type items:TItem[]? /> = { state { sel:TItem? = null } <Label /> }\nlet u = <List.Update sel=null />\nlet root() = { u }",
+        "external component <Label text?:string />\ncomponent <List TItem:type items?:TItem+ /> = { state { sel?:TItem } <Label /> }\nlet u = <List.Update sel={} />\nlet root() = { u }",
     );
     assert_line(&text, "record List.Update update of List");
     assert_line(&text, "  sel: object?");
@@ -1320,12 +1716,12 @@ fn a_record_type_parameter_is_erased_from_the_field_schema() {
 fn an_applied_type_is_a_nominal_reference() {
     let text = explain_source(
         "type Range = { T:type start:T end:T }\n\
-         type Slider = { range:<Range T=float64/> marks:<Range T=int/>[]? }\n\
+         type Slider = { range:<Range T=float64/> marks?:<Range T=int/>+ }\n\
          let s = <Slider range={<Range T=float64 start={0} end={1} />} />\n\
          let root() = { s }",
     );
     assert_line(&text, "  range: Range required");
-    assert_line(&text, "  marks: Range[]?");
+    assert_line(&text, "  marks: Range*");
 }
 
 /// A construction carries its fields and nothing for the type argument the source bound.
@@ -1621,7 +2017,7 @@ fn a_handler_emits_an_image_that_reads_back() {
 // ------------------------------------------------------------------------------------------------
 
 const TEMPLATE_LIST: &str =
-    "external component <List ItemTemplate:(<function Item:object Index:int />: string)? />\n";
+    "external component <List ItemTemplate?:<function Item:object Index:int />: string />\n";
 
 #[test]
 fn a_function_typed_prop_is_a_function_type_in_nx_spelling() {
@@ -1631,6 +2027,8 @@ fn a_function_typed_prop_is_a_function_type_in_nx_spelling() {
         Some("function")
     );
     let text = explain_source(&format!("{TEMPLATE_LIST}let root() = {{ 1 }}"));
+    // An optional prop is typed by its read type, so the function type sits under `?`,
+    // parenthesized.
     assert_contains(
         &text,
         "ItemTemplate: (<function Item:object Index:int />: string)?",
@@ -1639,7 +2037,7 @@ fn a_function_typed_prop_is_a_function_type_in_nx_spelling() {
 
     // One function type, one spelling: the explained artifact reads a type table and the checker
     // reads a `Type`, and both assemble the text through `nx_hir::ast::spell_function_type`.
-    let checked = nx_types::Type::nullable(nx_types::Type::function(
+    let checked = nx_types::Type::optional(nx_types::Type::function(
         vec![
             nx_types::FunctionParam::new("Item", nx_types::Type::named("object")),
             nx_types::FunctionParam::new("Index", nx_types::Type::int()),
@@ -1674,7 +2072,7 @@ fn two_identical_function_types_share_one_table_entry() {
 #[test]
 fn a_type_parameter_inside_a_function_type_is_erased() {
     let text = explain_source(
-        "external component <SkiaLayout TItem:type ItemTemplate:(<function Item:TItem Index:int />: object)? />\n\
+        "external component <SkiaLayout TItem:type ItemTemplate?:<function Item:TItem Index:int />: object />\n\
          let root() = { 1 }",
     );
     assert_contains(
@@ -1687,7 +2085,7 @@ fn a_type_parameter_inside_a_function_type_is_erased() {
 #[test]
 fn a_function_bound_to_a_prop_is_a_reference_and_needs_the_feature() {
     let source = "let <Row Item:object />: string = \"r\"\n\
-         external component <List ItemTemplate:(<function Item:object />: string)? />\n\
+         external component <List ItemTemplate?:<function Item:object />: string />\n\
          let root() = <List ItemTemplate={Row} />"
         .to_string();
     let model = entry_artifact(&artifact_from_source(&source));
@@ -1740,7 +2138,7 @@ fn a_call_of_a_top_level_let_of_function_type_is_a_named_call_on_a_reference() {
     // The callee is a declaration, not a lexical binding, so it emits the same reference node a
     // bare identifier would.
     let artifact = artifact_from_source(
-        "external component <Box Label:string? />\n\
+        "external component <Box Label?:string />\n\
          let <Wrap Item:object />: string = \"w\"\n\
          let F: <function Item:object />: string = {Wrap}\n\
          let root() = <Box Label=<F Item=\"x\" /> />",
@@ -1966,7 +2364,7 @@ fn building_a_range_without_iterating_needs_no_feature() {
 #[test]
 fn a_list_loop_is_unchanged_by_ranges() {
     let entry = entry_artifact(&artifact_from_source(
-        "let doubled(items:int[]) = { for item in items { item * 2 } }\n\
+        "let doubled(items:int+) = { for item in items { item * 2 } }\n\
          let root() = { doubled({ 1 2 }) }",
     ));
     assert!(
@@ -1997,5 +2395,5 @@ fn iterating_a_range_does_not_change_the_schema_version() {
 
     assert_eq!(with_range.schema_version, NX_IR_SCHEMA_VERSION);
     assert_eq!(with_range.schema_version, without.schema_version);
-    assert_eq!(NX_IR_SCHEMA_VERSION, 4);
+    assert_eq!(NX_IR_SCHEMA_VERSION, 5);
 }

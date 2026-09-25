@@ -7,5 +7,5 @@ abstract type UserBase extends Entity = {
 }
 
 type User extends UserBase = {
-  email: string?
+  email?: string
 }

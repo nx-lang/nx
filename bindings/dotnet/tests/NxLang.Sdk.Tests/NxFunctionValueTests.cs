@@ -30,7 +30,7 @@ public sealed class TemplatedListElement
 public class NxFunctionValueTests
 {
     private const string TemplateSource = """
-        external component <List ItemTemplate:(<function Item:object Index:int />: string)? />
+        external component <List ItemTemplate?:<function Item:object Index:int />: string />
         let <Row Item:object Index:int />: string = "r"
         let root() = <List ItemTemplate={Row} />
         """;

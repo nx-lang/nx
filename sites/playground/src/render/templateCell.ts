@@ -10,7 +10,7 @@
  * so the rest of the list still draws.</para>
  */
 import { callFunction, type NxCanonicalValue } from "@nx-lang/ir-runtime";
-import { SkiaLayout } from "../drawnui/controls/SkiaLayout";
+import { SkiaLayout } from "drawnui-react/core";
 import type { Program } from "./evaluate";
 import { materialize, type MaterializeContext } from "./materialize";
 import type { FunctionRecord } from "./values";

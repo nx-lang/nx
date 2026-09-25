@@ -15,9 +15,6 @@ let hexLiteral = 0xFF
 let boolTrue = true
 let boolFalse = false
 
-// Null literal
-let nullValue = null
-
 // String literals
 let stringValue = "Hello, World!"
 
@@ -58,10 +55,12 @@ let <Negation x:int /> = {-x}
 let <DoubleNegation x:int /> = {--x}
 let <LogicalNot flag:boolean /> = {!flag}
 
-// === Conditional (Ternary) Expressions ===
+// === Presence Operators ===
 
-let <TernarySimple x:int /> = {x > 0 ? 1 : -1}
-let <TernaryNested x:int /> = {x > 0 ? x * 2 : x < 0 ? x * -2 : 0}
+let <HasValue x?:int /> = {x?}
+let <StepThrough b:Book /> = {b.author?.name}
+let <Fallback x?:int /> = {x ?? 0}
+let <FallbackChain a?:int b?:int c:int /> = {a ?? b ?? c}
 
 // === Parenthesized Expressions ===
 
@@ -110,7 +109,6 @@ let <IfMatch x:int /> = {
 }
 
 // === For Expressions ===
-// Note:Array types (int[]) have grammar parsing issues, using object for now
 
 let <ForSimple items:object /> = {for item in items { item * 2 }}
 let <ForWithIndex items:object /> = {for item, index in items { item + index }}
@@ -129,11 +127,11 @@ let <ComplexExpression x:int y:int items:object /> = {
 }
 
 let <MixedOperators x:int y:int /> = {
-  x + y * 2 > 10 && x < 100 ? x * y : x + y
+  if x + y * 2 > 10 && x < 100 { x * y } else { x + y }
 }
 
 let <ChainedOperations obj:object x:int /> = {
-  obj.method(x + 1, x * 2).result.value > 0 ? "positive" : "negative"
+  if obj.method(x + 1, x * 2).result.value > 0 { "positive" } else { "negative" }
 }
 
 // === Property Defaults with Expressions ===
@@ -143,7 +141,7 @@ let <WithDefaultExpressions
   product:int={4 * 5}
   comparison:boolean={10 > 5}
   logical:boolean={true && false}
-  ternary:int={5 > 3 ? 100 : 200}
+  chosen:int={if 5 > 3 { 100 } else { 200 }}
   nested:int={(1 + 2) * (3 + 4)}
 /> = {sum + product}
 
@@ -156,6 +154,6 @@ let comparison:boolean={10 > 5}
 let logical:boolean={true && false}
 
 // Without type annotations (inferred)
-let ternary = {5 > 3 ? 100 : 200}
+let chosen = {if 5 > 3 { 100 } else { 200 }}
 let nested = {(1 + 2) * (3 + 4)}
 let complex = {1 + 2 * 3 - 4 / 2}

@@ -21,8 +21,9 @@ public abstract class NxProperty<TRecord> : NxField
     /// </summary>
     /// <param name="name">The field's wire name.</param>
     /// <param name="valueType">The CLR type of the field's values.</param>
-    protected NxProperty(string name, Type valueType)
-        : base(name, valueType)
+    /// <param name="clearable">Whether the field may be cleared; see <see cref="NxField"/>.</param>
+    protected NxProperty(string name, Type valueType, bool? clearable = null)
+        : base(name, valueType, clearable)
     {
     }
 
@@ -57,8 +58,13 @@ public sealed class NxProperty<TRecord, TValue> : NxProperty<TRecord>
     /// <param name="name">The field's wire name.</param>
     /// <param name="get">Reads the field from a record.</param>
     /// <param name="set">Writes the field of a record.</param>
-    public NxProperty(string name, Func<TRecord, TValue> get, Action<TRecord, TValue> set)
-        : base(name, typeof(TValue))
+    /// <param name="clearable">Whether the field may be cleared; see <see cref="NxField"/>.</param>
+    public NxProperty(
+        string name,
+        Func<TRecord, TValue> get,
+        Action<TRecord, TValue> set,
+        bool? clearable = null)
+        : base(name, typeof(TValue), clearable)
     {
         _get = get ?? throw new ArgumentNullException(nameof(get));
         _set = set ?? throw new ArgumentNullException(nameof(set));

@@ -1,0 +1,128 @@
+{
+  "entry": "main.nx",
+  "emit": [
+    "main.nx"
+  ],
+  "entrypoints": [
+    {
+      "module": "main.nx",
+      "function": "aliasItem"
+    },
+    {
+      "module": "main.nx",
+      "function": "optionalAliasItem"
+    },
+    {
+      "module": "main.nx",
+      "function": "aliasContent"
+    },
+    {
+      "module": "main.nx",
+      "function": "argument"
+    },
+    {
+      "module": "main.nx",
+      "function": "fallbackArgument"
+    },
+    {
+      "module": "main.nx",
+      "function": "fallbackItem"
+    },
+    {
+      "module": "main.nx",
+      "function": "fallbackLifted"
+    },
+    {
+      "module": "main.nx",
+      "function": "fallbackLoop"
+    },
+    {
+      "module": "main.nx",
+      "function": "presentLifted"
+    },
+    {
+      "module": "main.nx",
+      "function": "presentWidened"
+    },
+    {
+      "module": "main.nx",
+      "function": "emptyNicks"
+    },
+    {
+      "module": "main.nx",
+      "function": "differentNicks"
+    },
+    {
+      "module": "main.nx",
+      "function": "samePeople"
+    },
+    {
+      "module": "main.nx",
+      "function": "otherPeople"
+    },
+    {
+      "module": "main.nx",
+      "function": "rowWithout"
+    },
+    {
+      "module": "main.nx",
+      "function": "rowWith"
+    },
+    {
+      "module": "main.nx",
+      "function": "declaredMany"
+    },
+    {
+      "module": "main.nx",
+      "function": "declaredOne"
+    },
+    {
+      "module": "main.nx",
+      "function": "declaredFallback"
+    },
+    {
+      "module": "main.nx",
+      "function": "declaredValue"
+    },
+    {
+      "module": "main.nx",
+      "function": "noString"
+    },
+    {
+      "module": "main.nx",
+      "function": "noneInferred"
+    },
+    {
+      "module": "main.nx",
+      "function": "noInts"
+    },
+    {
+      "module": "main.nx",
+      "function": "updatedName"
+    },
+    {
+      "module": "main.nx",
+      "function": "absentName"
+    },
+    {
+      "module": "main.nx",
+      "function": "clearedNick"
+    },
+    {
+      "module": "main.nx",
+      "function": "updatedNick"
+    },
+    {
+      "module": "main.nx",
+      "function": "absentRead"
+    },
+    {
+      "module": "main.nx",
+      "function": "clearedRead"
+    },
+    {
+      "module": "main.nx",
+      "function": "root"
+    }
+  ]
+}

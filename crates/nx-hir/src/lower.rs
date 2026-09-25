@@ -4,15 +4,16 @@
 //! our typed High-level Intermediate Representation (HIR).
 
 use crate::ast::{
-    BinOp, Expr, FunctionParam, Literal, MatchArm, OrderedFloat, RecordLiteralProperty, Stmt,
-    TypeRef, UnOp,
+    BinOp, Expr, FunctionParam, Literal, MatchArm, Occurrence, OrderedFloat, RecordLiteralProperty,
+    Stmt, TypeRef, UnOp,
 };
 use crate::{
     property_union_name, update_record_name, Component, ComponentEmit, ComponentEmitKind, Element,
-    ExprId, Function, Import, ImportKind, Item, LoweredModule, LoweringDiagnostic, Name, Param,
-    Property, PropertyConditionArm, PropertyEntry, PropertyMatchArm, RecordDef, RecordField,
-    RecordKind, SelectiveImport, SourceId, TypeAlias, TypeParameter, UnionCaseDef, UnionCaseField,
-    UnionDef, ValueDef, Visibility, WhitespaceRun, PROPERTY_UNION_SUFFIX, UPDATE_RECORD_SUFFIX,
+    ExprId, Function, FunctionForm, Import, ImportKind, Item, LoweredModule, LoweringDiagnostic,
+    Name, Param, Property, PropertyConditionArm, PropertyEntry, PropertyMatchArm, RecordDef,
+    RecordField, RecordKind, SelectiveImport, SourceId, TypeAlias, TypeParameter, UnionCaseDef,
+    UnionCaseField, UnionDef, ValueDef, Visibility, WhitespaceRun, PROPERTY_UNION_SUFFIX,
+    UPDATE_RECORD_SUFFIX,
 };
 use nx_diagnostics::{TextSize, TextSpan};
 use nx_syntax::{property_definition_is_type_parameter, SyntaxKind, SyntaxNode};
@@ -68,6 +69,15 @@ impl<'tree> ContentGaps<'tree> {
     }
 }
 
+/// One lowered property definition, before it becomes a field, a prop or a parameter.
+struct LoweredProperty {
+    name: Name,
+    ty: TypeRef,
+    default: Option<ExprId>,
+    is_content: bool,
+    optional: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TypeTag {
     Int,
@@ -77,7 +87,6 @@ enum TypeTag {
     Float64,
     Boolean,
     String,
-    Null,
     Unknown,
 }
 
@@ -94,7 +103,9 @@ impl TypeTag {
                 "boolean" => TypeTag::Boolean,
                 _ => TypeTag::Unknown,
             },
-            TypeRef::Nullable(inner) => TypeTag::from_type_ref(inner),
+            // An optional primitive still has the primitive's kind for operand purposes; a
+            // sequence of them has no single kind.
+            TypeRef::Seq { inner, occ } if !occ.admits_many() => TypeTag::from_type_ref(inner),
             _ => TypeTag::Unknown,
         }
     }
@@ -237,6 +248,17 @@ impl LoweringContext {
     }
 
     fn lower_pattern_expr(&mut self, node: SyntaxNode) -> ExprId {
+        // The `{}` pattern has no named child: it is the empty value, which the checker already
+        // knows as the empty sequence.
+        if node
+            .children_with_tokens()
+            .any(|child| child.kind() == SyntaxKind::LBRACE)
+        {
+            return self.alloc_expr(Expr::Array {
+                elements: Vec::new(),
+                span: node.span(),
+            });
+        }
         let pattern_node = node.children().next().unwrap_or(node);
         if pattern_node.kind() == SyntaxKind::QUALIFIED_NAME {
             // A single-segment pattern is a contextual name resolved against the scrutinee's type,
@@ -248,6 +270,7 @@ impl LoweringContext {
                 if !name.as_str().is_empty() {
                     return self.alloc_expr(Expr::ContextualName {
                         name,
+                        occurrence: None,
                         span: pattern_node.span(),
                     });
                 }
@@ -499,9 +522,17 @@ impl LoweringContext {
             0 => self.error_expr(node.span()),
             1 => self.lower_expr(items[0]),
             _ => {
+                let salvaged = Self::salvaged_conditional_items(&items);
                 let elements = items
-                    .into_iter()
-                    .map(|item| self.lower_expr(item))
+                    .iter()
+                    .zip(salvaged)
+                    .map(|(item, salvaged)| {
+                        if salvaged {
+                            self.error_expr(item.span())
+                        } else {
+                            self.lower_expr(*item)
+                        }
+                    })
                     .collect();
                 self.alloc_expr(Expr::Array {
                     elements,
@@ -509,6 +540,43 @@ impl LoweringContext {
                 })
             }
         }
+    }
+
+    /// Marks the items of a sequence that the parser salvaged from a conditional operator.
+    ///
+    /// <para>NX has no `c ? a : b`; a `?` after a value is the presence test. The parser keeps
+    /// what it can read of the shape and fails at the `:`: `{ n > 0 ? n * 2 : -1 }` keeps
+    /// `n > (0?)`, and `{ c ? 1 : 2 }` keeps the items `c?` and `1`. Validation reports the shape
+    /// with the `if` form to write. The kept items are not what the author meant, so they lower to
+    /// error expressions rather than bringing type errors about `0?` or `n > boolean` along with
+    /// that diagnostic.</para>
+    ///
+    /// <para>An item is salvaged when a parse error follows it, or follows the one item after it
+    /// (the consequent), and it ends in a presence test; so is that consequent. Any presence test
+    /// cut off this way is treated alike, ternary or not: what followed the `?` was lost.</para>
+    fn salvaged_conditional_items(items: &[SyntaxNode]) -> Vec<bool> {
+        let mut salvaged = vec![false; items.len()];
+        for (error, _) in items.iter().enumerate().filter(|(_, item)| item.is_error()) {
+            let condition = (1..=2)
+                .filter_map(|back| error.checked_sub(back))
+                .find(|&index| Self::ends_in_presence_test(&items[index]));
+            if let Some(condition) = condition {
+                salvaged[condition..error].fill(true);
+            }
+        }
+        salvaged
+    }
+
+    /// True when the last token of `node` is the `?` of a presence test `x?`.
+    fn ends_in_presence_test(node: &SyntaxNode) -> bool {
+        let mut last = *node;
+        while let Some(child) = last.children_with_tokens().last() {
+            last = child;
+        }
+        last.kind() == SyntaxKind::QUESTION
+            && last
+                .parent()
+                .is_some_and(|parent| parent.kind() == SyntaxKind::EXISTS_EXPRESSION)
     }
 
     fn property_value_node<'tree>(node: SyntaxNode<'tree>) -> Option<SyntaxNode<'tree>> {
@@ -687,13 +755,15 @@ impl LoweringContext {
             .filter(|prop| !property_definition_is_type_parameter(prop))
             .map(|prop| {
                 let ty_node = prop.child_by_field("type").unwrap_or(prop);
-                RecordField::with_content(
+                let mut field = RecordField::with_content(
                     Self::property_definition_name(prop),
                     self.lower_type(ty_node),
                     Self::property_definition_is_content(prop),
                     None,
                     prop.span(),
-                )
+                );
+                field.optional = Self::property_definition_is_optional(prop);
+                field
             })
             .collect()
     }
@@ -832,17 +902,20 @@ impl LoweringContext {
             .unwrap_or(false)
     }
 
-    fn lower_property_definition(
-        &mut self,
-        prop: SyntaxNode,
-    ) -> (Name, TypeRef, Option<ExprId>, bool) {
-        let field_name = Self::property_definition_name(prop);
+    /// True when the definition carries the `?` mark after its name (`subtitle?:string`).
+    fn property_definition_is_optional(prop: SyntaxNode) -> bool {
+        prop.child_by_field("optional").is_some()
+    }
+
+    fn lower_property_definition(&mut self, prop: SyntaxNode) -> LoweredProperty {
+        let name = Self::property_definition_name(prop);
         let ty_node = prop.child_by_field("type").unwrap_or(prop);
         let ty = self.lower_type(ty_node);
         let default = prop
             .child_by_field("default")
             .map(|default_node| self.lower_expr(default_node));
         let is_content = Self::property_definition_is_content(prop);
+        let optional = Self::property_definition_is_optional(prop);
 
         if let Some(modifier) = prop.child_by_field("modifier") {
             if modifier.text() != "content" {
@@ -856,7 +929,13 @@ impl LoweringContext {
             }
         }
 
-        (field_name, ty, default, is_content)
+        LoweredProperty {
+            name,
+            ty,
+            default,
+            is_content,
+            optional,
+        }
     }
 
     /// Reads the type parameters of a component signature: the `Name:type` definitions that
@@ -901,7 +980,13 @@ impl LoweringContext {
             .filter(|child| child.kind() == SyntaxKind::PROPERTY_DEFINITION)
             .filter(|prop| !property_definition_is_type_parameter(prop))
         {
-            let (field_name, ty, default, is_content) = self.lower_property_definition(prop);
+            let LoweredProperty {
+                name: field_name,
+                ty,
+                default,
+                is_content,
+                optional,
+            } = self.lower_property_definition(prop);
 
             if is_content {
                 if let Some(existing_name) = content_field_name.as_ref() {
@@ -922,13 +1007,10 @@ impl LoweringContext {
                 self.define_name(&field_name, TypeTag::from_type_ref(&ty));
             }
 
-            properties.push(RecordField::with_content(
-                field_name,
-                ty,
-                is_content,
-                default,
-                prop.span(),
-            ));
+            let mut field =
+                RecordField::with_content(field_name, ty, is_content, default, prop.span());
+            field.optional = optional;
+            properties.push(field);
         }
 
         properties
@@ -1254,10 +1336,6 @@ impl LoweringContext {
                 self.literal_expr(Literal::Boolean(value), TypeTag::Boolean, node.span())
             }
 
-            SyntaxKind::NULL_LITERAL | SyntaxKind::NULL_EXPRESSION => {
-                self.literal_expr(Literal::Null, TypeTag::Null, node.span())
-            }
-
             // Identifier
             SyntaxKind::QUALIFIED_NAME => self.lower_qualified_name_expr(node),
 
@@ -1307,6 +1385,19 @@ impl LoweringContext {
                         start: lhs,
                         end: rhs,
                         inclusive,
+                        span: node.span(),
+                    });
+                }
+
+                // `??` lowers to its own node: it is not a primitive operation but a choice
+                // between its operands, and only the right one is evaluated on demand.
+                if node
+                    .children_with_tokens()
+                    .any(|n| n.kind() == SyntaxKind::QUESTION_QUESTION)
+                {
+                    return self.alloc_expr(Expr::Coalesce {
+                        left: lhs,
+                        right: rhs,
                         span: node.span(),
                     });
                 }
@@ -1479,6 +1570,33 @@ impl LoweringContext {
                 })
             }
 
+            SyntaxKind::OPTIONAL_MEMBER_EXPRESSION => {
+                let base = node
+                    .child_by_field("target")
+                    .map(|target| self.lower_expr(target))
+                    .unwrap_or_else(|| self.error_expr(node.span()));
+                let member = node
+                    .child_by_field("member")
+                    .map(|n| Name::new(n.text()))
+                    .unwrap_or_else(|| Name::new(""));
+                self.alloc_expr(Expr::OptionalMember {
+                    base,
+                    member,
+                    span: node.span(),
+                })
+            }
+
+            SyntaxKind::EXISTS_EXPRESSION => {
+                let operand = node
+                    .child_by_field("operand")
+                    .map(|operand| self.lower_expr(operand))
+                    .unwrap_or_else(|| self.error_expr(node.span()));
+                self.alloc_expr(Expr::Exists {
+                    operand,
+                    span: node.span(),
+                })
+            }
+
             SyntaxKind::ELEMENT | SyntaxKind::TEXT_CHILD_ELEMENT => {
                 let span = node.span();
                 let element = self.lower_element(node);
@@ -1556,9 +1674,29 @@ impl LoweringContext {
             // A bare name written where a literal is required. Deliberately not `Expr::Ident`:
             // it resolves against the expected type at its binding site, not against lexical scope.
             SyntaxKind::CONTEXTUAL_NAME => {
-                let name = Name::new(node.text().trim());
+                let name = node
+                    .children()
+                    .find(|child| child.kind() == SyntaxKind::IDENTIFIER)
+                    .map(|identifier| Name::new(identifier.text().trim()))
+                    .unwrap_or_else(|| Name::new(node.text().trim()));
+                // Only a property value can be a type argument, so only there is a suffix the
+                // checker's to judge; post-parse validation reports one anywhere else.
+                let in_property_value = node
+                    .parent()
+                    .and_then(|rhs| rhs.parent())
+                    .is_some_and(|parent| parent.kind() == SyntaxKind::PROPERTY_VALUE);
+                let occurrence = node
+                    .children_with_tokens()
+                    .filter(|_| in_property_value)
+                    .find_map(|child| match child.kind() {
+                        SyntaxKind::QUESTION => Some(Occurrence::OPTIONAL),
+                        SyntaxKind::PLUS => Some(Occurrence::ONE_OR_MORE),
+                        SyntaxKind::STAR => Some(Occurrence::ZERO_OR_MORE),
+                        _ => None,
+                    });
                 self.alloc_expr(Expr::ContextualName {
                     name,
+                    occurrence,
                     span: node.span(),
                 })
             }
@@ -1624,30 +1762,6 @@ impl LoweringContext {
                     index,
                     iterable,
                     body,
-                    span: node.span(),
-                })
-            }
-
-            // Ternary expression: condition ? consequent : alternative
-            SyntaxKind::CONDITIONAL_EXPRESSION => {
-                let condition = node
-                    .child_by_field("condition")
-                    .map(|n| self.lower_expr(n))
-                    .unwrap_or_else(|| self.error_expr(node.span()));
-
-                let then_branch = node
-                    .child_by_field("consequent")
-                    .map(|n| self.lower_expr(n))
-                    .unwrap_or_else(|| self.error_expr(node.span()));
-
-                let else_branch = node
-                    .child_by_field("alternative")
-                    .map(|n| self.lower_expr(n));
-
-                self.alloc_expr(Expr::If {
-                    condition,
-                    then_branch,
-                    else_branch,
                     span: node.span(),
                 })
             }
@@ -1802,16 +1916,17 @@ impl LoweringContext {
 
                 let mut ty = self.lower_type(base_node);
                 for child in children {
-                    match child.kind() {
-                        SyntaxKind::QUESTION => {
-                            ty = TypeRef::nullable(ty);
-                        }
-                        SyntaxKind::LBRACKET => {
-                            // Type suffixes compose in source order, so each `[` token from a
-                            // `[]` pair wraps the current type in one more array layer.
-                            ty = TypeRef::array(ty);
-                        }
-                        _ => {}
+                    let occ = match child.kind() {
+                        SyntaxKind::QUESTION => Occurrence::OPTIONAL,
+                        SyntaxKind::PLUS => Occurrence::ONE_OR_MORE,
+                        // Validation has already rejected `[]`, naming `*` and `+`; lowering it
+                        // as `*` keeps the reference usable so nothing cascades from it.
+                        SyntaxKind::STAR | SyntaxKind::LBRACKET => Occurrence::ZERO_OR_MORE,
+                        _ => continue,
+                    };
+                    // Validation has also rejected a second suffix; the first one stands.
+                    if ty.occurrence().is_one() {
+                        ty = TypeRef::seq(ty, occ);
                     }
                 }
 
@@ -1835,6 +1950,7 @@ impl LoweringContext {
                             name: Self::property_definition_name(param),
                             ty: self.lower_type(ty_node),
                             is_content: Self::property_definition_is_content(param),
+                            optional: Self::property_definition_is_optional(param),
                         }
                     })
                     .collect();
@@ -2044,13 +2160,21 @@ impl LoweringContext {
             .map(|n| Name::new(n.text()))
             .unwrap_or_else(|| Name::new("anonymous"));
 
-        // Parse parameters from property_definition nodes
+        // Parameters get a scope that opens before the first one, and each is defined as soon as
+        // it is lowered, so a default sees the parameters declared before it and expression
+        // lowering can infer operand kinds from their types.
+        self.push_scope();
         let mut params = Vec::new();
         let mut content_param_name: Option<Name> = None;
         for child in node.children() {
             if child.kind() == SyntaxKind::PROPERTY_DEFINITION {
-                let (param_name, param_type, _default, is_content) =
-                    self.lower_property_definition(child);
+                let LoweredProperty {
+                    name: param_name,
+                    ty: param_type,
+                    default,
+                    is_content,
+                    optional,
+                } = self.lower_property_definition(child);
                 let param_span = child.span();
 
                 if is_content {
@@ -2068,20 +2192,12 @@ impl LoweringContext {
                     }
                 }
 
-                params.push(Param::with_content(
-                    param_name, param_type, is_content, param_span,
-                ));
-
-                // Note: Default values are part of property_definition grammar
-                // but we don't store them in Param yet (future enhancement)
+                let mut param = Param::with_content(param_name, param_type, is_content, param_span);
+                param.optional = optional;
+                param.default = default;
+                self.define_name(&param.name, TypeTag::from_type_ref(&param.ty));
+                params.push(param);
             }
-        }
-
-        // Track parameter types in a new scope so expression lowering can infer operand kinds.
-        self.push_scope();
-        for param in &params {
-            let ty = TypeTag::from_type_ref(&param.ty);
-            self.define_name(&param.name, ty);
         }
 
         // Lower the optional return type annotation if present
@@ -2097,9 +2213,19 @@ impl LoweringContext {
 
         self.pop_scope();
 
+        let form = if node
+            .child_by_field("name")
+            .is_some_and(|name| name.kind() == SyntaxKind::IDENTIFIER)
+        {
+            FunctionForm::Paren
+        } else {
+            FunctionForm::Element
+        };
+
         Function {
             name,
             visibility: Self::lower_visibility(node),
+            form,
             params,
             return_type,
             body,
@@ -2630,6 +2756,7 @@ impl LoweringContext {
                     let root_func = Function {
                         name: Name::new("root"),
                         visibility: Visibility::Export,
+                        form: FunctionForm::Paren,
                         params: vec![],
                         return_type: None,
                         body,
@@ -2704,8 +2831,7 @@ mod tests {
     /// it cannot be found by offset at all, which is what kept an editor from reporting its type.
     #[test]
     fn literals_record_the_span_they_were_written_at() {
-        let source =
-            "let s = \"hi\"\nlet i = 42\nlet f = 1.5\nlet b = true\nlet n = null\nlet m = -42\n";
+        let source = "let s = \"hi\"\nlet i = 42\nlet f = 1.5\nlet b = true\nlet m = -42\n";
         let tree = parse_str(source, "literals.nx")
             .tree
             .expect("Should parse literals");
@@ -2717,7 +2843,7 @@ mod tests {
             .map(|(id, expr)| (expr.clone(), module.expr_span(id)))
             .collect::<Vec<_>>();
 
-        assert_eq!(located.len(), 6, "got: {located:?}");
+        assert_eq!(located.len(), 5, "got: {located:?}");
         for (expr, span) in &located {
             assert!(
                 !span.is_empty(),
@@ -2730,7 +2856,6 @@ mod tests {
                     Expr::Literal(Literal::Int(value)) => value.to_string(),
                     Expr::Literal(Literal::Float(value)) => format!("{}", value.0),
                     Expr::Literal(Literal::Boolean(value)) => value.to_string(),
-                    Expr::Literal(Literal::Null) => "null".to_string(),
                     other => panic!("unexpected literal {other:?}"),
                 },
                 "the span does not cover what was written"
@@ -3206,8 +3331,8 @@ type Mode = light | dark"#;
         let source = r#"
             type Contact = { name:string }
             type T = (<function Item:Contact Index:int />: DrawnNode)?
-            type Wrap = <function content Children:object[] />: string?
-            type Names = (string)[]
+            type Wrap = <function content Children:object+ />: string?
+            type Names = (string)+
         "#;
         let parse_result = parse_str(source, "types.nx");
         assert!(parse_result.is_ok(), "{:?}", parse_result.errors);
@@ -3229,7 +3354,7 @@ type Mode = light | dark"#;
 
         assert_eq!(
             alias("T"),
-            TypeRef::nullable(TypeRef::function(
+            TypeRef::optional(TypeRef::function(
                 vec![
                     FunctionParam::new("Item", TypeRef::name("Contact")),
                     FunctionParam::new("Index", TypeRef::name("int")),
@@ -3243,13 +3368,16 @@ type Mode = light | dark"#;
             TypeRef::function(
                 vec![FunctionParam::content(
                     "Children",
-                    TypeRef::array(TypeRef::name("object")),
+                    TypeRef::one_or_more(TypeRef::name("object")),
                 )],
-                TypeRef::nullable(TypeRef::name("string")),
+                TypeRef::optional(TypeRef::name("string")),
             ),
             "the suffix after the result binds to the result"
         );
-        assert_eq!(alias("Names"), TypeRef::array(TypeRef::name("string")));
+        assert_eq!(
+            alias("Names"),
+            TypeRef::one_or_more(TypeRef::name("string"))
+        );
     }
 
     #[test]
@@ -3930,22 +4058,21 @@ type Mode = light | dark"#;
     }
 
     #[test]
-    fn test_lower_record_field_nullable_and_array_types() {
+    fn test_lower_record_field_occurrence_types() {
         let source = r#"
             type User = {
-              tags: string[]
+              tags: string+
               age: int?
-              aliases: string?[]
-              grouped: string[][]
-              backupTags: string[]?
-              maybeAliases: string?[]?
+              aliases: string*
+              nick?: string
+              phones?: string+
             }
         "#;
         let parse_result = parse_str(source, "record-types.nx");
         let tree = parse_result.tree.expect("Should parse record");
         let root = tree.root();
-        let module = lower(root, SourceId::new(0));
 
+        let module = lower(root, SourceId::new(0));
         let record = module
             .items()
             .iter()
@@ -3955,100 +4082,135 @@ type Mode = light | dark"#;
             })
             .expect("Should lower record definition");
 
-        let tags = record
-            .properties
-            .iter()
-            .find(|field| field.name.as_str() == "tags")
-            .expect("Expected tags field");
-        match &tags.ty {
-            TypeRef::Array(inner) => match inner.as_ref() {
-                TypeRef::Name(name) => assert_eq!(name.as_str(), "string"),
-                other => panic!("Expected string element type, got {:?}", other),
-            },
-            other => panic!("Expected array type, got {:?}", other),
-        }
+        let field = |name: &str| {
+            record
+                .properties
+                .iter()
+                .find(|field| field.name.as_str() == name)
+                .unwrap_or_else(|| panic!("Expected {name} field"))
+        };
+        assert_eq!(
+            field("tags").ty,
+            TypeRef::one_or_more(TypeRef::name("string"))
+        );
+        assert!(!field("tags").optional);
+        assert_eq!(field("age").ty, TypeRef::optional(TypeRef::name("int")));
+        assert_eq!(
+            field("aliases").ty,
+            TypeRef::zero_or_more(TypeRef::name("string"))
+        );
+        // The `?` on the name is the field's mark, not part of its type.
+        assert_eq!(field("nick").ty, TypeRef::name("string"));
+        assert!(field("nick").optional);
+        assert_eq!(
+            field("phones").ty,
+            TypeRef::one_or_more(TypeRef::name("string"))
+        );
+        assert!(field("phones").optional);
+    }
 
-        let age = record
-            .properties
-            .iter()
-            .find(|field| field.name.as_str() == "age")
-            .expect("Expected age field");
-        match &age.ty {
-            TypeRef::Nullable(inner) => match inner.as_ref() {
-                TypeRef::Name(name) => assert_eq!(name.as_str(), "int"),
-                other => panic!("Expected int inner type, got {:?}", other),
-            },
-            other => panic!("Expected nullable type, got {:?}", other),
+    #[test]
+    fn test_lower_optional_mark_on_every_declaration_site() {
+        let module = lower_source(
+            r#"
+            component <Card title:string subtitle?:string /> = { state { note?:string } <Label text={title} /> }
+            let <Row gap:float64 = 0.0 content child?:Element /> = { child }
+            let f(a:int, b?:int) = { a }
+            type Render = <function Item:Person Index?:int />: string
+            type Shape = circle { r:int } | tagged { label?:string }
+            "#,
+            "optional.nx",
+        );
+        let component = match module.find_item("Card") {
+            Some(Item::Component(component)) => component,
+            other => panic!("Expected component, got {:?}", other),
+        };
+        assert_eq!(
+            component
+                .props
+                .iter()
+                .map(|p| p.optional)
+                .collect::<Vec<_>>(),
+            vec![false, true]
+        );
+        assert!(component.state[0].optional);
+        let row = match module.find_item("Row") {
+            Some(Item::Function(function)) => function,
+            other => panic!("Expected function, got {:?}", other),
+        };
+        assert!(!row.params[0].optional);
+        assert!(row.params[1].optional && row.params[1].is_content);
+        let f = match module.find_item("f") {
+            Some(Item::Function(function)) => function,
+            other => panic!("Expected function, got {:?}", other),
+        };
+        assert_eq!(
+            f.params.iter().map(|p| p.optional).collect::<Vec<_>>(),
+            vec![false, true]
+        );
+        let render = match module.find_item("Render") {
+            Some(Item::TypeAlias(alias)) => alias,
+            other => panic!("Expected alias, got {:?}", other),
+        };
+        match &render.ty {
+            TypeRef::Function { params, .. } => {
+                assert!(!params[0].optional);
+                assert!(params[1].optional);
+            }
+            other => panic!("Expected function type, got {:?}", other),
         }
+        let shape = match module.find_item("Shape") {
+            Some(Item::Union(union)) => union,
+            other => panic!("Expected union, got {:?}", other),
+        };
+        assert!(!shape.cases[0].fields[0].optional);
+        assert!(shape.cases[1].fields[0].optional);
+    }
 
-        let aliases = record
-            .properties
-            .iter()
-            .find(|field| field.name.as_str() == "aliases")
-            .expect("Expected aliases field");
-        match &aliases.ty {
-            TypeRef::Array(inner) => match inner.as_ref() {
-                TypeRef::Nullable(nullable_inner) => match nullable_inner.as_ref() {
-                    TypeRef::Name(name) => assert_eq!(name.as_str(), "string"),
-                    other => panic!("Expected string alias element type, got {:?}", other),
-                },
-                other => panic!("Expected nullable alias element type, got {:?}", other),
-            },
-            other => panic!("Expected array alias type, got {:?}", other),
+    #[test]
+    fn test_lower_presence_operators() {
+        let module = lower_source(
+            r#"
+            let name(b:Book) = { b.author?.name }
+            let has(b:Book) = { b.author? }
+            let sub(b:Book) = { b.subtitle ?? "none" }
+            let tag(s:State) = { if s is { {} => "none" else => "some" } }
+            "#,
+            "presence.nx",
+        );
+        let body = |name: &str| match module.find_item(name) {
+            Some(Item::Function(function)) => module.expr(function.body).clone(),
+            other => panic!("Expected function, got {:?}", other),
+        };
+        match body("name") {
+            Expr::OptionalMember { base, member, .. } => {
+                assert_eq!(member.as_str(), "name");
+                assert!(matches!(module.expr(base), Expr::Member { .. }));
+            }
+            other => panic!("Expected OptionalMember, got {:?}", other),
         }
-
-        let grouped = record
-            .properties
-            .iter()
-            .find(|field| field.name.as_str() == "grouped")
-            .expect("Expected grouped field");
-        match &grouped.ty {
-            TypeRef::Array(outer) => match outer.as_ref() {
-                TypeRef::Array(inner) => match inner.as_ref() {
-                    TypeRef::Name(name) => assert_eq!(name.as_str(), "string"),
-                    other => panic!("Expected grouped inner string type, got {:?}", other),
-                },
-                other => panic!("Expected grouped inner array type, got {:?}", other),
-            },
-            other => panic!("Expected grouped outer array type, got {:?}", other),
+        match body("has") {
+            Expr::Exists { operand, .. } => {
+                assert!(matches!(module.expr(operand), Expr::Member { .. }));
+            }
+            other => panic!("Expected Exists, got {:?}", other),
         }
-
-        let backup_tags = record
-            .properties
-            .iter()
-            .find(|field| field.name.as_str() == "backupTags")
-            .expect("Expected backupTags field");
-        match &backup_tags.ty {
-            TypeRef::Nullable(inner) => match inner.as_ref() {
-                TypeRef::Array(array_inner) => match array_inner.as_ref() {
-                    TypeRef::Name(name) => assert_eq!(name.as_str(), "string"),
-                    other => panic!("Expected backupTags array string type, got {:?}", other),
-                },
-                other => panic!("Expected backupTags inner array type, got {:?}", other),
-            },
-            other => panic!("Expected nullable backupTags type, got {:?}", other),
+        match body("sub") {
+            Expr::Coalesce { left, right, .. } => {
+                assert!(matches!(module.expr(left), Expr::Member { .. }));
+                assert!(matches!(
+                    module.expr(right),
+                    Expr::Literal(Literal::String(_))
+                ));
+            }
+            other => panic!("Expected Coalesce, got {:?}", other),
         }
-
-        let maybe_aliases = record
-            .properties
-            .iter()
-            .find(|field| field.name.as_str() == "maybeAliases")
-            .expect("Expected maybeAliases field");
-        match &maybe_aliases.ty {
-            TypeRef::Nullable(inner) => match inner.as_ref() {
-                TypeRef::Array(array_inner) => match array_inner.as_ref() {
-                    TypeRef::Nullable(nullable_inner) => match nullable_inner.as_ref() {
-                        TypeRef::Name(name) => assert_eq!(name.as_str(), "string"),
-                        other => panic!("Expected maybeAliases inner string type, got {:?}", other),
-                    },
-                    other => panic!(
-                        "Expected maybeAliases nullable array element type, got {:?}",
-                        other
-                    ),
-                },
-                other => panic!("Expected maybeAliases inner array type, got {:?}", other),
+        match body("tag") {
+            Expr::Match { arms, .. } => match module.expr(arms[0].patterns[0]) {
+                Expr::Array { elements, .. } => assert!(elements.is_empty()),
+                other => panic!("Expected the empty value as the pattern, got {:?}", other),
             },
-            other => panic!("Expected nullable maybeAliases type, got {:?}", other),
+            other => panic!("Expected Match, got {:?}", other),
         }
     }
 
@@ -4830,72 +4992,6 @@ type Mode = light | dark"#;
     }
 
     #[test]
-    fn test_lower_ternary_expression() {
-        // Ternary: condition ? consequent : alternative
-        let source = "let choose(cond:boolean): int = { cond ? 1 : 0 }";
-        let parse_result = parse_str(source, "test.nx");
-
-        assert!(
-            parse_result.errors.is_empty(),
-            "parse errors: {:?}",
-            parse_result.errors
-        );
-
-        let tree = parse_result.tree.unwrap();
-        let root = tree.root();
-        let module = lower(root, SourceId::new(0));
-
-        assert_eq!(module.items().len(), 1);
-
-        match &module.items()[0] {
-            Item::Function(func) => {
-                assert_eq!(func.name.as_str(), "choose");
-
-                // Navigate through potential block wrapper
-                let if_expr = match module.expr(func.body) {
-                    Expr::If { .. } => module.expr(func.body),
-                    Expr::Block { expr: Some(e), .. } => module.expr(*e),
-                    other => panic!("Expected If or Block expression, got {:?}", other),
-                };
-
-                match if_expr {
-                    Expr::If {
-                        condition,
-                        then_branch,
-                        else_branch,
-                        ..
-                    } => {
-                        // Verify condition is an identifier
-                        match module.expr(*condition) {
-                            Expr::Ident(name) => assert_eq!(name.as_str(), "cond"),
-                            other => panic!("Expected Ident for condition, got {:?}", other),
-                        }
-
-                        // Verify then branch is literal 1
-                        match module.expr(*then_branch) {
-                            Expr::Literal(Literal::Int(1)) => (),
-                            other => {
-                                panic!("Expected Literal(Int(1)) for then_branch, got {:?}", other)
-                            }
-                        }
-
-                        // Verify else branch is literal 0
-                        assert!(else_branch.is_some());
-                        match module.expr(else_branch.unwrap()) {
-                            Expr::Literal(Literal::Int(0)) => (),
-                            other => {
-                                panic!("Expected Literal(Int(0)) for else_branch, got {:?}", other)
-                            }
-                        }
-                    }
-                    other => panic!("Expected If expression, got {:?}", other),
-                }
-            }
-            _ => panic!("Expected Function item"),
-        }
-    }
-
-    #[test]
     fn test_lower_if_else_expression() {
         // If-else: if condition { then } else { else }
         let source = "let max(a:int, b:int): int = { if a > b { a } else { b } }";
@@ -5047,58 +5143,6 @@ type Mode = light | dark"#;
                         assert!(else_branch.is_some());
                     }
                     other => panic!("Expected Match expression, got {:?}", other),
-                }
-            }
-            _ => panic!("Expected Function item"),
-        }
-    }
-
-    #[test]
-    fn test_lower_nested_ternary() {
-        // Nested ternary: x > 0 ? "positive" : x < 0 ? "negative" : "zero"
-        let source =
-            r#"let classify(x:int): string = { x > 0 ? "positive" : x < 0 ? "negative" : "zero" }"#;
-        let parse_result = parse_str(source, "test.nx");
-
-        assert!(
-            parse_result.errors.is_empty(),
-            "parse errors: {:?}",
-            parse_result.errors
-        );
-
-        let tree = parse_result.tree.unwrap();
-        let root = tree.root();
-        let module = lower(root, SourceId::new(0));
-
-        assert_eq!(module.items().len(), 1);
-
-        match &module.items()[0] {
-            Item::Function(func) => {
-                assert_eq!(func.name.as_str(), "classify");
-
-                // Navigate through potential block wrapper
-                let if_expr = match module.expr(func.body) {
-                    Expr::If { .. } => module.expr(func.body),
-                    Expr::Block { expr: Some(e), .. } => module.expr(*e),
-                    other => panic!("Expected If or Block expression, got {:?}", other),
-                };
-
-                // Verify it's a nested if expression
-                match if_expr {
-                    Expr::If { else_branch, .. } => {
-                        assert!(else_branch.is_some());
-                        // The else branch should be another if expression
-                        match module.expr(else_branch.unwrap()) {
-                            Expr::If {
-                                else_branch: inner_else,
-                                ..
-                            } => {
-                                assert!(inner_else.is_some());
-                            }
-                            other => panic!("Expected nested If expression, got {:?}", other),
-                        }
-                    }
-                    other => panic!("Expected If expression, got {:?}", other),
                 }
             }
             _ => panic!("Expected Function item"),
@@ -6189,7 +6233,7 @@ type Mode = light | dark"#;
     #[test]
     fn test_lower_component_type_parameters_are_separate_from_props() {
         let module = lower_source(
-            "external component <SkiaLayout TItem:type itemsSource:TItem[]? />",
+            "external component <SkiaLayout TItem:type itemsSource?:TItem+ />",
             "type-params.nx",
         );
         assert!(
@@ -6212,15 +6256,16 @@ type Mode = light | dark"#;
         assert_eq!(field_names(&component.props), vec!["itemsSource"]);
         assert_eq!(
             component.props[0].ty,
-            TypeRef::nullable(TypeRef::array(TypeRef::name("TItem")))
+            TypeRef::one_or_more(TypeRef::name("TItem"))
         );
+        assert!(component.props[0].optional);
     }
 
     #[test]
     fn test_lower_applied_type_round_trips_through_spelling() {
         for source in [
             "type Slider = { range:<Range T=int/> }",
-            "type Slider = { range:<Range T=int/>[]? }",
+            "type Slider = { range:<Range T=int/>* }",
             "type Slider = { range:<Box T=<Range T=int/>/> }",
             "type Slider = { range:<Range.Update T=int/> }",
             "type Slider = { range:<Pair TKey=string TValue=int/> }",

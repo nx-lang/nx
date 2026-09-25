@@ -1,4 +1,4 @@
-//! Integration tests for conditional expressions (if/else and ternary)
+//! Integration tests for conditional expressions (if/else in its three forms)
 //!
 //! Tests T039-T042: Conditional execution
 //!
@@ -63,22 +63,40 @@ fn test_if_else_false_branch() {
     assert_eq!(result, Value::Int(7));
 }
 
-/// Test if without else (returns null on false)
+/// Test if without else (the empty value on false)
 #[test]
 fn test_if_without_else() {
+    // A missing `else` is an `else { }`, so the result is an `int?`: the branch's item when the
+    // condition holds and the empty value when it does not. Writing the `else` explicitly says the
+    // same thing, which `test_if_with_an_explicit_empty_else` covers.
     let source = r#"
         let maybe_double(x:int): int? = { if x > 0 { x * 2 } }
     "#;
 
-    // Condition true, returns x * 2
+    // Condition true: the branch's item, not a one-item sequence.
     let result = execute_nx_function(source, "maybe_double", vec![Value::Int(5)])
         .unwrap_or_else(|e| panic!("{}", e));
     assert_eq!(result, Value::Int(10));
 
-    // Condition false, returns null
+    // Condition false: the empty value.
     let result = execute_nx_function(source, "maybe_double", vec![Value::Int(-5)])
         .unwrap_or_else(|e| panic!("{}", e));
-    assert_eq!(result, Value::Null);
+    assert_eq!(result, Value::empty());
+}
+
+#[test]
+fn test_if_with_an_explicit_empty_else() {
+    let source = r#"
+        let maybe_double(x:int): int? = { if x > 0 { x * 2 } else {} }
+    "#;
+
+    let result = execute_nx_function(source, "maybe_double", vec![Value::Int(5)])
+        .unwrap_or_else(|e| panic!("{}", e));
+    assert_eq!(result, Value::Int(10));
+
+    let result = execute_nx_function(source, "maybe_double", vec![Value::Int(-5)])
+        .unwrap_or_else(|e| panic!("{}", e));
+    assert_eq!(result, Value::empty());
 }
 
 #[test]
@@ -645,14 +663,14 @@ fn test_function_call_in_condition() {
 }
 
 // ============================================================================
-// Ternary Operator Tests
+// If/Else as an Inline Expression
 // ============================================================================
 
-/// Test basic ternary expression
+/// Test basic inline if/else expression
 #[test]
-fn test_ternary_basic() {
+fn test_inline_if_else_basic() {
     let source = r#"
-        let max(a:int, b:int): int = { a > b ? a : b }
+        let max(a:int, b:int): int = { if a > b { a } else { b } }
     "#;
 
     assert_eq!(
@@ -666,11 +684,11 @@ fn test_ternary_basic() {
     );
 }
 
-/// Test nested ternary (sign function)
+/// Test nested inline if/else (sign function)
 #[test]
-fn test_ternary_nested() {
+fn test_inline_if_else_nested() {
     let source = r#"
-        let sign(x:int): int = { x > 0 ? 1 : x < 0 ? -1 : 0 }
+        let sign(x:int): int = { if x > 0 { 1 } else { if x < 0 { -1 } else { 0 } } }
     "#;
 
     // Positive
@@ -692,12 +710,12 @@ fn test_ternary_nested() {
     );
 }
 
-/// Test ternary used as function argument
+/// Test inline if/else used as function argument
 #[test]
-fn test_ternary_as_argument() {
+fn test_inline_if_else_as_argument() {
     let source = r#"
         let double(x:int): int = { x * 2 }
-        let cond_double(cond:boolean, x:int): int = { double(cond ? x : 0) }
+        let cond_double(cond:boolean, x:int): int = { double(if cond { x } else { 0 }) }
     "#;
 
     assert_eq!(
@@ -721,11 +739,11 @@ fn test_ternary_as_argument() {
     );
 }
 
-/// Test ternary with arithmetic in branches
+/// Test inline if/else with arithmetic in branches
 #[test]
-fn test_ternary_with_arithmetic() {
+fn test_inline_if_else_with_arithmetic() {
     let source = r#"
-        let clamp_positive(x:int): int = { x > 0 ? x : 0 }
+        let clamp_positive(x:int): int = { if x > 0 { x } else { 0 } }
     "#;
 
     assert_eq!(
@@ -739,11 +757,11 @@ fn test_ternary_with_arithmetic() {
     );
 }
 
-/// Test ternary with boolean result
+/// Test inline if/else with boolean result
 #[test]
-fn test_ternary_boolean_result() {
+fn test_inline_if_else_boolean_result() {
     let source = r#"
-        let is_big(x:int): boolean = { x > 100 ? true : false }
+        let is_big(x:int): boolean = { if x > 100 { true } else { false } }
     "#;
 
     assert_eq!(
@@ -757,11 +775,11 @@ fn test_ternary_boolean_result() {
     );
 }
 
-/// Test ternary with string result
+/// Test inline if/else with string result
 #[test]
-fn test_ternary_string_result() {
+fn test_inline_if_else_string_result() {
     let source = r#"
-        let grade(passed:boolean): string = { passed ? "pass" : "fail" }
+        let grade(passed:boolean): string = { if passed { "pass" } else { "fail" } }
     "#;
 
     assert_eq!(
@@ -776,16 +794,16 @@ fn test_ternary_string_result() {
 }
 
 // ============================================================================
-// Mixed If/Else and Ternary
+// Nested If/Else
 // ============================================================================
 
-/// Test if-else containing ternary
+/// Test if-else containing an inline if-else
 #[test]
-fn test_if_else_containing_ternary() {
+fn test_if_else_containing_inline_if_else() {
     let source = r#"
         let complex(a:int, b:int): int = {
             if a > 0 {
-                b > 0 ? a + b : a
+                if b > 0 { a + b } else { a }
             } else {
                 0
             }
@@ -878,10 +896,10 @@ fn test_condition_list_without_else() {
         Value::Int(-1)
     );
 
-    // Zero doesn't match any condition, should return null
+    // Zero matches no condition, so the uncovered path is an `else { }`: the empty value.
     assert_eq!(
         execute_nx_function(source, "sign", vec![Value::Int(0)]).unwrap(),
-        Value::Null
+        Value::empty()
     );
 }
 
@@ -1013,10 +1031,10 @@ fn test_match_expression_without_else() {
         Value::String(SmolStr::new("nothing"))
     );
 
-    // No match, should return null
+    // No arm matches, so the uncovered path is an `else { }`: the empty value.
     assert_eq!(
         execute_nx_function(source, "special", vec![Value::Int(1)]).unwrap(),
-        Value::Null
+        Value::empty()
     );
 }
 

@@ -49,8 +49,10 @@ server SHALL take part in compilation or drawing.
   value type of that name, so that DrawnUI's own type checks accept it
 
 #### Scenario: Unset properties keep DrawnUI's defaults
-- **WHEN** a snippet leaves a property unset
+- **WHEN** a snippet leaves a property unset, or binds it to a value that evaluates to the empty
+  value `{}` — an `if` with no `else` that took no branch, an optional prop that was not written
 - **THEN** the control SHALL be created without that property, so the DrawnUI default applies
+- **AND** the renderer SHALL NOT pass `null`, `undefined` or an empty array in its place
 
 #### Scenario: A compile error is reported in the engine's form
 - **WHEN** the snippet does not compile
@@ -177,6 +179,14 @@ backend's limit.
 - **WHEN** an NX share is opened on a host that has not registered NX
 - **THEN** the host SHALL show the source and say the language is unknown rather than failing
 
+#### Scenario: A share from another NX IR schema is reported
+- **WHEN** the player opens a share whose NX IR image was written under a schema version other than
+  the one the NX runtime bundle reads
+- **THEN** the player SHALL draw the engine's failure label naming both schema versions, and SHALL
+  NOT attempt to link or draw the share
+- **AND** the share's editor link SHALL still open the stored source in NX, where compiling it
+  reports whatever the current language rejects in the snippet's own line numbers
+
 ### Requirement: The engine lets a language prepare its runtime
 The engine's React surface SHALL let a registered language declare a preparation step, and SHALL
 await it before the language's first compile in the editor and before the player runs a share in
@@ -283,25 +293,32 @@ omitted.
 
 ### Requirement: The fiddle's catalog declares templated controls
 The catalog the fiddle generates SHALL declare, for each class that carries an item collection and
-a cell factory, a type parameter `TItem`, the property `ItemsSource: TItem[]?` and the property
-`ItemTemplate: (<function Item:TItem Index:int />: DrawnNode)?`, on the component standing for the
-class that declares them and inherited by every control below. The generated metadata SHALL record,
-for each renderable control carrying `ItemTemplate`, the parameter names the template is called
-with, in order, so the renderer can bind the item and its index. Neither property SHALL appear in
-the omitted list.
+a cell factory, a type parameter `TItem`, the property `ItemsSource?: TItem+` and the property
+`ItemTemplate?: <function Item:TItem Index:int />: DrawnNode` — an optional function-typed property
+marked on the name, which needs no parentheses — on the component standing for the class that
+declares them and inherited by every control below. Every other author-settable property SHALL
+carry its optionality on the name the same way, `x?: T` for a scalar and `x?: T+` for a DrawnUI
+array, never `?` or `*` in the type slot. The generated metadata SHALL record, for each renderable
+control carrying `ItemTemplate`, the parameter names the template is called with, in order, so the
+renderer can bind the item and its index. Neither property SHALL appear in the omitted list.
 
 #### Scenario: A layout binds a collection and a template
 - **WHEN** the catalog is regenerated from the pinned `drawnui-react` package
-- **THEN** `SkiaLayout` SHALL declare `TItem:type`, `ItemsSource:TItem[]?` and
-  `ItemTemplate:(<function Item:TItem Index:int />: DrawnNode)?` on the class that declares them
+- **THEN** `SkiaLayout` SHALL declare `TItem:type`, `ItemsSource?:TItem+` and
+  `ItemTemplate?:<function Item:TItem Index:int />: DrawnNode` on the class that declares them
 - **AND** a snippet binding `TItem=Contact ItemsSource={contacts} ItemTemplate={ContactCell}
   RecyclingTemplate=Enabled` SHALL compile when `ContactCell` is
-  `let <ContactCell Item:Contact Index:int />: DrawnNode = …`
+  `let <ContactCell Item:Contact Index:int />: DrawnNode = …` and `contacts` is a `Contact+`
 
 #### Scenario: A template whose item type disagrees is rejected
 - **WHEN** a snippet binds `TItem=Contact` and an `ItemTemplate` whose `Item` parameter is another
   record type
 - **THEN** the run SHALL fail with an error in the snippet's own line numbers
+
+#### Scenario: Children are one or more controls, optional on the name
+- **WHEN** the catalog is regenerated
+- **THEN** every container's content property SHALL be spelled `content Children?: DrawnNode+`
+- **AND** a snippet that nests one control in a container SHALL compile and draw that child
 
 #### Scenario: The template's parameter names are recorded
 - **WHEN** the generated metadata is inspected

@@ -1,6 +1,6 @@
 //! Type checking of derived `T.Update` records and of the action handlers that return them.
 //!
-//! Covers the update-records capability (shape, absent-versus-null construction, the bare
+//! Covers the update-records capability (shape, absent-versus-empty construction, the bare
 //! `Update` tag) and the component-action-handlers requirements that handler bodies are checked
 //! and their results routed by type.
 
@@ -62,7 +62,7 @@ fn assert_message(source: &str, file_name: &str, message_part: &str) {
 fn update_record_of_a_plain_record_has_the_same_fields() {
     let result = assert_ok(
         r#"
-        type User = { name:string email:string? }
+        type User = { name:string email?:string }
         let patch = <User.Update name="Ada" />
         let typed(): User.Update = <User.Update email="ada@example.com" />
         "#,
@@ -220,14 +220,14 @@ fn update_record_is_not_the_record_it_patches() {
 }
 
 // ============================================================================
-// An absent field means unchanged and null means set to null
+// An absent field means unchanged and an empty field means cleared
 // ============================================================================
 
 #[test]
 fn unsupplied_fields_are_not_required_and_defaults_do_not_apply() {
     assert_ok(
         r#"
-        type User = { name:string = "anon" email:string? }
+        type User = { name:string = "anon" email?:string }
         let patch = <User.Update email="ada@example.com" />
         "#,
         "update-absent.nx",
@@ -235,26 +235,57 @@ fn unsupplied_fields_are_not_required_and_defaults_do_not_apply() {
 }
 
 #[test]
-fn null_is_accepted_for_a_nullable_field() {
+fn the_empty_value_is_accepted_for_an_optional_field() {
     assert_ok(
         r#"
-        type User = { name:string email:string? }
-        let patch = <User.Update email={null} />
+        type User = { name:string email?:string }
+        let patch = <User.Update email={} />
         "#,
-        "update-null-nullable.nx",
+        "update-empty-optional.nx",
     );
 }
 
 #[test]
-fn null_is_rejected_for_a_non_nullable_field() {
+fn the_empty_value_is_rejected_for_a_required_field() {
     assert_error(
         r#"
         type User = { name:string }
-        let patch = <User.Update name={null} />
+        let patch = <User.Update name={} />
         "#,
-        "update-null-non-nullable.nx",
+        "update-empty-required.nx",
         "record-field-type-mismatch",
         "name",
+    );
+    // A defaulted field cannot be cleared either.
+    assert_error(
+        r#"
+        type User = { name:string = "anon" }
+        let patch = <User.Update name={} />
+        "#,
+        "update-empty-defaulted.nx",
+        "record-field-type-mismatch",
+        "{}",
+    );
+}
+
+#[test]
+fn a_value_that_may_be_empty_is_rejected_for_a_required_field() {
+    let result = check_str(
+        r#"
+        type User = { name:string }
+        let o:string? = {}
+        let patch = <User.Update name={o} />
+        "#,
+        "update-optional-required.nx",
+    );
+    assert!(
+        result.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code() == Some("record-field-type-mismatch")
+                && diagnostic.message().contains("string?")
+                && diagnostic.message().contains("string")
+        }),
+        "expected a mismatch naming string? and string, got {:?}",
+        diagnostics(&result)
     );
 }
 
@@ -287,6 +318,42 @@ fn empty_update_record_is_valid() {
         let none = <User.Update />
         "#,
         "update-empty.nx",
+    );
+}
+
+// ============================================================================
+// Reading a field of an update record admits zero
+// ============================================================================
+
+#[test]
+fn a_field_of_an_update_record_reads_as_optional() {
+    // Every field may be absent, so each reads as an optional field does: `T?`, or `T*` for a
+    // `+` field, whether or not the target declared it optional.
+    assert_ok(
+        r#"
+        type User = { name:string email?:string tags:string+ }
+        let name(u:User.Update): string? = { u.name }
+        let email(u:User.Update): string? = { u.email }
+        let tags(u:User.Update): string* = { u.tags }
+        let nameOr(u:User.Update): string = { u.name ?? "unchanged" }
+        "#,
+        "update-read.nx",
+    );
+    assert_message(
+        r#"
+        type User = { name:string email?:string }
+        let g(u:User.Update): string = { u.name }
+        "#,
+        "update-read-required.nx",
+        "expects string, found string?",
+    );
+    assert_message(
+        r#"
+        type User = { tags:string+ }
+        let g(u:User.Update): string+ = { u.tags }
+        "#,
+        "update-read-plus.nx",
+        "expects string+, found string*",
     );
 }
 
@@ -430,9 +497,9 @@ fn enclosing_loop_variables_are_visible_inside_a_handler() {
     assert_ok(
         r#"
         external component <Row emits { Tapped } />
-        let remove(items:string[], item:string): string[] = { items }
+        let remove(items:string+, item:string): string+ = { items }
         component <List /> = {
-          state { items:string[] = {} }
+          state { items:string+ = { "a" } }
           <Column>
             {for item in items { <Row onTapped=<Update items={remove(items, item)} /> /> }}
           </Column>
@@ -448,10 +515,10 @@ fn enclosing_let_bindings_are_visible_inside_a_handler() {
     assert_ok(
         r#"
         external component <Row emits { Tapped } />
-        let remove(items:string[], item:string): string[] = { items }
+        let remove(items:string+, item:string): string+ = { items }
         let first = "x"
         component <List /> = {
-          state { items:string[] = {} }
+          state { items:string+ = { "a" } }
           <Row onTapped=<Update items={remove(items, first)} /> />
         }
         "#,
@@ -491,15 +558,15 @@ fn a_match_result_is_routed_arm_by_arm() {
 }
 
 #[test]
-fn an_empty_list_result_is_rejected() {
+fn an_empty_result_is_rejected() {
     assert_error(
         r#"
         external component <Button emits { Tapped } />
         component <Counter /> = { state { count:int = 0 } <Button onTapped={} /> }
         "#,
-        "handler-empty-list.nx",
+        "handler-empty.nx",
         "handler-result-empty",
-        "empty list",
+        "found a value of type {} that may be empty",
     );
 }
 

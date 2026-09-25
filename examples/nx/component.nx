@@ -63,7 +63,7 @@ component <Counter step:int = 1 emits { Reset } /> = {
 }
 
 // `changed` lists the fields an update record carries, in declaration order.
-let touched(patch:Counter.Update): Counter.Property[] = {changed(patch)}
+let touched(patch:Counter.Update): Counter.Property* = {changed(patch)}
 
 let makeValueChanged(value:string): SearchBox.ValueChanged = {
   <SearchBox.ValueChanged value={value} />

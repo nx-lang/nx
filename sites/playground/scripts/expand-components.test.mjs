@@ -67,7 +67,7 @@ component <Page /> = {
 
 test("a handler bound outside any component is reported rather than expanded", () => {
   const { program, root } = evaluateRoot(`action Log = { }
-component <Card extends DrawnNode content Children:DrawnNode[] /> = { <SkiaStack>{Children}</SkiaStack> }
+component <Card extends DrawnNode content Children:DrawnNode+ /> = { <SkiaStack>{Children}</SkiaStack> }
 <Card><SkiaButton Text="Log" onTapped=<Log /> /></Card>
 `);
   assert.deepEqual(expandComponents(program, root), { inert: ["SkiaButton.onTapped"] });
@@ -84,7 +84,7 @@ test("a body that evaluates expands silently, nested uses included", () => {
   const { program, root } = evaluateRoot(`component <Chip extends DrawnNode Text:string /> = {
   <SkiaLabel Text={Text + "!"} />
 }
-component <Card extends DrawnNode content Children:DrawnNode[] /> = {
+component <Card extends DrawnNode content Children:DrawnNode+ /> = {
   <SkiaStack>{Children}</SkiaStack>
 }
 <Card><Chip Text="a" /><Chip Text="b" /></Card>

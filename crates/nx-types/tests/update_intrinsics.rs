@@ -114,9 +114,9 @@ fn wrong_argument_types_are_rejected() {
 fn apply_yields_the_record_type() {
     let result = assert_ok(
         r#"
-        type User = { name:string email:string? }
+        type User = { name:string email?:string }
         let u = <User name="Ada" email="ada@example.com" />
-        let v = {apply(u, <User.Update email={null} />)}
+        let v = {apply(u, <User.Update email={} />)}
         let w = {apply(<User name="Ada" />, <User.Update />)}
         "#,
         "apply-ok.nx",
@@ -161,8 +161,8 @@ fn apply_rejects_a_base_records_update_on_a_derived_record() {
 fn merge_yields_the_update_type() {
     let result = assert_ok(
         r#"
-        type User = { name:string email:string? age:int? }
-        let m = {merge(<User.Update name="Ada" email="x@y" />, <User.Update email={null} />)}
+        type User = { name:string email?:string age?:int }
+        let m = {merge(<User.Update name="Ada" email="x@y" />, <User.Update email={} />)}
         "#,
         "merge-ok.nx",
     );
@@ -191,8 +191,8 @@ fn updates_for_different_targets_cannot_be_merged() {
 fn diff_yields_the_update_type() {
     let result = assert_ok(
         r#"
-        type User = { name:string email:string? }
-        let d = {diff(<User name="Ada" email="x@y" />, <User name="Ada" email={null} />)}
+        type User = { name:string email?:string }
+        let d = {diff(<User name="Ada" email="x@y" />, <User name="Ada" />)}
         "#,
         "diff-ok.nx",
     );
@@ -227,17 +227,17 @@ fn diff_rejects_records_of_different_types_and_update_records() {
 // ============================================================================
 
 #[test]
-fn changed_yields_a_list_of_property_cases() {
+fn changed_yields_a_sequence_of_property_cases() {
     let result = assert_ok(
         r#"
-        type User = { name:string email:string? age:int? }
-        let keys = {changed(<User.Update age={null} name="Ada" />)}
+        type User = { name:string email?:string age?:int }
+        let keys = {changed(<User.Update age={} name="Ada" />)}
         let none = {changed(<User.Update />)}
         "#,
         "changed-ok.nx",
     );
-    assert_eq!(value_type(&result, "keys"), "User.Property[]");
-    assert_eq!(value_type(&result, "none"), "User.Property[]");
+    assert_eq!(value_type(&result, "keys"), "User.Property*");
+    assert_eq!(value_type(&result, "none"), "User.Property*");
 }
 
 #[test]

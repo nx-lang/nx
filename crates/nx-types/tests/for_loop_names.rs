@@ -31,7 +31,7 @@ const ROW: &str = "type Row = { label:string }\n";
 #[test]
 fn the_item_used_as_the_index_names_both() {
     let help = single_help(&format!(
-        "{ROW}let f(rows:Row[]) = {{ for index, row in rows {{ index % 2 == 0 }} }}"
+        "{ROW}let f(rows:Row+) = {{ for index, row in rows {{ index % 2 == 0 }} }}"
     ))
     .expect("a hint");
     assert_eq!(
@@ -43,7 +43,7 @@ fn the_item_used_as_the_index_names_both() {
 
 #[test]
 fn a_string_item_compared_with_an_int_names_both() {
-    let help = single_help("let f(names:string[]) = { for index, name in names { index == 0 } }")
+    let help = single_help("let f(names:string+) = { for index, name in names { index == 0 } }")
         .expect("a hint");
     assert!(help.contains("`index` is each item (string)"), "{help}");
 }
@@ -51,7 +51,7 @@ fn a_string_item_compared_with_an_int_names_both() {
 #[test]
 fn the_index_used_as_the_item_names_both() {
     let help = single_help(&format!(
-        "{ROW}let f(rows:Row[]) = {{ for index, row in rows {{ row.label }} }}"
+        "{ROW}let f(rows:Row+) = {{ for index, row in rows {{ row.label }} }}"
     ))
     .expect("a hint");
     assert!(
@@ -64,7 +64,7 @@ fn the_index_used_as_the_item_names_both() {
 fn an_unrelated_error_on_the_item_has_no_hint() {
     assert_eq!(
         single_help(&format!(
-            "{ROW}let f(rows:Row[]) = {{ for row, index in rows {{ row.label == 5 }} }}"
+            "{ROW}let f(rows:Row+) = {{ for row, index in rows {{ row.label == 5 }} }}"
         )),
         None
     );
@@ -73,7 +73,7 @@ fn an_unrelated_error_on_the_item_has_no_hint() {
 #[test]
 fn a_loop_over_ints_has_no_hint() {
     assert_eq!(
-        single_help("let f(counts:int[]) = { for index, count in counts { index == \"a\" } }"),
+        single_help("let f(counts:int+) = { for index, count in counts { index == \"a\" } }"),
         None
     );
 }
@@ -82,7 +82,7 @@ fn a_loop_over_ints_has_no_hint() {
 fn a_shadowed_name_has_no_hint() {
     assert_eq!(
         single_help(&format!(
-            "{ROW}let f(rows:Row[], names:string[]) = \
+            "{ROW}let f(rows:Row+, names:string+) = \
              {{ for row, index in rows {{ for index in names {{ index == 0 }} }} }}"
         )),
         None

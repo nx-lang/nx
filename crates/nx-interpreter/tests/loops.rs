@@ -39,7 +39,7 @@ fn test_for_loop_simple() {
     // Create function: double_all(items) = for item in items { item * 2 }
     let params = vec![Param::new(
         Name::new("items"),
-        nx_hir::ast::TypeRef::array(nx_hir::ast::TypeRef::name("int")),
+        nx_hir::ast::TypeRef::zero_or_more(nx_hir::ast::TypeRef::name("int")),
         span(0, 5),
     )];
 
@@ -68,6 +68,7 @@ fn test_for_loop_simple() {
     let func = Function {
         name: Name::new("double_all"),
         visibility: nx_hir::Visibility::Export,
+        form: nx_hir::FunctionForm::Paren,
         params,
         return_type: None,
         body: for_expr,
@@ -97,7 +98,7 @@ fn test_for_loop_with_index() {
     // Create function: add_index(items) = for item, index in items { item + index }
     let params = vec![Param::new(
         Name::new("items"),
-        nx_hir::ast::TypeRef::array(nx_hir::ast::TypeRef::name("int")),
+        nx_hir::ast::TypeRef::zero_or_more(nx_hir::ast::TypeRef::name("int")),
         span(0, 5),
     )];
 
@@ -125,6 +126,7 @@ fn test_for_loop_with_index() {
     let func = Function {
         name: Name::new("add_index"),
         visibility: nx_hir::Visibility::Export,
+        form: nx_hir::FunctionForm::Paren,
         params,
         return_type: None,
         body: for_expr,
@@ -157,7 +159,7 @@ fn test_nested_for_loops() {
 
     let params = vec![Param::new(
         Name::new("numbers"),
-        nx_hir::ast::TypeRef::array(nx_hir::ast::TypeRef::name("int")),
+        nx_hir::ast::TypeRef::zero_or_more(nx_hir::ast::TypeRef::name("int")),
         span(0, 7),
     )];
 
@@ -177,6 +179,7 @@ fn test_nested_for_loops() {
     let func = Function {
         name: Name::new("identity"),
         visibility: nx_hir::Visibility::Export,
+        form: nx_hir::FunctionForm::Paren,
         params,
         return_type: None,
         body: for_expr,
@@ -204,7 +207,7 @@ fn test_for_loop_empty_array() {
 
     let params = vec![Param::new(
         Name::new("items"),
-        nx_hir::ast::TypeRef::array(nx_hir::ast::TypeRef::name("object")),
+        nx_hir::ast::TypeRef::zero_or_more(nx_hir::ast::TypeRef::name("object")),
         span(0, 5),
     )];
 
@@ -222,6 +225,7 @@ fn test_for_loop_empty_array() {
     let func = Function {
         name: Name::new("process"),
         visibility: nx_hir::Visibility::Export,
+        form: nx_hir::FunctionForm::Paren,
         params,
         return_type: None,
         body: for_expr,
@@ -240,9 +244,14 @@ fn test_for_loop_empty_array() {
     assert_eq!(result, Value::Array(vec![]));
 }
 
-/// T051: Test for loop with type error (non-array iterable)
+/// T051: Test for loop over a single item
+///
+/// A `?` value that holds an item is the item itself, so a `for` over one iterates once over it,
+/// and the loop's value is the body's value unchanged: the product of `?` with an exactly-one body
+/// is `?`, whose present value is the item rather than a one-element list. The checker is what
+/// rejects a `for` over an exactly-one value; the runtime treats a lone item the same way.
 #[test]
-fn test_for_loop_type_error() {
+fn test_for_loop_over_a_single_item_iterates_once() {
     let mut module = LoweredModule::new(SourceId::new(0));
 
     let params = vec![Param::new(
@@ -263,8 +272,9 @@ fn test_for_loop_type_error() {
     });
 
     let func = Function {
-        name: Name::new("bad_loop"),
+        name: Name::new("single_loop"),
         visibility: nx_hir::Visibility::Export,
+        form: nx_hir::FunctionForm::Paren,
         params,
         return_type: None,
         body: for_expr,
@@ -273,16 +283,12 @@ fn test_for_loop_type_error() {
 
     module.add_item(Item::Function(func));
 
-    // Test with integer (should fail)
     let interpreter = Interpreter::new();
-    let result = interpreter.execute_function(&module, "bad_loop", vec![Value::Int(42)]);
+    let result = interpreter
+        .execute_function(&module, "single_loop", vec![Value::Int(42)])
+        .unwrap();
 
-    assert!(result.is_err());
-    let err = result.unwrap_err();
-    assert!(matches!(
-        err.kind(),
-        nx_interpreter::RuntimeErrorKind::TypeMismatch { .. }
-    ));
+    assert_eq!(result, Value::Int(42));
 }
 
 // ============================================================================
@@ -363,7 +369,7 @@ fn test_for_loop_index_arithmetic() {
     // Function: index_times_two(items) = for item, index in items { index * 2 }
     let params = vec![Param::new(
         Name::new("items"),
-        nx_hir::ast::TypeRef::array(nx_hir::ast::TypeRef::name("int")),
+        nx_hir::ast::TypeRef::zero_or_more(nx_hir::ast::TypeRef::name("int")),
         span(0, 5),
     )];
 
@@ -390,6 +396,7 @@ fn test_for_loop_index_arithmetic() {
     let func = Function {
         name: Name::new("index_times_two"),
         visibility: nx_hir::Visibility::Export,
+        form: nx_hir::FunctionForm::Paren,
         params,
         return_type: None,
         body: for_expr,
@@ -504,7 +511,7 @@ fn test_for_loop_float_array() {
     // Function: double_floats(items) = for item in items { item * 2.0 }
     let params = vec![Param::new(
         Name::new("items"),
-        nx_hir::ast::TypeRef::array(nx_hir::ast::TypeRef::name("float64")),
+        nx_hir::ast::TypeRef::zero_or_more(nx_hir::ast::TypeRef::name("float64")),
         span(0, 5),
     )];
 
@@ -531,6 +538,7 @@ fn test_for_loop_float_array() {
     let func = Function {
         name: Name::new("double_floats"),
         visibility: nx_hir::Visibility::Export,
+        form: nx_hir::FunctionForm::Paren,
         params,
         return_type: None,
         body: for_expr,

@@ -1,4 +1,4 @@
-//! NX IR schema 4: one module per artifact, encoded as flat tables.
+//! NX IR schema 5: one module per artifact, encoded as flat tables.
 //!
 //! <para>An artifact carries the module's string, type, constant and node tables and its
 //! declaration list, plus a module table naming every module it references. A reference is a
@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
-pub const NX_IR_SCHEMA_VERSION: u32 = 4;
+pub const NX_IR_SCHEMA_VERSION: u32 = 5;
 pub const NX_IR_RUNTIME_ABI: &str = "nx-ir-runtime-v2";
 /// Required by a module that declares a derived update record, so a runtime that predates them
 /// refuses the module rather than normalizing a patch as a whole record.
@@ -51,10 +51,16 @@ pub const NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1: &str = "function-values-v1"
 /// by name rather than failing on an unknown node.
 pub const NX_IR_REQUIRED_FEATURE_RANGES_V1: &str = "ranges-v1";
 
-/// The kind numbers of schema 4. A number, once assigned, is never reused for anything else.
+/// The feature a module lists when its nodes use a presence operator (`x?`, `x?.m`, `x ?? y`) or
+/// a match arm carries the `{}` pattern, so a runtime that predates them refuses it by name.
+pub const NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1: &str = "occurrence-v1";
+
+/// The kind numbers of schema 5. A number, once assigned, is never reused for anything else.
 pub mod kinds {
     /// Node kinds: the first element of every `nodes` entry.
     pub mod node {
+        /// Retired with schema 5: the language has no null value. The number stays assigned so
+        /// no later kind reuses it, and a schema-5 emitter never writes it.
         pub const NULL: i64 = 0;
         pub const BOOL: i64 = 1;
         pub const STRING: i64 = 2;
@@ -78,9 +84,14 @@ pub mod kinds {
         pub const TEXT: i64 = 20;
         pub const NAMED_CALL: i64 = 21;
         pub const FOR_RANGE: i64 = 22;
+        /// `x?`: `[23, operand]`.
+        pub const EXISTS: i64 = 23;
+        /// `x?.m`: `[24, receiver, member]`.
+        pub const OPTIONAL_MEMBER: i64 = 24;
+        /// `x ?? y`: `[25, left, right]`.
+        pub const COALESCE: i64 = 25;
 
         pub const NAMES: &[(i64, &str)] = &[
-            (NULL, "null"),
             (BOOL, "bool"),
             (STRING, "string"),
             (NUMBER, "number"),
@@ -103,6 +114,9 @@ pub mod kinds {
             (TEXT, "text"),
             (NAMED_CALL, "namedCall"),
             (FOR_RANGE, "forRange"),
+            (EXISTS, "exists"),
+            (OPTIONAL_MEMBER, "optionalMember"),
+            (COALESCE, "coalesce"),
         ];
     }
 
@@ -110,20 +124,49 @@ pub mod kinds {
     pub mod ty {
         pub const PRIMITIVE: i64 = 0;
         pub const NOMINAL: i64 = 1;
+        /// Retired with schema 5, replaced by `SEQ`. The number stays assigned and is never
+        /// emitted; a schema-5 reader reports an entry of this kind as malformed.
         pub const ARRAY: i64 = 2;
+        /// Retired with schema 5, replaced by `SEQ`; see `ARRAY`.
         pub const NULLABLE: i64 = 3;
         pub const FUNCTION: i64 = 4;
+        /// An exactly-one item type under an occurrence: `[5, item, occurrence]`, where the
+        /// occurrence cell is `OCCURRENCE_EMPTY | OCCURRENCE_MANY` bits — `1` for `?`, `2` for
+        /// `+`, `3` for `*`.
+        pub const SEQ: i64 = 5;
 
         /// Bit 0 of a function type parameter's flags cell: the parameter takes body content.
         pub const FUNCTION_PARAM_CONTENT: i64 = 1;
+        /// Bit 1 of a function type parameter's flags cell: the parameter is optional (`p?:T`).
+        pub const FUNCTION_PARAM_OPTIONAL: i64 = 2;
+
+        /// Bit 0 of a `SEQ` type's occurrence cell: the type admits no value.
+        pub const OCCURRENCE_EMPTY: i64 = 1;
+        /// Bit 1 of a `SEQ` type's occurrence cell: the type admits more than one value.
+        pub const OCCURRENCE_MANY: i64 = 2;
 
         pub const NAMES: &[(i64, &str)] = &[
             (PRIMITIVE, "primitive"),
             (NOMINAL, "nominal"),
-            (ARRAY, "array"),
-            (NULLABLE, "nullable"),
             (FUNCTION, "function"),
+            (SEQ, "seq"),
         ];
+
+        /// The occurrence cell of a `SEQ` type entry.
+        pub fn occurrence_cell(occ: nx_hir::ast::Occurrence) -> i64 {
+            i64::from(occ.may_be_empty) * OCCURRENCE_EMPTY
+                + i64::from(occ.may_be_many) * OCCURRENCE_MANY
+        }
+
+        /// The occurrence a `SEQ` type entry's cell encodes, or `None` for a cell no suffix
+        /// spells (exactly one is never written as a `SEQ`).
+        pub fn occurrence_from_cell(cell: i64) -> Option<nx_hir::ast::Occurrence> {
+            let occ = nx_hir::ast::Occurrence {
+                may_be_empty: cell & OCCURRENCE_EMPTY != 0,
+                may_be_many: cell & OCCURRENCE_MANY != 0,
+            };
+            (cell & !(OCCURRENCE_EMPTY | OCCURRENCE_MANY) == 0 && !occ.is_one()).then_some(occ)
+        }
     }
 
     /// Constant kinds: the first element of every `constants` entry.
@@ -143,6 +186,10 @@ pub mod kinds {
         pub const COMPONENT: i64 = 3;
         pub const UNION: i64 = 4;
         pub const TYPE_ALIAS: i64 = 5;
+
+        /// Bit 0 of a function declaration's result flags: the result type, declared or inferred,
+        /// is a standalone `T?`, so an entry call returns an empty result to the host as `null`.
+        pub const RESULT_OPTIONAL: i64 = 1;
 
         pub const NAMES: &[(i64, &str)] = &[
             (FUNCTION, "function"),
@@ -699,7 +746,33 @@ fn required_features(module: &CodegenModule) -> Vec<String> {
     }) {
         features.push(NX_IR_REQUIRED_FEATURE_RANGES_V1.to_string());
     }
+    // The presence operators and the `{}` pattern are nodes a runtime that predates them has
+    // never seen. A `seq` type alone needs no feature: it is a type kind, not a node.
+    if module.declarations.iter().any(|declaration| {
+        declaration_contains(declaration, |expression| {
+            matches!(
+                expression.kind,
+                CodegenExpressionKind::Exists { .. }
+                    | CodegenExpressionKind::OptionalMember { .. }
+                    | CodegenExpressionKind::Coalesce { .. }
+            ) || match_has_empty_pattern(expression)
+        })
+    }) {
+        features.push(NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1.to_string());
+    }
     features
+}
+
+/// Whether an expression is a match with an arm whose pattern is the `{}` pattern.
+fn match_has_empty_pattern(expression: &CodegenExpression) -> bool {
+    match &expression.kind {
+        CodegenExpressionKind::Match { arms, .. } => arms.iter().any(|arm| {
+            arm.patterns.iter().any(|pattern| {
+                matches!(&pattern.kind, CodegenExpressionKind::Array(elements) if elements.is_empty())
+            })
+        }),
+        _ => false,
+    }
 }
 
 /// Whether a declaration names a function as a value — a `reference` to a function anywhere but
@@ -744,7 +817,7 @@ fn declaration_contains(
 }
 
 /// Calls `visit` on every expression a declaration owns, parents before children.
-fn visit_declaration_expressions(
+pub(crate) fn visit_declaration_expressions(
     declaration: &CodegenDeclaration,
     visit: &mut dyn FnMut(&CodegenExpression),
 ) {
@@ -756,7 +829,12 @@ fn visit_declaration_expressions(
         }
     };
     match &declaration.kind {
-        CodegenDeclarationKind::Function { body, .. } => visit_expression(body, visit),
+        CodegenDeclarationKind::Function { params, body, .. } => {
+            for default in params.iter().filter_map(|param| param.default.as_ref()) {
+                visit_expression(default, visit);
+            }
+            visit_expression(body, visit)
+        }
         CodegenDeclarationKind::Value { value, .. } => visit_expression(value, visit),
         CodegenDeclarationKind::Record { fields: items, .. } => fields(items),
         CodegenDeclarationKind::Union { cases, .. } => {
@@ -774,7 +852,7 @@ fn visit_declaration_expressions(
                 visit_expression(body, visit);
             }
         }
-        CodegenDeclarationKind::TypeAlias | CodegenDeclarationKind::Unsupported(_) => {}
+        CodegenDeclarationKind::TypeAlias { .. } | CodegenDeclarationKind::Unsupported(_) => {}
     }
 }
 
@@ -803,7 +881,9 @@ fn visit_expression(expression: &CodegenExpression, visit: &mut dyn FnMut(&Codeg
         }
         CodegenExpressionKind::Call { callee, args } => {
             visit_expression(callee, visit);
-            visit_expressions(args, visit);
+            for arg in args.iter().flatten() {
+                visit_expression(arg, visit);
+            }
         }
         CodegenExpressionKind::NamedCall { callee, args } => {
             visit_expression(callee, visit);
@@ -864,7 +944,13 @@ fn visit_expression(expression: &CodegenExpression, visit: &mut dyn FnMut(&Codeg
             visit_expression(base, visit);
             visit_expression(index, visit);
         }
-        CodegenExpressionKind::Member { base, .. } => visit_expression(base, visit),
+        CodegenExpressionKind::Member { base, .. }
+        | CodegenExpressionKind::OptionalMember { base, .. } => visit_expression(base, visit),
+        CodegenExpressionKind::Exists { operand } => visit_expression(operand, visit),
+        CodegenExpressionKind::Coalesce { lhs, rhs } => {
+            visit_expression(lhs, visit);
+            visit_expression(rhs, visit);
+        }
         CodegenExpressionKind::UnionCase {
             properties,
             content,
@@ -1204,13 +1290,9 @@ impl<'a> ModuleEmitter<'a> {
                 let (slot, name) = self.reference(reference);
                 IrItem::ints([kinds::ty::NOMINAL, slot, name])
             }
-            CodegenTypeRef::Array { element } => {
-                let element = self.type_ref(element);
-                IrItem::ints([kinds::ty::ARRAY, element])
-            }
-            CodegenTypeRef::Nullable { inner } => {
-                let inner = self.type_ref(inner);
-                IrItem::ints([kinds::ty::NULLABLE, inner])
+            CodegenTypeRef::Seq { item, occ } => {
+                let item = self.type_ref(item);
+                IrItem::ints([kinds::ty::SEQ, item, kinds::ty::occurrence_cell(*occ)])
             }
             // `[4, result, [[name, type, flags]...]]`: the parameters keep their names because a
             // function satisfies the type by name, and a runtime binds a call's arguments by name.
@@ -1224,11 +1306,8 @@ impl<'a> ModuleEmitter<'a> {
                     .map(|param| {
                         let name = self.string(&param.name);
                         let ty = self.type_ref(&param.ty);
-                        let flags = if param.is_content {
-                            kinds::ty::FUNCTION_PARAM_CONTENT
-                        } else {
-                            0
-                        };
+                        let flags = i64::from(param.is_content) * kinds::ty::FUNCTION_PARAM_CONTENT
+                            + i64::from(param.optional) * kinds::ty::FUNCTION_PARAM_OPTIONAL;
                         IrItem::ints([name, ty, flags])
                     })
                     .collect::<Vec<_>>();
@@ -1268,29 +1347,54 @@ impl<'a> ModuleEmitter<'a> {
         self.span_module = self.module.id;
         let name = self.string(&declaration.reference.name);
         let entry = match &declaration.kind {
-            CodegenDeclarationKind::Function { params, body, .. } => {
+            CodegenDeclarationKind::Function {
+                params,
+                body,
+                return_type,
+                declared_return_type,
+            } => {
+                // Each default is emitted before its own parameter is bound, so it sees the
+                // parameters before it through their slots, as a field default does.
                 let first = self.frame.reserve(params.len());
                 let params = params
                     .iter()
                     .enumerate()
                     .map(|(index, param)| {
+                        let default = match &param.default {
+                            Some(default) => self.expression(default),
+                            None => -1,
+                        };
                         self.frame.bind(&param.name, first + index as i64);
                         let name = self.string(&param.name);
                         let ty = self.type_ref(&param.resolved_ty);
-                        IrItem::ints([name, ty, i64::from(param.is_content)])
+                        // The same flags a function type's parameter carries: a call may leave
+                        // out an optional parameter, which then binds the empty value.
+                        let flags = i64::from(param.is_content) * kinds::ty::FUNCTION_PARAM_CONTENT
+                            + i64::from(param.optional) * kinds::ty::FUNCTION_PARAM_OPTIONAL;
+                        IrItem::ints([name, ty, default, flags])
                     })
                     .collect::<Vec<_>>();
                 let body = self.expression(body);
+                let declared = self.declared_type(declared_return_type);
+                let optional = return_type
+                    .as_ref()
+                    .is_some_and(|ty| ty.occurrence() == nx_hir::ast::Occurrence::OPTIONAL);
+                let flags = i64::from(optional) * kinds::declaration::RESULT_OPTIONAL;
                 IrItem::list([
                     IrItem::Int(kinds::declaration::FUNCTION),
                     IrItem::Int(name),
                     IrItem::List(params),
                     IrItem::Int(body),
+                    IrItem::Int(declared),
+                    IrItem::Int(flags),
                 ])
             }
-            CodegenDeclarationKind::Value { value, .. } => {
+            CodegenDeclarationKind::Value {
+                value, declared_ty, ..
+            } => {
                 let value = self.expression(value);
-                IrItem::ints([kinds::declaration::VALUE, name, value])
+                let declared = self.declared_type(declared_ty);
+                IrItem::ints([kinds::declaration::VALUE, name, value, declared])
             }
             CodegenDeclarationKind::Record {
                 fields,
@@ -1342,7 +1446,7 @@ impl<'a> ModuleEmitter<'a> {
                     property_target,
                 ])
             }
-            CodegenDeclarationKind::TypeAlias | CodegenDeclarationKind::Unsupported(_) => {
+            CodegenDeclarationKind::TypeAlias { .. } | CodegenDeclarationKind::Unsupported(_) => {
                 IrItem::ints([kinds::declaration::TYPE_ALIAS, name])
             }
         };
@@ -1350,6 +1454,15 @@ impl<'a> ModuleEmitter<'a> {
         self.span_module = self.module.id;
         let span = self.span(declaration.span);
         self.declaration_spans.push(span);
+    }
+
+    /// A function's declared result type or a value's declared type, or `-1` when it declares
+    /// none.
+    fn declared_type(&mut self, declared: &Option<CodegenTypeRef>) -> i64 {
+        match declared {
+            Some(declared) => self.type_ref(declared),
+            None => -1,
+        }
     }
 
     fn component(&mut self, name: i64, component: &CodegenComponent) -> IrItem {
@@ -1484,7 +1597,7 @@ impl<'a> ModuleEmitter<'a> {
                     }
                     None => {
                         self.unresolved(name, span);
-                        IrItem::ints([kinds::node::NULL])
+                        Self::empty_node()
                     }
                 },
             },
@@ -1517,8 +1630,18 @@ impl<'a> ModuleEmitter<'a> {
             }
             CodegenExpressionKind::Call { callee, args } => {
                 let callee = self.expression(callee);
-                let args = self.expressions(args);
-                IrItem::list([IrItem::Int(kinds::node::CALL), IrItem::Int(callee), args])
+                let args = args
+                    .iter()
+                    .map(|arg| match arg {
+                        Some(arg) => self.expression(arg),
+                        None => -1,
+                    })
+                    .collect::<Vec<_>>();
+                IrItem::list([
+                    IrItem::Int(kinds::node::CALL),
+                    IrItem::Int(callee),
+                    IrItem::ints(args),
+                ])
             }
             CodegenExpressionKind::NamedCall { callee, args } => {
                 let callee = self.expression(callee);
@@ -1600,7 +1723,7 @@ impl<'a> ModuleEmitter<'a> {
                         .with_label(Label::primary(module_identity(self.module), span))
                         .build(),
                 );
-                IrItem::ints([kinds::node::NULL])
+                Self::empty_node()
             }
             CodegenExpressionKind::Block {
                 statements,
@@ -1620,7 +1743,7 @@ impl<'a> ModuleEmitter<'a> {
                 }
                 return match result {
                     Some(result) => self.expression(result),
-                    None => self.push_node(IrItem::ints([kinds::node::NULL]), span),
+                    None => self.push_node(Self::empty_node(), span),
                 };
             }
             CodegenExpressionKind::Array(elements) => {
@@ -1665,7 +1788,7 @@ impl<'a> ModuleEmitter<'a> {
                         .with_label(Label::primary(module_identity(self.module), span))
                         .build(),
                 );
-                IrItem::ints([kinds::node::NULL])
+                Self::empty_node()
             }
             CodegenExpressionKind::Member {
                 base,
@@ -1681,6 +1804,20 @@ impl<'a> ModuleEmitter<'a> {
                     let member = self.string(member);
                     IrItem::ints([kinds::node::MEMBER, base, member])
                 }
+            }
+            CodegenExpressionKind::OptionalMember { base, member } => {
+                let base = self.expression(base);
+                let member = self.string(member);
+                IrItem::ints([kinds::node::OPTIONAL_MEMBER, base, member])
+            }
+            CodegenExpressionKind::Exists { operand } => {
+                let operand = self.expression(operand);
+                IrItem::ints([kinds::node::EXISTS, operand])
+            }
+            CodegenExpressionKind::Coalesce { lhs, rhs } => {
+                let lhs = self.expression(lhs);
+                let rhs = self.expression(rhs);
+                IrItem::ints([kinds::node::COALESCE, lhs, rhs])
             }
             CodegenExpressionKind::Record {
                 name,
@@ -1698,7 +1835,7 @@ impl<'a> ModuleEmitter<'a> {
                             .with_label(Label::primary(module_identity(self.module), span))
                             .build(),
                     );
-                    return self.push_node(IrItem::ints([kinds::node::NULL]), span);
+                    return self.push_node(Self::empty_node(), span);
                 };
                 let properties = self.properties(properties);
                 let content = self.expressions(content);
@@ -1757,9 +1894,15 @@ impl<'a> ModuleEmitter<'a> {
             }
             CodegenExpressionKind::ActionHandler(handler) => self.action_handler(handler),
             // Refused by `validate_ir_program` before emission starts.
-            CodegenExpressionKind::Unsupported(_) => IrItem::ints([kinds::node::NULL]),
+            CodegenExpressionKind::Unsupported(_) => Self::empty_node(),
         };
         self.push_node(entry, span)
+    }
+
+    /// The empty value as a node: an `array` with no elements. What a construct that cannot be
+    /// emitted stands in as, after its diagnostic; the language has no null to write instead.
+    fn empty_node() -> IrItem {
+        IrItem::list([IrItem::Int(kinds::node::ARRAY), IrItem::List(Vec::new())])
     }
 
     /// Emits a handler as `[19, ref, str, ref, slot, ref?, node]`: the component and emit it
@@ -1820,7 +1963,6 @@ impl<'a> ModuleEmitter<'a> {
                 IrItem::ints([kinds::node::NUMBER, constant])
             }
             Literal::Boolean(value) => IrItem::ints([kinds::node::BOOL, i64::from(*value)]),
-            Literal::Null => IrItem::ints([kinds::node::NULL]),
         }
     }
 }

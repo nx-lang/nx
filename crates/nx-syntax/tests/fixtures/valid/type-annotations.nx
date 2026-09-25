@@ -2,30 +2,30 @@
 type UserId = int
 type Username = string
 type MaybeUser = User?
-type UserList = User[]
-type UserGrid = User[][]
-type MaybeUserList = User[]?
-type MaybeUserAliases = Username?[]
+type UserList = User+
+type UserAliasList = Username*
+type MaybeUserList = User*
+type MaybeUserAliases = (Username)*
 
 type User = object
 
-let loadUsers(users: User[][]): User[][] = {users}
-let maybeUsers(): User[]? = null
+let loadUsers(users: User*): User* = {users}
+let maybeUsers(): User? = {}
 
 let <UserCard
   id:UserId
   name:Username
-  email:string?
-  previousNames:string?[]
-  relatedUsers:User[]?
-  groupedUsers:User[][]
+  email?:string
+  previousNames?:string+
+  relatedUsers?:User+
+  groupedUsers:User+
   age:int
 /> =
   <div class="user-card">
     <h3>{name}</h3>
     <p:>ID: {id}</p>
     if email is {
-      null => <p:>No email</p>
+      {} => <p:>No email</p>
       else => <p:>Email: {email}</p>
     }
     <p:>Age: {age}</p>

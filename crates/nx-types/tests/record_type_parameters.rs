@@ -31,6 +31,7 @@ fn assert_reports(source: &str, needle: &str) -> Vec<String> {
 const RANGE: &str = "type Range = { T:type start:T end:T }\n";
 const BOX: &str = "type Box = { T:type value:T }\n";
 const PAIR: &str = "type Pair = { TKey:type TValue:type key:TKey value:TValue }\n";
+const PAGE: &str = "type Page = { T:type items:T+ }\n";
 
 // ---------------------------------------------------------------------------------------------
 // An applied type names one instantiation
@@ -46,9 +47,9 @@ fn an_applied_type_annotates_a_binding() {
 #[test]
 fn suffixes_compose_after_an_applied_type() {
     assert_clean(&format!(
-        "{RANGE}type Schedule = {{ slots:<Range T=int/>[] override:<Range T=int/>? }}\n\
-         let s = <Schedule slots={{ }} override={{null}} />\n\
-         let first:<Range T=int/>[] = {{s.slots}}\n\
+        "{RANGE}type Schedule = {{ slots:<Range T=int/>+ override?:<Range T=int/> }}\n\
+         let s = <Schedule slots={{ <Range T=int start={{1}} end={{5}} /> }} />\n\
+         let first:<Range T=int/>+ = {{s.slots}}\n\
          let over:<Range T=int/>? = {{s.override}}"
     ));
 }
@@ -62,12 +63,92 @@ fn an_alias_names_an_instantiation() {
 }
 
 #[test]
-fn applied_types_nest_and_take_suffixed_arguments() {
+fn applied_types_nest_and_reject_an_optional_argument() {
     assert_clean(&format!(
-        "{BOX}type IntBox = <Box T=int/>\ntype Ints = int[]\n\
-         let a:<Box T=<Box T=int/>/> = <Box T=IntBox value={{<Box T=int value={{1}} />}} />\n\
-         let b:<Box T=int[]/> = <Box T=Ints value={{ 1 }} />"
+        "{BOX}type IntBox = <Box T=int/>\n\
+         let a:<Box T=<Box T=int/>/> = <Box T=IntBox value={{<Box T=int value={{1}} />}} />"
     ));
+    // A type argument is exactly one value: optionality belongs on the field that holds it.
+    let errors = errors(&format!(
+        "{BOX}type MaybeInt = int?\nlet b:<Box T=int?/> = <Box T=MaybeInt value={{}} />"
+    ));
+    let rejected = errors
+        .iter()
+        .filter(|message| message.contains("A type argument must be exactly one value"))
+        .count();
+    assert_eq!(
+        rejected, 2,
+        "the annotation and the argument, once each: {errors:?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|message| message.contains("'MaybeInt' carries an occurrence")),
+        "the alias is named where it was written: {errors:?}"
+    );
+    let errors = assert_reports(
+        "type OptBox = { T:type value?:T }\nlet c = <OptBox T=int />\nlet bad:string = {c.value}",
+        "expects string, found int?",
+    );
+    assert_eq!(errors.len(), 1, "{errors:?}");
+}
+
+#[test]
+fn a_sequence_type_is_not_a_type_argument() {
+    // Substituting a sequence for `T` would make a `T+` field a sequence of sequences.
+    for source in [
+        format!("{BOX}let a:<Box T=int+/> = <Box T=int value={{ 1 }} />"),
+        format!("{BOX}type Ints = int+\nlet a:<Box T=Ints/> = <Box T=int value={{ 1 }} />"),
+        format!("{BOX}type Ints = int+\nlet a = <Box T=Ints value={{ 1 }} />"),
+        format!("{PAGE}type Ints = int+\nlet p:<Page T=Ints/> = <Page T=int items={{ 1 }} />"),
+    ] {
+        let errors = assert_reports(&source, "A type argument must be exactly one value");
+        assert!(
+            errors
+                .iter()
+                .all(|message| !message.contains("found object")),
+            "{errors:?}"
+        );
+    }
+
+    // The alias is named where one was written.
+    assert_reports(
+        &format!("{BOX}type Ints = int+\nlet a = <Box T=Ints value={{ 1 }} />"),
+        "'Ints' carries an occurrence",
+    );
+}
+
+#[test]
+fn a_suffixed_type_argument_at_a_construction_site_is_rejected_once() {
+    // A construction site writes a type argument as a bare name, and a suffix glued to it parses
+    // so the checker can say what is wrong rather than leaving a syntax error.
+    for suffixed in ["int?", "int+", "int*"] {
+        let errors = errors(&format!(
+            "type OptBox = {{ T:type value?:T }}\nlet b = <OptBox T={suffixed} value={{ 1 }} />"
+        ));
+        assert_eq!(
+            errors,
+            vec![format!(
+                "A type argument must be exactly one value; '{suffixed}' carries an occurrence"
+            )],
+            "{suffixed}"
+        );
+    }
+
+    // A rejected argument still binds its parameter, so it is not also reported as unspecified.
+    let errors = errors(&format!(
+        "{BOX}type MaybeInt = int?\nlet b = <Box T=MaybeInt value={{ 1 }} />"
+    ));
+    assert_eq!(errors.len(), 1, "{errors:?}");
+}
+
+#[test]
+fn a_suffix_on_a_value_is_rejected() {
+    let errors = assert_reports(
+        "type Fit = fill | cover\ntype Img = { fit:Fit }\nlet i = <Img fit=cover? />",
+        "'cover?' puts an occurrence suffix on a value",
+    );
+    assert_eq!(errors.len(), 1, "{errors:?}");
 }
 
 #[test]
@@ -80,7 +161,7 @@ fn a_type_parameter_in_scope_is_a_type_argument() {
 
 #[test]
 fn a_generic_record_refers_to_itself() {
-    assert_clean("type Node = { T:type value:T next:<Node T=T/>? }");
+    assert_clean("type Node = { T:type value:T next?:<Node T=T/> }");
 }
 
 #[test]
@@ -106,8 +187,8 @@ fn a_bare_generic_record_name_is_not_a_type() {
 fn a_bare_generic_record_name_is_a_diagnostic_in_every_type_position() {
     for position in [
         "type Slider = { range:Range }",
-        "type Slider = { range:Range[] }",
-        "type Slider = { range:Range? }",
+        "type Slider = { range:Range+ }",
+        "type Slider = { range?:Range }",
         "let r:Range = <Range T=int start={1} end={5} />",
         "let f(r:Range): int = 1",
         "let g(x:int): Range = <Range T=int start={1} end={5} />",
@@ -131,16 +212,16 @@ fn a_bare_generic_record_name_is_a_diagnostic_in_every_type_position() {
 fn a_diagnostic_about_a_type_reference_lands_on_the_declaration_that_wrote_it() {
     // A `TypeRef` carries no span, so each of these positions has to hand the converter the span
     // of the construct that wrote the reference. Without that the label falls back to offset 0 and
-    // underlines the first character of the file, which is what this locks down: every diagnostic
-    // has to land inside the declaration under test, and there has to be exactly one of each.
+    // underlines the first character of the file, which is what this locks down: the diagnostic
+    // has to land inside the declaration under test, and there has to be exactly one.
     for position in [
         "type Slider = { range:<Range U=int/> }",
-        "let r:<Range U=int/> = {null}",
+        "let r:<Range U=int/> = {}",
         "let f(r:<Range U=int/>): int = {1}",
-        "let g(x:int): <Range U=int/> = {null}",
+        "let g(x:int): <Range U=int/> = {}",
         "type Status = | only { r:<Range U=int/> }",
         "external component <Slider range:<Range U=int/> />",
-        "component <Slider /> = { state { s:<Range U=int/> = {null} } <text value=\"x\" /> }",
+        "component <Slider /> = { state { s:<Range U=int/> = {} } <text value=\"x\" /> }",
     ] {
         let source = format!("{RANGE}{position}");
         let declaration = RANGE.len();
@@ -152,9 +233,8 @@ fn a_diagnostic_about_a_type_reference_lands_on_the_declaration_that_wrote_it() 
             .collect();
         assert_eq!(
             reported.len(),
-            2,
-            "expected the unknown argument and the missing one, once each, for {position:?}, \
-             got: {:?}",
+            1,
+            "expected the unknown argument, once, for {position:?}, got: {:?}",
             reported
                 .iter()
                 .map(|diagnostic| diagnostic.message())
@@ -208,9 +288,10 @@ fn a_declarations_type_reference_is_reported_once_however_often_a_use_site_resol
     ] {
         let source = format!("{RANGE}{position}");
         let messages = errors(&source);
-        for needle in [
-            "'U' is not a type parameter of record 'Range'",
-            "Type parameter 'T' of record 'Range' was not specified",
+        for (needle, occurrences) in [
+            ("'U' is not a type parameter of record 'Range'", occurrences),
+            // The misspelled argument is the missing one, so `T` is not reported on top of it.
+            ("Type parameter 'T' of record 'Range' was not specified", 0),
         ] {
             let count = messages
                 .iter()
@@ -288,7 +369,7 @@ fn a_parameter_typed_field_rejects_a_concrete_default() {
 
 #[test]
 fn a_type_parameter_composes_with_suffixes_and_function_types() {
-    assert_clean("type Page = { T:type items:T[] next:T? render:(<function item:T />: string)? }");
+    assert_clean("type Page = { T:type items:T+ next?:T render?:<function item:T />: string }");
 }
 
 #[test]
@@ -334,9 +415,9 @@ fn an_alias_argument_is_the_same_type_as_its_target() {
 
 #[test]
 fn field_access_substitutes_the_argument() {
-    let source = "type Page = { T:type items:T[] next:T? }\n\
+    let source = "type Page = { T:type items:T+ next?:T }\n\
          let p:<Page T=string/> = <Page T=string items={ \"a\" } />\n\
-         let first:string[] = {p.items}\n\
+         let first:string+ = {p.items}\n\
          let bad:int? = {p.next}";
     let errors = assert_reports(source, "expects int?, found string?");
     assert_eq!(errors.len(), 1, "only `bad` should fail: {errors:?}");
@@ -358,7 +439,7 @@ fn equal_instantiations_join_to_themselves() {
              let b = <Box T=int value={{2}} />\n\
              let bad:int = {{ a b }}"
         ),
-        "found list <Box T=int/>[]",
+        "found <Box T=int/>+",
     );
 }
 
@@ -373,12 +454,12 @@ fn differing_instantiations_join_to_object() {
              let b = <Box T=string value=\"x\" />\n\
              let bad:int = {{ a b }}"
         ),
-        "found list object[]",
+        "found object+",
     );
     assert_clean(&format!(
         "{BOX}let a = <Box T=int value={{1}} />\n\
          let b = <Box T=string value=\"x\" />\n\
-         let mixed:object[] = {{ a b }}"
+         let mixed:object+ = {{ a b }}"
     ));
 }
 
@@ -393,7 +474,7 @@ fn an_instantiation_joins_with_an_unrelated_record_at_object() {
              let c = <Contact name=\"a\" />\n\
              let bad:int = {{ a c }}"
         ),
-        "found list object[]",
+        "found object+",
     );
 }
 

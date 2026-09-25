@@ -1,0 +1,11 @@
+// The `{}` pattern: a match arm taken exactly when the scrutinee is empty. It is apart from
+// `occurrences` because generated JavaScript does not support match expressions.
+export type Person = { name:string nick?:string }
+export type Book = { title:string author?:Person }
+
+let withAuthor() = <Book title="A" author={<Person name="Ada" />} />
+let withoutAuthor() = <Book title="B" />
+let describe(b:Book): string = { if b.author is { {} => "anonymous" else => b.author.name } }
+let described() = { describe(withAuthor()) }
+let undescribed() = { describe(withoutAuthor()) }
+let root() = { described() }

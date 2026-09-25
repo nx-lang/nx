@@ -545,6 +545,7 @@ fn test_float_in_conditional() {
     let func = Function {
         name: Name::new("maxf"),
         visibility: nx_hir::Visibility::Export,
+        form: nx_hir::FunctionForm::Paren,
         params,
         return_type: None,
         body: if_expr,
@@ -698,9 +699,9 @@ fn test_an_int_bound_at_a_float64_component_property_evaluates_as_a_float() {
 }
 
 #[test]
-fn test_widening_applies_to_each_element_of_a_list() {
+fn test_widening_applies_to_each_element_of_a_sequence() {
     let source = r#"
-        type Series = { values:float64[] }
+        type Series = { values:float64+ }
         let f(n:int, m:int32) = { <Series values={n m} /> }
     "#;
     let result = execute_checked(source, "f", vec![Value::Int(1), Value::Int32(2)]).unwrap();
@@ -711,9 +712,9 @@ fn test_widening_applies_to_each_element_of_a_list() {
 }
 
 #[test]
-fn test_widening_applies_at_a_nullable_site() {
+fn test_widening_applies_at_an_optional_site() {
     let source = r#"
-        type Box = { width:float64? }
+        type Box = { width?:float64 }
         let f(n:int) = { <Box width={n} /> }
     "#;
     let result = execute_checked(source, "f", vec![Value::Int(3)]).unwrap();
@@ -727,7 +728,7 @@ fn test_a_host_number_takes_the_width_of_its_parameter() {
     let source = r#"
         let next(n:int32) = { n + 1 }
         let twice(w:float32) = { w * 2 }
-        let halves(ws:float32?[]) = { ws }
+        let halves(ws?:float32+) = { ws }
     "#;
     assert_eq!(
         execute_checked(source, "next", vec![Value::Int(7)]).unwrap(),
@@ -741,10 +742,14 @@ fn test_a_host_number_takes_the_width_of_its_parameter() {
         execute_checked(source, "twice", vec![Value::Int(2)]).unwrap(),
         Value::Float32(4.0)
     );
-    let items = Value::Array(vec![Value::Float(0.5), Value::Null]);
+    let items = Value::Array(vec![Value::Float(0.5), Value::Float(1.5)]);
     assert_eq!(
         execute_checked(source, "halves", vec![items]).unwrap(),
-        Value::Array(vec![Value::Float32(0.5), Value::Null])
+        Value::Array(vec![Value::Float32(0.5), Value::Float32(1.5)])
+    );
+    assert_eq!(
+        execute_checked(source, "halves", vec![Value::empty()]).unwrap(),
+        Value::empty()
     );
 
     let too_big = execute_checked(source, "next", vec![Value::Int(3_000_000_000)]).unwrap_err();
@@ -754,23 +759,27 @@ fn test_a_host_number_takes_the_width_of_its_parameter() {
 }
 
 #[test]
-fn test_a_nullable_int_widens_at_a_nullable_float64_site() {
+fn test_an_optional_int_widens_at_an_optional_float64_site() {
     let source = r#"
-        let widen(n:int?): float64? = { n }
-        let widen_all(ns:int?[]): float64?[] = { ns }
+        let widen(n?:int): float64? = { n }
+        let widen_all(ns?:int+): float64* = { ns }
     "#;
     assert_eq!(
         execute_checked(source, "widen", vec![Value::Int(3)]).unwrap(),
         Value::Float(3.0)
     );
     assert_eq!(
-        execute_checked(source, "widen", vec![Value::Null]).unwrap(),
-        Value::Null
+        execute_checked(source, "widen", vec![Value::empty()]).unwrap(),
+        Value::empty()
     );
-    let items = Value::Array(vec![Value::Int(3), Value::Null]);
+    let items = Value::Array(vec![Value::Int(3), Value::Int(4)]);
     assert_eq!(
         execute_checked(source, "widen_all", vec![items]).unwrap(),
-        Value::Array(vec![Value::Float(3.0), Value::Null])
+        Value::Array(vec![Value::Float(3.0), Value::Float(4.0)])
+    );
+    assert_eq!(
+        execute_checked(source, "widen_all", vec![Value::empty()]).unwrap(),
+        Value::empty()
     );
 }
 
@@ -836,7 +845,7 @@ fn test_a_narrower_match_arm_evaluates_as_the_join() {
 }
 
 #[test]
-fn test_a_joined_list_or_nullable_branch_widens_item_by_item() {
+fn test_a_joined_sequence_or_optional_branch_widens_item_by_item() {
     let lists = r#"
         let ints(n:int) = { n n }
         let floats(x:float64) = { x x }
@@ -848,24 +857,24 @@ fn test_a_joined_list_or_nullable_branch_widens_item_by_item() {
         Value::Array(vec![Value::Float(3.0), Value::Float(3.0)])
     );
 
-    let nullables = "let f(b:boolean, n:int?, x:float64?) = { if b { n } else { x } }";
-    let present = vec![Value::Boolean(true), Value::Int(3), Value::Null];
+    let optionals = "let f(b:boolean, n?:int, x?:float64) = { if b { n } else { x } }";
+    let present = vec![Value::Boolean(true), Value::Int(3), Value::empty()];
     assert_eq!(
-        execute_checked(nullables, "f", present).unwrap(),
+        execute_checked(optionals, "f", present).unwrap(),
         Value::Float(3.0)
     );
-    let absent = vec![Value::Boolean(true), Value::Null, Value::Float(1.5)];
+    let absent = vec![Value::Boolean(true), Value::empty(), Value::Float(1.5)];
     assert_eq!(
-        execute_checked(nullables, "f", absent).unwrap(),
-        Value::Null
+        execute_checked(optionals, "f", absent).unwrap(),
+        Value::empty()
     );
 }
 
 #[test]
-fn test_a_branch_joined_with_a_nullable_float_through_null_evaluates_as_a_float() {
+fn test_a_branch_joined_with_an_optional_float_through_empty_evaluates_as_a_float() {
     let source = r#"
         let f(a:boolean, b:boolean, n:int, x:float64) = {
-          if a { n } else { if b { x } else { null } }
+          if a { n } else { if b { x } }
         }
     "#;
     let run = |a: bool, b: bool| {
@@ -879,7 +888,7 @@ fn test_a_branch_joined_with_a_nullable_float_through_null_evaluates_as_a_float(
     };
     assert_eq!(run(true, false), Value::Float(3.0));
     assert_eq!(run(false, true), Value::Float(1.5));
-    assert_eq!(run(false, false), Value::Null);
+    assert_eq!(run(false, false), Value::empty());
 }
 
 #[test]

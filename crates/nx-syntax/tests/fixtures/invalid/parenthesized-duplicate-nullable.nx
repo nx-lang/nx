@@ -1,2 +1,0 @@
-// Parentheses add no layer, so the outer `?` makes the same layer nullable twice.
-type Twice = (string?)?

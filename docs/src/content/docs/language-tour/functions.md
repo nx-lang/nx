@@ -82,7 +82,8 @@ component <Counter /> = {
 ```
 
 Every record also has an update record, so the same patch shape works outside components:
-`<User.Update email={null} />` sets `email` to null and leaves every other field alone. See
+`<User.Update email={} />` clears `email` — the field is present and empty, which is allowed only
+for an optional field such as `email?:string` — and leaves every other field alone. See
 [Updating state](/reference/syntax/functions#updating-state).
 
 A field can also be named as a value. `User.Property.email` is a case of the derived constant union
@@ -95,13 +96,22 @@ lists the present fields as `User.Property` cases. See
 ## Paren-style functions
 
 ```nx
-let formatName(name:string, title:string?) : string =
-  if title { `${title} ${name}` } else { name }
+let formatName(name:string, title?:string): string = {
+  if title? { title + " " + name } else { name }
+}
 
-let displayName = formatName("Ada", "Dr.")
+let displayName = { formatName("Ada", "Dr.") }
+let plainName = { formatName("Ada") }
 ```
 
-Use this form for utility helpers when angle brackets would add noise.
+Use this form for small, general-purpose helpers that compute a value and read naturally with
+parentheses, such as `min`, `floor` or `rgb`. A function that produces markup uses the element
+style, even when it takes a single parameter. A paren-style function can also be called as an element,
+`<formatName name="Ada" />`; an element-style function is called only as an element.
+
+Parameters a caller may leave out — optional (`title?:string`) or defaulted (`sep:string = ", "`)
+— come last, and a call may stop before them. The function fills each one it is not given: with
+its default, which it evaluates itself, or with `{}`.
 
 ## Constants
 

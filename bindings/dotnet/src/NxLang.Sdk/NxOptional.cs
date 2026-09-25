@@ -11,8 +11,10 @@ namespace NxLang.Nx;
 /// </summary>
 /// <remarks>
 /// <para>Generated update record DTOs expose every field through this struct. In an update record an unset field
-/// means "leave this field unchanged" and a field set to <see langword="null"/> means "set this field to null", so
-/// the two stay distinct: the DTO stores only its set fields, and serialization writes only those.</para>
+/// means "leave this field unchanged" and a field set to <see langword="null"/> means "clear this field", since
+/// <see langword="null"/> is the .NET spelling of the NX empty value, so the two stay distinct: the DTO stores
+/// only its set fields, and serialization writes only those. A generated accessor's value type is nullable only
+/// for a field that can be cleared, one the target declares optional (<c>name?:T</c>).</para>
 /// <para><c>default</c> is unset. The struct is an in-memory value only and is never serialized itself; a DTO's
 /// fields travel through the map <see cref="NxUpdateRecord"/> keeps.</para>
 /// </remarks>

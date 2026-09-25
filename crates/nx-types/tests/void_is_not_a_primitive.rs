@@ -47,21 +47,47 @@ fn a_user_declaration_may_take_the_name_void() {
 }
 
 #[test]
-fn the_unit_type_still_renders_as_void() {
-    // Removing the spelling does not remove the type or its name in diagnostics: the author
-    // receives the name, they do not supply it.
-    assert_eq!(Type::void().to_string(), "void");
+fn no_inferred_type_renders_as_void() {
+    // The unit type is gone: an `if` with no `else` carries an implicit `else { }` and is an
+    // optional, an uncovered match path follows the same rule, and nothing else constructed one.
+    // So no diagnostic can name a type `void` except the user's own declaration of that name.
+    let messages = errors("let c = true\nlet v:string = { if c { 1 } }");
+    assert!(!messages.is_empty());
+    assert!(
+        messages.iter().all(|message| !message.contains("void")),
+        "got: {messages:?}"
+    );
 }
 
 #[test]
-fn a_no_else_conditional_still_takes_the_unit_type() {
-    // `if` with no `else` is one of the sites inference assigns the unit type. The observable
-    // consequence here is that its type is not the then-branch's.
+fn a_no_else_conditional_is_an_optional_rather_than_the_unit_type() {
+    // An `if` with no `else` carries an implicit `else { }`, so its type is the join of the branch
+    // with the empty value -- the branch's type admitting zero, not the unit type.
     let source = "let c = true\nlet v = { if c { 1 } }";
     let ty = check(source)
         .type_env
         .lookup(&Name::new("v"))
         .cloned()
         .expect("binding v");
-    assert_eq!(ty, Type::void(), "expected the unit type, got: {ty}");
+    assert_eq!(ty, Type::optional(Type::int()), "got: {ty}");
+}
+
+#[test]
+fn a_diagnostic_naming_a_user_declared_void_names_only_that_type() {
+    // With no unit type left, `void` in a message can only be the declaration the author wrote,
+    // so one rendering cannot stand for two types.
+    let messages =
+        errors("type void = { value:int }\ntype Holder = { n:void }\nlet h = <Holder n=\"x\" />");
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("expects void")),
+        "got: {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .all(|message| !message.contains("found void")),
+        "no inferred type is rendered as `void`: {messages:?}"
+    );
 }

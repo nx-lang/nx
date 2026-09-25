@@ -1,6 +1,6 @@
 //! Typed wrappers around tree-sitter nodes.
 
-use crate::syntax_kind::{syntax_kind_from_str, SyntaxKind};
+use crate::syntax_kind::{syntax_kind_from_id, SyntaxKind};
 use text_size::{TextRange, TextSize};
 use tree_sitter::Node;
 
@@ -21,7 +21,7 @@ impl<'tree> SyntaxNode<'tree> {
 
     /// Returns the kind of this syntax node.
     pub fn kind(&self) -> SyntaxKind {
-        syntax_kind_from_str(self.node.kind())
+        syntax_kind_from_id(self.node.kind_id())
     }
 
     /// Returns the source text for this node.

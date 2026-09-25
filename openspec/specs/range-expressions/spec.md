@@ -37,7 +37,7 @@ member access on either side binds before the operator.
   value is a literal and never an expression
 
 #### Scenario: A range in a braced list is parenthesized
-- **WHEN** a file contains `let rs:<Range T=int/>[] = { (0..5) (5..=9) }`
+- **WHEN** a file contains `let rs:<Range T=int/>+ = { (0..5) (5..=9) }`
 - **THEN** analysis SHALL accept the list of two ranges
 - **AND** `{ 0..5 5..=9 }` SHALL be rejected as any unparenthesized binary expression in a list is
 
@@ -143,7 +143,7 @@ integer ranges iterate. Evaluation SHALL NOT build the list of integers before r
 - **AND** `items` SHALL evaluate to the list `2 3 4`
 
 #### Scenario: The item has the range's integer type
-- **WHEN** a file contains `let lo:int32 = 1` and `let hi:int32 = 3` and `let xs:int32[] = { for i in lo..hi { i } }`
+- **WHEN** a file contains `let lo:int32 = 1` and `let hi:int32 = 3` and `let xs:int32* = { for i in lo..hi { i } }`
 - **THEN** analysis SHALL accept the binding
 
 #### Scenario: A non-integer range does not iterate

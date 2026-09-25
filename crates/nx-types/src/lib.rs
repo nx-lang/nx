@@ -3,7 +3,7 @@
 //! This crate provides comprehensive type checking and inference for the NX language,
 //! including:
 //!
-//! - **Type representation** ([`Type`] enum with primitives, arrays, functions, and nullables)
+//! - **Type representation** ([`Type`] enum with primitives, sequences, functions, and named types)
 //! - **Type inference** for expressions, function calls, and control flow
 //! - **Type checking** with compatibility rules and error recovery
 //! - **Type environment** for symbol resolution and scope management
@@ -101,9 +101,9 @@
 //!
 //! ## Compound Types
 //!
-//! - **Arrays**: `int[]`, `string[][]`, `string[]?`, `string?[]`
-//! - **Functions**: `(int, string) => boolean`
-//! - **Nullable**: `int?`, `string?`
+//! - **Occurrences**: `int?`, `int+`, `int*` — one suffix per type, so never `int+?`; a
+//!   sequence is flat, and `{}` is the empty value every `?` and `*` type admits
+//! - **Functions**: `<function a:int b:string />: boolean`
 //! - **Named types**: User-defined types and element names
 //!
 //! ## Type Compatibility
@@ -112,8 +112,9 @@
 //!
 //! - Exact types are compatible: `int` ≅ `int`
 //! - Any integer width is compatible with any other: `int32` ≅ `int` ≅ `int64`
-//! - Non-nullable types are compatible with nullable: `int` ≅ `int?`
-//! - Arrays are covariant: `int[]` ≅ `int[]`
+//! - An occurrence satisfies every occurrence above it in the lattice: `int` fits `int?`, `int+`
+//!   and `int*`; `int?` and `int+` each fit `int*` and nothing narrower
+//! - Sequences are covariant in their item type
 //! - Functions are contravariant in parameters, covariant in return
 //! - Error types are compatible with everything (for error recovery)
 //!
@@ -146,9 +147,9 @@ pub use env::{TypeBinding, TypeEnvironment};
 pub use infer::{ContextualResolution, InferenceContext, TypeInference};
 pub use semantics::{
     common_supertype, is_object_type, numeric_literal_target, resolve_type_ref_with,
-    resolve_type_ref_with_seen, type_satisfies_expected, type_satisfies_expected_with_coercion,
+    resolve_type_ref_with_seen, type_satisfies_expected,
 };
 pub use ty::{
-    check_function_satisfies, display_type_pair, DeclaringOrigin, FunctionMismatch, FunctionParam,
-    Primitive, Type, TypeId, UnionCaseType, UnionType,
+    check_function_satisfies, display_type_pair, read_type, DeclaringOrigin, FunctionMismatch,
+    FunctionParam, Occurrence, Primitive, Type, TypeId, UnionCaseType, UnionType,
 };

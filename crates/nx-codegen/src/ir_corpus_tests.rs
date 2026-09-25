@@ -604,3 +604,158 @@ fn corpus_artifacts_fit_the_size_budget() {
         over_budget.join(", ")
     );
 }
+
+/// Whether generated-code diagnostics refuse a construct executable source codegen does not
+/// support, rather than report a failure of the emitter.
+fn is_unsupported_by_source_codegen(message: &str) -> bool {
+    message.contains("not supported")
+}
+
+/// Two canonical values, with numbers compared by value: generated JavaScript prints `2.0` as `2`.
+fn canonical_values_agree(left: &Value, right: &Value) -> bool {
+    match (left, right) {
+        (Value::Number(left), Value::Number(right)) => left.as_f64() == right.as_f64(),
+        (Value::Array(left), Value::Array(right)) => {
+            left.len() == right.len()
+                && left
+                    .iter()
+                    .zip(right)
+                    .all(|(left, right)| canonical_values_agree(left, right))
+        }
+        (Value::Object(left), Value::Object(right)) => {
+            left.len() == right.len()
+                && left.iter().all(|(key, value)| {
+                    right
+                        .get(key)
+                        .is_some_and(|other| canonical_values_agree(value, other))
+                })
+        }
+        _ => left == right,
+    }
+}
+
+/// A generated entrypoint's result against the recorded one. A generated function is typed NX code,
+/// not a host boundary: an empty `T?` result is `nxEmpty`, as its TypeScript signature says, where
+/// an entry call through a runtime returns the host's `null`.
+fn entry_results_agree(generated: &Value, recorded: &Value) -> bool {
+    match (generated, recorded) {
+        (Value::Array(items), Value::Null) => items.is_empty(),
+        _ => canonical_values_agree(generated, recorded),
+    }
+}
+
+/// The third engine: generated JavaScript run over every corpus entrypoint of an entry module
+/// must evaluate to the result the interpreter recorded, which the IR runtime is held to as well.
+///
+/// <para>Executable source codegen refuses some constructs outright — match expressions, calls of
+/// function-typed values, action handlers — so a program it refuses, and an entrypoint that
+/// reaches an unsupported construct at run time, are skipped, and only then. Every refusal must be
+/// one of those; any other failure to generate or to run fails the test.</para>
+#[test]
+fn generated_javascript_agrees_with_the_recorded_results() {
+    let mut failures = Vec::new();
+    let mut compared = 0;
+    let mut skipped = Vec::new();
+    for program in load_programs() {
+        let output =
+            match crate::emit_program(&program.artifact, &crate::CodegenOptions::javascript()) {
+                Ok(output) => output,
+                Err(error) => {
+                    let unexpected = error
+                        .diagnostics
+                        .iter()
+                        .filter(|diagnostic| {
+                            !is_unsupported_by_source_codegen(diagnostic.message())
+                        })
+                        .map(|diagnostic| diagnostic.message().to_string())
+                        .collect::<Vec<_>>();
+                    if !unexpected.is_empty() {
+                        failures.push(format!(
+                            "{}: JavaScript generation failed: {unexpected:?}",
+                            program.name
+                        ));
+                    }
+                    skipped.push(program.name.clone());
+                    continue;
+                }
+            };
+        let entrypoints = program
+            .manifest
+            .entrypoints
+            .iter()
+            .filter(|entrypoint| entrypoint.module == program.manifest.entry)
+            .collect::<Vec<_>>();
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        fs::write(dir.path().join("package.json"), r#"{ "type": "module" }"#)
+            .expect("package file");
+        for file in output.files {
+            fs::write(dir.path().join(file.relative_path), file.content).expect("generated file");
+        }
+        let names = entrypoints
+            .iter()
+            .map(|entrypoint| serde_json::to_string(&entrypoint.function).expect("name"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let script = format!(
+            "const m = await import({:?});\n\
+             const out = {{}};\n\
+             for (const name of [{names}]) {{\n\
+               try {{ out[name] = {{ ok: m[name]() }}; }}\n\
+               catch (error) {{ out[name] = {{ error: String(error && error.message || error) }}; }}\n\
+             }}\n\
+             console.log(JSON.stringify(out));",
+            format!("file://{}", dir.path().join("index.js").display())
+        );
+        let run = std::process::Command::new("node")
+            .args(["--input-type=module", "--eval", &script])
+            .output()
+            .expect("node is required to run generated JavaScript");
+        assert!(
+            run.status.success(),
+            "{}: node failed: {}",
+            program.name,
+            String::from_utf8_lossy(&run.stderr)
+        );
+        let actual: BTreeMap<String, Value> =
+            serde_json::from_slice(&run.stdout).expect("generated results");
+        let expected: BTreeMap<String, Value> = serde_json::from_str(
+            &fs::read_to_string(program.dir.join("expected").join("results.json"))
+                .expect("recorded results"),
+        )
+        .expect("recorded results");
+        for entrypoint in entrypoints {
+            let key = format!("{}::{}", entrypoint.module, entrypoint.function);
+            let outcome = &actual[&entrypoint.function];
+            match (outcome.get("ok"), outcome.get("error")) {
+                (Some(value), _) => {
+                    compared += 1;
+                    if !entry_results_agree(value, &expected[&key]) {
+                        failures.push(format!(
+                            "{}: {key}: generated JavaScript gave {value}, the interpreter {}",
+                            program.name, expected[&key]
+                        ));
+                    }
+                }
+                (None, Some(Value::String(message)))
+                    if is_unsupported_by_source_codegen(message) =>
+                {
+                    skipped.push(key);
+                }
+                _ => failures.push(format!(
+                    "{}: {key}: generated JavaScript failed: {outcome}",
+                    program.name
+                )),
+            }
+        }
+    }
+    println!("{compared} corpus entrypoints compared; skipped as unsupported: {skipped:?}");
+    assert!(
+        compared > 0,
+        "no corpus entrypoint ran as generated JavaScript"
+    );
+    assert!(
+        failures.is_empty(),
+        "generated JavaScript disagrees with the corpus:\n{}",
+        failures.join("\n")
+    );
+}

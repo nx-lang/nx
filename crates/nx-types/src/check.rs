@@ -241,6 +241,7 @@ pub fn analyze_prepared_module(
         .collect();
     let folded_constants = ctx.folded_constants().clone();
     let string_conversions = ctx.string_conversions().clone();
+    let lifted_joins = ctx.lifted_joins().clone();
     let widened_joins: FxHashMap<_, _> = ctx
         .widened_joins()
         .iter()
@@ -254,8 +255,8 @@ pub fn analyze_prepared_module(
     diagnostics.extend(normalize_diagnostics_file_name(type_diagnostics, file_name));
     // A resolution reached a union declaration, so it has an origin. One without cannot be
     // rewritten, and an unrewritten contextual name is not an error anywhere below type checking:
-    // the interpreter evaluates it to null. Reporting it here is what keeps that impossible rather
-    // than merely unlikely.
+    // the interpreter fails on it as an undefined name. Reporting it here is what keeps that
+    // impossible rather than merely unlikely.
     for (expr_id, resolution) in &contextual_resolutions {
         if resolution.origin.is_some() {
             continue;
@@ -290,6 +291,11 @@ pub fn analyze_prepared_module(
         type_env.set_expr_type(created, Type::string());
     }
 
+    // A branch the join lifted from an item to a sequence is wrapped as a one-item sequence, so
+    // its value is what its type says in every engine. This runs before the widenings, which then
+    // find a lifted branch as its wrapper's one element and widen it there.
+    let lifts = nx_hir::apply_join_lifts(&mut prepared_module, &lifted_joins);
+
     // A branch of a join that widens is wrapped so it produces a value of the join's numeric
     // type. The wrapper is typed as the widened branch, which is what the join expects of it.
     for (wrapped, branch) in nx_hir::apply_join_widenings(&mut prepared_module, &widened_joins) {
@@ -299,6 +305,24 @@ pub fn analyze_prepared_module(
             .cloned()
             .unwrap_or(Type::Error);
         type_env.set_expr_type(wrapped, crate::infer::widened_type(&branch_ty, target));
+    }
+
+    // Each lift wrapper is a sequence of its branch's items, typed after the widenings so that a
+    // branch that also widened gives a sequence of the widened type: `[1.0]` is a `float64+`. A
+    // branch that may be empty lifts to a sequence that may be too: an `int?` branch beside an
+    // `int+` one is `int*` once lifted.
+    for (wrapped, branch) in lifts {
+        let branch_ty = type_env
+            .get_expr_type(branch)
+            .cloned()
+            .unwrap_or(Type::Error);
+        let branch_ty = match widened_joins.get(&branch) {
+            Some(target) => crate::infer::widened_type(&branch_ty, *target),
+            None => branch_ty,
+        };
+        let (item, occ) = branch_ty.split();
+        let lifted = Type::seq(item.clone(), occ.join(nx_hir::ast::Occurrence::ONE_OR_MORE));
+        type_env.set_expr_type(wrapped, lifted);
     }
 
     nx_hir::apply_contextual_name_resolutions(
@@ -651,8 +675,8 @@ mod tests {
             "external component <B v:float64 />\nlet root() = { <B v=-1 /> }",
         );
         assert_accepted(
-            "an integer literal at a nullable float",
-            "external component <B v:float64? />\nlet root() = { <B v=0 /> }",
+            "an integer literal at an optional float",
+            "external component <B v?:float64 />\nlet root() = { <B v=0 /> }",
         );
     }
 
@@ -677,12 +701,12 @@ mod tests {
         );
         assert_accepted("a declared return type", "let g():float64 = 1");
         assert_accepted(
-            "the elements of a float list",
-            "external component <B v:float64[] />\nlet root() = { <B v={1 2 3} /> }",
+            "the elements of a float sequence",
+            "external component <B v:float64+ />\nlet root() = { <B v={1 2 3} /> }",
         );
         assert_accepted(
-            "a scalar coerced to a float list",
-            "external component <B v:float64[] />\nlet root() = { <B v=1 /> }",
+            "one value at a float sequence",
+            "external component <B v:float64+ />\nlet root() = { <B v=1 /> }",
         );
     }
 
@@ -694,8 +718,8 @@ mod tests {
              let root() = { <collect>{1}</collect> }",
         );
         assert_accepted(
-            "several content expressions at a float list content property",
-            "let <collect content items: float64[] />: float64[] = { items }\n\
+            "several content expressions at a float sequence content property",
+            "let <collect content items: float64+ />: float64+ = { items }\n\
              let root() = { <collect>{1} {2} {3}</collect> }",
         );
         assert_accepted(
@@ -919,24 +943,24 @@ mod tests {
             "let f(x:float64) = { x }\nlet g(n:int) = { f(n) }",
         );
         assert_accepted(
-            "each element of a list",
-            "external component <B v:float64[] />\nlet f(n:int, m:int32) = { <B v={n m} /> }",
+            "each item of a sequence",
+            "external component <B v:float64+ />\nlet f(n:int, m:int32) = { <B v={n m} /> }",
         );
         assert_accepted(
-            "a nullable site",
-            "external component <B v:float64? />\ncomponent <A n:int /> = { <B v={n} /> }",
+            "an optional site",
+            "external component <B v?:float64 />\ncomponent <A n:int /> = { <B v={n} /> }",
         );
         assert_accepted(
-            "a nullable int at a nullable float64 site",
+            "an optional int at an optional float64 site",
             "let a:int? = {3}\nlet b:float64? = {a}",
         );
         assert_accepted(
-            "a nullable int at a nullable float64 return type",
-            "let f(n:int?): float64? = { n }",
+            "an optional int at an optional float64 return type",
+            "let f(n?:int): float64? = { n }",
         );
         assert_accepted(
-            "a list of nullable ints at a list of nullable float64s",
-            "let f(ns:int?[]): float64?[] = { ns }",
+            "an optional sequence of ints at a zero-or-more float64 return type",
+            "let f(ns?:int+): float64* = { ns }",
         );
         assert_accepted(
             "a content property",
@@ -989,14 +1013,14 @@ mod tests {
                 "float64",
             ),
             (
-                "a nullable int64 at a nullable float64 return type",
-                "let f(n:int64?): float64? = { n }",
+                "an optional int64 at an optional float64 return type",
+                "let f(n?:int64): float64? = { n }",
                 "int64?",
                 "float64?",
             ),
             (
-                "an int64 element of a float64 list",
-                "external component <B v:float64[] />\nlet f(n:int64) = { <B v={n 1} /> }",
+                "an int64 item of a float64 sequence",
+                "external component <B v:float64+ />\nlet f(n:int64) = { <B v={n 1} /> }",
                 "int64",
                 "float64",
             ),
@@ -1017,8 +1041,8 @@ mod tests {
             "external component <B v:int />\ncomponent <A s:string /> = { <B v={s} /> }",
         );
         assert_rejected(
-            "a nullable int at an int site: undefined for null",
-            "external component <B v:int />\ncomponent <A n:int? /> = { <B v={n} /> }",
+            "an optional int at an int site: undefined when absent",
+            "external component <B v:int />\ncomponent <A n?:int /> = { <B v={n} /> }",
         );
     }
 
@@ -1064,12 +1088,12 @@ mod tests {
             vec![(Literal::Float(OrderedFloat(1.0)), "float64".to_string())],
         );
         assert_eq!(
-            literals("external component <B v:int32[] />\nlet root() = { <B v={1 2} /> }"),
+            literals("external component <B v:int32+ />\nlet root() = { <B v={1 2} /> }"),
             vec![
                 (Literal::Int32(1), "int32".to_string()),
                 (Literal::Int32(2), "int32".to_string())
             ],
-            "each element of a list is written at the element type"
+            "each item of a sequence is written at the item type"
         );
     }
 
@@ -1175,13 +1199,16 @@ mod tests {
             record
         );
         assert_rejected(
-            "a string plus a nullable string",
-            "let f(s:string?) = { \"value: \" + s }",
+            "a string plus an optional string",
+            "let f(s?:string) = { \"value: \" + s }",
         );
-        assert_rejected("a string plus null", "let f() = { \"value: \" + null }");
         assert_rejected(
-            "a string plus a list",
-            "let f(xs:int[]) = { \"items: \" + xs }",
+            "a string plus a value that may be absent",
+            "let f(c:boolean) = { \"value: \" + if c { 1 } }",
+        );
+        assert_rejected(
+            "a string plus a sequence",
+            "let f(xs:int+) = { \"items: \" + xs }",
         );
         assert_rejected("a string minus a number", "let f(n:int) = { \"a\" - n }");
         assert_rejected(
@@ -1306,7 +1333,7 @@ mod tests {
 
     #[test]
     fn test_a_widened_branch_is_typed_as_the_join_expects_it() {
-        let source = "let f(b:boolean, n:int?, x:float64?) = { if b { n } else { x } }";
+        let source = "let f(b:boolean, n?:int, x?:float64) = { if b { n } else { x } }";
         let checked = check_str(source, "main.nx");
         let module = checked.lowered_module.as_ref().expect("lowered module");
         let (wrapper, _) = module
@@ -1315,7 +1342,7 @@ mod tests {
             .expect("a widened branch");
         assert_eq!(
             checked.type_env.get_expr_type(wrapper),
-            Some(&Type::nullable(Type::float64()))
+            Some(&Type::optional(Type::float64()))
         );
     }
 
@@ -1393,18 +1420,18 @@ mod tests {
             "a lone braced float literal",
             &format!("{LABEL}let f() = <Label>{{1.0}}</Label>"),
         );
-        let nullable = assert_rejected(
-            "a lone braced nullable int",
-            &format!("{LABEL}let f(count:int?) = <Label>{{count}}</Label>"),
+        let optional = assert_rejected(
+            "a lone braced optional int",
+            &format!("{LABEL}let f(count?:int) = <Label>{{count}}</Label>"),
         );
         assert!(
-            nullable.contains("content-type-mismatch"),
-            "a nullable number has no text form: {}",
-            nullable
+            optional.contains("content-type-mismatch"),
+            "an optional number has no text form: {}",
+            optional
         );
         assert_accepted(
-            "a nullable string content property",
-            "type Label = { content text:string? }\n\
+            "an optional string content property",
+            "type Label = { content text?:string }\n\
              let f(on:boolean) = <Label>Enabled: {on}</Label>",
         );
 
@@ -1433,11 +1460,11 @@ mod tests {
         );
         assert_eq!(
             shape(
-                "let <collect content items: object[] />: object[] = { items }\n\
+                "let <collect content items: object+ />: object+ = { items }\n\
                  let f(count:int) = <collect>Total: {count}</collect>"
             ),
             "Element[Literal, Ident]",
-            "a body at a list content property stays a list of pieces"
+            "a body at a sequence content property stays a sequence of pieces"
         );
     }
 
@@ -1643,9 +1670,9 @@ mod tests {
     }
 
     #[test]
-    fn test_scalar_brace_return_coerces_to_list_annotation() {
+    fn test_scalar_brace_return_satisfies_sequence_annotation() {
         let source = r#"
-            let wrap(): int[] = { 1 }
+            let wrap(): int+ = { 1 }
         "#;
         let result = check_str(source, "coerce-return.nx");
 
@@ -1674,7 +1701,7 @@ mod tests {
     }
 
     #[test]
-    fn test_unannotated_multi_value_element_brace_falls_back_to_object_array() {
+    fn test_unannotated_multi_value_element_brace_falls_back_to_object_sequence() {
         let source = r#"
             let root() = { <A /> <B /> }
         "#;
@@ -1696,20 +1723,22 @@ mod tests {
             .type_of(root.body)
             .expect("Expected inferred body type")
             .clone();
-        assert_eq!(root_ty, Type::array(Type::named("object")));
+        assert_eq!(root_ty, Type::one_or_more(Type::named("object")));
 
         let func_ty = result
             .type_env
             .lookup(&Name::new("root"))
             .expect("Expected root function type");
         match func_ty {
-            Type::Function { ret, .. } => assert_eq!(**ret, Type::array(Type::named("object"))),
+            Type::Function { ret, .. } => {
+                assert_eq!(**ret, Type::one_or_more(Type::named("object")))
+            }
             other => panic!("Expected function type, got {:?}", other),
         }
     }
 
     #[test]
-    fn test_unannotated_multi_value_literal_brace_infers_int_array() {
+    fn test_unannotated_multi_value_literal_brace_infers_int_sequence() {
         let source = r#"
             let root() = { 1 2 3 }
         "#;
@@ -1731,7 +1760,7 @@ mod tests {
             .type_of(root.body)
             .expect("Expected inferred body type")
             .clone();
-        assert_eq!(root_ty, Type::array(Type::int()));
+        assert_eq!(root_ty, Type::one_or_more(Type::int()));
     }
 
     #[test]
@@ -1755,8 +1784,8 @@ mod tests {
     #[test]
     fn test_content_binding_conflict_reports_diagnostic() {
         let source = r#"
-            let <Collect content items: object[] />: object[] = { items }
-            let root(): object[] = { <Collect items={null}><div /></Collect> }
+            let <Collect content items: object+ />: object+ = { items }
+            let root(): object+ = { <Collect items={<span />}><div /></Collect> }
         "#;
         let result = check_str(source, "content-binding-conflict.nx");
 
@@ -1771,10 +1800,10 @@ mod tests {
     }
 
     #[test]
-    fn test_content_scalar_coerces_to_list_annotation() {
+    fn test_content_scalar_satisfies_sequence_annotation() {
         let source = r#"
-            let <Collect content items: object[] />: object[] = { items }
-            let root(): object[] = { <Collect><div /></Collect> }
+            let <Collect content items: object+ />: object+ = { items }
+            let root(): object+ = { <Collect><div /></Collect> }
         "#;
         let result = check_str(source, "content-coerce.nx");
 
@@ -1801,10 +1830,10 @@ mod tests {
     }
 
     #[test]
-    fn test_scalar_value_child_coerces_to_list_content_annotation() {
+    fn test_scalar_value_child_satisfies_sequence_content_annotation() {
         let source = r#"
-            let <Collect content items: int[] />: int[] = { items }
-            let root(): int[] = { <Collect>{1}</Collect> }
+            let <Collect content items: int+ />: int+ = { items }
+            let root(): int+ = { <Collect>{1}</Collect> }
         "#;
         let result = check_str(source, "content-scalar-value-list.nx");
 
@@ -1818,8 +1847,8 @@ mod tests {
     #[test]
     fn test_missing_content_property_reports_diagnostic() {
         let source = r#"
-            let <Collect items: object[] />: object[] = { items }
-            let root(): object[] = { <Collect><div /></Collect> }
+            let <Collect items: object+ />: object+ = { items }
+            let root(): object+ = { <Collect><div /></Collect> }
         "#;
         let result = check_str(source, "missing-content-property.nx");
 

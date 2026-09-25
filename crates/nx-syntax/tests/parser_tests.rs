@@ -887,26 +887,26 @@ fn test_parse_type_annotations() {
 }
 
 #[test]
-fn test_parse_composed_type_suffixes() {
+fn test_parse_occurrence_type_suffixes() {
     let source = r#"
-        type Matrix = string[][]
-        type MaybeNames = string[]?
-        type NameHistory = string?[]
+        type Maybe = string?
+        type Names = string+
+        type Tags = string*
 
         type SearchState = {
-          queries: string[]?
-          aliases: string?[]
-          grouped: string[][]
+          queries?: string+
+          aliases: string*
+          grouped?: string
         }
 
-        let loadUsers(users: User[][]): User[][] = {users}
-        let maybeUsers(): User[]? = null
+        let loadUsers(users: User+): User* = {users}
+        let maybeUsers(): User? = {}
     "#;
-    let result = parse_str(source, "composed-types.nx");
+    let result = parse_str(source, "occurrence-types.nx");
 
     assert!(
         result.is_ok(),
-        "Composed postfix type suffixes should parse. Errors: {:?}",
+        "Occurrence suffixes should parse. Errors: {:?}",
         result.errors
     );
     let root = result.root().expect("Should have syntax tree root");
@@ -914,45 +914,42 @@ fn test_parse_composed_type_suffixes() {
     let aliases: Vec<_> = root
         .children()
         .filter(|c| c.kind() == SyntaxKind::TYPE_DEFINITION)
+        .map(|alias| {
+            alias
+                .child_by_field("type")
+                .expect("alias type")
+                .text()
+                .to_string()
+        })
         .collect();
-    assert_eq!(
-        aliases[0]
-            .child_by_field("type")
-            .expect("Matrix alias should have type")
-            .text(),
-        "string[][]"
-    );
-    assert_eq!(
-        aliases[1]
-            .child_by_field("type")
-            .expect("MaybeNames alias should have type")
-            .text(),
-        "string[]?"
-    );
-    assert_eq!(
-        aliases[2]
-            .child_by_field("type")
-            .expect("NameHistory alias should have type")
-            .text(),
-        "string?[]"
-    );
+    assert_eq!(aliases, vec!["string?", "string+", "string*"]);
 
     let record = root
         .children()
         .find(|c| c.kind() == SyntaxKind::RECORD_DEFINITION)
         .expect("Should find record definition");
-    let field_types: Vec<_> = record
+    let fields: Vec<_> = record
         .children()
         .filter(|c| c.kind() == SyntaxKind::PROPERTY_DEFINITION)
         .map(|field| {
-            field
-                .child_by_field("type")
-                .expect("Field should have type")
-                .text()
-                .to_string()
+            (
+                field.child_by_field("optional").is_some(),
+                field
+                    .child_by_field("type")
+                    .expect("Field should have type")
+                    .text()
+                    .to_string(),
+            )
         })
         .collect();
-    assert_eq!(field_types, vec!["string[]?", "string?[]", "string[][]"]);
+    assert_eq!(
+        fields,
+        vec![
+            (true, "string+".to_string()),
+            (false, "string*".to_string()),
+            (true, "string".to_string()),
+        ]
+    );
 
     let maybe_users = root
         .children()
@@ -965,7 +962,7 @@ fn test_parse_composed_type_suffixes() {
     let return_type = maybe_users
         .child_by_field("return_type")
         .expect("Function should capture return type annotation");
-    assert_eq!(return_type.text(), "User[]?");
+    assert_eq!(return_type.text(), "User?");
 }
 
 #[test]
@@ -1246,7 +1243,7 @@ fn test_parse_text_and_embed_braced_lists() {
 
 #[test]
 fn test_parse_empty_braced_value_at_annotated_let() {
-    let source = "let value:string[] = {}";
+    let source = "let value:string* = {}";
     let result = parse_str(source, "test.nx");
 
     assert!(
@@ -1345,9 +1342,9 @@ fn test_parse_empty_for_body_is_still_rejected() {
 #[test]
 fn test_parse_empty_braced_value_in_value_position_control_flow() {
     let sources = [
-        "let pick(c:boolean): string[] = {if c {\"a\" \"b\"} else {}}",
-        "let pick(c:boolean): string[] = {if { c => {} else => {\"a\" \"b\"} }}",
-        "let xs:string[][] = {for y in ys {}}",
+        "let pick(c:boolean): string* = {if c {\"a\" \"b\"} else {}}",
+        "let pick(c:boolean): string* = {if { c => {} else => {\"a\" \"b\"} }}",
+        "let xs:string* = {for y in ys {}}",
     ];
 
     for source in sources {
@@ -1364,6 +1361,56 @@ fn test_parse_empty_braced_value_in_value_position_control_flow() {
             "Expected no recovery node in: {source}"
         );
     }
+}
+
+/// `{}` is an item and an operand, not only a whole braced value. Each form below failed with
+/// "Unclosed brace" or a syntax error before the empty brace was admitted as an item.
+#[test]
+fn test_parse_empty_braced_value_as_an_item_and_operand() {
+    // (source, braced values in total, of which empty)
+    for (source, total, empty) in [
+        ("let xs:string* = { \"a\" {} }", 2, 1),
+        ("let e = {none == {}}", 2, 1),
+        ("let f(c:boolean): int? = { if c { {} } else { 1 } }", 4, 1),
+        ("let g:int* = { {} {} }", 3, 2),
+        ("let h:int? = { {} }", 2, 1),
+        ("let k(x:int?): int = { {} ?? x ?? 1 }", 2, 1),
+        ("let r = <div>{ {} }</div>", 2, 1),
+        ("let items = {{} b}", 2, 1),
+        ("let v = <Box items={{}} />", 2, 1),
+    ] {
+        let result = parse_str(source, "test.nx");
+        assert!(result.is_ok(), "{source}: {:?}", result.errors);
+
+        let root = result.root().expect("Should have root node");
+        assert!(
+            !contains_missing(&root),
+            "Expected no recovery node in: {source}"
+        );
+
+        let mut braces = Vec::new();
+        collect_kinds(&root, SyntaxKind::VALUES_BRACED_EXPRESSION, &mut braces);
+        assert_eq!(braces.len(), total, "{source}");
+        let empties = braces
+            .iter()
+            .filter(|brace| brace.children().next().is_none())
+            .count();
+        assert_eq!(empties, empty, "{source}");
+    }
+}
+
+/// Where a full braced value is admitted anyway (a match arm body, a call argument), `{}` stays
+/// that braced value rather than a braced value wrapped in an item.
+#[test]
+fn test_parse_empty_braced_value_prefers_the_full_brace_where_both_fit() {
+    let source = "let p(x:int?): int? = { if x is { {} => {} else => 1 } }";
+    let result = parse_str(source, "test.nx");
+    assert!(result.is_ok(), "{:?}", result.errors);
+
+    let root = result.root().expect("Should have root node");
+    let arm = find_first_kind(&root, SyntaxKind::VALUE_IF_MATCH_ARM).expect("Expected an arm");
+    let body = arm.child_by_field("body").expect("Expected an arm body");
+    assert_eq!(body.kind(), SyntaxKind::VALUES_BRACED_EXPRESSION);
 }
 
 #[test]
@@ -1448,13 +1495,14 @@ fn test_parse_braced_values_in_every_argument_position() {
 
 #[test]
 fn test_parse_braced_value_is_still_not_a_list_item() {
-    // Admitting the brace as an argument deliberately does not admit it as a list item: a list is
-    // still not an item of a list, at any arity.
+    // Admitting the brace as an argument deliberately does not admit it as a list item: a
+    // non-empty list is still not an item of a list, at any arity. The empty brace `{}` is the
+    // exception (`test_parse_empty_braced_value_as_an_item_and_operand`): a sequence is flat, so
+    // `{{} b}` is `{b}` and `{{}}` is `{}`.
     for source in [
         "let items = {{\"a\"} b}",
-        "let items = {{} b}",
         "let v = <Box items={{\"a\" \"b\"}} />",
-        "let v = <Box items={{}} />",
+        "let v = <Box items={{\"a\"}} />",
     ] {
         let result = parse_str(source, "test.nx");
         assert!(
@@ -2861,9 +2909,13 @@ fn test_literal_expressions() {
     let result = parse_str("let test = false", "test.nx");
     assert!(result.is_ok());
 
-    // Null literal
+    // `null` is not a literal; it parses as a contextual name and is rejected by name resolution.
     let result = parse_str("let test = null", "test.nx");
     assert!(result.is_ok());
+    assert!(
+        contains_kind(&result.root().unwrap(), SyntaxKind::CONTEXTUAL_NAME),
+        "`null` should be an ordinary name"
+    );
 
     // String literal
     let result = parse_str("let test = \"hello\"", "test.nx");
@@ -3180,17 +3232,251 @@ fn test_unary_expressions() {
 }
 
 #[test]
-fn test_conditional_ternary_expressions() {
-    // Simple ternary
-    let result = parse_str("let <Test x: int /> = {x > 0 ? 1 : -1}", "test.nx");
-    assert!(result.is_ok());
+fn test_conditional_operator_is_rejected_with_the_if_form() {
+    for (source, replacement) in [
+        // An unbraced `let` value needs the `if` in braces.
+        (
+            "let ratio = ready ? 1 : 2",
+            "`{ if ready { 1 } else { 2 } }`",
+        ),
+        (
+            "let <Test x: int /> = {x > 0 ? x * 2 : -1}",
+            "if x > 0 { x * 2 } else { -1 }",
+        ),
+        (
+            "let c = {\"a?\" + (b ? \"x\" : \"y\")}",
+            "if b { \"x\" } else { \"y\" }",
+        ),
+        // The alternative stops at the next call argument.
+        ("let r = { g(c ? 1 : 2, 3) }", "`if c { 1 } else { 2 }`"),
+        // A trailing comment is not part of the alternative.
+        ("let r = { c ? 1 : 2 // pick\n}", "`if c { 1 } else { 2 }`"),
+        (
+            "let r = { c ? 1 : 2 /* pick */ }",
+            "`if c { 1 } else { 2 }`",
+        ),
+        // A colon inside a string literal does not end the consequent early.
+        (
+            "let r = { c ? \"a:b\" : \"c\" }",
+            "`if c { \"a:b\" } else { \"c\" }`",
+        ),
+        // A later item in the sequence follows the conditional rather than joining the `else`.
+        (
+            "let r = { c ? \"a\" : \"b\" \"z\" }",
+            "`if c { \"a\" } else { \"b\" }`",
+        ),
+        (
+            "let r = { c ? 1 : 2 undefinedAfter }",
+            "`if c { 1 } else { 2 }`",
+        ),
+        // One operand per line.
+        (
+            "let r = {\n  c\n    ? 1\n    : 2\n}",
+            "`if c { 1 } else { 2 }`",
+        ),
+    ] {
+        let result = parse_str(source, "test.nx");
+        let codes: Vec<_> = result.errors.iter().filter_map(|d| d.code()).collect();
+        assert_eq!(
+            codes,
+            vec!["removed-conditional-operator"],
+            "{source}: {:?}",
+            result.errors
+        );
+        let note = result.errors[0].note().unwrap_or_default();
+        assert!(note.contains(replacement), "{source}: {note}");
+    }
+}
 
-    // Nested ternary
-    let result = parse_str(
-        "let <Test x: int /> = {x > 0 ? x * 2 : x < 0 ? x * -2 : 0}",
-        "test.nx",
+/// The `?` of a parameter's optional mark is not a ternary's `?`, so an unrelated error after it
+/// is reported as itself rather than hidden behind a conditional-operator rewrite.
+#[test]
+fn test_optional_mark_is_not_taken_for_a_conditional_operator() {
+    for source in [
+        "let f(a?:int): int = { a ) : 3 }",
+        "component <C a?:int /> = { <div x={a ) : 3} /> }",
+    ] {
+        let result = parse_str(source, "test.nx");
+        assert!(result.has_errors(), "{source}");
+        assert!(
+            result
+                .errors
+                .iter()
+                .all(|d| d.code() != Some("removed-conditional-operator")),
+            "{source}: {:?}",
+            result.errors
+        );
+    }
+}
+
+/// A rewrite that would not parse — an alternative cut at a line break, or an operand that was
+/// already malformed — is not suggested, so the note names the `if` form without filling it in.
+#[test]
+fn test_conditional_operator_rewrite_that_does_not_parse_gets_no_filled_in_fix_it() {
+    for source in [
+        "let r = {\n  c ? 1 : n +\n    2\n}",
+        "let f(a?:int): boolean = { a? ) : 3 }",
+        "let f(a?:int): boolean = { a? + ) : 3 }",
+    ] {
+        let result = parse_str(source, "test.nx");
+        let diagnostic = result
+            .errors
+            .iter()
+            .find(|d| d.code() == Some("removed-conditional-operator"))
+            .unwrap_or_else(|| panic!("{source}: {:?}", result.errors));
+        let note = diagnostic.note().unwrap_or_default();
+        assert!(
+            note.contains("`if condition { a } else { b }`"),
+            "{source}: {note}"
+        );
+    }
+}
+
+/// A nested conditional cannot be split at one `?` and one `:` into the author's operands, so the
+/// note names the `if` form without filling it in rather than suggesting a wrong rewrite.
+#[test]
+fn test_nested_conditional_operator_gets_no_filled_in_fix_it() {
+    // A parenthesized inner conditional (`c ? (d ? 1 : 2) : 3`) is its own error region and gets
+    // its own, correct fix-it, so only the unparenthesized chain is pinned here.
+    for source in ["let r = { c ? 1 : d ? 2 : 3 }", "let r = c ? 1 : d ? 2 : 3"] {
+        let result = parse_str(source, "test.nx");
+        let conditional: Vec<_> = result
+            .errors
+            .iter()
+            .filter(|d| d.code() == Some("removed-conditional-operator"))
+            .collect();
+        assert!(!conditional.is_empty(), "{source}: {:?}", result.errors);
+        for diagnostic in conditional {
+            let note = diagnostic.note().unwrap_or_default();
+            assert!(
+                note.contains("`if condition { a } else { b }`"),
+                "{source}: {note}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_presence_operators_parse() {
+    let source = r#"
+        let has(b:Book): boolean = { b.author? }
+        let name(b:Book): string? = { b.author?.name }
+        let byline(b:Book): string = { "Author: " + b.author?.name ?? "Anonymous" }
+        let pick(c:int, a?:int, b?:int): int = { a ?? b ?? c }
+        let f(a?:int, b?:int): boolean = { !a? || (a? && b?) }
+        let g(s?:State): string = { if s is { {} => "none" idle => "idle" else => "busy" } }
+    "#;
+    let result = parse_str(source, "test.nx");
+    assert!(result.is_ok(), "{:?}", result.errors);
+    let root = result.root().unwrap();
+    assert_eq!(count_kind(&root, SyntaxKind::EXISTS_EXPRESSION), 4);
+    assert_eq!(count_kind(&root, SyntaxKind::OPTIONAL_MEMBER_EXPRESSION), 2);
+    let mut binaries = Vec::new();
+    collect_kinds(&root, SyntaxKind::BINARY_EXPRESSION, &mut binaries);
+    let coalesces = binaries
+        .iter()
+        .filter(|binary| {
+            binary
+                .child_by_field("operator")
+                .is_some_and(|operator| operator.text() == "??")
+        })
+        .count();
+    assert_eq!(coalesces, 3);
+
+    // `??` associates to the right: `a ?? (b ?? c)`.
+    let pick = root
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::FUNCTION_DEFINITION)
+        .nth(3)
+        .unwrap();
+    let outer = find_first_kind(&pick, SyntaxKind::BINARY_EXPRESSION).unwrap();
+    let right = outer.child_by_field("right").unwrap();
+    assert!(
+        contains_kind(&right, SyntaxKind::BINARY_EXPRESSION),
+        "{}",
+        outer.text()
     );
-    assert!(result.is_ok());
+
+    // `??` binds above `+`: `"Author: " + (b.author?.name ?? "Anonymous")`.
+    let byline = root
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::FUNCTION_DEFINITION)
+        .nth(2)
+        .unwrap();
+    let outer = find_first_kind(&byline, SyntaxKind::BINARY_EXPRESSION).unwrap();
+    assert_eq!(
+        outer.child_by_field("operator").unwrap().text(),
+        "+",
+        "{}",
+        outer.text()
+    );
+}
+
+/// The value of the body brace of `let r = { ... }`, below its `value_expression` wrapper.
+fn body_expression(source: &str) -> String {
+    let result = parse_str(source, "test.nx");
+    assert!(result.is_ok(), "{source}: {:?}", result.errors);
+    let root = result.root().unwrap();
+    let braced = find_first_kind(&root, SyntaxKind::VALUES_BRACED_EXPRESSION).unwrap();
+    let shape = shape_of(&braced.children().next().unwrap());
+    shape
+}
+
+/// A bracketed outline of an expression's operator structure: `(?? a (* b c))`.
+fn shape_of(node: &nx_syntax::SyntaxNode) -> String {
+    match node.kind() {
+        SyntaxKind::VALUE_EXPRESSION | SyntaxKind::VALUE_LIST_ITEM_EXPRESSION => {
+            shape_of(&node.children().next().unwrap())
+        }
+        SyntaxKind::BINARY_EXPRESSION => format!(
+            "({} {} {})",
+            node.child_by_field("operator").unwrap().text(),
+            shape_of(&node.child_by_field("left").unwrap()),
+            shape_of(&node.child_by_field("right").unwrap())
+        ),
+        SyntaxKind::PREFIX_UNARY_EXPRESSION => format!(
+            "({} {})",
+            node.child_by_field("operator").unwrap().text(),
+            shape_of(&node.child_by_field("operand").unwrap())
+        ),
+        SyntaxKind::EXISTS_EXPRESSION => {
+            format!("(? {})", shape_of(&node.child_by_field("operand").unwrap()))
+        }
+        SyntaxKind::MEMBER_ACCESS_EXPRESSION => format!(
+            "(. {} {})",
+            shape_of(&node.child_by_field("target").unwrap()),
+            node.child_by_field("member").unwrap().text()
+        ),
+        SyntaxKind::OPTIONAL_MEMBER_EXPRESSION => format!(
+            "(?. {} {})",
+            shape_of(&node.child_by_field("target").unwrap()),
+            node.child_by_field("member").unwrap().text()
+        ),
+        _ => node.text().to_string(),
+    }
+}
+
+/// Pins how the presence operators group against their neighbours: `??` above the binary
+/// arithmetic operators and below the prefix ones, postfix `?` above everything else.
+#[test]
+fn test_presence_operator_precedence_shapes() {
+    for (source, expected) in [
+        ("let r = { a ?? b * c }", "(* (?? a b) c)"),
+        ("let r = { a * b ?? c }", "(* a (?? b c))"),
+        ("let r = { a + b ?? c }", "(+ a (?? b c))"),
+        ("let r = { a ?? b == c }", "(== (?? a b) c)"),
+        ("let r = { !a? }", "(! (? a))"),
+        ("let r = { a? && b? }", "(&& (? a) (? b))"),
+        ("let r = { -x ?? 1 }", "(?? (- x) 1)"),
+        ("let r = { !x ?? y }", "(?? (! x) y)"),
+        ("let r = { a?.b?.c }", "(?. (?. a b) c)"),
+        ("let r = { a.b? }", "(? (. a b))"),
+        // A space splits `?.`: `x? .m` is a member access on the presence test, which the
+        // checker then rejects, rather than an optional member access.
+        ("let r = { x? .m }", "(. (? x) m)"),
+    ] {
+        assert_eq!(body_expression(source), expected, "{source}");
+    }
 }
 
 #[test]
@@ -3350,14 +3636,14 @@ fn test_complex_expression_combinations() {
 
     // Mixed operators with precedence
     let result = parse_str(
-        "let <Test x: int y: int /> = {x + y * 2 > 10 && x < 100 ? x * y : x + y}",
+        "let <Test x: int y: int /> = {if x + y * 2 > 10 && x < 100 { x * y } else { x + y }}",
         "test.nx",
     );
     assert!(result.is_ok());
 
-    // Chained method calls with ternary
+    // Chained method calls under an if
     let result = parse_str(
-        "let <Test obj: object x: int /> = {obj.method(x + 1, x * 2).result > 0 ? \"pos\" : \"neg\"}",
+        "let <Test obj: object x: int /> = {if obj.method(x + 1, x * 2).result > 0 { \"pos\" } else { \"neg\" }}",
         "test.nx"
     );
     assert!(result.is_ok());
@@ -3370,7 +3656,7 @@ fn test_property_defaults_with_expressions() {
   product: int = {4 * 5}
   comparison: boolean = {10 > 5}
   logical: boolean = {true && false}
-  ternary: int = {5 > 3 ? 100 : 200}
+  chosen: int = {if 5 > 3 { 100 } else { 200 }}
   nested: int = {(1 + 2) * (3 + 4)}
 /> = {sum + product}"#;
     let result = parse_str(source, "test.nx");
@@ -3517,7 +3803,7 @@ fn test_parse_element_with_empty_body_across_lines() {
 #[test]
 fn test_parse_top_level_element_with_empty_body() {
     // A source file may end in a single element expression, and that element may be empty.
-    let source = "external component <App content Children:Element[]? />\n\n<App>\n</App>";
+    let source = "external component <App content Children?:Element+ />\n\n<App>\n</App>";
     let result = parse_str(source, "test.nx");
 
     assert!(
@@ -3674,14 +3960,14 @@ fn test_parse_record_field_named_type() {
 #[test]
 fn test_parse_leading_component_type_parameter() {
     let props = component_property_definitions(
-        "external component <SkiaLayout extends SkiaControl TItem:type layoutType:string? itemsSource:TItem[]? />",
+        "external component <SkiaLayout extends SkiaControl TItem:type layoutType?:string itemsSource?:TItem+ />",
     );
     assert_eq!(
         props,
         vec![
             ("TItem".to_string(), "type".to_string(), false),
-            ("layoutType".to_string(), "string?".to_string(), true),
-            ("itemsSource".to_string(), "TItem[]?".to_string(), true),
+            ("layoutType".to_string(), "string".to_string(), true),
+            ("itemsSource".to_string(), "TItem+".to_string(), true),
         ],
         "the type parameter should carry the `type` keyword token; the props ordinary type references"
     );
@@ -3691,7 +3977,8 @@ fn test_parse_leading_component_type_parameter() {
 fn test_parse_type_parameter_rejects_suffix() {
     for source in [
         "component <Bad TItem:type? /> = { <Label /> }",
-        "component <Bad TItem:type[] /> = { <Label /> }",
+        "component <Bad TItem:type+ /> = { <Label /> }",
+        "component <Bad TItem?:type /> = { <Label /> }",
     ] {
         let result = parse_str(source, "test.nx");
         assert!(!result.is_ok(), "{source} should fail to parse");
@@ -3712,7 +3999,7 @@ fn type_parameter_errors(source: &str) -> Vec<String> {
 #[test]
 fn test_validate_type_parameter_after_prop_is_rejected() {
     let errors =
-        type_parameter_errors("component <Bad items:object[] TItem:type /> = { <Label /> }");
+        type_parameter_errors("component <Bad items:object+ TItem:type /> = { <Label /> }");
     assert_eq!(
         errors,
         vec!["Type parameter 'TItem' must be declared before every prop".to_string()]
@@ -3747,7 +4034,7 @@ fn test_validate_type_parameter_with_default_is_rejected() {
 
 #[test]
 fn test_validate_type_parameter_named_after_a_primitive_is_rejected() {
-    let errors = type_parameter_errors("external component <List string:type items:string[]? />");
+    let errors = type_parameter_errors("external component <List string:type items?:string+ />");
     assert_eq!(
         errors,
         vec!["Type parameter 'string' cannot take the name of a primitive type".to_string()]
@@ -3756,18 +4043,18 @@ fn test_validate_type_parameter_named_after_a_primitive_is_rejected() {
     // Every primitive name is refused; a declared type's name is not validation's concern.
     for primitive in nx_syntax::PRIMITIVE_TYPE_NAMES {
         let errors = type_parameter_errors(&format!(
-            "external component <List {primitive}:type items:{primitive}[]? />"
+            "external component <List {primitive}:type items?:{primitive}+ />"
         ));
         assert_eq!(errors.len(), 1, "{primitive}: {errors:?}");
     }
     let errors = type_parameter_errors(
-        "type Contact = { name:string }\nexternal component <List Contact:type items:Contact[]? />",
+        "type Contact = { name:string }\nexternal component <List Contact:type items?:Contact+ />",
     );
     assert!(errors.is_empty(), "{errors:?}");
 
     // `Element` is a built-in, refused on the same terms as a primitive.
     let errors =
-        type_parameter_errors("component <List Element:type slot:Element? /> = { <Label /> }");
+        type_parameter_errors("component <List Element:type slot?:Element /> = { <Label /> }");
     assert_eq!(
         errors,
         vec![
@@ -3820,7 +4107,7 @@ fn test_validate_record_type_parameter_is_accepted() {
     for source in [
         "type Range = { T:type start:T end:T endInclusive:boolean }",
         "type Pair = { TKey:type TValue:type key:TKey value:TValue }",
-        "type Page = { T:type items:T[] next:T? render:(<function item:T />: string)? }",
+        "type Page = { T:type items:T+ next?:T render?:<function item:T />: string }",
     ] {
         let errors = type_parameter_errors(source);
         assert!(errors.is_empty(), "for source: {source}: {errors:?}");
@@ -3936,10 +4223,10 @@ fn test_parse_applied_type_as_an_alias_target() {
 fn test_parse_applied_type_under_suffixes() {
     // The suffixes belong to the enclosing `type`, so the applied type itself is unchanged.
     assert_eq!(
-        applied_types("type Schedule = { slots:<Range T=int/>[] override:<Range T=int/>? }"),
+        applied_types("type Schedule = { slots:<Range T=int/>+ override?:<Range T=int/> }"),
         [int_range(), int_range()].concat()
     );
-    let result = parse_str("type S = { both:<Range T=int/>[]? }", "test.nx");
+    let result = parse_str("type S = <Range T=int/>*", "test.nx");
     assert!(result.is_ok(), "{:?}", result.errors);
 }
 
@@ -3963,10 +4250,10 @@ fn test_parse_applied_type_nests() {
 #[test]
 fn test_parse_applied_type_with_a_suffixed_argument() {
     assert_eq!(
-        applied_types("type Ints = { b:<Box T=int[]?/> }"),
+        applied_types("type Ints = { b:<Box T=int+/> }"),
         vec![(
             "Box".to_string(),
-            vec![("T".to_string(), "int[]?".to_string())]
+            vec![("T".to_string(), "int+".to_string())]
         )]
     );
 }
@@ -4044,7 +4331,7 @@ fn test_snapshot_function_types_fixture() {
         "function-types.nx should contain no MISSING nodes"
     );
     assert_eq!(count_kind(&root, SyntaxKind::FUNCTION_TYPE), 11);
-    assert_eq!(count_kind(&root, SyntaxKind::PARENTHESIZED_TYPE), 5);
+    assert_eq!(count_kind(&root, SyntaxKind::PARENTHESIZED_TYPE), 4);
 
     insta::assert_snapshot!(root.raw().to_sexp());
 }
@@ -4120,14 +4407,14 @@ fn test_function_type_second_content_parameter_is_rejected() {
 }
 
 #[test]
-fn test_duplicate_nullable_across_a_parenthesis_is_rejected() {
+fn test_second_occurrence_suffix_across_a_parenthesis_is_rejected() {
     let (result, rendered) =
-        invalid_fixture_diagnostics("invalid/parenthesized-duplicate-nullable.nx");
+        invalid_fixture_diagnostics("invalid/parenthesized-second-occurrence.nx");
     assert!(!result.is_ok());
     let codes: Vec<_> = result.errors.iter().filter_map(|d| d.code()).collect();
-    assert_eq!(codes, vec!["duplicate-nullable-suffix"], "{rendered}");
+    assert_eq!(codes, vec!["second-occurrence-suffix"], "{rendered}");
     assert!(
-        rendered.contains("already nullable at this layer"),
+        rendered.contains("already carries an occurrence"),
         "{rendered}"
     );
     let primary = result.errors[0]
@@ -4136,33 +4423,106 @@ fn test_duplicate_nullable_across_a_parenthesis_is_rejected() {
         .find(|label| label.primary)
         .unwrap();
     let source =
-        fs::read_to_string(fixture_path("invalid/parenthesized-duplicate-nullable.nx")).unwrap();
-    assert_eq!(&source[primary.range], "?");
+        fs::read_to_string(fixture_path("invalid/parenthesized-second-occurrence.nx")).unwrap();
+    assert_eq!(&source[primary.range], "*");
     assert_eq!(
         usize::from(primary.range.start()),
         source.trim_end().len() - 1,
-        "the outer `?` is the one reported"
+        "the outer `*` is the one reported"
     );
 
     // Parentheses add no layer however many of them there are.
     let nested = parse_str("type Twice = ((string?))?", "test.nx");
     assert!(
         !nested.is_ok(),
-        "a nested parenthesis is still the same layer"
+        "a nested parenthesis is still the same chain"
     );
     let nested_codes: Vec<_> = nested.errors.iter().filter_map(|d| d.code()).collect();
     assert_eq!(
         nested_codes,
-        vec!["duplicate-nullable-suffix"],
+        vec!["second-occurrence-suffix"],
         "{:?}",
         nested.errors
     );
+}
 
-    // The inner and outer layers are distinct once `[]` separates them.
-    let result = parse_str("type Fine = (string?)[]?", "test.nx");
-    assert!(result.is_ok(), "{:?}", result.errors);
-    let result = parse_str("type AlsoFine = ((string?)[])?", "test.nx");
-    assert!(result.is_ok(), "{:?}", result.errors);
+#[test]
+fn test_second_occurrence_suffix_is_rejected_wherever_it_is_written() {
+    // One suffix per chain, so the second one is the one reported, wherever the first was.
+    let second = [
+        ("type E = string??", "string??"),
+        ("type F = string?+", "string?+"),
+        ("type G = (string+)*", "(string+)*"),
+        ("type H = <function />: int*?", "int*?"),
+        ("type Deep = ((string+))?", "((string+))?"),
+    ];
+
+    for (source, described) in second {
+        let result = parse_str(source, "test.nx");
+        let codes: Vec<_> = result.errors.iter().filter_map(|d| d.code()).collect();
+        assert_eq!(
+            codes,
+            vec!["second-occurrence-suffix"],
+            "{described} should report one occurrence error: {:?}",
+            result.errors
+        );
+        let primary = result.errors[0]
+            .labels()
+            .iter()
+            .find(|label| label.primary)
+            .expect("the occurrence error should have a primary label");
+        assert_eq!(
+            usize::from(primary.range.start()),
+            source.len() - 1,
+            "the trailing suffix is the one reported in {described}"
+        );
+    }
+
+    // Parentheses add no layer at all, and a function type's result is a chain of its own.
+    for source in [
+        "type Maybe = string?",
+        "type Names = string+",
+        "type Tags = string*",
+        "type Paren = (string)+",
+        "type Loaders = (<function />: string+)+",
+        "type Loader = <function />: string+",
+    ] {
+        let result = parse_str(source, "test.nx");
+        assert!(result.is_ok(), "{source}: {:?}", result.errors);
+    }
+}
+
+#[test]
+fn test_list_suffix_is_rejected_naming_the_occurrence_spellings() {
+    for (source, star, plus) in [
+        ("type Names = string[]", "`string*`", "`string+`"),
+        (
+            "type Rows = <Range T=int/>[]",
+            "`<Range T=int/>*`",
+            "`<Range T=int/>+`",
+        ),
+        ("type Box = { items:Item[] }", "`Item*`", "`Item+`"),
+    ] {
+        let result = parse_str(source, "test.nx");
+        let codes: Vec<_> = result.errors.iter().filter_map(|d| d.code()).collect();
+        assert_eq!(
+            codes,
+            vec!["removed-list-suffix"],
+            "{source}: {:?}",
+            result.errors
+        );
+        let note = result.errors[0].note().unwrap_or_default();
+        assert!(
+            note.contains(star) && note.contains(plus),
+            "{source}: {note}"
+        );
+        let primary = result.errors[0]
+            .labels()
+            .iter()
+            .find(|label| label.primary)
+            .unwrap();
+        assert_eq!(&source[primary.range], "[]", "{source}");
+    }
 }
 
 #[test]
@@ -4187,4 +4547,50 @@ fn test_unclosed_function_type_yields_one_error_node() {
         root.raw().to_sexp()
     );
     assert_eq!(result.errors.len(), 1, "{rendered}");
+}
+
+#[test]
+fn test_validate_optional_property_with_default_quotes_both_forms() {
+    let result = parse_str("type Book = { subtitle?:string = \"none\" }", "test.nx");
+    let codes: Vec<_> = result.errors.iter().filter_map(|d| d.code()).collect();
+    assert_eq!(
+        codes,
+        vec!["optional-property-with-default"],
+        "{:?}",
+        result.errors
+    );
+    assert!(
+        result.errors[0]
+            .message()
+            .contains("write `subtitle:string = \"none\"` or `subtitle?:string`"),
+        "{:?}",
+        result.errors
+    );
+
+    // A function type's parameter and a type parameter reject any default by their own rules,
+    // so an optional one is not reported twice.
+    for (source, code) in [
+        (
+            "type Render = <function Index?:int = 1 />: string",
+            "function-type-default",
+        ),
+        (
+            "component <Bad TItem?:type = object /> = { <Label /> }",
+            "type-parameter-definition",
+        ),
+    ] {
+        let result = parse_str(source, "test.nx");
+        assert!(
+            result
+                .errors
+                .iter()
+                .all(|d| d.code() != Some("optional-property-with-default")),
+            "{source}: {:?}",
+            result.errors
+        );
+        assert!(
+            !result.errors.is_empty(),
+            "{source}: expected the {code} rule to fire"
+        );
+    }
 }

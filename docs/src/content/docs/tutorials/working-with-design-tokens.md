@@ -17,8 +17,8 @@ type <Theme
   primary:ColorToken
   surface:ColorToken
   text:ColorToken
-  space:SpaceToken[]
-  fonts:FontToken[]/>
+  space:SpaceToken+
+  fonts:FontToken+/>
 ```
 
 - Tokens are strongly typed; you can constrain units (`int` for spacing) and required fields.
@@ -32,16 +32,16 @@ let baseTheme: Theme =
     primary=<ColorToken name="primary" value="#5B6EF5"/>
     surface=<ColorToken name="surface" value="#0B0C10"/>
     text=<ColorToken name="text" value="#F2F4F8"/>
-    space={[
-      <SpaceToken name="xs" value=4/>,
-      <SpaceToken name="sm" value=8/>,
-      <SpaceToken name="md" value=12/>,
+    space={
+      <SpaceToken name="xs" value=4/>
+      <SpaceToken name="sm" value=8/>
+      <SpaceToken name="md" value=12/>
       <SpaceToken name="lg" value=16/>
-    ]}
-    fonts={[
-      <FontToken name="body" family="Inter" size=16 weight=400/>,
+    }
+    fonts={
+      <FontToken name="body" family="Inter" size=16 weight=400/>
       <FontToken name="heading" family="Inter" size=24 weight=700/>
-    ]}/>
+    }/>
 ```
 
 ## 3) Consume tokens in components

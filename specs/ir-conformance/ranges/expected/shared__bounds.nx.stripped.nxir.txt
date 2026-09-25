@@ -2,14 +2,14 @@ module shared/bounds.nx fingerprint 9215827138459482051
 links @nx/prelude.nx version "1" fingerprint 16429037828798365428
 entrypoints functions [half closed sameBounds fractional] components []
 
-function half() =
+function half(): @nx/prelude.nx:Range =
   <@nx/prelude.nx:Range end=5 endInclusive=false start=1 />
 
-function closed() =
+function closed(): @nx/prelude.nx:Range =
   <@nx/prelude.nx:Range end=5 endInclusive=true start=1 />
 
-function sameBounds() =
+function sameBounds(): boolean =
   (half() eq closed())
 
-function fractional() =
+function fractional(): @nx/prelude.nx:Range =
   <@nx/prelude.nx:Range end=1.5 endInclusive=false start=0.0 />

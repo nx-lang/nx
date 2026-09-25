@@ -4,7 +4,7 @@ import * as monaco from "monaco-editor";
 import editorWorker from "monaco-editor/editor/editor.worker.js?worker";
 import { NX_LANGUAGE_ID, registerNxLanguage } from "@nx-lang/monaco";
 import type { Diagnostic } from "../compile";
-import { SkiaEditor } from "../drawnui/index";
+import { SkiaEditor } from "drawnui-react/core";
 import { createWorkerLanguageService } from "../language/worker.ts";
 
 // Monaco expects to be told where its workers live; Vite supplies them as module workers.

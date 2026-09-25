@@ -85,7 +85,7 @@ fn value_type(result: &TypeCheckResult, name: &str) -> String {
 fn property_union_of_a_plain_record_lists_its_fields() {
     let result = assert_ok(
         r#"
-        type User = { name:string email:string? }
+        type User = { name:string email?:string }
         let key: User.Property = {User.Property.email}
         "#,
         "property-plain.nx",
@@ -125,7 +125,7 @@ fn property_union_includes_inherited_fields_in_declaration_order() {
         r#"
         abstract type Named = { name:string }
         type User extends Named = { email:string }
-        let keys: User.Property[] = { User.Property.name User.Property.email }
+        let keys: User.Property+ = { User.Property.name User.Property.email }
         "#,
         "property-inherited.nx",
     );
@@ -246,14 +246,14 @@ fn bare_case_name_resolves_at_a_property_typed_site() {
 }
 
 #[test]
-fn bare_case_names_resolve_at_a_list_typed_site() {
+fn bare_case_names_resolve_at_a_sequence_typed_site() {
     assert_ok(
         r#"
         type Contact = { title:string subtitle:string }
-        component <Table columns:Contact.Property[] /> = { <div /> }
+        component <Table columns:Contact.Property+ /> = { <div /> }
         let v = <Table columns=title />
         "#,
-        "property-bare-list.nx",
+        "property-bare-sequence.nx",
     );
 }
 
@@ -286,14 +286,14 @@ fn unknown_case_at_a_property_typed_site_names_the_candidates() {
 fn match_over_a_property_union_is_checked_for_exhaustiveness() {
     assert_ok(
         r#"
-        type User = { name:string email:string? }
+        type User = { name:string email?:string }
         let label(key:User.Property) = {if key is { name => "Name" email => "Email" }}
         "#,
         "property-match.nx",
     );
     assert_message(
         r#"
-        type User = { name:string email:string? }
+        type User = { name:string email?:string }
         let label(key:User.Property) = {if key is { name => "Name" }}
         "#,
         "property-match-partial.nx",
@@ -330,7 +330,7 @@ fn property_unions_of_different_records_are_distinct_types() {
 fn property_union_values_can_be_compared() {
     let result = assert_ok(
         r#"
-        type User = { name:string email:string? }
+        type User = { name:string email?:string }
         let same = {User.Property.name == User.Property.name}
         let other = {User.Property.name == User.Property.email}
         "#,
@@ -347,7 +347,7 @@ fn property_union_values_cannot_be_ordered() {
         assert_error(
             &format!(
                 r#"
-                type User = {{ name:string email:string? }}
+                type User = {{ name:string email?:string }}
                 let ordered = {{User.Property.name {op} User.Property.email}}
                 "#
             ),

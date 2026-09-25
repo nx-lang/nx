@@ -1,4 +1,4 @@
-module main.nx fingerprint 9072530855260268794
+module main.nx fingerprint 13706109451253551705
 entrypoints functions [labels root] components [Node Label Stack Greeting]
 
 component Node abstract external
@@ -11,7 +11,7 @@ component Label external
 component Stack external
   props
     Spacing: int = 4
-    content Children: Node[] required
+    content Children: Node+ required
 
 component Greeting
   props

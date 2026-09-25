@@ -21,12 +21,12 @@ This is a complete module: imports, types, functions, markup, and logic all live
 ```nx
 import { Card, Avatar, Stack } from "./ui"
 
-type <User id:string name:string email:string avatarUrl:string?/>
+type <User id:string name:string email:string avatarUrl?:string/>
 
 let <UserCard user:User tone:string = "neutral"/> =
   <Card tone={tone}>
     <Stack direction="row" gap=12>
-      <Avatar src={if user.avatarUrl { user.avatarUrl } else { "/fallback.png" }}/>
+      <Avatar src={user.avatarUrl ?? "/fallback.png"}/>
       <div>
         <h3>{user.name}</h3>
         <p>{user.email}</p>

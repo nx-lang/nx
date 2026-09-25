@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Colors, RefreshIndicator, SkiaImage, SkiaLabel, SkiaLayer, SkiaRow, SkiaScroll, SkiaShape, SkiaStack, Thickness } from "drawnui-react";
+import { Colors, RefreshIndicator, SkiaImage, SkiaLabel, SkiaLayer, SkiaRow, SkiaScroll, SkiaScrollBar, SkiaShape, SkiaStack, Thickness } from "drawnui-react";
 import { CornerRadius, type SkiaScroll as SkiaScrollCtrl } from "drawnui-react/core";
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
@@ -76,8 +76,9 @@ export function ScrollPage() {
           </SkiaScroll>
         </Card>
 
-        <Card title='ScrollBarsVisibility="Vertical" + ScrollBarThumbColor · default SkiaScrollBar, auto-hides 1 s after scrolling'>
-          <SkiaScroll HeightRequest={200} BackgroundColor="#212529" ScrollBarsVisibility="Vertical" ScrollBarThumbColor="#6EA8FE" ScrollBarTrackColor="#FFFFFF22" IgnoreWrongDirection>
+        <Card title='SkiaScrollBar Tag="ScrollBar" IsDraggable · drag the thumb or press the track, auto-hides 1 s after scrolling · horizontal: ScrollBarsVisibility="Horizontal"'>
+          <SkiaScroll HeightRequest={200} BackgroundColor="#212529" ScrollBarThumbColor="#6EA8FE" ScrollBarTrackColor="#FFFFFF22" IgnoreWrongDirection>
+            <SkiaScrollBar Tag="ScrollBar" IsDraggable Thickness={8} />
             <Rows count={16} prefix="Scrollbar row" />
           </SkiaScroll>
           <SkiaScroll Orientation="Horizontal" HeightRequest={70} BackgroundColor="#212529" ScrollBarsVisibility="Horizontal" ScrollBarThumbColor="#FFC107">

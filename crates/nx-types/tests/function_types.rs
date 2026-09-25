@@ -28,9 +28,9 @@ fn assert_reports(source: &str, needle: &str) -> Vec<String> {
 }
 
 // `DrawnNode` is abstract, so a template body renders the concrete `SkiaLabel`.
-const DRAWN_NODE: &str = "abstract external component <DrawnNode />\nexternal component <SkiaLabel extends DrawnNode Text:string? />\n";
+const DRAWN_NODE: &str = "abstract external component <DrawnNode />\nexternal component <SkiaLabel extends DrawnNode Text?:string />\n";
 const CONTACT: &str = "type Contact = { name:string }\n";
-const SKIA_LAYOUT: &str = "external component <SkiaLayout TItem:type ItemsSource:TItem[]? ItemTemplate:(<function Item:TItem Index:int />: DrawnNode)? />\n";
+const SKIA_LAYOUT: &str = "external component <SkiaLayout TItem:type ItemsSource?:TItem+ ItemTemplate?:<function Item:TItem Index:int />: DrawnNode />\n";
 const CONTACT_ROW: &str = "let <ContactRow Item:Contact Index:int />: DrawnNode = <SkiaLabel />\n";
 
 // ---------------------------------------------------------------------------------------------
@@ -65,24 +65,39 @@ fn an_aliased_function_type_is_the_inline_one() {
 
 #[test]
 fn a_suffix_after_the_result_binds_to_the_result() {
-    // `Maybe` is a non-nullable function returning `string?`: a function returning `string`
-    // satisfies it, and `null` does not.
+    // `Maybe` is exactly one function returning `string?`: a function returning `string`
+    // satisfies it, and the empty value does not.
     assert_clean(
         "type Maybe = <function Count:int />: string?\n\
          let <Count Count:int />: string = \"x\"\n\
          let m: Maybe = {Count}",
     );
     assert_reports(
-        "type Maybe = <function Count:int />: string?\nlet m: Maybe = null",
-        "expects <function Count:int />: string?, found null",
+        "type Maybe = <function Count:int />: string?\nlet m: Maybe = {}",
+        "expects <function Count:int />: string?, found {}",
+    );
+    // `Many` and `Rows` are likewise exactly one function each, returning `string+` and
+    // `DrawnNode*`; a suffix on a parenthesized function type counts functions instead.
+    assert_clean(&format!(
+        "{DRAWN_NODE}type Many = <function />: string+\ntype Rows = <function />: DrawnNode*\n\
+         let <Two />: string+ = {{ \"a\" \"b\" }}\n\
+         let <None />: DrawnNode* = {{}}\n\
+         let many: Many = {{Two}}\n\
+         let rows: Rows = {{None}}\n\
+         let <One />: string = \"x\"\n\
+         let fns: (<function />: string)+ = {{ One One }}"
+    ));
+    assert_reports(
+        "let <One />: string = \"x\"\nlet fns: (<function />: string)+ = {}",
+        "expects (<function />: string)+, found {}",
     );
 }
 
 #[test]
 fn a_content_parameter_is_accepted_once() {
     assert_clean(
-        "type Wrap = <function content Children:object[] />: string\n\
-         let <Box content Children:object[] />: string = \"x\"\n\
+        "type Wrap = <function content Children:object+ />: string\n\
+         let <Box content Children:object+ />: string = \"x\"\n\
          let w: Wrap = {Box}",
     );
 }
@@ -112,10 +127,10 @@ fn a_mismatch_diagnostic_shows_the_function_type() {
 }
 
 #[test]
-fn a_nullable_function_type_is_parenthesized() {
+fn an_optional_function_type_is_parenthesized() {
     assert_reports(
         &format!(
-            "{DRAWN_NODE}component <Section extends DrawnNode Row:(<function />: DrawnNode)? /> = {{ <SkiaLabel /> }}\n\
+            "{DRAWN_NODE}component <Section extends DrawnNode Row?:<function />: DrawnNode /> = {{ <SkiaLabel /> }}\n\
              let s = <Section Row=\"text\" />"
         ),
         "expects (<function />: DrawnNode)?, found string",
@@ -152,6 +167,22 @@ fn a_function_that_needs_a_parameter_the_type_lacks_is_rejected() {
         "'Index', which the function type does not supply",
     );
     assert_eq!(errors.len(), 1, "{errors:?}");
+}
+
+/// Parameters match by name, so an omissible parameter the type does not supply is still refused:
+/// accepting it would let a misspelled name compile and always read its default.
+#[test]
+fn a_function_with_an_extra_omissible_parameter_is_rejected() {
+    for parameter in ["Idx:int = 0", "Idx?:int"] {
+        let errors = assert_reports(
+            &format!(
+                "let <Row Item:object {parameter} />: string = \"x\"\n\
+                 let r: <function Item:object Index:int />: string = {{Row}}"
+            ),
+            "'Idx', which the function type does not supply",
+        );
+        assert_eq!(errors.len(), 1, "{parameter}: {errors:?}");
+    }
 }
 
 #[test]
@@ -207,7 +238,7 @@ fn parameter_order_does_not_matter() {
 fn a_function_is_bound_to_a_function_typed_property() {
     assert_clean(&format!(
         "{DRAWN_NODE}{CONTACT}{SKIA_LAYOUT}{CONTACT_ROW}\
-         let contacts:Contact[] = {{}}\n\
+         let contacts:Contact* = {{}}\n\
          let v = <SkiaLayout TItem=Contact ItemsSource={{contacts}} ItemTemplate={{ContactRow}} />"
     ));
 }
@@ -217,7 +248,7 @@ fn a_function_is_forwarded_through_an_authored_component() {
     assert_clean(&format!(
         "{DRAWN_NODE}{CONTACT}type RowTemplate = <function Item:Contact Index:int />: DrawnNode\n\
          {SKIA_LAYOUT}\
-         component <Section extends DrawnNode Items:Contact[] Row:RowTemplate /> = {{ <SkiaLayout TItem=Contact ItemsSource={{Items}} ItemTemplate={{Row}} /> }}\n\
+         component <Section extends DrawnNode Items?:Contact+ Row:RowTemplate /> = {{ <SkiaLayout TItem=Contact ItemsSource={{Items}} ItemTemplate={{Row}} /> }}\n\
          {CONTACT_ROW}\
          let s = <Section Items={{}} Row={{ContactRow}} />"
     ));
@@ -322,7 +353,7 @@ fn a_template_is_checked_at_the_substituted_item_type() {
     let shared = format!(
         "{DRAWN_NODE}{CONTACT}type Post = {{ title:string }}\n{SKIA_LAYOUT}{CONTACT_ROW}\
          let <PostRow Item:Post Index:int />: DrawnNode = <SkiaLabel />\n\
-         let contacts:Contact[] = {{}}\n"
+         let contacts:Contact* = {{}}\n"
     );
     assert_clean(&format!(
         "{shared}let ok = <SkiaLayout TItem=Contact ItemsSource={{contacts}} ItemTemplate={{ContactRow}} />"
@@ -339,7 +370,7 @@ fn a_template_is_checked_at_the_substituted_item_type() {
 fn a_template_bound_without_a_type_argument_names_the_parameter() {
     let errors = assert_reports(
         &format!(
-            "{DRAWN_NODE}{CONTACT}external component <SkiaLayout TItem:type ItemTemplate:(<function Item:TItem />: DrawnNode)? />\n\
+            "{DRAWN_NODE}{CONTACT}external component <SkiaLayout TItem:type ItemTemplate?:<function Item:TItem />: DrawnNode />\n\
              let <ContactRow Item:Contact />: DrawnNode = <SkiaLabel />\n\
              let v = <SkiaLayout ItemTemplate={{ContactRow}} />"
         ),
@@ -352,7 +383,7 @@ fn a_template_bound_without_a_type_argument_names_the_parameter() {
 fn a_forwarded_parameter_reaches_a_function_typed_prop() {
     assert_clean(&format!(
         "{DRAWN_NODE}{SKIA_LAYOUT}\
-         component <Section extends DrawnNode TItem:type Items:TItem[] Row:<function Item:TItem Index:int />: DrawnNode /> = {{ <SkiaLayout TItem=TItem ItemsSource={{Items}} ItemTemplate={{Row}} /> }}"
+         component <Section extends DrawnNode TItem:type Items:TItem+ Row:<function Item:TItem Index:int />: DrawnNode /> = {{ <SkiaLayout TItem=TItem ItemsSource={{Items}} ItemTemplate={{Row}} /> }}"
     ));
 }
 

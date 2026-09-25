@@ -137,7 +137,7 @@ let Hive5Survey =
     ]
 
 
-    let myOptions:Option[] = {
+    let myOptions:Option+ = {
       <Option "Yes, borrowed"/>
       <Option "Yes, lent"/>
       if allowBoth {
@@ -189,8 +189,6 @@ let Hive5Survey =
       }
 
       if allowBoth {<Option "Both"/>} else {<Option "Neither"/>}
-
-      allowBoth ? {<Option "Both"/>} : {<Option "Neither"/>}
 
       if allowBoth { <Option "Both"/> }
       else         {<Option "Neither"/>}

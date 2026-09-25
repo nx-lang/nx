@@ -24,6 +24,19 @@ fn typescript_runtime() -> String {
   | readonly NxValue[]
   | { readonly [key: string]: NxValue };
 
+/**
+ * The empty value: the empty sequence, which a host may also write as `null`. A `?` type is
+ * `T | NxEmpty`, and generated code reads it through `nxExists`, `nxStep`, `nxCoalesce` and
+ * `nxItems`, which treat both spellings as the one empty.
+ */
+export type NxEmpty = null | readonly never[];
+
+/**
+ * The empty value as generated code writes it: an empty array, which is both the empty `T?` and
+ * the empty `T*`.
+ */
+export const nxEmpty: readonly never[] = [];
+
 export type NxDiagnostic = {
   readonly code?: string;
   readonly message: string;
@@ -39,8 +52,8 @@ export type NxSchema =
   | "float32"
   | "number"
   | "string"
-  | { readonly array: NxSchema }
-  | { readonly nullable: NxSchema }
+  | { readonly array: NxSchema; readonly nonEmpty?: boolean }
+  | { readonly optional: NxSchema }
   | { readonly enum: readonly string[] }
   | NxRecordSchema
   | { readonly union: readonly NxSchema[] };
@@ -49,6 +62,8 @@ export type NxFieldSchema = {
   readonly name: string;
   readonly schema: NxSchema;
   readonly required: boolean;
+  /** Whether the field carries the `?` mark, so that an empty value is an omitted key. */
+  readonly optional?: boolean;
   readonly hasDefault?: boolean;
   readonly defaultValue?: NxValue;
   readonly defaultFactory?: NxFieldDefault;
@@ -92,8 +107,98 @@ export function nxArraySchema(element: NxSchema): NxSchema {
   return { array: element };
 }
 
-export function nxNullableSchema(inner: NxSchema): NxSchema {
-  return { nullable: inner };
+export function nxNonEmptyArraySchema(element: NxSchema): NxSchema {
+  return { array: element, nonEmpty: true };
+}
+
+export function nxOptionalSchema(item: NxSchema): NxSchema {
+  return { optional: item };
+}
+
+/**
+ * The empty value is the empty sequence. A host may also send `null`, and a record carries no key
+ * for an empty optional field, so a missing key reads as `undefined`; all three are the one empty.
+ */
+export function nxIsEmpty(value: unknown): boolean {
+  return value == null || (Array.isArray(value) && value.length === 0);
+}
+
+/** `x?`: true when the value holds at least one item. */
+export function nxExists(value: unknown): boolean {
+  return !nxIsEmpty(value);
+}
+
+/** The item type of a value that may be empty or a sequence: `R` for `R | NxEmpty` or `readonly R[]`. */
+export type NxItem<T> = Exclude<T, NxEmpty | undefined> extends infer R
+  ? R extends readonly (infer I)[]
+    ? I
+    : R
+  : never;
+
+/** The type of member `K` of the item a value holds, or `NxValue` where the item type is not a record. */
+export type NxMember<T, K extends string> = NxItem<T> extends infer R
+  ? R extends { readonly [P in K]?: infer V }
+    ? V
+    : NxValue
+  : never;
+
+/** `x?.m`: the empty value when the receiver is empty, its member otherwise. */
+export function nxStep<T, K extends string>(value: T, member: K): NxMember<T, K> | readonly never[] {
+  if (nxIsEmpty(value)) {
+    return [];
+  }
+  const receiver = (Array.isArray(value) ? value[0] : value) as Record<string, NxMember<T, K>>;
+  return receiver[member] ?? [];
+}
+
+/** `x ?? y`: the left operand when it holds an item, else the fallback, run only then. */
+export function nxCoalesce<T, U>(value: T, fallback: () => U): Exclude<T, NxEmpty | undefined> | U {
+  return nxIsEmpty(value) ? fallback() : (value as Exclude<T, NxEmpty | undefined>);
+}
+
+/**
+ * A `for` over an optional (or exactly-one) value: the body's value for the one item, unchanged,
+ * or the empty value. The product of `?` with the body's occurrence is the body's own, so an item
+ * stays an item rather than becoming a one-element array.
+ */
+export function nxForOne<T, U>(
+  value: T | NxEmpty | undefined,
+  body: (item: T, index: number) => U,
+): U | readonly never[] {
+  if (nxIsEmpty(value)) {
+    return [];
+  }
+  return body((Array.isArray(value) ? value[0] : value) as T, 0);
+}
+
+/** The items a `for` iterates: a sequence's items, an optional's one item, or none. */
+export function nxItems<T>(value: T | readonly T[] | NxEmpty | undefined): readonly T[] {
+  if (nxIsEmpty(value)) {
+    return [];
+  }
+  return Array.isArray(value) ? (value as readonly T[]) : [value as T];
+}
+
+/**
+ * The entry for an optional field: the key with its value when the value holds an item, and no
+ * key when it is empty, so that an empty optional field is an omitted key.
+ */
+export function nxOptional<K extends string, T>(
+  name: K,
+  value: T | NxEmpty,
+  many = false,
+): { readonly [P in K]?: T } {
+  if (nxIsEmpty(value)) {
+    return {};
+  }
+  // A `?` field holds its item as itself; a `?:T+` field keeps its sequence.
+  const item = !many && Array.isArray(value) && value.length === 1 ? value[0] : value;
+  return { [name]: item } as { readonly [P in K]?: T };
+}
+
+/** The value of a present clearable update-record field: `null` for a cleared one. */
+export function nxCleared<T>(value: T): Exclude<T, NxEmpty> | null {
+  return nxIsEmpty(value) ? null : (value as Exclude<T, NxEmpty>);
 }
 
 export function nxEnumSchema(members: readonly string[]): NxSchema {
@@ -269,22 +374,38 @@ export function nxMissingField(field: string, operation: string): never {
 }
 
 export function nxNormalizeValue(value: NxValue, schema: NxSchema, path: string): any {
-  if (typeof schema === "object" && "nullable" in schema) {
-    if (value === null) {
-      return null;
+  // A `?` site: a missing key, `null` and an empty array are the empty value, a one-element
+  // array is its element, and a longer array is refused.
+  if (typeof schema === "object" && "optional" in schema) {
+    if (nxIsEmpty(value)) {
+      return [];
     }
-    return nxNormalizeValue(value, schema.nullable, path);
+    if (Array.isArray(value)) {
+      if (value.length !== 1) {
+        throw new NxRuntimeError([
+          {
+            code: "invalid-field",
+            message: `${path} expected at most one value, got ${value.length}`,
+          },
+        ]);
+      }
+      return nxNormalizeValue(value[0]!, schema.optional, path);
+    }
+    return nxNormalizeValue(value, schema.optional, path);
   }
+  // A `+` or `*` site: an item is a sequence of one, `null` is the empty sequence, and a `+`
+  // site refuses the empty sequence.
   if (typeof schema === "object" && "array" in schema) {
-    if (!Array.isArray(value)) {
+    const items = value === null ? [] : Array.isArray(value) ? value : [value];
+    if (schema.nonEmpty === true && items.length === 0) {
       throw new NxRuntimeError([
         {
           code: "invalid-array",
-          message: `${path} expected an array`,
+          message: `${path} expected at least one value`,
         },
       ]);
     }
-    return value.map((element, index) => nxNormalizeValue(element, schema.array, `${path}[${index}]`));
+    return items.map((element, index) => nxNormalizeValue(element, schema.array, `${path}[${index}]`));
   }
   if (typeof schema === "object" && "enum" in schema) {
     if (typeof value === "string" && schema.enum.includes(value)) {
@@ -392,12 +513,26 @@ function nxNormalizeRecordInput(
     } else if (field.defaultFactory != null) {
       output[field.name] = nxNormalizeValue(field.defaultFactory(output), field.schema, `${path}.${field.name}`);
     } else if (field.hasDefault === true) {
-      output[field.name] = field.defaultValue ?? null;
+      output[field.name] = field.defaultValue ?? [];
     } else if (field.required) {
       nxMissingField(`${path}.${field.name}`, path);
     }
+    // An empty optional field is an omitted key, a `p?:T+` one included, whose read type is a
+    // sequence.
+    if (
+      Object.prototype.hasOwnProperty.call(output, field.name) &&
+      nxIsEmpty(output[field.name]) &&
+      (field.optional === true || !isSequenceSchema(field.schema))
+    ) {
+      delete output[field.name];
+    }
   }
   return output;
+}
+
+/** Whether a schema is a `+` or `*` site, where the empty value is an empty array, not an omitted key. */
+function isSequenceSchema(schema: NxSchema): boolean {
+  return typeof schema === "object" && "array" in schema;
 }
 
 function nxRequireRecordType(input: Record<string, NxValue>, path: string): string {
@@ -427,9 +562,18 @@ export function nxRuntimeError(message: string): never {
   throw new NxRuntimeError([{ code: "runtime-error", message }]);
 }
 
+/** `apply`: a present field replaces the record's, and a present empty one clears it, leaving no key. */
 export function nxApplyUpdate<T>(record: T, update: unknown): T {
   const { $type: _update, ...fields } = update as Record<string, NxValue>;
-  return { ...(record as Record<string, NxValue>), ...fields } as T;
+  const output: Record<string, NxValue> = { ...(record as Record<string, NxValue>) };
+  for (const [key, value] of Object.entries(fields)) {
+    if (nxIsEmpty(value)) {
+      delete output[key];
+    } else {
+      output[key] = value;
+    }
+  }
+  return output as T;
 }
 
 export function nxMergeUpdates<T>(first: T, second: T): T {
@@ -437,19 +581,20 @@ export function nxMergeUpdates<T>(first: T, second: T): T {
   return { ...(first as Record<string, NxValue>), ...later } as T;
 }
 
+/** `diff`: the fields that differ, each with its value from `after`, a cleared one as `null`. */
 export function nxDiffRecords(before: unknown, after: unknown): any {
   const beforeRecord = before as Record<string, NxValue>;
   const afterRecord = after as Record<string, NxValue>;
   const output: Record<string, NxValue> = { $type: `${String(beforeRecord.$type)}.Update` };
-  // A field either record leaves out reads as `null`, so a field only one of them carries
-  // still compares.
+  // A field either record leaves out reads as the empty value, so a field only one of them
+  // carries still compares.
   for (const key of new Set([...Object.keys(beforeRecord), ...Object.keys(afterRecord)])) {
     if (key === "$type") {
       continue;
     }
-    const next = afterRecord[key] ?? null;
-    if (!nxValuesEqual(beforeRecord[key] ?? null, next)) {
-      output[key] = next;
+    const next = afterRecord[key] ?? [];
+    if (!nxValuesEqual(beforeRecord[key] ?? [], next)) {
+      output[key] = nxCleared(next);
     }
   }
   return output;
@@ -548,14 +693,26 @@ export function nxChangedFields(update: unknown, order: readonly string[]): any[
   return keys.sort((left, right) => position(left) - position(right));
 }
 
-function nxValuesEqual(left: NxValue, right: NxValue): boolean {
-  if (Array.isArray(left) || Array.isArray(right)) {
+/**
+ * `==`: numbers, strings and booleans by value, sequences by their items in order, records by
+ * their fields. Every value compares as a sequence, so an item equals a sequence of one holding
+ * an equal item, and every spelling of the empty value equals only the empty value.
+ */
+export function nxValuesEqual(left: unknown, right: unknown): boolean {
+  if (nxIsEmpty(left) || nxIsEmpty(right)) {
+    return nxIsEmpty(left) && nxIsEmpty(right);
+  }
+  if (Array.isArray(left) && Array.isArray(right)) {
     return (
-      Array.isArray(left) &&
-      Array.isArray(right) &&
       left.length === right.length &&
       left.every((item, index) => nxValuesEqual(item, right[index] ?? null))
     );
+  }
+  if (Array.isArray(left)) {
+    return left.length === 1 && nxValuesEqual(left[0], right);
+  }
+  if (Array.isArray(right)) {
+    return right.length === 1 && nxValuesEqual(left, right[0]);
   }
   if (left !== null && typeof left === "object") {
     if (right === null || typeof right !== "object") {
@@ -595,8 +752,78 @@ export function nxArraySchema(element) {
   return { array: element };
 }
 
-export function nxNullableSchema(inner) {
-  return { nullable: inner };
+export function nxNonEmptyArraySchema(element) {
+  return { array: element, nonEmpty: true };
+}
+
+export function nxOptionalSchema(item) {
+  return { optional: item };
+}
+
+/**
+ * The empty value is the empty sequence. A host may also send `null`, and a record carries no key
+ * for an empty optional field, so a missing key reads as `undefined`; all three are the one empty.
+ */
+export function nxIsEmpty(value) {
+  return value == null || (Array.isArray(value) && value.length === 0);
+}
+
+/** The empty value as generated code writes it. */
+export const nxEmpty = [];
+
+/** `x?`: true when the value holds at least one item. */
+export function nxExists(value) {
+  return !nxIsEmpty(value);
+}
+
+/** `x?.m`: the empty value when the receiver is empty, its member otherwise. */
+export function nxStep(value, member) {
+  if (nxIsEmpty(value)) {
+    return [];
+  }
+  const receiver = Array.isArray(value) ? value[0] : value;
+  return receiver[member] ?? [];
+}
+
+/** `x ?? y`: the left operand when it holds an item, else the fallback, run only then. */
+export function nxCoalesce(value, fallback) {
+  return nxIsEmpty(value) ? fallback() : value;
+}
+
+/**
+ * A `for` over an optional (or exactly-one) value: the body's value for the one item, unchanged,
+ * or the empty value.
+ */
+export function nxForOne(value, body) {
+  if (nxIsEmpty(value)) {
+    return [];
+  }
+  return body(Array.isArray(value) ? value[0] : value, 0);
+}
+
+/** The items a `for` iterates: a sequence's items, an optional's one item, or none. */
+export function nxItems(value) {
+  if (nxIsEmpty(value)) {
+    return [];
+  }
+  return Array.isArray(value) ? value : [value];
+}
+
+/**
+ * The entry for an optional field: the key with its value when the value holds an item, and no
+ * key when it is empty, so that an empty optional field is an omitted key.
+ */
+export function nxOptional(name, value, many = false) {
+  if (nxIsEmpty(value)) {
+    return {};
+  }
+  // A `?` field holds its item as itself; a `?:T+` field keeps its sequence.
+  return { [name]: !many && Array.isArray(value) && value.length === 1 ? value[0] : value };
+}
+
+/** The value of a present update-record field: `null` for a cleared one. */
+export function nxCleared(value) {
+  return nxIsEmpty(value) ? null : value;
 }
 
 export function nxEnumSchema(members) {
@@ -741,22 +968,38 @@ export function nxMissingField(field, operation) {
 }
 
 export function nxNormalizeValue(value, schema, path) {
-  if (typeof schema === "object" && Object.prototype.hasOwnProperty.call(schema, "nullable")) {
-    if (value === null) {
-      return null;
+  // A `?` site: a missing key, `null` and an empty array are the empty value, a one-element
+  // array is its element, and a longer array is refused.
+  if (typeof schema === "object" && Object.prototype.hasOwnProperty.call(schema, "optional")) {
+    if (nxIsEmpty(value)) {
+      return [];
     }
-    return nxNormalizeValue(value, schema.nullable, path);
+    if (Array.isArray(value)) {
+      if (value.length !== 1) {
+        throw new NxRuntimeError([
+          {
+            code: "invalid-field",
+            message: `${path} expected at most one value, got ${value.length}`,
+          },
+        ]);
+      }
+      return nxNormalizeValue(value[0], schema.optional, path);
+    }
+    return nxNormalizeValue(value, schema.optional, path);
   }
+  // A `+` or `*` site: an item is a sequence of one, `null` is the empty sequence, and a `+`
+  // site refuses the empty sequence.
   if (typeof schema === "object" && Object.prototype.hasOwnProperty.call(schema, "array")) {
-    if (!Array.isArray(value)) {
+    const items = value === null ? [] : Array.isArray(value) ? value : [value];
+    if (schema.nonEmpty === true && items.length === 0) {
       throw new NxRuntimeError([
         {
           code: "invalid-array",
-          message: `${path} expected an array`,
+          message: `${path} expected at least one value`,
         },
       ]);
     }
-    return value.map((element, index) => nxNormalizeValue(element, schema.array, `${path}[${index}]`));
+    return items.map((element, index) => nxNormalizeValue(element, schema.array, `${path}[${index}]`));
   }
   if (typeof schema === "object" && Object.prototype.hasOwnProperty.call(schema, "enum")) {
     if (typeof value === "string" && schema.enum.includes(value)) {
@@ -860,12 +1103,26 @@ function nxNormalizeRecordInput(input, schema, path) {
     } else if (field.defaultFactory != null) {
       output[field.name] = nxNormalizeValue(field.defaultFactory(output), field.schema, `${path}.${field.name}`);
     } else if (field.hasDefault === true) {
-      output[field.name] = field.defaultValue ?? null;
+      output[field.name] = field.defaultValue ?? [];
     } else if (field.required) {
       nxMissingField(`${path}.${field.name}`, path);
     }
+    // An empty optional field is an omitted key, a `p?:T+` one included, whose read type is a
+    // sequence.
+    if (
+      Object.prototype.hasOwnProperty.call(output, field.name) &&
+      nxIsEmpty(output[field.name]) &&
+      (field.optional === true || !isSequenceSchema(field.schema))
+    ) {
+      delete output[field.name];
+    }
   }
   return output;
+}
+
+/** Whether a schema is a `+` or `*` site, where the empty value is an empty array, not an omitted key. */
+function isSequenceSchema(schema) {
+  return typeof schema === "object" && Object.prototype.hasOwnProperty.call(schema, "array");
 }
 
 function nxRequireRecordType(input, path) {
@@ -895,9 +1152,18 @@ export function nxRuntimeError(message) {
   throw new NxRuntimeError([{ code: "runtime-error", message }]);
 }
 
+/** `apply`: a present field replaces the record's, and a present empty one clears it, leaving no key. */
 export function nxApplyUpdate(record, update) {
   const { $type: _update, ...fields } = update;
-  return { ...record, ...fields };
+  const output = { ...record };
+  for (const [key, value] of Object.entries(fields)) {
+    if (nxIsEmpty(value)) {
+      delete output[key];
+    } else {
+      output[key] = value;
+    }
+  }
+  return output;
 }
 
 export function nxMergeUpdates(first, second) {
@@ -905,17 +1171,18 @@ export function nxMergeUpdates(first, second) {
   return { ...first, ...later };
 }
 
+/** `diff`: the fields that differ, each with its value from `after`, a cleared one as `null`. */
 export function nxDiffRecords(before, after) {
   const output = { $type: `${String(before.$type)}.Update` };
-  // A field either record leaves out reads as `null`, so a field only one of them carries
-  // still compares.
+  // A field either record leaves out reads as the empty value, so a field only one of them
+  // carries still compares.
   for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
     if (key === "$type") {
       continue;
     }
-    const next = after[key] ?? null;
-    if (!nxValuesEqual(before[key] ?? null, next)) {
-      output[key] = next;
+    const next = after[key] ?? [];
+    if (!nxValuesEqual(before[key] ?? [], next)) {
+      output[key] = nxCleared(next);
     }
   }
   return output;
@@ -1006,14 +1273,26 @@ export function nxChangedFields(update, order) {
   return keys.sort((left, right) => position(left) - position(right));
 }
 
-function nxValuesEqual(left, right) {
-  if (Array.isArray(left) || Array.isArray(right)) {
+/**
+ * `==`: numbers, strings and booleans by value, sequences by their items in order, records by
+ * their fields. Every value compares as a sequence, so an item equals a sequence of one holding
+ * an equal item, and every spelling of the empty value equals only the empty value.
+ */
+export function nxValuesEqual(left, right) {
+  if (nxIsEmpty(left) || nxIsEmpty(right)) {
+    return nxIsEmpty(left) && nxIsEmpty(right);
+  }
+  if (Array.isArray(left) && Array.isArray(right)) {
     return (
-      Array.isArray(left) &&
-      Array.isArray(right) &&
       left.length === right.length &&
       left.every((item, index) => nxValuesEqual(item, right[index] ?? null))
     );
+  }
+  if (Array.isArray(left)) {
+    return left.length === 1 && nxValuesEqual(left[0], right);
+  }
+  if (Array.isArray(right)) {
+    return right.length === 1 && nxValuesEqual(left, right[0]);
   }
   if (left !== null && typeof left === "object") {
     if (right === null || typeof right !== "object") {

@@ -28,22 +28,29 @@ control hierarchy so that inherited properties are declared once.
 - **AND** the property SHALL appear in the evaluated output
 
 ### Requirement: Catalog is derived from DrawnUI sources rather than hand-maintained
-The catalog SHALL be generated from the vendored DrawnUI TypeScript sources by resolving each
-control's public property surface through the TypeScript type system, and SHALL be regenerable on
-demand so that a DrawnUI sync is followed by a catalog refresh rather than manual editing.
+The catalog SHALL be generated from the `drawnui-react` package version the site pins exactly, by
+resolving each renderable tag's public property surface through the package's TypeScript
+declarations, and SHALL be regenerable on demand so that moving the pin is followed by a catalog
+refresh rather than manual editing. The generated metadata SHALL record the package version the
+catalog was generated from.
 
 #### Scenario: Accessor-defined properties are captured
 - **WHEN** a DrawnUI control exposes a property through a getter and setter pair rather than a field
 - **THEN** the generated catalog SHALL declare that property
 
 #### Scenario: Regeneration is reproducible
-- **WHEN** the catalog is generated twice from the same DrawnUI sources
+- **WHEN** the catalog is generated twice from the same package version
 - **THEN** both runs SHALL produce identical catalog output
 
 #### Scenario: Generated catalog is committed
 - **WHEN** a contributor checks out the repository without running the generator
 - **THEN** the generated catalog SHALL already be present
 - **AND** building and running the application SHALL NOT require regenerating it
+
+#### Scenario: A stale catalog is detected
+- **WHEN** the pinned `drawnui-react` version differs from the version the committed catalog records
+- **THEN** the site's tests SHALL fail with a message naming both versions and the command that
+  regenerates the catalog
 
 ### Requirement: Catalog excludes members that cannot be authored
 The catalog SHALL exclude DrawnUI members that are not author-settable inputs: engine-internal and
@@ -79,7 +86,10 @@ nor the cell factory of a templated control, such as transforms that return a va
 ### Requirement: DrawnUI types map onto NX types by documented rules
 The catalog SHALL map each DrawnUI property type onto an NX type by a fixed, documented set of
 rules, so that an evaluated NX value carries enough information for a renderer to reconstruct the
-value DrawnUI expects.
+value DrawnUI expects. Optionality SHALL be carried by the property name, as `optional-properties`
+defines: an author-settable DrawnUI property `x: T` or `x?: T` SHALL become `x?: T`, and an array
+property `x: T[]` or `x?: T[]` SHALL become `x?: T+`, since an empty TypeScript array is absence to
+DrawnUI and `{}` is absence to NX. The catalog SHALL NOT spell `?` or `*` in a property's type slot.
 
 #### Scenario: String-literal unions become NX unions
 - **WHEN** a DrawnUI property's type is a union of string literals
@@ -102,11 +112,18 @@ value DrawnUI expects.
 - **THEN** the catalog SHALL declare it as a string
 - **AND** the catalog SHALL record that a discriminated union is the intended eventual model
 
+#### Scenario: Optional and array-typed properties carry the mark on the name
+- **WHEN** DrawnUI exposes `MaxLines: number` and `Shadows: SkiaShadow[]` as author-settable
+  properties
+- **THEN** the catalog SHALL declare `MaxLines?: float64` and `Shadows?: SkiaShadow+`
+- **AND** an author who leaves either unset, or writes `Shadows={}`, SHALL bind the empty value
+
 #### Scenario: Container children are typed by the control hierarchy
 - **WHEN** a DrawnUI control accepts child controls
-- **THEN** the catalog SHALL declare a content property typed as a sequence of the abstract control
-  base
-- **AND** an author SHALL be able to nest any catalog control inside it
+- **THEN** the catalog SHALL declare a content property `content Children?: DrawnNode+`, one or more
+  of the abstract control base, optional on the name
+- **AND** an author SHALL be able to nest any catalog control inside it, and a lone child SHALL
+  bind a one-item sequence
 
 ### Requirement: Catalog declares DrawnUI events as emits
 The catalog SHALL declare every DrawnUI event — an optional function-typed member whose return type
@@ -165,8 +182,8 @@ the fiddle's compile pipeline never fails because of the catalog itself.
 
 ### Requirement: Catalog divergence from DrawnUI is recorded
 Where the catalog deliberately differs from DrawnUI — because a DrawnUI type has no NX equivalent,
-because an event's parameter was dropped, or because the vendored DrawnUI source was edited to suit
-NX — the divergence SHALL be recorded in the sample app's documentation.
+or because an event's parameter was dropped — the divergence SHALL be recorded in the site's
+documentation.
 
 #### Scenario: Simplified property types are documented
 - **WHEN** a DrawnUI property's type is narrowed or simplified in the catalog
@@ -176,33 +193,39 @@ NX — the divergence SHALL be recorded in the sample app's documentation.
 - **WHEN** an event's parameter is dropped from its emit's payload
 - **THEN** the documentation SHALL name the event and the parameter and state why
 
-#### Scenario: Edits to vendored DrawnUI are documented
-- **WHEN** the vendored DrawnUI source is edited rather than copied verbatim
-- **THEN** the documentation SHALL record what was changed and why
+#### Scenario: Behavior the package lacks waits on upstream
+- **WHEN** NX would need DrawnUI to behave differently from the published package the site pins
+- **THEN** the site SHALL NOT patch or vendor the package's code
+- **AND** the documentation SHALL record the divergence and the upstream change it waits on
 
 ### Requirement: Catalog declares templated controls
 For a DrawnUI control that declares both an items collection `ItemsSource: readonly unknown[]`
 and a cell factory `ItemTemplate: () => SkiaControl`, the catalog SHALL declare a type parameter
-`TItem`, the property `ItemsSource: TItem[]?`, and the property
-`ItemTemplate: (<function Item:TItem Index:int />: DrawnNode)?` on the component for the class
-that declares them, so that an author binds a collection and an element function and DrawnUI
-realizes and recycles cells. The generated metadata SHALL record, for every renderable control
-that carries `ItemTemplate`, the parameter names the template is called with, in order, so a
-renderer can bind the item and its index. `ItemsSource` and `ItemTemplate` SHALL NOT appear in
-the recorded omissions. The naming of the template's parameters — `Item` for what DrawnUI sets
-as the cell's binding context and `Index` for its index in the collection — SHALL be recorded as
-a divergence.
+`TItem`, the property `ItemsSource?: TItem+`, and the property
+`ItemTemplate?: <function Item:TItem Index:int />: DrawnNode` — an optional function-typed
+property, marked on the name and needing no parentheses — on the component for the class that
+declares them, so that an author binds a collection and an element function and DrawnUI realizes
+and recycles cells. The generated metadata SHALL record, for every renderable control that carries
+`ItemTemplate`, the parameter names the template is called with, in order, so a renderer can bind
+the item and its index. `ItemsSource` and `ItemTemplate` SHALL NOT appear in the recorded
+omissions. The naming of the template's parameters — `Item` for what DrawnUI sets as the cell's
+binding context and `Index` for its index in the collection — SHALL be recorded as a divergence.
 
 #### Scenario: SkiaLayout is templated
-- **WHEN** the catalog is generated from the vendored DrawnUI sources
-- **THEN** `SkiaLayout` SHALL declare `TItem:type`, `ItemsSource:TItem[]?` and
-  `ItemTemplate:(<function Item:TItem Index:int />: DrawnNode)?` on the class that declares them
-- **AND** `<SkiaLayout TItem=Contact ItemsSource={contacts} ItemTemplate={ContactRow} RecyclingTemplate=Enabled />` SHALL compile when `ContactRow` is `let <ContactRow Item:Contact Index:int /> = ...`
+- **WHEN** the catalog is generated from the pinned `drawnui-react` package
+- **THEN** `SkiaLayout` SHALL declare `TItem:type`, `ItemsSource?:TItem+` and
+  `ItemTemplate?:<function Item:TItem Index:int />: DrawnNode` on the class that declares them
+- **AND** `<SkiaLayout TItem=Contact ItemsSource={contacts} ItemTemplate={ContactRow} RecyclingTemplate=Enabled />` SHALL compile when `ContactRow` is `let <ContactRow Item:Contact Index:int /> = ...` and `contacts` is a `Contact+`
 
 #### Scenario: A template of the wrong item type is rejected
 - **WHEN** an author binds `TItem=Contact` and an `ItemTemplate` whose `Item` parameter is another
   type
 - **THEN** compilation SHALL fail with a diagnostic showing both function types
+
+#### Scenario: An empty collection is absence
+- **WHEN** an author binds `ItemsSource={}` or leaves `ItemsSource` unset
+- **THEN** compilation SHALL succeed
+- **AND** the control SHALL be created without an `ItemsSource`, so DrawnUI draws no cells
 
 #### Scenario: Metadata names the template parameters
 - **WHEN** the catalog metadata is generated

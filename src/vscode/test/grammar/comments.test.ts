@@ -36,7 +36,7 @@ describe('NX comments', function () {
     },
     {
       label: 'a declaration signature',
-      lines: ['export external component <Text', '  maxLines: int?   // >= 1 / null; true means unbounded', '/>'],
+      lines: ['export external component <Text', '  maxLines?: int   // >= 1 / null; true means unbounded', '/>'],
       find: 'maxLines'
     },
     {

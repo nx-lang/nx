@@ -67,7 +67,7 @@ fn case(union: &str, case: &str) -> Value {
 }
 
 const USER: &str = r#"
-type User = { name:string email:string? age:int? }
+type User = { name:string email?:string age?:int }
 "#;
 
 // ============================================================================
@@ -79,19 +79,13 @@ fn apply_replaces_present_fields_and_keeps_the_rest() {
     let runtime = Runtime::new(&format!(
         r#"{USER}
         let u = <User name="Ada" email="ada@example.com" age=30 />
-        let v() = {{apply(u, <User.Update email={{null}} />)}}
+        let v() = {{apply(u, <User.Update email={{}} />)}}
         "#
     ));
+    // A cleared optional field is removed from the record rather than stored as empty.
     assert_eq!(
         runtime.call("v"),
-        record(
-            "User",
-            &[
-                ("name", string("Ada")),
-                ("email", Value::Null),
-                ("age", Value::Int(30)),
-            ]
-        )
+        record("User", &[("name", string("Ada")), ("age", Value::Int(30))])
     );
 }
 
@@ -117,14 +111,14 @@ fn apply_with_an_empty_update_returns_an_equal_record() {
 fn merge_lets_the_later_update_win_and_keeps_absence() {
     let runtime = Runtime::new(&format!(
         r#"{USER}
-        let m() = {{merge(<User.Update name="Ada" email="x@y" />, <User.Update email={{null}} />)}}
+        let m() = {{merge(<User.Update name="Ada" email="x@y" />, <User.Update email={{}} />)}}
         "#
     ));
     assert_eq!(
         runtime.call("m"),
         record(
             "User.Update",
-            &[("name", string("Ada")), ("email", Value::Null)]
+            &[("name", string("Ada")), ("email", Value::empty())]
         )
     );
 }
@@ -135,7 +129,7 @@ fn applying_a_merged_update_equals_applying_both_in_turn() {
         r#"{USER}
         let u = <User name="Ada" email="x@y" />
         let a = <User.Update name="Bo" />
-        let b = <User.Update email={{null}} age=1 />
+        let b = <User.Update email={{}} age=1 />
         let merged() = {{apply(u, merge(a, b))}}
         let stepped() = {{apply(apply(u, a), b)}}
         "#
@@ -148,16 +142,19 @@ fn applying_a_merged_update_equals_applying_both_in_turn() {
 // ============================================================================
 
 #[test]
-fn diff_lists_only_differing_fields_with_a_present_null() {
+fn diff_lists_only_differing_fields_with_a_present_empty_value() {
     let runtime = Runtime::new(&format!(
         r#"{USER}
-        let d() = {{diff(<User name="Ada" email="x@y" />, <User name="Ada" email={{null}} />)}}
+        let d() = {{diff(<User name="Ada" email="x@y" />, <User name="Ada" email={{}} />)}}
+        let same() = {{diff(<User name="Ada" />, <User name="Ada" email={{}} />)}}
         "#
     ));
     assert_eq!(
         runtime.call("d"),
-        record("User.Update", &[("email", Value::Null)])
+        record("User.Update", &[("email", Value::empty())])
     );
+    // An unstored optional field reads as empty on both sides, so it is not a difference.
+    assert_eq!(runtime.call("same"), record("User.Update", &[]));
 }
 
 #[test]
@@ -176,7 +173,7 @@ fn diff_compares_nested_records_and_lists_structurally_and_apply_round_trips() {
     let runtime = Runtime::new(
         r#"
         type Address = { city:string }
-        type User = { name:string tags:string[] home:Address }
+        type User = { name:string tags:string+ home:Address }
         let a = <User name="Ada" tags={ "x" "y" } home=<Address city="Paris" /> />
         let same() = {diff(a, <User name="Ada" tags={ "x" "y" } home=<Address city="Paris" /> />)}
         let b = <User name="Ada" tags={ "x" } home=<Address city="Rome" /> />
@@ -206,7 +203,7 @@ fn diff_compares_nested_records_and_lists_structurally_and_apply_round_trips() {
 fn changed_lists_present_fields_in_declaration_order() {
     let runtime = Runtime::new(&format!(
         r#"{USER}
-        let keys() = {{changed(<User.Update age={{null}} name="Ada" />)}}
+        let keys() = {{changed(<User.Update age={{}} name="Ada" />)}}
         let none() = {{changed(<User.Update />)}}
         "#
     ));
@@ -285,7 +282,7 @@ fn a_bare_case_at_a_property_typed_site_evaluates_as_the_qualified_form() {
 fn a_match_over_a_property_union_selects_the_arm() {
     let runtime = Runtime::new(
         r#"
-        type User = { name:string email:string? }
+        type User = { name:string email?:string }
         let label(key:User.Property) = {if key is { name => "Name" email => "Email" }}
         let e() = {label(User.Property.email)}
         "#,

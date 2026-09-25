@@ -74,6 +74,7 @@ fn test_factorial_recursion() {
     let func = Function {
         name: Name::new("factorial"),
         visibility: nx_hir::Visibility::Export,
+        form: nx_hir::FunctionForm::Paren,
         params,
         return_type: None,
         body: if_expr,
@@ -180,6 +181,7 @@ fn test_fibonacci_recursion() {
     let func = Function {
         name: Name::new("fib"),
         visibility: nx_hir::Visibility::Export,
+        form: nx_hir::FunctionForm::Paren,
         params,
         return_type: None,
         body: if_expr,
@@ -242,6 +244,7 @@ fn test_recursion_depth_limit() {
     let func = Function {
         name: Name::new("infinite"),
         visibility: nx_hir::Visibility::Export,
+        form: nx_hir::FunctionForm::Paren,
         params,
         return_type: None,
         body: recursive_call,
@@ -321,6 +324,7 @@ fn test_deep_recursion_within_limit() {
     let func = Function {
         name: Name::new("countdown"),
         visibility: nx_hir::Visibility::Export,
+        form: nx_hir::FunctionForm::Paren,
         params,
         return_type: None,
         body: if_expr,

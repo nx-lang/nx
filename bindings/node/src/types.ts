@@ -14,15 +14,24 @@ export type NxOutputFormat = "messagePack" | "json";
 export type NxSeverity = "error" | "warning" | "info" | "hint";
 
 /**
- * JSON-compatible value returned by NX JSON evaluation.
+ * JSON-compatible value returned by NX JSON evaluation, in NX's canonical encoding.
+ *
+ * NX has no `null` value. The empty value (`{}` in NX source, a `?` or `*` occurrence that holds
+ * nothing) encodes as `[]` outside a record, and an empty optional record field is an omitted key. A
+ * `+` or `*` value is an array; a `?` value that holds an item is the item itself.
  */
-export type NxJsonValue =
-  | null
-  | boolean
-  | number
-  | string
-  | readonly NxJsonValue[]
-  | { readonly [key: string]: NxJsonValue };
+export type NxJsonValue = boolean | number | string | readonly NxJsonValue[] | NxJsonRecord;
+
+/**
+ * A record in NX's canonical JSON encoding: its `$type` and the fields it stores.
+ *
+ * An ordinary record never stores an empty field, so its keys are all present values. An update
+ * record (a `$type` ending in `.Update`) is the one place `null` appears: a key present with `null`
+ * means that field is cleared, while an absent key means it is unchanged.
+ */
+export interface NxJsonRecord {
+  readonly [key: string]: NxJsonValue | null;
+}
 
 /**
  * Source module submitted as part of an in-memory NX workspace.

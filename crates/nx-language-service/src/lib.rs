@@ -40,7 +40,6 @@ const KEYWORD_COMPLETIONS: &[&str] = &[
     "match",
     "true",
     "false",
-    "null",
 ];
 
 const PRIMITIVE_TYPE_COMPLETIONS: &[&str] = &nx_syntax::PRIMITIVE_TYPE_NAMES;
@@ -435,6 +434,7 @@ impl WorkspaceSnapshot {
                 Some(hover::fenced(hover::property(
                     Some(tag),
                     &declared.name,
+                    declared.optional,
                     &declared.display_type,
                 )))
             }
@@ -527,7 +527,14 @@ impl WorkspaceSnapshot {
                 .join(", ");
             let properties = inherited
                 .iter()
-                .map(|property| format!("{}:{}", property.name, property.display_type))
+                .map(|property| {
+                    format!(
+                        "{}{}:{}",
+                        property.name,
+                        hover::optional_mark(property.optional),
+                        property.display_type
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join("\n");
             content.push_str(&format!(
@@ -563,9 +570,11 @@ impl WorkspaceSnapshot {
         }
 
         // The receiver's type is what declares the member, and naming it is what tells
-        // `user.name` from any other `name`.
+        // `user.name` from any other `name`. Through `x?.m` the receiver is `T?`, and `T` is
+        // still what declares `m`.
         let qualifier = match expr {
-            nx_hir::ast::Expr::Member { base, .. } => analysis
+            nx_hir::ast::Expr::Member { base, .. }
+            | nx_hir::ast::Expr::OptionalMember { base, .. } => analysis
                 .type_env()
                 .get_expr_type(*base)
                 .filter(|base_ty| !is_unresolved_type(base_ty))
@@ -573,9 +582,12 @@ impl WorkspaceSnapshot {
             _ => None,
         };
 
+        // The type is the access's own — `string?` for a read of `subtitle?:string` — so there is
+        // no mark to spell on the name.
         Some(hover::fenced(hover::property(
             qualifier.as_deref(),
             member,
+            false,
             &ty.to_string(),
         )))
     }
@@ -857,14 +869,7 @@ impl WorkspaceSnapshot {
 
         let mut declarations = WorkspaceDeclarations::default();
         for module in modules {
-            let identity = module.file_name.clone();
-            let source = self
-                .documents
-                .iter()
-                .find(|document| document.identity.as_str() == identity)
-                .map(|document| document.source.clone())
-                .unwrap_or_else(|| Arc::from(""));
-            declarations.index_module(module, &source);
+            declarations.index_module(module);
         }
 
         // A workspace module's import of a library binds names whose origin is a module of that
@@ -880,12 +885,7 @@ impl WorkspaceSnapshot {
                 if declarations.artifacts.contains_key(&module.file_name) {
                     continue;
                 }
-                let source = library
-                    .sources
-                    .get(&module.file_name)
-                    .cloned()
-                    .unwrap_or_else(|| Arc::from(""));
-                declarations.index_module(module.clone(), &source);
+                declarations.index_module(module.clone());
             }
         }
 
@@ -1199,12 +1199,14 @@ type DeclarationOrigin = (String, LocalDefinitionId);
 ///
 /// <para>The two spellings of the type are both needed and neither derives from the other here.
 /// `base_type` is what a namespace lookup takes — the declaring module's name for the type, with
-/// nullability and arity stripped, so `Fit`, `Fit?`, and `Fit[]` all reach the `Fit` declaration.
+/// its occurrence suffix stripped, so `Fit`, `Fit?`, and `Fit+` all reach the `Fit` declaration.
 /// `display_type` is what a reader is shown, where that stripping would be a lie.</para>
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PropertyDeclaration {
     /// The name the property is supplied under.
     name: String,
+    /// Whether the property carries the `?` mark (`subtitle?:string`), so it may be omitted.
+    optional: bool,
     /// The base name of the declared type, resolved in the declaring module's namespace.
     base_type: String,
     /// The declared type as it is written.
@@ -1245,7 +1247,7 @@ fn local_declaration_hover(
                 .params
                 .iter()
                 .find(|param| param.name.as_str() == name)?;
-            hover::parameter(name, &type_ref_display(&param.ty))
+            hover::parameter(name, param.optional, &type_ref_display(&param.ty))
         }
         // A component declares properties rather than parameters, and is written at the same
         // position an element-style function's are.
@@ -1254,7 +1256,12 @@ fn local_declaration_hover(
                 .props
                 .iter()
                 .find(|property| property.name.as_str() == name)?;
-            hover::property(Some(owner), name, &type_ref_display(&property.ty))
+            hover::property(
+                Some(owner),
+                name,
+                property.optional,
+                &type_ref_display(&property.ty),
+            )
         }
         // A type parameter is a type, not a value, so it renders the same way whichever kind of
         // declaration declares it.
@@ -1277,7 +1284,12 @@ fn local_declaration_hover(
                 .properties
                 .iter()
                 .find(|field| field.name.as_str() == name)?;
-            hover::property(Some(owner), name, &type_ref_display(&field.ty))
+            hover::property(
+                Some(owner),
+                name,
+                field.optional,
+                &type_ref_display(&field.ty),
+            )
         }
         (positions::LocalDeclarationKind::UnionCase, Item::Union(union_def)) => {
             union_def
@@ -1297,6 +1309,7 @@ fn local_declaration_hover(
             hover::property(
                 Some(&format!("{}.{}", owner, case)),
                 name,
+                field.optional,
                 &type_ref_display(&field.ty),
             )
         }
@@ -1471,7 +1484,7 @@ impl WorkspaceDeclarations {
 
     /// Records one analyzed module: what it can see, its type namespace, its artifact, and a
     /// `Declaration` for each of its items, read from `source`.
-    fn index_module(&mut self, module: ModuleArtifact, source: &str) {
+    fn index_module(&mut self, module: ModuleArtifact) {
         let identity = module.file_name.clone();
         let origin_of = |binding: &PreparedBinding| {
             (
@@ -1521,7 +1534,7 @@ impl WorkspaceDeclarations {
         for (item_index, item) in lowered.items().iter().enumerate() {
             let origin = (identity.clone(), LocalDefinitionId::new(item_index as u32));
             self.by_origin
-                .insert(origin.clone(), declaration_from_item(item, source, origin));
+                .insert(origin.clone(), declaration_from_item(item, origin));
         }
     }
 }
@@ -1800,7 +1813,7 @@ fn hir_document_symbols(document: &DocumentSnapshot) -> Vec<DocumentSymbol> {
                 document.identity.as_str().to_string(),
                 LocalDefinitionId::new(item_index as u32),
             );
-            let declaration = declaration_from_item(item, document.source(), origin);
+            let declaration = declaration_from_item(item, origin);
             let range = item_span(item);
             DocumentSymbol {
                 name: declaration.name,
@@ -1816,16 +1829,16 @@ fn hir_document_symbols(document: &DocumentSnapshot) -> Vec<DocumentSymbol> {
 ///
 /// <para>`?` and `<error>` are the two the checker spells as failures, but not the only two it
 /// produces where it has nothing. An unsolved variable renders as `T0` and a bare
-/// `ContextualName` renders as the name itself, which reads as a type of that name; `null` infers
-/// as `T0?`, so the unresolved part need not be at the top of the type. Rendering any of them
-/// would be the fabricated hover the conservative contract rules out.</para>
+/// `ContextualName` renders as the name itself, which reads as a type of that name; either may sit
+/// under an occurrence suffix, so the unresolved part need not be at the top of the type.
+/// Rendering any of them would be the fabricated hover the conservative contract rules out.</para>
 fn is_unresolved_type(ty: &nx_types::Type) -> bool {
     match ty {
         nx_types::Type::Unknown
         | nx_types::Type::Error
         | nx_types::Type::Variable(_)
         | nx_types::Type::ContextualName(_) => true,
-        nx_types::Type::Array(inner) | nx_types::Type::Nullable(inner) => is_unresolved_type(inner),
+        nx_types::Type::Seq { item, .. } => is_unresolved_type(item),
         nx_types::Type::Function { params, ret } => {
             params.iter().any(|param| is_unresolved_type(&param.ty)) || is_unresolved_type(ret)
         }
@@ -1980,20 +1993,10 @@ fn clean_symbol_name(text: &str) -> String {
         .collect()
 }
 
-fn declaration_from_item(item: &Item, source: &str, origin: DeclarationOrigin) -> Declaration {
+fn declaration_from_item(item: &Item, origin: DeclarationOrigin) -> Declaration {
     match item {
         Item::Function(function) => {
-            // A markup function is `let <Tag ... />`, optionally behind a visibility keyword. The
-            // span covers the whole declaration, so the keywords have to be skipped rather than
-            // matched away.
-            let declaration_text = source_text_for_range(source, function.span);
-            let is_markup_function = declaration_text
-                .split_whitespace()
-                .find(|word| !matches!(*word, "export" | "private"))
-                .is_some_and(|word| word == "let" || word.starts_with("let<"))
-                && declaration_text
-                    .split_once("let")
-                    .is_some_and(|(_, rest)| rest.trim_start().starts_with('<'));
+            let is_markup_function = function.form == nx_hir::FunctionForm::Element;
             Declaration {
                 name: function.name.as_str().to_string(),
                 kind: if is_markup_function {
@@ -2007,7 +2010,7 @@ fn declaration_from_item(item: &Item, source: &str, origin: DeclarationOrigin) -
                         function
                             .params
                             .iter()
-                            .map(|param| (param.name.as_str(), &param.ty)),
+                            .map(|param| (param.name.as_str(), param.optional, &param.ty)),
                     )
                 } else {
                     format!("function {}", function_signature(function))
@@ -2017,7 +2020,12 @@ fn declaration_from_item(item: &Item, source: &str, origin: DeclarationOrigin) -
                         .params
                         .iter()
                         .map(|param| {
-                            property_declaration(param.name.as_str(), &param.ty, &origin.0)
+                            property_declaration(
+                                param.name.as_str(),
+                                param.optional,
+                                &param.ty,
+                                &origin.0,
+                            )
                         })
                         .collect()
                 } else {
@@ -2057,7 +2065,7 @@ fn declaration_from_item(item: &Item, source: &str, origin: DeclarationOrigin) -
                 component
                     .props
                     .iter()
-                    .map(|property| (property.name.as_str(), &property.ty)),
+                    .map(|property| (property.name.as_str(), property.optional, &property.ty)),
             ),
             // An emit is bound at a use site as `on<Emit>`, checked like any other property of the
             // component, so it is listed with them: after the props, in declaration order.
@@ -2065,7 +2073,12 @@ fn declaration_from_item(item: &Item, source: &str, origin: DeclarationOrigin) -
                 .props
                 .iter()
                 .map(|property| {
-                    property_declaration(property.name.as_str(), &property.ty, &origin.0)
+                    property_declaration(
+                        property.name.as_str(),
+                        property.optional,
+                        &property.ty,
+                        &origin.0,
+                    )
                 })
                 .chain(
                     component
@@ -2128,7 +2141,12 @@ fn declaration_from_item(item: &Item, source: &str, origin: DeclarationOrigin) -
                 .properties
                 .iter()
                 .map(|property| {
-                    property_declaration(property.name.as_str(), &property.ty, &origin.0)
+                    property_declaration(
+                        property.name.as_str(),
+                        property.optional,
+                        &property.ty,
+                        &origin.0,
+                    )
                 })
                 .collect(),
             own_properties: record.properties.len(),
@@ -2140,9 +2158,15 @@ fn declaration_from_item(item: &Item, source: &str, origin: DeclarationOrigin) -
     }
 }
 
-fn property_declaration(name: &str, ty: &TypeRef, declaring_module: &str) -> PropertyDeclaration {
+fn property_declaration(
+    name: &str,
+    optional: bool,
+    ty: &TypeRef,
+    declaring_module: &str,
+) -> PropertyDeclaration {
     PropertyDeclaration {
         name: name.to_string(),
+        optional,
         base_type: base_type_name(ty),
         display_type: type_ref_display(ty),
         declaring_module: declaring_module.to_string(),
@@ -2160,16 +2184,11 @@ fn handler_property_declaration(
 ) -> PropertyDeclaration {
     PropertyDeclaration {
         name: format!("on{}", emit.name.as_str()),
+        optional: false,
         base_type: emit.action_name.as_str().to_string(),
         display_type: format!("handler of {}", emit.action_name.as_str()),
         declaring_module: declaring_module.to_string(),
     }
-}
-
-fn source_text_for_range(source: &str, range: ByteTextRange) -> &str {
-    let start: usize = range.start().into();
-    let end: usize = range.end().into();
-    source.get(start..end).unwrap_or_default()
 }
 
 /// A component's signature as it is written: the tag with its properties and their types.
@@ -2178,10 +2197,17 @@ fn source_text_for_range(source: &str, range: ByteTextRange) -> &str {
 /// is what the tag accepts, which is the same list completions offer one name at a time.</para>
 fn markup_signature<'a>(
     name: &str,
-    properties: impl Iterator<Item = (&'a str, &'a TypeRef)>,
+    properties: impl Iterator<Item = (&'a str, bool, &'a TypeRef)>,
 ) -> String {
     let properties = properties
-        .map(|(property, ty)| format!("{}:{}", property, type_ref_display(ty)))
+        .map(|(property, optional, ty)| {
+            format!(
+                "{}{}:{}",
+                property,
+                hover::optional_mark(optional),
+                type_ref_display(ty)
+            )
+        })
         .collect::<Vec<_>>()
         .join(" ");
     if properties.is_empty() {
@@ -2205,7 +2231,7 @@ fn function_signature(function: &nx_hir::Function) -> String {
     format!("{}({}){}", function.name.as_str(), params, return_type)
 }
 
-/// Strips nullability and one list level to reach the type a bare value would resolve against.
+/// Strips the occurrence suffix to reach the type a bare value would resolve against.
 ///
 /// Mirrors the checker's normalization, so completions offer members exactly where the compiler
 /// would accept a bare name.
@@ -2214,7 +2240,7 @@ fn base_type_name(ty: &TypeRef) -> String {
         // An applied type reaches its record: a bare name resolves against the record's members,
         // which the type arguments do not change.
         TypeRef::Name(name) | TypeRef::Applied { name, .. } => name.as_str().to_string(),
-        TypeRef::Nullable(inner) | TypeRef::Array(inner) => base_type_name(inner),
+        TypeRef::Seq { inner, .. } => base_type_name(inner),
         TypeRef::Function { .. } => String::new(),
     }
 }
@@ -2279,9 +2305,14 @@ fn property_completion_items(context: PropertyCompletionContext) -> Vec<Completi
         .into_iter()
         .filter(|property| !context.supplied.contains(&property.name))
         .map(|property| CompletionItem {
-            // The detail is the property's declared type, which is what hover reports at the same
-            // position. One fact, spelled once, so the two cannot drift apart.
-            detail: Some(property.display_type),
+            // The detail is the property as hover reports it at the same position, less hover's
+            // qualifier. The name is part of it because optionality is marked on the name, not in
+            // the type.
+            detail: Some(hover::signature(
+                &property.name,
+                property.optional,
+                &property.display_type,
+            )),
             label: property.name,
             kind: CompletionItemKind::Property,
         })
@@ -3138,9 +3169,9 @@ component <SearchBox placeholder:string /> = {
     fn a_generic_component_does_not_regress_diagnostics_hover_or_completions() {
         const GENERIC: &str = "type Contact = { name:string }\n\
             type Range = { T:type start:T end:T }\n\
-            external component <SkiaLayout TItem:type itemsSource:TItem[]? />\n\
-            component <Section TItem:type items:TItem[] /> = { <SkiaLayout TItem=TItem itemsSource={items} /> }\n\
-            let contacts:Contact[] = {}\n\
+            external component <SkiaLayout TItem:type itemsSource?:TItem+ />\n\
+            component <Section TItem:type items:TItem+ /> = { <SkiaLayout TItem=TItem itemsSource={items} /> }\n\
+            let contacts:Contact+ = { <Contact name=\"a\" /> }\n\
             let span:<Range T=int/> = <Range T=int start={1} end={5} />\n\
             <Section TItem=Contact items={contacts} />\n";
 
@@ -3153,7 +3184,7 @@ component <SearchBox placeholder:string /> = {
         );
 
         // Hover over a prop typed by the parameter renders the parameter as `TItem`.
-        let hover = hover_at(&GENERIC.replace("items:TItem[] />", "it⟨cursor⟩ems:TItem[] />"))
+        let hover = hover_at(&GENERIC.replace("items:TItem+ />", "it⟨cursor⟩ems:TItem+ />"))
             .expect("hover over the prop name");
         assert!(hover.contents.contains("TItem"), "got: {}", hover.contents);
 
@@ -3357,7 +3388,7 @@ component <SearchBox placeholder:string /> = {
         "nx://tenant/controls.nx",
         concat!(
             "export type Mode = light | dark\n",
-            "export abstract external component <Control mode:Mode? margin:int? />\n",
+            "export abstract external component <Control mode?:Mode margin?:int />\n",
         ),
     );
     const LABELS: (&str, &str) = (
@@ -3419,12 +3450,12 @@ component <SearchBox placeholder:string /> = {
             hover.contents
         );
         assert!(
-            hover.contents.contains("mode:Mode?"),
+            hover.contents.contains("mode?:Mode"),
             "got: {}",
             hover.contents
         );
         assert!(
-            hover.contents.contains("margin:int?"),
+            hover.contents.contains("margin?:int"),
             "got: {}",
             hover.contents
         );
@@ -3442,6 +3473,51 @@ component <SearchBox placeholder:string /> = {
         assert!(hover.contents.contains("int"), "got: {}", hover.contents);
     }
 
+    /// A type's occurrence is its suffix, and hover is where an author reads it back. `Person?`,
+    /// `Person+` and `Person*` are three types, spelled as source spells them: never "nullable",
+    /// never `[]`, never `void`.
+    #[test]
+    fn hover_over_a_binding_spells_its_occurrence_suffix() {
+        const PERSON: &str = "type Person = { name:string }\n";
+        for (source, expected) in [
+            ("let ma⟨cursor⟩ybe:Person? = {}\n", "let maybe: Person?"),
+            (
+                "let so⟨cursor⟩me:Person+ = { <Person name=\"a\" /> }\n",
+                "let some: Person+",
+            ),
+            ("let an⟨cursor⟩y:Person* = {}\n", "let any: Person*"),
+        ] {
+            let hover = hover_at(&format!("{PERSON}{source}")).expect("hover content");
+            assert_eq!(hover.contents, nx(expected), "for: {source:?}");
+            for spelling in ["nullable", "[]", "void"] {
+                assert!(
+                    !hover.contents.contains(spelling),
+                    "{spelling:?} in: {}",
+                    hover.contents
+                );
+            }
+        }
+    }
+
+    /// The optional mark is the property's, not its type's, and hover spells it where the author
+    /// wrote it — `subtitle?:string` on the declaration, `string?` on a read of it.
+    #[test]
+    fn hover_spells_an_optional_property_by_its_mark_and_a_read_of_it_by_its_type() {
+        let declaration = hover_at("type Person = { name:string sub⟨cursor⟩title?:string }\n")
+            .expect("hover content");
+        assert_eq!(
+            declaration.contents,
+            nx("(property) Person.subtitle?: string")
+        );
+
+        let read = hover_at(concat!(
+            "type Person = { name:string subtitle?:string }\n",
+            "let describe(p:Person) = { p.sub⟨cursor⟩title }\n",
+        ))
+        .expect("hover content");
+        assert_eq!(read.contents, nx("(property) Person.subtitle: string?"));
+    }
+
     /// An emit is bound at a use site as `on<Emit>`, which the compiler checks like any other
     /// property of the component, so completion offers it and hover describes it: the component's
     /// own emits and the ones it inherits, from whichever module declared them.
@@ -3449,7 +3525,7 @@ component <SearchBox placeholder:string /> = {
         "nx://tenant/buttons.nx",
         concat!(
             "export abstract external component <Pressable emits { Tapped { } } />\n",
-            "export external component <Toggle extends Pressable on:boolean?\n",
+            "export external component <Toggle extends Pressable on?:boolean\n",
             "  emits { Toggled { value:boolean } } />\n",
         ),
     );
@@ -3889,22 +3965,17 @@ component <SearchBox placeholder:string /> = {
         }
     }
 
-    /// `null` is the one literal inference has no type for on its own: it infers as `T0?`, an
-    /// unsolved variable. The variable's id is not a type a reader can act on, so the conservative
-    /// answer is no hover rather than one naming it.
+    /// `{}` is the empty value, and its type is the empty type, which renders as `{}`: the form
+    /// the author can act on, rather than the `never?` it is made of.
     #[test]
-    fn hover_over_a_null_literal_reports_no_type() {
+    fn hover_over_the_empty_value_reports_the_empty_type() {
         for fixture in [
-            "let value = nu⟨cursor⟩ll\n",
-            "let value:string? = nu⟨cursor⟩ll\n",
+            "let value:string? = {⟨cursor⟩}\n",
+            "let value:string* = { ⟨cursor⟩ }\n",
         ] {
-            let hover = hover_at(fixture);
+            let hover = hover_at(fixture).unwrap_or_else(|| panic!("no hover for: {fixture:?}"));
 
-            assert!(
-                hover.is_none(),
-                "for {fixture:?}, got: {:?}",
-                hover.map(|hover| hover.contents)
-            );
+            assert_eq!(hover.contents, nx("{}"), "for: {fixture:?}");
         }
     }
 
@@ -4097,6 +4168,20 @@ component <SearchBox placeholder:string /> = {
         assert_eq!(hover.contents, nx("(property) User.name: string"));
     }
 
+    /// `x?.m` is a member access too: the member reports the access's optional type, qualified by
+    /// the type that declares it rather than the optional receiver.
+    #[test]
+    fn hover_over_a_member_of_an_optional_member_access_reports_the_member() {
+        let hover = hover_at(concat!(
+            "type Author = { name:string }\n",
+            "type Book = { author?:Author }\n",
+            "let byline(b:Book): string? = { b.author?.na⟨cursor⟩me }\n"
+        ))
+        .expect("hover content");
+
+        assert_eq!(hover.contents, nx("(property) Author.name: string?"));
+    }
+
     /// The receiver is not the member: a cursor before the dot still reports the value it is on.
     #[test]
     fn hover_on_the_receiver_of_a_member_access_reports_the_receiver() {
@@ -4115,13 +4200,13 @@ component <SearchBox placeholder:string /> = {
         let hover = hover_at(concat!(
             "abstract external component <DrawnNode />\n",
             "type Contact = { name:string }\n",
-            "component <Section extends DrawnNode Ro⟨cursor⟩w:(<function Item:Contact Index:int />: DrawnNode)? /> = { <DrawnNode /> }\n"
+            "component <Section extends DrawnNode Ro⟨cursor⟩w?:(<function Item:Contact Index:int />: DrawnNode) /> = { <DrawnNode /> }\n"
         ))
         .expect("hover content");
 
         assert_eq!(
             hover.contents,
-            nx("(property) Section.Row: (<function Item:Contact Index:int />: DrawnNode)?")
+            nx("(property) Section.Row?: <function Item:Contact Index:int />: DrawnNode")
         );
         assert!(!hover.contents.contains("=>"), "{}", hover.contents);
     }
@@ -4133,20 +4218,20 @@ component <SearchBox placeholder:string /> = {
         let hover = hover_at(concat!(
             "abstract external component <DrawnNode />\n",
             "type Contact = { name:string }\n",
-            "component <Section extends DrawnNode Ro⟨cursor⟩w:(<function Item:Contact Index:int />: DrawnNode)? /> = { <DrawnNode /> }\n"
+            "component <Section extends DrawnNode Ro⟨cursor⟩w?:(<function Item:Contact Index:int />: DrawnNode) /> = { <DrawnNode /> }\n"
         ))
         .expect("hover content");
 
-        let checked = nx_types::Type::nullable(nx_types::Type::function(
+        let checked = nx_types::Type::function(
             vec![
                 nx_types::FunctionParam::new("Item", nx_types::Type::named("Contact")),
                 nx_types::FunctionParam::new("Index", nx_types::Type::int()),
             ],
             nx_types::Type::named("DrawnNode"),
-        ));
+        );
         assert_eq!(
             hover.contents,
-            nx(&format!("(property) Section.Row: {checked}"))
+            nx(&format!("(property) Section.Row?: {checked}"))
         );
     }
 
@@ -4356,12 +4441,12 @@ component <SearchBox placeholder:string /> = {
     /// Spec: "Hover over a record type declaration reports its fields".
     #[test]
     fn hover_over_a_record_type_declaration_reports_its_fields() {
-        let hover = hover_at("type U⟨cursor⟩ser = {\n  name: string\n  email: string?\n}\n")
+        let hover = hover_at("type U⟨cursor⟩ser = {\n  name: string\n  email?: string\n}\n")
             .expect("hover content");
 
         assert_eq!(
             hover.contents,
-            nx("type User = {\n  name: string\n  email: string?\n}")
+            nx("type User = {\n  name: string\n  email?: string\n}")
         );
     }
 
@@ -4402,13 +4487,13 @@ component <SearchBox placeholder:string /> = {
     fn a_component_declaration_hover_is_spelled_in_nx() {
         let hover = hover_at(concat!(
             "type Hue = Red | Green\n",
-            "external component <Pa⟨cursor⟩int colour:Hue? />\n"
+            "external component <Pa⟨cursor⟩int colour?:Hue />\n"
         ))
         .expect("hover content");
 
         assert_eq!(
             hover.contents,
-            nx("external component <Paint colour:Hue? />")
+            nx("external component <Paint colour?:Hue />")
         );
     }
 
@@ -4546,6 +4631,43 @@ component <SearchBox placeholder:string /> = {
 
         assert!(!labels.contains(&"title".to_string()), "got: {labels:?}");
         assert!(labels.contains(&"subtitle".to_string()), "got: {labels:?}");
+    }
+
+    /// Optionality is on a property's name now, not in its type, so the detail has to carry the
+    /// name for the `?` to survive. It reads as hover does, less hover's qualifier.
+    #[test]
+    fn a_property_completion_detail_marks_an_optional_property_as_hover_does() {
+        let (source, position) = position_for(
+            "\nlet <Card title:string subtitle?:string tags?:string+ /> = <div>{title}</div>\n<Card ⟨cursor⟩/>\n",
+            CURSOR,
+        );
+        let snapshot = snapshot_for("nx://tenant/form.nx", &source, 1);
+        assert_fixture_parses(&snapshot, &source);
+
+        let details = snapshot
+            .completions(&DocumentUri::from("nx://tenant/form.nx"), position)
+            .expect("completions")
+            .items
+            .into_iter()
+            .filter(|item| item.kind == CompletionItemKind::Property)
+            .map(|item| (item.label, item.detail))
+            .collect::<Vec<_>>();
+
+        assert!(
+            details.contains(&("title".to_string(), Some("title: string".to_string()))),
+            "got: {details:?}"
+        );
+        assert!(
+            details.contains(&(
+                "subtitle".to_string(),
+                Some("subtitle?: string".to_string())
+            )),
+            "got: {details:?}"
+        );
+        assert!(
+            details.contains(&("tags".to_string(), Some("tags?: string+".to_string()))),
+            "got: {details:?}"
+        );
     }
 
     // ---------------------------------------------------------------------------------------------

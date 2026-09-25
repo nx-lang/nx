@@ -6,6 +6,8 @@
         "conversions",
         "expressions",
         "handlers",
+        "occurrence-lifting",
+        "parameter-defaults",
         "ranges",
         "two-module"
       ],
@@ -16,7 +18,10 @@
         "components",
         "conversions",
         "expressions",
-        "function-values"
+        "function-values",
+        "occurrence-lifting",
+        "occurrences",
+        "parameter-defaults"
       ],
       "div": [
         "conversions",
@@ -26,6 +31,7 @@
         "conversions",
         "expressions",
         "function-values",
+        "occurrence-lifting",
         "ranges"
       ],
       "fadd32": [
@@ -66,10 +72,12 @@
       "mul": [
         "expressions",
         "function-values",
+        "parameter-defaults",
         "ranges"
       ],
       "ne": [
-        "expressions"
+        "expressions",
+        "occurrence-lifting"
       ],
       "or": [
         "expressions"
@@ -86,6 +94,7 @@
       "float": [
         "conversions",
         "expressions",
+        "occurrence-lifting",
         "ranges"
       ],
       "int": [
@@ -95,6 +104,9 @@
         "function-values",
         "generic-records",
         "handlers",
+        "occurrence-lifting",
+        "occurrences",
+        "parameter-defaults",
         "ranges",
         "records",
         "snippet",
@@ -107,6 +119,7 @@
         "components",
         "function-values",
         "handlers",
+        "occurrences",
         "snippet",
         "trailing-element",
         "two-module"
@@ -118,6 +131,10 @@
         "function-values",
         "generic-records",
         "handlers",
+        "occurrence-lifting",
+        "occurrence-patterns",
+        "occurrences",
+        "parameter-defaults",
         "ranges",
         "records",
         "snippet",
@@ -129,14 +146,19 @@
         "function-values",
         "generic-records",
         "handlers",
+        "occurrence-lifting",
+        "occurrence-patterns",
+        "occurrences",
         "records",
         "two-module"
       ],
       "typeAlias": [
         "function-values",
+        "occurrence-lifting",
         "records"
       ],
       "union": [
+        "expressions",
         "handlers",
         "records",
         "two-module"
@@ -147,12 +169,15 @@
         "expressions",
         "function-values",
         "handlers",
+        "occurrence-lifting",
+        "parameter-defaults",
         "snippet"
       ]
     },
     "intrinsics": {
       "apply": [
         "generic-records",
+        "occurrences",
         "records"
       ],
       "changed": [
@@ -175,7 +200,11 @@
         "conversions",
         "expressions",
         "function-values",
-        "handlers"
+        "handlers",
+        "occurrence-lifting",
+        "occurrence-patterns",
+        "occurrences",
+        "records"
       ],
       "binary": [
         "components",
@@ -184,12 +213,16 @@
         "function-values",
         "generic-records",
         "handlers",
+        "occurrence-lifting",
+        "occurrences",
+        "parameter-defaults",
         "ranges",
         "two-module"
       ],
       "bool": [
         "conversions",
         "expressions",
+        "occurrence-lifting",
         "ranges",
         "snippet",
         "trailing-element"
@@ -199,14 +232,24 @@
         "expressions",
         "function-values",
         "generic-records",
+        "occurrence-lifting",
+        "occurrence-patterns",
+        "occurrences",
+        "parameter-defaults",
         "ranges",
         "records",
         "two-module"
+      ],
+      "coalesce": [
+        "occurrence-lifting",
+        "occurrences",
+        "parameter-defaults"
       ],
       "component": [
         "components",
         "function-values",
         "handlers",
+        "occurrences",
         "snippet",
         "trailing-element",
         "two-module"
@@ -215,40 +258,47 @@
         "expressions",
         "handlers"
       ],
+      "exists": [
+        "occurrences"
+      ],
       "for": [
         "components",
         "expressions",
-        "handlers"
+        "handlers",
+        "occurrence-lifting"
       ],
       "forRange": [
         "ranges"
       ],
       "if": [
         "conversions",
-        "expressions"
+        "expressions",
+        "occurrence-lifting"
       ],
       "ifIs": [
         "conversions",
-        "expressions"
+        "expressions",
+        "occurrence-patterns"
       ],
       "intrinsic": [
         "generic-records",
+        "occurrences",
         "records"
       ],
       "member": [
         "conversions",
+        "expressions",
         "function-values",
         "generic-records",
         "handlers",
+        "occurrence-lifting",
+        "occurrence-patterns",
+        "occurrences",
         "records",
         "two-module"
       ],
       "namedCall": [
         "function-values"
-      ],
-      "null": [
-        "expressions",
-        "records"
       ],
       "number": [
         "components",
@@ -257,17 +307,26 @@
         "function-values",
         "generic-records",
         "handlers",
+        "occurrence-lifting",
+        "occurrences",
+        "parameter-defaults",
         "ranges",
         "records",
         "snippet",
         "trailing-element",
         "two-module"
       ],
+      "optionalMember": [
+        "occurrences"
+      ],
       "record": [
         "conversions",
         "function-values",
         "generic-records",
         "handlers",
+        "occurrence-lifting",
+        "occurrence-patterns",
+        "occurrences",
         "ranges",
         "records",
         "two-module"
@@ -279,6 +338,10 @@
         "function-values",
         "generic-records",
         "handlers",
+        "occurrence-lifting",
+        "occurrence-patterns",
+        "occurrences",
+        "parameter-defaults",
         "ranges",
         "records",
         "snippet",
@@ -291,6 +354,10 @@
         "function-values",
         "generic-records",
         "handlers",
+        "occurrence-lifting",
+        "occurrence-patterns",
+        "occurrences",
+        "parameter-defaults",
         "ranges",
         "records",
         "two-module"
@@ -302,6 +369,10 @@
         "function-values",
         "generic-records",
         "handlers",
+        "occurrence-lifting",
+        "occurrence-patterns",
+        "occurrences",
+        "parameter-defaults",
         "records",
         "snippet",
         "trailing-element",
@@ -309,45 +380,37 @@
       ],
       "text": [
         "conversions",
-        "function-values"
+        "function-values",
+        "parameter-defaults"
       ],
       "unary": [
         "expressions"
       ],
       "unionCase": [
+        "expressions",
         "handlers",
         "records",
         "two-module"
       ]
     },
     "types": {
-      "array": [
-        "components",
-        "conversions",
-        "function-values",
-        "generic-records",
-        "handlers",
-        "records",
-        "snippet",
-        "trailing-element"
-      ],
       "function": [
         "function-values"
       ],
       "nominal": [
         "components",
+        "expressions",
         "function-values",
         "generic-records",
         "handlers",
+        "occurrence-lifting",
+        "occurrence-patterns",
+        "occurrences",
+        "ranges",
         "records",
         "snippet",
         "trailing-element",
         "two-module"
-      ],
-      "nullable": [
-        "conversions",
-        "function-values",
-        "records"
       ],
       "primitive": [
         "components",
@@ -356,10 +419,29 @@
         "function-values",
         "generic-records",
         "handlers",
+        "occurrence-lifting",
+        "occurrence-patterns",
+        "occurrences",
+        "parameter-defaults",
+        "ranges",
         "records",
         "snippet",
         "trailing-element",
         "two-module"
+      ],
+      "seq": [
+        "components",
+        "conversions",
+        "function-values",
+        "generic-records",
+        "handlers",
+        "occurrence-lifting",
+        "occurrence-patterns",
+        "occurrences",
+        "parameter-defaults",
+        "records",
+        "snippet",
+        "trailing-element"
       ]
     },
     "unaryOperators": {
@@ -378,6 +460,10 @@
     "function-values",
     "generic-records",
     "handlers",
+    "occurrence-lifting",
+    "occurrence-patterns",
+    "occurrences",
+    "parameter-defaults",
     "ranges",
     "records",
     "snippet",

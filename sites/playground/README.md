@@ -41,8 +41,9 @@ an edit to it re-emits the artifact.
   toolchain (`rust-toolchain.toml` lists it); clang compiles tree-sitter's C sources for that target,
   and the pinned WASI sysroot the build needs is fetched into a gitignored `.cache/` by
   `scripts/fetch-wasi-sysroot.mjs`, which `pnpm -r build` runs for you.
-- **A checkout of DrawnUI React** at `~/src/DrawnUi.React`, but only to re-run the sync script. The
-  vendored copy under `src/drawnui/` is committed, so a normal build needs nothing.
+- **A checkout of DrawnUI React** at `~/src/DrawnUi.React`, but only to re-run the asset sync. The
+  runtime is the `drawnui-react` npm package, and the copied assets are committed, so a normal
+  build needs nothing more.
 
 ## Running it
 
@@ -69,7 +70,7 @@ the gallery; any other address outside the prefix is not found. The prefix is sp
 `base.mjs`, and the server, the Vite config and the client all take it from there.
 
 ```bash
-pnpm run typecheck       # tsc over the site and the vendored DrawnUI source
+pnpm run typecheck       # tsc over the site
 pnpm test                # server, route, compile, worker and dev-shell tests, then every example
 pnpm run check-examples  # every example compiles, evaluates, and declares its coverage
 ```
@@ -88,8 +89,8 @@ do not need a build to have run.
 | `base.mjs` | the site's path prefix, and the API and health paths derived from it |
 | `catalog/skia.nx` | the generated NX catalog: external components for the DrawnUI control set, compiled to its artifact at build time |
 | `catalog/catalog-meta.json` | which types are unions, which are records, which records are constructed |
-| `scripts/generate-catalog.mjs` | generates both from the vendored TypeScript |
-| `scripts/sync-drawnui.mjs` | re-copies DrawnUI's source, demo pages and assets |
+| `scripts/generate-catalog.mjs` | generates both from the pinned `drawnui-react` package's declarations |
+| `scripts/sync-drawnui.mjs` | copies DrawnUI's assets and demo pages from the tag of the pinned release |
 | `scripts/check-examples.mjs` | one check over the whole example set |
 | `scripts/emit-example-ir.mjs` | emits each example's NX IR, for proving an edit changed only notation |
 | `scripts/compile-example.mjs` | the wasm host and catalog those two scripts compile through |
@@ -102,31 +103,42 @@ do not need a build to have run.
 | `src/editor/` | the editor view, and Monaco through `@nx-lang/monaco` (grammar, highlighting, hover, completion) over `src/language/` |
 | `src/gallery/` | the gallery |
 | `src/examples/` | the ported examples and their metadata |
-| `src/drawnui/` | vendored DrawnUI runtime — see `UPSTREAM.md` |
 | `reference/demo-pages/` | the original TSX pages, for comparison only; never built |
+| `docs/UPSTREAM.md` | the upstream tag and commit the assets and demo pages were copied from |
 
-## Syncing DrawnUI
+## Moving the DrawnUI pin
+
+The site draws with the `drawnui-react` npm package, pinned to one exact version in
+`package.json`, the same version the DrawnUI fiddle pins. Moving it takes three steps, and the result
+is one reviewable diff:
 
 ```bash
-npm run sync-drawnui              # from ~/src/DrawnUi.React
-npm run sync-drawnui -- --source /path/to/DrawnUi.React
-npm run generate-catalog          # regenerate the catalog after a sync
+pnpm add drawnui-react@<version> --save-exact   # move the pin
+pnpm run generate-catalog                        # regenerate the catalog from the new declarations
+pnpm run sync-drawnui                            # copy the assets from ~/src/DrawnUi.React at v<version>
 ```
 
-The sync copies upstream's `src` whole, the demo pages for reference, and the asset trees the
-examples read: `fonts/`, `images/`, and — since the preview.4 sync — `lottie/` (Skottie
-animations), `anims/` (sprite sheets) and `shaders/` (SkSL, including the `transitions/` set the
-shader carousel uses), each landing under `public/` by the same name. It records the upstream
-commit in `src/drawnui/UPSTREAM.md`. The catalog is committed, so a sync that changes it shows up
-as a reviewable diff. Local edits to the vendored copy are allowed where they improve NX
-compatibility; `docs/CATALOG.md` is where they are recorded, because a sync overwrites them. The
-vendored Vite plugin (`src/drawnui/vite/`, upstream's build-time crawler) imports an optional peer
-the site does not install, so `tsconfig.json` excludes it from the type check rather than the sync
-pruning it.
+The sync reads `~/src/DrawnUi.React` by default. For a checkout elsewhere, pass
+`pnpm run sync-drawnui -- --source /path/to/DrawnUi.React`.
 
-The vendored runtime loads CanvasKit's "full" build, roughly 0.9 MB more of WASM than the default
-one, because Lottie playback (Skottie) lives only there. The binary is a hashed build asset and is
-cached like the previous one.
+`catalog/catalog-meta.json` records the version the catalog was generated from, and
+`docs/UPSTREAM.md` the release the assets were copied from. `pnpm test` fails when either differs
+from the pin, naming both versions and the command that brings it level.
+
+The package ships only its compiled runtime. The asset trees the examples read are not in it, so the
+sync copies them: `fonts/`, `images/`, `lottie/` (Skottie animations), `anims/` (sprite sheets) and
+`shaders/` (SkSL, including the `transitions/` set the shader carousel uses), each landing under
+`public/` by the same name. It also copies the demo pages into `reference/`. It reads them at the tag
+`v<version>` with `git archive`, so they match the code that draws them, and the checkout's working
+tree and `HEAD` are left alone. If the tag is missing, it says to run `git fetch --tags` there.
+`docs/UPSTREAM.md` records the tag and commit.
+
+Nothing in the package is patched. Where NX needs DrawnUI to behave differently, `docs/CATALOG.md`
+records the difference and the upstream change it waits on.
+
+The runtime loads CanvasKit's "full" build, roughly 0.9 MB more of WASM than the default one,
+because Lottie playback (Skottie) lives only there. The binary is a hashed build asset and is cached
+like the previous one.
 
 ## What it does not do
 
@@ -162,10 +174,10 @@ component <Page /> = {
 DrawnUI's own behavior works as before: scroll regions scroll, carousels swipe, drawers drag,
 ripples play, switches toggle, sliders drag, whether or not a handler is bound.
 
-All twenty DrawnUI demo pages at the vendored commit are ported — none is omitted — and each says
-where it stands: **complete** (no note), **static** (drawn correctly, with some of the original's
-motion or interaction absent), or **reduced** (scaled down, because NX cannot express the mechanism
-the original demonstrates). SVG, Text, Shapes and Common Controls are complete; the rest gained
+All twenty demo pages DrawnUI had at 0.1.0-preview.4 are ported, and each says where it stands:
+**complete** (no note), **static** (drawn correctly, with some of the original's motion or
+interaction absent), or **reduced** (scaled down, because NX cannot express the mechanism the
+original demonstrates). SVG, Text, Shapes and Common Controls are complete; the rest gained
 interaction or code-driven mechanisms upstream and say so. Every non-complete example names its gap
 from a fixed vocabulary, and the vocabulary separates what NX lacks from what a port has not used:
 `animation` and `code-behind` (an engine object built, driven or read from code: a shader effect,
@@ -176,6 +188,12 @@ and the port does not use yet. List virtualization is not a gap: a templated `Sk
 measures the cells, which is how Recycled cells and Uneven cells are ported. The gallery can be
 read as a coverage report on NX rather than a list of disclaimers, and a landed capability is never
 presented as missing.
+
+One demo page added upstream since preview.4 has no NX example, and the gallery shows no entry for
+it: **Pong** (`reference/demo-pages/PongPage.tsx`). It is a `DrawnGame`, with a game loop that
+moves sprites every frame from code and reads the keyboard and touch. Every part of it is
+`animation` or `code-behind`, so even a reduced port would draw a still field and two paddles that
+do not move.
 
 The readouts are wired: a tap count, a selected index, a slider's value, a speed, `IsOpen`. Each is
 a number or a boolean held in a page component's state, and `+` converts it to text where it joins

@@ -11,11 +11,14 @@ take a function such as a UI template.
 ### Requirement: A function type is spelled as an element function signature
 Anywhere NX accepts a type reference, the parser SHALL accept a function type written as `<`, the
 contextual keyword `function`, zero or more parameter definitions, `/>`, `:` and a result type.
-Each parameter definition SHALL be a property definition — a name, `:` and a type, with an optional
-`content` modifier — matched by name at every use. The result type SHALL be required. A default
-value on a parameter, a second `content` parameter, and a `type`-typed parameter SHALL each be
-rejected with a diagnostic. `function` SHALL be a keyword only in that position: an identifier
-named `function` elsewhere SHALL keep its current meaning.
+Each parameter definition SHALL be a property definition — a name, an optional `?` mark, `:` and a
+type, with an optional `content` modifier — matched by name at every use, and SHALL follow
+`optional-properties`: the type SHALL be an exactly-one or `+` type, and a parameter that admits no
+value SHALL be spelled `Name?:T`. The result type SHALL be required, and MAY carry any one
+occurrence suffix, which binds to the result as `occurrence-types` defines. A default value on a
+parameter, a second `content` parameter, and a `type`-typed parameter SHALL each be rejected with a
+diagnostic. `function` SHALL be a keyword only in that position: an identifier named `function`
+elsewhere SHALL keep its current meaning.
 
 #### Scenario: A property is declared at a function type
 - **WHEN** a file contains `abstract external component <DrawnNode /> external component <DataTable RowTemplate: <function Item:object Index:int />: DrawnNode />`
@@ -33,13 +36,20 @@ named `function` elsewhere SHALL keep its current meaning.
   function type written inline
 
 #### Scenario: A suffix after the result binds to the result
-- **WHEN** a file contains `type Maybe = <function Count:int />: string?`
-- **THEN** analysis SHALL treat `Maybe` as a non-nullable function whose result is nullable `string`
+- **WHEN** a file contains `type Maybe = <function Count:int />: string?`, `type Many = <function />: string+` and `type Rows = <function />: DrawnNode*`
+- **THEN** analysis SHALL treat `Maybe` as exactly one function whose result is `string?`, `Many` as exactly one function whose result is `string+`, and `Rows` as exactly one function whose result is `DrawnNode*`
+- **AND** `(<function />: string)+` SHALL be one or more functions each returning exactly one `string`
 
 #### Scenario: A parameter default is rejected
 - **WHEN** a file contains `type T = <function Index:int = 0 />: string`
 - **THEN** parsing SHALL produce a validation error on the default
 - **AND** the diagnostic SHALL say a function type cannot carry a default value
+
+#### Scenario: An optional parameter is accepted and still takes no default
+- **WHEN** a file contains `type Render = <function Item:Contact Index?:int />: string` and `type Bad = <function Index?:int = 0 />: string`
+- **THEN** parsing and lowering SHALL accept `Render` with `Index` optional, read as `int?` by a function checked against it
+- **AND** `Bad` SHALL be rejected on the default
+- **AND** `type Worse = <function Index:int? />: string` SHALL be rejected, the diagnostic showing `Index?:int`
 
 #### Scenario: A type parameter in a function type is rejected
 - **WHEN** a file contains `type T = <function TItem:type />: string`
@@ -47,7 +57,7 @@ named `function` elsewhere SHALL keep its current meaning.
   function parameter list
 
 #### Scenario: A content parameter is accepted once
-- **WHEN** a file contains `type Wrap = <function content Children:object[] />: string`
+- **WHEN** a file contains `type Wrap = <function content Children:object+ />: string`
 - **THEN** parsing and lowering SHALL accept `Children` as the function type's content parameter
 - **AND** a second `content` parameter in the same function type SHALL be rejected
 
@@ -58,8 +68,8 @@ named `function` elsewhere SHALL keep its current meaning.
 ### Requirement: A function type is displayed in NX spelling
 Wherever the system shows a function type to an author — a diagnostic, a hover, an explained
 artifact — it SHALL spell it as a function type is written in source, `<function Name:Type ... />:
-Result`, and SHALL parenthesize it under a `?` or `[]` suffix. It SHALL NOT use an arrow form
-such as `(int) => string`.
+Result`, and SHALL parenthesize it under a `?`, `+` or `*` suffix, so that the suffix is not read as
+the result's. It SHALL NOT use an arrow form such as `(int) => string`.
 
 #### Scenario: A mismatch diagnostic shows the function type
 - **WHEN** analysis reports a value bound to a property typed `<function Item:Contact />: DrawnNode`
@@ -67,8 +77,9 @@ such as `(int) => string`.
 - **THEN** the diagnostic SHALL show the expected type as `<function Item:Contact />: DrawnNode`
 
 #### Scenario: A nullable function type is parenthesized
-- **WHEN** the system displays the type of a property declared `(<function />: DrawnNode)?`
-- **THEN** it SHALL show `(<function />: DrawnNode)?`
+- **WHEN** the system displays the read type of a property declared `Template?:<function />: DrawnNode`, or the type `(<function />: DrawnNode)+`
+- **THEN** it SHALL show `(<function />: DrawnNode)?` and `(<function />: DrawnNode)+` respectively
+- **AND** it SHALL show `<function />: DrawnNode?` only for a function whose result is optional
 
 ### Requirement: A function satisfies a function type by parameter name
 A function SHALL be compatible with a function type when: every parameter the function declares
@@ -77,8 +88,11 @@ function's parameter type; a content parameter of the function is the content pa
 type; and the function's result type is compatible with the type's result type. A function MAY
 declare fewer parameters than the type — a caller supplies every parameter of the type and the
 function ignores those it does not declare. A function that declares a parameter the type does not
-SHALL NOT be compatible. Parameter order SHALL NOT affect compatibility. The same rule SHALL relate
-two function types.
+SHALL NOT be compatible, even when that parameter is optional or defaulted. Parameters match by
+name, so this is what reports a misspelled name on either side: were an omissible parameter the
+type does not supply accepted, `Idx:int = 0` against a type supplying `Index` would compile and
+always read 0. Parameter order SHALL NOT affect compatibility. The same rule SHALL relate two
+function types.
 
 #### Scenario: An exact match is compatible
 - **WHEN** a file contains `type Contact = { name:string } let <Row Item:Contact Index:int />: string = {Item.name} let r: <function Item:Contact Index:int />: string = {Row}`
@@ -94,13 +108,18 @@ two function types.
 - **THEN** analysis SHALL reject `r`
 - **AND** the diagnostic SHALL name `Index` as a parameter the type does not supply
 
+#### Scenario: A function with an extra omissible parameter is rejected
+- **WHEN** a file contains `let <Row Item:object Idx:int = 0 />: string = "x" let r: <function Item:object Index:int />: string = {Row}` or `let <Row Item:object Idx?:int />: string = "x" let r: <function Item:object Index:int />: string = {Row}`
+- **THEN** analysis SHALL reject `r`
+- **AND** the diagnostic SHALL name `Idx` as a parameter the type does not supply
+
 #### Scenario: A parameter type is checked contravariantly
 - **WHEN** a file contains `let <Show Value:object />: string = "x" let r: <function Value:int />: string = {Show}` and `let <Count Value:int />: string = "x" let bad: <function Value:object />: string = {Count}`
 - **THEN** analysis SHALL accept `r`, because `int` is compatible with `object`
 - **AND** SHALL reject `bad`, because `object` is not compatible with `int`
 
 #### Scenario: A result type is checked covariantly
-- **WHEN** a file contains `abstract external component <DrawnNode /> external component <SkiaLabel extends DrawnNode Text:string? /> let <Row Item:object />: SkiaLabel = <SkiaLabel /> let r: <function Item:object />: DrawnNode = {Row}`
+- **WHEN** a file contains `abstract external component <DrawnNode /> external component <SkiaLabel extends DrawnNode Text?:string /> let <Row Item:object />: SkiaLabel = <SkiaLabel /> let r: <function Item:object />: DrawnNode = {Row}`
 - **THEN** analysis SHALL accept `r`
 
 #### Scenario: A parameter name mismatch is rejected

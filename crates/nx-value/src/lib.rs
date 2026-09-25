@@ -19,9 +19,14 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 /// name. The declaring union is recovered from the target schema (declared NX type, typed DTO
 /// property, or other type annotation) at the point where the value is consumed; the IR itself
 /// carries no in-payload union type wrapper.
+///
+/// NX has no null: its absent value is the empty sequence, [`NxValue::empty`]. [`NxValue::Null`]
+/// is the host's spelling of absence, which NX reads as the empty value. NX writes it in two
+/// places: an entry call's result whose type is a standalone `T?` and holds nothing, and a
+/// present empty field of an update record — a cleared field — which is how key presence carries
+/// "cleared" through JSON. An absent optional record field is an omitted key.
 #[derive(Debug, Clone, PartialEq)]
 pub enum NxValue {
-    Null,
     Bool(bool),
     Int32(i32),
     Int(i64),
@@ -33,6 +38,8 @@ pub enum NxValue {
     /// distinguishable only against the target schema — a schema-less consumer cannot tell
     /// them apart from the payload alone.
     String(String),
+    /// The host's `null`: JSON `null`, MessagePack `nil`. NX reads it as the empty value.
+    Null,
     Array(Vec<NxValue>),
     /// Record value (ordered properties).
     ///
@@ -44,6 +51,20 @@ pub enum NxValue {
 }
 
 impl NxValue {
+    /// The empty value: the empty sequence, which is also the absent value.
+    pub fn empty() -> Self {
+        NxValue::Array(Vec::new())
+    }
+
+    /// True for the empty value, or for a host `null`, which NX reads as the empty value.
+    pub fn is_empty_value(&self) -> bool {
+        match self {
+            NxValue::Null => true,
+            NxValue::Array(elements) => elements.is_empty(),
+            _ => false,
+        }
+    }
+
     /// Deserialize a value from a JSON string.
     pub fn from_json_str(source: &str) -> Result<Self, serde_json::Error> {
         serde_json::from_str(source)
@@ -106,13 +127,13 @@ impl NxValue {
 impl Serialize for NxValue {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
-            NxValue::Null => serializer.serialize_unit(),
             NxValue::Bool(value) => serializer.serialize_bool(*value),
             NxValue::Int32(value) => serializer.serialize_i32(*value),
             NxValue::Int(value) => serializer.serialize_i64(*value),
             NxValue::Float32(value) => serializer.serialize_f32(*value),
             NxValue::Float(value) => serializer.serialize_f64(*value),
             NxValue::String(value) => serializer.serialize_str(value),
+            NxValue::Null => serializer.serialize_unit(),
             NxValue::Array(elements) => {
                 let mut seq = serializer.serialize_seq(Some(elements.len()))?;
                 for element in elements {
@@ -286,7 +307,7 @@ mod tests {
         obj.insert("b".to_string(), NxValue::Bool(true));
         obj.insert(
             "c".to_string(),
-            NxValue::Array(vec![NxValue::Null, NxValue::String("x".to_string())]),
+            NxValue::Array(vec![NxValue::Int(2), NxValue::String("x".to_string())]),
         );
 
         let value = NxValue::Record {
@@ -301,7 +322,6 @@ mod tests {
     #[test]
     fn json_round_trip_primitives() {
         let cases = [
-            ("null", NxValue::Null),
             ("true", NxValue::Bool(true)),
             ("false", NxValue::Bool(false)),
             ("0", NxValue::Int(0)),
@@ -342,7 +362,7 @@ mod tests {
                         type_name: None,
                         properties: BTreeMap::from([
                             ("x".to_string(), NxValue::Bool(false)),
-                            ("y".to_string(), NxValue::Null),
+                            ("y".to_string(), NxValue::empty()),
                         ]),
                     },
                 ),
@@ -352,6 +372,67 @@ mod tests {
         let json = value.to_json_string().unwrap();
         let decoded = NxValue::from_json_str(&json).unwrap();
         assert_eq!(decoded, value);
+    }
+
+    /// The canonical encoding of an occurrence-typed value, row by row: `+` and `*` are arrays, a
+    /// present `?` is its item, a host `null` decodes to [`NxValue::Null`], which NX reads as the
+    /// empty value, and `Null` is written as `null`.
+    #[test]
+    fn json_encoding_of_occurrence_typed_values() {
+        // `+` and `*` encode as arrays, the empty `*` as the empty array.
+        assert_eq!(
+            NxValue::Array(vec![NxValue::Int(1), NxValue::Int(2)])
+                .to_json_string()
+                .unwrap(),
+            "[1,2]"
+        );
+        assert_eq!(NxValue::empty().to_json_string().unwrap(), "[]");
+        // A present `?` is its item; an absent standalone `?` is `null`.
+        assert_eq!(NxValue::Int(1).to_json_string().unwrap(), "1");
+        assert_eq!(NxValue::Null.to_json_string().unwrap(), "null");
+        // Host `null` and `[]` are both read as the empty value.
+        assert_eq!(NxValue::from_json_str("null").unwrap(), NxValue::Null);
+        assert_eq!(NxValue::from_json_str("[]").unwrap(), NxValue::empty());
+        assert!(NxValue::from_json_str("null").unwrap().is_empty_value());
+        // A missing key stays missing: an absent optional field is an omitted key.
+        let book = NxValue::from_json_str(r#"{"$type":"Book","title":"A"}"#).unwrap();
+        let NxValue::Record { properties, .. } = &book else {
+            panic!("a record");
+        };
+        assert!(!properties.contains_key("author"));
+        assert_eq!(
+            book.to_json_string().unwrap(),
+            r#"{"$type":"Book","title":"A"}"#
+        );
+        // A cleared update-record field is `Null`, and round-trips as `null`.
+        let cleared = NxValue::Record {
+            type_name: Some("Book.Update".to_string()),
+            properties: BTreeMap::from([("author".to_string(), NxValue::Null)]),
+        };
+        assert_eq!(
+            cleared.to_json_string().unwrap(),
+            r#"{"$type":"Book.Update","author":null}"#
+        );
+        assert_eq!(
+            NxValue::from_json_str(r#"{"$type":"Book.Update","author":null}"#).unwrap(),
+            cleared
+        );
+        // The encoding is structural: an empty field encodes as it is stored.
+        let plain = NxValue::Record {
+            type_name: Some("Box".to_string()),
+            properties: BTreeMap::from([("items".to_string(), NxValue::empty())]),
+        };
+        assert_eq!(
+            plain.to_json_string().unwrap(),
+            r#"{"$type":"Box","items":[]}"#
+        );
+    }
+
+    #[test]
+    fn msgpack_writes_null_as_nil() {
+        let bytes = NxValue::Null.to_msgpack_vec().unwrap();
+        assert_eq!(bytes, vec![0xc0]);
+        assert_eq!(NxValue::from_msgpack_slice(&bytes).unwrap(), NxValue::Null);
     }
 
     #[test]

@@ -38,24 +38,26 @@ value and SHALL expose that value to the handler body through the implicit `acti
 
 ### Requirement: Handler invocation returns a non-empty action list
 The interpreter SHALL normalize the result of invoking a component action handler into an ordered
-list of one or more values, each of which SHALL be either an action record or an update record.
-A single record result SHALL be normalized to a one-item list; a list result SHALL preserve source
-order and MAY mix action records and update records.
+sequence of one or more values — a `+` sequence as `occurrence-types` defines it — each of which
+SHALL be either an action record or an update record. A single record result SHALL be normalized to
+a one-item sequence by the one-level lift; a braced result SHALL preserve source order and MAY mix
+action records and update records. A result that is the empty value SHALL be rejected, which is the
+runtime face of the static rule that a handler's result type must not admit zero.
 
 #### Scenario: Single returned action is normalized to a one-item list
 - **WHEN** a handler body evaluates to `<DoSearch search={action.searchString} />`
-- **THEN** invocation SHALL return a list containing exactly one `DoSearch` action
+- **THEN** invocation SHALL return a sequence containing exactly one `DoSearch` action
 
 #### Scenario: Multiple returned actions preserve order
-- **WHEN** a handler body evaluates to `[<LogSearch search={action.searchString} />, <DoSearch search={action.searchString} />]`
+- **WHEN** a handler body evaluates to `{ <LogSearch search={action.searchString} /> <DoSearch search={action.searchString} /> }`
 - **THEN** invocation SHALL return both actions in source order
 
 #### Scenario: Update records are accepted as handler results
-- **WHEN** a handler bound inside `component <Counter /> = { state { count:int = 0 } ... }` evaluates to `[<Update count={count + 1} />, <Saved />]`
-- **THEN** invocation SHALL return a two-item list whose first item is a `Counter.Update` value and whose second item is a `Saved` action
+- **WHEN** a handler bound inside `component <Counter /> = { state { count:int = 0 } ... }` evaluates to `{ <Update count={count + 1} /> <Saved /> }`
+- **THEN** invocation SHALL return a two-item sequence whose first item is a `Counter.Update` value and whose second item is a `Saved` action
 
 #### Scenario: Empty or non-action results are rejected
-- **WHEN** a handler body evaluates to `[]`, `"docs"`, or a plain record such as `<User name="Ada" />`
+- **WHEN** a handler body evaluates to `{}`, `"docs"`, or a plain record such as `<User name="Ada" />`
 - **THEN** invocation SHALL fail with a runtime error because action handlers must return one or more actions or update records
 
 ### Requirement: Component dispatch applies bound emitted-action handlers
@@ -76,7 +78,7 @@ The system SHALL preserve host-provided action order across component dispatch, 
 it SHALL preserve the normalized order of actions returned by the matching handler.
 
 #### Scenario: Effects preserve both dispatch order and per-handler order
-- **WHEN** a component instance created from `<SearchBox onSearchSubmitted=[<LogSearch search={action.searchString} />, <DoSearch search={action.searchString} />] onValueChanged=<TrackSearch value={action.value} /> />` dispatches `[<SearchSubmitted searchString="docs" />, <SearchBox.ValueChanged value="docs" />]`
+- **WHEN** a component instance created from `<SearchBox onSearchSubmitted={ <LogSearch search={action.searchString} /> <DoSearch search={action.searchString} /> } onValueChanged=<TrackSearch value={action.value} /> />` dispatches the batch `{ <SearchSubmitted searchString="docs" /> <SearchBox.ValueChanged value="docs" /> }`
 - **THEN** dispatch SHALL return effect actions in this order: `LogSearch`, `DoSearch`, `TrackSearch`
 - **AND** the `LogSearch` and `DoSearch` actions SHALL both use `search="docs"`
 - **AND** the trailing `TrackSearch` action SHALL use `value="docs"`
@@ -94,7 +96,9 @@ The type checker SHALL infer and check every `on<ActionName>` handler body. The 
 checked with the same names in scope as the element it is bound on — the enclosing component's
 effective props and state fields, enclosing `let` bindings and loop variables — plus the implicit
 `action` identifier bound to the emitted action's record type. A handler body whose result is
-neither an action record, nor an update record, nor a non-empty list of those SHALL be rejected.
+neither an action record, nor an update record, nor a `+` sequence of those SHALL be rejected; in
+particular a result whose occurrence admits zero — `{}`, an `if` with no `else`, a `?` or `*` value —
+SHALL be rejected, naming the result type against the `+` the handler requires.
 
 #### Scenario: Action payload fields are typed inside the body
 - **WHEN** a file contains `external component <Slider emits { EndChanged { value:float64 } } />` and `component <Volume /> = { state { level:float64 = 0.5 } <Slider onEndChanged=<Update level={action.value} /> /> }`
@@ -112,8 +116,13 @@ neither an action record, nor an update record, nor a non-empty list of those SH
 - **WHEN** a file contains `component <Counter /> = { state { count:int = 0 } <Button onTapped={count + 1} /> }`
 - **THEN** type checking SHALL reject the handler because its result type `int` is neither an action nor an update record
 
+#### Scenario: A handler whose result may be empty is rejected statically
+- **WHEN** a file contains `component <Counter /> = { state { count:int = 0 } <Button onTapped={ if count < 10 { <Update count={count + 1} /> } } /> }`
+- **THEN** type checking SHALL reject the handler, naming `Counter.Update?` against a result that must be `+`
+- **AND** the same handler with an `else` arm returning `<Update />` SHALL be accepted
+
 #### Scenario: Enclosing let bindings and loop variables are visible
-- **WHEN** a file contains `component <List /> = { state { items:string[] = [] } for item in items { <Row onTapped=<Update items={remove(items, item)} /> /> } }` with a suitable `remove` function
+- **WHEN** a file contains `component <List /> = { state { items?:string+ } for item in items { <Row onTapped=<Update items={remove(items, item)} /> /> } }` with a suitable `remove` function
 - **THEN** type checking SHALL accept the reference to the loop variable `item` inside the handler
 
 ### Requirement: Handler results are routed by type to state, parent, or host
@@ -143,12 +152,12 @@ statically for every handler result.
 - **THEN** type checking SHALL reject the handler because `User.Update` is not `Form.Update`
 
 #### Scenario: Any action or update record is a host effect at the root
-- **WHEN** a file contains `type User = { name:string } action DoSearch = { search:string } let render() = <SearchBox onSearchSubmitted=[<DoSearch search={action.searchString} />, <User.Update name="Ada" />] />`
+- **WHEN** a file contains `type User = { name:string } action DoSearch = { search:string } let render() = <SearchBox onSearchSubmitted={ <DoSearch search={action.searchString} /> <User.Update name="Ada" /> } />`
 - **THEN** type checking SHALL accept the handler
 - **AND** dispatching the action SHALL return both values in the effect list
 
 #### Scenario: A mixed result list is routed item by item
-- **WHEN** a file contains `action Saved = { } component <Form emits { Saved } /> = { state { dirty:boolean = true } <Button onTapped=[<Update dirty=false />, <Saved />] /> }` and the tap is dispatched
+- **WHEN** a file contains `action Saved = { } component <Form emits { Saved } /> = { state { dirty:boolean = true } <Button onTapped={ <Update dirty=false /> <Saved /> } /> }` and the tap is dispatched
 - **THEN** the component's `dirty` state SHALL become `false`
 - **AND** `Saved` SHALL be emitted to the parent
 

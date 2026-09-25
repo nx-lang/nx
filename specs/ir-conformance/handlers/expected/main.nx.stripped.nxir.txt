@@ -1,4 +1,4 @@
-module main.nx fingerprint 7397562101735551248
+module main.nx fingerprint 123210532413214032
 requires update-records-v1 property-unions-v1 action-handlers-v1
 entrypoints functions [root] components [Node Label Button TextInput Card Stack Counter Tens SearchBox Page]
 
@@ -22,13 +22,13 @@ component TextInput external
 
 component Card external
   props
-    items: Node[] required
+    items: Node+ required
     header: Node required
     count: int required
 
 component Stack
   props
-    content children: Node[] required
+    content children: Node+ required
   body =
     <column>
       children

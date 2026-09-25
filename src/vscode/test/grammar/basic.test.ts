@@ -290,13 +290,6 @@ describe('NX TextMate grammar', function () {
     expect(scopesForSubstring(line, tokens, '}')).to.include('punctuation.section.block.end.nx');
   });
 
-  it('highlights the conditional operator', function () {
-    const line = 'let result = isReady ? whenReady() : whenNot();';
-    const { tokens } = grammar.tokenizeLine(line, null);
-    expect(scopesForSubstring(line, tokens, '?')).to.include('keyword.operator.conditional.nx');
-    expect(scopesForSubstring(line, tokens, ':')).to.include('punctuation.separator.conditional.nx');
-  });
-
   it('highlights paren-style function calls', function () {
     const line = 'let message = render(user, index)';
     const { tokens } = grammar.tokenizeLine(line, null);
@@ -413,10 +406,12 @@ describe('NX TextMate grammar', function () {
     expect(scopesForSubstring(line, tokens, 'else')).to.include('keyword.control.conditional.nx');
   });
 
-  it('highlights sequence type modifiers', function () {
-    const line = 'let numbers: int[] = [1, 2]';
+  it('highlights occurrence type modifiers', function () {
+    const line = 'let numbers: int+ = {1 2}';
     const { tokens } = grammar.tokenizeLine(line, null);
-    expect(scopesForSubstring(line, tokens, '[]')).to.include('keyword.operator.type-modifier.nx');
+    expect(scopesForSubstring(line, tokens, '+'))
+      .to.include('keyword.operator.type-modifier.nx')
+      .and.not.include('keyword.operator.arithmetic.nx');
   });
 
   it('scopes an attribute named after a keyword as an attribute', function () {
@@ -450,7 +445,7 @@ describe('NX TextMate grammar', function () {
     // its name, type, and default are scoped by the same rule rather than falling through to the
     // module-qualifier catch-all.
     const result = tokenizeLines(grammar, [
-      'let f(alpha: int, beta: Color? = red, gamma: string = "hi") = alpha'
+      'let f(alpha: int, beta: Color = red, gamma?: int) = alpha'
     ]);
 
     for (const name of ['alpha', 'beta', 'gamma']) {
@@ -462,66 +457,60 @@ describe('NX TextMate grammar', function () {
       .toInclude('support.type.primitive.nx');
     expectScopes(scopesAt(result, 'let f(', 'Color'), 'parameter type Color')
       .toInclude('entity.name.type.nx');
+    expectScopes(scopesAt(result, 'let f(', '?'), 'optional mark after gamma')
+      .toInclude('keyword.operator.optional.nx')
+      .toNotInclude('keyword.operator.type-modifier.nx', 'keyword.operator.presence.nx');
+    expect(tokenTextAt(result, 'let f(', 'gamma'), 'gamma token span').to.equal('gamma');
     expectScopes(scopesAt(result, 'let f(', 'red'), 'parameter default red')
       .toInclude('variable.other.enummember.nx')
       .toNotInclude('entity.name.qualifier.nx');
-    expectScopes(scopesAt(result, 'let f(', '"hi"'), 'parameter default "hi"')
-      .toInclude('string.quoted.double.nx');
   });
 
-  it('scopes the ? and [] type suffixes alike in every annotation position', function () {
+  it('scopes the ?, + and * type suffixes alike in every annotation position', function () {
     const record = tokenizeLines(grammar, [
       'type Doc = {',
-      '  catalogs: CatalogUse[]',
-      '  metadata: DocumentMetadata?',
+      '  catalogs: CatalogUse+',
+      '  metadata?: DocumentMetadata',
       '  title: string?',
-      '  items: string[]?',
+      '  items: string*',
       '}'
     ]);
 
-    for (const [property, suffix] of [['catalogs', '[]'], ['metadata', '?'], ['title', '?']]) {
+    for (const [property, suffix] of [['catalogs', '+'], ['title', '?'], ['items', '*']]) {
       expectScopes(scopesAt(record, property, suffix), `${suffix} on ${property}`)
         .toInclude('keyword.operator.type-modifier.nx')
-        .toNotInclude('keyword.operator.conditional.nx');
+        .toNotInclude('keyword.operator.presence.nx', 'keyword.operator.arithmetic.nx');
     }
-    expectScopes(scopesAt(record, 'items', '[]'), '[] on items').toInclude('keyword.operator.type-modifier.nx');
-    expectScopes(scopesAt(record, 'items', '?'), '? on items').toInclude('keyword.operator.type-modifier.nx');
+    // A `?` before the colon is the property's optional mark, not its type's suffix.
+    expectScopes(scopesAt(record, 'metadata', '?'), '? on metadata')
+      .toInclude('keyword.operator.optional.nx')
+      .toNotInclude('keyword.operator.type-modifier.nx');
 
     // The same suffix in a declaration signature.
-    const signature = tokenizeLines(grammar, ['component <Box', '  size: float64?', '/>']);
+    const signature = tokenizeLines(grammar, ['component <Box', '  size: float64?', '  swatches: Color*', '/>']);
     expectScopes(scopesAt(signature, 'size', '?'), '? in a signature')
       .toInclude('keyword.operator.type-modifier.nx');
+    expectScopes(scopesAt(signature, 'swatches', '*'), '* in a signature')
+      .toInclude('keyword.operator.type-modifier.nx')
+      .toNotInclude('keyword.operator.arithmetic.nx');
 
     // ...and in a value definition, a parameter list, and a function return type.
     const value = tokenizeLines(grammar, [
-      'let catalogs: CatalogUse[]? = items',
-      'let render(scale: float64?) = scale',
+      'let maybe: string? = {}',
+      'let catalogs: CatalogUse* = items',
+      'let render(scale: float64+) = scale',
       'let <Row item: string /> : Element? = <HStack />'
     ]);
-    for (const [line, suffix] of [['catalogs', '[]?'], ['scale: float64', '?'], ['Element?', '?']]) {
+    for (const [line, suffix] of [['maybe', '?'], ['catalogs', '*'], ['scale: float64', '+'], ['Element?', '?']]) {
       expectScopes(scopesAt(value, line, suffix), `${suffix} in \`${line}\``)
         .toInclude('keyword.operator.type-modifier.nx')
-        .toNotInclude('keyword.operator.conditional.nx');
+        .toNotInclude('keyword.operator.presence.nx', 'keyword.operator.arithmetic.nx');
     }
 
-    // `TypeSuffix*` is a source-ordered repetition, so `?` may precede `[]`.
-    const reordered = tokenizeLines(grammar, [
-      'component <Box',
-      '  tags: string?[]',
-      '  swatches: Color[]?[]',
-      '/>'
-    ]);
-    for (const [property, suffix] of [['tags', '?[]'], ['swatches', '[]?[]']]) {
-      expectScopes(scopesAt(reordered, property, suffix), `${suffix} on ${property}`)
-        .toInclude('keyword.operator.type-modifier.nx');
-      expect(tokenTextAt(reordered, property, suffix), `${suffix} on ${property} span`).to.equal(suffix);
+    // A type carries at most one suffix, so the token is exactly the one character.
+    for (const [line, suffix] of [['maybe', '?'], ['catalogs', '*'], ['scale: float64', '+']]) {
+      expect(tokenTextAt(value, line, suffix), `${suffix} in \`${line}\` span`).to.equal(suffix);
     }
-
-    // ...but a ternary is still a ternary.
-    const ternary = tokenizeLines(grammar, ['let ratio = ready ? 1 : 2']);
-    expectScopes(scopesAt(ternary, 'ratio', '?'), '? in a ternary')
-      .toInclude('keyword.operator.conditional.nx')
-      .toNotInclude('keyword.operator.type-modifier.nx');
   });
 
   it('highlights match and for blocks inside braced value expressions', function () {

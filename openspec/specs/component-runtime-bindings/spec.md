@@ -34,7 +34,7 @@ batch, and SHALL return the rendered output, the ordered effect list, and the ne
 snapshot.
 
 #### Scenario: Dispatch preserves host-provided action order
-- **WHEN** a host dispatches `[<SearchSubmitted searchString="docs" />, <SearchSubmitted searchString="guides" />]` against a previously returned `SearchBox` state snapshot
+- **WHEN** a host dispatches the batch `{ <SearchSubmitted searchString="docs" /> <SearchSubmitted searchString="guides" /> }` against a previously returned `SearchBox` state snapshot
 - **THEN** dispatch SHALL process the `"docs"` action before the `"guides"` action
 - **AND** dispatch SHALL return an effect action list and a next component-state snapshot for the
   same component instance
@@ -53,7 +53,7 @@ snapshot.
 - **AND** the effect list SHALL be empty
 
 #### Scenario: Non-update results of a handler invocation are effects
-- **WHEN** a host dispatches an invocation of a handler bound as `onTapped=[<Update count=0 />, <Saved />]` inside a component that emits `Saved`
+- **WHEN** a host dispatches an invocation of a handler bound as `onTapped={ <Update count=0 /> <Saved /> }` inside a component that emits `Saved`
 - **THEN** dispatch SHALL apply the update to the snapshot's state
 - **AND** SHALL return `Saved` as the only effect
 
@@ -196,6 +196,11 @@ actions, SHALL NOT invoke action handlers, and SHALL NOT return effects.
 - **THEN** evaluation SHALL fail with a type or missing-field diagnostic rather than silently using
   an absent state value
 
+#### Scenario: An optional state field may be omitted from the supplied state
+- **WHEN** a host evaluates a component whose state declaration contains a field `query?:string`
+- **AND** the supplied state value does not provide `query`, or provides it as `null`
+- **THEN** evaluation SHALL bind `query` to the empty value and SHALL render the body
+
 #### Scenario: Stateless component evaluation accepts empty state
 - **WHEN** a host evaluates `Button` from a `ProgramArtifact` containing `component <Button text:string /> = { <button>{text}</button> }` with props `{ text: "Save" }` and an empty state value
 - **THEN** evaluation SHALL return a rendered `button` element containing `"Save"`
@@ -286,30 +291,42 @@ return a next snapshot, and the snapshot the host supplied SHALL remain the auth
 A record the host supplies through component props, explicit component state, or a dispatch batch
 entry SHALL be constructed from its fields against the declaration its type name reaches, at every
 nesting depth: inside another record, an update record, a union case payload, a component value,
-or an array. A component value SHALL be constructed against the component's props, as an element
+or a sequence. A component value SHALL be constructed against the component's props, as an element
 tag naming it would be. A dispatch batch entry that is an emitted action SHALL be constructed
 whether or not the instance's parent bound a handler for it. That
 construction SHALL apply the rules static analysis applies to the same value — an unknown field is
-rejected, `null` is accepted only where the field is nullable, a plain record's required fields are
-present or defaulted, and an update record's absent fields stay absent — and a violation SHALL fail
-the call with a diagnostic naming the offending field. A value the runtime itself produced SHALL NOT
-be re-checked.
+rejected, `null`, a missing key or an empty array decodes to the empty value and is accepted only
+where the field is optional, an empty array is rejected at a `+` field, a plain record's required
+fields are present or defaulted, and an update record's absent fields stay absent while its present
+empty fields stay present — as `occurrence-types` and `update-records` define the decoding, and a
+violation SHALL fail the call with a diagnostic naming the offending field. A value the runtime
+itself produced SHALL NOT be re-checked.
 
 #### Scenario: An update record in a prop keeps only the fields it carries
-- **WHEN** a host initializes `component <Editor pending:User.Update /> = { <Panel pending={pending} /> }` with `pending` set to `{ $type: "User.Update", email: null }`
-- **THEN** the rendered `pending` SHALL be a `User.Update` carrying `email` as `null` and no `name`
+- **WHEN** a host initializes `component <Editor pending:User.Update /> = { <Panel pending={pending} /> }`, where `User` declares `email?:string`, with `pending` set to `{ $type: "User.Update", email: null }`
+- **THEN** the rendered `pending` SHALL be a `User.Update` carrying `email` present and empty and no `name`
+- **AND** the returned JSON SHALL encode that `email` as `null`, as `update-records` requires
 
 #### Scenario: An unknown field in a prop's update record is rejected
 - **WHEN** a host initializes `Editor` with `pending` set to `{ $type: "User.Update", nick: "a" }`
 - **THEN** initialization SHALL fail with a diagnostic naming `nick`
 
 #### Scenario: A null for a non-nullable field inside an action payload is rejected
-- **WHEN** a host dispatches an invocation of a handler bound for `Button.Tapped`, where `Button` emits `Tapped { patch:User.Update }`, with `patch` set to `{ $type: "User.Update", name: null }`
+- **WHEN** a host dispatches an invocation of a handler bound for `Button.Tapped`, where `Button` emits `Tapped { patch:User.Update }` and `User` declares `name:string`, with `patch` set to `{ $type: "User.Update", name: null }`
 - **THEN** dispatch SHALL fail with a diagnostic naming `name`
 - **AND** SHALL NOT change state or produce effects
 
+#### Scenario: A null and an empty array for an optional field are the empty value
+- **WHEN** a host initializes `component <Card user:User />`, where `User = { name:string nickname?:string tags?:string+ }`, with `user` set to `{ name: "Ada", nickname: null, tags: [] }`
+- **THEN** initialization SHALL succeed with `nickname` and `tags` both empty
+- **AND** the same call with `tags` omitted SHALL produce an equal value
+
+#### Scenario: An empty array for a one-or-more field is rejected
+- **WHEN** a host initializes `component <Card user:User />`, where `User = { name:string tags:string+ }`, with `user` set to `{ name: "Ada", tags: [] }`
+- **THEN** initialization SHALL fail with a diagnostic naming `tags`
+
 #### Scenario: A record inside a prop array is checked
-- **WHEN** a host initializes a component with a prop typed `User.Update[]` whose second element carries a field `User` does not declare
+- **WHEN** a host initializes a component with a prop typed `User.Update+` whose second element carries a field `User` does not declare
 - **THEN** initialization SHALL fail with a diagnostic naming that field
 
 #### Scenario: A plain record nested in a prop is checked
@@ -321,6 +338,6 @@ be re-checked.
 - **THEN** initialization SHALL fail with a diagnostic naming `nick`
 
 #### Scenario: An action entry with no bound handler is still checked
-- **WHEN** a host dispatches `{ $type: "Editor.Apply", patch: { $type: "User.Update", name: null } }`, where `Editor` emits `Apply { patch:User.Update }`, against an instance whose parent bound no `onApply`
+- **WHEN** a host dispatches `{ $type: "Editor.Apply", patch: { $type: "User.Update", name: null } }`, where `Editor` emits `Apply { patch:User.Update }` and `User` declares `name:string`, against an instance whose parent bound no `onApply`
 - **THEN** dispatch SHALL fail with a diagnostic naming `name`
 - **AND** the same entry with a well-formed `patch` SHALL succeed with no effects

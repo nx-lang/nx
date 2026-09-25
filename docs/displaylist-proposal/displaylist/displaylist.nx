@@ -69,39 +69,39 @@ export type DisplayListDocument = {
   format: string = "nx-display-list"
   schemaVersion: string = "0.1.0"
   root: DisplayListId
-  lists: DisplayList[]
-  spatial: SpatialNode[]
+  lists: DisplayList+
+  spatial: SpatialNode+
   slots: SlotTable
   resources: ResourceTable
-  metadata: DocumentMetadata?
+  metadata?: DocumentMetadata
 }
 
 // `bounds` is a conservative device-space bound of everything the list paints, used for culling,
-// damage tracking, and layer sizing; null means "unknown, assume everything." `generation`
+// damage tracking, and layer sizing; omitted means "unknown, assume everything." `generation`
 // increments whenever the list's ops change, which is what lets a backend keep a cached
 // rasterization keyed by list id (§10). Updating a slot never changes a generation — that is the
 // whole point of slots.
 //
-// NX gap: `ops: Op[]?` rather than `= []`, because NX has no empty-sequence literal in any
-// position. An empty list is legal and paints nothing.
+// `ops?: Op+`: an `ops` that is omitted, or written `{}`, is the empty value. An empty list is
+// legal and paints nothing.
 export type DisplayList = {
-  ops: Op[]?
-  bounds: Rect?
+  ops?: Op+
+  bounds?: Rect
   generation: int64 = 0
 }
 
 export type DocumentMetadata = {
-  title: string?
-  generator: string?
+  title?: string
+  generator?: string
 }
 
 export type ResourceTable = {
-  brushes: Brush[]?
-  strokeStyles: StrokeStyle[]?
-  paths: Path[]?
-  images: Image[]?
-  fonts: Font[]?
-  textRuns: TextRun[]?
+  brushes?: Brush+
+  strokeStyles?: StrokeStyle+
+  paths?: Path+
+  images?: Image+
+  fonts?: Font+
+  textRuns?: TextRun+
 }
 
 
@@ -171,10 +171,10 @@ export type Color = {
 // It also makes animation work properly. Binding a slot to one interior node moves everything below
 // it, including ops in other display lists, with no display list edited and no wrapper push/pop.
 //
-// `parent` is null on the root node and must otherwise be a strictly smaller index, so the tree is
+// `parent` is omitted on the root node and must otherwise be a strictly smaller index, so the tree is
 // acyclic by construction and one forward pass resolves every effective transform.
 export type SpatialNode = {
-  parent: SpatialId?
+  parent?: SpatialId
   transform: AnimatedTransform
 }
 
@@ -186,7 +186,7 @@ export type SpatialNode = {
 // A value that an animation may change between frames without the display list changing.
 //
 // `value` is the constant, and is also the value a renderer uses before the slot is first written;
-// a non-null `slot` says to read the current value from the slot table instead. This is WebRender's
+// a present `slot` says to read the current value from the slot table instead. This is WebRender's
 // `PropertyBinding::Binding(key, fallback)` with the fallback kept in the same record rather than
 // a union case, which avoids a `$type` tag on every animatable value.
 //
@@ -197,26 +197,26 @@ export type SpatialNode = {
 // the indirection would buy nothing and cost a branch on every field of every op.
 export type AnimatedTransform = {
   value: Transform2D
-  slot: TransformSlotId?
+  slot?: TransformSlotId
 }
 
 export type AnimatedFloat = {
   value: float64
-  slot: FloatSlotId?
+  slot?: FloatSlotId
 }
 
 export type AnimatedColor = {
   value: Color
-  slot: ColorSlotId?
+  slot?: ColorSlotId
 }
 
 // The mutable half of the model, and the only part of a document a renderer ever writes. Sequence
 // lengths declare how many slots of each type exist; the entries are their initial values. The
 // animation engine writes slots between frames (§9); the display list itself is immutable.
 export type SlotTable = {
-  floats: float64[]?
-  colors: Color[]?
-  transforms: Transform2D[]?
+  floats?: float64+
+  colors?: Color+
+  transforms?: Transform2D+
 }
 
 
@@ -247,16 +247,16 @@ export type Brush =
       y1: float64
       x2: float64
       y2: float64
-      stops: GradientStop[]
+      stops: GradientStop+
       extend: Extend = pad
     }
   | radialGradient {
       cx: float64
       cy: float64
       r: float64
-      fx: float64?                  // null means "same as cx"
-      fy: float64?                  // null means "same as cy"
-      stops: GradientStop[]
+      fx?: float64                  // omitted means "same as cx"
+      fy?: float64                  // omitted means "same as cy"
+      stops: GradientStop+
       extend: Extend = pad
     }
   | image {
@@ -276,7 +276,7 @@ export type StrokeStyle = {
   cap: LineCap = butt
   join: LineJoin = miter
   miterLimit: float64 = 4
-  dashArray: float64[]?
+  dashArray?: float64+
   dashOffset: float64 = 0
 }
 
@@ -300,8 +300,8 @@ export type PathVerb = moveTo | lineTo | quadTo | cubicTo | close
 //
 // The fill rule is on the fill op rather than here, because the same path may be filled either way.
 export type Path = {
-  verbs: PathVerb[]
-  points: float64[]
+  verbs: PathVerb+
+  points: float64+
 }
 
 
@@ -334,7 +334,7 @@ export type Image = {
 export type FontStyle = normal | italic
 
 export type Font = {
-  family: string?                   // null means the host default
+  family?: string                   // omitted means the host default
   weight: float64 = 400             // 1..1000
   style: FontStyle = normal
 }
@@ -425,10 +425,10 @@ export type Op =
   // --- scopes -------------------------------------------------------------
   | pushLayer {
       spatial: SpatialId
-      bounds: Rect?                 // null means "renderer computes from contents"
+      bounds?: Rect                 // omitted means "renderer computes from contents"
       alpha: AnimatedFloat
       blend: BlendMode = srcOver
-      filter: LayerFilter?
+      filter?: LayerFilter
     }
   | pushClipRect {
       spatial: SpatialId
@@ -534,7 +534,7 @@ export type Op =
     }
 
   // --- content ------------------------------------------------------------
-  // `src` is the sub-rectangle of the image in image pixels; null means the whole image. Any
+  // `src` is the sub-rectangle of the image in image pixels; omitted means the whole image. Any
   // object-fit resolution has already happened — the compiler produced the src and dst rects.
   // `alpha` is here, and on no other draw op, because an image has no brush to carry it; fading an
   // image would otherwise need a layer and an offscreen.
@@ -545,7 +545,7 @@ export type Op =
       y: float64
       width: float64
       height: float64
-      src: Rect?
+      src?: Rect
       sampling: Sampling = linear
       alpha: AnimatedFloat
     }

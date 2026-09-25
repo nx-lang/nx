@@ -144,10 +144,12 @@ import targets SHALL be derived from the dependency library name and the optiona
 ### Requirement: TypeScript generated records preserve concrete runtime discriminators
 TypeScript code generation SHALL emit record-like declarations that preserve the NX `$type` payload
 discriminator. Every generated concrete record or action record SHALL include a `$type` property
-whose type is the string literal of that declaration's exported name. When a concrete record or
-action derives from an exported abstract base of the same family, the generated output SHALL
-preserve the abstract base's shared fields through a reusable base contract while keeping each
-concrete descendant discriminated by its own literal `$type`.
+whose type is the string literal of that declaration's exported name. An abstract record or action
+SHALL be generated under its own name as an open contract: an interface declaring its fields, whose
+`$type` is any string. A record, action or union case that extends it SHALL extend that interface
+and narrow `$type` to its own name. The generated output SHALL NOT generate a closed union of an
+abstract base's descendants: an abstract base is an open set in NX, as it is in generated C#, and a
+closed set of records is an NX union, generated as a TypeScript union.
 
 #### Scenario: Concrete record includes a literal `$type`
 - **WHEN** source contains `export type ShortTextQuestion = { label:string }`
@@ -155,21 +157,21 @@ concrete descendant discriminated by its own literal `$type`.
   `$type: "ShortTextQuestion"`
 
 #### Scenario: Abstract record family exposes a shared base and concrete runtime surface
-- **WHEN** source contains `export abstract type Question = { label:string } export type ShortTextQuestion extends Question = { placeholder:string? } export type LongTextQuestion extends Question = { wordLimit:int? }`
-- **THEN** generated TypeScript SHALL preserve the shared `Question` fields in a generated base
-  contract for descendants
-- **AND** the generated `ShortTextQuestion` and `LongTextQuestion` contracts SHALL each include
-  their own literal `$type`
-- **AND** the exported `Question` type surface SHALL remain usable as the concrete runtime type for
-  values of either descendant
+- **WHEN** source contains `export abstract type Question = { label:string } export type ShortTextQuestion extends Question = { placeholder?:string } export type LongTextQuestion extends Question = { wordLimit?:int }`
+- **THEN** generated TypeScript SHALL declare `interface Question` with the shared `label` field and
+  a `$type` that is any string
+- **AND** the generated `ShortTextQuestion` and `LongTextQuestion` contracts SHALL each extend
+  `Question` and narrow `$type` to their own name
+- **AND** a value of either descendant SHALL be accepted where a `Question` is expected
+- **AND** generated TypeScript SHALL NOT declare a union of the descendants
 
 #### Scenario: Cross-module abstract record family remains generated as a coherent TypeScript surface
 - **WHEN** library module `questions/base.nx` exports `abstract type Question = { label:string }`
 - **AND** library module `questions/short-text.nx` exports
-  `type ShortTextQuestion extends Question = { placeholder:string? }`
-- **THEN** library TypeScript generation SHALL emit any needed `import type` statements so the
-  exported `Question` type surface in `questions/base.ts` can reference `ShortTextQuestion` without
-  manual edits
+  `type ShortTextQuestion extends Question = { placeholder?:string }`
+- **THEN** `questions/short-text.ts` SHALL import `Question` as a type from `questions/base.ts` and
+  declare `ShortTextQuestion` extending it
+- **AND** `questions/base.ts` SHALL NOT import or name `ShortTextQuestion`
 
 #### Scenario: Exported action record includes a literal `$type`
 - **WHEN** source contains `export action SearchRequested = { query:string }`
@@ -178,20 +180,19 @@ concrete descendant discriminated by its own literal `$type`.
 
 #### Scenario: Abstract action family exposes a shared base and concrete runtime surface
 - **WHEN** source contains `export abstract action SearchAction = { source:string } export action SearchRequested extends SearchAction = { query:string } export action SearchSubmitted extends SearchAction = { submittedAt:string }`
-- **THEN** generated TypeScript SHALL preserve the shared `SearchAction` fields in a generated base
-  contract for descendants
-- **AND** the generated `SearchRequested` and `SearchSubmitted` contracts SHALL each include their
-  own literal `$type`
-- **AND** the exported `SearchAction` type surface SHALL remain usable as the concrete runtime type
-  for values of either descendant
+- **THEN** generated TypeScript SHALL declare `interface SearchAction` with the shared `source`
+  field and a `$type` that is any string
+- **AND** the generated `SearchRequested` and `SearchSubmitted` contracts SHALL each extend
+  `SearchAction` and narrow `$type` to their own name
+- **AND** a value of either descendant SHALL be accepted where a `SearchAction` is expected
 
 #### Scenario: Cross-module abstract action family remains generated as a coherent TypeScript surface
 - **WHEN** library module `actions/base.nx` exports `abstract action SearchAction = { source:string }`
 - **AND** library module `actions/requested.nx` exports
   `action SearchRequested extends SearchAction = { query:string }`
-- **THEN** library TypeScript generation SHALL emit any needed `import type` statements so the
-  exported `SearchAction` type surface in `actions/base.ts` can reference `SearchRequested` without
-  manual edits
+- **THEN** `actions/requested.ts` SHALL import `SearchAction` as a type from `actions/base.ts` and
+  declare `SearchRequested` extending it
+- **AND** `actions/base.ts` SHALL NOT import or name `SearchRequested`
 
 ### Requirement: C# generated records use serializer metadata without emitted discriminator members
 C# code generation SHALL emit generated record and action DTO classes that can serialize and
@@ -212,13 +213,13 @@ MessagePack polymorphism SHALL use the same `$type`-keyed map contract as canoni
 - **AND** generated property `Query` SHALL be annotated so both serializers use wire name `query`
 
 #### Scenario: Abstract C# record root advertises polymorphism without a discriminator member
-- **WHEN** source contains `export abstract type Question = { label:string } export type ShortTextQuestion extends Question = { placeholder:string? }`
+- **WHEN** source contains `export abstract type Question = { label:string } export type ShortTextQuestion extends Question = { placeholder?:string }`
 - **THEN** generated C# SHALL emit `Question` as an inheritable abstract generated record type
 - **AND** `Question` SHALL advertise polymorphism using `$type` and its concrete descendants
 - **AND** generated `ShortTextQuestion` SHALL not declare a generated member mapped to `$type`
 
 #### Scenario: Intermediate abstract C# records inherit the root metadata without redeclaring a member
-- **WHEN** source contains `export abstract type Question = { label:string } export abstract type TextQuestion extends Question = { placeholder:string? } export type ShortTextQuestion extends TextQuestion = { maxLength:int? }`
+- **WHEN** source contains `export abstract type Question = { label:string } export abstract type TextQuestion extends Question = { placeholder?:string } export type ShortTextQuestion extends TextQuestion = { maxLength?:int }`
 - **THEN** the generated root abstract type SHALL advertise polymorphism for its concrete
   descendants using `$type`
 - **AND** intermediate abstract generated records SHALL inherit that metadata without redeclaring a
@@ -293,27 +294,6 @@ the synthesized companion instead of overwriting the conflicting declaration.
 - **AND** SHALL omit the generated `SearchBox_state` companion contract
 - **AND** SHALL preserve the explicit exported declaration `SearchBox_state`
 
-### Requirement: Generated type surfaces preserve composed list and nullable type references
-The generator SHALL preserve the same nested-list and nullability structure when exported aliases,
-record-like fields, action fields, or generated external-component state contracts use composed NX
-list and nullable suffixes. The generator SHALL continue to distinguish `T?[]` from `T[]?`
-instead of normalizing them to the same target-language shape.
-
-#### Scenario: TypeScript aliases preserve nested lists and nullable lists
-- **WHEN** source contains `export type Matrix = string[][]` and `export type MaybeNames = string[]?`
-- **THEN** TypeScript generation SHALL emit `export type Matrix = string[][];`
-- **AND** SHALL emit `export type MaybeNames = string[] | null;`
-
-#### Scenario: TypeScript fields preserve list-of-nullable elements
-- **WHEN** source contains `export type Payload = { aliases:string?[] }`
-- **THEN** generated TypeScript for `Payload` SHALL include field `aliases: (string | null)[]`
-
-#### Scenario: C# fields preserve nested and outer nullable list structure
-- **WHEN** source contains `export type Payload = { matrix:string[][] maybeNames:string[]? aliases:string?[] }`
-- **THEN** generated C# for `Payload` SHALL include property `Matrix` with type `string[][]`
-- **AND** SHALL include property `MaybeNames` with type `string[]?`
-- **AND** SHALL include property `Aliases` with type `string?[]`
-
 ### Requirement: Generated C# enums reuse shared runtime serialization helpers
 Generated C# enums SHALL reference shared enum serialization helpers from `NxLang.Runtime` for both
 `System.Text.Json` and MessagePack instead of emitting a dedicated converter and formatter type per
@@ -354,12 +334,13 @@ with authored wire names, and SHALL allow TypeScript consumers to narrow by `$ty
 
 #### Scenario: TypeScript generation includes shared inherited union fields
 - **WHEN** source contains `export abstract type EventBase = { source:string } export type UiEvent extends EventBase = | clicked { x:int } | closed`
-- **THEN** generated TypeScript SHALL include `source` on every generated `UiEvent` case member
+- **THEN** generated TypeScript SHALL include `source` on every generated `UiEvent` case member,
+  each of which extends the open `EventBase` contract
 - **AND** the exported `UiEvent` type surface SHALL remain narrowable by the case `$type`
 
 #### Scenario: TypeScript library generation preserves cross-module field references
 - **WHEN** library module `items.nx` exports `type Item = { name:string }`
-- **AND** library module `state.nx` exports `type LoadState = | loaded { items:Item[] }`
+- **AND** library module `state.nx` exports `type LoadState = | loaded { items:Item+ }`
 - **THEN** TypeScript library generation SHALL emit any needed type-only imports so the generated
   `LoadState.loaded` case field can reference `Item`
 
@@ -390,18 +371,19 @@ authored NX wire names.
 ### Requirement: Generated C# DTO properties preserve supported literal defaults
 C# type generation SHALL preserve authored NX literal defaults on generated DTO properties when the
 literal can be represented as a C# property initializer. Supported literal defaults SHALL include
-string, integer, floating-point, boolean, and null literals. When a generated C# property has a
-supported literal default, that authored initializer SHALL take precedence over the generator's
-non-null reference `default!` initializer. When a C# generated field has a non-literal default
-expression, generation SHALL continue and SHALL emit a warning that the default could not be
-preserved.
+string, integer, floating-point, and boolean literals. When a generated C# property has a supported
+literal default, that authored initializer SHALL take precedence over the generator's non-null
+reference `default!` initializer. An optional property (`name?:T`) has no default, as
+`optional-properties` requires, and SHALL be emitted as a nullable property with no initializer.
+When a C# generated field has a non-literal default expression, generation SHALL continue and
+SHALL emit a warning that the default could not be preserved.
 
 #### Scenario: Record field literal defaults are emitted as C# initializers
-- **WHEN** source contains `export type Settings = { enabled:boolean = true count:int = 42 title:string = "hello" maybe:string? = null }`
+- **WHEN** source contains `export type Settings = { enabled:boolean = true count:int = 42 title:string = "hello" maybe?:string }`
 - **THEN** generated C# SHALL include `public bool Enabled { get; set; } = true;`
 - **AND** generated C# SHALL include `public long Count { get; set; } = 42;`
 - **AND** generated C# SHALL include `public string Title { get; set; } = "hello";`
-- **AND** generated C# SHALL include `public string? Maybe { get; set; } = null;`
+- **AND** generated C# SHALL include `public string? Maybe { get; set; }` with no initializer
 
 #### Scenario: Union case field literal defaults are emitted as C# initializers
 - **WHEN** source contains `export type LoadState = | failed { retryable:boolean = true }`
@@ -507,7 +489,11 @@ companion update type named `<Name>_update` beside the exported type, following 
 companion-naming and collision rules as `<ComponentName>_state`. The companion SHALL carry the
 target's effective fields, each optional, SHALL carry the `$type` discriminator `<Name>.Update`
 where the target language emits discriminators, and SHALL let a consumer distinguish a field that
-is absent from a field that is present and `null`.
+is absent from a field that is present and `null`, where `null` is the host spelling of a cleared
+field — the empty value — and is legal only for a field that is optional in the target, as
+`update-records` requires. In TypeScript a clearable field SHALL be declared `name?: T | null` and
+a non-clearable one `name?: T`. In C# an unset field SHALL serialize to no key and a cleared field
+to `null`, and a non-clearable field's value type SHALL be non-nullable.
 
 A companion field the target inherits from a base declared in another module SHALL have its type
 resolved in the namespace of the module that declared the field, not the module that generates
@@ -522,19 +508,20 @@ companion, the field, and the type, and SHALL leave the field's written type nam
 output.
 
 #### Scenario: TypeScript update companion uses optional properties
-- **WHEN** source contains `export type User = { name:string email:string? }`
+- **WHEN** source contains `export type User = { name:string email?:string }`
 - **THEN** TypeScript generation SHALL emit `export interface User_update` with `$type: "User.Update"`
 - **AND** SHALL declare `name?: string` and `email?: string | null`
 - **AND** SHALL NOT declare either property as required
 
 #### Scenario: C# update companion distinguishes absent from null
-- **WHEN** source contains `export type User = { name:string email:string? }`
+- **WHEN** source contains `export type User = { name:string email?:string }`
 - **THEN** C# generation SHALL emit a generated type `User_update` whose properties are typed so that an unset property serializes to no key and a property set to `null` serializes to a `null` value
 - **AND** deserializing an object without the `email` key SHALL leave that property unset rather than `null`
+- **AND** the `Name` property's value type SHALL be non-nullable, since `name` cannot be cleared
 - **AND** the generated type SHALL carry the wire names `name` and `email` in a form both MessagePack and JSON serialization use, without requiring a per-property attribute on each generated property
 
 #### Scenario: C# update companion carries its field schema
-- **WHEN** source contains `export type User = { name:string email:string? }`
+- **WHEN** source contains `export type User = { name:string email?:string }`
 - **THEN** the generated `User_update` SHALL expose, to the managed SDK, each field's wire name paired with its value type
 - **AND** that schema SHALL be the only thing serialization needs to read or write the companion, so no runtime reflection over the generated type is required
 
@@ -587,12 +574,12 @@ generated as a reference to the `<T>_property` companion, including across libra
 with the same cross-library linkage a reference to `T` itself would produce.
 
 #### Scenario: TypeScript property companion is a string literal union
-- **WHEN** source contains `export type User = { name:string email:string? }`
+- **WHEN** source contains `export type User = { name:string email?:string }`
 - **THEN** TypeScript generation SHALL emit `export type User_property = "name" | "email";`
 - **AND** SHALL NOT emit a runtime value for it
 
 #### Scenario: C# property companion is an enum with the bare-string wire format
-- **WHEN** source contains `export type User = { name:string email:string? }`
+- **WHEN** source contains `export type User = { name:string email?:string }`
 - **THEN** C# generation SHALL emit `enum User_property` with members for `name` and `email`
 - **AND** the enum SHALL serialize each member as its authored field name in both JSON and MessagePack using the shared enum helpers
 
@@ -602,8 +589,8 @@ with the same cross-library linkage a reference to `T` itself would produce.
 - **AND** SHALL emit `User_property` with cases `name` then `email`
 
 #### Scenario: A property-typed prop references the companion
-- **WHEN** source contains `export type Contact = { title:string } export external component <Table sortBy:Contact.Property? columns:Contact.Property[] />`
-- **THEN** generated TypeScript SHALL type `sortBy` as `Contact_property | null` and `columns` as `Contact_property[]`
+- **WHEN** source contains `export type Contact = { title:string } export external component <Table sortBy?:Contact.Property columns:Contact.Property+ />`
+- **THEN** generated TypeScript SHALL type `sortBy` as the optional property `sortBy?: Contact_property` and `columns` as `Contact_property[]`
 - **AND** generated C# SHALL type `sortBy` as a nullable `Contact_property` and `columns` as a collection of `Contact_property`
 
 #### Scenario: Property companion name collision warns and skips
@@ -616,9 +603,9 @@ with the same cross-library linkage a reference to `T` itself would produce.
 For every declaration that gets a `<Name>_property` companion and whose fields are reachable on a
 generated plain type, C# generation SHALL also emit a typed key per field. A key SHALL carry the
 field's wire name, its value type, and read and write access to that field on the plain generated
-type. Generation SHALL provide a mapping from each `<Name>_property` case to its key, so the
-property companion remains the single naming of a declaration's fields and no second spelling of
-those names is introduced.
+type. A key for an optional field (`name?:T`) SHALL carry a nullable value type. Generation SHALL
+provide a mapping from each `<Name>_property` case to its key, so the property companion remains
+the single naming of a declaration's fields and no second spelling of those names is introduced.
 
 Where a declaration has a property companion but no instantiable generated plain type carrying its
 fields, such as a non-external component's state or an abstract record, generation SHALL emit the
@@ -631,7 +618,7 @@ declaration already owns that name, generation SHALL warn naming the table and t
 SHALL omit the table, and SHALL emit the update companion without keys.
 
 #### Scenario: Record gets a key per field
-- **WHEN** source contains `export type User = { name:string email:string? }`
+- **WHEN** source contains `export type User = { name:string email?:string }`
 - **THEN** C# generation SHALL emit a typed key for `name` whose value type is the C# spelling of `string`, and one for `email` whose value type is nullable
 - **AND** each key SHALL be able to read and write that field of a generated `User` instance
 - **AND** generation SHALL emit a mapping from each `User_property` case to its key
@@ -664,8 +651,9 @@ contract references it, SHALL NOT declare a generic parameter on the generated r
 NOT include a member for the type parameter. The TypeScript `typegen` emitter SHALL declare the
 exported contract type with one generic parameter per component type parameter, each defaulting
 to `unknown`, SHALL reference the parameter by name inside the type, and SHALL NOT include a
-member for it. List and nullable suffixes on a type-parameter reference SHALL be preserved around
-the erased or generic type. The exported contract's parameter list SHALL be the component's
+member for it. An occurrence on a type-parameter reference, and the optional mark on the property
+that carries it, SHALL be preserved around the erased or generic type as "Generated type surfaces
+map occurrences" maps them. The exported contract's parameter list SHALL be the component's
 effective one, including parameters inherited from an abstract base declared in another module of
 the library. A generic component's `<Name>_update` companion and, for an external component, its
 `<Name>_state` record SHALL erase a state field's type parameter in both languages — to `object`
@@ -673,27 +661,27 @@ in C# and `unknown` in TypeScript — with no generic parameter, because no host
 instantiation: an NX use site fixed it.
 
 #### Scenario: C# external contract erases the parameter
-- **WHEN** NX source declares `export external component <SkiaLayout TItem:type itemsSource:TItem[]? />`
+- **WHEN** NX source declares `export external component <SkiaLayout TItem:type itemsSource?:TItem+ />`
 - **AND** a caller requests C# output
 - **THEN** the generated `SkiaLayout` record SHALL declare `itemsSource` as a nullable list of `object`
 - **AND** SHALL NOT declare a generic type parameter or a `TItem` property
 
 #### Scenario: TypeScript external contract is generic with an unknown default
-- **WHEN** NX source declares `export external component <SkiaLayout TItem:type itemsSource:TItem[]? />`
+- **WHEN** NX source declares `export external component <SkiaLayout TItem:type itemsSource?:TItem+ />`
 - **AND** a caller requests TypeScript output
-- **THEN** the generated type SHALL be declared as `SkiaLayout<TItem = unknown>` with `itemsSource` as a nullable array of `TItem`
+- **THEN** the generated type SHALL be declared as `SkiaLayout<TItem = unknown>` with `itemsSource` as an optional property whose type is an array of `TItem`
 - **AND** SHALL NOT declare a `TItem` property
-- **AND** a caller writing `SkiaLayout` with no argument SHALL get `itemsSource` typed as a nullable array of `unknown`
+- **AND** a caller writing `SkiaLayout` with no argument SHALL get `itemsSource` typed as an optional array of `unknown`
 
 #### Scenario: Derived contract carries a parameter inherited across modules
-- **WHEN** a library's `base.nx` declares `export abstract external component <ItemsBase TItem:type items:TItem[]? />`
-- **AND** its `derived.nx` declares `export external component <ContactList extends ItemsBase extra:TItem[]? />`
-- **THEN** the generated TypeScript SHALL declare `ContactList<TItem = unknown>` extending `ItemsBaseBase<TItem>` with `extra` as a nullable array of `TItem`
+- **WHEN** a library's `base.nx` declares `export abstract external component <ItemsBase TItem:type items?:TItem+ />`
+- **AND** its `derived.nx` declares `export external component <ContactList extends ItemsBase extra?:TItem+ />`
+- **THEN** the generated TypeScript SHALL declare `ContactList<TItem = unknown>` extending `ItemsBase<TItem>` with `extra` as an optional array of `TItem`
 - **AND** the generated C# `ContactList` SHALL declare `extra` as a nullable list of `object` with no `TItem` anywhere
 
 #### Scenario: State and update companion erase the parameter
-- **WHEN** NX source declares `export external component <Picker TItem:type items:TItem[]? /> = { state { sel:TItem? } }`
-- **THEN** the generated TypeScript `Picker_state` SHALL type `sel` as nullable `unknown` and `Picker_update` SHALL type it as optional nullable `unknown`
+- **WHEN** NX source declares `export external component <Picker TItem:type items?:TItem+ /> = { state { sel?:TItem } }`
+- **THEN** the generated TypeScript `Picker_state` SHALL type `sel` as the optional property `sel?: unknown` and `Picker_update` SHALL type it as `sel?: unknown | null`, since `sel` is clearable
 - **AND** the generated C# `Picker_state` SHALL declare `Sel` as nullable `object` and `Picker_update` SHALL expose it as `NxOptional<object?>`
 - **AND** neither language's output SHALL declare a `TItem` member on either type
 
@@ -728,18 +716,18 @@ on the wire: the discriminator and the field names are unchanged by the paramete
 - **AND** SHALL NOT declare a `T` property
 
 #### Scenario: An applied type is rendered as the instantiation
-- **WHEN** NX source declares `export type Range = { T:type start:T end:T }` and `export type Slider = { range:<Range T=float64/> marks:<Range T=int/>[]? }`
+- **WHEN** NX source declares `export type Range = { T:type start:T end:T }` and `export type Slider = { range:<Range T=float64/> marks?:<Range T=int/>+ }`
 - **THEN** the generated C# `Slider` SHALL declare `Range` as `Range<double>` and `Marks` as a nullable list of `Range<long>`
-- **AND** the generated TypeScript `Slider` SHALL declare `range` as `Range<number>` and `marks` as a nullable array of `Range<number>`
+- **AND** the generated TypeScript `Slider` SHALL declare `range` as `Range<number>` and `marks` as an optional property whose type is an array of `Range<number>`
 
 #### Scenario: Arguments are emitted in declaration order
 - **WHEN** NX source declares `export type Pair = { TKey:type TValue:type key:TKey value:TValue }` and `export type Entry = { p:<Pair TValue=int TKey=string/> }`
 - **THEN** the generated C# SHALL type `P` as `Pair<string, long>` and the generated TypeScript SHALL type `p` as `Pair<string, number>`
 
 #### Scenario: A component type parameter as an argument follows the component rule
-- **WHEN** NX source declares `export type Range = { T:type start:T end:T }` and `export external component <Slider TValue:type range:<Range T=TValue/>? />`
+- **WHEN** NX source declares `export type Range = { T:type start:T end:T }` and `export external component <Slider TValue:type range?:<Range T=TValue/> />`
 - **THEN** the generated C# `Slider` SHALL declare `Range` as a nullable `Range<object>`
-- **AND** the generated TypeScript `Slider<TValue = unknown>` SHALL declare `range` as a nullable `Range<TValue>`
+- **AND** the generated TypeScript `Slider<TValue = unknown>` SHALL declare `range` as the optional property `range?: Range<TValue>`
 
 #### Scenario: The update companion of a generic record carries the parameter
 - **WHEN** NX source declares `export type Range = { T:type start:T end:T }`
@@ -753,8 +741,8 @@ on the wire: the discriminator and the field names are unchanged by the paramete
 - **AND** reading a patched field SHALL give the record's field type rather than an untyped value
 
 #### Scenario: A component's state companion still erases the component's parameters
-- **WHEN** NX source declares `export external component <Picker TItem:type /> = { state { sel:TItem? } <Label /> }`
-- **THEN** the generated `Picker_update` SHALL declare no generic parameter, and SHALL type `sel` as optional `unknown` in TypeScript and `NxOptional<object?>` in C#
+- **WHEN** NX source declares `export external component <Picker TItem:type /> = { state { sel?:TItem } <Label /> }`
+- **THEN** the generated `Picker_update` SHALL declare no generic parameter, and SHALL type `sel` as `sel?: unknown | null` in TypeScript and `NxOptional<object?>` in C#
 
 ### Requirement: CLI explains an NX IR artifact as readable text
 Because an NX IR artifact is a binary image, `nxlang ir explain <artifact>` SHALL be the supported
@@ -802,7 +790,7 @@ generating library hides a prelude name in every one of its modules, because a s
 visible without an import, while an `import` hides it only in the module that wrote it.
 
 #### Scenario: C# maps a range to the SDK type
-- **WHEN** NX source declares `export type Slider = { range:<Range T=float64/> marks:<Range T=int/>[]? }`
+- **WHEN** NX source declares `export type Slider = { range:<Range T=float64/> marks?:<Range T=int/>+ }`
 - **AND** a caller requests C# output
 - **THEN** the generated `Slider` SHALL declare `Range` as `global::NxLang.Nx.NxRange<double>` and `Marks` as a nullable list of `global::NxLang.Nx.NxRange<long>`
 - **AND** the output SHALL NOT declare a type named `Range` or `NxRange`
@@ -851,10 +839,11 @@ wherever in the member's type it sits. A generated C# file SHALL suppress `MsgPa
 formatters against the open generic and so reads two instantiations of one companion as two
 formatters for one type; they are not, since the source generator resolves each member by the closed
 type its attribute names. One shape has no formatter the generator can resolve: a companion another
-assembly declares, reached *below* the member's own type, where there is nowhere to put the
-attribute and the open generic on the companion is `MsgPack006` from the compiler itself, which no
-file-level pragma reaches. A field of that shape SHALL be reported as a warning naming the field and
-the companion, rather than generated into a file that does not compile.
+assembly declares, reached *below* the member's own type — under a `+` or `*` occurrence — where
+there is nowhere to put the attribute and the open generic on the companion is `MsgPack006` from the
+compiler itself, which no file-level pragma reaches. A field of that shape SHALL be reported as a
+warning naming the field and the companion, rather than generated into a file that does not
+compile.
 
 #### Scenario: A member typed by the prelude's update companion
 - **WHEN** NX source declares `export type Patch = { change:<Range.Update T=int/> }` and a caller requests C# output
@@ -872,6 +861,42 @@ the companion, rather than generated into a file that does not compile.
 - **AND** both members SHALL carry `[MessagePackFormatter]` naming it
 
 #### Scenario: A generic update companion C# cannot format
-- **WHEN** NX source declares a field typed as a list of the prelude's `Range.Update`
+- **WHEN** NX source declares a field typed `<Range.Update T=int/>+` or `<Range.Update T=int/>*`
 - **THEN** C# output SHALL warn, naming the field and the companion
 - **AND** a field typed by the update companion of a generic record the library declares itself SHALL NOT warn, at the member's own type or below it
+
+### Requirement: Generated type surfaces map occurrences
+The generator SHALL map each of the four occurrences to one host shape wherever an exported alias,
+record-like field, action field, component prop, external-component state contract, or companion
+mentions a type. `T?` in a type position SHALL map to TypeScript `T | null` and C# `T?`. A property
+declared `name?:T` SHALL map to a TypeScript optional property `name?: T` and a C# nullable property
+`T?`; one declared `name?:T+` SHALL map to `name?: T[]` and `T[]?` respectively, since its read type
+is `T*`. `T+` and `T*` SHALL both map to TypeScript `T[]` and to the C# list or array mapping the
+generator already uses for a sequence. The non-emptiness of `+` SHALL NOT be encoded in the static
+type; it SHALL be validated when the value crosses the NX boundary, where the runtime rejects an
+empty array at a `+` site as `occurrence-types` requires. Because an NX sequence never contains a
+sequence and no suffixed type is an item type, the generator SHALL NOT be asked to emit a nested
+list or a nullable element type, and SHALL NOT synthesize one. Generated output SHALL NOT mention
+`null` for an NX value except as the host reading of an absent optional value or a cleared update
+field.
+
+#### Scenario: TypeScript aliases map each occurrence
+- **WHEN** source contains `export type MaybeName = string?`, `export type Names = string+` and `export type Tags = string*`
+- **THEN** TypeScript generation SHALL emit `export type MaybeName = string | null;`
+- **AND** SHALL emit `export type Names = string[];` and `export type Tags = string[];`
+
+#### Scenario: TypeScript fields map optional properties and sequences
+- **WHEN** source contains `export type Payload = { names:string+ tags?:string+ nick?:string }`
+- **THEN** generated TypeScript for `Payload` SHALL include `names: string[]`, `tags?: string[]` and `nick?: string`
+
+#### Scenario: C# fields map optional properties and sequences
+- **WHEN** source contains `export type Payload = { names:string+ tags?:string+ nick?:string }`
+- **THEN** generated C# for `Payload` SHALL include property `Names` with type `string[]`
+- **AND** SHALL include property `Tags` with type `string[]?`
+- **AND** SHALL include property `Nick` with type `string?`
+
+#### Scenario: Non-emptiness is validated at the boundary, not in the type
+- **WHEN** NX source declares `type Book = { title:string authors:Person+ }` and a component taking `book:Book`
+- **AND** a C# host passes as that prop a record whose `authors` is an empty array, in the shape typegen emits for a `+` field (a plain `Person[]`)
+- **THEN** the host code SHALL compile without objection
+- **AND** the NX runtime SHALL reject the value with a diagnostic naming `authors`

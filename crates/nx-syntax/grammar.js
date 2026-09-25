@@ -223,9 +223,12 @@ module.exports = grammar({
       field('value', $.rhs_expression),
     ),
 
-    // `prec.right` makes a suffix after a function type's result bind to the result, so
-    // `<function />: string?` is a function returning `string?`; a nullable function type is
-    // written `(<function />: string)?`.
+    // A base type followed by at most one occurrence suffix: `?` zero or one, `+` one or more,
+    // `*` zero or more. `prec.right` makes a suffix after a function type's result bind to the
+    // result, so `<function />: string?` is a function returning `string?`; a suffix on the
+    // function type itself is written `(<function />: string)?`. Every suffix is admitted here,
+    // and `[]` still parses, so that post-parse validation can report a second suffix and a `[]`
+    // by name rather than as a bare parse error.
     type: $ => prec.right(seq(
       choice(
         $.primitive_type,
@@ -235,8 +238,10 @@ module.exports = grammar({
         $.parenthesized_type,
       ),
       repeat(choice(
-        '?',          // nullable
-        seq('[', ']'), // sequence/list
+        '?',           // zero or one
+        '+',           // one or more
+        '*',           // zero or more
+        seq('[', ']'), // removed; validation names `*` and `+`
       )),
     )),
 
@@ -403,6 +408,7 @@ module.exports = grammar({
     _component_property_definition: $ => choice(
       seq(
         field('name', alias($._component_field_name, $.markup_identifier)),
+        optional(field('optional', '?')),
         ':',
         field('type', $._property_type),
         optional(seq(
@@ -413,6 +419,7 @@ module.exports = grammar({
       seq(
         field('modifier', alias($._component_field_name, $.markup_identifier)),
         field('name', alias($._component_field_name, $.markup_identifier)),
+        optional(field('optional', '?')),
         ':',
         field('type', $._property_type),
         optional(seq(
@@ -432,9 +439,13 @@ module.exports = grammar({
       $.markup_identifier,
     ),
 
+    // `name?:type` marks a property optional: it may be omitted at construction and reads as a
+    // type that admits zero. The mark sits on the name, never in the type slot, so `?` and `*`
+    // there are the type checker's to reject with the `name?:` fix-it.
     property_definition: $ => choice(
       seq(
         field('name', $.markup_identifier),
+        optional(field('optional', '?')),
         ':',
         field('type', $._property_type),
         optional(seq(
@@ -445,6 +456,7 @@ module.exports = grammar({
       seq(
         field('modifier', $.markup_identifier),
         field('name', $.markup_identifier),
+        optional(field('optional', '?')),
         ':',
         field('type', $._property_type),
         optional(seq(
@@ -456,7 +468,7 @@ module.exports = grammar({
 
     // ===== Expressions =====
     // An unbraced value is always a literal, never an expression. `literal` comes first so
-    // `true`, `false`, and `null` keep lexing as bool/null literals rather than contextual names.
+    // `true` and `false` keep lexing as bool literals rather than contextual names.
     // `contextual_name` is a single identifier and deliberately never a qualified_name: admitting
     // `fit=Fit.cover` would also admit `fit=obj.field`, and the invariant would be gone.
     rhs_expression: $ => choice(
@@ -475,10 +487,22 @@ module.exports = grammar({
       choice($.int_literal, $.real_literal, $.hex_literal),
     ),
 
-    contextual_name: $ => $.identifier,
+    // An occurrence suffix may follow the name with no space, so `T=int?` at a construction site
+    // parses and the checker can say that a type argument is exactly one value. Only the glued form
+    // is admitted: an unbraced value is never an operator expression, and `a=n + 1` or
+    // `a=c ? 1 : 2` is the author reaching for one, not writing a suffix.
+    contextual_name: $ => seq(
+      $.identifier,
+      repeat(field('suffix', choice(
+        token.immediate('?'),
+        token.immediate('+'),
+        token.immediate('*'),
+      ))),
+    ),
 
-    // Zero items is admitted so an empty list has a spelling: `{}`. It stays on this rule only --
-    // `elements_braced_expression` and `embed_braced_expression` still require at least one item.
+    // Zero items is admitted so the empty value has a spelling: `{}`. It stays off
+    // `elements_braced_expression` and `embed_braced_expression`, which still require at least one
+    // item; `_empty_braced_expression` admits it as an item and an operand.
     values_braced_expression: $ => seq(
       '{',
       optional(choice(
@@ -501,15 +525,24 @@ module.exports = grammar({
       $.value_for_expression,
       $.call_expression,
       $.member_access_expression,
+      $.optional_member_expression,
+      $.exists_expression,
       $.literal,
       $.identifier_expression,
       $.unit_literal,
       $.parenthesized_expression,
+      alias($._empty_braced_expression, $.values_braced_expression),
     ),
+
+    // The empty value `{}` is an item and an operand too: `{ "a" {} }`, `{ x == {} }`,
+    // `if c { {} } else { 1 }`. Only the zero-item brace is admitted here, so a non-empty list
+    // is still not an item of a list. It shares the `values_braced_expression` node, so lowering
+    // reads it as the same empty value. Where a full braced value is also admitted, the lower
+    // precedence lets that reading win.
+    _empty_braced_expression: $ => prec(-1, seq('{', '}')),
 
     value_expression: $ => choice(
       $.value_list_item_expression,
-      $.conditional_expression,
       $.prefix_unary_expression,
       $.binary_expression,
     ),
@@ -524,16 +557,14 @@ module.exports = grammar({
       ')',
     ),
 
-    conditional_expression: $ => prec.right(20, seq(
-      field('condition', $.value_expression),
-      '?',
-      field('consequent', $.value_expression),
-      ':',
-      field('alternative', $.value_expression),
-    )),
-
+    // There is no conditional operator: `c ? a : b` is written `if c { a } else { b }`, and a
+    // `?` after an expression is the presence test. Validation reports the ternary shape with
+    // that fix-it.
     binary_expression: $ => {
       const operators = [
+        // `??` supplies a fallback for an empty value. It binds above arithmetic, so
+        // `"a" + x ?? "b"` is `"a" + (x ?? "b")`, and associates to the right.
+        [prec.right, 125, '??'],
         [prec.left, 120, '*'],
         [prec.left, 120, '/'],
         [prec.left, 120, '%'],
@@ -578,9 +609,9 @@ module.exports = grammar({
     )),
 
     // An argument may be a braced value, so a function is passed a list the same way a property
-    // is bound one: `f({})`, `f({a})`, `f({a b})`. The brace is admitted here and nowhere else
-    // new -- `value_list_item_expression` still excludes it, so a list is still not an item of a
-    // list. Hidden, so the argument's own node reaches lowering directly.
+    // is bound one: `f({})`, `f({a})`, `f({a b})`. `value_list_item_expression` admits only the
+    // empty brace, so a non-empty list is still not an item of a list. Hidden, so the argument's
+    // own node reaches lowering directly.
     _call_argument: $ => choice(
       $.value_expression,
       $.values_braced_expression,
@@ -592,6 +623,22 @@ module.exports = grammar({
       field('member', $.identifier),
     )),
 
+    // `x?.m` steps through a receiver that may be empty: `{}` when `x` is empty, `x.m` otherwise.
+    // `?.` is one token, so the lexer's longest match keeps it from reading as a presence test
+    // followed by `.`.
+    optional_member_expression: $ => prec.left(140, seq(
+      field('target', $.value_expression),
+      '?.',
+      field('member', $.identifier),
+    )),
+
+    // Postfix `?` tests presence: `x?` is `true` when `x` holds an item and `false` when it is
+    // the empty value. It binds as tightly as member access.
+    exists_expression: $ => prec.left(140, seq(
+      field('operand', $.value_expression),
+      '?',
+    )),
+
     // ===== Literals =====
     literal: $ => choice(
       $.string_literal,
@@ -599,7 +646,6 @@ module.exports = grammar({
       $.real_literal,
       $.hex_literal,
       $.bool_literal,
-      $.null_literal,
     ),
 
     string_literal: $ => token(seq(
@@ -615,7 +661,6 @@ module.exports = grammar({
     real_literal: $ => /[0-9]+\.[0-9]+([eE][+-]?[0-9]+)?/,
     hex_literal: $ => /0[xX][0-9a-fA-F]+/,
     bool_literal: $ => choice('true', 'false'),
-    null_literal: $ => 'null',
 
     // ===== Value If Expressions =====
     value_if_expression: $ => choice(
@@ -1000,10 +1045,12 @@ module.exports = grammar({
     raw_text_chunk: $ => token(/[^<]+/),
 
     // ===== Patterns =====
+    // `{}` matches the empty value, so `if x is { {} => ... else => ... }` tests absence.
     pattern: $ => choice(
       $.literal,
       $.signed_numeric_literal,
       $.qualified_name,
+      seq('{', '}'),
     ),
 
     // ===== Names =====

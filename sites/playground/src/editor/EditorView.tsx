@@ -1,6 +1,6 @@
 import { useEffect, type ReactNode } from "react";
 import type { Compile, Diagnostic } from "../compile";
-import { Canvas } from "../drawnui/react/index";
+import { Canvas } from "drawnui-react";
 import { pathForRoute } from "../router";
 import { useNxDrawing } from "../render/useNxDrawing";
 import type { NxObject } from "../render/values";

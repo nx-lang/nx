@@ -146,7 +146,9 @@ pub(crate) fn resolve(tree: &SyntaxTree, offset: usize) -> PositionContext {
         .iter()
         .any(|node| is_expression_container(node.kind()))
     {
-        let span = literal_span(&chain).unwrap_or_else(|| innermost.span());
+        let span = literal_span(&chain)
+            .or_else(|| empty_value_span(&chain))
+            .unwrap_or_else(|| innermost.span());
         return PositionContext::Expression { span };
     }
 
@@ -369,7 +371,7 @@ fn type_annotation_context(chain: &[SyntaxNode<'_>], offset: usize) -> Option<Po
 
 /// The plain name the innermost node spells, where it spells one.
 ///
-/// <para>Taking the annotation node's whole text would answer `Mode[]` for a cursor on `Mode`, and
+/// <para>Taking the annotation node's whole text would answer `Mode+` for a cursor on `Mode`, and
 /// would answer with the punctuation of a still-empty annotation. The innermost node is the name
 /// the cursor is actually on, when it is on one at all.</para>
 fn name_at(chain: &[SyntaxNode<'_>]) -> Option<String> {
@@ -443,7 +445,7 @@ fn declaration_context(chain: &[SyntaxNode<'_>]) -> Option<PositionContext> {
     })
 }
 
-/// The cursor on the member of a member-access expression.
+/// The cursor on the member of a member-access expression, `x.m` or `x?.m`.
 ///
 /// <para>The member is the identifier written directly under the access. A cursor on the receiver
 /// descends through the wrapper nodes the grammar puts around an operand instead, so it is not the
@@ -454,7 +456,10 @@ fn member_access_context(chain: &[SyntaxNode<'_>]) -> Option<PositionContext> {
         return None;
     }
     let parent = *chain.get(chain.len().checked_sub(2)?)?;
-    if parent.kind() != SyntaxKind::MEMBER_ACCESS_EXPRESSION {
+    if !matches!(
+        parent.kind(),
+        SyntaxKind::MEMBER_ACCESS_EXPRESSION | SyntaxKind::OPTIONAL_MEMBER_EXPRESSION
+    ) {
         return None;
     }
 
@@ -658,6 +663,29 @@ fn literal_span(chain: &[SyntaxNode<'_>]) -> Option<TextRange> {
         .map(|node| node.span())
 }
 
+/// The span of the empty value `{}` where the cursor is on one of its braces.
+///
+/// <para>The braces of `{}` are the whole expression: there is no item between them the cursor
+/// could be on instead, so a cursor on either brace is on the value. A brace of a braced value
+/// that holds items is punctuation around them, and a cursor on it stays on the punctuation.</para>
+///
+/// <para>A comment between the braces is not an item, so `{ /* none */ }` is the empty value too.
+/// The `{}` pattern of a match arm is the same value, matched rather than written.</para>
+fn empty_value_span(chain: &[SyntaxNode<'_>]) -> Option<TextRange> {
+    let braced = chain.iter().rev().find(|node| {
+        matches!(
+            node.kind(),
+            SyntaxKind::VALUES_BRACED_EXPRESSION
+                | SyntaxKind::ELEMENTS_BRACED_EXPRESSION
+                | SyntaxKind::PATTERN
+        )
+    })?;
+    // `children` leaves comments out, so a brace holding only a comment has none.
+    let is_empty =
+        braced.text().trim_start().starts_with('{') && braced.children().next().is_none();
+    is_empty.then(|| braced.span())
+}
+
 /// True where `node` spells one literal and nothing besides, a folded `-` included.
 fn spans_a_literal(node: SyntaxNode<'_>) -> bool {
     is_literal(node.kind())
@@ -695,7 +723,6 @@ fn is_literal(kind: SyntaxKind) -> bool {
             | SyntaxKind::REAL_LITERAL
             | SyntaxKind::HEX_LITERAL
             | SyntaxKind::BOOL_LITERAL
-            | SyntaxKind::NULL_LITERAL
             | SyntaxKind::SIGNED_NUMERIC_LITERAL
     )
 }
@@ -754,6 +781,8 @@ fn is_expression_container(kind: SyntaxKind) -> bool {
             | SyntaxKind::BINARY_EXPRESSION
             | SyntaxKind::IDENTIFIER_EXPRESSION
             | SyntaxKind::MEMBER_ACCESS_EXPRESSION
+            | SyntaxKind::OPTIONAL_MEMBER_EXPRESSION
+            | SyntaxKind::EXISTS_EXPRESSION
             | SyntaxKind::LITERAL
     )
 }
@@ -775,6 +804,59 @@ mod tests {
         );
         let tree = parse_str(&stripped, "t.nx").tree.expect("tree");
         resolve(&tree, offset)
+    }
+
+    /// The braces of `{}` are the value, so a cursor on either one is on the value: the span is
+    /// the whole `{}`, not the one brace, which no expression spans.
+    #[test]
+    fn a_cursor_on_a_brace_of_the_empty_value_resolves_to_the_whole_value() {
+        for fixture in [
+            "let value:string? = ⟨cursor⟩{}\n",
+            "let value:string? = {⟨cursor⟩}\n",
+            "let value:string? = {}⟨cursor⟩\n",
+        ] {
+            let context = context_at(fixture);
+
+            assert_eq!(
+                context,
+                PositionContext::Expression {
+                    span: TextRange::new(20.into(), 22.into()),
+                },
+                "for: {fixture:?}"
+            );
+        }
+
+        // A comment between the braces is not an item.
+        let context = context_at("let value:string? = {⟨cursor⟩ /* none */ }\n");
+        assert_eq!(
+            context,
+            PositionContext::Expression {
+                span: TextRange::new(20.into(), 34.into()),
+            }
+        );
+
+        // The `{}` pattern is the empty value too.
+        let source = "let f(x:int?): int = { if x is { ⟨cursor⟩{} => 0 else => 1 } }\n";
+        let pattern_start = source.find("⟨cursor⟩").unwrap();
+        let context = context_at(source);
+        assert_eq!(
+            context,
+            PositionContext::Expression {
+                span: TextRange::new(
+                    (pattern_start as u32).into(),
+                    (pattern_start as u32 + 2).into()
+                ),
+            }
+        );
+
+        // A brace around items is punctuation, and stays the cursor's own position.
+        let context = context_at("let value:string+ = {⟨cursor⟩\"a\"}\n");
+        assert_eq!(
+            context,
+            PositionContext::Expression {
+                span: TextRange::new(20.into(), 21.into()),
+            }
+        );
     }
 
     #[test]
@@ -883,6 +965,31 @@ mod tests {
         // The whole access, not the member identifier: a lookup bounded by the identifier's own
         // range could not contain the access it belongs to.
         assert_eq!(span, TextRange::new(40.into(), 46.into()));
+    }
+
+    #[test]
+    fn a_cursor_on_the_member_of_an_optional_member_access_resolves_to_a_member_access() {
+        let source = "type U = { name:string }\nlet f(u:U?) = { u?.na⟨cursor⟩me }\n";
+        let access_start = source.find("u?.").unwrap() as u32;
+        let PositionContext::MemberAccess { member, span } = context_at(source) else {
+            panic!("expected a member-access context");
+        };
+
+        assert_eq!(member, "name");
+        assert_eq!(
+            span,
+            TextRange::new(access_start.into(), (access_start + 7).into())
+        );
+    }
+
+    /// A cursor on the operand of a presence test is still an expression position.
+    #[test]
+    fn a_cursor_inside_a_presence_test_resolves_to_an_expression() {
+        let context = context_at("let f(u:int?): boolean = { (u + 1)⟨cursor⟩? }\n");
+        assert!(
+            matches!(context, PositionContext::Expression { .. }),
+            "got: {context:?}"
+        );
     }
 
     #[test]

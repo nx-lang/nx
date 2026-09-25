@@ -1,2 +1,2 @@
 // A function type has at most one content parameter.
-type Wrap = <function content Children:object[] content More:object[] />: string
+type Wrap = <function content Children:object+ content More:object+ />: string

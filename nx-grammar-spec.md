@@ -49,7 +49,6 @@ Literals
 - REAL_LITERAL
 - HEX_LITERAL
 - BOOL_LITERAL (true|false)
-- NULL_LITERAL (null)
 
  Punctuation and operators
 - LT (<), GT (>)
@@ -60,6 +59,7 @@ Literals
 - FAT_ARROW (=>)
 - EQ (=)
 - QMARK (?)
+- QMARK_DOT (?.), QMARK_QMARK (??)
 - PIPE (|)
  - PLUS (+), MINUS (-), STAR (*), SLASH (/), PERCENT (%)
  - BANG (!)
@@ -106,12 +106,27 @@ Conventional expressions (non-markup) use a Pratt parser with the following prec
 - Member access: led token: DOT IDENTIFIER, left-associative
   - form: left DOT IDENTIFIER → MemberAccess(left, name)
   - Note: Handles both property/field access on values and union case access; semantic analysis distinguishes based on whether left resolves to a type or value
+- Optional member access: led token: QMARK_DOT IDENTIFIER, left-associative
+  - form: left QMARK_DOT IDENTIFIER → OptionalMemberAccess(left, name)
+  - `{}` when `left` is empty, `left.name` otherwise; `left` is evaluated once
+- Presence test: led token: QMARK (postfix)
+  - form: operand QMARK → ExistsExpression(operand)
+  - `true` when the operand holds at least one item; `QMARK_DOT` and `QMARK_QMARK` are single
+    tokens, so `x?.m` and `x ?? y` never lex as a presence test followed by `.` or `?`
 
  130: Prefix unary, right-associative
  - Prefix minus: nud token: MINUS
    - form: MINUS Expr → PrefixUnaryExpression(op: MINUS, expr)
  - Prefix not: nud token: BANG
    - form: token Expr → PrefixUnaryExpression(op: token, expr)
+
+125: Fallback, right-associative
+- QMARK_QMARK (??)
+  - form: left QMARK_QMARK Expr → BinaryExpression, lowered to a coalesce expression
+  - `x ?? y` is `x` when `x` holds an item and `y` otherwise; `y` is evaluated only then.
+  - Above arithmetic, unlike C# and Swift, so `"Author: " + name ?? "Anonymous"` is
+    `"Author: " + (name ?? "Anonymous")`; the low-binding parse would be a type error in NX every
+    time, since `+` takes exactly-one operands.
 
  120: Multiplicative, left-associative
 - STAR (*), SLASH (/), PERCENT (%)
@@ -139,9 +154,8 @@ Conventional expressions (non-markup) use a Pratt parser with the following prec
 30: Logical OR, left-associative
 - PIPE_PIPE (||)
 
-20: Conditional, right-associative
-- led token: QMARK … COLON …
-  - form: condition QMARK consequent COLON alternative → Conditional(condition, consequent, alternative)
+There is no conditional operator. `c ? a : b` is written `if c { a } else { b }`; the shape is
+recognised after the parse fails at its `:` and reported with that `if` form.
 
 Grouping
 - LPAREN Expr RPAREN binds as a primary (handled in nud for LPAREN).
@@ -236,8 +250,8 @@ UnionCasePayloadOpt
 - UnionCasePayloadOpt → ε
 
 RecordPropertyDefinition (AST: RecordPropertyDefinitionSyntax)
-- RecordPropertyDefinition → CONTENT? MARKUP_IDENTIFIER COLON PropertyType RecordPropertyDefaultOpt
-  - fields: modifier?: "content", name: string, type: TypeSyntax | "type", default?: ExpressionSyntax
+- RecordPropertyDefinition → CONTENT? MARKUP_IDENTIFIER QMARK? COLON PropertyType RecordPropertyDefaultOpt
+  - fields: modifier?: "content", name: string, optional: boolean, type: TypeSyntax | "type", default?: ExpressionSyntax
 
 RecordPropertyDefaultOpt
 - RecordPropertyDefaultOpt → EQ RhsExpression
@@ -256,16 +270,20 @@ ValueDefinitionTypeOpt
 - ValueDefinitionTypeOpt → ε
 
 Type (AST: TypeSyntax)
-- Type → PrimitiveType TypeSuffix*
-- Type → UserDefinedType TypeSuffix*
-- Type → FunctionType TypeSuffix*
-- Type → AppliedType TypeSuffix*
-- Type → ParenthesizedType TypeSuffix*
-  - fields: kind: "primitive"|"user"|"function"|"applied", name?: string (qualified), params?: FunctionTypeParamSyntax[], result?: TypeSyntax, args?: TypeArgumentSyntax[], suffixes: ("nullable"|"sequence")[]
+- Type → PrimitiveType OccurrenceSuffix?
+- Type → UserDefinedType OccurrenceSuffix?
+- Type → FunctionType OccurrenceSuffix?
+- Type → AppliedType OccurrenceSuffix?
+- Type → ParenthesizedType OccurrenceSuffix?
+  - fields: kind: "primitive"|"user"|"function"|"applied", name?: string (qualified), params?: FunctionTypeParamSyntax[], result?: TypeSyntax, args?: TypeArgumentSyntax[], occurrence: "one"|"optional"|"oneOrMore"|"zeroOrMore"
 
-TypeSuffix
-- TypeSuffix → QMARK
-- TypeSuffix → LBRACK RBRACK
+OccurrenceSuffix
+- OccurrenceSuffix → QMARK        (zero or one)
+- OccurrenceSuffix → PLUS         (one or more)
+- OccurrenceSuffix → STAR         (zero or more)
+  - The parser admits a run of suffixes and the former `LBRACK RBRACK` so that post-parse
+    validation can name the fault: a second suffix is "already carries an occurrence", and `[]`
+    is rejected naming `*` and `+`.
 
 FunctionType (AST: FunctionTypeSyntax)
 - FunctionType → LT FUNCTION PropertyDefinition* SLASH GT COLON Type
@@ -283,7 +301,8 @@ AppliedType (AST: AppliedTypeSyntax)
     the first token after `LT` and never collide; a record named `function` cannot be applied.
   - `TypeArgument*`, not `+`: `<Range/>` parses, so a missing argument is reported by parameter
     name rather than as a parse error.
-  - `SLASH GT` closes it, so a `TypeSuffix` after it needs no parentheses.
+  - `SLASH GT` closes it, so an `OccurrenceSuffix` after it needs no parentheses.
+  - A type argument is an exactly-one type: `<Box T=int?/>` is a type-checker diagnostic.
 
 TypeArgument (AST: TypeArgumentSyntax)
 - TypeArgument → IDENTIFIER EQ Type
@@ -296,17 +315,21 @@ ParenthesizedType
   - No AST node of its own: it denotes the enclosed type, and exists so a suffix can apply to a
     function type as a whole, `(<function />: DrawnNode)?`.
 
-Semantic note: `TypeSuffix*` preserves source-order composition, but post-parse validation rejects
-reapplying `QMARK` to the same outer type layer. `string?[]?` is valid; `string??`,
-`string?[]??` and `(string?)?` are invalid.
+Semantic note: a type reference carries at most one occurrence suffix, so post-parse validation
+rejects a second one along a chain, looking through parentheses: `string?`, `string+`, `string*`
+and `(string)+` are valid; `string??`, `string?+`, `(string+)*` and `<function />: int*?` are
+invalid. A function type's result is a chain of its own, so `(<function />: string+)+` is valid.
+There is no optional sequence and no sequence of optionals. The rule is completed at type
+resolution, which rejects a suffix whose base resolves through an alias to a suffixed type.
 
 PrimitiveType (AST: PrimitiveTypeSyntax)
 - PrimitiveType → STRING | INT32 | INT64 | FLOAT32 | FLOAT64 | BOOLEAN | OBJECT
   - fields: name: "string"|"int"|"int32"|"int64"|"float32"|"float64"|"boolean"|"object"
 
-Semantic note: `void` is not among them. The unit type exists in inference — it is what an `if`
-with no `else` takes — and still renders as `void` in diagnostics, but it has no source spelling,
-so `void` in type position is an ordinary named type reference like any other undeclared name.
+Semantic note: `void` is not among them, and there is no unit type in inference either. An `if`
+with no `else` is read as having an `else { }`, so its type is a sequence of what its branches
+produce rather than a unit type, and no diagnostic renders a type as `void`. `void` in type position
+is an ordinary named type reference like any other undeclared name.
 
 UserDefinedType (AST: UserTypeSyntax)
 - UserDefinedType → QualifiedName
@@ -375,8 +398,12 @@ FunctionReturnTypeOpt
 - FunctionReturnTypeOpt → ε
 
 PropertyDefinition (AST: PropertyDefinitionSyntax)
-- PropertyDefinition → CONTENT? MARKUP_IDENTIFIER COLON PropertyType [EQ RhsExpression]
-  - fields: modifier?: "content", name: string, type: TypeSyntax | "type", default?: ExpressionSyntax
+- PropertyDefinition → CONTENT? MARKUP_IDENTIFIER QMARK? COLON PropertyType [EQ RhsExpression]
+  - fields: modifier?: "content", name: string, optional: boolean, type: TypeSyntax | "type", default?: ExpressionSyntax
+  - `QMARK` on the name marks the property optional: omitted at construction it is the empty
+    value, and it reads as `T?` (or `T*` when its type is `T+`). Type checking rejects a default
+    on an optional property and a `?` or `*` occurrence in the type slot, offering the `name?:`
+    form; the mark is the one way a property admits zero.
 
 PropertyType
 - PropertyType → Type
@@ -384,7 +411,7 @@ PropertyType
   - The `type` keyword declares a **type parameter** rather than a value. The grammar admits it in
     every property list; post-parse validation restricts it to the leading definitions of a
     ComponentSignature or a plain RecordDefinition, and rejects a default, a modifier, a suffix on
-    `type`, a primitive or built-in name, and a duplicate.
+    `type`, the optional mark, a primitive or built-in name, and a duplicate.
 
 
 
@@ -415,9 +442,10 @@ ValuesBracedExpression (AST: ValuesBracedExpressionSyntax)
   - fields: items: ExpressionSyntax[]
 
 Semantic note: the item list is optional, so `{}` parses with zero items. That is the spelling of
-the empty list, and it is unique to this rule: `ElementsBracedExpression` and
-`EmbedBracedExpression` both require at least one item, so an element-position `if`/`for` body and
-`@{}` remain parse errors.
+the empty value. `ElementsBracedExpression` and `EmbedBracedExpression` both require at least one
+item, so an element-position `if`/`for` body and `@{}` remain parse errors. The zero-item brace is
+also a `ValueListItemExpression` (below), so it can be an item or an operand: `{ "a" {} }`,
+`{ x == {} }`, `if c { {} } else { 1 }`.
 
 ValueExpressions
 - ValueExpressions → ValueExpression
@@ -437,16 +465,16 @@ ValueListItemExpression (AST: ExpressionSyntax)
 - ValueListItemExpression → IDENTIFIER
 - ValueListItemExpression → Unit
 - ValueListItemExpression → ParenthesizedExpression
+- ValueListItemExpression → LBRACE RBRACE   (* the empty value; a ValuesBracedExpressionSyntax with no items *)
 
 ValueExpression (AST: ExpressionSyntax; Pratt-parsed for operators)
 - ValueExpression → ValueListItemExpression
-- ValueExpression → ConditionalExpression
 - ValueExpression → PrefixUnaryExpression
 - ValueExpression → BinaryExpression
 
 ValueExpr (parsed by Pratt; not a standalone AST node)
 - Primaries (nud): Literal | IDENTIFIER | Unit | ParenthesizedExpression
-- Postfix/infix handled via the operator table (including the conditional operator `?:` at precedence 20)
+- Postfix/infix handled via the operator table (member access, `?.` and postfix `?` at 140, `??` at 125)
 
 ValueOrValuesBracedExpression
 - ValueOrValuesBracedExpression → ValueExpression
@@ -466,8 +494,8 @@ ParenFunctionCallArgumentList
 Semantic note: an argument may be a braced value, so a function is passed a list the same way a
 property is bound one — `f({})`, `f({a})`, `f({a b})`. The arity rule is the ordinary one, so a
 one-item brace is a scalar that the parameter's list type coerces. This does not make a
-`ValuesBracedExpression` a `ValueListItemExpression`: `f({{a} b})` is still a parse error, because a
-list is not an item of a list.
+non-empty `ValuesBracedExpression` a `ValueListItemExpression`: `f({{a} b})` is still a parse error,
+because a list is not an item of a list. Only the empty brace `{}` is an item.
 
 Unit (AST: UnitLiteralSyntax)
 - Unit → LPAREN RPAREN
@@ -477,13 +505,18 @@ ParenthesizedExpression (AST: ParenthesizedExpressionSyntax)
 - ParenthesizedExpression → LPAREN ValueExpression RPAREN
   - fields: expr: ExpressionSyntax
 
-ConditionalExpression (AST: ConditionalExpressionSyntax)
-- ConditionalExpression → ValueExpression QMARK ValueExpression COLON ValueExpression  (parsed via Pratt entry at precedence 20; right-associative)
-  - fields: condition: ExpressionSyntax, whenTrue: ExpressionSyntax, whenFalse: ExpressionSyntax
+OptionalMemberAccess (AST: OptionalMemberAccessExpressionSyntax)
+- OptionalMemberAccess → ValueExpression QMARK_DOT IDENTIFIER  (parsed via Pratt entry at precedence 140; left-associative)
+  - fields: target: ExpressionSyntax, name: string
+
+ExistsExpression (AST: ExistsExpressionSyntax)
+- ExistsExpression → ValueExpression QMARK  (parsed via Pratt entry at precedence 140)
+  - fields: operand: ExpressionSyntax
 
 Literal (AST: LiteralExpressionSyntax)
-- Literal → STRING_LITERAL | INT_LITERAL | REAL_LITERAL | HEX_LITERAL | BOOL_LITERAL | NULL_LITERAL
-  - fields: kind: "string"|"int"|"real"|"hex"|"bool"|"null", value: token payload
+- Literal → STRING_LITERAL | INT_LITERAL | REAL_LITERAL | HEX_LITERAL | BOOL_LITERAL
+  - fields: kind: "string"|"int"|"real"|"hex"|"bool", value: token payload
+  - There is no null literal. `{}` — an empty ValuesBracedExpression — is the absent value.
 
 ValueIfExpression (AST: ExpressionSyntax is a sum type)
 - ValueIfExpression → ValueIfSimpleExpression        (ValueIfSimpleExpressionSyntax)
@@ -723,7 +756,10 @@ QualifiedMarkupName (AST: QualifiedMarkupNameSyntax)
 Pattern (AST: PatternSyntax)
 - Pattern → Literal
 - Pattern → QualifiedName
-  - fields: kind: "literal"|"name", value: LiteralExpressionSyntax|QualifiedNameSyntax
+- Pattern → LBRACE RBRACE
+  - fields: kind: "literal"|"name"|"empty", value?: LiteralExpressionSyntax|QualifiedNameSyntax
+  - `{}` matches the empty value. It is permitted only where the scrutinee admits zero; the arms
+    after it, and an `else` arm, read a path scrutinee as present.
 
 ## AST Mapping Summary
 
@@ -744,7 +780,7 @@ This section lists the AST node types with fields for implementers.
 - ActionDefinitionSyntax: visibility?: "private"|"export", isAbstract: boolean, name: string, base?: QualifiedNameSyntax, properties: RecordPropertyDefinitionSyntax[]
 - RecordPropertyDefinitionSyntax: modifier?: "content", name: string, type: TypeSyntax, default?: ExpressionSyntax
 - ValueDefinitionSyntax: visibility?: "private"|"export", name: string, type?: TypeSyntax, value: ExpressionSyntax
-- TypeSyntax: kind: "primitive"|"user"|"function", name?: string (qualified), params?: FunctionTypeParamSyntax[], result?: TypeSyntax, suffixes: ("nullable"|"sequence")[]
+- TypeSyntax: kind: "primitive"|"user"|"function"|"applied", name?: string (qualified), params?: FunctionTypeParamSyntax[], result?: TypeSyntax, args?: TypeArgumentSyntax[], occurrence: "one"|"optional"|"oneOrMore"|"zeroOrMore"
 - PrimitiveTypeSyntax: name: string
 - UserTypeSyntax: name: QualifiedNameSyntax
 - FunctionTypeSyntax: params: FunctionTypeParamSyntax[], result: TypeSyntax
@@ -756,10 +792,11 @@ This section lists the AST node types with fields for implementers.
 - PropertyDefinitionSyntax: modifier?: "content", name: string, type: TypeSyntax | "type", default?: ExpressionSyntax
 - AppliedTypeSyntax: name: QualifiedNameSyntax, args: TypeArgumentSyntax[]
 - TypeArgumentSyntax: name: string, type: TypeSyntax
-- ExpressionSyntax: union of MarkupElementSyntax | ValuesBracedExpressionSyntax | LiteralExpressionSyntax | IdentifierNameSyntax | ValueIfSimpleExpressionSyntax | ValueIfMatchExpressionSyntax | ValueIfConditionListExpressionSyntax | ValueForExpressionSyntax | ConditionalExpressionSyntax | ParenFunctionCallExpressionSyntax | MemberAccessExpressionSyntax | BinaryExpressionSyntax | PrefixUnaryExpressionSyntax | ParenthesizedExpressionSyntax | UnitLiteralSyntax
+- ExpressionSyntax: union of MarkupElementSyntax | ValuesBracedExpressionSyntax | LiteralExpressionSyntax | IdentifierNameSyntax | ValueIfSimpleExpressionSyntax | ValueIfMatchExpressionSyntax | ValueIfConditionListExpressionSyntax | ValueForExpressionSyntax | ParenFunctionCallExpressionSyntax | MemberAccessExpressionSyntax | OptionalMemberAccessExpressionSyntax | ExistsExpressionSyntax | BinaryExpressionSyntax | PrefixUnaryExpressionSyntax | ParenthesizedExpressionSyntax | UnitLiteralSyntax
  - ParenFunctionCallExpressionSyntax: callee: ExpressionSyntax, args: ExpressionSyntax[]
  - MemberAccessExpressionSyntax: target: ExpressionSyntax, name: string (includes both property access and union case access; distinguished during semantic analysis)
- - ConditionalExpressionSyntax: condition: ExpressionSyntax, whenTrue: ExpressionSyntax, whenFalse: ExpressionSyntax
+ - OptionalMemberAccessExpressionSyntax: target: ExpressionSyntax, name: string
+ - ExistsExpressionSyntax: operand: ExpressionSyntax
  - BinaryExpressionSyntax: op: token, left: ExpressionSyntax, right: ExpressionSyntax
  - PrefixUnaryExpressionSyntax: op: token, expr: ExpressionSyntax
  - ParenthesizedExpressionSyntax: expr: ExpressionSyntax (may be elided)
@@ -804,7 +841,7 @@ This section lists the AST node types with fields for implementers.
 - ValueListItemExpressionSyntax: expr: ExpressionSyntax
 - QualifiedNameSyntax: parts: string[]
 - QualifiedMarkupNameSyntax: parts: string[]
-- PatternSyntax: kind: "literal"|"name", value: LiteralExpressionSyntax|QualifiedNameSyntax
+- PatternSyntax: kind: "literal"|"name"|"empty", value?: LiteralExpressionSyntax|QualifiedNameSyntax
 
 ## Disambiguation and Lookahead Notes
 
@@ -840,7 +877,7 @@ This section lists the AST node types with fields for implementers.
 - ContextualName resolves against the declared type of its binding site, never against lexical scope:
   - Legal at element and component property values, property and field defaults, annotated value
     definitions, and match patterns — every unbraced position where the expected type is declared
-  - Resolution normalizes the expected type by stripping nullability then one list level, then
+  - Resolution normalizes the expected type by stripping its occurrence, then
     resolves only against a closed nominal set: the cases of the union that types the binding site
   - A bare name resolves only nominally and a quoted string only as string data; there is no
     fallback between the two in NX source, so `fill=none` is a case and `fill="none"` is string data
@@ -865,8 +902,9 @@ This section lists the AST node types with fields for implementers.
 - SelectiveImport aliases must contain exactly one DOT and the final identifier must match the imported name.
 - Omitted visibility on top-level declarations defaults to internal; `private` is file-scoped,
   omitted visibility is library-scoped or program-scoped, and `export` is visible to consumers.
-- Type suffixes: zero or more of QMARK or LBRACK RBRACK, applied in source order; a QMARK that
-  makes the same outer layer nullable twice is rejected, across a parenthesis included.
+- Type suffixes: at most one of QMARK, PLUS or STAR per type reference chain; a second one is
+  rejected, across a parenthesis included, and LBRACK RBRACK is rejected naming `*` and `+`.
+- The shape `c ? a : b` is rejected with the `if c { a } else { b }` form.
 - A function type's parameters carry no default value, at most one is marked `content`, and none
   is a `type` parameter.
 - Union declarations require at least one leading-pipe case, case names must be unique within the union, and a union `extends` target must resolve to an abstract record.
@@ -877,6 +915,7 @@ This section lists the AST node types with fields for implementers.
 
 ## Notes and Gaps
 
-- Pattern is limited to constant-like forms (Literal or QualifiedName). Extend as needed.
+- Pattern is limited to constant-like forms (Literal, QualifiedName, or the empty value `{}`). Extend
+  as needed.
 - Entities in TextRun are preserved as ENTITY tokens; decoding can be a later phase.
 - ParenthesizedExpression may be elided in AST after parsing.

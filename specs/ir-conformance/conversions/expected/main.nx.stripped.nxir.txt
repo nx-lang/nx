@@ -1,4 +1,4 @@
-module main.nx fingerprint 813895554484553202
+module main.nx fingerprint 7551624779271495919
 entrypoints functions [total onTheLeft enabled leftAssociative stringFirst reorder integralFloat fractionalFloat largeFloat smallFloat negativeZero negativeInt float32Tenth float32Scaled float32Product scaled float32Widened float32Compared float32Steps float32StepsOf label named note markdownNote fullName mixedSum mixedSumOf mixedEqual mixedLess mixedDivision integerDivision integerDivisionOf pick joinedIf arm joinedMatch joinedList halfOrX joinedIntegerDivision armHalf joinedArmDivision listHalf joinedListDivision productOrX scaledJoin joinedFloat32Product widened root] components []
 
 record Item
@@ -9,7 +9,7 @@ record Label
 
 record Box
   width: float64 required
-  ratios: float64[] required
+  ratios: float64+ required
   opacity: float64?
 
 value count =
@@ -18,7 +18,7 @@ value count =
 value item =
   <Item title="Rust" />
 
-value tenth =
+value tenth: float32 =
   0.10000000149011612
 
 function total() =
@@ -66,7 +66,7 @@ function float32Scaled(w: float32) =
 function float32Product() =
   float32Scaled(2.299999952316284)
 
-function scaled(v: float32) =
+function scaled(v: float32): float64 =
   (v fmul32 3.0)
 
 function float32Widened() =
@@ -75,7 +75,7 @@ function float32Widened() =
 function float32Compared() =
   (scaled(2.299999952316284) eq 6.899999618530273)
 
-function float32Steps(v: float32, d: float32) =
+function float32Steps(v: float32, d: float32): float64 =
   (((v fadd32 0.10000000149011612) fsub32 0.20000000298023224) fdiv32 d)
 
 function float32StepsOf() =

@@ -3,11 +3,12 @@ use crate::artifacts::{
     ProgramArtifact, ProgramBuildContext,
 };
 use crate::diagnostics::{diagnostics_to_api, diagnostics_to_api_with_sources};
-use crate::value::to_nx_value;
+use crate::value::entry_result_to_nx_value;
 use crate::NxDiagnostic;
 use nx_diagnostics::{Diagnostic, Label, Severity};
-use nx_hir::Item;
+use nx_hir::{Item, Name};
 use nx_interpreter::{Interpreter, RuntimeError};
+use nx_types::Type;
 use nx_value::NxValue;
 use std::fs;
 use std::path::Path;
@@ -164,9 +165,29 @@ fn eval_program_artifact_with_source(program: &ProgramArtifact, source: &str) ->
 
     let interpreter = Interpreter::from_resolved_program(program.resolved_program.clone());
     match interpreter.execute_resolved_program_module_function(entry_module_id, "root", vec![]) {
-        Ok(value) => EvalResult::Ok(to_nx_value(&value)),
+        Ok(value) => EvalResult::Ok(entry_result_to_nx_value(
+            &value,
+            entry_result_type(program, &root_module.file_name, "root"),
+        )),
         Err(error) => EvalResult::Err(runtime_error_diagnostics(source, error)),
     }
+}
+
+/// The declared or inferred result type of the function `name` in the source-provider module
+/// `identity`, as the checker bound it.
+fn entry_result_type<'a>(
+    program: &'a ProgramArtifact,
+    identity: &str,
+    name: &str,
+) -> Option<&'a Type> {
+    program
+        .root_modules
+        .iter()
+        .find(|module| module.file_name == identity)?
+        .type_env
+        .lookup(&Name::new(name))?
+        .function_parts()
+        .map(|(_, result)| result)
 }
 
 /// Evaluates a zero-argument function of one module of a previously built [`ProgramArtifact`].
@@ -193,7 +214,10 @@ pub fn eval_program_artifact_function(
     };
     let interpreter = Interpreter::from_resolved_program(program.resolved_program.clone());
     match interpreter.execute_resolved_program_module_function(module_id, function_name, vec![]) {
-        Ok(value) => EvalResult::Ok(to_nx_value(&value)),
+        Ok(value) => EvalResult::Ok(entry_result_to_nx_value(
+            &value,
+            entry_result_type(program, module_identity, function_name),
+        )),
         Err(error) => EvalResult::Err(runtime_error_diagnostics(&source, error)),
     }
 }

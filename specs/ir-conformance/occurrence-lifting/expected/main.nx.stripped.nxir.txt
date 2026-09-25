@@ -1,0 +1,169 @@
+module main.nx fingerprint 9118623915898972064
+requires update-records-v1 occurrence-v1
+entrypoints functions [aliasItem optionalAliasItem aliasContent echo argument orFive fallbackArgument fallbackItem fallbackAtSite fallbackLifted bumped fallbackLoop itemOr presentLifted halfOr presentWidened sameNick emptyNicks differentNicks samePeople otherPeople Row rowWithout rowWith declaredMany viaFor declaredOne orFiveDeclared declaredFallback declaredValue noString noneInferred noInts nameOr nickOr nameOf updatedName absentName clearedNick updatedNick absentRead nickOf clearedRead root] components []
+
+alias Ints
+
+record Person
+  name: string required
+  nick: string?
+
+record Scores
+  values: int+ required
+
+record Maybe
+  values: int*
+
+record Item
+  n: int required
+
+alias Items
+
+record Shelf
+  content items: Item+ required
+
+function aliasItem() =
+  <Scores values=3 />
+
+function optionalAliasItem() =
+  <Maybe values=3 />
+
+function aliasContent() =
+  <Shelf>
+    <Item n=1 />
+  </Shelf>
+
+function echo(xs: int+) =
+  xs
+
+function argument() =
+  echo(5)
+
+function orFive(xs?: int+) =
+  (xs ?? [5])
+
+function fallbackArgument() =
+  orFive(3)
+
+function fallbackItem() =
+  orFive({})
+
+function fallbackAtSite(xs?: int+) =
+  <Scores values=(xs ?? [5]) />
+
+function fallbackLifted() =
+  fallbackAtSite({})
+
+function bumped(xs?: int+) =
+  for x in (xs ?? [5]) yield
+    (x add 1)
+
+function fallbackLoop() =
+  bumped({})
+
+function itemOr(ys: int+, o?: int) =
+  ([o] ?? ys)
+
+function presentLifted() =
+  itemOr([2, 3], 1)
+
+function halfOr(o?: int) =
+  (o ?? 1.5)
+
+function presentWidened() =
+  halfOr(1)
+
+function sameNick(a: Person, b: Person) =
+  (a.nick eq b.nick)
+
+function emptyNicks() =
+  sameNick(<Person name="A" />, <Person name="B" />)
+
+function differentNicks() =
+  sameNick(<Person name="A" nick="a" />, <Person name="B" />)
+
+function samePeople() =
+  (<Person name="A" nick="a" /> eq <Person name="A" nick="a" />)
+
+function otherPeople() =
+  (<Person name="A" /> ne <Person name="B" />)
+
+function Row(Item: string, Note?: string): string =
+  (Item concat (Note ?? "-none"))
+
+function rowWithout() =
+  Row("x")
+
+function rowWith() =
+  Row("x", "-y")
+
+function declaredMany(): int+ =
+  5
+
+function viaFor(o?: int): int? (optional result) =
+  for x in o yield
+    x
+
+function declaredOne() (optional result) =
+  viaFor(1)
+
+function orFiveDeclared(xs?: int+): int+ =
+  (xs ?? [5])
+
+function declaredFallback() =
+  orFiveDeclared({})
+
+value fives: int+ =
+  5
+
+function declaredValue() =
+  fives
+
+function noString(): string? (optional result) =
+  if false then
+    "a"
+
+function noneInferred() (optional result) =
+  if false then
+    1
+
+function noInts(): int* =
+  if false then
+    1
+
+function nameOr(u: Person.Update) =
+  (u.name ?? "same")
+
+function nickOr(u: Person.Update) =
+  (u.nick ?? "same")
+
+function nameOf(u: Person.Update) (optional result) =
+  u.name
+
+function updatedName() =
+  nameOr(<Person.Update name="Bo" />)
+
+function absentName() =
+  nameOr(<Person.Update />)
+
+function clearedNick() =
+  nickOr(<Person.Update nick={} />)
+
+function updatedNick() =
+  nickOr(<Person.Update nick="b" />)
+
+function absentRead() (optional result) =
+  nameOf(<Person.Update />)
+
+function nickOf(u: Person.Update) (optional result) =
+  u.nick
+
+function clearedRead() (optional result) =
+  nickOf(<Person.Update nick={} />)
+
+function root() =
+  aliasItem()
+
+record Person.Update update of Person
+  name: string
+  nick: string?

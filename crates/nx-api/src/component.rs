@@ -342,13 +342,13 @@ fn validate_host_input_value_at_path(
     path: &str,
 ) -> Result<(), String> {
     match value {
-        NxValue::Null
-        | NxValue::Bool(_)
+        NxValue::Bool(_)
         | NxValue::Int32(_)
         | NxValue::Int(_)
         | NxValue::Float32(_)
         | NxValue::Float(_)
-        | NxValue::String(_) => Ok(()),
+        | NxValue::String(_)
+        | NxValue::Null => Ok(()),
         NxValue::Array(values) => {
             for (index, value) in values.iter().enumerate() {
                 validate_host_input_value_at_path(lookup, value, &format!("{path}[{index}]"))?;
@@ -2162,7 +2162,7 @@ let root() = { 0 }"#;
                 "widgets.nx",
                 br#"import { Circle } from "./shapes.nx"
 
-export abstract type Shape = { label: string? }
+export abstract type Shape = { label?: string }
 
 export component <Draw s: Shape /> = { <div /> }"#
                     .to_vec(),
@@ -2205,7 +2205,7 @@ let root() = { 0 }"#
     #[test]
     fn a_host_record_whose_lineage_only_shares_a_name_with_the_expected_base_is_rejected() {
         let program = prop_lineage_workspace(
-            r#"abstract type Shape = { label: string? }
+            r#"abstract type Shape = { label?: string }
 
 export type Circle extends Shape = { r: int }"#,
         );

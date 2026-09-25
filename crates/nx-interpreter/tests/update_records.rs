@@ -116,6 +116,13 @@ fn field<'a>(value: &'a Value, name: &str) -> &'a Value {
         .unwrap_or_else(|| panic!("Expected field '{}' on {:?}", name, value))
 }
 
+fn has_field(value: &Value, name: &str) -> bool {
+    let Value::Record { fields, .. } = value else {
+        panic!("Expected a record, got {:?}", value);
+    };
+    fields.contains_key(name)
+}
+
 fn token(rendered: &Value, handler_property: &str) -> SmolStr {
     match field(rendered, handler_property) {
         Value::ActionHandler {
@@ -485,12 +492,12 @@ fn an_update_that_fails_validation_aborts_the_batch() {
 fn update_records_constructed_in_functions_keep_absence() {
     let runtime = Runtime::new(
         r#"
-        type User = { name:string = "anon" email:string? }
-        let clearEmail(): User.Update = <User.Update email={null} />
+        type User = { name:string = "anon" email?:string }
+        let clearEmail(): User.Update = <User.Update email={} />
         "#,
     );
     let mut expected = FxHashMap::default();
-    expected.insert(SmolStr::new("email"), Value::Null);
+    expected.insert(SmolStr::new("email"), Value::empty());
     assert_eq!(
         runtime.call("clearEmail"),
         Value::Record {
@@ -533,7 +540,7 @@ fn a_loop_variable_that_shadows_a_state_field_keeps_its_captured_value() {
         r#"
         external component <Row emits { Tapped { } } />
         component <Picker /> = {
-          state { count:int = 0 items:int[] = {10 20 30} }
+          state { count:int = 0 items:int+ = {10 20 30} }
           <Panel count={count}>
             {for count in items { <Row onTapped=<Update count={count} /> /> }}
           </Panel>
@@ -671,9 +678,9 @@ fn the_component_example_counts_and_resets() {
 
 /// A component whose props, action payload, and state each carry a `User.Update`.
 const HOST_BOUNDARY: &str = r#"
-    type User = { name:string email:string? }
+    type User = { name:string email?:string }
     external component <Button emits { Tapped { patch:User.Update } } />
-    component <Editor pending:User.Update drafts:User.Update[] = {} /> = {
+    component <Editor pending:User.Update drafts?:User.Update+ /> = {
       state { last:User.Update = <User.Update /> }
       <Panel pending={pending} drafts={drafts} last={last}>
         <Button onTapped=<Update last={action.patch} /> />
@@ -697,12 +704,12 @@ fn a_host_update_record_in_a_prop_keeps_only_the_fields_it_carries() {
     let runtime = Runtime::new(HOST_BOUNDARY);
     let rendered = try_init(
         &runtime,
-        editor_props(record("User.Update", &[("email", Value::Null)])),
+        editor_props(record("User.Update", &[("email", Value::empty())])),
     )
     .expect("Expected a well-formed update record to initialize");
     assert_eq!(
         field(&rendered, "pending"),
-        &record("User.Update", &[("email", Value::Null)])
+        &record("User.Update", &[("email", Value::empty())])
     );
     assert_eq!(field(&rendered, "last"), &record("User.Update", &[]));
 }
@@ -723,13 +730,13 @@ fn a_host_update_record_in_a_prop_with_an_unknown_field_is_rejected() {
 }
 
 #[test]
-fn a_host_update_record_in_a_prop_with_null_for_a_non_nullable_field_is_rejected() {
+fn a_host_update_record_in_a_prop_with_empty_for_a_required_field_is_rejected() {
     let runtime = Runtime::new(HOST_BOUNDARY);
     let error = try_init(
         &runtime,
-        editor_props(record("User.Update", &[("name", Value::Null)])),
+        editor_props(record("User.Update", &[("name", Value::empty())])),
     )
-    .expect_err("Expected null for a non-nullable field to be rejected at initialization");
+    .expect_err("Expected an empty value for a required field to be rejected at initialization");
     assert!(error.to_string().contains("name"), "got {}", error);
 }
 
@@ -770,13 +777,13 @@ fn a_host_update_record_inside_an_action_payload_is_checked_too() {
             &tapped,
             record(
                 "Button.Tapped",
-                &[("patch", record("User.Update", &[("email", Value::Null)]))],
+                &[("patch", record("User.Update", &[("email", Value::empty())]))],
             ),
         )],
     );
     assert_eq!(
         field(&ok.rendered, "last"),
-        &record("User.Update", &[("email", Value::Null)])
+        &record("User.Update", &[("email", Value::empty())])
     );
 
     let error = runtime
@@ -786,12 +793,40 @@ fn a_host_update_record_inside_an_action_payload_is_checked_too() {
                 &tapped,
                 record(
                     "Button.Tapped",
-                    &[("patch", record("User.Update", &[("name", Value::Null)]))],
+                    &[("patch", record("User.Update", &[("name", Value::empty())]))],
                 ),
             )],
         )
-        .expect_err("Expected null for a non-nullable field inside the payload to be rejected");
+        .expect_err(
+            "Expected an empty value for a required field inside the payload to be rejected",
+        );
     assert!(error.to_string().contains("name"), "got {}", error);
+}
+
+#[test]
+fn an_omitted_optional_prop_is_still_in_scope_after_dispatch() {
+    let runtime = Runtime::new(
+        r#"
+        external component <Button emits { Tapped { } } />
+        component <Form note?:string /> = {
+          state { count:int = 0 label?:string }
+          <Panel note={note} label={label} count={count}>
+            <Button onTapped=<Update count={count + 1} /> />
+          </Panel>
+        }
+        "#,
+    );
+    // `Panel` is undeclared, so an empty attribute on it is omitted: the reads evaluated to the
+    // empty value rather than failing.
+    let init = runtime.init("Form", no_props());
+    assert!(!has_field(&init.rendered, "note"));
+    assert!(!has_field(&init.rendered, "label"));
+
+    let tapped = token(field(&init.rendered, "content"), "onTapped");
+    let next = runtime.dispatch(&init, vec![invoke(&tapped, record("Button.Tapped", &[]))]);
+    assert_eq!(field(&next.rendered, "count"), &Value::Int(1));
+    assert!(!has_field(&next.rendered, "note"));
+    assert!(!has_field(&next.rendered, "label"));
 }
 
 #[test]
@@ -860,7 +895,7 @@ fn a_host_plain_record_nested_in_a_prop_is_checked_too() {
 fn a_host_update_record_under_a_component_typed_prop_is_checked_too() {
     let runtime = Runtime::new(
         r#"
-        type User = { name:string email:string? }
+        type User = { name:string email?:string }
         component <Editor pending:User.Update /> = { <Panel pending={pending} /> }
         component <Wrap inner:Editor /> = { <Frame inner={inner} /> }
         "#,
@@ -876,14 +911,17 @@ fn a_host_update_record_under_a_component_typed_prop_is_checked_too() {
         )
     };
 
-    let rendered = init_wrap(record("User.Update", &[("email", Value::Null)]))
+    let rendered = init_wrap(record("User.Update", &[("email", Value::empty())]))
         .expect("Expected a well-formed component value to initialize")
         .rendered;
     assert_eq!(
         field(&rendered, "inner"),
         &record(
             "Editor",
-            &[("pending", record("User.Update", &[("email", Value::Null)]))]
+            &[(
+                "pending",
+                record("User.Update", &[("email", Value::empty())])
+            )]
         )
     );
 
@@ -895,8 +933,9 @@ fn a_host_update_record_under_a_component_typed_prop_is_checked_too() {
         error
     );
 
-    let error = init_wrap(record("User.Update", &[("name", Value::Null)]))
-        .expect_err("Expected null for a non-nullable field under the component value to fail");
+    let error = init_wrap(record("User.Update", &[("name", Value::empty())])).expect_err(
+        "Expected an empty value for a required field under the component value to fail",
+    );
     assert!(error.to_string().contains("name"), "got {}", error);
 }
 
@@ -904,7 +943,7 @@ fn a_host_update_record_under_a_component_typed_prop_is_checked_too() {
 fn a_host_action_entry_with_no_bound_handler_is_still_checked() {
     let runtime = Runtime::new(
         r#"
-        type User = { name:string email:string? }
+        type User = { name:string email?:string }
         component <Editor emits { Apply { patch:User.Update } } /> = { <Panel /> }
         "#,
     );
@@ -913,15 +952,55 @@ fn a_host_action_entry_with_no_bound_handler_is_still_checked() {
 
     let ok = runtime.dispatch(
         &init,
-        vec![apply(record("User.Update", &[("email", Value::Null)]))],
+        vec![apply(record("User.Update", &[("email", Value::empty())]))],
     );
     assert!(ok.effects.is_empty());
 
     let error = runtime
         .try_dispatch(
             &init.snapshot,
-            vec![apply(record("User.Update", &[("name", Value::Null)]))],
+            vec![apply(record("User.Update", &[("name", Value::empty())]))],
         )
         .expect_err("Expected the unbound entry's payload to be constructed and rejected");
     assert!(error.to_string().contains("name"), "got {}", error);
+}
+
+/// A handler later in a batch reads a state field an earlier handler cleared as empty, not as the
+/// value the render captured: a cleared optional field has no entry in the working state.
+#[test]
+fn a_cleared_optional_state_field_reads_as_empty_later_in_the_batch() {
+    let runtime = Runtime::new(
+        r#"
+        external component <Button emits { Tapped { } } />
+        component <Form /> = {
+          state { note?:string copy:string = "" }
+          <Panel copy={copy}>
+            <Button onTapped=<Update note="x" /> />
+            <Button onTapped=<Update note={} /> />
+            <Button onTapped=<Update copy={note ?? "none"} /> />
+          </Panel>
+        }
+        "#,
+    );
+    let init = runtime.init("Form", no_props());
+    let buttons = |rendered: &Value| -> Vec<SmolStr> {
+        let Value::Array(children) = field(rendered, "content") else {
+            panic!("Expected the panel's children, got {:?}", rendered);
+        };
+        children
+            .iter()
+            .map(|child| token(child, "onTapped"))
+            .collect()
+    };
+    let set = buttons(&init.rendered);
+    let noted = runtime.dispatch(&init, vec![invoke(&set[0], record("Button.Tapped", &[]))]);
+    let tokens = buttons(&noted.rendered);
+    let next = runtime.dispatch(
+        &noted,
+        vec![
+            invoke(&tokens[1], record("Button.Tapped", &[])),
+            invoke(&tokens[2], record("Button.Tapped", &[])),
+        ],
+    );
+    assert_eq!(field(&next.rendered, "copy"), &string("none"));
 }

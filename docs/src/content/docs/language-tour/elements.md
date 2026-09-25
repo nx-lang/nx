@@ -49,7 +49,7 @@ type LoadState = idle | failed { message:string }
 let <Notice message:string tone:string density:string /> =
   <aside tone={tone}>{message}</aside>
 
-let view(state:LoadState, compact:boolean) =
+let <StatusNotice state:LoadState compact:boolean /> =
   <Notice
     if state is {
       LoadState.failed => message={state.message} tone="danger"

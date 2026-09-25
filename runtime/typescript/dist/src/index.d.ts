@@ -1,5 +1,5 @@
 /**
- * The NX IR runtime: prepares schema 4 images, links them by name, and evaluates them.
+ * The NX IR runtime: prepares schema 5 images, links them by name, and evaluates them.
  *
  * An image carries one module as flat tables of 32-bit cells over one string blob, and the runtime
  * reads it in place. `prepareNxIrModule` validates every section, offset and index of the image and
@@ -9,7 +9,7 @@
  * one prepared catalog serves any number of programs.
  */
 import { NX_PRELUDE_VERSION } from "./prelude-image.js";
-export declare const NX_IR_SCHEMA_VERSION = 4;
+export declare const NX_IR_SCHEMA_VERSION = 5;
 export declare const NX_IR_RUNTIME_ABI = "nx-ir-runtime-v2";
 export declare const NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1 = "update-records-v1";
 export declare const NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1 = "property-unions-v1";
@@ -19,6 +19,11 @@ export declare const NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1 = "action-handler
 export declare const NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1 = "function-values-v1";
 /** Iteration over a range: the `forRange` node. Building a range needs no feature. */
 export declare const NX_IR_REQUIRED_FEATURE_RANGES_V1 = "ranges-v1";
+/**
+ * The presence operators — `exists`, `optionalMember` and `coalesce` nodes — and the `{}` match
+ * pattern. A `seq` type alone needs no feature: it is a type kind, not a node.
+ */
+export declare const NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1 = "occurrence-v1";
 /** The reserved identity of the NX prelude, the module every NX module sees without an import. */
 export declare const NX_PRELUDE_MODULE_IDENTITY = "@nx/prelude.nx";
 /**
@@ -80,9 +85,12 @@ export declare class NxIrImage {
     /** The byte span of node `index` in the source, when the debug section records one. */
     nodeSpan(index: number): readonly [number, number] | undefined;
 }
-/** The kind numbers of schema 4, as `docs/nx-ir-format.md` assigns them. */
+/**
+ * The kind numbers of schema 5, as `docs/nx-ir-format.md` assigns them. Kind `0`, the `null`
+ * node, was retired with schema 5: the language has no null value, so a reader reports the kind
+ * as malformed rather than evaluating it.
+ */
 export declare const nodeKinds: {
-    readonly null: 0;
     readonly bool: 1;
     readonly string: 2;
     readonly number: 3;
@@ -105,13 +113,30 @@ export declare const nodeKinds: {
     readonly text: 20;
     readonly namedCall: 21;
     readonly forRange: 22;
+    /** `x?`: `[23, operand]`, true when the operand holds at least one item. */
+    readonly exists: 23;
+    /** `x?.m`: `[24, receiver, str]`, the empty value when the receiver is empty and `x.m` otherwise. */
+    readonly optionalMember: 24;
+    /** `x ?? y`: `[25, left, right]`, the left operand when it holds an item and the right one otherwise. */
+    readonly coalesce: 25;
 };
+/**
+ * The type kinds. `2` (`array`) and `3` (`nullable`) were retired with schema 5, replaced by
+ * `seq`, and stay assigned so no later kind reuses them; a reader reports either as malformed.
+ */
 export declare const typeKinds: {
     readonly primitive: 0;
     readonly nominal: 1;
-    readonly array: 2;
-    readonly nullable: 3;
     readonly function: 4;
+    readonly seq: 5;
+};
+/**
+ * The bits of a `seq` type's occurrence cell: whether the type admits no value and whether it
+ * admits more than one. `?` is `1`, `+` is `2` and `*` is `3`; exactly one is never a `seq`.
+ */
+export declare const occurrenceFlags: {
+    readonly empty: 1;
+    readonly many: 2;
 };
 export declare const constantKinds: {
     readonly int: 0;
@@ -149,6 +174,13 @@ export type NxResult<T> = {
     readonly ok: false;
     readonly diagnostics: readonly NxIrDiagnostic[];
 };
+/**
+ * A value in the canonical JSON encoding. The empty value — an absent optional, an untaken
+ * branch, an empty `for` — is the empty array, and the runtime never holds `null` as an NX value.
+ * `null` is here for the host boundary only: a decoder reads it as the empty value wherever the
+ * site admits zero, and the encoder writes it for a cleared field of an update record, which is
+ * the one place the canonical encoding spells `null`.
+ */
 export type NxCanonicalValue = null | boolean | number | string | readonly NxCanonicalValue[] | {
     readonly [key: string]: NxCanonicalValue;
 };
@@ -156,6 +188,11 @@ export declare class NxIrRuntimeError extends Error {
     readonly diagnostics: readonly NxIrDiagnostic[];
     constructor(diagnostics: readonly NxIrDiagnostic[]);
 }
+/**
+ * A type as the image spells it. A `seq` carries an occurrence over an exactly-one item type:
+ * `?` is `mayBeEmpty` alone, `+` is `mayBeMany` alone and `*` is both. An item type is never a
+ * `seq`, so an exactly-one type is any of the other three.
+ */
 export type PreparedType = {
     readonly kind: "primitive";
     readonly name: string;
@@ -164,11 +201,10 @@ export type PreparedType = {
     readonly slot: number;
     readonly name: string;
 } | {
-    readonly kind: "array";
-    readonly element: PreparedType;
-} | {
-    readonly kind: "nullable";
-    readonly inner: PreparedType;
+    readonly kind: "seq";
+    readonly item: PreparedType;
+    readonly mayBeEmpty: boolean;
+    readonly mayBeMany: boolean;
 } | {
     readonly kind: "function";
     readonly params: readonly PreparedParam[];
@@ -188,8 +224,19 @@ export interface PreparedField {
 }
 export interface PreparedParam {
     readonly name: string;
+    /** The parameter's read type: `T?` for one declared `p?:T`. */
     readonly ty: PreparedType;
     readonly isContent: boolean;
+    /** Whether the parameter carries the `?` mark, so a call may leave it out. */
+    readonly isOptional: boolean;
+}
+/** A parameter of a function declaration, which, unlike one of a function type, may have a default. */
+export interface PreparedDeclaredParam extends PreparedParam {
+    /**
+     * The node the function evaluates for the parameter when a call leaves it out, reading the
+     * parameters before it through their slots, or `-1` when it has no default.
+     */
+    readonly default: number;
 }
 export interface PreparedUnionCase {
     readonly name: string;
@@ -203,11 +250,17 @@ export interface PreparedEmit {
 }
 export type PreparedDeclarationKind = {
     readonly tag: "function";
-    readonly params: readonly PreparedParam[];
+    readonly params: readonly PreparedDeclaredParam[];
     readonly body: number;
+    /** The declared result type the body's value is normalized to, when the source declares one. */
+    readonly result: PreparedType | undefined;
+    /** The result type, declared or inferred, is a standalone `T?`. */
+    readonly isOptionalResult: boolean;
 } | {
     readonly tag: "value";
     readonly value: number;
+    /** The declared type the value is normalized to, when the source declares one. */
+    readonly ty: PreparedType | undefined;
 } | {
     readonly tag: "record";
     readonly fields: readonly PreparedField[];
@@ -450,7 +503,8 @@ export declare function normalizeComponentState(program: NxPreparedProgram | NxP
  *
  * The patch is either a plain partial state object or the component's own update record,
  * `{ $type: "<Component>.Update", ... }`. Either way a present field replaces the current value, an
- * absent one keeps it, and a present `null` sets a nullable field to `null`.
+ * absent one keeps it, and a present empty value — `null` or `[]` — clears an optional state field,
+ * so the next state carries no key for it; for a field that is not optional it is rejected.
  */
 export declare function applyComponentStatePatch(program: NxPreparedProgram | NxPreparedModule, name: string, currentState: Record<string, NxCanonicalValue>, patch: Record<string, NxCanonicalValue>, options?: NxRuntimeOptions): Record<string, NxCanonicalValue>;
 /**
@@ -471,22 +525,27 @@ export type NxUpdateOf<T extends NxRecordObject> = {
     readonly [K in keyof T as K extends "$type" ? never : K]?: T[K];
 };
 /**
- * `apply(record, update)`: the record with each field present in the update replaced, a present
- * `null` included; every absent field keeps its value. The update must be the record's own
- * `<Type>.Update`.
+ * `apply(record, update)`: the record with each field present in the update replaced, and each
+ * field the update clears — present as `null` or the empty value — left out of the result, which
+ * is how the canonical encoding writes an empty optional field; every absent field keeps its
+ * value. The update must be the record's own `<Type>.Update`.
  */
 export declare function applyUpdate<T extends NxRecordObject>(record: T, update: NxUpdateOf<T>): T;
-/** `merge(first, second)`: every field present in either update, the second winning. */
+/**
+ * `merge(first, second)`: every field present in either update, the second winning, a cleared
+ * field included. A cleared field is `null` in the result, as the canonical encoding spells it.
+ */
 export declare function mergeUpdates<T extends NxRecordObject>(first: T, second: T): T;
 /**
  * `diff(before, after)`: the `<Type>.Update` carrying exactly the fields whose values differ, each
- * with its value from `after`, comparing records and lists structurally.
+ * with its value from `after`, comparing records and lists structurally. A field either record
+ * leaves out is empty there, so a field `after` clears is present and `null` in the result.
  */
 export declare function diffRecords<T extends NxRecordObject>(before: T, after: T): NxUpdateOf<T>;
 /**
- * `changed(update)`: the names of the fields present in the update, in the order the update
- * record's declaration in `program` lists them. Fails when the program does not declare the
- * update record, since the order is then unknowable from the value.
+ * `changed(update)`: the names of the fields present in the update, cleared ones included, in the
+ * order the update record's declaration in `program` lists them. Fails when the program does not
+ * declare the update record, since the order is then unknowable from the value.
  */
 export declare function changedFields(update: NxRecordObject, program: NxPreparedProgram): string[];
 /**

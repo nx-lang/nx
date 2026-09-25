@@ -15,7 +15,7 @@ type Sample = {
   Title: string
   Text: string
   // The title gradient. The original cycles through the six drawnui.net accents by card index.
-  Colors: string[]
+  Colors: string+
 }
 
 component <SampleCard extends DrawnNode Item:Sample /> = {

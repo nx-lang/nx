@@ -50,16 +50,16 @@ fn a_lexical_binding_of_the_same_name_does_not_shadow_the_member() {
 }
 
 #[test]
-fn nullable_expected_type_accepts_a_bare_name() {
+fn optional_expected_type_accepts_a_bare_name() {
     assert_clean(&format!(
-        "{FIT}type Box = {{ fit: Fit? }}\n<Box fit=cover />"
+        "{FIT}type Box = {{ fit?: Fit }}\n<Box fit=cover />"
     ));
 }
 
 #[test]
-fn list_typed_site_accepts_a_bare_name() {
+fn sequence_typed_site_accepts_a_bare_name() {
     assert_clean(&format!(
-        "{FIT}type Box = {{ fits: Fit[] }}\n<Box fits=cover />"
+        "{FIT}type Box = {{ fits: Fit+ }}\n<Box fits=cover />"
     ));
 }
 
@@ -271,7 +271,7 @@ fn bare_name_resolves_to_a_visible_type_at_a_type_parameter_site() {
     // module's top-level names are unique.)
     assert_clean(
         "type Contact = { name:string }\n\
-         external component <List TItem:type items:TItem[]? />\n\
+         external component <List TItem:type items?:TItem+ />\n\
          let v(Contact:string) = <List TItem=Contact />",
     );
 }

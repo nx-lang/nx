@@ -10,16 +10,17 @@
 // ---- A small catalog, the way a host describes its controls ------------------------------------
 
 abstract external component <DrawnNode />
-external component <Label extends DrawnNode Text:string? />
-external component <Stack extends DrawnNode Spacing:int? content Children:DrawnNode[]? />
+external component <Label extends DrawnNode Text?:string />
+external component <Stack extends DrawnNode Spacing?:int content Children?:DrawnNode+ />
 
-// A templated list: the item type is a type parameter, the collection is a list of it, and the
-// template is a function of the item and its index. `(...)?` makes the function itself optional;
-// a `?` after the result would make the result optional instead.
+// A templated list: the item type is a type parameter, the collection is one or more of it, and
+// the template is a function of the item and its index. The `?` on each name makes the property
+// optional, so the function type needs no parentheses; a `?` after the result would make the
+// result optional instead.
 external component <List extends DrawnNode
   TItem:type
-  ItemsSource:TItem[]?
-  ItemTemplate:(<function Item:TItem Index:int />: DrawnNode)?
+  ItemsSource?:TItem+
+  ItemTemplate?:<function Item:TItem Index:int />: DrawnNode
 />
 
 // A table with three template properties, each with its own parameter list. Templates are just
@@ -27,10 +28,10 @@ external component <List extends DrawnNode
 // alias, as `FooterTemplate` does, or spell the function type inline.
 external component <DataTable extends DrawnNode
   TItem:type
-  Rows:TItem[]?
-  HeaderTemplate:(<function />: DrawnNode)?
-  RowTemplate:(<function Item:TItem Index:int />: DrawnNode)?
-  FooterTemplate:TableFooterTemplate?
+  Rows?:TItem+
+  HeaderTemplate?:<function />: DrawnNode
+  RowTemplate?:<function Item:TItem Index:int />: DrawnNode
+  FooterTemplate?:TableFooterTemplate
 />
 
 // ---- The data -----------------------------------------------------------------------------------
@@ -60,7 +61,7 @@ let <TableFooter Count:int />: DrawnNode = <Label Text={"" + Count + " contacts"
 
 // ---- A component that takes a template and forwards it -------------------------------------------
 
-component <Section extends DrawnNode Title:string Items:Contact[] Row:ContactRowTemplate /> = {
+component <Section extends DrawnNode Title:string Items:Contact+ Row:ContactRowTemplate /> = {
   <Stack Spacing=6>
     <Label Text={Title} />
     <List TItem=Contact ItemsSource={Items} ItemTemplate={Row} />

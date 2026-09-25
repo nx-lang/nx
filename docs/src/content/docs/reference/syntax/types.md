@@ -10,8 +10,128 @@ Use aliases to name primitive or composite types.
 
 ```nx
 type UserId = string
-type EventHandler = (string) => void
+type Tags = string+
+type RowTemplate = <function Item:string Index:int />: string
 ```
+
+## Occurrences
+A type reference is a base type followed by at most one *occurrence suffix*, which says how many
+values the type admits. The base is a primitive, a declared type, an [applied generic](#generic-records),
+a [function type](#function-types) or a parenthesized type.
+
+| Type | Admits |
+| --- | --- |
+| `T` | exactly one value |
+| `T?` | zero or one |
+| `T+` | one or more |
+| `T*` | zero or more |
+
+```nx
+type Name = string                        // exactly one
+type Nickname = string?                   // zero or one
+type Names = string+                      // one or more
+type Tags = string*                       // zero or more
+type Loaders = (<function />: string)+    // one or more functions, each returning one string
+```
+
+There is no `[]` suffix and no `null`. A sequence is `T+` or `T*`, and the absent value is `{}`, the
+empty sequence. `T[]` is rejected with a diagnostic naming `T*` and `T+`.
+
+### One suffix
+A type carries at most one suffix, and the rule follows an alias. There is no optional sequence and
+no sequence of optionals: a sequence with no items *is* the absent value, so `T*` is both, and a
+suffix on a type that already has one is rejected:
+
+```nx
+// Rejected: each type already carries an occurrence.
+type Names = string+
+type Grid = Names*
+type Twice = string??
+type Paren = (string+)?
+```
+
+Where data has to nest, a record nests it: declare the row and take a sequence of rows. See
+[Sequences & Object Duality](/reference/concepts/sequences-and-objects#nesting-data).
+
+### The empty value
+`{}` is the one absent value. It satisfies every `?` and `*` type and no exactly-one or `+` type,
+and every source of emptiness produces it: an optional property that was not written, an `if` with
+no `else` that takes no branch, a `for` whose body yields nothing. Nothing distinguishes one such
+empty from another, and a diagnostic renders its type as `{}`.
+
+```nx
+let a:string? = {}
+let b:string* = {}
+```
+
+```nx
+// Rejected: {} satisfies neither an exactly-one type nor a + type.
+let c:string = {}
+let d:string+ = {}
+```
+
+### What satisfies what
+Exactly one sits below `?` and `+`, and both sit below `*`. A value satisfies a site when its
+occurrence is at or below the site's: a single value is accepted wherever a suffixed type is
+expected, as a sequence of one; `?` and `+` each satisfy `*` and nothing narrower; `*` satisfies
+only `*`. A mismatch names both types by their spelling.
+
+```nx
+let one:int = 1
+let a:int? = {one}     // one value satisfies every occurrence
+let b:int+ = {one}
+let c:int* = {one}
+
+let o:int? = {}
+let p:int+ = {1 2}
+let s:int* = {o}       // ? satisfies *
+let t:int* = {p}       // + satisfies *
+```
+
+```nx
+// Rejected
+let o:int? = {}
+let p:int+ = {1 2}
+let u:int+ = {o}       // expects int+, found int?
+let v:int? = {p}       // expects int?, found int+
+let w:int = {o}        // expects int, found int?
+```
+
+Because `?` does not satisfy exactly one, a value that may be empty has to be tested, stepped
+through or given a fallback before it is used as one value. The operators for that are `x?`,
+`x?.m` and `x ?? y`; see [Expressions](/reference/syntax/expressions#values-that-may-be-empty).
+
+### Occurrences add and multiply
+Every site that collects, joins or iterates computes an occurrence from the same lattice, so it is
+rarely written by hand:
+
+- A **collecting position** — a braced value, element body content, a braced call argument, the
+  yields of a `for` — adds its items' occurrences. Two items make `+`; an item that may be empty
+  beside one that cannot still make `+`; two that may both be empty make `*`. A braced value of one
+  item is that item.
+- A **`for`** multiplies the iterated occurrence by its body's: over a `+` a body yielding one
+  gives `+`, a body that may yield nothing gives `*`; over a `?`, a body yielding one gives `?`.
+- A **join** — the branches of an `if`, the arms of a match, the operands of `??` — takes the least
+  upper bound. An `if` with no `else` joins its branch with `{}`, so over `T` it is `T?` and over
+  `T+` it is `T*`.
+
+```nx
+type Person = { name:string }
+
+let o:int? = {}
+let p:int? = 3
+let pair = { 1 2 }         // int+
+let some = { o 2 }         // int+: the 2 is always there
+let few = { o p }          // int*: both may be empty
+let lone = { o }           // int?: a braced value of one item is that item
+
+let squares(ns:int+): int+ = { for n in ns { n * n } }
+let evens(ns:int+): int* = { for n in ns { if (n % 2 == 0) { n } } }
+let nameOf(p?:Person): string? = { for x in p { x.name } }
+```
+
+See [if](/reference/syntax/if#when-there-is-no-else) for the conditional and
+[Sequences & Object Duality](/reference/concepts/sequences-and-objects) for the splice rule.
 
 ## Numeric Types and Conversions
 The numeric primitives are `int`, `int32`, `int64`, `float32` and `float64`. `int` is the integer
@@ -36,8 +156,8 @@ The two crossings into floating point are there because they are exact: a `float
 integer in ±(2^53−1) without loss, which is precisely the range of `int`, and `int32` lies inside
 it. Widening applies to an expression of any form, not only to a literal, and at every site that
 declares a type: property bindings, property and record field defaults, record field values,
-annotated `let` bindings, declared return types, arguments, each element of a list, a content
-property, and any of those declared nullable.
+annotated `let` bindings, declared return types, arguments, each item of a sequence, a content
+property, and any of those declared with an occurrence.
 
 ```nx
 type Box = { width: float64  height: float64  opacity: float64 = 1 }
@@ -45,8 +165,8 @@ type Box = { width: float64  height: float64  opacity: float64 = 1 }
 // Accepted: an int is exact in a float64, so `n` widens at the float64 property.
 let scaled(n: int) = { <Box width={n} height={n} /> }
 
-// Accepted: each element widens to the element type.
-let widths(a: int, b: int32): float64[] = { a b }
+// Accepted: each item widens to the item type.
+let widths(a: int, b: int32): float64+ = { a b }
 ```
 
 The value takes the site's type when the program runs: `width` above is the `float64` `3.0` for
@@ -96,9 +216,10 @@ let mean(a: int32, b: float32) = { a + b }    // float64: neither widens to the 
 integer division, so `7 / 2` is `3`; when either operand is floating point it is `3.5`.
 
 ### Joined branches
-The branches of an `if` or a match, and the elements of a list, are joined the same way: the result
+The branches of an `if` or a match, and the items of a sequence, are joined the same way: the result
 has the narrowest type every branch widens to, and a narrower branch widens to it when the program
-runs, as it would at a declared site. This holds inside lists and nullable types too.
+runs, as it would at a declared site. This holds through an occurrence too: the item types are
+joined and the occurrences take their least upper bound, as [Occurrences](#occurrences) describes.
 
 ```nx
 let pick(b: boolean, n: int, x: float64) = { if b { n } else { x } }  // float64
@@ -108,14 +229,14 @@ let ratio(b: boolean, n: int, x: float64, d: int) = { pick(b, n, x) / d }
 `pick(true, 3, 1.5)` is the `float64` `3.0`, so `ratio(true, 3, 1.5, 2)` divides as floats and is
 `1.5`, not the integer division `1`.
 
-A `null` branch makes the result nullable and changes nothing else, and a nullable branch keeps
-the result nullable. If the branches have no common type other than `object`, the result is
-`object`, which already admits `null`.
+A missing `else` makes the result optional and changes nothing else, and a branch that may be
+empty keeps the result optional. If the branches have no common item type other than `object`, the
+result is `object`, or `object?` when a branch may be empty.
 
 ```nx
-let maybe(b: boolean, n: int) = { if b { n } else { null } }              // int?
-let mixed(b: boolean, n: int?, x: float64) = { if b { n } else { x } }    // float64?
-let either(b: boolean, s: string?, x: float64) = { if b { s } else { x } } // object
+let maybe(b: boolean, n: int) = { if b { n } }                             // int?
+let mixed(b: boolean, x: float64, n?: int) = { if b { n } else { x } }     // float64?
+let either(b: boolean, x: float64, s?: string) = { if b { s } else { x } } // object?
 ```
 
 ### Literals
@@ -199,13 +320,15 @@ Record types use `type Name = { ... }` declarations. Record inheritance is limit
 inheritance from abstract records.
 
 ```nx
+type UserId = string
+
 abstract type Entity = {
   id: UserId
 }
 
 abstract type UserBase extends Entity = {
   name: string
-  email: string?
+  email?: string
 }
 
 type User extends UserBase = {
@@ -213,12 +336,90 @@ type User extends UserBase = {
 }
 ```
 
-- Fields use `name: Type` and can optionally declare defaults with `=`.
+- Fields use `name: Type` and can optionally declare defaults with `=`. A field that may be left
+  out is marked on its name, `name?: Type`; see [Optional properties](#optional-properties).
 - Prefix one field with `content` when element body content should bind to that field during markup-style construction.
 - `abstract type` records can appear in annotations but cannot be instantiated directly.
 - `extends Base` is valid only when `Base` resolves to an abstract record declaration.
+- An abstract record is an open set: any module may declare another record that extends it, and a
+  site typed `Entity` accepts all of them. A closed set of records is a
+  [discriminated union](#discriminated-union-types). Generated host types follow the same split. An
+  abstract record is an open base type: an abstract class in C#, and in TypeScript an interface
+  whose `$type` is any string, which each record extending it narrows to its own name. A union is
+  a closed union type.
 - Record construction is closed: supplied fields must be declared on the effective record shape,
   including inherited fields. Unknown fields are rejected instead of being ignored.
+
+## Optional properties
+A property — a record or action field, a component prop, a `state` field, an emitted action's
+payload field, a function parameter, or a function type's parameter — admits no value only through
+a `?` mark on its name. What follows the colon is an exactly-one type or a `+` type:
+
+```nx
+type Person = { name:string }
+
+type Book = {
+  title:string          // required: exactly one
+  subtitle?:string      // zero or one
+  authors:Person+       // one or more
+  tags?:string+         // zero or more
+}
+```
+
+A `?` or `*` in the type slot is rejected, whether spelled there or reached through an alias, and
+the diagnostic shows the `name?:` form to write instead:
+
+```nx
+// Rejected: write `subtitle?:string` and `tags?:string+`.
+type Book = { subtitle:string? tags:string* }
+```
+
+An optional property has no default. A default already makes a property omissible and gives it a
+value, so the two forms are exclusive, and `name?:T = x` is rejected with both alternatives shown:
+
+```nx
+// Rejected: write `subtitle:string = "none"` or `subtitle?:string`.
+type Book = { subtitle?:string = "none" }
+```
+
+### Reading and writing one
+Reading a property declared `p?:T` gives `T?`, and reading one declared `p?:T+` gives `T*`. A
+required or defaulted property reads as its declared type. This holds for a field read through a
+record, a prop or state field read inside a component body, and a parameter read inside a function.
+
+```nx
+type Book = { title:string subtitle?:string tags?:string+ }
+
+let sub(b:Book) = { b.subtitle }   // string?
+let tags(b:Book) = { b.tags }      // string*
+```
+
+At a construction, component use or call, a property that is not written binds its default when it
+has one, the empty value when it is optional, and is reported as missing otherwise. A written value
+is checked against the read type, so an optional property accepts `{}`, a `?` value, an exactly-one
+value, and a `*` value where its type is `+`. A required or defaulted property is checked against its
+declared type, so `{}` or a value that may be empty is rejected there — the same mismatch as an
+`int?` at an `int`.
+
+```nx
+type Book = { title:string = "Untitled" subtitle?:string tags?:string+ }
+
+let o:string? = {}
+let a = <Book title="A" subtitle="S" tags={"x" "y"} />
+let b = <Book title="B" />                          // subtitle and tags are empty
+let c = <Book subtitle={o} tags={} />               // the same as <Book />, with the default title
+```
+
+```nx
+// Rejected: `title` has a default, so it cannot be written empty.
+type Book = { title:string = "Untitled" }
+let d = <Book title={} />
+```
+
+Because an optional property reads as `T?`, using it as one value takes a presence test, a step or
+a fallback — `b.subtitle ?? "none"`, `if b.subtitle? { b.subtitle }` — described under
+[Values that may be empty](/reference/syntax/expressions#values-that-may-be-empty). A `state`
+field marked `?` starts empty.
 
 ## Constant Unions
 A union whose cases all carry no payload declares a fixed set of named values. This is the form
@@ -228,7 +429,7 @@ constants.
 ```nx
 type DealStage = draft | pending_review | approved_for_launch
 
-let stage = DealStage.pending_review
+let stage = { DealStage.pending_review }
 ```
 
 - Case names conventionally use `snake_case`.
@@ -252,15 +453,15 @@ type LoadState =
   | idle
   | loading
   | failed { message:string retryable:boolean = true }
-  | loaded { items:string[] }
+  | loaded { items:string+ }
 ```
 
 - Every case is referenced through the owning union name, such as `LoadState.idle`.
 - Fieldless cases can be used directly with member syntax.
 - Payload cases are constructed with element-style syntax:
   `<LoadState.failed message={"Network unavailable"} />`.
-- Case payload fields use the same `name: Type`, nullable, default, and `content` field rules as
-  record fields.
+- Case payload fields use the same `name: Type`, `name?: Type`, default, and `content` field rules
+  as record fields.
 - A union may extend an abstract record to share inherited fields across every case:
 
 ```nx
@@ -315,13 +516,13 @@ Concrete records are instantiated with the same element-style syntax used elsewh
 ```nx
 let user =
   <User
-    id={123}
-    name={"John Doe"}
-    email={"john@example.com"}
+    id="123"
+    name="John Doe"
+    email="john@example.com"
   />
 
-let entityName(user: UserBase) = user.name
-let result = entityName(user)
+let entityName(user: UserBase) = { user.name }
+let result = { entityName(user) }
 ```
 
 If a record has a stale field name, type checking reports it before defaults are applied.
@@ -338,7 +539,7 @@ let config = <ChatLinkConfig
 ## Generic records
 A record whose fields hold values of a type the declaration does not fix declares a **type
 parameter**, with the same `Name:type` syntax a component signature uses and the same placement
-rules — before every field, with no default, no modifier and no suffix:
+rules — before every field, with no default, no modifier, no `?` mark and no suffix:
 
 ```nx
 type Bounds = {
@@ -350,12 +551,12 @@ type Bounds = {
 ```
 
 Inside the declaration `T` is a type like any other, and it is **rigid**: only `T` itself satisfies
-it, which is what rejects `value:T = "text"`. It composes with the suffixes and with a function
-type, and a record may declare more than one:
+it, which is what rejects `value:T = "text"`. It takes an occurrence suffix, the `?` mark on a
+field, and a place in a function type like any other type, and a record may declare more than one:
 
 ```nx
 type Pair = { TKey:type TValue:type key:TKey value:TValue }
-type Page = { T:type items:T[] next:T? render:(<function item:T />: string)? }
+type Page = { T:type items:T+ next?:T render?:<function item:T />: string }
 ```
 
 A type parameter is not a field: a constructed `Bounds` has `low`, `high` and `inclusive` and
@@ -371,15 +572,16 @@ as the element that constructs the record with only its type arguments:
 ```nx
 type Schedule = {
   week:<Range T=int/>
-  spans:<Range T=float64/>[]?
+  spans?:<Range T=float64/>+
 }
 
 let week:<Range T=int/> = <Range T=int start={1} end={7} endInclusive={true} />
 ```
 
-An applied type composes with `?` and `[]` in source order, nests (`<Page T=<Range T=int/>/>`), may
-take any type as an argument, and may name a qualified tag, which is how the update companion is
-written (`<Range.Update T=int/>`). Arguments are matched to parameters **by name**, so
+An applied type takes one occurrence suffix like any other base type, nests
+(`<Page T=<Range T=int/>/>`), takes any exactly-one type as an argument — a suffixed type is not
+one, since a record declaring `items:T+` would then have a field whose items carry an occurrence —
+and may name a qualified tag, which is how the update companion is written (`<Range.Update T=int/>`). Arguments are matched to parameters **by name**, so
 `<Pair TValue=int TKey=string/>` and `<Pair TKey=string TValue=int/>` are one type.
 
 ### Distinct per argument, and invariant
@@ -395,12 +597,12 @@ let wider:<Range T=float64/> = {ints}   // rejected: int does not convert inside
 Reading a field gives its declared type with each parameter replaced by its argument, so
 `week.start` is `int`. Every applied type satisfies `object`.
 
-Invariance also decides what a list of them is. Two of one instantiation keep their arguments, and
-two that differ have nothing in common below `object`:
+Invariance also decides what a sequence of them is. Two of one instantiation keep their arguments,
+and two that differ have nothing in common below `object`:
 
 ```nx
-let same = { (0..5) (5..=9) }       // <Range T=int/>[]
-let mixed = { (0..5) (0.0..1.0) }   // object[]
+let same = { (0..5) (5..=9) }       // <Range T=int/>+
+let mixed = { (0..5) (0.0..1.0) }   // object+
 ```
 
 ### Constructing one
@@ -421,11 +623,23 @@ takes where a type position would take the spelled-out type:
 
 ```nx
 type Box = { T:type value:T }
-type Ints = int[]
 type IntRange = <Range T=int/>
 
-let boxedInts:<Box T=int[]/> = <Box T=Ints value={ 1 2 } />
 let nested:<Box T=<Range T=int/>/> = <Box T=IntRange value={<Range T=int start={1} end={5} endInclusive={false} />} />
+```
+
+A type argument is an exactly-one type. A primitive, a record, a union, a function type and another
+applied type all qualify; a type with an occurrence does not, so `<Box T=int?/>`, `<Box T=int+/>`
+and an alias that names either are rejected as not being exactly one value. Where a field has to
+hold many values or none, the occurrence goes on the field and the argument stays an item type:
+
+```nx
+type Box = { T:type value?:T }
+type Boxes = { T:type items:T+ }
+
+let full = <Box T=int value=1 />     // value reads as int?
+let empty = <Box T=int />            // value is empty
+let many = <Boxes T=int items={1 2} />
 ```
 
 ### Companions
@@ -523,19 +737,19 @@ type RowTemplate = <function Item:Contact Index:int />: DrawnNode
 
 // A property declared at the type, inline or through the alias.
 external component <List extends DrawnNode
-  ItemsSource:Contact[]?
-  ItemTemplate:(<function Item:Contact Index:int />: DrawnNode)?
+  ItemsSource?:Contact+
+  ItemTemplate?:<function Item:Contact Index:int />: DrawnNode
 />
-component <Section extends DrawnNode Items:Contact[] Row:RowTemplate /> = {
+component <Section extends DrawnNode Items:Contact+ Row:RowTemplate /> = {
   <List ItemsSource={Items} ItemTemplate={Row} />
 }
 ```
 
 A suffix written after the result binds to the result: `<function Count:int />: string?` is a
-function returning a nullable string. To make the function itself nullable, or a list element,
-parenthesize it: `(<function Item:Contact />: DrawnNode)?`, `(<function />: DrawnNode)[]`.
-Parentheses group and nothing more — `(string)[]` is `string[]` — and they add no layer, so
-`(string?)?` is rejected like `string??`.
+function returning an optional string. To give the function type itself an occurrence, parenthesize
+it: `(<function />: DrawnNode)+` is one or more functions. Parentheses group and nothing more —
+`(string)+` is `string+` — and they add no layer, so `(string?)?` is rejected like `string??`. An
+optional function-typed property is marked on its name like any other, as `ItemTemplate?` above.
 
 A function type's parameters carry no defaults (the caller supplies every one), at most one is
 marked `content`, and none is a `type` parameter. `function` is a keyword only in this position; an

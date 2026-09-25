@@ -142,12 +142,12 @@ fn a_range_of_a_range_is_a_type_error() {
 #[test]
 fn a_range_in_a_braced_list_is_parenthesized() {
     assert_clean(
-        "let rs:<Range T=int/>[] = { (0..5) (5..=9) }\n\
+        "let rs:<Range T=int/>+ = { (0..5) (5..=9) }\n\
          let root() = { rs }\n",
     );
     assert!(
         !diagnostics(
-            "let rs:<Range T=int/>[] = { 0..5 5..=9 }\n\
+            "let rs:<Range T=int/>+ = { 0..5 5..=9 }\n\
              let root() = { rs }\n"
         )
         .is_empty(),
@@ -163,13 +163,13 @@ fn a_list_of_ranges_takes_the_join_of_its_instantiations() {
         "let same = { (0..5) (5..=9) }\n\
          let bad:int = {same}\n\
          let root() = { 1 }\n",
-        "found list <Range T=int/>[]",
+        "found <Range T=int/>+",
     );
     assert_reports(
         "let mixed = { (0..5) (0.0..1.0) }\n\
          let bad:int = {mixed}\n\
          let root() = { 1 }\n",
-        "found list object[]",
+        "found object+",
     );
 }
 
@@ -411,7 +411,7 @@ fn a_host_supplied_range_iterates() {
             type_name: None,
             properties: props,
         },
-        &NxValue::Null,
+        &NxValue::empty(),
     );
     let rendered = match result {
         ComponentEvaluateEvalResult::Ok(result) => result.rendered,
@@ -450,7 +450,7 @@ fn the_item_has_the_ranges_integer_type() {
     assert_clean(
         "let lo:int32 = 1\n\
          let hi:int32 = 3\n\
-         let xs:int32[] = { for i in lo..hi { i } }\n\
+         let xs:int32* = { for i in lo..hi { i } }\n\
          let root() = { xs }\n",
     );
 }
@@ -465,9 +465,8 @@ fn a_modules_own_range_does_not_iterate() {
         "type Range = { start:int end:int endInclusive:boolean }\n         let mine = <Range start={0} end={4} endInclusive={false} />\n         let xs = { for i in mine { i } }\n         let root() = { xs }\n",
     );
     assert!(
-        messages
-            .iter()
-            .any(|message| message.contains("For iterable must be an array, found Range")),
+        messages.iter().any(|message| message
+            .contains("For iterable must be a sequence or an optional value, found Range")),
         "expected the loop over the module's own Range to be refused, got: {messages:?}"
     );
 }
@@ -504,7 +503,7 @@ fn an_optional_range_does_not_iterate() {
 #[test]
 fn a_range_binds_to_an_optional_range_field() {
     assert_clean(
-        "type Slider = { range:<Range T=float64/>? }\n         let s = <Slider range={0..1} />\n         let root() = { s }\n",
+        "type Slider = { range?:<Range T=float64/> }\n         let s = <Slider range={0..1} />\n         let root() = { s }\n",
     );
 }
 

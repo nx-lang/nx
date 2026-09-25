@@ -12,7 +12,7 @@ describe('NX TextMate grammar: function types', function () {
   });
 
   it('scopes a function-typed property of a signature', function () {
-    const line = 'external component <List TItem:type ItemTemplate: (<function Item:TItem Index:int />: DrawnNode)? />';
+    const line = 'external component <List TItem:type ItemTemplate?: <function Item:TItem Index?:int />: DrawnNode />';
     const { tokens } = grammar.tokenizeLine(line, null);
     expect(scopesForSubstring(line, tokens, 'function')).to.include('keyword.other.function.nx');
     expect(scopesForSubstring(line, tokens, 'Item')).to.include('variable.other.property.nx');
@@ -20,9 +20,23 @@ describe('NX TextMate grammar: function types', function () {
     expect(scopesForSubstring(line, tokens, 'TItem', 2)).to.include('entity.name.type.nx');
     expect(scopesForSubstring(line, tokens, 'int')).to.include('support.type.primitive.nx');
     expect(scopesForSubstring(line, tokens, 'DrawnNode')).to.include('entity.name.type.nx');
+    // The `?` after `ItemTemplate` and the `?` after `Index` are each an optional mark.
+    for (const occurrence of [1, 2]) {
+      expect(scopesForSubstring(line, tokens, '?', occurrence), `optional mark ${occurrence}`)
+        .to.include('keyword.operator.optional.nx')
+        .and.not.include('keyword.operator.type-modifier.nx');
+    }
+  });
+
+  it('scopes a suffix on a parenthesized function type', function () {
+    const line = 'type Loaders = (<function />: string?)+';
+    const { tokens } = grammar.tokenizeLine(line, null);
     expect(scopesForSubstring(line, tokens, '(')).to.include('punctuation.definition.type.group.nx');
     expect(scopesForSubstring(line, tokens, ')')).to.include('punctuation.definition.type.group.nx');
-    expect(scopesForSubstring(line, tokens, '?', 1)).to.include('keyword.operator.type-modifier.nx');
+    expect(scopesForSubstring(line, tokens, '?')).to.include('keyword.operator.type-modifier.nx');
+    expect(scopesForSubstring(line, tokens, '+'))
+      .to.include('keyword.operator.type-modifier.nx')
+      .and.not.include('keyword.operator.arithmetic.nx');
   });
 
   it('scopes a function type alias as a function type', function () {
@@ -39,8 +53,8 @@ describe('NX TextMate grammar: function types', function () {
   it('scopes a function type in a parameter, a return annotation, a record field and a value definition', function () {
     const lines = [
       'let invoke(f: <function count:int />: int, n:int): int = <f count={n} />',
-      'type Table = { header: (<function />: DrawnNode)? }',
-      'let picked: (<function Item:Contact />: DrawnNode)? = null',
+      'type Table = { header?: <function />: DrawnNode }',
+      'let picked: (<function Item:Contact />: DrawnNode)? = {}',
     ];
     const tokenized = tokenizeLines(grammar, lines);
     for (const { line, tokens } of tokenized) {

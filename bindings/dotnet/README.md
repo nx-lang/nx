@@ -552,18 +552,23 @@ supplied back as a prop, as state, or inside an action is refused.
 ### Update Records and `NxOptional<T>`
 
 Generated `<Name>_update` DTOs type every property as `NxOptional<T>`, which tells an unset property ("leave this
-field unchanged") apart from one set to `null`. Unset properties are omitted from both JSON and MessagePack, and a
-missing key reads back as unset:
+field unchanged") apart from one that is cleared. `null` is the .NET spelling of a cleared field — the NX empty
+value `{}` — and only a field the target declares optional (`email?:string`) can be cleared, so the accessor's
+value type is nullable only for such a field: `User_update.Email` is `NxOptional<string?>` while `Name` is
+`NxOptional<string>`. Unset properties are omitted from both JSON and MessagePack, a cleared one is written as
+`null`, and a missing key reads back as unset:
 
 ```csharp
-User_update patch = new() { Email = null };   // Name stays unset
+User_update patch = new() { Email = null };   // clears email; Name stays unset
 string json = JsonSerializer.Serialize(patch); // {"$type":"User.Update","email":null}
 ```
 
-The runtime checks every record a host passes in — as a prop, in explicit state, or inside an action (even one with
-no bound handler), at any nesting depth — against its NX declaration. A property the NX type does not declare, or `null` for a
-non-nullable one, fails the call with an `NxEvaluationException` naming the field, so a DTO that has drifted from
-the NX source cannot turn "unchanged" into "set to null".
+The runtime checks every record a host passes in — as a prop, in explicit state, or inside an action (even one with no
+bound handler), at any nesting depth — against its NX declaration. A property the NX type does not declare, `null` for a
+field that is not optional, or an empty array for a `name:T+` field, fails the call with an `NxEvaluationException`
+naming the field, so a DTO that has drifted from the NX source cannot turn "unchanged" into "cleared". On the way out,
+an optional field the NX value leaves empty is an omitted key, so it reads as `null`, and a host may send `null`, an
+empty array, or no key at all for one; the runtime reads all three as the empty value.
 
 If the host wants JSON results instead of typed MessagePack models:
 

@@ -1,0 +1,11 @@
+// The module a caller links against. Its defaults read a value only this file can see, which is
+// why the function, not the caller, evaluates them.
+private let honorific = "Dr."
+
+export let title(name:string, prefix:string = { honorific }, suffix?:string): string = {
+  prefix + " " + name + (suffix ?? "")
+}
+
+export let <Badge label:string size:int = { 2 * 3 } tone?:string />: string = {
+  label + ":" + size + (tone ?? "")
+}

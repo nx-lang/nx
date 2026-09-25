@@ -144,7 +144,7 @@ fn test_union_payload_case_construction_type_checks() {
           | failed {
               message: string
               retryable: boolean = true
-              code: int?
+              code?: int
             }
 
         let state: LoadState = <LoadState.failed message={"Offline"} />
@@ -245,53 +245,53 @@ fn test_union_case_construction_rejects_field_type_mismatch() {
 }
 
 #[test]
-fn test_nullable_union_field_accepts_explicit_null() {
+fn test_optional_union_field_accepts_the_written_empty_value() {
     let source = r#"
         type InitialExperience = | welcome { message:string }
-        type ChatLinkConfig = { initialExperience:InitialExperience? }
-        let root(): ChatLinkConfig = <ChatLinkConfig initialExperience={null} />
+        type ChatLinkConfig = { initialExperience?:InitialExperience }
+        let root(): ChatLinkConfig = <ChatLinkConfig initialExperience={} />
     "#;
 
-    let result = check_str(source, "nullable-union-field-null.nx");
+    let result = check_str(source, "optional-union-field-empty.nx");
     assert!(
         result.is_ok(),
-        "Expected explicit null nullable union field to type check, got {:?}",
+        "Expected the written empty value at an optional union field to type check, got {:?}",
         result.errors()
     );
 }
 
 #[test]
-fn test_nullable_union_helper_return_accepts_explicit_null() {
+fn test_optional_union_helper_return_accepts_the_empty_value() {
     let source = r#"
         type InitialExperience = | welcome { message:string }
-        let none(): InitialExperience? = { null }
+        let none(): InitialExperience? = {}
     "#;
 
-    let result = check_str(source, "nullable-union-return-null.nx");
+    let result = check_str(source, "optional-union-return-empty.nx");
     assert!(
         result.is_ok(),
-        "Expected explicit null nullable union return to type check, got {:?}",
+        "Expected the empty value at an optional union return to type check, got {:?}",
         result.errors()
     );
 }
 
 #[test]
-fn test_non_nullable_union_targets_reject_explicit_null() {
+fn test_exactly_one_union_targets_reject_the_empty_value() {
     let return_result = check_str(
         r#"
             type InitialExperience = | welcome { message:string }
-            let invalid(): InitialExperience = { null }
+            let invalid(): InitialExperience = {}
         "#,
-        "non-nullable-union-return-null.nx",
+        "exactly-one-union-return-empty.nx",
     );
     let return_errors = return_result.errors();
     assert!(
         return_errors.iter().any(|diag| {
             diag.code() == Some("return-type-mismatch")
                 && diag.message().contains("InitialExperience")
-                && diag.message().contains("null")
+                && diag.message().contains("{}")
         }),
-        "Expected precise non-nullable union return diagnostic, got {:?}",
+        "Expected precise exactly-one union return diagnostic, got {:?}",
         return_errors
     );
 
@@ -299,18 +299,18 @@ fn test_non_nullable_union_targets_reject_explicit_null() {
         r#"
             type InitialExperience = | welcome { message:string }
             type ChatLinkConfig = { initialExperience:InitialExperience }
-            let root(): ChatLinkConfig = <ChatLinkConfig initialExperience={null} />
+            let root(): ChatLinkConfig = <ChatLinkConfig initialExperience={} />
         "#,
-        "non-nullable-union-field-null.nx",
+        "exactly-one-union-field-empty.nx",
     );
     let field_errors = field_result.errors();
     assert!(
         field_errors.iter().any(|diag| {
             diag.code() == Some("record-field-type-mismatch")
                 && diag.message().contains("InitialExperience")
-                && diag.message().contains("null")
+                && diag.message().contains("{}")
         }),
-        "Expected precise non-nullable union field diagnostic, got {:?}",
+        "Expected precise exactly-one union field diagnostic, got {:?}",
         field_errors
     );
 }
@@ -384,7 +384,7 @@ fn test_duplicate_union_case_syntax_diagnostic_suppresses_hir_duplicate() {
 fn test_union_sibling_cases_infer_owning_union_in_sequences() {
     let source = r#"
         type LoadState = idle | failed { message:string }
-        let states: LoadState[] = { LoadState.idle <LoadState.failed message={"Offline"} /> }
+        let states: LoadState+ = { LoadState.idle <LoadState.failed message={"Offline"} /> }
     "#;
 
     let result = check_str(source, "union-common-supertype.nx");
@@ -462,13 +462,10 @@ fn test_non_exhaustive_union_match_without_else_is_rejected() {
 
     let result = check_str(source, "union-match-non-exhaustive.nx");
     let errors = result.errors();
-    assert!(
-        errors
-            .iter()
-            .any(|diag| diag.code() == Some("non-exhaustive-union-match")),
-        "Expected non-exhaustive-union-match diagnostic, got {:?}",
-        errors
-    );
+    // The missing case is the one mistake: the match is not also read as an `else { }` that
+    // makes the body `string?` and mismatches the return type.
+    assert_eq!(errors.len(), 1, "{:?}", errors);
+    assert_eq!(errors[0].code(), Some("non-exhaustive-union-match"));
 }
 
 #[test]
@@ -721,19 +718,18 @@ fn test_property_fragment_match_rejects_wrong_union_pattern() {
 }
 
 #[test]
-#[ignore = "Array literals are not yet accepted as RHS expressions (parser limitation)"]
 fn test_record_in_collections_type_checks() {
     let source = r#"
         type User = { name: string age: int }
         let a: User = { <User name="A" age=1 /> }
         let b: User = { <User name="B" age=2 /> }
-        let users: User[] = [ a, b ]
+        let users: User+ = { a b }
     "#;
 
-    let result = check_str(source, "record-array.nx");
+    let result = check_str(source, "record-sequence.nx");
     assert!(
         result.is_ok(),
-        "record arrays should type check, diagnostics: {:?}",
+        "record sequences should type check, diagnostics: {:?}",
         result
             .errors()
             .iter()
@@ -991,7 +987,7 @@ fn test_action_record_rejects_unknown_record_field() {
 fn test_derived_record_accepts_inherited_fields_and_rejects_unknown_record_field() {
     let source = r##"
         abstract type AppearanceBase = { variant:string }
-        type SplitAppearance extends AppearanceBase = { links:string[]? }
+        type SplitAppearance extends AppearanceBase = { links?:string+ }
         let appearance: SplitAppearance = {
           <SplitAppearance variant={"split"} links={ "docs" } accentColor={"#3b82f6"} />
         }
@@ -1361,7 +1357,7 @@ fn test_external_component_state_only_body_type_checks() {
 fn test_external_component_value_satisfies_abstract_base_type() {
     let source = r#"
         abstract external component <Question label:string />
-        external component <ShortTextQuestion extends Question placeholder:string? />
+        external component <ShortTextQuestion extends Question placeholder?:string />
 
         let question: Question = <ShortTextQuestion label={"Name"} placeholder={"Enter your name"} />
     "#;
@@ -1385,7 +1381,7 @@ fn test_external_component_sequence_uses_common_base_type() {
         external component <ShortTextQuestion extends Question />
         external component <LongTextQuestion extends Question />
 
-        let questions: Question[] = {
+        let questions: Question+ = {
           <ShortTextQuestion label={"Name"} />
           <LongTextQuestion label={"Details"} />
         }
@@ -1394,7 +1390,7 @@ fn test_external_component_sequence_uses_common_base_type() {
     let result = check_str(source, "external-component-common-base-sequence.nx");
     assert!(
         result.errors().is_empty(),
-        "Expected mixed derived external component sequence to satisfy Question[], got {:?}",
+        "Expected mixed derived external component sequence to satisfy Question+, got {:?}",
         result
             .diagnostics
             .iter()
@@ -1619,14 +1615,14 @@ fn test_type_mismatch_in_array() {
 }
 
 #[test]
-fn test_composed_list_type_mismatch_diagnostics_preserve_rendered_shapes() {
+fn test_occurrence_type_mismatch_diagnostics_preserve_rendered_shapes() {
     let source = r#"
-        let nullableList: string[]? = null
-        let rejectAliases(items:string?[]): string[]? = { items }
-        let rejectMaybeNames(items:string[]?): string?[] = { items }
+        let rejectMany(items:string+): string? = { items }
+        let rejectZero(items?:string): string+ = { items }
+        let rejectEmpty(items?:string+): string+ = { items }
     "#;
 
-    let result = check_str(source, "composed-list-mismatch.nx");
+    let result = check_str(source, "occurrence-mismatch.nx");
     let messages = result
         .errors()
         .iter()
@@ -1636,15 +1632,22 @@ fn test_composed_list_type_mismatch_diagnostics_preserve_rendered_shapes() {
     assert!(
         messages
             .iter()
-            .any(|message| message.contains("expects string[]?, found list string?[]")),
-        "Expected list-of-nullable vs nullable-list mismatch message, got {:?}",
+            .any(|message| message.contains("expects string?, found string+")),
+        "Expected one-or-more at optional mismatch message, got {:?}",
         messages
     );
     assert!(
         messages
             .iter()
-            .any(|message| message.contains("expects string?[], found string[]?")),
-        "Expected nullable-list vs list-of-nullable mismatch message, got {:?}",
+            .any(|message| message.contains("expects string+, found string?")),
+        "Expected optional at one-or-more mismatch message, got {:?}",
+        messages
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("expects string+, found string*")),
+        "Expected zero-or-more at one-or-more mismatch message, got {:?}",
         messages
     );
 }
@@ -1844,33 +1847,33 @@ fn test_type_compatibility() {
     assert!(Type::int().is_compatible_with(&Type::int()));
     assert!(!Type::int().is_compatible_with(&Type::string()));
 
-    // Test nullable compatibility
-    let nullable_int = Type::nullable(Type::int());
-    assert!(Type::int().is_compatible_with(&nullable_int));
-    assert!(!nullable_int.is_compatible_with(&Type::int()));
+    // Test optional compatibility
+    let optional_int = Type::optional(Type::int());
+    assert!(Type::int().is_compatible_with(&optional_int));
+    assert!(!optional_int.is_compatible_with(&Type::int()));
 }
 
 #[test]
 fn test_array_type_compatibility() {
-    let arr_int = Type::array(Type::int());
-    let arr_int2 = Type::array(Type::int());
-    let arr_str = Type::array(Type::string());
+    let arr_int = Type::one_or_more(Type::int());
+    let arr_int2 = Type::one_or_more(Type::int());
+    let arr_str = Type::one_or_more(Type::string());
 
     assert!(arr_int.is_compatible_with(&arr_int2));
     assert!(!arr_int.is_compatible_with(&arr_str));
 }
 
 #[test]
-fn test_annotated_nullable_list_let_accepts_braced_list_literal() {
+fn test_annotated_zero_or_more_let_accepts_braced_sequence_literal() {
     let source = r#"
         type ChatBrandLink = { label:string = "docs" }
-        let links: ChatBrandLink[]? = { <ChatBrandLink /> <ChatBrandLink /> }
+        let links: ChatBrandLink* = { <ChatBrandLink /> <ChatBrandLink /> }
     "#;
 
-    let result = check_str(source, "nullable-list-let.nx");
+    let result = check_str(source, "zero-or-more-let.nx");
     assert!(
         result.errors().is_empty(),
-        "Expected nullable-list let binding to type check, got {:?}",
+        "Expected zero-or-more let binding to type check, got {:?}",
         result
             .diagnostics
             .iter()
@@ -1880,17 +1883,17 @@ fn test_annotated_nullable_list_let_accepts_braced_list_literal() {
 }
 
 #[test]
-fn test_record_nullable_list_field_accepts_braced_list_literal() {
+fn test_record_optional_sequence_field_accepts_braced_sequence_literal() {
     let source = r#"
         type ChatBrandLink = { label:string = "docs" }
-        type Brand = { links: ChatBrandLink[]? }
+        type Brand = { links?: ChatBrandLink+ }
         let brand: Brand = { <Brand links={ <ChatBrandLink /> <ChatBrandLink /> } /> }
     "#;
 
-    let result = check_str(source, "nullable-list-record-field.nx");
+    let result = check_str(source, "optional-sequence-record-field.nx");
     assert!(
         result.errors().is_empty(),
-        "Expected nullable-list record field binding to type check, got {:?}",
+        "Expected optional-sequence record field binding to type check, got {:?}",
         result
             .diagnostics
             .iter()
@@ -1900,17 +1903,17 @@ fn test_record_nullable_list_field_accepts_braced_list_literal() {
 }
 
 #[test]
-fn test_component_nullable_list_prop_accepts_braced_list_literal() {
+fn test_component_optional_sequence_prop_accepts_braced_sequence_literal() {
     let source = r#"
         type ChatBrandLink = { label:string = "docs" }
-        component <Brand links: ChatBrandLink[]? /> = { <div /> }
+        component <Brand links?: ChatBrandLink+ /> = { <div /> }
         let brand: Brand = { <Brand links={ <ChatBrandLink /> <ChatBrandLink /> } /> }
     "#;
 
-    let result = check_str(source, "nullable-list-component-prop.nx");
+    let result = check_str(source, "optional-sequence-component-prop.nx");
     assert!(
         result.errors().is_empty(),
-        "Expected nullable-list component prop binding to type check, got {:?}",
+        "Expected optional-sequence component prop binding to type check, got {:?}",
         result
             .diagnostics
             .iter()
@@ -1920,22 +1923,22 @@ fn test_component_nullable_list_prop_accepts_braced_list_literal() {
 }
 
 #[test]
-fn test_nullable_list_binding_rejects_incompatible_element_types_with_full_shape() {
+fn test_zero_or_more_binding_rejects_incompatible_item_types_with_full_shape() {
     let source = r#"
         type ChatBrandLink = { label:string = "docs" }
         type OtherLink = { href:string = "/docs" }
-        let links: ChatBrandLink[]? = { <OtherLink /> <OtherLink /> }
+        let links: ChatBrandLink* = { <OtherLink /> <OtherLink /> }
     "#;
 
-    let result = check_str(source, "nullable-list-value-mismatch.nx");
+    let result = check_str(source, "zero-or-more-value-mismatch.nx");
     let errors = result.errors();
     assert!(
         errors
             .iter()
             .any(|diag| diag.code() == Some("value-type-mismatch")
-                && diag.message().contains("ChatBrandLink[]?")
-                && diag.message().contains("OtherLink[]")),
-        "Expected value-type-mismatch with full nullable-list shapes, got {:?}",
+                && diag.message().contains("ChatBrandLink*")
+                && diag.message().contains("OtherLink+")),
+        "Expected value-type-mismatch with full occurrence shapes, got {:?}",
         errors
             .iter()
             .map(|diag| (diag.code(), diag.message()))
@@ -1944,23 +1947,23 @@ fn test_nullable_list_binding_rejects_incompatible_element_types_with_full_shape
 }
 
 #[test]
-fn test_nullable_list_property_rejects_incompatible_element_types_with_full_shape() {
+fn test_optional_sequence_property_rejects_incompatible_item_types_with_full_shape() {
     let source = r#"
         type ChatBrandLink = { label:string = "docs" }
         type OtherLink = { href:string = "/docs" }
-        component <Brand links: ChatBrandLink[]? /> = { <div /> }
+        component <Brand links?: ChatBrandLink+ /> = { <div /> }
         let brand: Brand = { <Brand links={ <OtherLink /> <OtherLink /> } /> }
     "#;
 
-    let result = check_str(source, "nullable-list-property-mismatch.nx");
+    let result = check_str(source, "optional-sequence-property-mismatch.nx");
     let errors = result.errors();
     assert!(
         errors
             .iter()
             .any(|diag| diag.code() == Some("property-type-mismatch")
-                && diag.message().contains("ChatBrandLink[]?")
-                && diag.message().contains("OtherLink[]")),
-        "Expected property-type-mismatch with full nullable-list shapes, got {:?}",
+                && diag.message().contains("ChatBrandLink*")
+                && diag.message().contains("OtherLink+")),
+        "Expected property-type-mismatch with full occurrence shapes, got {:?}",
         errors
             .iter()
             .map(|diag| (diag.code(), diag.message()))

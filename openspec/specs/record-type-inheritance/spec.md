@@ -68,14 +68,14 @@ base records.
 
 #### Scenario: Peer file abstract record can be extended
 - **WHEN** `base.nx` in one library contains `abstract type Field = { label:string }`
-- **AND** `derived.nx` in the same library contains `type TextField extends Field = { placeholder:string? }`
+- **AND** `derived.nx` in the same library contains `type TextField extends Field = { placeholder?:string }`
 - **THEN** analysis SHALL accept `TextField extends Field`
 
 #### Scenario: Imported abstract record can be extended
 - **WHEN** a host loads `../ui` into a `LibraryRegistry`
 - **AND** creates a `ProgramBuildContext` from that registry
 - **AND** analyzes `app/main.nx` containing `import "../ui"` and
-  `type TextField extends Field = { placeholder:string? }`
+  `type TextField extends Field = { placeholder?:string }`
 - **AND** `../ui` exports `abstract type Field = { label:string }`
 - **THEN** analysis SHALL accept `TextField extends Field`
 
@@ -84,7 +84,7 @@ base records.
 - **AND** creates a `ProgramBuildContext` from that registry
 - **AND** `../ui` exports `type FieldBase = Field` and `abstract type Field = { label:string }`
 - **AND** `app/main.nx` contains `import "../ui"` and
-  `type TextField extends FieldBase = { placeholder:string? }`
+  `type TextField extends FieldBase = { placeholder?:string }`
 - **THEN** analysis SHALL accept `TextField extends FieldBase`
 
 #### Scenario: Peer file abstract action can be extended
@@ -132,14 +132,19 @@ prepared bindings that target a same-library peer file or an imported library in
 fields SHALL participate in typed construction, field access, and default application. Duplicate
 field names across the base chain and derived declaration MUST be rejected.
 
-Reading a field of a record-typed expression SHALL produce that field's declared type, resolved
-through the record's effective field set so that an inherited field reads exactly as a locally
-declared one does. Each field's type SHALL be resolved in the module that declared *that field*,
-which is not necessarily the module that declared the record. Reading a name that is not a field of
-the record SHALL be a diagnostic that names the fields the record has.
+Reading a field of a record-typed expression SHALL produce that field's read type — the declared
+type for a required or defaulted field, `T?` for a field declared `f?:T`, and `T*` for one declared
+`f?:T+`, as `optional-properties` defines — resolved through the record's effective field set so
+that an inherited field reads exactly as a locally declared one does. Each field's type SHALL be
+resolved in the module that declared *that field*, which is not necessarily the module that
+declared the record. Reading a name that is not a field of the record SHALL be a diagnostic that
+names the fields the record has.
 
-A nullable base SHALL read its field exactly as the non-nullable base does, and SHALL produce the
-field's own declared type rather than a nullable of it.
+A base whose type carries the `?` occurrence SHALL be read through `?.`, not `.`: `u?.name` on a
+`u?:User` SHALL produce the field's read type joined with `?`, so a field declared `name:string`
+reads `string?`, and a plain `u.name` SHALL be rejected with a diagnostic that shows the `?.`
+spelling, as `presence-operators` defines. A `+` or `*` base has no fields to read, and a member
+access on it SHALL be rejected on the terms `presence-operators` sets.
 
 Generated NX IR SHALL carry the effective field set. A record declaration, a record construction,
 and a union case SHALL each list the fields the value carries — the base chain's first, in the order
@@ -173,7 +178,7 @@ rather than stamped with a type NX itself refuses to construct.
 
 #### Scenario: Duplicate inherited peer-file field name is rejected
 - **WHEN** `base.nx` in one library contains `abstract type Field = { label:string }`
-- **AND** `derived.nx` in the same library contains `type TextField extends Field = { label:string placeholder:string? }`
+- **AND** `derived.nx` in the same library contains `type TextField extends Field = { label:string placeholder?:string }`
 - **THEN** analysis SHALL reject `TextField` because `label` duplicates an inherited record field
 
 #### Scenario: Concrete derived action uses inherited and local fields
@@ -207,17 +212,19 @@ rather than stamped with a type NX itself refuses to construct.
 
 #### Scenario: A field's type resolves in the module that declared the field
 - **WHEN** `model.nx` contains `export type Hue = Red | Green export type Swatch = { hue:Hue }`
-- **AND** `main.nx` contains `import { Swatch } from "./model.nx" type Hue = Blue | Violet external component <Paint colour:Hue? /> abstract external component <Node /> component <Chip extends Node s:Swatch /> = { <Paint colour={s.hue} /> }`
+- **AND** `main.nx` contains `import { Swatch } from "./model.nx" type Hue = Blue | Violet external component <Paint colour?:Hue /> abstract external component <Node /> component <Chip extends Node s:Swatch /> = { <Paint colour={s.hue} /> }`
 - **THEN** type checking SHALL type `s.hue` as `model.nx`'s `Hue`, not the local one
 - **AND** it SHALL reject the property with a diagnostic distinguishing the two same-named unions
 
 #### Scenario: A nullable base reads its field
-- **WHEN** a file contains `type User = { name:string } external component <TextInput value:string /> abstract external component <Node /> component <Row extends Node u:User? /> = { <TextInput value={u.name} /> }`
-- **THEN** type checking SHALL accept `u.name` as `string`, not as `string?`
+- **WHEN** a file contains `type User = { name:string } external component <TextInput value?:string /> abstract external component <Node /> component <Row extends Node u?:User /> = { <TextInput value={u?.name} /> }`
+- **THEN** type checking SHALL accept `u?.name` as `string?`, not as `string`
+- **AND** writing `value={u.name}` instead SHALL be rejected, the diagnostic showing `u?.name`
+- **AND** `<TextInput value={u?.name ?? ""} />` SHALL type `u?.name ?? ""` as `string`
 
 #### Scenario: A nullable base still rejects a name that is not a field
-- **WHEN** a file contains `type User = { name:string } external component <TextInput value:string /> let show(u:User?) = { <TextInput value={u.nombre} /> }`
-- **THEN** type checking SHALL reject `u.nombre` and name `name` as a field the record has
+- **WHEN** a file contains `type User = { name:string } external component <TextInput value?:string /> let show(u?:User) = { <TextInput value={u?.nombre} /> }`
+- **THEN** type checking SHALL reject `u?.nombre` and name `name` as a field the record has
 
 #### Scenario: Reading a name that is not a field names the fields that exist
 - **WHEN** a file contains `type User = { name:string } external component <TextInput value:string /> let show(u:User) = { <TextInput value={u.nombre} /> }`

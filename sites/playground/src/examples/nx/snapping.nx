@@ -18,7 +18,7 @@ type Slide = {
   Text: string
 }
 
-component <Card extends DrawnNode Title:string content Children:DrawnNode[] /> = {
+component <Card extends DrawnNode Title:string content Children:DrawnNode+ /> = {
   <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=8 />
     BackgroundColor="#2B3035" HorizontalOptions=Fill>
     <SkiaStack Padding=<Thickness Left=16 Top=12 Right=16 Bottom=12 /> Spacing=10>
@@ -36,7 +36,7 @@ component <Toggle extends DrawnNode Text:string On:boolean emits { Tapped { } } 
     TextColor={if On { "#1A1A2E" } else { "#FFFFFF" }} onTapped=<Toggle.Tapped /> />
 }
 
-let speeds:float64[] = { 0.5 1.0 2.0 }
+let speeds:float64+ = { 0.5 1.0 2.0 }
 
 // The looped carousel's twelve slides, by color: the original cycles six colors by index. A range
 // counts the slides below, but NX still has no list indexing to cycle a palette with, so the
@@ -62,7 +62,7 @@ component <BigSlide extends DrawnNode Item:Slide /> = {
 
 // The original's SlideCell, a recycled cell whose footer reports its index; here a plain component
 // with the index written in.
-component <SlideFace extends DrawnNode Item:Slide Size:float64 Sub:string? Height:float64? /> = {
+component <SlideFace extends DrawnNode Item:Slide Size:float64 Sub?:string Height?:float64 /> = {
   <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=12 /> BackgroundColor={Item.Color}
     HorizontalOptions=Fill VerticalOptions=Fill HeightRequest={Height}>
     <SkiaLabel Text={Item.Title} FontSize={Size} FontFamily="FontTextBold" TextColor="#FFFFFF"

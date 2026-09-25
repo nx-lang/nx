@@ -19,13 +19,13 @@ when both name the same declaration, in every runtime and under every comparison
 shares — `==`, match patterns and `diff`.
 
 #### Scenario: A function is bound to a function-typed property
-- **WHEN** a file contains `abstract external component <DrawnNode /> type Contact = { name:string } external component <SkiaLayout TItem:type ItemsSource:TItem[]? ItemTemplate:(<function Item:TItem Index:int />: DrawnNode)? /> let <ContactRow Item:Contact Index:int />: DrawnNode = <DrawnNode /> let contacts:Contact[] = {} let v = <SkiaLayout TItem=Contact ItemsSource={contacts} ItemTemplate={ContactRow} />`
+- **WHEN** a file contains `abstract external component <DrawnNode /> type Contact = { name:string } external component <SkiaLayout TItem:type ItemsSource?:TItem+ ItemTemplate?:<function Item:TItem Index:int />: DrawnNode /> let <ContactRow Item:Contact Index:int />: DrawnNode = <DrawnNode /> let contacts:Contact* = {} let v = <SkiaLayout TItem=Contact ItemsSource={contacts} ItemTemplate={ContactRow} />`
 - **THEN** analysis SHALL accept `v`
 - **AND** evaluation SHALL produce a `SkiaLayout` record whose `ItemTemplate` field is the function
   value for `ContactRow`
 
 #### Scenario: A function is forwarded through an authored component
-- **WHEN** a file contains `abstract external component <DrawnNode /> type Contact = { name:string } type RowTemplate = <function Item:Contact Index:int />: DrawnNode external component <SkiaLayout TItem:type ItemsSource:TItem[]? ItemTemplate:(<function Item:TItem Index:int />: DrawnNode)? /> component <Section extends DrawnNode Items:Contact[] Row:RowTemplate /> = { <SkiaLayout TItem=Contact ItemsSource={Items} ItemTemplate={Row} /> } let <ContactRow Item:Contact Index:int />: DrawnNode = <DrawnNode /> let s = <Section Items={} Row={ContactRow} />`
+- **WHEN** a file contains `abstract external component <DrawnNode /> type Contact = { name:string } type RowTemplate = <function Item:Contact Index:int />: DrawnNode external component <SkiaLayout TItem:type ItemsSource?:TItem+ ItemTemplate?:<function Item:TItem Index:int />: DrawnNode /> component <Section extends DrawnNode Items:Contact* Row:RowTemplate /> = { <SkiaLayout TItem=Contact ItemsSource={Items} ItemTemplate={Row} /> } let <ContactRow Item:Contact Index:int />: DrawnNode = <DrawnNode /> let s = <Section Items={} Row={ContactRow} />`
 - **THEN** analysis SHALL accept both the component body and `s`
 
 #### Scenario: A paren function is a value too
@@ -72,7 +72,7 @@ by position would depend on the order of parameters the value's own declaration 
 - **AND** evaluation SHALL produce `8`
 
 #### Scenario: A top-level `let` of function type is invoked as an element
-- **WHEN** a file contains `external component <Box Label:string? /> let <Wrap Item:object />: string = "w" let F: <function Item:object />: string = {Wrap} let root() = <Box Label=<F Item="x" /> />`
+- **WHEN** a file contains `external component <Box Label?:string /> let <Wrap Item:object />: string = "w" let F: <function Item:object />: string = {Wrap} let root() = <Box Label=<F Item="x" /> />`
 - **THEN** analysis SHALL accept the call, resolving the tag `F` to the declaration
 - **AND** evaluating `root` SHALL produce `<Box Label="w" />` in every runtime
 
