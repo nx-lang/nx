@@ -48,9 +48,9 @@
 ## 8. Cutover
 
 - [x] 8.1 Deploy both Workers with their routes. Verify every scenario in the `website` spec's "The site is served at the domain root" and in the playground's "Site is served under the playground path" with `curl` against `https://nxlang.org`, plus a Playwright run that opens an example and sees it draw. *Every scenario answers as specified, and `/playground/cells` draws its example with no diagnostics and no failed request.*
-- [ ] 8.2 Set `workers_dev: false` in both configs and redeploy. Delete the `playground assets` cache rule. Check `curl -s -H 'accept: text/html' https://nxlang.org/ | grep -c cloudflareinsights`, and if it is 0, add the beacon snippet to both sites. Verify the check answers 1 on both sites. *`workers_dev` is off and the beacon check answers 1 on both sites with no snippet; the cache rule is still to delete.*
+- [x] 8.2 Set `workers_dev: false` in both configs and redeploy. Delete the `playground assets` cache rule. Check `curl -s -H 'accept: text/html' https://nxlang.org/ | grep -c cloudflareinsights`, and if it is 0, add the beacon snippet to both sites. Verify the check answers 1 on both sites. *`workers_dev` is off and the beacon check answers 1 on both sites with no snippet; the cache rule is deleted.*
 - [ ] 8.3 Change the apex and `www` DNS records to proxied `AAAA 100::`. Remove the Railway custom domain, then delete the Railway project and `RAILWAY_TOKEN_PRODUCTION`. Verify 8.1's checks again.
-- [ ] 8.4 Unpublish GitHub Pages and delete the `github-pages` environment (`.github/workflows/deploy-docs.yml` is deleted in the PR). Verify `https://nx-lang.github.io/nx/` no longer serves the docs.
+- [x] 8.4 Unpublish GitHub Pages and delete the `github-pages` environment (`.github/workflows/deploy-docs.yml` is deleted in the PR). Verify `https://nx-lang.github.io/nx/` no longer serves the docs. *Done 2026-09-26: the Pages API answers 404 for the repository, and the old address answered 404 once GitHub's 10-minute cache expired.*
 
 ## 9. Remove what is no longer used
 
