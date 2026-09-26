@@ -2,8 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
-- Add Rust `nx-lsp` language server integration for diagnostics, symbols, hover, and completions
+## 0.1.0
+The first release on the Visual Studio Marketplace and Open VSX.
+- TextMate grammar for `.nx` files and for `nx` code blocks in Markdown, and language configuration
+- The Rust `nx-lsp` language server, packaged for Windows x64, macOS Apple silicon and Linux x64:
+  diagnostics, document symbols, hover and completions
+- Snippets
 
 ### Syntax highlighting
 The grammar follows the occurrence-cardinality change to the language:
@@ -177,8 +181,3 @@ Declaration recovery, qualified names, and remaining annotation positions:
 A declaration is now scoped independently of what precedes it in the file: `external` was missing
 from the lookaheads that terminate a union or record body, so a multi-line union nested every
 following declaration inside a stale union-case scope.
-
-## 0.1.0
-- Initial release
-- TextMate grammar and language configuration
-- Snippets and sample file

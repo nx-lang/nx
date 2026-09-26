@@ -28,3 +28,38 @@ releasing the extension SHALL live in a separate maintainer document, which the 
 #### Scenario: Maintainer instructions have a home
 - **WHEN** a maintainer looks for how to build, package or release the extension
 - **THEN** `src/vscode/CONTRIBUTING.md` SHALL describe it, and the README SHALL link to that file
+
+## MODIFIED Requirements
+
+### Requirement: VS Code extension publishing credentials
+
+The publishing workflow SHALL keep registry credentials outside source control and fail safely when
+credentials are missing for a publish job. Registry credentials SHALL be scoped through GitHub
+environments when publication targets `production`. The workflow SHALL authenticate to the Visual
+Studio Marketplace as a Microsoft Entra ID managed identity that is a member of the `nx-lang`
+publisher, signed in through GitHub's OIDC token, rather than with a personal access token, because
+Azure DevOps retires global personal access tokens on 2026-12-01. It SHALL authenticate to Open VSX
+with the `OVSX_PAT` token.
+
+#### Scenario: Required production CI credentials are missing
+
+- **WHEN** the `Publish VS Code extension` workflow targets the `production` environment for VS Code
+  extension publication
+- **AND** any of `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` or `OVSX_PAT` is not configured
+- **THEN** the workflow MUST fail before publishing to either registry
+
+#### Scenario: Pull request credentials are unavailable
+
+- **WHEN** the VS Code extension workflow runs from an untrusted pull request context
+- **THEN** registry credentials SHALL NOT be exposed to the job
+- **AND** the workflow SHALL limit itself to verification and artifact upload behavior
+- **AND** the managed identity SHALL trust GitHub's OIDC token only for jobs in the `production`
+  environment
+
+#### Scenario: Local credentials are supplied through environment variables
+
+- **WHEN** a maintainer follows the documented local publishing commands
+- **THEN** the commands SHALL sign in to the Marketplace through the maintainer's Azure CLI session
+  and read the Open VSX token from an environment variable
+- **AND** the documentation MUST NOT instruct maintainers to commit tokens or write them into
+  tracked configuration files

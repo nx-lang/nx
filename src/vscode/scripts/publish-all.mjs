@@ -1,10 +1,8 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
-const packageRoot = join(scriptDir, '..');
 const vsixPath = process.argv[2];
 
 if (!vsixPath) {
@@ -12,22 +10,17 @@ if (!vsixPath) {
   process.exit(1);
 }
 
-if (!existsSync(join(packageRoot, vsixPath)) && !existsSync(vsixPath)) {
-  console.error(`VSIX not found: ${vsixPath}`);
+// Fail before either registry is written. The Marketplace signs in through `az login` (see
+// publish-vsix.mjs), so only Open VSX has a token to check.
+if (!process.env.OVSX_PAT) {
+  console.error('Missing required environment variable: OVSX_PAT');
   process.exit(1);
 }
 
-const missing = ['VSCE_PAT', 'OVSX_PAT'].filter((name) => !process.env[name]);
-if (missing.length > 0) {
-  console.error(`Missing required environment variable(s): ${missing.join(', ')}`);
-  process.exit(1);
-}
-
-function run(command, args) {
-  const executable = process.platform === 'win32' ? `${command}.cmd` : command;
-  const result = spawnSync(join(packageRoot, 'node_modules', '.bin', executable), args, {
-    cwd: packageRoot,
-    env: process.env,
+// publish-vsix.mjs checks the VSIX and each registry's credentials, and skips a version a registry
+// already has, so a rerun after a partial failure completes the other registry.
+for (const registry of ['vsce', 'ovsx']) {
+  const result = spawnSync(process.execPath, [join(scriptDir, 'publish-vsix.mjs'), registry, vsixPath], {
     stdio: 'inherit',
   });
 
@@ -40,6 +33,3 @@ function run(command, args) {
     process.exit(result.status ?? 1);
   }
 }
-
-run('vsce', ['publish', '--packagePath', vsixPath]);
-run('ovsx', ['publish', vsixPath]);

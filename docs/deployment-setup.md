@@ -50,8 +50,10 @@ Prefer trusted publishing where the registry supports it:
 The package publish job requests GitHub OIDC with `id-token: write` only after a package GitHub
 Release is published and its release assets are validated.
 
-Visual Studio Marketplace and Open VSX publishing currently use production environment token secrets
-in `.github/workflows/vscode-extension-publish.yml`.
+The Visual Studio Marketplace also takes GitHub OIDC: `vscode-extension-publish.yml` signs in as an
+Azure managed identity that is a member of the `nx-lang` publisher (see
+[Visual Studio Marketplace publishing identity](#visual-studio-marketplace-publishing-identity)).
+Open VSX has no equivalent, so it uses the `OVSX_PAT` token secret.
 
 ## Secrets And Variables
 
@@ -59,7 +61,8 @@ Production environment secrets:
 
 - `NUGET_USER`: NuGet.org account or organization owner used by NuGet trusted publishing.
 - `NUGET_API_KEY`: fallback NuGet.org API key when trusted publishing is unavailable.
-- `VSCE_PAT`: Visual Studio Marketplace token for publisher `nx-lang`.
+- `AZURE_CLIENT_ID` and `AZURE_TENANT_ID`: the Marketplace publishing identity's client and tenant
+  ids. They identify the identity rather than grant anything; GitHub's OIDC token does that.
 - `OVSX_PAT`: Open VSX token for namespace `nx-lang`.
 - `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`: deploy the website and playground Workers
   (see [Website and playground hosting](#website-and-playground-hosting)).
@@ -79,6 +82,37 @@ Rust tool publication for `nxlang`, `nx-lsp`, and Rust crates is not part of thi
 yet; no crates.io token or Rust binary-release credential is required for this release pipeline.
 
 Never commit registry tokens or write them into tracked configuration files.
+
+## Visual Studio Marketplace Publishing Identity
+
+The Marketplace retires global personal access tokens on 2026-12-01, so the extension is published
+with a Microsoft Entra ID token for a user-assigned managed identity, which GitHub Actions signs in
+as through OIDC. It must be a managed identity: an app registration signs in, but the Marketplace
+refuses its publish with `InvalidAccessException`.
+
+The identity lives in the Azure subscription `nx-lang` (Pay-As-You-Go, sponsored by Forward Reach,
+with a $1 monthly budget alert). A managed identity costs nothing. No Azure DevOps organization is
+needed.
+
+1. In the Azure portal, **Managed Identities → Create**: subscription `nx-lang`, resource group
+   `nx-lang`, name `nx-vscode-publisher`, any region.
+2. On the identity, **Settings → Federated credentials → Add credential**: scenario "GitHub Actions
+   deploying Azure resources", organization `nx-lang`, repository `nx`, entity **Environment**,
+   environment `production`. An environment matches every release; a tag entity would match only
+   one tag.
+3. Store the identity's ids from its **Overview** on `production`:
+
+   ```bash
+   gh secret set AZURE_CLIENT_ID --repo nx-lang/nx --env production --body <client-id>
+   gh secret set AZURE_TENANT_ID --repo nx-lang/nx --env production --body <tenant-id>
+   ```
+
+4. Run **Show Marketplace identity** (`marketplace-identity.yml`) from the Actions tab. Its summary
+   shows the identity's Azure DevOps id, the only id the Marketplace accepts for a member.
+5. At `https://marketplace.visualstudio.com/manage/publishers/nx-lang`, **Members → Add**, paste
+   that id, role **Contributor**.
+
+To replace the identity, repeat these steps and remove the old member.
 
 ## Versioning Setup
 

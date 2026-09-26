@@ -52,7 +52,8 @@ pnpm run vscode:launch
 ```
 
 `pnpm run package:verify` builds a `.vsix` you can install with **Extensions: Install from VSIX**.
-`src/vscode/README.md` has the details.
+[`src/vscode/CONTRIBUTING.md`](https://github.com/nx-lang/nx/blob/main/src/vscode/CONTRIBUTING.md)
+has the details, including packaging and releasing.
 
 ## This site
 

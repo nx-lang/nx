@@ -80,8 +80,10 @@ serves files and answers a health check.
   removed. The Railway project deleted once the Workers serve.
 - **VS Code extension**: `src/vscode/README.md` rewritten for users, `src/vscode/CONTRIBUTING.md`
   added, an icon added to the manifest, and the first `vscode-v0.1.0` release published. By hand:
-  the Marketplace publisher `nx-lang`, the Open VSX namespace `nx-lang`, and the `VSCE_PAT` and
-  `OVSX_PAT` secrets on the `production` environment.
+  the Marketplace publisher `nx-lang`, the Open VSX namespace `nx-lang`, an Azure managed identity
+  that publishes to the Marketplace through GitHub OIDC (global Azure DevOps tokens are retired on
+  2026-12-01), and the `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` and `OVSX_PAT` secrets on the
+  `production` environment.
 - **Docs**: `docs/deployment.md` and `docs/deployment-setup.md` rewritten for the Workers. The
   `specs/future.md` sections "A static host, without the Node server" and "Splitting the domain
   across services" are removed, since this change answers both.

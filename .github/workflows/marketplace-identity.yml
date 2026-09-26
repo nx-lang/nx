@@ -1,0 +1,46 @@
+# Prints the Azure DevOps id of the nx-vscode-publisher managed identity, which the Visual Studio
+# Marketplace needs to add the identity as a member of the nx-lang publisher. The identity's client
+# id and object id don't work there; only this id does. Run it once when setting up or replacing the
+# identity (docs/deployment-setup.md, "Visual Studio Marketplace publishing identity").
+
+name: Show Marketplace identity
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  show:
+    name: Show the publishing identity's Marketplace id
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # The identity trusts GitHub's OIDC token only for jobs in this environment.
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+    - name: Sign in to Azure as the Marketplace publisher
+      uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+      with:
+        client-id: ${{ secrets.AZURE_CLIENT_ID }}
+        tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+        allow-no-subscriptions: true
+    # 499b84ac-1321-427f-aa17-267ca6975798 is Azure DevOps, which the Marketplace runs on.
+    - name: Look up the identity's Azure DevOps profile
+      shell: bash
+      run: |
+        set -euo pipefail
+        id=$(az rest --method get \
+          --url https://app.vssps.visualstudio.com/_apis/profile/profiles/me \
+          --resource 499b84ac-1321-427f-aa17-267ca6975798 \
+          --query id --output tsv)
+        echo "Marketplace member id: ${id}"
+        {
+          echo "Add this id as a **Contributor** member of the \`nx-lang\` publisher at"
+          echo "https://marketplace.visualstudio.com/manage/publishers/nx-lang (Members):"
+          echo ""
+          echo "\`${id}\`"
+        } >> "$GITHUB_STEP_SUMMARY"
