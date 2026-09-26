@@ -82,9 +82,10 @@
   `https://marketplace.visualstudio.com/publishers/nx-lang` and `https://open-vsx.org/api/nx-lang`
   answer.
 - [ ] 11.3 Store `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` and `OVSX_PAT` on the `production` environment
-  with `gh secret set`. Once this change is on `main`, run **Show Marketplace identity** and add the
+  with `gh secret set`. Once this change is on `main`, run **Check Marketplace identity** and add the
   id it prints as a Contributor member of the `nx-lang` publisher. Verify `gh secret list --env
-  production` lists all three and the publisher's Members page lists the identity.
+  production` lists all three and a second run of **Check Marketplace identity** passes its publish
+  check.
 - [ ] 11.4 Release `vscode-v0.1.0` by the runbook in `docs/deployment.md` (a maintainer pushes the
   tag): inspect the draft release, publish it, and approve the deployment. Verify both registries
   report 0.1.0, and that `code --install-extension nx-lang.nx-language` in a clean profile installs

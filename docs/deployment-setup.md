@@ -107,10 +107,13 @@ needed.
    gh secret set AZURE_TENANT_ID --repo nx-lang/nx --env production --body <tenant-id>
    ```
 
-4. Run **Show Marketplace identity** (`marketplace-identity.yml`) from the Actions tab. Its summary
-   shows the identity's Azure DevOps id, the only id the Marketplace accepts for a member.
+4. Run **Check Marketplace identity** (`marketplace-identity.yml`) from the Actions tab. Its
+   summary shows the identity's Azure DevOps id, the only id the Marketplace accepts for a member.
+   Its publish check fails until step 5 is done.
 5. At `https://marketplace.visualstudio.com/manage/publishers/nx-lang`, **Members → Add**, paste
-   that id, role **Contributor**.
+   that id, role **Contributor**. The Marketplace lists the member as `<tenant id>\<object id>`.
+6. Run **Check Marketplace identity** again. Its last step, `vsce verify-pat --azure-credential
+   nx-lang`, passes once the identity may publish.
 
 To replace the identity, repeat these steps and remove the old member.
 
