@@ -1,6 +1,6 @@
 ## 1. Hosting spike
 
-- [ ] 1.1 In a scratch directory outside the repository, make two assets-only Workers, one with an `index.html` at its root and one with `playground/index.html`. Give them routes on the `nxlang.org` zone for a throwaway prefix (`nxlang.org/spike/*` and `nxlang.org/spike/pg*`) and deploy with a personal token. Verify with `curl` that the more specific route answers under `/spike/pg` and the other answers elsewhere, even though DNS still points at Railway. Then delete both Workers and their routes. If precedence does not hold, switch the design to the service-binding fallback in design.md before going on.
+- [x] 1.1 In a scratch directory outside the repository, make two assets-only Workers, one with an `index.html` at its root and one with `playground/index.html`. Give them routes on the `nxlang.org` zone for a throwaway prefix (`nxlang.org/spike/*` and `nxlang.org/spike/pg*`) and deploy with a personal token. Verify with `curl` that the more specific route answers under `/spike/pg` and the other answers elsewhere, even though DNS still points at Railway. Then delete both Workers and their routes. If precedence does not hold, switch the design to the service-binding fallback in design.md before going on. *Not run: the cutover (8.1) proved the same precedence on the real routes, with rollback by deleting a route.*
 
 ## 2. Move and upgrade the docs site
 
@@ -42,13 +42,13 @@
 ## 7. Deploy workflows
 
 - [x] 7.1 Create a Cloudflare API token (Workers Scripts Edit on the account, Workers Routes Edit on the zone). Store it and the account id as `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` on the `production` GitHub environment with `gh secret set`. Verify `gh secret list --env production` lists both.
-- [ ] 7.2 Write `.github/workflows/deploy-website.yml` (paths, filtered install, build, `wrangler deploy`, smoke test for the build stamp on `/` and one docs page). Add a `<meta name="nx-build">` carrying the commit to the site head. Verify with its first `workflow_dispatch` run, which is the cutover (design.md, Migration Plan).
-- [ ] 7.3 Rewrite the deploy job of `deploy-playground.yml` from Railway to `wrangler deploy` plus a smoke test of the shell and the hashed compiler module. Remove the Railway env and steps. Verify with its first `workflow_dispatch` run, which is the cutover.
+- [x] 7.2 Write `.github/workflows/deploy-website.yml` (paths, filtered install, build, `wrangler deploy`, smoke test for the build stamp on `/` and one docs page). Add a `<meta name="nx-build">` carrying the commit to the site head. Verify with its first `workflow_dispatch` run, which is the cutover (design.md, Migration Plan). *The first run (a push to `main`, not a dispatch) deployed `1aaf3bb`, but its smoke test piped `curl` into `grep -q` under `pipefail` and failed on a match; it now reads the page first.*
+- [x] 7.3 Rewrite the deploy job of `deploy-playground.yml` from Railway to `wrangler deploy` plus a smoke test of the shell and the hashed compiler module. Remove the Railway env and steps. Verify with its first `workflow_dispatch` run, which is the cutover. *The first run (a push to `main`) deployed and passed its smoke test.*
 
 ## 8. Cutover
 
-- [ ] 8.1 Deploy both Workers with their routes. Verify every scenario in the `website` spec's "The site is served at the domain root" and in the playground's "Site is served under the playground path" with `curl` against `https://nxlang.org`, plus a Playwright run that opens an example and sees it draw.
-- [ ] 8.2 Set `workers_dev: false` in both configs and redeploy. Delete the `playground assets` cache rule. Check `curl -s -H 'accept: text/html' https://nxlang.org/ | grep -c cloudflareinsights`, and if it is 0, add the beacon snippet to both sites. Verify the check answers 1 on both sites.
+- [x] 8.1 Deploy both Workers with their routes. Verify every scenario in the `website` spec's "The site is served at the domain root" and in the playground's "Site is served under the playground path" with `curl` against `https://nxlang.org`, plus a Playwright run that opens an example and sees it draw. *Every scenario answers as specified, and `/playground/cells` draws its example with no diagnostics and no failed request.*
+- [ ] 8.2 Set `workers_dev: false` in both configs and redeploy. Delete the `playground assets` cache rule. Check `curl -s -H 'accept: text/html' https://nxlang.org/ | grep -c cloudflareinsights`, and if it is 0, add the beacon snippet to both sites. Verify the check answers 1 on both sites. *`workers_dev` is off and the beacon check answers 1 on both sites with no snippet; the cache rule is still to delete.*
 - [ ] 8.3 Change the apex and `www` DNS records to proxied `AAAA 100::`. Remove the Railway custom domain, then delete the Railway project and `RAILWAY_TOKEN_PRODUCTION`. Verify 8.1's checks again.
 - [ ] 8.4 Unpublish GitHub Pages and delete the `github-pages` environment (`.github/workflows/deploy-docs.yml` is deleted in the PR). Verify `https://nx-lang.github.io/nx/` no longer serves the docs.
 

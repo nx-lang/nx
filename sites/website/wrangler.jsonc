@@ -10,5 +10,5 @@
     "html_handling": "auto-trailing-slash"
   },
   "routes": [{ "pattern": "nxlang.org/*", "zone_name": "nxlang.org" }],
-  "workers_dev": true
+  "workers_dev": false
 }
