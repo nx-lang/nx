@@ -57,7 +57,7 @@ try {
     }
 
     $metadata = $nuspec.package.metadata
-    $expectedProjectUrl = 'https://nxlang.org'
+    $expectedProjectUrl = 'https://nxlang.org/'
     if ($metadata.projectUrl -ne $expectedProjectUrl) {
         throw "Package '$PackagePath' has projectUrl '$($metadata.projectUrl)'; expected '$expectedProjectUrl'."
     }
