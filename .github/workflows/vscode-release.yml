@@ -219,9 +219,9 @@ jobs:
             echo "::error::Release ${RELEASE_TAG} already exists and is not a draft."
             exit 1
           fi
-          gh release edit "${RELEASE_TAG}" --draft=true --title "NX VS Code extension ${RELEASE_VERSION}" --notes-file "${notes}"
+          gh release edit "${RELEASE_TAG}" --draft=true --title "NX VS Code ${RELEASE_VERSION}" --notes-file "${notes}"
         else
-          gh release create "${RELEASE_TAG}" --draft --title "NX VS Code extension ${RELEASE_VERSION}" --notes-file "${notes}"
+          gh release create "${RELEASE_TAG}" --draft --title "NX VS Code ${RELEASE_VERSION}" --notes-file "${notes}"
         fi
 
         gh release upload "${RELEASE_TAG}" "${RUNNER_TEMP}/release-assets/"* --clobber
