@@ -1,0 +1,13 @@
+{
+  "name": "@nx-lang/branding",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "The NX logo: the files, and the script that builds them.",
+  "scripts": {
+    "generate": "node generate.mjs"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2"
+  }
+}
