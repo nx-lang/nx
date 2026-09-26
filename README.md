@@ -2,6 +2,9 @@
 
 A Rust-based parser and type checker for the NX language, a modern XML-like syntax with embedded expressions.
 
+**Website and documentation: [nxlang.org](https://nxlang.org).** Try NX in your browser in the
+[playground](https://nxlang.org/playground).
+
 ## Overview
 
 This workspace provides comprehensive parsing and type checking infrastructure for NX files:

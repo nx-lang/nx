@@ -1,6 +1,6 @@
 import { createNxHost, loadNxModule } from "@nx-lang/sdk-wasm";
 import react from "@vitejs/plugin-react";
-import { readFileSync } from "node:fs";
+import { copyFileSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { type Plugin, defineConfig } from "vite";
 import { BASE_HREF } from "./base.mjs";
@@ -59,6 +59,30 @@ function siteBase(): Plugin {
 }
 
 /**
+ * Where the build goes. Files land under `dist/playground/`, so the path of each file under `dist/`
+ * is the path it is served at, and `dist/` is the directory the Cloudflare Worker serves.
+ */
+const outDir = fileURLToPath(new URL("./dist/playground", import.meta.url));
+
+/**
+ * Copies the cache policy into the root of the served directory, where Cloudflare's static assets
+ * read `_headers` from. It is not in `public/`, which would put it under the prefix and serve it as a
+ * file.
+ */
+function cacheHeaders(): Plugin {
+  return {
+    name: "cache-headers",
+    apply: "build",
+    closeBundle() {
+      copyFileSync(
+        fileURLToPath(new URL("./_headers", import.meta.url)),
+        fileURLToPath(new URL("./dist/_headers", import.meta.url)),
+      );
+    },
+  };
+}
+
+/**
  * drawnui-react is built for Vite: its `dist` imports the CanvasKit wasm binary with `?url`, and
  * the fonts it is configured with load from `publicDir`. The `build` and `fs` settings below mirror
  * `samples/vite.shared.ts` upstream, so the package runs as it does there.
@@ -72,8 +96,8 @@ function siteBase(): Plugin {
  */
 export default defineConfig({
   base: BASE_HREF,
-  plugins: [react(), siteBase(), catalogArtifact()],
-  build: { target: "esnext" },
+  plugins: [react(), siteBase(), catalogArtifact(), cacheHeaders()],
+  build: { target: "esnext", outDir, emptyOutDir: true },
   server: {
     // The shared packages are workspace links into the repository, so dev needs to be allowed to
     // read above the app root.

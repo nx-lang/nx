@@ -1,0 +1,28 @@
+{
+  "name": "@nx-lang/website",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "description": "The NX website at https://nxlang.org: the landing page and the language documentation.",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "test": "node --no-warnings --test \"scripts/*.test.mjs\" && node --no-warnings scripts/check-code-blocks.mjs",
+    "check:code-blocks": "node --no-warnings scripts/check-code-blocks.mjs"
+  },
+  "dependencies": {
+    "@astrojs/markdown-remark": "^7.3.1",
+    "@astrojs/starlight": "^0.42.4",
+    "astro": "^7.3.5",
+    "starlight-links-validator": "^0.26.0",
+    "starlight-llms-txt": "^0.12.0"
+  },
+  "devDependencies": {
+    "@nx-lang/sdk-wasm": "workspace:*",
+    "mdast-util-from-markdown": "^2.0.3",
+    "mdast-util-mdx": "^3.0.0",
+    "micromark-extension-mdxjs": "^3.0.0",
+    "typescript": "^5.9.3"
+  }
+}

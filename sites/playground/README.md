@@ -61,17 +61,25 @@ pnpm run dev      # the whole site at http://localhost:5173/playground/
 ```
 
 `pnpm run dev` is the whole development setup: there is no second process to start, because the
-compiler is in the page. `pnpm start` serves a built `dist/` the way production does, on 8080.
+compiler is in the page. To serve a build the way production does, through the same Worker script
+and headers:
+
+```bash
+pnpm run build                        # writes dist/playground/ and dist/_headers
+npx wrangler@4.141.0 dev              # http://localhost:8787/playground
+```
+
+`pnpm run preview` serves the build with Vite instead, without the Worker's routing or headers.
 
 Everything the site serves lives under `/playground` — the gallery at `/playground`, an example's
-editor view at `/playground/<id>`, the health route under `/playground/api/`, every asset under the
-same prefix — so that the rest of the domain can later be served by something else. `/` redirects to
-the gallery; any other address outside the prefix is not found. The prefix is spelled once, in
-`base.mjs`, and the server, the Vite config and the client all take it from there.
+editor view at `/playground/<id>`, every asset under the same prefix — and the website
+(`sites/website`) serves the rest of the domain. The build writes files under `dist/playground/`, so
+a file's path under `dist/` is the path it is served at. The prefix is spelled once, in `base.mjs`,
+and the Worker script, the Vite config and the client all take it from there.
 
 ```bash
 pnpm run typecheck       # tsc over the site
-pnpm test                # server, route, compile, worker and dev-shell tests, then every example
+pnpm test                # Worker, route, compile, worker and dev-shell tests, then every example
 pnpm run check-examples  # every example compiles, evaluates, and declares its coverage
 ```
 
@@ -79,14 +87,11 @@ The example check compiles through the same module and the same catalog path the
 links each example against the catalog artifact emitted the way the build emits it, so what is
 checked is what ships.
 
-The server tests serve a stand-in `dist/` from a temporary directory (`PLAYGROUND_DIST`), so they
-do not need a build to have run.
-
 ## Layout
 
 | Path | What it is |
 |---|---|
-| `base.mjs` | the site's path prefix, and the API and health paths derived from it |
+| `base.mjs` | the site's path prefix |
 | `catalog/skia.nx` | the generated NX catalog: external components for the DrawnUI control set, compiled to its artifact at build time |
 | `catalog/catalog-meta.json` | which types are unions, which are records, which records are constructed |
 | `scripts/generate-catalog.mjs` | generates both from the pinned `drawnui-react` package's declarations |
@@ -94,7 +99,9 @@ do not need a build to have run.
 | `scripts/check-examples.mjs` | one check over the whole example set |
 | `scripts/emit-example-ir.mjs` | emits each example's NX IR, for proving an edit changed only notation |
 | `scripts/compile-example.mjs` | the wasm host and catalog those two scripts compile through |
-| `server/index.mjs` | serves `dist/` under the prefix, the health route, and the root redirect |
+| `worker/index.mjs` | the Cloudflare Worker script: the shell for the client router's addresses, not found for everything else |
+| `wrangler.jsonc` | the Worker's name, routes and static-assets settings |
+| `_headers` | the cache policy for the built files, copied to `dist/_headers` by the build |
 | `src/paths.ts`, `src/routes.ts` | the prefix as the client sees it, and the address scheme under it |
 | `src/compile/` | the compile seam, NX source + catalog → the visitor's NX IR with diagnostics, and the catalog's own artifact |
 | `src/worker/` | the compiler worker: its module load, its session, and the main thread's channel to it |
@@ -206,36 +213,22 @@ catalog diverges from the DrawnUI object model.
 
 ## Deploying
 
-One image, one process: the build stage compiles the WebAssembly module and bundles the SPA, and the
-runtime stage serves the bundle. Build it from the **repository root**, since the image needs the
-crates, the wasm SDK and the IR runtime alongside the site:
+The public site is static files on a Cloudflare Worker, `nxlang-playground`, with no server behind
+it. A push to `main` that touches the site or a package it depends on runs
+`.github/workflows/deploy-playground.yml`, which builds and tests the workspace, the WebAssembly
+module included, then uploads `dist/` with `wrangler deploy`. The Worker's routes
+(`nxlang.org/playground` and `nxlang.org/playground/*`) are in `wrangler.jsonc`. The day-to-day flow
+(deploy, verify, roll back) is in `docs/deployment.md` at the repository root, and the one-time
+Cloudflare setup is in `docs/deployment-setup.md`.
 
-```bash
-docker build -f sites/playground/Dockerfile -t nx-playground .
-docker run -p 8080:8080 nx-playground        # http://localhost:8080/playground
-```
+**Routing.** A request for a file that exists gets the file. Otherwise `worker/index.mjs` answers:
+the shell for `/playground`, `/playground/` and one path segment below it, and not found for
+everything else, so a missing asset is a clear 404 rather than HTML where a script was expected.
 
-`PORT` selects the port (8080 in the image). Nothing else is required at runtime — the compiler, the
-catalog, the examples and the grammar are all in the bundle.
-
-The public site runs on Railway behind Cloudflare. A push to `main` that touches the site or
-something the image copies runs `.github/workflows/deploy-playground.yml`, which builds and tests
-the workspace and then uploads it with `railway up`; Railway builds this Dockerfile from the
-repository root as declared in `.railway/railway.ts` — the Dockerfile path, the health check and
-the restart policy come from there, and `railway config apply` puts a change to it into effect —
-and Cloudflare proxies `nxlang.org`, terminates TLS and caches assets by the headers the server
-sends. The day-to-day flow (deploy, verify, roll back) is in `docs/deployment.md` at the repository
-root; the one-time Railway and Cloudflare setup, with every rule and its value, is in
-`docs/deployment-setup.md`.
-
-**Health.** `GET /playground/api/health` answers `{ "ok": true }`, and Railway polls it before
-switching traffic to a new deployment. Nothing a visitor does reaches this process's event loop, so
-there is no longer a way for it to be alive and unable to answer, and nothing for a watchdog to do.
-
-**Cache headers.** Hashed build output under `assets/` (scripts, styles, the CanvasKit binary and
-the NX compiler module) is `immutable` for a year; fonts and images are held for a day; the shell is
-`no-cache`. A deploy changes the hashes and the shell names the new ones, so old assets can stay
-cached forever.
+**Cache headers.** `_headers` makes hashed build output under `assets/` (scripts, styles, the
+CanvasKit binary and the NX compiler module) `immutable` for a year, holds fonts and images for a
+day, and makes the shell `no-cache`. A deploy changes the hashes and the shell names the new ones,
+so old assets can stay cached forever.
 
 **One request at a time, in the visitor's own tab.** The compiler is single-threaded and answers one
 request at a time, but that thread is a Web Worker in the visitor's browser: a slow compile costs

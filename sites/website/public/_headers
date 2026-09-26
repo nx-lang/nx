@@ -1,0 +1,9 @@
+# Cache policy for the website's static files, read by Cloudflare's static assets from the root of
+# dist/, where Astro copies public/.
+#
+# Astro names everything under _astro/ by content hash, so a build changes the names and the old
+# ones can be held forever. Pages, Pagefind's index and the other public files keep their names
+# across builds and keep the static-assets default, which revalidates on every use.
+
+/_astro/*
+  Cache-Control: public, max-age=31536000, immutable

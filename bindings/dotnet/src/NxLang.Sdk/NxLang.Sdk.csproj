@@ -6,7 +6,7 @@
     <Title>NX .NET SDK</Title>
     <Description>Managed .NET SDK for NX host, compiler, diagnostics, program artifacts, IR generation, and evaluation workflows with packaged native nx_ffi SDK assets.</Description>
     <PackageTags>nx;sdk;runtime;compiler;binding;ffi;language</PackageTags>
-    <PackageProjectUrl>https://github.com/nx-lang/nx</PackageProjectUrl>
+    <PackageProjectUrl>https://nxlang.org</PackageProjectUrl>
     <RepositoryUrl>https://github.com/nx-lang/nx</RepositoryUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <NxSdkNativePackageAssetsRoot Condition="'$(NxSdkNativePackageAssetsRoot)' == ''">$(RepoRootPath)artifacts\nx-sdk\</NxSdkNativePackageAssetsRoot>

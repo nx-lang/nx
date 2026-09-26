@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Node-only native SDK for NX host, compiler, diagnostics, artifacts, IR generation, and evaluation workflows.",
   "license": "MIT",
-  "homepage": "https://nx-lang.dev",
+  "homepage": "https://nxlang.org",
   "repository": {
     "type": "git",
     "url": "https://github.com/nx-lang/nx.git",

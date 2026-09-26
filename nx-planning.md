@@ -2,15 +2,15 @@
 
 High-level product vision, syntax overviews, and core language concepts now live in the documentation:
 
-- `docs/src/content/docs/overview/what-is-nx.md`
-- `docs/src/content/docs/overview/design-goals.md`
-- `docs/src/content/docs/overview/comparison.md`
-- `docs/src/content/docs/reference/syntax/modules.md`
-- `docs/src/content/docs/reference/syntax/functions.md`
-- `docs/src/content/docs/reference/syntax/expressions.md`
-- `docs/src/content/docs/reference/syntax/types.md`
-- `docs/src/content/docs/reference/syntax/elements.md`
-- `docs/src/content/docs/reference/concepts/sequences-and-objects.md`
+- `sites/website/src/content/docs/overview/what-is-nx.md`
+- `sites/website/src/content/docs/overview/design-goals.md`
+- `sites/website/src/content/docs/overview/comparison.md`
+- `sites/website/src/content/docs/reference/syntax/modules.md`
+- `sites/website/src/content/docs/reference/syntax/functions.md`
+- `sites/website/src/content/docs/reference/syntax/expressions.md`
+- `sites/website/src/content/docs/reference/syntax/types.md`
+- `sites/website/src/content/docs/reference/syntax/elements.md`
+- `sites/website/src/content/docs/reference/concepts/sequences-and-objects.md`
 
 ## Implementation Strategy
 

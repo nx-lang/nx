@@ -1,0 +1,86 @@
+---
+title: NX
+description: 'NX is a typed language for markup, data and the logic between them, in one syntax that runs on .NET, JavaScript and in the browser.'
+template: splash
+hero:
+  title: NX
+  tagline: A typed language for markup, data and the logic between them, in one syntax that runs on .NET, in JavaScript and in the browser.
+  actions:
+    - text: Get started
+      link: /tutorials/getting-started/
+      icon: right-arrow
+    - text: Try the playground
+      link: /playground
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+<div class="nx-hero-code">
+<div>
+
+```nx title="tasks.nx"
+type Task = { title:string  done:boolean = false }
+
+let <TaskList tasks:Task+ /> =
+  <ul>
+    for task in tasks {
+      <li checked={task.done}>{task.title}</li>
+    }
+  </ul>
+
+<TaskList tasks={
+  <Task title="Write the docs" done=true />
+  <Task title="Ship the site" />
+} />
+```
+
+</div>
+<div>
+
+```nx fragment title="Evaluates to" wrap
+<ul
+  content={<li checked=true content="Write the docs" /> <li checked=false content="Ship the site" />}
+/>
+```
+
+</div>
+</div>
+
+## Why NX
+
+<CardGrid>
+  <Card title="Markup and logic together" icon="puzzle">
+    Elements, functions, `if` and `for` are all expressions of one language. There is no separate
+    template syntax, and no code-behind file.
+  </Card>
+  <Card title="Typed all the way through" icon="approve-check">
+    Records, unions and components are checked before anything runs. A missing property or a
+    misspelled case is a compile error with a precise location.
+  </Card>
+  <Card title="Runs where your app runs" icon="rocket">
+    Evaluate NX from .NET with `NxLang.Sdk`, or compile it to NX IR in the browser or Node with
+    `@nx-lang/sdk-wasm` and run it with `@nx-lang/ir-runtime`.
+  </Card>
+  <Card title="Good tooling from day one" icon="pencil">
+    One compiler powers the language service behind hover, completion and diagnostics, in the
+    editor and in the playground.
+  </Card>
+</CardGrid>
+
+## See NX draw
+
+<LinkCard
+  title="NX in the DrawnUI fiddle"
+  href="https://fiddle.drawnui.net"
+  description="Write NX in the browser and watch it render as live, interactive graphics with DrawnUI."
+/>
+
+## Start here
+
+<CardGrid>
+  <LinkCard title="Getting Started" href="/tutorials/getting-started/" description="Try NX, then use it from .NET or JavaScript." />
+  <LinkCard title="Language Tour" href="/language-tour/elements/" description="Elements, functions, expressions and types, one page each." />
+  <LinkCard title="Playground" href="/playground" description="Edit NX in your browser and see the result as you type." />
+  <LinkCard title="Reference" href="/reference/syntax/elements/" description="The exact rules for every construct." />
+</CardGrid>

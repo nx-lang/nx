@@ -1,6 +1,7 @@
 # Deployment Runbook
 
-This runbook covers day-to-day package and VS Code extension publishing, and the playground site.
+This runbook covers day-to-day package and VS Code extension publishing, and the website and
+playground.
 One-time environment, registry and hosting setup is in [deployment-setup.md](deployment-setup.md).
 
 ## Release Model
@@ -186,69 +187,73 @@ Public registry versions are immutable. When a published artifact is bad:
 3. Unlist or deprecate the bad NuGet, npm, or extension version where useful.
 4. Update release notes or documentation to steer users to the fixed version.
 
-## Playground Site
+## Website And Playground
 
-The NX Playground at `https://nxlang.org/playground` is the `sites/playground` workspace member,
-built and run as one Docker image on Railway behind Cloudflare. It is not part of the tag-driven
-release tracks above.
+`https://nxlang.org` is two Cloudflare Workers that serve static files, with no origin server:
+
+| Worker | Serves | Built from | Deployed by |
+|---|---|---|---|
+| `nxlang-website` | everything except `/playground` | `sites/website` | `.github/workflows/deploy-website.yml` |
+| `nxlang-playground` | `/playground` and everything under it | `sites/playground` | `.github/workflows/deploy-playground.yml` |
+
+Each Worker's `wrangler.jsonc` sits beside its site and declares its routes. The playground's routes
+are more specific than the website's `nxlang.org/*`, so Cloudflare sends `/playground` requests to
+it. Neither is part of the tag-driven release tracks above.
 
 ### Deploy
 
-`.github/workflows/deploy-playground.yml` deploys every push to `main` that touches
-`sites/playground/`, a package the site depends on, the Rust crates or the workspace manifests
-(the workflow's `paths` list). It is the same shape as the other Railway-hosted sites: the runner
-builds and tests the workspace, then uploads the checkout with `railway up` under the project
-token in the `production` GitHub environment. Railway builds `sites/playground/Dockerfile` from
-the repository root, polls `/playground/api/health` on the new container, and switches traffic
-only once it answers `200`; the job waits for the deployment to report success, then checks the
-health endpoint and the gallery through Cloudflare. A failed check, build or health check leaves
-the previous deployment serving, and the job summary names the deployment to roll back to.
-Nothing else deploys the service: the Railway GitHub App is not installed and the service has no
-repository source.
+Both workflows deploy every push to `main` that touches their site, and either can be run by hand
+from the Actions tab. Each authenticates with `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` in
+the `production` GitHub environment.
 
-To redeploy without a change, run the workflow from the Actions tab. To deploy something that is
-not on `main`, from the repository root with the Railway CLI linked to the project:
+- **Website.** Installs only the site's dependencies, runs `astro build`, which fails on a broken
+  internal link, then `wrangler deploy`. It needs no Rust. The docs' code-block check, which does,
+  runs in `build.yml` on every pull request, so a page reaches `main` already checked. The smoke test
+  fetches `/` and a docs page and looks for the commit in their `nx-build` meta tag.
+- **Playground.** Builds and tests the whole workspace, the WebAssembly compiler included, keeps
+  `sites/playground/dist` as an artifact, and deploys that with `wrangler deploy`. The smoke test
+  checks that the shell names this build's entry script and that the compiler module answers.
+
+A Workers deploy is atomic: the previous version keeps serving until every file of the new one is
+uploaded. A failed build or test stops the job before the deploy.
+
+To deploy by hand, from the site's folder after building it, with a token in the environment:
 
 ```bash
-railway up --service playground --environment production --ci
+cd sites/website            # or sites/playground
+npx wrangler@4.141.0 deploy
 ```
 
 ### Verify
 
 ```bash
-curl -sI https://nxlang.org/                          # 302 to /playground
-curl -sI https://nxlang.org/playground                # 200, cache-control: no-cache
-curl -s  https://nxlang.org/playground/api/health     # {"ok":true}
-curl -sI https://nxlang.org/playground/assets/<hashed asset>   # cf-cache-status: HIT on the second request
+curl -sI https://nxlang.org/                                   # 200, the landing page
+curl -sI https://nxlang.org/language-tour/types/               # 200
+curl -sI https://nxlang.org/nope                               # 404, the site's not-found page
+curl -sI https://nxlang.org/playground                         # 200, cache-control: no-cache
+curl -sI https://nxlang.org/playground/shapes                  # 200, the same shell
+curl -sI https://nxlang.org/playground/assets/nx-<hash>.wasm   # 200, immutable for a year
+curl -sI https://nxlang.org/playground/assets/missing.js       # 404, not the shell
 ```
 
-Then open an example (`https://nxlang.org/playground/shapes`), edit it, and confirm the drawing
-follows and hover answers. Railway's deployment log shows `NX playground listening on ...` on
-start; a line beginning `watchdog:` means the main thread stopped answering and the process ended
-itself, after which the restart policy (`ALWAYS`, no retry budget) started a fresh one. Repeated
-`watchdog:` lines mean something is provoking the hang and are worth reading the request log for.
+Then open the playground, choose an example and edit it: the result follows and hover answers.
 
 ### Roll back
 
-Railway keeps previous deployments. In the service's deployment list, choose the last good one and
-**Redeploy**; it becomes live once its health check passes. Nothing on Cloudflare needs to change.
-The immutable asset cache is safe across a rollback because the shell is never cached and names
-the assets of whichever build is live.
+From the site's folder, with a token in the environment:
+
+```bash
+npx wrangler@4.141.0 deployments list    # the recent versions
+npx wrangler@4.141.0 rollback            # back to the previous version, or name one
+```
+
+A rollback takes effect at once. The playground's immutable assets are safe across it, because the
+shell is never cached and names the assets of whichever version is live.
 
 ### Change the hosting configuration
 
-The service's build, health check and restart settings are declared in `.railway/railway.ts`.
-Edit the file, then from the repository root with the CLI linked to the `nxlang` project:
-
-```bash
-railway config plan      # read-only preview of what would change on Railway
-railway config apply     # applies it, after showing the plan once more
-```
-
-Do not change those settings in the dashboard; the next apply would revert them.
-
-### Change the edge
-
-Every Cloudflare record and rule the site depends on, with its value, is listed in
-[deployment-setup.md](deployment-setup.md#playground-site-hosting). Change them there first, then
-in the dashboard, so the doc stays the record.
+Routes, the static-assets settings and the playground's Worker script are in each site's
+`wrangler.jsonc` and deploy with it. The cache headers are in `sites/playground/_headers` and
+`sites/website/public/_headers`. Zone settings, DNS records and the redirect rule are in the dashboard
+and recorded in [deployment-setup.md](deployment-setup.md#website-and-playground-hosting). Change
+them there first, then in the dashboard, so the doc stays the record.

@@ -1,0 +1,17 @@
+---
+// Starlight's mobile menu footer, with the site links above the theme and social controls.
+import Default from '@astrojs/starlight/components/MobileMenuFooter.astro';
+import SiteLinks from './SiteLinks.astro';
+---
+
+<div class="mobile-site-links">
+  <SiteLinks />
+</div>
+<Default />
+
+<style>
+  .mobile-site-links {
+    border-top: 1px solid var(--sl-color-gray-6);
+    padding-block: 1rem;
+  }
+</style>

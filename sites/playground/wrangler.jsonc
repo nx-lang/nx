@@ -1,0 +1,22 @@
+// The playground's Cloudflare Worker: the static files under dist/ and, for a request no file
+// answers, worker/index.mjs, which serves the shell for the client router's addresses. The routes
+// are more specific than the website's `nxlang.org/*`, so everything under /playground comes here.
+// Deployed by .github/workflows/deploy-playground.yml; setup is in docs/deployment-setup.md.
+{
+  "name": "nxlang-playground",
+  "main": "worker/index.mjs",
+  "compatibility_date": "2026-09-25",
+  "assets": {
+    "directory": "dist",
+    "binding": "ASSETS",
+    // Only exact file paths match, so /playground and /playground/ reach the script rather than
+    // redirecting to each other.
+    "html_handling": "none",
+    "not_found_handling": "none"
+  },
+  "routes": [
+    { "pattern": "nxlang.org/playground", "zone_name": "nxlang.org" },
+    { "pattern": "nxlang.org/playground/*", "zone_name": "nxlang.org" }
+  ],
+  "workers_dev": true
+}

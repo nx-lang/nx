@@ -27,7 +27,7 @@ test("an unknown id resolves to the gallery", () => {
 });
 
 test("addresses that are not the site's own resolve to the gallery", () => {
-  // The server never serves the shell for these, so the answer only matters as a default.
+  // The Worker never serves the shell for these, so the answer only matters as a default.
   assert.deepEqual(routeFromPath("/", ROOT, isExample), { kind: "gallery" });
   assert.deepEqual(routeFromPath("/playgrounds/shapes", ROOT, isExample), { kind: "gallery" });
   assert.deepEqual(routeFromPath("/playground/shapes/extra", ROOT, isExample), { kind: "gallery" });

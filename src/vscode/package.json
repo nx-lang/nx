@@ -23,7 +23,7 @@
   "bugs": {
     "url": "https://github.com/nx-lang/nx/issues"
   },
-  "homepage": "https://github.com/nx-lang/nx/tree/main/src/vscode",
+  "homepage": "https://nxlang.org",
   "exports": {
     "./grammar": "./syntaxes/nx.tmLanguage.json",
     "./markdown-codeblock-grammar": "./syntaxes/nx.markdown.codeblock.tmLanguage.json",
