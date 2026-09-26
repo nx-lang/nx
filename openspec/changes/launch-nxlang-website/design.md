@@ -206,6 +206,10 @@ behind it don't exist. What this change adds:
   but the Marketplace refuses its publishes. The Marketplace only accepts the identity's Azure
   DevOps id as a member, so a small manual workflow, `marketplace-identity.yml`, prints it, and
   checks with `vsce verify-pat` that the identity may publish.
+- **The display name is "NX Language (Official)".** Marketplace display names are unique, and
+  "NX Language" belongs to `niklasbeitler.nx`, Tcl support for Siemens NX, published first. The
+  qualifier follows Vue's "Vue (Official)". A bare "NX" was free but reads as the Nx build tool,
+  whose Nx Console is one of the most installed extensions. The id stays `nx-lang.nx-language`.
 - **Publishing per platform.** The release has one VSIX per platform, all at the same version. The
   publish script used to skip a VSIX when the registry already listed its version, which would have
   published the first platform and skipped the other two. It now passes `--skip-duplicate`, which

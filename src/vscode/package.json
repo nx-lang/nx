@@ -1,6 +1,6 @@
 {
   "name": "nx-language",
-  "displayName": "NX Language",
+  "displayName": "NX Language (Official)",
   "publisher": "nx-lang",
   "version": "0.1.0",
   "description": "Syntax highlighting, diagnostics, hover and completions for the NX language.",
