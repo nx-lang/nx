@@ -5,8 +5,8 @@ import { fileURLToPath } from 'node:url';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const packageRoot = join(scriptDir, '..');
-const registry = process.argv[2];
-const vsixPath = process.argv[3];
+// `pnpm run publish:vsce -- <vsix>` passes the `--` through, so it is not an argument.
+const [registry, vsixPath] = process.argv.slice(2).filter((arg) => arg !== '--');
 
 // Each registry skips a VSIX whose version and target it already has, so a release with one VSIX
 // per platform publishes every platform, and a repair run republishes only what is missing.

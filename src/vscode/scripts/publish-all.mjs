@@ -3,7 +3,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
-const vsixPath = process.argv[2];
+// `pnpm run publish:all -- <vsix>` passes the `--` through, so it is not an argument.
+const [vsixPath] = process.argv.slice(2).filter((arg) => arg !== '--');
 
 if (!vsixPath) {
   console.error('Usage: pnpm run publish:all -- <extension.vsix>');
