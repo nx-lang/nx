@@ -28,7 +28,9 @@ used](#where-the-logo-is-used)).
 The SVGs are drawn as shapes with no text, so they need no fonts and look the same everywhere.
 They are cropped tight to the drawing: add space around them where you place them.
 
-### Colors
+### Logo colors
+
+These are settled: they are the colors the logo is drawn in.
 
 | Color | Hex | Used for |
 | --- | --- | --- |
@@ -42,6 +44,66 @@ They are cropped tight to the drawing: add space around them where you place the
 The two bracket colors are lighter on dark backgrounds so they stay visible: blue on dark has a
 4.6:1 contrast ratio against ink. Gold on white is only 3.1:1, which is enough for a logo but not
 for text or thin lines, so don't use gold for text on light backgrounds.
+
+### Proposed brand colors
+
+> **Status: proposal, not yet applied or reviewed.** The website still uses the violet accent of
+> the placeholder logo (`sites/website/src/styles/custom.css`). Try these colors on the website,
+> look at the result in both themes, then replace this section with the final decisions.
+
+The logo colors say which bracket is which. Brand colors are a different question: what each
+color does across the website, the docs, the playground and the editor. The proposal gives each
+color one job:
+
+| Color | Hex (light / dark theme) | Proposed job |
+| --- | --- | --- |
+| Deep blue | `#1F4FE0` / `#4D78FF` | The primary color: links, buttons, the selected sidebar item, focus rings. |
+| Gold | `#C98500` / `#FFB020` | Highlights only, used sparingly: a "new" badge, a callout's edge, the playground's run button. Never body text. |
+| Dark gold | `#8A5A00` | Only if gold is ever needed as text on a light background. A new color, not in the logo. |
+| Ink | `#16171C` | Text on light backgrounds, dark backgrounds. |
+| Paper | `#F5F4EF` | Light backgrounds, text on dark backgrounds. |
+
+Why these jobs:
+
+- **Blue is safe for text.** Blue on white is 6.5:1 and white on blue is 6.5:1, so it works for
+  links and for text on blue buttons. Blue on dark (`#4D78FF` on ink) is 4.6:1, just above the
+  4.5:1 minimum for body text.
+- **Gold isn't.** Gold on white is 3.1:1, below the 4.5:1 text minimum, which is why it's limited
+  to highlights on light backgrounds. Dark gold (`#8A5A00`) is 5.9:1 on white. On dark
+  backgrounds gold is fine for text: ink on gold is 9.8:1.
+- **Grays.** Secondary text and dividers need one or two grays between ink and paper. Starlight's
+  defaults can cover this until there's a reason to pick brand grays.
+
+#### On the website
+
+Starlight's theme takes three shades of the accent per theme, a pale tint, the main color and a
+deep shade, set in `sites/website/src/styles/custom.css`. Proposed values:
+
+| Starlight variable | Light theme | Dark theme |
+| --- | --- | --- |
+| `--sl-color-accent-low` | `#E3EAFC` | `#14224F` |
+| `--sl-color-accent` | `#1F4FE0` | `#4D78FF` |
+| `--sl-color-accent-high` | `#0F2A7A` | `#D4DEFF` |
+
+The low and high shades are chosen to read against each other (10.7:1 in the light theme, 11.4:1
+in the dark), since Starlight pairs them, for example as the background and text of the selected
+sidebar item in the dark theme. Check each pairing on the built site rather than trusting the
+ratios alone.
+
+#### Deliberately left out
+
+- A full scale of tints for every color (blue-100 to blue-900 and so on).
+- A design-tokens file (`colors.json` or CSS variables shared across sites).
+
+Nothing uses either yet. Add them when a second site or the editor theme needs the same values.
+
+#### Questions for the review
+
+- Does the blue accent look right in the website's dark theme, or does it need to be lighter
+  for links?
+- Does gold earn a place on the website at all, or is it better kept to the logo?
+- Should NX code blocks and the VS Code theme use the two bracket colors for syntax highlighting,
+  for example blue for tags and gold for expressions? That would tie the logo to how NX code looks.
 
 ### Using the logo
 
