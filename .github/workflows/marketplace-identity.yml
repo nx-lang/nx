@@ -1,9 +1,10 @@
-# Prints the Azure DevOps id of the nx-vscode-publisher managed identity, which the Visual Studio
-# Marketplace needs to add the identity as a member of the nx-lang publisher. The identity's client
-# id and object id don't work there; only this id does. Run it once when setting up or replacing the
-# identity (docs/deployment-setup.md, "Visual Studio Marketplace publishing identity").
+# Signs in as the nx-vscode-publisher managed identity, prints its Azure DevOps id, and checks that
+# the identity may publish to the nx-lang publisher, without publishing anything. The Marketplace
+# only accepts that id to add the identity as a member (it then lists it as <tenant id>\<object id>),
+# so the check fails until the id is added. Run it when setting up or replacing the identity, or
+# before a release (docs/deployment-setup.md, "Visual Studio Marketplace publishing identity").
 
-name: Show Marketplace identity
+name: Check Marketplace identity
 
 on:
   workflow_dispatch:
@@ -12,8 +13,8 @@ permissions:
   contents: read
 
 jobs:
-  show:
-    name: Show the publishing identity's Marketplace id
+  check:
+    name: Check the publishing identity
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # The identity trusts GitHub's OIDC token only for jobs in this environment.
@@ -44,3 +45,10 @@ jobs:
           echo ""
           echo "\`${id}\`"
         } >> "$GITHUB_STEP_SUMMARY"
+    - name: Set up Node.js
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      with:
+        node-version: '24'
+    # Fails unless the identity is a member of nx-lang with publish rights.
+    - name: Check the identity may publish to nx-lang
+      run: npx --yes @vscode/vsce@3.7.0 verify-pat --azure-credential nx-lang

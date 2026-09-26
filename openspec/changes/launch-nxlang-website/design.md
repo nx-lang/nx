@@ -204,7 +204,8 @@ behind it don't exist. What this change adds:
   of the publisher, so replacing it (for example when the project moves to a community-owned
   account) is a new identity and a member change. An app registration would need no subscription,
   but the Marketplace refuses its publishes. The Marketplace only accepts the identity's Azure
-  DevOps id as a member, so a small manual workflow, `marketplace-identity.yml`, prints it.
+  DevOps id as a member, so a small manual workflow, `marketplace-identity.yml`, prints it, and
+  checks with `vsce verify-pat` that the identity may publish.
 - **Publishing per platform.** The release has one VSIX per platform, all at the same version. The
   publish script used to skip a VSIX when the registry already listed its version, which would have
   published the first platform and skipped the other two. It now passes `--skip-duplicate`, which
