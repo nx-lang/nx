@@ -74,13 +74,17 @@
   `src/vscode/CONTRIBUTING.md`, and link it from the README and from the website's Contributing
   page. Verify `pnpm run package:verify` in `src/vscode` passes, `vsce ls` lists the icon, and
   `node scripts/verify-editor-package.mjs` still passes for `@nx-lang/language`.
-- [ ] 11.2 Create the registry accounts (by hand): the Marketplace publisher `nx-lang`, with an Azure
-  DevOps token scoped to Marketplace (Manage); an Eclipse account with the Open VSX publisher
-  agreement signed, and the namespace `nx-lang` (`npx ovsx create-namespace nx-lang -p <token>`).
-  Verify `https://marketplace.visualstudio.com/publishers/nx-lang` and
-  `https://open-vsx.org/api/nx-lang` answer.
-- [ ] 11.3 Store the tokens as `VSCE_PAT` and `OVSX_PAT` on the `production` environment with
-  `gh secret set`. Verify `gh secret list --env production` lists both.
+- [ ] 11.2 Create the registry accounts (by hand): the Marketplace publisher `nx-lang`; an Eclipse
+  account with the Open VSX publisher agreement signed, and the namespace `nx-lang`
+  (`npx ovsx create-namespace nx-lang -p <token>`); and the Marketplace publishing identity as
+  `docs/deployment-setup.md` describes (Azure subscription `nx-lang`, managed identity
+  `nx-vscode-publisher` with a federated credential for the `production` environment). Verify
+  `https://marketplace.visualstudio.com/publishers/nx-lang` and `https://open-vsx.org/api/nx-lang`
+  answer.
+- [ ] 11.3 Store `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` and `OVSX_PAT` on the `production` environment
+  with `gh secret set`. Once this change is on `main`, run **Show Marketplace identity** and add the
+  id it prints as a Contributor member of the `nx-lang` publisher. Verify `gh secret list --env
+  production` lists all three and the publisher's Members page lists the identity.
 - [ ] 11.4 Release `vscode-v0.1.0` by the runbook in `docs/deployment.md` (a maintainer pushes the
   tag): inspect the draft release, publish it, and approve the deployment. Verify both registries
   report 0.1.0, and that `code --install-extension nx-lang.nx-language` in a clean profile installs

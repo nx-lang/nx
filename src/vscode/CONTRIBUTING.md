@@ -123,18 +123,23 @@ republish VSIX artifacts from an already-published GitHub Release.
 
 ### Credentials
 
-Configure these GitHub Actions secrets before enabling production VS Code extension publishing:
+CI publishes with these `production` environment settings, set up as
+[docs/deployment-setup.md](../../docs/deployment-setup.md) describes:
 
-- `VSCE_PAT` - Visual Studio Marketplace personal access token for publisher `nx-lang`
+- `AZURE_CLIENT_ID` and `AZURE_TENANT_ID` - the `nx-vscode-publisher` managed identity, a member of
+  the Marketplace publisher `nx-lang`, which the workflow signs in as through GitHub OIDC. The
+  Marketplace retires global personal access tokens on 2026-12-01, so there is no Marketplace token.
 - `OVSX_PAT` - Open VSX personal access token for namespace `nx-lang`
 
 Production npm publishing for `@nx-lang/language` uses npm trusted publishing only. Do not configure
 an npm publish token for CI.
 
-For local VS Code extension publishing, provide the registry values as environment variables:
+For local publishing, sign in to the Marketplace with `az login` as a member of the `nx-lang`
+publisher (`publish:vsce` passes `--azure-credential` unless `VSCE_PAT` is set), and provide the Open
+VSX token as an environment variable:
 
 ```bash
-export VSCE_PAT=...
+az login
 export OVSX_PAT=...
 ```
 
@@ -158,8 +163,9 @@ pnpm run publish:vsce -- "$VSIX"
 pnpm run publish:ovsx -- "$VSIX"
 ```
 
-Both commands publish the provided VSIX artifact instead of rebuilding a new package. The publisher
-is `nx-lang` and the extension ID is `nx-language`.
+Both commands publish the provided VSIX artifact instead of rebuilding a new package, and skip it when
+the registry already has that version for that platform. The publisher is `nx-lang` and the
+extension ID is `nx-language`.
 
 The normal production path is not local publishing: push a `vscode-v*` tag, inspect the draft GitHub
 Release assets, then publish that GitHub Release so CI publishes the reviewed VSIX files.

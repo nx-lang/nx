@@ -193,10 +193,22 @@ verifies per-platform VSIX files into a draft GitHub Release, and publishing tha
 `vscode-extension-publish.yml` against both registries. It has never run, because the accounts
 behind it don't exist. What this change adds:
 
-- **Accounts, by hand.** A Marketplace publisher `nx-lang`, with an Azure DevOps token scoped to
-  Marketplace (Manage), and an Open VSX namespace `nx-lang`, which needs an Eclipse account and the
-  signed publisher agreement. The tokens go on `production` as `VSCE_PAT` and `OVSX_PAT`, the names
-  `docs/deployment-setup.md` already documents.
+- **Accounts, by hand.** A Marketplace publisher `nx-lang`, and an Open VSX namespace `nx-lang`,
+  which needs an Eclipse account and the signed publisher agreement. The Open VSX token goes on
+  `production` as `OVSX_PAT`.
+- **No Marketplace token.** The Marketplace token would have to be a global Azure DevOps personal
+  access token, and Azure DevOps retires those on 2026-12-01, two months after this release. So the
+  publish workflow signs in through GitHub OIDC as a user-assigned managed identity,
+  `nx-vscode-publisher`, and publishes with `vsce publish --azure-credential`. The identity lives in
+  an Azure subscription `nx-lang` that Forward Reach pays for; it costs nothing, and it is a member
+  of the publisher, so replacing it (for example when the project moves to a community-owned
+  account) is a new identity and a member change. An app registration would need no subscription,
+  but the Marketplace refuses its publishes. The Marketplace only accepts the identity's Azure
+  DevOps id as a member, so a small manual workflow, `marketplace-identity.yml`, prints it.
+- **Publishing per platform.** The release has one VSIX per platform, all at the same version. The
+  publish script used to skip a VSIX when the registry already listed its version, which would have
+  published the first platform and skipped the other two. It now passes `--skip-duplicate`, which
+  both registries apply per version and target.
 - **A listing for users.** Both registries show the extension's README as its page. Today that
   README opens with contributor setup (nvm, pnpm, building the language server), so it is rewritten
   for someone installing the extension: features, settings, and a link to `nxlang.org`. The
