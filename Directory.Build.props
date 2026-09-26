@@ -23,9 +23,9 @@
     <DebugType Condition=" '$(CI)' != 'true' and '$(TF_BUILD)' != 'true' ">embedded</DebugType>
 
     <!-- <PackageProjectUrl>https://github.com/ORG/REPO</PackageProjectUrl> -->
-    <Company>Bret Johnson</Company>
-    <Authors>Bret Johnson</Authors>
-    <Copyright>© Bret Johnson. All rights reserved.</Copyright>
+    <Company>The NX Authors</Company>
+    <Authors>The NX Authors</Authors>
+    <Copyright>© The NX Authors</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>

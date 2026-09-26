@@ -292,11 +292,14 @@ The workspace includes comprehensive test coverage:
 
 ## License
 
-Copyright © 2024-2025. All rights reserved.
+NX is open source under the [MIT License](LICENSE). Copyright belongs to the NX authors: each
+contributor keeps the copyright in what they contribute, under the same license.
 
 ## Contributing
 
-This is currently a private project. For questions or issues, please contact the maintainers.
+Contributions are welcome. See [Contributing](https://nxlang.org/contributing/) for building NX
+from source, and open an issue or a pull request at
+[github.com/nx-lang/nx](https://github.com/nx-lang/nx).
 
 ## Documentation
 
