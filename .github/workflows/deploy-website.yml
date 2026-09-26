@@ -73,7 +73,10 @@ jobs:
           for attempt in $(seq 1 12); do
             ok=true
             for path in / /language-tour/types/; do
-              if ! curl -sS --max-time 15 -A "nx-website-deploy" "${SITE_URL}${path}" | grep -qF "$stamp"; then
+              # Read the whole page first: piped into `grep -q`, which exits at the first match,
+              # curl fails writing the rest, and pipefail reports a match as a miss.
+              page=$(curl -sS --max-time 15 -A "nx-website-deploy" "${SITE_URL}${path}" || true)
+              if ! grep -qF "$stamp" <<< "$page"; then
                 echo "${path} is not serving ${GITHUB_SHA} yet ($attempt/12)"
                 ok=false
               fi
