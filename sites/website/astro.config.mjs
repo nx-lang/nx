@@ -15,7 +15,7 @@ export default defineConfig({
         starlightLlmsTxt({
           projectName: 'NX',
           description:
-            'NX is a typed language for markup, data and the logic between them, in one syntax that runs on .NET, in JavaScript and in the browser.',
+            'NX is a modern language for executable markup, built for dynamic, AI-native experiences. It runs on .NET, in JavaScript and in the browser.',
           // One set per sidebar section, so llms.txt links each of them.
           customSets: [
             { label: 'Overview', paths: ['overview/**'], description: 'what NX is and why' },

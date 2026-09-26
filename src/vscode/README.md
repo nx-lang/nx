@@ -1,8 +1,8 @@
 # NX Language
 
-Language support for [NX](https://nxlang.org), a typed language for markup, data and the logic
-between them. Open any `.nx` file to get highlighting, diagnostics as you type, hover information
-and completions.
+Language support for [NX](https://nxlang.org): a modern language for executable markup, built for
+dynamic, AI-native experiences. Open any `.nx` file to get highlighting, diagnostics as you type,
+hover information and completions.
 
 ```nx
 type Task = { title:string  done:boolean = false }
