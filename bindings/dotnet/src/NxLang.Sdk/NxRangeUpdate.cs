@@ -1,4 +1,4 @@
-// Copyright (c) Bret Johnson. All rights reserved.
+// Copyright (c) The NX Authors.
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
 // MsgPack006 reads the open generic MessagePack documents for a generic type's formatter as a type
