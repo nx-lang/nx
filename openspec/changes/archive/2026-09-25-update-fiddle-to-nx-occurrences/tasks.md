@@ -88,12 +88,12 @@ Paths in this section are under `nx:sites/playground` unless they say otherwise.
 
 ## 8. Release and repin (each step on the user's go-ahead)
 
-- [ ] 8.1 Get the NX branch onto `main` (push `refine-sequences-and-optionals`, open and merge its PR). Verify `origin/main` contains `6f56e76`, the section 6 playground commit and the section 7 fixes, and that nxlang.org/playground deploys and draws its gallery.
-- [ ] 8.2 Tag `v0.4.0` per `nx:docs/deployment.md` § "Publish A Package Release", verify the draft release's tarballs, manifest and checksums, and publish it. Verify `npm view @nx-lang/sdk-wasm@0.4.0 version` answers and NuGet lists `NxLang.Sdk` 0.4.0.
-- [ ] 8.3 In the fiddle, merge `origin/main` again, repin the four `@nx-lang/*` packages to 0.4.0 (and `AGENTS.md`'s pin sentence), and run `npm install --prefer-online`. Verify `npm run catalog` without `--nx` reproduces `drawnui.nxir` byte for byte.
-- [ ] 8.4 Run `npm run runtime` and `npm run test:nx` without `--nx`. Verify both pass; the one expected skip is the checkout-only debug-trap test.
-- [ ] 8.5 Commit the repin.
-- [ ] 8.6 Push `nx-occurrences` and open its PR against `DrawnUi/DrawnUi.FiddleEngine` `main`. The description summarizes the spelling change, the catalog, the preset edits, and the note that deploying it retires existing NX share links, which then show the schema-mismatch label. Verify the PR exists and CI, if any, is green.
+- [x] 8.1 Get the NX branch onto `main` (push `refine-sequences-and-optionals`, open and merge its PR). Verify `origin/main` contains `6f56e76`, the section 6 playground commit and the section 7 fixes, and that nxlang.org/playground deploys and draws its gallery.
+- [x] 8.2 Tag `v0.4.0` per `nx:docs/deployment.md` § "Publish A Package Release", verify the draft release's tarballs, manifest and checksums, and publish it. Verify `npm view @nx-lang/sdk-wasm@0.4.0 version` answers and NuGet lists `NxLang.Sdk` 0.4.0.
+- [x] 8.3 In the fiddle, merge `origin/main` again, repin the four `@nx-lang/*` packages to 0.4.0 (and `AGENTS.md`'s pin sentence), and run `npm install --prefer-online`. Verify `npm run catalog` without `--nx` reproduces `drawnui.nxir` byte for byte.
+- [x] 8.4 Run `npm run runtime` and `npm run test:nx` without `--nx`. Verify both pass; the one expected skip is the checkout-only debug-trap test.
+- [x] 8.5 Commit the repin.
+- [x] 8.6 Push `nx-occurrences` and open its PR against `DrawnUi/DrawnUi.FiddleEngine` `main`. The description summarizes the spelling change, the catalog, the preset edits, and the note that deploying it retires existing NX share links, which then show the schema-mismatch label. Verify the PR exists and CI, if any, is green.
 
 ## 9. Wrap up
 
