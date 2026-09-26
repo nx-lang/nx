@@ -41,3 +41,29 @@
 :root[data-has-hero] .hero .tagline {
   max-width: 44rem;
 }
+
+/* The tagline, set as branding/README.md ("Tagline") describes: line 1 is the positioning, line 2
+   the AI hook at about three quarters of its size. Gold marks AI: on dark backgrounds the whole of
+   line 2 is gold; on light ones line 2 is gray with only "AI-native" in dark gold, at medium weight
+   since dark text on light reads thinner. */
+.hero .tagline .nx-tagline-lead {
+  display: block;
+  font-weight: 600;
+  color: var(--sl-color-white);
+}
+
+.hero .tagline .nx-tagline-ai {
+  display: block;
+  margin-top: 0.5em;
+  font-size: 0.75em;
+  color: #ffb020;
+}
+
+:root[data-theme='light'] .hero .tagline .nx-tagline-ai {
+  font-weight: 500;
+  color: #5a5b62;
+}
+
+:root[data-theme='light'] .hero .tagline .nx-tagline-gold {
+  color: #8a5a00;
+}

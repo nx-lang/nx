@@ -3,10 +3,10 @@
   "displayName": "NX Language (Official)",
   "publisher": "nx-lang",
   "version": "0.1.0",
-  "description": "Syntax highlighting, diagnostics, hover and completions for the NX language.",
+  "description": "NX, a modern language for executable markup, built for dynamic, AI-native experiences: highlighting, diagnostics, hover and completions.",
   "icon": "images/icon.png",
   "galleryBanner": {
-    "color": "#5b47d6",
+    "color": "#16171C",
     "theme": "dark"
   },
   "packageManager": "pnpm@10.28.1",
