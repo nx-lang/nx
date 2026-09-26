@@ -3,7 +3,12 @@
   "displayName": "NX Language",
   "publisher": "nx-lang",
   "version": "0.1.0",
-  "description": "Syntax highlighting, reusable editor assets, and language server integration for the NX language.",
+  "description": "Syntax highlighting, diagnostics, hover and completions for the NX language.",
+  "icon": "images/icon.png",
+  "galleryBanner": {
+    "color": "#5b47d6",
+    "theme": "dark"
+  },
   "packageManager": "pnpm@10.28.1",
   "license": "MIT",
   "keywords": [
@@ -64,6 +69,7 @@
     "README.md",
     "CHANGELOG.md",
     "LICENSE",
+    "images/icon.png",
     "language-configuration.json",
     "out/**",
     "server/**",

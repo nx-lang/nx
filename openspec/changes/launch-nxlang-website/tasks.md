@@ -66,7 +66,7 @@
 
 ## 11. Publish the VS Code extension
 
-- [ ] 11.1 Make the listing: a 128×128 PNG icon from the site's logo mark at
+- [x] 11.1 Make the listing: a 128×128 PNG icon from the site's logo mark at
   `src/vscode/images/icon.png`, set as `icon` in `package.json` with a matching `galleryBanner`.
   Rewrite `src/vscode/README.md` for users (what it does, settings such as `nx.server.path`, a link
   to `https://nxlang.org`), keeping the `@nx-lang/language` editor-assets section below. Move the
