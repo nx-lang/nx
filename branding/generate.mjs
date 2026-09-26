@@ -134,13 +134,22 @@ function mark({ close, open }, tile) {
   return svg(`0 0 ${side} ${side}`, body);
 }
 
-/** The 1200×630 card shown when a page of the website is shared. */
+/** The tagline, as it appears with the logo. See "Tagline" in README.md for how to set it. */
+const tagline = {
+  line1: "A modern language for executable markup.",
+  line2: "Built for dynamic, AI-native experiences."
+};
+
+/**
+ * The 1200×630 card shown when a page of the website is shared: the logo, then the tagline in the
+ * dark-theme style (line 2 all gold), then the site's address.
+ */
 function socialCard() {
   const s = shapes(true);
-  const logoHeight = 150;
+  const logoHeight = 120;
   const scale = logoHeight / (geometry.bottom - geometry.top);
   const x = 96 - s.left * scale;
-  const y = 140 - geometry.top * scale;
+  const y = 96 - geometry.top * scale;
   const drawing =
     s.n.map((p) => `<polygon points="${p}" fill="${colors.paper}"/>`).join("") +
     `<polygon points="${s.close}" fill="${colors.blueOnDark}"/>` +
@@ -148,10 +157,11 @@ function socialCard() {
   const body =
     `<rect width="1200" height="630" fill="${colors.ink}"/>` +
     `<g transform="translate(${round(x)} ${round(y)}) scale(${round(scale * 1000) / 1000})">${drawing}</g>` +
-    `<text x="96" y="410" font-family="Geist" font-size="40" fill="#D6D7DC">` +
-    `A typed language for markup, data and the logic</text>` +
-    `<text x="96" y="464" font-family="Geist" font-size="40" fill="#D6D7DC">between them.</text>` +
-    `<text x="96" y="556" font-family="Geist Mono" font-size="26" fill="${colors.goldOnDark}">nxlang.org</text>`;
+    `<text x="96" y="318" font-family="Geist" font-weight="600" font-size="40" letter-spacing="-0.4" ` +
+    `fill="${colors.paper}">${tagline.line1}</text>` +
+    `<text x="96" y="376" font-family="Geist" font-weight="400" font-size="30" ` +
+    `fill="${colors.goldOnDark}">${tagline.line2}</text>` +
+    `<text x="96" y="532" font-family="Geist Mono" font-size="22" fill="#8C8D95">nxlang.org</text>`;
   return svg("0 0 1200 630", body, 1200, 630);
 }
 
@@ -159,6 +169,7 @@ function socialCard() {
 const fontsRoot = join(brandingRoot, "fonts");
 const fontFiles = [
   join(fontsRoot, "Geist-Regular.ttf"),
+  join(fontsRoot, "Geist-SemiBold.ttf"),
   join(fontsRoot, "GeistMono-Medium.ttf")
 ];
 

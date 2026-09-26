@@ -23,7 +23,7 @@ used](#where-the-logo-is-used)).
 | `nx-icon-light.svg` | The app icon on a white tile, for dark surroundings where an ink tile disappears. |
 | `png/nx-icon-*.png` | The app icon at 512, 256, 180 (Apple touch icon), 128, 32 and 16 pixels. |
 | `png/nx-logo-1200.png`, `png/nx-logo-on-dark-1200.png` | The logo as images, for places that don't take SVG. |
-| `png/nx-social-card.png` | The 1200×630 card shown when a page of the website is shared. |
+| `png/nx-social-card.png` | The 1200×630 card shown when a page of the website is shared: the logo, the tagline and the site's address. |
 
 The SVGs are drawn as shapes with no text, so they need no fonts and look the same everywhere.
 They are cropped tight to the drawing: add space around them where you place them.
@@ -58,8 +58,8 @@ color one job:
 | Color | Hex (light / dark theme) | Proposed job |
 | --- | --- | --- |
 | Deep blue | `#1F4FE0` / `#4D78FF` | The primary color: links, buttons, the selected sidebar item, focus rings. |
-| Gold | `#C98500` / `#FFB020` | Highlights only, used sparingly: a "new" badge, a callout's edge, the playground's run button. Never body text. |
-| Dark gold | `#8A5A00` | Only if gold is ever needed as text on a light background. A new color, not in the logo. |
+| Gold | `#C98500` / `#FFB020` | AI and intelligence (see [Tagline](#tagline)). Otherwise highlights only, used sparingly: a "new" badge, a callout's edge, the playground's run button. Never body text on light backgrounds. |
+| Dark gold | `#8A5A00` | Gold as text on light backgrounds, such as "AI-native" in the tagline. A new color, not in the logo. |
 | Ink | `#16171C` | Text on light backgrounds, dark backgrounds. |
 | Paper | `#F5F4EF` | Light backgrounds, text on dark backgrounds. |
 
@@ -101,9 +101,11 @@ Nothing uses either yet. Add them when a second site or the editor theme needs t
 
 - Does the blue accent look right in the website's dark theme, or does it need to be lighter
   for links?
-- Does gold earn a place on the website at all, or is it better kept to the logo?
+- Beyond the tagline, where else should gold mark AI on the website: AI-related pages,
+  examples or features?
 - Should NX code blocks and the VS Code theme use the two bracket colors for syntax highlighting,
-  for example blue for tags and gold for expressions? That would tie the logo to how NX code looks.
+  following the same rule: blue for markup and structure, gold for AI constructs such as prompts
+  and agents? That would tie the logo to how NX code looks.
 
 ### Using the logo
 
@@ -118,6 +120,39 @@ Nothing uses either yet. Add them when a second site or the editor theme needs t
   wrong height.
 - **One color when color isn't available.** Use the black or white version rather than a gray
   version of the colored logo.
+
+### Tagline
+
+> A modern language for executable markup.
+> Built for dynamic, AI-native experiences.
+
+The logo already says "NX", so the tagline doesn't repeat the name when it appears with the logo.
+
+- **Line 1** is the positioning: semibold, near-white on dark backgrounds and ink on light, about
+  40 pixels where the logo is 120 tall.
+- **Line 2** is the AI hook: regular weight, about three quarters of line 1's size (30 pixels
+  next to 40), 18 pixels below line 1.
+- **Gold marks AI.** It's the rule behind the second line's color, and it's applied differently
+  per theme, because gold reads differently on each:
+  - **Dark backgrounds:** the whole of line 2 in gold (`#FFB020`). Bright gold is easy to read on
+    ink, and a single gold word would jump out too much.
+  - **Light backgrounds:** line 2 in gray (`#5A5B62`) with only "AI-native" in dark gold
+    (`#8A5A00`), both at medium weight (500). A whole line of dark gold is harder to read on light
+    backgrounds, and dark text on light reads thinner, hence the extra weight.
+- **Don't** bold words within line 2, color "dynamic" gold (most of what it covers isn't AI), or
+  italicize either line.
+
+The social card (`png/nx-social-card.png`) sets the tagline on the dark style: the logo 120
+pixels tall, line 1 at 40 pixels, line 2 at 30, then `nxlang.org`.
+
+What the words mean:
+
+- **Dynamic:** UI generated on the server rather than baked into the client, so it's easy to
+  update; UI an LLM creates at runtime (generative UI); UI tailored to each user, by AI or by
+  ordinary server code; and UI that animates and moves.
+- **AI-native:** NX treats AI as part of the application model, not an add-on. An NX program can
+  describe UI, data, logic, prompts, agents and actions together, while also serving as a
+  structured representation that AI can generate and humans can inspect.
 
 ### The shape
 
@@ -145,7 +180,7 @@ pnpm --filter @nx-lang/branding generate
 
 The script rewrites every file in this folder and the copies listed below. It renders PNGs with
 [resvg](https://github.com/linebender/resvg) and sets the social card's text in
-[Geist](https://vercel.com/font), whose two font files are kept in `fonts/`.
+[Geist](https://vercel.com/font), whose three font files are kept in `fonts/`.
 
 ### Where the logo is used
 
