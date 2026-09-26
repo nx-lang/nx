@@ -4,3 +4,4 @@ packages:
   - bindings/node
   - bindings/wasm
   - sites/*
+  - branding
