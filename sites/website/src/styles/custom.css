@@ -1,0 +1,43 @@
+/* NX accent: a violet that reads on both themes. Dark theme first, as Starlight defines it. */
+:root {
+  --sl-color-accent-low: #251b52;
+  --sl-color-accent: #7c6cf0;
+  --sl-color-accent-high: #d9d4ff;
+}
+
+:root[data-theme='light'] {
+  --sl-color-accent-low: #e4e0ff;
+  --sl-color-accent: #5b47d6;
+  --sl-color-accent-high: #261a6b;
+}
+
+/* The landing page shows its snippet and the value it evaluates to side by side. */
+.nx-hero-code {
+  display: grid;
+  gap: 1rem;
+  align-items: start;
+}
+
+.sl-markdown-content .nx-hero-code > div {
+  min-width: 0;
+  margin-top: 0;
+}
+
+.nx-hero-code .expressive-code {
+  margin-top: 0;
+}
+
+@media (min-width: 72rem) {
+  .nx-hero-code {
+    grid-template-columns: 3fr 2fr;
+  }
+}
+
+/* A compact landing hero, so the snippet below it is on the first screen. */
+:root[data-has-hero] .hero {
+  padding-block: 2.5rem 0.5rem;
+}
+
+:root[data-has-hero] .hero .tagline {
+  max-width: 44rem;
+}

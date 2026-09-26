@@ -281,8 +281,10 @@ FakesAssemblies/
 # Node.js Tools for Visual Studio
 .ntvs_analysis.dat
 node_modules/
-docs/dist/
-docs/.astro/
+sites/website/dist/
+sites/website/.astro/
+# Local state from `wrangler dev`
+.wrangler/
 
 # Visual Studio 6 build log
 *.plg

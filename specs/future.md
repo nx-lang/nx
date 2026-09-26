@@ -882,11 +882,11 @@ build context it already validates with; rename the `nx-language` `file:` link t
 ## Playground: What `add-playground-site` Left For Later
 
 The playground at `nxlang.org/playground` (`sites/playground`, spec `openspec/specs/playground`)
-shipped as the DrawnUI fiddle under a public address: gallery, editor view, Railway behind
-Cloudflare, the service declared in `.railway/railway.ts` and deployed by
-`.github/workflows/deploy-playground.yml` with `railway up`. Compilation and language queries were
-server-side then; `add-wasm-sdk` moved both into the visitor's browser, as a WebAssembly module in a
-Web Worker. The items below are what the site deliberately does not do yet.
+shipped as the DrawnUI fiddle under a public address: a gallery and an editor view. Compilation
+and language queries were server-side then; `add-wasm-sdk` moved both into the visitor's browser,
+as a WebAssembly module in a Web Worker, and `launch-nxlang-website` made the site static files on a
+Cloudflare Worker beside the website, deployed by `.github/workflows/deploy-playground.yml`. The
+items below are what the site deliberately does not do yet.
 
 ### Shareable edited source
 
@@ -914,26 +914,6 @@ module rather than a dependency because an imported external component loses its
 inherited properties (NXE12/NXE13). Once that is fixed, the catalog can be a library artifact
 analyzed once per worker and shared by every compile — the win is proportional to how much of each
 compile is the catalog, which today is most of it.
-
-### A static host, without the Node server
-
-The server now serves `dist/` under the prefix, redirects `/`, and answers a health route. Nothing
-it does needs a process: a static host with a rewrite rule and a fallback document would serve the
-same site, and the health check that gates a Railway deployment would go with the thing being
-deployed. What has to be decided first is what replaces the deploy gate — a static host has no
-health check to poll — and where the redirect at `/` lives, which is the same question the section
-below asks. Keeping the Node process meanwhile costs one small container and no complexity.
-
-### Splitting the domain across services
-
-Everything the site serves is under `/playground`, so a second service on `nxlang.org` — a home
-page at `/`, the docs — is an edge change, not a code change. The root redirect is the one thing
-that moves: it lives in the playground's server and would have to be replaced by whatever serves
-`/`. Routing by path to a second Railway service needs either a Cloudflare Origin Rule with a host
-override (confirm the plan supports it) or a Worker in front of both. Whichever is chosen, the new
-service must go through Cloudflare the way the playground does: the playground has no
-Railway-generated domain on purpose, because that hostname would answer outside the edge, where the
-cache rules do not apply.
 
 ## The DrawnUI Fiddle: What `add-nx-to-drawnui-fiddle` Left For Later
 
@@ -1377,3 +1357,82 @@ The fix for both is the same rework: give `TypeRef` (or each of its name and arg
 span and an `Error` variant when lowering it, and report at that span. Every crate that builds or
 matches a `TypeRef` changes with it: the checker, codegen, typegen and the language service, about
 a dozen files. Found by the `occurrence-cardinality` review (RF39, RF48).
+
+## The interpreter rejects an `Element` argument the checker accepts
+
+**Observed.** A property typed `Element` fails at run time in the Rust interpreter, although the
+checker accepts the program and the TypeScript IR runtime evaluates it:
+
+```nx
+let <Card title:string content body:Element /> =
+  <article><h2>{title}</h2>{body}</article>
+
+<Card title="Hi"><p>Body</p></Card>
+```
+
+`nxlang run` answers `Runtime error: Type mismatch in function call parameter 'body': expected
+Element, got p`. Compiling the same source with `@nx-lang/sdk-wasm` and evaluating it with
+`@nx-lang/ir-runtime` gives `<article>` with the `h2` and the `p` inside it. It fails the same way for
+a `component` and for a `let` element function. The interpreter's argument check seems to compare the
+value's tag with the parameter type's name, so no element satisfies `Element`, which no declaration
+names (see "Reconsider `Element` As A Built-In Type Name" above).
+
+**Why it matters.** `Element` is how a component takes markup, so `nxlang run` can't run most
+component examples that pass content, including the language tour's `Card` and the design-tokens
+tutorial. The .NET SDK evaluates with the same interpreter and is likely affected, but wasn't tried.
+It was found while checking the documentation's code blocks, and the check only compiles them, so it
+doesn't catch this.
+
+## A misspelled component compiles as a plain element
+
+**Observed.** An element whose tag matches no declaration is accepted as a host element, so a typo in
+a component's name is not reported:
+
+```nx
+let <Card title:string /> = <article>{title}</article>
+
+<Crad title="Hi" />
+```
+
+This compiles with no diagnostic and evaluates to `<Crad title="Hi" />`. It is how several
+documentation examples passed the code-block check while using undeclared tags such as `<Button>`,
+`<Tooltip>` and `<User>`.
+
+**Why it matters.** A misspelling, or a component that was renamed or never imported, fails
+silently and surfaces only as wrong output. This is the tag-level counterpart of "Built-In Element
+Content And Property Values Are Never Type-Checked" above, which covers what is inside such an
+element. A fix has to decide what a host element is: an open set of lowercase HTML-style tags, a
+declared set a host supplies, or anything not starting with an uppercase letter.
+
+## `emits` accepts a brace-less reference to an action that doesn't exist
+
+**Observed.** The `component-syntax` spec says a brace-less entry in `emits { ... }` must name an
+existing action, but no error is reported when it doesn't:
+
+```nx
+component <Search query:string emits { Submitted } /> = {
+  <input value={query} />
+}
+
+<Search query="nx" />
+```
+
+This compiles and runs, and nothing declares `Submitted`. The `SearchBox` block on the Functions
+reference page passes the code-block check only because of this: `SearchSubmitted` is declared in the
+block before it.
+
+**Why it matters.** A typo in an emitted action's name is found only when a handler for it never
+fires. Adding the check will fail code that compiles today, the docs among it, which the website's
+code-block check will point to.
+
+## `examples/nx/types.nx` no longer compiles
+
+**Observed.** `nxlang run examples/nx/types.nx` fails with `'UserCard' is declared more than once in
+this module; top-level names must be unique` (line 45): the file declares a `type UserCard` record
+and a `let <UserCard ... />` component. Nothing compiles the files under `examples/nx/` in CI, so it
+wasn't noticed when duplicate top-level names became an error.
+
+**Why it matters.** The examples are read as a reference for current syntax. Fix the file by
+renaming one of the two, and consider compiling every file under `examples/nx/` in CI, the way the
+website's code blocks are checked. Compiling is the right bar rather than running: `loops.nx` and
+`simple.nx` have no root, and `function.nx` imports a library directory.

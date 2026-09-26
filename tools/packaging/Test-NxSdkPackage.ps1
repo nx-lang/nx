@@ -57,14 +57,15 @@ try {
     }
 
     $metadata = $nuspec.package.metadata
-    $expectedProjectUrl = 'https://github.com/nx-lang/nx'
+    $expectedProjectUrl = 'https://nxlang.org/'
     if ($metadata.projectUrl -ne $expectedProjectUrl) {
         throw "Package '$PackagePath' has projectUrl '$($metadata.projectUrl)'; expected '$expectedProjectUrl'."
     }
 
+    $expectedRepositoryUrl = 'https://github.com/nx-lang/nx'
     $repositoryUrl = $metadata.repository.url
-    if ($repositoryUrl -ne $expectedProjectUrl) {
-        throw "Package '$PackagePath' has repository URL '$repositoryUrl'; expected '$expectedProjectUrl'."
+    if ($repositoryUrl -ne $expectedRepositoryUrl) {
+        throw "Package '$PackagePath' has repository URL '$repositoryUrl'; expected '$expectedRepositoryUrl'."
     }
 
     $metadataText = $metadata.OuterXml

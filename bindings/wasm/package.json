@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Browser and Node SDK for NX compilation, NX IR generation and the language service, over a WebAssembly module.",
   "license": "MIT",
-  "homepage": "https://nx-lang.dev",
+  "homepage": "https://nxlang.org",
   "repository": {
     "type": "git",
     "url": "https://github.com/nx-lang/nx.git",

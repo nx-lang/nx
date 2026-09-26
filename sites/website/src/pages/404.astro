@@ -1,0 +1,26 @@
+---
+// The not-found page, built here rather than as `src/content/docs/404.md` so it is not a
+// documentation entry: `starlight-llms-txt` reads every entry into `llms-full.txt`, and its
+// `exclude` option reaches only `llms-small.txt`. Starlight's own 404 route is turned off in
+// starlight.config.mjs, and the Worker's `not_found_handling: "404-page"` serves this build output.
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+---
+
+<StarlightPage
+  frontmatter={{
+    title: 'Page not found',
+    description: 'There is no page at this address.',
+    template: 'splash',
+    editUrl: false,
+    pagefind: false,
+    hero: {
+      title: 'Page not found',
+      tagline:
+        'There is no page at this address. It may have moved when the documentation moved to nxlang.org.',
+      actions: [
+        { text: 'Go to the documentation', link: '/tutorials/getting-started/', icon: 'right-arrow' },
+        { text: 'Home', link: '/', variant: 'minimal' }
+      ]
+    }
+  }}
+/>

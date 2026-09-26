@@ -1,0 +1,97 @@
+# Deploys the NX website (sites/website) to its Cloudflare Worker, `nxlang-website`, which serves
+# https://nxlang.org except /playground. The build needs no Rust: the code-block check, which does,
+# runs in build.yml on every pull request, so a page reaches main already checked. The link check
+# runs inside `astro build`, so a broken link fails here and nothing deploys. Setup (API token,
+# secrets, routes) is in docs/deployment-setup.md.
+
+name: Deploy Website
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - sites/website/**
+      # The site highlights NX with the extension's grammar.
+      - src/vscode/syntaxes/nx.tmLanguage.json
+      - pnpm-lock.yaml
+      - .github/workflows/deploy-website.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-website
+  cancel-in-progress: false
+
+env:
+  SITE_URL: https://nxlang.org
+  WRANGLER_VERSION: 4.141.0
+
+jobs:
+  deploy:
+    name: Build and deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: production
+      url: https://nxlang.org
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Install the site's dependencies
+        run: pnpm install --frozen-lockfile --filter @nx-lang/website
+
+      # GITHUB_SHA goes into every page's `nx-build` meta tag, which the smoke test looks for.
+      - name: Build the site
+        run: pnpm --filter @nx-lang/website build
+
+      # A Workers deploy is atomic: the new version serves only once every file is uploaded.
+      - name: Deploy to Cloudflare
+        working-directory: sites/website
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes "wrangler@${WRANGLER_VERSION}" deploy --message "main ${GITHUB_SHA}"
+
+      - name: Smoke-test the site
+        run: |
+          set -euo pipefail
+          stamp="name=\"nx-build\" content=\"${GITHUB_SHA}\""
+          for attempt in $(seq 1 12); do
+            ok=true
+            for path in / /language-tour/types/; do
+              if ! curl -sS --max-time 15 -A "nx-website-deploy" "${SITE_URL}${path}" | grep -qF "$stamp"; then
+                echo "${path} is not serving ${GITHUB_SHA} yet ($attempt/12)"
+                ok=false
+              fi
+            done
+            if [ "$ok" = true ]; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::${SITE_URL} did not serve the new build after the deployment"
+          exit 1
+
+      - name: Write the deployment summary
+        if: always()
+        run: |
+          {
+            echo "Website deployment of \`${GITHUB_SHA}\`: ${{ job.status }}."
+            echo ""
+            echo "- Site: ${SITE_URL}"
+            echo "- Roll back from sites/website: \`npx wrangler@${WRANGLER_VERSION} rollback\` (see docs/deployment.md)."
+          } >> "$GITHUB_STEP_SUMMARY"

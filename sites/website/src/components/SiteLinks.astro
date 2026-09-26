@@ -1,0 +1,28 @@
+---
+// The site-wide links beside search: the documentation and the playground, which is a separate
+// site under /playground.
+const links = [
+  { label: 'Docs', href: '/tutorials/getting-started/' },
+  { label: 'Playground', href: '/playground' }
+];
+---
+
+<nav class="site-links sl-flex" aria-label="Site">
+  {links.map(({ label, href }) => <a href={href}>{label}</a>)}
+</nav>
+
+<style>
+  .site-links {
+    gap: 1.25rem;
+    align-items: center;
+  }
+  .site-links a {
+    color: var(--sl-color-gray-2);
+    font-size: var(--sl-text-sm);
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .site-links a:hover {
+    color: var(--sl-color-white);
+  }
+</style>
