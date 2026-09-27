@@ -9,9 +9,9 @@ editor. Today it draws with DrawnUI; the site is shaped so that further targets 
 ## Requirements
 
 ### Requirement: Site is served under the playground path
-Everything the site serves — the gallery, each example's editor view, the health route, and every
-static asset — SHALL live under the `/playground` path prefix, so that the rest of the domain can
-later be served by something else without the playground changing.
+Everything the site serves — the gallery, each example's editor view, and every static asset —
+SHALL live under the `/playground` path prefix, so that the rest of the domain is served by the
+website without the playground changing.
 
 #### Scenario: Gallery address
 - **WHEN** a visitor opens `/playground` or `/playground/`
@@ -26,10 +26,9 @@ later be served by something else without the playground changing.
 - **THEN** the site SHALL show the gallery rather than an error page
 
 #### Scenario: API lives under the prefix
-- **WHEN** the hosting platform checks the service's health
-- **THEN** the request SHALL go to a path under `/playground/api/`
-- **AND** no compile or language route SHALL be served under that path, since the client compiles
-  and answers language queries itself
+- **WHEN** a request names a path under `/playground/api/`
+- **THEN** the site SHALL answer not found, since it serves no API: the client compiles and answers
+  language queries itself, and a static site has no health route
 
 #### Scenario: Assets live under the prefix
 - **WHEN** the shell loads its scripts, styles, fonts, images, the CanvasKit binary and the NX
@@ -38,11 +37,16 @@ later be served by something else without the playground changing.
 
 #### Scenario: Root redirects to the playground
 - **WHEN** a visitor opens `/`
-- **THEN** the service SHALL answer with a temporary redirect to `/playground`
+- **THEN** the website's landing page SHALL answer, with no redirect to `/playground`
+- **AND** the landing page and the site header SHALL link to `/playground`
 
 #### Scenario: Paths outside the prefix are not the shell
-- **WHEN** a request names a path that is neither `/` nor under `/playground`
-- **THEN** the service SHALL answer not found rather than serving the shell
+- **WHEN** a request names a path that is not under `/playground`
+- **THEN** the website SHALL answer it, and the playground's shell SHALL NOT be served
+
+#### Scenario: A missing asset is not the shell
+- **WHEN** a request under `/playground/assets/` names a file the build did not produce
+- **THEN** the site SHALL answer not found rather than serving the shell
 
 ### Requirement: Site is branded as the NX Playground
 The site SHALL present itself as the NX Playground — a place to try NX — and SHALL say, secondarily,
@@ -567,23 +571,6 @@ not change when the implementation does.
 - **THEN** it SHALL compile every example through the same in-browser compiler package the site
   ships, with the same catalog handling
 
-### Requirement: Service reports its own health
-The service SHALL answer a health request under the API prefix so that the hosting platform can
-tell a deployment that serves from one that does not before it switches traffic.
-
-#### Scenario: A healthy service answers
-- **WHEN** `GET /playground/api/health` is requested and the process is able to serve requests
-- **THEN** the service SHALL answer with a success status and a small JSON body
-
-#### Scenario: A stuck service does not answer
-- **WHEN** the process's request thread is blocked and cannot serve files
-- **THEN** the health request SHALL NOT be answered, since it is served from that same thread
-
-#### Scenario: A deployment that cannot serve is not switched to
-- **WHEN** a new deployment starts and its health request is not answered within the platform's
-  deadline
-- **THEN** the platform SHALL keep the previous deployment serving
-
 ### Requirement: A failed compiler costs one request
 A compile or language call that traps or overruns its deadline SHALL cost that request only: the
 site SHALL report it as a failure, replace the compiler, and answer the next request normally.
@@ -612,67 +599,9 @@ site SHALL report it as a failure, replace the compiler, and answer the next req
   is never edited
 - **THEN** the site SHALL compile again of its own accord rather than leave the failure standing
 
-### Requirement: Origin sets cache policy for the edge
-The service SHALL send cache headers that let an edge cache hold content-addressed assets for a long
-time and never hold the shell or the health answer, so that a deploy is visible on the next page
-load while the heavy assets are served from the edge.
-
-#### Scenario: Hashed assets are cacheable for a long time
-- **WHEN** a build-output asset whose file name carries a content hash is served, the NX compiler
-  module included
-- **THEN** the response SHALL declare itself publicly cacheable, immutable, and valid for at least a
-  year
-
-#### Scenario: Static files without a hash are revalidated
-- **WHEN** a font, image or other static file whose name carries no content hash is served
-- **THEN** the response SHALL be cacheable but SHALL require revalidation within a day
-
-#### Scenario: The shell is not cached
-- **WHEN** the shell document is served, for any address that resolves to it
-- **THEN** the response SHALL require revalidation on every use
-
-#### Scenario: API answers are not cached
-- **WHEN** a health request, the only request under the API prefix, is answered
-- **THEN** the response SHALL declare itself not storable
-
-### Requirement: Site is deployable as a single service
-The site SHALL be deployable as one service that serves the client application, its build SHALL be
-reproducible from the repository, and the deployment's own configuration — how the image is built,
-where the health check is, how restarts happen — SHALL be committed in the repository rather than
-held only in a hosting dashboard.
-
-#### Scenario: One service serves everything
-- **WHEN** the site is deployed
-- **THEN** a single service SHALL serve the client application, the compiler module it loads, and
-  the health route
-
-#### Scenario: A request the service cannot understand does not end it
-- **WHEN** a request names a path the URL decoder rejects, or fails anywhere outside a handler's own
-  error handling
-- **THEN** the service SHALL answer that request with an error status
-- **AND** it SHALL still answer the requests that follow
-
-#### Scenario: Build produces its own native dependencies
-- **WHEN** the deployment image is built from a clean checkout
-- **THEN** the build SHALL produce the NX compiler module the client loads
-- **AND** it SHALL NOT depend on artifacts built outside the image
-- **AND** the running service SHALL need no Rust toolchain and no native addon
-
-#### Scenario: Deployment configuration is in the repository
-- **WHEN** the hosting platform builds and runs the service
-- **THEN** the Dockerfile path, the health check path and the restart policy SHALL come from a
-  configuration file committed in the repository
-
-#### Scenario: Deploys follow the main branch
-- **WHEN** a commit that touches the site or a package it depends on lands on `main`
-- **THEN** a new deployment SHALL be built and, once its health check passes, replace the previous
-  one
-
 ### Requirement: Public deployment is fronted by an edge that serves assets
-The public deployment SHALL sit behind an edge proxy that terminates TLS and caches according to
-the origin's cache headers, so that the heavy assets, the compiler module among them, are served
-near the visitor. No rate limit on the service SHALL be required, since no request costs the origin
-more than a file.
+The playground SHALL be served from Cloudflare's edge as static files, over TLS, with no origin
+process behind it. No rate limit SHALL be required, since no request costs more than a file.
 
 #### Scenario: The site is reachable at its public address
 - **WHEN** a visitor opens `https://nxlang.org/playground`
@@ -680,14 +609,13 @@ more than a file.
 - **AND** `http://nxlang.org/playground` SHALL redirect to it
 
 #### Scenario: Assets are served from the edge
-- **WHEN** a hashed asset, the CanvasKit binary or the NX compiler module is requested a second
-  time from the same region
-- **THEN** it SHALL be served from the edge cache rather than from the service
+- **WHEN** a hashed asset, the CanvasKit binary or the NX compiler module is requested
+- **THEN** it SHALL be served from Cloudflare's edge, with no request reaching an origin server
 
 ### Requirement: Site documents how to run, sync and deploy it
 The site SHALL carry documentation covering how to build and run it locally, what it depends on
 including the wasm toolchain, how to move its `drawnui-react` pin and refresh the DrawnUI assets
-copied from upstream, and how it is deployed, including the one-time edge and hosting setup.
+copied from upstream, and how it is deployed, including the one-time edge setup.
 
 #### Scenario: Local run is documented
 - **WHEN** a contributor reads the site's documentation
@@ -703,8 +631,9 @@ copied from upstream, and how it is deployed, including the one-time edge and ho
 #### Scenario: Deployment is documented
 - **WHEN** a maintainer needs to deploy, roll back, or set the site up on a fresh hosting account
 - **THEN** the repository's deployment docs SHALL describe the day-to-day flow and the one-time
-  setup, including every edge rule the site depends on
-- **AND** they SHALL NOT describe a rate limit the site no longer needs
+  setup, including every edge setting the site depends on
+- **AND** they SHALL NOT describe a rate limit, a health route or an origin service the site no
+  longer has
 
 ### Requirement: Drawn text uses the demo's font configuration
 The site SHALL register the same fonts and the same font defaults as the DrawnUI demo site, so that
@@ -786,3 +715,46 @@ the same controls.
 - **THEN** the site's tests and example checks SHALL pass only once the catalog records the new
   version
 - **AND** the catalog's changes SHALL show as an ordinary diff
+
+### Requirement: Static files declare their cache policy
+The site's static files SHALL declare cache headers that let browsers hold content-addressed assets
+for a long time and never hold a stale shell, so that a deploy is visible on the next page load.
+
+#### Scenario: Hashed assets are cacheable for a long time
+- **WHEN** a build-output asset whose file name carries a content hash is served, the NX compiler
+  module included
+- **THEN** the response SHALL declare itself publicly cacheable, immutable, and valid for at least a
+  year
+
+#### Scenario: Static files without a hash are revalidated
+- **WHEN** a font, image or other static file whose name carries no content hash is served
+- **THEN** the response SHALL be cacheable but SHALL require revalidation within a day
+
+#### Scenario: The shell is not cached
+- **WHEN** the shell document is served, for any address that resolves to it
+- **THEN** the response SHALL require revalidation on every use
+
+### Requirement: Site deploys as static files from main
+The site SHALL be built to static files from a clean checkout, the NX compiler module included, and
+a push to `main` that touches the site or a package it depends on SHALL build, test and deploy it.
+The deployment's configuration, meaning the route it serves, its client routing and its headers,
+SHALL be committed in the repository.
+
+#### Scenario: Build produces its own native dependencies
+- **WHEN** the site is built from a clean checkout in CI
+- **THEN** the build SHALL produce the NX compiler module the client loads
+- **AND** it SHALL NOT depend on artifacts built outside that run
+
+#### Scenario: Deploys follow the main branch
+- **WHEN** a commit that touches the site or a package it depends on lands on `main`, and its build
+  and tests pass
+- **THEN** the new build SHALL replace the live one
+
+#### Scenario: A failing build does not deploy
+- **WHEN** the build or tests fail
+- **THEN** the live site SHALL keep serving the previous build
+
+#### Scenario: The deploy is verified
+- **WHEN** a deployment finishes
+- **THEN** the workflow SHALL fetch the shell and the compiler module from
+  `https://nxlang.org/playground`, and fail if either does not answer
