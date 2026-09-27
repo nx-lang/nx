@@ -1,30 +1,62 @@
-# vscode-extension-publishing Specification
+## ADDED Requirements
 
-## Purpose
-Define the VS Code extension packaging, verification, registry publishing, and maintainer release
-documentation for the NX language extension.
+### Requirement: VS Code extension is released with the NX release
 
-## Requirements
+The automated publishing workflow SHALL publish VS Code extension packages only from trusted release
+contexts that produce a registry-valid VSIX version for the artifact being published. The production
+path SHALL be the NX release tag, `v<major>.<minor>.<patch>`, which creates one draft GitHub Release
+for the packages and the extension together; publishing that GitHub Release SHALL trigger
+Marketplace and Open VSX publication from the release assets.
 
-### Requirement: VS Code extension package verification
+#### Scenario: VS Code release tag computes publishable extension version
 
-The repository SHALL provide a repeatable way to package the NX VS Code extension into a VSIX and
-inspect the package contents before publishing.
+- **WHEN** a maintainer pushes a valid release tag matching `v<major>.<minor>.<patch>`
+- **THEN** CI SHALL compute the VSIX version as `major.minor.patch` from the tag, the same version as
+  the release's packages
+- **AND** the staged extension manifest version SHALL match the VSIX artifact being published
+- **AND** the checked-in development manifest SHALL NOT need to be manually edited for every release
+  solely to create the published extension version
 
-#### Scenario: Local package verification
+#### Scenario: VS Code release tag creates draft release
 
-- **WHEN** a maintainer runs the documented package verification command from `src/vscode`
-- **THEN** the command SHALL run the extension test suite before producing or validating the VSIX
-- **AND** the generated VSIX contents SHALL be visible to the maintainer before any publish command
-  is run
+- **WHEN** a valid release tag is pushed
+- **THEN** CI SHALL build, verify, and upload the VSIX artifact for every supported package target
+- **AND** CI SHALL attach the verified VSIX artifacts to the release's draft GitHub Release, beside
+  the package artifacts
+- **AND** CI SHALL NOT publish those VSIX artifacts to Marketplace or Open VSX while the GitHub Release
+  remains a draft
 
-#### Scenario: Development files are excluded from the VSIX
+#### Scenario: Published VS Code release uses release assets
 
-- **WHEN** the VS Code extension is packaged for release
-- **THEN** the VSIX SHALL include the extension manifest, README, changelog, license, language
-  configuration, TextMate grammars, and snippets
-- **AND** the VSIX SHALL exclude tests, samples, lockfiles, workspace metadata, local editor
-  settings, generated VSIX files, and dependency directories
+- **WHEN** a human publishes a non-draft GitHub Release for a valid release tag
+- **THEN** the publish workflow SHALL validate the release tag and attached VSIX artifacts
+- **AND** the workflow SHALL publish those artifacts without rebuilding different package contents
+
+#### Scenario: Extension version is invalid
+
+- **WHEN** a trusted release workflow cannot compute a registry-valid VSIX version
+- **THEN** the workflow MUST fail before creating a publishable release or publishing to any registry
+
+#### Scenario: Already-published registry version is skipped
+
+- **WHEN** the publish workflow checks a target registry before publication
+- **AND** the verified VSIX artifact version is already published in that registry for the selected
+  release channel and package target
+- **THEN** the workflow SHALL skip that registry write for that VSIX artifact as an idempotent retry
+- **AND** it SHALL continue publishing the same VSIX artifact to any target registry where that
+  version is not already present
+
+#### Scenario: Manual repair uses release assets
+
+- **WHEN** a maintainer runs a manual repair publish for the VS Code extension
+- **THEN** the workflow SHALL require an explicit GitHub Release tag or release asset set
+- **AND** the workflow SHALL validate the release assets before publication
+- **AND** the workflow SHALL publish artifacts from that release without rebuilding different
+  package contents
+- **AND** the workflow SHALL allow same-version repair by skipping registries where the artifact
+  version is already published and publishing to registries where that version is missing
+
+## MODIFIED Requirements
 
 ### Requirement: VS Code extension registry publishing
 
@@ -147,49 +179,6 @@ registry configuration, artifact testing, and recurring release operations.
 - **AND** it SHALL explain that installing from VSIX is the supported PR testing path rather than
   publishing PR builds to Marketplace or Open VSX
 
-### Requirement: VS Code extension package includes LSP runtime assets
-The VS Code extension package SHALL include the compiled TypeScript extension client runtime and
-the Rust `nx-lsp` server asset required for the package target. LSP runtime assets SHALL be included
-without including development-only source files, tests, local editor settings, dependency caches, or
-generated package artifacts.
-
-#### Scenario: LSP-enabled package contains client runtime
-- **WHEN** the VS Code extension is packaged after LSP client integration
-- **THEN** the VSIX SHALL include the compiled extension client JavaScript needed by the `main`
-  extension entry point
-- **AND** it SHALL include package metadata needed for VS Code to activate the NX LSP client
-
-#### Scenario: LSP-enabled package contains server binary
-- **WHEN** the VS Code extension is packaged for a platform target that supports the Rust language
-  server
-- **THEN** the VSIX SHALL include the `nx-lsp` executable for that target
-- **AND** the extension SHALL be able to locate that executable at runtime without requiring a
-  separate user installation
-
-### Requirement: VS Code package verification validates LSP assets
-The local and CI package verification workflow SHALL verify that LSP-enabled packages contain the
-expected extension runtime and server assets before publishing.
-
-#### Scenario: Package verification detects missing server asset
-- **WHEN** package verification runs for an LSP-enabled VS Code package
-- **AND** the expected `nx-lsp` executable is missing from the packaged contents
-- **THEN** package verification MUST fail before publishing
-
-#### Scenario: Package verification still runs grammar tests
-- **WHEN** package verification runs after LSP integration
-- **THEN** the verification workflow SHALL continue to run the existing grammar and extension tests
-- **AND** it SHALL add the LSP asset checks rather than replacing the existing checks
-
-### Requirement: VS Code publishing supports native package targets
-The VS Code extension publishing workflow SHALL support platform-specific package targets when a
-release includes native `nx-lsp` binaries. Each published native package SHALL pair the extension
-client with a server binary built for the corresponding target platform.
-
-#### Scenario: Native package target uses matching server binary
-- **WHEN** CI packages the VS Code extension for a native target
-- **THEN** the packaged `nx-lsp` executable SHALL match that target platform
-- **AND** the package verification step SHALL inspect the target package contents before publishing
-
 ### Requirement: The extension is published for NX users
 The VS Code extension SHALL be published to the Visual Studio Marketplace under publisher `nx-lang`
 and to Open VSX under namespace `nx-lang`, as extension `nx-language`, with each NX release
@@ -219,58 +208,10 @@ releasing the extension SHALL live in a separate maintainer document, which the 
 - **WHEN** a maintainer looks for how to build, package or release the extension
 - **THEN** `src/vscode/CONTRIBUTING.md` SHALL describe it, and the README SHALL link to that file
 
-### Requirement: VS Code extension is released with the NX release
+## REMOVED Requirements
 
-The automated publishing workflow SHALL publish VS Code extension packages only from trusted release
-contexts that produce a registry-valid VSIX version for the artifact being published. The production
-path SHALL be the NX release tag, `v<major>.<minor>.<patch>`, which creates one draft GitHub Release
-for the packages and the extension together; publishing that GitHub Release SHALL trigger
-Marketplace and Open VSX publication from the release assets.
-
-#### Scenario: VS Code release tag computes publishable extension version
-
-- **WHEN** a maintainer pushes a valid release tag matching `v<major>.<minor>.<patch>`
-- **THEN** CI SHALL compute the VSIX version as `major.minor.patch` from the tag, the same version as
-  the release's packages
-- **AND** the staged extension manifest version SHALL match the VSIX artifact being published
-- **AND** the checked-in development manifest SHALL NOT need to be manually edited for every release
-  solely to create the published extension version
-
-#### Scenario: VS Code release tag creates draft release
-
-- **WHEN** a valid release tag is pushed
-- **THEN** CI SHALL build, verify, and upload the VSIX artifact for every supported package target
-- **AND** CI SHALL attach the verified VSIX artifacts to the release's draft GitHub Release, beside
-  the package artifacts
-- **AND** CI SHALL NOT publish those VSIX artifacts to Marketplace or Open VSX while the GitHub Release
-  remains a draft
-
-#### Scenario: Published VS Code release uses release assets
-
-- **WHEN** a human publishes a non-draft GitHub Release for a valid release tag
-- **THEN** the publish workflow SHALL validate the release tag and attached VSIX artifacts
-- **AND** the workflow SHALL publish those artifacts without rebuilding different package contents
-
-#### Scenario: Extension version is invalid
-
-- **WHEN** a trusted release workflow cannot compute a registry-valid VSIX version
-- **THEN** the workflow MUST fail before creating a publishable release or publishing to any registry
-
-#### Scenario: Already-published registry version is skipped
-
-- **WHEN** the publish workflow checks a target registry before publication
-- **AND** the verified VSIX artifact version is already published in that registry for the selected
-  release channel and package target
-- **THEN** the workflow SHALL skip that registry write for that VSIX artifact as an idempotent retry
-- **AND** it SHALL continue publishing the same VSIX artifact to any target registry where that
-  version is not already present
-
-#### Scenario: Manual repair uses release assets
-
-- **WHEN** a maintainer runs a manual repair publish for the VS Code extension
-- **THEN** the workflow SHALL require an explicit GitHub Release tag or release asset set
-- **AND** the workflow SHALL validate the release assets before publication
-- **AND** the workflow SHALL publish artifacts from that release without rebuilding different
-  package contents
-- **AND** the workflow SHALL allow same-version repair by skipping registries where the artifact
-  version is already published and publishing to registries where that version is missing
+### Requirement: VS Code extension versioned release trigger
+**Reason**: The extension no longer has its own `vscode-v*` release tag. It is released from the NX
+release tag at the package version; see "VS Code extension is released with the NX release".
+**Migration**: Push a `v<major>.<minor>.<patch>` tag to release the extension along with the
+packages.

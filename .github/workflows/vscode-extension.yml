@@ -1,3 +1,7 @@
+# Builds the VSIX files for pull requests and main, so reviewers can install them from the run's
+# artifacts; pr-artifact-comment.yml posts the install commands. release.yml builds the release VSIX
+# files with the same reusable workflow.
+
 name: VS Code Extension
 
 on:
@@ -10,8 +14,8 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/vscode-extension.yml'
-      - '.github/workflows/vscode-extension-publish.yml'
-      - '.github/workflows/vscode-release.yml'
+      - '.github/workflows/vscode-vsix.yml'
+      - 'tools/versions/**'
       - '.github/workflows/pr-artifact-comment.yml'
   push:
     branches: [ main ]
@@ -21,94 +25,4 @@ permissions:
 
 jobs:
   package:
-    name: Package (${{ matrix.target }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: linux-x64
-            os: ubuntu-latest
-          - target: darwin-arm64
-            os: macos-14
-          - target: win32-x64
-            os: windows-latest
-    env:
-      NX_LSP_PLATFORM: ${{ matrix.target }}
-      NX_VSCODE_TARGET: ${{ matrix.target }}
-    defaults:
-      run:
-        working-directory: src/vscode
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          package_json_file: src/vscode/package.json
-          run_install: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: 'pnpm'
-          cache-dependency-path: src/vscode/pnpm-lock.yaml
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Restore .NET tools
-        run: dotnet tool restore
-        working-directory: .
-
-      - name: Calculate VS Code extension version
-        shell: pwsh
-        run: >
-          tools/versions/Get-ReleaseVersion.ps1
-          -Track vscode
-          -PullRequestNumber '${{ github.event.pull_request.number }}'
-          -GitHubEnvPath $env:GITHUB_ENV
-        working-directory: .
-
-      - name: Build Rust language server
-        run: pnpm run build:lsp
-
-      - name: Stage CI extension version
-        run: pnpm run version:stage
-
-      - name: Verify and package VSIX
-        id: package
-        shell: bash
-        run: |
-          rm -f ./*.vsix
-          pnpm run package:verify
-
-          vsix_files="$(find . -maxdepth 1 -type f -name '*.vsix' | sort)"
-          vsix_count="$(printf '%s\n' "${vsix_files}" | sed '/^$/d' | wc -l | tr -d ' ')"
-          if [ "${vsix_count}" -ne 1 ]; then
-            echo "::error::Expected exactly one VSIX, found ${vsix_count}."
-            printf '%s\n' "${vsix_files}"
-            exit 1
-          fi
-
-          vsix_path="${vsix_files}"
-          echo "vsix_path=${vsix_path}" >> "$GITHUB_OUTPUT"
-          echo "vsix_name=${vsix_path#./}" >> "$GITHUB_OUTPUT"
-
-      - name: List packaged VSIX contents
-        shell: bash
-        run: unzip -l "${{ steps.package.outputs.vsix_path }}"
-
-      - name: Upload .vsix artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: vscode-vsix-${{ matrix.target }}
-          path: src/vscode/${{ steps.package.outputs.vsix_name }}
-          if-no-files-found: error
+    uses: ./.github/workflows/vscode-vsix.yml

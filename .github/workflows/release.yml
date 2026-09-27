@@ -1,17 +1,22 @@
-name: Package release
+# Releases NX from a v<major>.<minor>.<patch> tag: the NuGet package, every npm package and a VSIX
+# per VS Code extension target, all at the tag's version, attached to one draft GitHub Release.
+# Publishing that release runs package-publish.yml.
+
+name: Release
 
 on:
   push:
     tags:
-    - 'v*'
+    # Only v<major>.<minor>.<patch>, so a tag of the retired vscode-v* track starts no run.
+    - 'v[0-9]+.[0-9]+.[0-9]+'
   workflow_dispatch:
     inputs:
       tag:
-        description: Package release tag to rebuild as a draft release
+        description: Release tag to rebuild as a draft release
         type: string
         required: true
 
-run-name: Package release ${{ inputs.tag || github.ref_name }}
+run-name: Release ${{ inputs.tag || github.ref_name }}
 
 env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
@@ -19,14 +24,13 @@ env:
   NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages/
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   validate:
-    name: Validate package release tag
+    name: Validate release tag
     runs-on: ubuntu-latest
     outputs:
-      should_release: ${{ steps.tag.outputs.should_release }}
       tag: ${{ steps.tag.outputs.tag }}
       version: ${{ steps.tag.outputs.version }}
     steps:
@@ -39,23 +43,12 @@ jobs:
         set -euo pipefail
 
         tag="${DISPATCH_TAG:-${GITHUB_REF_NAME}}"
-        if [[ "${tag}" =~ ^vscode-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-          echo "VS Code release tag ${tag} is handled by vscode-release.yml; skipping package release."
-          {
-            echo "should_release=false"
-            echo "tag=${tag}"
-            echo "version="
-          } >> "${GITHUB_OUTPUT}"
-          exit 0
-        fi
-
         if [[ ! "${tag}" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-          echo "::error::Package release tags must match v<major>.<minor>.<patch>. Actual tag: ${tag}."
+          echo "::error::Release tags must match v<major>.<minor>.<patch>. Actual tag: ${tag}."
           exit 1
         fi
 
         {
-          echo "should_release=true"
           echo "tag=${tag}"
           echo "version=${tag#v}"
         } >> "${GITHUB_OUTPUT}"
@@ -64,7 +57,6 @@ jobs:
     name: Build native SDK (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     needs: validate
-    if: ${{ needs.validate.outputs.should_release == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -98,7 +90,6 @@ jobs:
     needs:
     - validate
     - native-sdk
-    if: ${{ needs.validate.outputs.should_release == 'true' }}
     steps:
     - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
       with:
@@ -114,7 +105,6 @@ jobs:
       shell: pwsh
       run: >
         tools/versions/Get-ReleaseVersion.ps1
-        -Track package
         -Context tag
         -RefName '${{ needs.validate.outputs.tag }}'
         -GitHubEnvPath $env:GITHUB_ENV
@@ -152,7 +142,6 @@ jobs:
     name: Build editor-assets package
     runs-on: ubuntu-latest
     needs: validate
-    if: ${{ needs.validate.outputs.should_release == 'true' }}
     defaults:
       run:
         working-directory: src/vscode
@@ -168,18 +157,17 @@ jobs:
       shell: pwsh
       run: >
         tools/versions/Get-ReleaseVersion.ps1
-        -Track package
         -Context tag
         -RefName '${{ needs.validate.outputs.tag }}'
         -GitHubEnvPath $env:GITHUB_ENV
       working-directory: .
     - name: Setup pnpm
-      uses: pnpm/action-setup@v4
+      uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
       with:
         package_json_file: src/vscode/package.json
         run_install: false
     - name: Setup Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
       with:
         node-version: '24'
         cache: 'pnpm'
@@ -205,7 +193,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: validate
-    if: ${{ needs.validate.outputs.should_release == 'true' }}
     steps:
     - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
       with:
@@ -229,6 +216,12 @@ jobs:
         path: ${{ runner.temp }}/npm-packages/*.tgz
         if-no-files-found: error
 
+  vsix:
+    needs: validate
+    uses: ./.github/workflows/vscode-vsix.yml
+    with:
+      release_tag: ${{ needs.validate.outputs.tag }}
+
   draft-release:
     name: Create draft GitHub Release
     runs-on: ubuntu-latest
@@ -237,7 +230,7 @@ jobs:
     - package
     - editor-assets
     - npm-packages
-    if: ${{ needs.validate.outputs.should_release == 'true' }}
+    - vsix
     permissions:
       actions: read
       contents: write
@@ -257,6 +250,13 @@ jobs:
       with:
         name: package-release-npm
         path: ${{ runner.temp }}/npm-packages
+    # One vscode-vsix-<target> artifact per target in vscode-vsix.yml's matrix, each in its own
+    # directory, so the check below learns the targets from the matrix instead of repeating them.
+    - name: Download VSIX release artifacts
+      uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+      with:
+        pattern: vscode-vsix-*
+        path: ${{ runner.temp }}/vsix
     - name: Create manifest and checksums
       shell: pwsh
       env:
@@ -270,13 +270,27 @@ jobs:
         Get-ChildItem "$env:RUNNER_TEMP/nuget" -File -Include '*.nupkg', '*.snupkg' -Recurse | Copy-Item -Destination $releaseAssets
         Get-ChildItem "$env:RUNNER_TEMP/editor-assets" -File -Filter '*.tgz' -Recurse | Copy-Item -Destination $releaseAssets
         Get-ChildItem "$env:RUNNER_TEMP/npm-packages" -File -Filter '*.tgz' -Recurse | Copy-Item -Destination $releaseAssets
+        Get-ChildItem "$env:RUNNER_TEMP/vsix" -File -Filter '*.vsix' -Recurse | Copy-Item -Destination $releaseAssets
 
         $nupkg = @(Get-ChildItem $releaseAssets -File -Filter '*.nupkg')
         $snupkg = @(Get-ChildItem $releaseAssets -File -Filter '*.snupkg')
         $tgz = @(Get-ChildItem $releaseAssets -File -Filter '*.tgz')
+        $vsix = @(Get-ChildItem $releaseAssets -File -Filter '*.vsix')
 
         if ($nupkg.Count -eq 0 -or $snupkg.Count -eq 0 -or $tgz.Count -lt 2) {
-            throw 'Package releases require .nupkg, .snupkg, the editor-assets .tgz and the workspace npm .tgz assets.'
+            throw 'Releases require .nupkg, .snupkg, the editor-assets .tgz and the workspace npm .tgz assets.'
+        }
+
+        $vsixArtifacts = @(Get-ChildItem "$env:RUNNER_TEMP/vsix" -Directory -Filter 'vscode-vsix-*')
+        if ($vsixArtifacts.Count -eq 0) {
+            throw 'Releases require a VSIX for every VS Code extension target.'
+        }
+
+        foreach ($artifact in $vsixArtifacts) {
+            $target = $artifact.Name.Substring('vscode-vsix-'.Length)
+            if (!($vsix | Where-Object Name -eq "nx-language-$target-$env:RELEASE_VERSION.vsix")) {
+                throw "Releases require the $target VSIX at version $env:RELEASE_VERSION."
+            }
         }
 
         $artifacts = @(Get-ChildItem $releaseAssets -File | Sort-Object Name | ForEach-Object {
@@ -289,7 +303,6 @@ jobs:
 
         $manifest = [ordered] @{
             schema = 'nx.release-manifest.v1'
-            track = 'package'
             tag = $env:RELEASE_TAG
             version = $env:RELEASE_VERSION
             commit = $env:GITHUB_SHA
@@ -312,10 +325,10 @@ jobs:
 
         notes="${RUNNER_TEMP}/release-notes.md"
         cat > "${notes}" <<EOF
-        Draft package release for ${RELEASE_TAG}.
+        Draft release for ${RELEASE_TAG}.
 
-        Review the attached NuGet, symbol, npm (editor assets and workspace packages), manifest, and checksum assets before publishing this GitHub Release.
-        Publishing the release triggers production package registry publication.
+        Review the attached NuGet, symbol, npm (editor assets and workspace packages), VS Code extension VSIX, manifest, and checksum assets before publishing this GitHub Release.
+        Publishing the release publishes them to NuGet, npm, the Visual Studio Marketplace and Open VSX.
         EOF
 
         if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
@@ -324,9 +337,9 @@ jobs:
             echo "::error::Release ${RELEASE_TAG} already exists and is not a draft."
             exit 1
           fi
-          gh release edit "${RELEASE_TAG}" --draft=true --title "NX packages ${RELEASE_VERSION}" --notes-file "${notes}"
+          gh release edit "${RELEASE_TAG}" --draft=true --title "NX ${RELEASE_VERSION}" --notes-file "${notes}"
         else
-          gh release create "${RELEASE_TAG}" --draft --title "NX packages ${RELEASE_VERSION}" --notes-file "${notes}"
+          gh release create "${RELEASE_TAG}" --draft --title "NX ${RELEASE_VERSION}" --notes-file "${notes}"
         fi
 
         gh release upload "${RELEASE_TAG}" "${RUNNER_TEMP}/release-assets/"* --clobber

@@ -1,7 +1,7 @@
 # Deployment Runbook
 
-This runbook covers day-to-day package and VS Code extension publishing, and the website and
-playground.
+This runbook covers day-to-day releases of the packages and the VS Code extension, and the website
+and playground.
 One-time environment, registry and hosting setup is in [deployment-setup.md](deployment-setup.md).
 
 ## Release Model
@@ -9,22 +9,28 @@ One-time environment, registry and hosting setup is in [deployment-setup.md](dep
 Pull requests and `main` builds are artifact-only. They build, verify, and upload NuGet, npm
 (editor assets and the workspace packages), and VSIX artifacts without public registry credentials.
 
-Production publishing has two reviewed release tracks:
+Production publishing has one reviewed release track. The packages and the VS Code extension are
+released together, from one tag such as `v1.2.3`, at one version: the extension's language server is
+built from the same crates as the runtime, so extension 1.2.3 understands the same NX as SDK 1.2.3.
 
-- Package releases use tags like `v1.2.3`. The tag workflow creates a draft GitHub Release with
-  verified `NxLang.Sdk` `.nupkg` and `.snupkg` assets, one npm tarball per package — the
-  `@nx-lang/language` editor assets and the workspace packages `@nx-lang/language-protocol`,
-  `@nx-lang/language-core`, `@nx-lang/language-client`, `@nx-lang/ir-runtime`, `@nx-lang/sdk-wasm`
-  (with the WebAssembly module inside) and `@nx-lang/monaco` — a release manifest, and checksums.
-  Every npm package carries the tag's version, and a workspace package's dependency on another is
-  pinned to that version.
-- VS Code extension releases use tags like `vscode-v1.2.3`. The tag workflow creates a draft GitHub
-  Release with verified VSIX assets, a release manifest, and checksums.
+The tag workflow, `release.yml`, creates a draft GitHub Release titled `NX 1.2.3` with:
 
-Publishing the GitHub Release is the production gate. Published package releases trigger
-`package-publish.yml`; published VS Code releases trigger `vscode-extension-publish.yml`. Those
-workflows validate the release assets and publish the attached files without rebuilding package
-contents.
+- the verified `NxLang.Sdk` `.nupkg` and `.snupkg`;
+- one npm tarball per package: the `@nx-lang/language` editor assets and the workspace packages
+  `@nx-lang/language-protocol`, `@nx-lang/language-core`, `@nx-lang/language-client`,
+  `@nx-lang/ir-runtime`, `@nx-lang/sdk-wasm` (with the WebAssembly module inside) and
+  `@nx-lang/monaco`. A workspace package's dependency on another is pinned to the release version;
+- one VSIX per extension target (`linux-x64`, `darwin-arm64`, `win32-x64`), each with its
+  platform's `nx-lsp`;
+- a release manifest and checksums.
+
+Publishing the GitHub Release is the production gate. It triggers `package-publish.yml`, which
+validates the release assets and publishes the attached files without rebuilding them: NuGet and npm
+in one job, the Visual Studio Marketplace and Open VSX in another, so an outage on one side doesn't
+stop the other.
+
+Tags of the retired extension-only track, `vscode-v*`, no longer release anything. `vscode-v0.1.0`
+and its GitHub Release stay as history.
 
 Rust tooling publication for `nxlang`, `nx-lsp`, and Rust crates is not part of this release
 pipeline yet.
@@ -34,9 +40,8 @@ pipeline yet.
 Version calculation is centralized in `tools/versions/Get-ReleaseVersion.ps1` and uses the local
 MinVer CLI tool.
 
-- `v<major>.<minor>.<patch>` package tags produce stable NuGet and npm versions with no prerelease
-  suffix.
-- `vscode-v<major>.<minor>.<patch>` tags produce registry-valid VSIX versions.
+- `v<major>.<minor>.<patch>` tags produce stable NuGet, npm and VSIX versions with no prerelease
+  suffix, all equal to the tag's version.
 - Pull request package artifacts use unique prerelease versions such as
   `0.1.0-pr.<pr>.<run>.<attempt>`.
 - `main` package artifacts use CI prerelease versions such as `0.1.0-ci.<run>.<attempt>`.
@@ -45,44 +50,33 @@ MinVer CLI tool.
 
 Only stable `major.minor.patch` release tags are supported in this implementation.
 
-## Publish A Package Release
+## Publish A Release
 
-1. Merge the release change to `main`.
-2. Create and push a package release tag:
+1. Merge the release change to `main`, including a section for the release version in
+   `src/vscode/CHANGELOG.md`, which the Marketplace and Open VSX show as the extension's changelog.
+2. Create and push a release tag:
    ```bash
    git tag v1.2.3
    git push origin v1.2.3
    ```
-3. Wait for the Package release workflow to finish.
-4. Open the draft GitHub Release for `v1.2.3`.
-5. Inspect the attached `.nupkg`, `.snupkg`, npm `.tgz` files, `release-manifest.json`, and
-   `release-checksums.txt` assets.
+3. Wait for the Release workflow to finish.
+4. Open the draft GitHub Release for `v1.2.3`, titled `NX 1.2.3`.
+5. Inspect the attached `.nupkg`, `.snupkg`, npm `.tgz` files, the three `.vsix` files,
+   `release-manifest.json`, and `release-checksums.txt`.
 6. Confirm the manifest tag, version, commit, artifact names, and checksums match the intended
-   release.
+   release, and that every VSIX contains publisher `nx-lang`, extension `nx-language`, and version
+   `1.2.3`.
 7. Publish the GitHub Release.
-8. Approve the `production` environment deployment if reviewers are required.
-9. Confirm publication on NuGet.org and npm: `npm view @nx-lang/sdk-wasm version` and the same
-   for each package should answer with the tag's version.
+8. Approve the `production` environment deployments if reviewers are required.
+9. Confirm publication:
+   - NuGet.org lists `NxLang.Sdk` 1.2.3.
+   - `npm view @nx-lang/sdk-wasm version`, and the same for each package, answers `1.2.3`.
+   - The Visual Studio Marketplace and Open VSX list `nx-lang.nx-language` 1.2.3 for all three
+     platforms.
 
 The publish job publishes the npm tarballs in dependency order (`scripts/publish-packages.mjs`), so
 a consumer installing a just-published package finds its `@nx-lang/*` dependencies on the registry
 already, and skips any version the registry has.
-
-## Publish A VS Code Extension Release
-
-1. Merge the extension release change to `main`.
-2. Create and push a VS Code extension release tag:
-   ```bash
-   git tag vscode-v1.2.3
-   git push origin vscode-v1.2.3
-   ```
-3. Wait for the VS Code extension release workflow to finish.
-4. Open the draft GitHub Release for `vscode-v1.2.3`.
-5. Inspect the attached VSIX assets, `release-manifest.json`, and `release-checksums.txt`.
-6. Confirm every VSIX contains publisher `nx-lang`, extension `nx-language`, and version `1.2.3`.
-7. Publish the GitHub Release.
-8. Approve the `production` environment deployment if reviewers are required.
-9. Confirm publication in the Visual Studio Marketplace and Open VSX.
 
 ## Pull Request Artifact Testing
 
@@ -147,30 +141,27 @@ each one and installs it into a scratch project, and `node scripts/pack-packages
 
 Repair uses the same GitHub Release assets that were already reviewed and partially published.
 
-Package registry repair:
+Rerun the failed job of the Publish release run, or run the workflow again for the release:
 
 ```bash
 gh workflow run package-publish.yml --ref main -f release_tag=v1.2.3
 ```
 
-VS Code registry repair:
-
-```bash
-gh workflow run vscode-extension-publish.yml --ref main -f release_tag=vscode-v1.2.3
-```
-
-The package publish workflow validates the release assets before registry writes and uses
-idempotent duplicate-version behavior where supported. The VSIX publish script checks each registry
-separately and skips an already-published extension version, so a repair can fill in a missing
-Marketplace or Open VSX publication.
+Each publish job validates the release assets before registry writes, and every registry write skips
+a version that is already there: `--skip-duplicate` for NuGet, `publish-packages.mjs` for npm, and
+the VSIX publish script, which checks the Marketplace and Open VSX separately. So a repair fills in
+only what is missing.
 
 For a local emergency repair from already-downloaded assets:
 
 ```bash
 dotnet nuget push NxLang.Sdk.*.nupkg --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
 node scripts/publish-packages.mjs <directory-with-the-release-tgz-files> --version 1.2.3
-pnpm run publish:vsce -- nx-language-*.vsix
-pnpm run publish:ovsx -- nx-language-*.vsix
+# The VSIX scripts publish one file per call, so loop over the three platforms.
+for vsix in <directory-with-the-release-vsix-files>/nx-language-*.vsix; do
+  pnpm -C src/vscode run publish:vsce -- "$(realpath "$vsix")"
+  pnpm -C src/vscode run publish:ovsx -- "$(realpath "$vsix")"
+done
 ```
 
 The npm script publishes in dependency order and skips versions the registry already has, so it
@@ -183,7 +174,7 @@ Do not rebuild package contents for a repair publish unless the fix requires a n
 Public registry versions are immutable. When a published artifact is bad:
 
 1. Fix the source issue.
-2. Publish a higher version through the appropriate tag-driven release track.
+2. Publish a higher version by pushing a new release tag.
 3. Unlist or deprecate the bad NuGet, npm, or extension version where useful.
 4. Update release notes or documentation to steer users to the fixed version.
 
@@ -198,7 +189,7 @@ Public registry versions are immutable. When a published artifact is bad:
 
 Each Worker's `wrangler.jsonc` sits beside its site and declares its routes. The playground's routes
 are more specific than the website's `nxlang.org/*`, so Cloudflare sends `/playground` requests to
-it. Neither is part of the tag-driven release tracks above.
+it. Neither is part of the tag-driven release above.
 
 ### Deploy
 

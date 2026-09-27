@@ -47,23 +47,17 @@ Release automation is tag-driven and uses GitHub Releases as the review gate. Pu
 `main` builds produce testable artifacts only; they do not publish to package or extension
 registries.
 
-Use a package release tag for compiler/runtime and editor-assets packages:
+One tag releases the NuGet package, the npm packages and the VS Code extension together, at one
+version:
 
 ```bash
 git tag v1.2.3
 git push origin v1.2.3
 ```
 
-Use a VS Code extension release tag for Marketplace and Open VSX publication:
-
-```bash
-git tag vscode-v1.2.3
-git push origin vscode-v1.2.3
-```
-
-The tag workflows create draft GitHub Releases with verified artifacts, a release manifest, and
-checksums. Inspect the draft release assets, then publish the GitHub Release to trigger the
-production publish workflow for that release track.
+The tag workflow creates a draft GitHub Release with verified artifacts, a release manifest, and
+checksums. Inspect the draft release assets, then publish the GitHub Release to trigger production
+publication to NuGet, npm, the Visual Studio Marketplace and Open VSX.
 
 See [docs/deployment.md](docs/deployment.md) for the recurring release runbook and
 [docs/deployment-setup.md](docs/deployment-setup.md) for one-time registry and environment setup.
