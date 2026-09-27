@@ -1,6 +1,6 @@
 ---
 title: 'Getting Started'
-description: 'Try NX in the browser, then use it from .NET or JavaScript through the published packages.'
+description: 'Try NX in the browser, install the VS Code extension, then use NX from .NET or JavaScript through the published packages.'
 ---
 
 You can write and run NX without installing anything, then call it from your own application
@@ -27,9 +27,18 @@ It evaluates to a `p` element whose content is `"Hello, "`, `"Ada"` and `"!"`.
 
 ## 2) Editor support
 
-A VS Code extension with highlighting, diagnostics, hover and completion is on its way to the
-Visual Studio Marketplace and Open VSX, and isn't published yet. Until it is,
-[Contributing](/contributing/) describes how to run it from source.
+The NX extension for VS Code highlights NX files, reports errors as you type, and adds hover and
+completion. Install **NX Language (Official)** from the
+[Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=nx-lang.nx-language)
+or, for VSCodium, Cursor and other editors built on VS Code,
+[Open VSX](https://open-vsx.org/extension/nx-lang/nx-language). You can also search for
+`nx-lang.nx-language` in the Extensions view, or run:
+
+```bash
+code --install-extension nx-lang.nx-language
+```
+
+It runs on Linux x64, macOS arm64 and Windows x64, and opens any `.nx` file.
 
 ## 3) Use NX from .NET
 
