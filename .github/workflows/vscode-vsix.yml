@@ -1,0 +1,106 @@
+# Builds and verifies one VSIX per VS Code extension target, each with its platform's nx-lsp, and
+# uploads it as the vscode-vsix-<target> artifact. vscode-extension.yml calls it for pull requests
+# and main, and release.yml for a release tag, so the target list lives only here.
+
+name: Package VS Code extension
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        description: Release tag to build and version the VSIX files from; empty for pull request and main builds
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - target: linux-x64
+          os: ubuntu-latest
+        - target: darwin-arm64
+          os: macos-14
+        - target: win32-x64
+          os: windows-latest
+    env:
+      NX_LSP_PLATFORM: ${{ matrix.target }}
+      NX_VSCODE_TARGET: ${{ matrix.target }}
+    defaults:
+      run:
+        working-directory: src/vscode
+    steps:
+    - name: Checkout
+      uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+      with:
+        fetch-depth: 0
+        ref: ${{ inputs.release_tag }}
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+    - name: Setup pnpm
+      uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      with:
+        package_json_file: src/vscode/package.json
+        run_install: false
+    - name: Setup Node.js
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      with:
+        node-version: '24'
+        cache: 'pnpm'
+        cache-dependency-path: src/vscode/pnpm-lock.yaml
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile
+    - name: Restore .NET tools
+      run: dotnet tool restore
+      working-directory: .
+    # A release tag gives every VSIX the release version. Pull request and main builds take the core
+    # of their preview version, because VS Code and the registries accept only major.minor.patch.
+    - name: Calculate VS Code extension version
+      shell: pwsh
+      env:
+        RELEASE_TAG: ${{ inputs.release_tag }}
+        PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
+      run: |
+        if ($env:RELEASE_TAG) {
+            tools/versions/Get-ReleaseVersion.ps1 -Context tag -RefName $env:RELEASE_TAG -GitHubEnvPath $env:GITHUB_ENV
+        } else {
+            tools/versions/Get-ReleaseVersion.ps1 -PullRequestNumber $env:PULL_REQUEST_NUMBER -GitHubEnvPath $env:GITHUB_ENV
+        }
+      working-directory: .
+    - name: Build Rust language server
+      run: pnpm run build:lsp
+    - name: Stage extension version
+      run: pnpm run version:stage
+    - name: Verify and package VSIX
+      id: package
+      shell: bash
+      run: |
+        rm -f ./*.vsix
+        pnpm run package:verify
+
+        vsix_files="$(find . -maxdepth 1 -type f -name '*.vsix' | sort)"
+        vsix_count="$(printf '%s\n' "${vsix_files}" | sed '/^$/d' | wc -l | tr -d ' ')"
+        if [ "${vsix_count}" -ne 1 ]; then
+          echo "::error::Expected exactly one VSIX, found ${vsix_count}."
+          printf '%s\n' "${vsix_files}"
+          exit 1
+        fi
+
+        vsix_path="${vsix_files}"
+        echo "vsix_path=${vsix_path}" >> "${GITHUB_OUTPUT}"
+        echo "vsix_name=${vsix_path#./}" >> "${GITHUB_OUTPUT}"
+    - name: List packaged VSIX contents
+      shell: bash
+      run: unzip -l "${{ steps.package.outputs.vsix_path }}"
+    - name: Upload VSIX artifact
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      with:
+        name: vscode-vsix-${{ matrix.target }}
+        path: src/vscode/${{ steps.package.outputs.vsix_name }}
+        if-no-files-found: error

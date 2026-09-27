@@ -2,9 +2,6 @@
 
 [CmdletBinding()]
 param (
-    [ValidateSet('package', 'vscode')]
-    [string] $Track = 'package',
-
     [ValidateSet('auto', 'pull_request', 'main', 'tag')]
     [string] $Context = 'auto',
 
@@ -29,8 +26,9 @@ param (
 
 $ErrorActionPreference = 'Stop'
 
-$packageTagPattern = '^v(?<Version>\d+\.\d+\.\d+)$'
-$vscodeTagPattern = '^vscode-v(?<Version>\d+\.\d+\.\d+)$'
+# A v<major>.<minor>.<patch> tag releases the packages and the VS Code extension together, at one
+# version. Any other ref, including a tag of the retired vscode-v* track, is not a release.
+$releaseTagPattern = '^v(?<Version>\d+\.\d+\.\d+)$'
 
 function Normalize-RefName([string] $Value) {
     if ($Value -like 'refs/heads/*') {
@@ -54,7 +52,7 @@ function Resolve-ReleaseContext {
     }
 
     $normalizedRef = Normalize-RefName $RefName
-    if ($normalizedRef -match $packageTagPattern -or $normalizedRef -match $vscodeTagPattern) {
+    if ($normalizedRef -match $releaseTagPattern) {
         return 'tag'
     }
 
@@ -125,31 +123,15 @@ function Get-PullRequestNumberFromEvent {
 
 $resolvedContext = Resolve-ReleaseContext
 $normalizedRefName = Normalize-RefName $RefName
-$tagPrefix = if ($Track -eq 'vscode') { 'vscode-v' } else { 'v' }
-$minVerVersion = Invoke-MinVer $tagPrefix
+$minVerVersion = Invoke-MinVer 'v'
 $baseVersion = Get-CoreVersion $minVerVersion
 $releaseTag = ''
 $releaseVersion = $baseVersion
 
 if ($resolvedContext -eq 'tag') {
-    if ($Track -eq 'package') {
-        if ($normalizedRefName -match $vscodeTagPattern) {
-            throw "VS Code release tag '$normalizedRefName' cannot run the package release track."
-        }
-
-        $tagMatch = [regex]::Match($normalizedRefName, $packageTagPattern)
-        if (!$tagMatch.Success) {
-            throw "Package release tags must match v<major>.<minor>.<patch>. Actual tag: '$normalizedRefName'."
-        }
-    } else {
-        if ($normalizedRefName -match $packageTagPattern) {
-            throw "Package release tag '$normalizedRefName' cannot run the VS Code release track."
-        }
-
-        $tagMatch = [regex]::Match($normalizedRefName, $vscodeTagPattern)
-        if (!$tagMatch.Success) {
-            throw "VS Code release tags must match vscode-v<major>.<minor>.<patch>. Actual tag: '$normalizedRefName'."
-        }
+    $tagMatch = [regex]::Match($normalizedRefName, $releaseTagPattern)
+    if (!$tagMatch.Success) {
+        throw "Release tags must match v<major>.<minor>.<patch>. Actual tag: '$normalizedRefName'."
     }
 
     $releaseTag = $normalizedRefName
@@ -180,7 +162,9 @@ if ($resolvedContext -eq 'pull_request') {
     $packageVersion = $releaseVersion
 }
 
-$vsixVersion = if ($resolvedContext -eq 'tag' -and $Track -eq 'vscode') { $releaseVersion } else { Get-CoreVersion $packageVersion }
+# The Marketplace and VS Code accept only major.minor.patch, so a preview build's VSIX takes the core
+# of its package version. On a release tag the two are the same.
+$vsixVersion = Get-CoreVersion $packageVersion
 
 Assert-ValidSemVer $packageVersion 'Package version'
 if ($vsixVersion -notmatch '^\d+\.\d+\.\d+$') {
@@ -188,7 +172,6 @@ if ($vsixVersion -notmatch '^\d+\.\d+\.\d+$') {
 }
 
 $values = [ordered] @{
-    RELEASE_TRACK = $Track
     RELEASE_CONTEXT = $resolvedContext
     RELEASE_TAG = $releaseTag
     RELEASE_VERSION = $releaseVersion

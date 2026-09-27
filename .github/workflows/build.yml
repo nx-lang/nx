@@ -100,7 +100,6 @@ jobs:
       shell: pwsh
       run: >
         tools/versions/Get-ReleaseVersion.ps1
-        -Track package
         -PullRequestNumber '${{ github.event.pull_request.number }}'
         -GitHubEnvPath $env:GITHUB_ENV
         -GitHubOutputPath $env:GITHUB_OUTPUT
@@ -183,7 +182,6 @@ jobs:
       shell: pwsh
       run: >
         tools/versions/Get-ReleaseVersion.ps1
-        -Track package
         -PullRequestNumber '${{ github.event.pull_request.number }}'
         -GitHubEnvPath $env:GITHUB_ENV
         -GitHubOutputPath $env:GITHUB_OUTPUT
@@ -256,7 +254,6 @@ jobs:
       shell: pwsh
       run: >
         tools/versions/Get-ReleaseVersion.ps1
-        -Track package
         -PullRequestNumber '${{ github.event.pull_request.number }}'
         -GitHubEnvPath $env:GITHUB_ENV
         -GitHubOutputPath $env:GITHUB_OUTPUT

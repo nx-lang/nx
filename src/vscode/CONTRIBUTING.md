@@ -95,9 +95,13 @@ reusable editor-assets package.
 
 ### Release Preparation
 
+The extension is released with the NX packages, from the same `v<major>.<minor>.<patch>` tag and at
+the same version, so extension 1.2.3 understands the same NX as SDK 1.2.3.
+[docs/deployment.md](../../docs/deployment.md) is the release runbook.
+
 1. Add the release notes to `src/vscode/CHANGELOG.md`.
-2. Let CI stage the publishable VSIX version from the `vscode-v<major>.<minor>.<patch>` release tag,
-   or set `VSCODE_EXTENSION_VERSION` for a local repair package.
+2. Let CI stage the publishable VSIX version from the release tag, or set
+   `VSCODE_EXTENSION_VERSION` for a local repair package.
 3. Run the package verification:
    ```bash
    pnpm install --frozen-lockfile
@@ -106,9 +110,11 @@ reusable editor-assets package.
    pnpm run package:verify
    pnpm run package:language
    ```
-4. Push a VS Code extension release tag such as `vscode-v1.2.3`.
+4. Push a release tag such as `v1.2.3`. The Release workflow builds a VSIX per target beside the
+   packages and attaches them all to one draft GitHub Release, titled `NX 1.2.3`.
 5. Review the draft GitHub Release, including the attached VSIX files, manifest, and checksums.
-6. Publish the GitHub Release to trigger the separate `Publish VS Code extension` workflow.
+6. Publish the GitHub Release. The Publish release workflow publishes the packages and, in its
+   `publish-extension` job, the VSIX files to the Marketplace and Open VSX.
 
 Pull requests and `main` builds upload verified VSIX artifacts but do not publish to the Visual
 Studio Marketplace or Open VSX. Pull request builds are tested by downloading the VSIX artifact from
@@ -119,8 +125,8 @@ gh run download <run-id> -R nx-lang/nx -p 'vscode-vsix-*' -D nx-vsix-artifacts
 find nx-vsix-artifacts -name '*.vsix' -type f -print0 | xargs -0 -I{} code --install-extension '{}' --force
 ```
 
-Manual CI repair uses the Publish VS Code extension workflow's `release_tag` dispatch input to
-republish VSIX artifacts from an already-published GitHub Release.
+Manual CI repair reruns the failed `publish-extension` job, or dispatches the Publish release
+workflow with `release_tag` to republish from an already-published GitHub Release.
 
 ### Credentials
 
@@ -168,8 +174,8 @@ Both commands publish the provided VSIX artifact instead of rebuilding a new pac
 the registry already has that version for that platform. The publisher is `nx-lang` and the
 extension ID is `nx-language`.
 
-The normal production path is not local publishing: push a `vscode-v*` tag, inspect the draft GitHub
-Release assets, then publish that GitHub Release so CI publishes the reviewed VSIX files.
+The normal production path is not local publishing: push a `v*` release tag, inspect the draft
+GitHub Release assets, then publish that GitHub Release so CI publishes the reviewed VSIX files.
 
 ## Roadmap
 

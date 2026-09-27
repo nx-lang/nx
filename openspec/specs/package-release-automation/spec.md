@@ -69,24 +69,24 @@ registries.
 - **AND** CI SHALL NOT publish package artifacts to preview or test package registries
 
 #### Scenario: Package release tag creates draft release
-- **WHEN** a maintainer pushes a valid compiler package release tag matching `v<major>.<minor>.<patch>`
+- **WHEN** a maintainer pushes a valid release tag matching `v<major>.<minor>.<patch>`
 - **THEN** CI SHALL build, verify, and smoke-test the compiler/runtime and editor-assets package
-  artifacts from that tag
-- **AND** CI SHALL create or update a draft GitHub Release for the tag
-- **AND** CI SHALL attach the verified NuGet and npm package artifacts to the draft GitHub Release
-- **AND** CI SHALL NOT publish those artifacts to external package registries while the GitHub Release
+  artifacts, and build and verify a VSIX file for every supported extension target, from that tag
+- **AND** CI SHALL create or update one draft GitHub Release for the tag, titled `NX <version>`
+- **AND** CI SHALL attach the verified NuGet, npm and VSIX artifacts to that draft GitHub Release
+- **AND** CI SHALL NOT publish those artifacts to external registries while the GitHub Release
   remains a draft
 
 #### Scenario: VS Code tag does not create package release
-- **WHEN** a maintainer pushes a tag matching `vscode-v<major>.<minor>.<patch>`
-- **THEN** the package release track SHALL ignore the tag for compiler/runtime and editor-assets
-  publication
+- **WHEN** a maintainer pushes a tag matching `vscode-v<major>.<minor>.<patch>`, the retired
+  extension-only tag format
+- **THEN** no release workflow SHALL build, create a release for, or publish anything from that tag
 
 #### Scenario: Published package release triggers production publishing
-- **WHEN** a human publishes a non-draft GitHub Release for a valid compiler package release tag
-- **THEN** the package publish workflow SHALL target the `production` environment
-- **AND** CI SHALL publish the attached NuGet and npm editor-assets artifacts to the configured
-  production registries
+- **WHEN** a human publishes a non-draft GitHub Release for a valid release tag
+- **THEN** the publish workflow SHALL target the `production` environment
+- **AND** CI SHALL publish the attached NuGet and npm artifacts to NuGet.org and npm, and the attached
+  VSIX files to the Visual Studio Marketplace and Open VSX
 - **AND** CI SHALL use only credentials or trusted-publishing policies scoped to the `production`
   environment
 
@@ -96,10 +96,10 @@ corresponding GitHub Release before the publish step. Production publishing MUST
 writes when release asset validation fails or when the package version is not publishable.
 
 #### Scenario: Publish jobs consume GitHub Release assets
-- **WHEN** a production package publish job runs after a GitHub Release is published
-- **THEN** it SHALL download the NuGet and npm package artifacts attached to that GitHub Release
-- **AND** it SHALL validate that the release tag, artifact versions, and expected artifact set match the
-  selected package release track
+- **WHEN** a production publish job runs after a GitHub Release is published
+- **THEN** it SHALL download the NuGet, npm and VSIX artifacts attached to that GitHub Release
+- **AND** it SHALL validate that the release tag, artifact versions, and expected artifact set match
+  the release
 - **AND** it SHALL publish those artifacts without rebuilding package contents in the publish job
 
 #### Scenario: Duplicate or invalid package version blocks publication
@@ -154,17 +154,17 @@ CI/PR builds, release-publication registry writes, and artifact-based pull reque
 #### Scenario: Maintainer understands tag-driven publishing
 - **WHEN** a maintainer reads `docs/deployment.md`
 - **THEN** the document SHALL explain that successful `main` builds produce CI artifacts only
-- **AND** it SHALL explain that pushing release tags creates draft GitHub Releases with attached
+- **AND** it SHALL explain that pushing a release tag creates a draft GitHub Release with attached
   verified artifacts
 - **AND** it SHALL explain that publishing the GitHub Release triggers production registry publication
 
 #### Scenario: Maintainer follows the release runbook
 - **WHEN** a maintainer reads `docs/deployment.md`
-- **THEN** the document SHALL describe how to publish a new compiler package release from a `v*` tag
-- **AND** it SHALL describe how to publish a new VS Code extension release from a `vscode-v*` tag
+- **THEN** the document SHALL describe how to publish a release, packages and VS Code extension
+  together, from a `v*` tag
 - **AND** it SHALL list the verification, draft release inspection, release publication, environment
-  approval, and registry confirmation steps for NuGet, npm editor assets, Visual Studio Marketplace,
-  and Open VSX
+  approval, and registry confirmation steps for NuGet, npm, the Visual Studio Marketplace, and Open
+  VSX
 
 #### Scenario: Maintainer tests pull request artifacts
 - **WHEN** a maintainer reads `docs/deployment.md`
@@ -177,43 +177,6 @@ CI/PR builds, release-publication registry writes, and artifact-based pull reque
   Release assets
 - **AND** it SHALL describe the rollback posture for immutable registries, including publishing a
   higher-version fix and unlisting or deprecating bad versions where supported
-
-### Requirement: Release publishing is split into explicit package and extension actions
-NX SHALL expose separate release tracks for package-registry publication and VS Code
-extension-registry publication. Build and packaging workflows SHALL produce verified artifacts, tag
-release workflows SHALL create draft GitHub Releases, and publish workflows SHALL write release assets
-to external registries only after the corresponding GitHub Release is published.
-
-#### Scenario: Package and extension release tracks are separate
-- **WHEN** a maintainer inspects the release pipeline workflows
-- **THEN** the pipeline SHALL provide a package release track for NuGet and editor-assets package
-  registries
-- **AND** it SHALL provide a separate VS Code extension release track for Visual Studio Marketplace and
-  Open VSX publication
-- **AND** each track SHALL use a distinct tag pattern and validate the tag before creating or publishing
-  a release
-
-#### Scenario: Build workflows do not require production registry credentials
-- **WHEN** `Build` or `VS Code Extension` workflow runs verify package artifacts on pull requests or
-  `main`
-- **THEN** those workflows SHALL complete artifact verification without requiring production registry
-  credentials
-- **AND** production registry credentials SHALL be used only by explicit publish workflows that target
-  the `production` environment after a GitHub Release is published
-
-#### Scenario: Draft releases contain reviewed publish inputs
-- **WHEN** a tag-driven release workflow creates a draft GitHub Release
-- **THEN** it SHALL attach the verified artifacts that will be published if the release is later
-  published
-- **AND** it SHALL provide enough release metadata for a maintainer to inspect the source tag, versions,
-  and attached artifacts before public registry publication
-
-#### Scenario: Rust tool publishing is out of scope for this release pipeline
-- **WHEN** a maintainer reads the package deployment runbook for this release pipeline
-- **THEN** the runbook SHALL describe NuGet/editor-assets package publishing and VS Code extension
-  publishing
-- **AND** it SHALL NOT describe `nxlang`, `nx-lsp`, or Rust crate publication as part of this
-  release pipeline
 
 ### Requirement: Workspace npm packages ship on the package release track
 The package release track SHALL treat the workspace's publishable npm packages
@@ -248,3 +211,47 @@ workspace references between them SHALL resolve to that version in the packed ar
 #### Scenario: Workspace references are resolved in the artifacts
 - **WHEN** a packed package depended on another workspace package through a workspace reference
 - **THEN** the packed manifest SHALL name the release version instead of the workspace reference
+
+### Requirement: Packages and the VS Code extension are released together
+NX SHALL release its packages and its VS Code extension as one release: one
+`v<major>.<minor>.<patch>` tag, one version, one draft GitHub Release and one publication. Build and
+packaging workflows SHALL produce verified artifacts, the tag release workflow SHALL create the draft
+GitHub Release, and the publish workflow SHALL write release assets to external registries only after
+that GitHub Release is published.
+
+#### Scenario: One tag releases every artifact
+- **WHEN** a maintainer inspects the release pipeline workflows
+- **THEN** the pipeline SHALL provide one release track, triggered by `v<major>.<minor>.<patch>` tags,
+  that covers NuGet, npm, the Visual Studio Marketplace and Open VSX
+- **AND** it SHALL validate the tag before creating or publishing a release
+
+#### Scenario: Packages and extension share a version
+- **WHEN** a release is built from a `v<major>.<minor>.<patch>` tag
+- **THEN** the NuGet package, every npm package and every VSIX file SHALL carry the version
+  `<major>.<minor>.<patch>`
+
+#### Scenario: One release is the latest
+- **WHEN** a maintainer publishes a release
+- **THEN** that GitHub Release SHALL carry every artifact of the version, so the repository's latest
+  release covers the packages and the extension alike
+
+#### Scenario: Build workflows do not require production registry credentials
+- **WHEN** `Build` or `VS Code Extension` workflow runs verify package artifacts on pull requests or
+  `main`
+- **THEN** those workflows SHALL complete artifact verification without requiring production registry
+  credentials
+- **AND** production registry credentials SHALL be used only by the publish workflow, targeting the
+  `production` environment after a GitHub Release is published
+
+#### Scenario: Draft releases contain reviewed publish inputs
+- **WHEN** the tag release workflow creates a draft GitHub Release
+- **THEN** it SHALL attach the verified artifacts that will be published if the release is later
+  published
+- **AND** it SHALL provide enough release metadata for a maintainer to inspect the source tag, version
+  and attached artifacts before public registry publication
+
+#### Scenario: Rust tool publishing is out of scope for this release pipeline
+- **WHEN** a maintainer reads the deployment runbook for this release pipeline
+- **THEN** the runbook SHALL describe NuGet, npm and VS Code extension publishing
+- **AND** it SHALL NOT describe `nxlang`, `nx-lsp`, or Rust crate publication as part of this release
+  pipeline, beyond `nx-lsp` shipping inside the VSIX files
