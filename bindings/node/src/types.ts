@@ -281,13 +281,49 @@ export interface NxSourceEvaluationOptions extends NxSourceBuildOptions, NxEvalu
 export interface NxSourceByteEvaluationOptions extends NxSourceBuildOptions, NxByteEvaluationOptions {}
 
 /**
+ * One module of a library loaded from memory.
+ */
+export interface NxLibraryModuleInput {
+  /**
+   * Identity relative to the library's root, such as `QuestionFlow.nx` or `steps/Choice.nx`.
+   */
+  readonly identity: string;
+
+  /**
+   * NX source text or UTF-8 source bytes for this module.
+   */
+  readonly source: NxSourceInput;
+}
+
+/**
+ * A library loaded from memory into an `NxLibraryRegistry`.
+ */
+export interface NxLibraryInput {
+  /**
+   * Logical root the library is named by, such as `libraries/question-flow`. Its modules are named
+   * `<root>/<identity>` in diagnostics and NX IR, and another library imports it by a relative path
+   * to this root, such as `import "../question-flow"`.
+   */
+  readonly root: string;
+
+  /**
+   * The version every NX IR image of one of the library's modules records. NX never reads it.
+   * Records `""` when omitted.
+   */
+  readonly version?: string;
+
+  readonly modules: readonly NxLibraryModuleInput[];
+}
+
+/**
  * Options shared by every operation over an in-memory workspace.
  */
 export interface NxWorkspaceOptions {
   /**
-   * Workspace identities every other module imports implicitly, as if it began with a wildcard
-   * import of each. A listed module imports nothing implicitly itself. An identity the workspace
-   * does not hold fails the operation with a diagnostic naming it.
+   * Identities every other module imports implicitly, as if it began with a wildcard import of
+   * each: a workspace module, or the root of a library the build context can see. A listed module
+   * imports nothing implicitly itself. An identity that names neither fails the operation with a
+   * diagnostic naming it, and one that names both is ambiguous.
    */
   readonly implicitImports?: readonly string[];
 }

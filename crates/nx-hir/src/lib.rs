@@ -361,8 +361,13 @@ pub struct UnionCaseField {
     pub is_content: bool,
     /// Whether the field carries the `?` mark: omitted at construction it is the empty value.
     pub optional: bool,
-    /// Default value expression, if present.
+    /// Default value expression, if present in this module.
     pub default: Option<ExprId>,
+    /// Whether the field declares a default. True wherever `default` is, and also for a field
+    /// imported from another module's interface, which publishes that a default exists but not
+    /// its expression. The parser rejects `?` together with a default
+    /// (`optional-property-with-default`), so `has_default` and `optional` are never both true.
+    pub has_default: bool,
     /// Source span
     pub span: TextSpan,
 }
@@ -381,6 +386,7 @@ impl UnionCaseField {
             ty,
             is_content,
             optional: false,
+            has_default: default.is_some(),
             default,
             span,
         }
@@ -393,9 +399,32 @@ impl UnionCaseField {
             ty: field.ty,
             is_content: field.is_content,
             optional: field.optional,
+            has_default: field.default.is_some(),
             default: field.default,
             span: field.span,
         }
+    }
+
+    /// Converts imported interface metadata into union case metadata without a raw default body.
+    ///
+    /// The interface publishes whether a field is required, not its default expression. Since `?`
+    /// and a default are mutually exclusive, a field that is neither required nor optional is
+    /// exactly one with a default; this is the inverse of [`UnionCaseField::is_required`].
+    pub fn from_interface_field(field: &crate::prepared::InterfaceField) -> Self {
+        Self {
+            name: field.name.clone(),
+            ty: field.ty.clone(),
+            is_content: field.is_content,
+            optional: field.optional,
+            default: None,
+            has_default: !field.is_required && !field.optional,
+            span: field.span,
+        }
+    }
+
+    /// Whether a construction must supply the field: it has neither a default nor the `?` mark.
+    pub fn is_required(&self) -> bool {
+        !self.has_default && !self.optional
     }
 }
 
@@ -1170,6 +1199,14 @@ pub struct LoweredModule {
     expr_spans: FxHashMap<ExprId, TextSpan>,
     /// Arena for all elements
     elements: Arena<Element>,
+    /// Every type name written in a type position, as lowered, with where it was written.
+    ///
+    /// <para>A `TypeRef` carries no span, so a diagnostic about one is placed at the declaration
+    /// or property that wrote it. This lets it narrow to the name itself.</para>
+    type_name_spans: Vec<(Name, TextSpan)>,
+    /// Where the annotation of a declaration that is not a property was written — a function's
+    /// return type, a value's `: Type` — keyed by the declaration's span.
+    annotation_spans: FxHashMap<TextSpan, TextSpan>,
 }
 
 impl LoweredModule {
@@ -1183,7 +1220,48 @@ impl LoweredModule {
             exprs: Arena::new(),
             expr_spans: FxHashMap::default(),
             elements: Arena::new(),
+            type_name_spans: Vec::new(),
+            annotation_spans: FxHashMap::default(),
         }
+    }
+
+    /// Records every type name written in a type position, with where it was written.
+    pub fn set_type_name_spans(&mut self, spans: Vec<(Name, TextSpan)>) {
+        self.type_name_spans = spans;
+    }
+
+    /// Where the type name `name` was written for the `ordinal`th time (from zero, in source
+    /// order) inside `within`, if lowering recorded that many there.
+    ///
+    /// <para>`within` is the declaration or property a diagnostic about the name would otherwise
+    /// underline; the ordinal tells apart a name it writes more than once, as in
+    /// `<function a:Dup />: Dup`. A module built by hand records nothing, and gets `None`.</para>
+    pub fn type_name_span_within(
+        &self,
+        name: &Name,
+        within: TextSpan,
+        ordinal: usize,
+    ) -> Option<TextSpan> {
+        let mut spans: Vec<TextSpan> = self
+            .type_name_spans
+            .iter()
+            .filter(|(written, span)| written == name && within.contains_range(*span))
+            .map(|(_, span)| *span)
+            .collect();
+        // A declaration lowered twice (a component's state, say) records its names twice.
+        spans.sort_by_key(|span| (span.start(), span.end()));
+        spans.dedup();
+        spans.get(ordinal).copied()
+    }
+
+    /// Records that the declaration spanning `declaration` wrote its annotation at `annotation`.
+    pub fn set_annotation_span(&mut self, declaration: TextSpan, annotation: TextSpan) {
+        self.annotation_spans.insert(declaration, annotation);
+    }
+
+    /// Where the declaration spanning `declaration` wrote its return type or value annotation.
+    pub fn annotation_span(&self, declaration: TextSpan) -> Option<TextSpan> {
+        self.annotation_spans.get(&declaration).copied()
     }
 
     /// Get all top-level items.

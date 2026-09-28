@@ -331,10 +331,14 @@ Referenced modules are listed in the order the emitter first meets them, so the 
 deterministic.
 
 - The identity is the module's logical workspace identity, for example `input.nx` or `app/main.nx`.
-- The version is the string the host gave the workspace module when it built the program, or `""`
-  when it gave none. It is part of the module, not an emit option, so every image emitted from one
-  program records the same version for a module. It is recorded, not interpreted: a runtime
-  linking two images compares the strings for equality.
+  A module of a library a host loaded from memory is named by the library's logical root and its
+  identity within the library, for example `libraries/question-flow/QuestionFlow.nx`; a module of a
+  library loaded from a directory is named by its canonical path.
+- The version is the string the host gave the workspace module when it built the program, or the
+  one it gave a library module's library when it loaded it, or `""` when it gave none. It is part of
+  the module, not an emit option, so every image emitted from one program records the same version
+  for a module. It is recorded, not interpreted: a runtime linking two images compares the strings
+  for equality.
 - The fingerprint is a 64-bit hash of the module's identity and source text: FNV-1a over the
   identity's UTF-8 bytes, a zero byte, and the source's UTF-8 bytes, so the same module fingerprints
   the same whatever emitted it. A JavaScript reader holds it as a `BigInt`, or as its decimal string.
@@ -345,7 +349,7 @@ refused — and it holds the declarations every NX module sees without an import
 `Range`. It is otherwise an ordinary module: an image that constructs a `Range`, names it as a type,
 or derives from it lists the prelude in its table and reaches the declaration through that slot, and
 no prelude declaration is ever copied into another module's image. Unlike a library module, whose
-table entry carries an empty version, the prelude's entry carries the compiler's prelude version —
+table entry carries the version its host gave it, the prelude's entry carries the compiler's prelude version —
 `1` today. No host supplies the prelude, so that version is the only thing a runtime can compare its
 own built-in copy against. It names the prelude's contract rather than its text: it is bumped when a
 declaration's shape changes and left alone for an edit that changes no declaration, so a reworded

@@ -60,6 +60,9 @@ fn record_lineage(shape: &nx_hir::EffectiveRecordShape) -> Vec<nx_hir::RecordAnc
 /// reached it otherwise.</para>
 struct TypeAliasInfo {
     target: ast::TypeRef,
+    /// Whether another module wrote the alias. A name its target fails to resolve is that
+    /// module's to report, when it is analyzed, not this one's.
+    foreign: bool,
 }
 
 /// One discriminated union definition together with the declaration it came from.
@@ -307,6 +310,14 @@ pub struct InferenceContext<'a> {
     /// the same module. The declaring module reports its own cycle; this only stops the consumer
     /// from following one forever.</para>
     foreign_alias_stack: FxHashSet<DeclaringOrigin>,
+    /// How many imported alias targets are being walked. A name one of them fails to resolve is
+    /// left as it was written rather than reported: its module reports it, and a library that
+    /// names an unresolved type does not load.
+    foreign_alias_depth: usize,
+    /// How many times each type name has been visited in the reference being walked, in source
+    /// order, so a report about one occurrence of a name the reference writes twice underlines
+    /// that occurrence. See [`Self::next_type_name_ordinal`].
+    type_name_ordinals: FxHashMap<Name, usize>,
     /// Contextual names resolved at binding sites, as `expr → (declaring type, member)`.
     ///
     /// Consumed after analysis to rewrite each `Expr::ContextualName` into the qualified member
@@ -456,6 +467,8 @@ impl<'a> InferenceContext<'a> {
             type_aliases: FxHashMap::default(),
             foreign_union_defs: FxHashMap::default(),
             foreign_alias_stack: FxHashSet::default(),
+            foreign_alias_depth: 0,
+            type_name_ordinals: FxHashMap::default(),
             union_defs: FxHashMap::default(),
             record_origins: FxHashMap::default(),
             component_origins: FxHashMap::default(),
@@ -1204,7 +1217,8 @@ impl<'a> InferenceContext<'a> {
         self.env.pop_scope();
 
         let return_ty = if let Some(ty) = func.return_type.as_ref() {
-            let expected = self.type_from_type_ref_at(func.span, ty);
+            let annotation_span = self.annotation_span(func.span);
+            let expected = self.type_from_type_ref_at(annotation_span, ty);
             self.check_typed_binding_for(
                 Some(func.body),
                 &body_ty,
@@ -1337,6 +1351,17 @@ impl<'a> InferenceContext<'a> {
             }
         }
 
+        // A shared emit names an action declared elsewhere, as a type reference this component
+        // wrote; an inline one declares its action here, and its payload is a record of its own.
+        for emit in &component.emits {
+            if emit.kind == nx_hir::ComponentEmitKind::Shared {
+                self.type_from_type_ref_at(
+                    emit.span,
+                    &ast::TypeRef::name(emit.action_name.as_str()),
+                );
+            }
+        }
+
         for field in &component.state {
             let field_ty = self.property_slot_type(field.span, &field.name, &field.ty);
             self.check_component_field_default(component, &field.name, &field_ty);
@@ -1389,7 +1414,9 @@ impl<'a> InferenceContext<'a> {
         owner: Option<&Name>,
         body: ExprId,
     ) -> Type {
-        let action_ty = self.type_from_type_ref_in(
+        // An action name the emit wrote that reaches nothing is reported at the emit, by the
+        // module that wrote it, not at every handler bound to it.
+        let action_ty = self.type_from_type_ref_in_quietly(
             action_module_identity,
             &ast::TypeRef::name(action_name.as_str()),
         );
@@ -1577,7 +1604,7 @@ impl<'a> InferenceContext<'a> {
             return false;
         };
         contract.emits.iter().any(|emit| {
-            let emit_ty = self.type_from_type_ref_in(
+            let emit_ty = self.type_from_type_ref_in_quietly(
                 Some(emit.module_identity.as_str()),
                 &ast::TypeRef::name(emit.emit.action_name.as_str()),
             );
@@ -4257,7 +4284,7 @@ impl<'a> InferenceContext<'a> {
 
         for field in &case.fields {
             let ty = self.type_from_type_ref_in_quietly(declaring_module, &field.ty);
-            let is_required = field.default.is_none() && !field.optional;
+            let is_required = field.is_required();
             if field.is_content {
                 content_property = Some(field.name.clone());
             }
@@ -4439,7 +4466,10 @@ impl<'a> InferenceContext<'a> {
         type_ref: &ast::TypeRef,
     ) -> Type {
         let mut seen = FxHashSet::default();
-        self.type_from_type_ref_walk(declaring_module, type_ref, &mut seen, true)
+        let enclosing = std::mem::take(&mut self.type_name_ordinals);
+        let ty = self.type_from_type_ref_walk(declaring_module, type_ref, &mut seen, true);
+        self.type_name_ordinals = enclosing;
+        ty
     }
 
     /// Reports an occurrence suffix applied to something that already carries one, once per name.
@@ -4478,22 +4508,13 @@ impl<'a> InferenceContext<'a> {
     ) -> Type {
         match type_ref {
             ast::TypeRef::Name(name) => {
-                if scoped {
-                    if let Some(ty) = self.type_parameter_scope.get(name) {
-                        return ty.clone();
-                    }
+                let ordinal = self.next_type_name_ordinal(name);
+                let ty = self.type_from_type_name(declaring_module, name, seen, scoped);
+                if self.foreign_alias_depth == 0 && self.is_unresolved_type_name(name, &ty) {
+                    self.report_unresolved_type(name, ordinal);
+                    return Type::Error;
                 }
-                if let Some(ty) = crate::semantics::builtin_type(name) {
-                    return ty;
-                }
-                if let Some(module_identity) = declaring_module {
-                    let module_identity = module_identity.to_string();
-                    if let Some(ty) = self.nominal_type_in_module(&module_identity, name) {
-                        return self.require_type_arguments(name, ty);
-                    }
-                }
-                let ty = self.resolve_named_type(name, seen);
-                self.require_type_arguments(name, ty)
+                ty
             }
             ast::TypeRef::Applied { name, args } => {
                 self.applied_type(declaring_module, name, args, seen, scoped)
@@ -4537,6 +4558,222 @@ impl<'a> InferenceContext<'a> {
                 Type::function(params, ret)
             }
         }
+    }
+
+    /// Resolves a bare type name the way [`Self::type_from_type_ref_walk`] does, without reporting
+    /// a name that reaches nothing: that is left to the caller, which knows what the name was
+    /// written as.
+    fn type_from_type_name(
+        &mut self,
+        declaring_module: Option<&str>,
+        name: &Name,
+        seen: &mut FxHashSet<Name>,
+        scoped: bool,
+    ) -> Type {
+        // Lowering's stand-in for a type it could not lower; the syntax or validation error
+        // there already says what is wrong.
+        if ast::TypeRef::is_recovery_name(name) {
+            return Type::Error;
+        }
+        if scoped {
+            if let Some(ty) = self.type_parameter_scope.get(name) {
+                return ty.clone();
+            }
+        }
+        if let Some(ty) = crate::semantics::builtin_type(name) {
+            return ty;
+        }
+        if let Some(module_identity) = declaring_module {
+            let module_identity = module_identity.to_string();
+            if let Some(ty) = self.nominal_type_in_module(&module_identity, name) {
+                return self.require_type_arguments(name, ty);
+            }
+        }
+        let ty = self.resolve_named_type(name, seen);
+        self.require_type_arguments(name, ty)
+    }
+
+    /// True when a bare name resolved to a nominal type no declaration stands behind, and is not
+    /// one of the names that denote a type without a declaration (`object`, `Element`).
+    ///
+    /// <para>Such a `Type::Named` satisfies only itself, so left alone it surfaces far away as a
+    /// mismatch ("expects MissingType, found string"), or not at all.</para>
+    fn is_unresolved_type_name(&self, name: &Name, ty: &Type) -> bool {
+        matches!(ty, Type::Named(named) if named.origin().is_none())
+            && !self.is_visible_type_name(name)
+    }
+
+    /// Reports a written type name that denotes no visible type, with the closest visible name.
+    ///
+    /// <para>A name an import would have made visible, had it resolved, is not reported: the
+    /// import's own diagnostic says what is wrong, and saying "not a visible type" at every use
+    /// of every name it would have bound turns one error into dozens.</para>
+    fn report_unresolved_type(&mut self, name: &Name, ordinal: usize) {
+        if self.is_name_of_failed_import(name) {
+            return;
+        }
+        let message = match self.union_of_case_written_as_type(name) {
+            Some(union) => format!(
+                "`{}` is not a visible type; it is a case of the union `{}`, which is the type to write",
+                name, union
+            ),
+            None => format!(
+                "`{}` is not a visible type{}",
+                name,
+                self.did_you_mean_type(name)
+            ),
+        };
+        let span = self.type_name_span(name, ordinal);
+        self.error("unresolved-type", message, span);
+    }
+
+    /// `"; did you mean `<name>`?"` for the visible type name closest to `name`, or nothing when
+    /// none is close enough to be the one meant.
+    fn did_you_mean_type(&self, name: &Name) -> String {
+        let candidates = self.visible_type_names();
+        Self::closest_type_name(name, &candidates)
+            .map(|candidate| format!("; did you mean `{}`?", candidate))
+            .unwrap_or_default()
+    }
+
+    /// The candidate closest to a written type name, when it is close enough to be a misspelling
+    /// of it.
+    ///
+    /// <para>Stricter than [`Self::closest_candidate`], because a type name can be short: the
+    /// edits allowed are a third of the shorter name, at least one, and must leave some of the
+    /// written name in place. Letter case is not counted as an edit, since `Strin` means
+    /// `string` as surely as `strin` does; among equally close names the one whose case matches
+    /// better wins. So `Contatc` finds `Contact` and `Txt` finds `Text`, but `Txt` is not
+    /// "corrected" to `int`, nor `T` to `A`.</para>
+    fn closest_type_name(name: &Name, candidates: &[Name]) -> Option<Name> {
+        let written = name.as_str().to_lowercase();
+        let written_len = written.chars().count();
+        candidates
+            .iter()
+            .filter_map(|candidate| {
+                let distance = Self::edit_distance(&written, &candidate.as_str().to_lowercase());
+                let shorter = written_len.min(candidate.as_str().chars().count());
+                (distance < written_len && distance <= 1.max(shorter / 3)).then(|| {
+                    let exact = Self::edit_distance(name.as_str(), candidate.as_str());
+                    ((distance, exact), candidate)
+                })
+            })
+            .min_by_key(|(distance, _)| *distance)
+            .map(|(_, candidate)| candidate.clone())
+    }
+
+    /// Where the declaration spanning `declaration` wrote its return type or value annotation,
+    /// or the declaration itself when lowering recorded none.
+    ///
+    /// <para>A problem with the annotation is underlined there, not across the whole declaration,
+    /// which for a function runs through its parameters and body.</para>
+    fn annotation_span(&self, declaration: TextSpan) -> TextSpan {
+        self.module
+            .raw_module()
+            .annotation_span(declaration)
+            .unwrap_or(declaration)
+    }
+
+    /// Where a diagnostic about the `ordinal`th occurrence of the type name `name` in the
+    /// reference being walked goes: that occurrence, when lowering recorded it inside the
+    /// reference's enclosing span, or else that span.
+    fn type_name_span(&self, name: &Name, ordinal: usize) -> TextSpan {
+        self.module
+            .raw_module()
+            .type_name_span_within(name, self.type_ref_span, ordinal)
+            .unwrap_or(self.type_ref_span)
+    }
+
+    /// Counts a visit to the type name `name` in the reference being walked, and returns how
+    /// many visits preceded it.
+    ///
+    /// <para>The walk visits a reference's names in the order they are written, so the count is
+    /// which occurrence of the name inside the enclosing span this one is. Every entry into a
+    /// reference of its own — a new annotation, an alias's target — starts the count afresh.</para>
+    fn next_type_name_ordinal(&mut self, name: &Name) -> usize {
+        let count = self.type_name_ordinals.entry(name.clone()).or_default();
+        *count += 1;
+        *count - 1
+    }
+
+    /// Counts the names of a part of the reference the walk skips, so the occurrences written
+    /// after it keep their place.
+    fn skip_type_name_ordinals(&mut self, type_ref: &ast::TypeRef) {
+        for name in nx_hir::type_ref_names(type_ref) {
+            self.next_type_name_ordinal(name);
+        }
+    }
+
+    /// The union `name` spells a case of, when it is written `<Union>.<case>`.
+    ///
+    /// <para>A case is a value of its union, not a type of its own, so `Shape.circle` in type
+    /// position names nothing; the union is the type to write.</para>
+    fn union_of_case_written_as_type(&self, name: &Name) -> Option<Name> {
+        let (union, case) = name.as_str().rsplit_once('.')?;
+        let entry = self.union_defs.get(&Name::new(union))?;
+        entry
+            .def
+            .cases
+            .iter()
+            .any(|candidate| candidate.name.as_str() == case)
+            .then(|| Name::new(union))
+    }
+
+    /// Whether `name` is one an import that did not bind all its names would have made visible.
+    ///
+    /// <para>A selective import claims the names it lists (and their derived `.Property` and
+    /// `.Update`), and a namespace import every name under its alias; either failed when nothing
+    /// is bound under what it claims, or when preparation recorded it as incomplete — it did not
+    /// resolve, or its target lost a declaration to an error. An unaliased wildcard import claims
+    /// names that cannot be known without its target, so one recorded as incomplete claims every
+    /// name. One that resolved to a module that kept its declarations but carries another
+    /// diagnostic, such as a repeated import, claims nothing it did not bind.</para>
+    fn is_name_of_failed_import(&self, name: &Name) -> bool {
+        const NAMESPACES: [PreparedNamespace; 3] = [
+            PreparedNamespace::Value,
+            PreparedNamespace::Type,
+            PreparedNamespace::Element,
+        ];
+        let module = self.module;
+        let written = name.as_str();
+        let under = |prefix: &str| {
+            written == prefix
+                || written
+                    .strip_prefix(prefix)
+                    .is_some_and(|rest| rest.starts_with('.'))
+        };
+        module
+            .raw_module()
+            .imports
+            .iter()
+            .any(|import| match &import.kind {
+                nx_hir::ImportKind::Wildcard { alias: None } => {
+                    module.is_import_incomplete(import.span)
+                }
+                nx_hir::ImportKind::Wildcard { alias: Some(alias) } => {
+                    let prefix = format!("{}.", alias);
+                    written.starts_with(&prefix)
+                        && (module.is_import_incomplete(import.span)
+                            || !NAMESPACES.iter().any(|namespace| {
+                                module.bindings(*namespace).any(|binding| {
+                                    binding.visible_name.as_str().starts_with(&prefix)
+                                })
+                            }))
+                }
+                nx_hir::ImportKind::Selective { entries } => entries.iter().any(|entry| {
+                    let visible = match &entry.qualifier {
+                        Some(qualifier) => {
+                            Name::new(format!("{}.{}", qualifier, entry.name).as_str())
+                        }
+                        None => entry.name.clone(),
+                    };
+                    under(visible.as_str())
+                        && (module.is_import_incomplete(import.span)
+                            || !NAMESPACES
+                                .iter()
+                                .any(|namespace| module.has_binding(*namespace, &visible)))
+                }),
+            })
     }
 
     /// The type parameters of the record `ty` names, empty when it names no generic record.
@@ -4645,6 +4882,17 @@ impl<'a> InferenceContext<'a> {
         scoped: bool,
     ) -> Type {
         let span = self.type_ref_span;
+        self.next_type_name_ordinal(name);
+        // Whatever returns before the arguments are walked leaves their names counted.
+        let skip_arguments = |this: &mut Self| {
+            for (_, arg) in args {
+                this.skip_type_name_ordinals(arg);
+            }
+        };
+        if ast::TypeRef::is_recovery_name(name) {
+            skip_arguments(self);
+            return Type::Error;
+        }
         // The tag names a record, never a type parameter or a primitive, so it skips both.
         let base = match declaring_module
             .map(|module_identity| module_identity.to_string())
@@ -4654,7 +4902,16 @@ impl<'a> InferenceContext<'a> {
             None => self.resolve_named_type(name, seen),
         };
         let params = self.record_type_params_of(&base);
+        // A tag an import that failed would have bound is that import's error, not this one's.
+        if params.is_empty()
+            && self.is_unresolved_type_name(name, &base)
+            && self.is_name_of_failed_import(name)
+        {
+            skip_arguments(self);
+            return Type::Error;
+        }
         if params.is_empty() {
+            skip_arguments(self);
             self.error(
                 "applied-type-not-generic",
                 match &base {
@@ -4675,6 +4932,17 @@ impl<'a> InferenceContext<'a> {
         let mut bound: FxHashMap<Name, Type> = FxHashMap::default();
         let mut failed = false;
         for (param, arg) in args {
+            // A bare argument is counted here, since it is resolved below without the walk; a
+            // composite one is counted by the walk, or skipped when it is not walked.
+            let arg_ordinal = match arg {
+                ast::TypeRef::Name(arg_name) => self.next_type_name_ordinal(arg_name),
+                _ => 0,
+            };
+            if (!params.contains(param) || bound.contains_key(param))
+                && !matches!(arg, ast::TypeRef::Name(_))
+            {
+                self.skip_type_name_ordinals(arg);
+            }
             if !params.contains(param) {
                 self.error(
                     "unknown-type-argument",
@@ -4705,7 +4973,14 @@ impl<'a> InferenceContext<'a> {
                 failed = true;
                 continue;
             }
-            let ty = self.type_from_type_ref_walk(declaring_module, arg, seen, scoped);
+            // A bare argument is resolved without the walk's own report, so a name that reaches
+            // nothing is reported once, as the argument it was written as, below.
+            let ty = match arg {
+                ast::TypeRef::Name(arg_name) => {
+                    self.type_from_type_name(declaring_module, arg_name, seen, scoped)
+                }
+                _ => self.type_from_type_ref_walk(declaring_module, arg, seen, scoped),
+            };
             if ty.is_error() {
                 failed = true;
             }
@@ -4716,24 +4991,22 @@ impl<'a> InferenceContext<'a> {
             if self.reject_occurrence_type_argument(&ty, written.as_ref(), span) {
                 failed = true;
             }
-            // A bare name that reached no declaration is a misspelling, not a type. Nothing else
-            // reports it: an unresolved `Type::Named` is otherwise carried along unremarked.
+            // A bare name that reached no declaration is a misspelling, not a type, and is named
+            // here as the argument it was written for rather than as a bare `unresolved-type`.
             if let ast::TypeRef::Name(arg_name) = arg {
-                if matches!(&ty, Type::Named(named) if named.origin().is_none())
-                    && !self.is_visible_type_name(arg_name)
-                {
-                    let candidates = self.visible_type_names();
-                    let suggestion = Self::closest_candidate(arg_name, &candidates)
-                        .map(|candidate| format!("; did you mean `{}`?", candidate))
-                        .unwrap_or_default();
-                    self.error(
-                        "unresolved-type-argument",
-                        format!(
-                            "Type parameter '{}' of record '{}' expects a type, and '{}' is not a visible type{}",
-                            param, name, arg_name, suggestion
-                        ),
-                        span,
-                    );
+                if self.is_unresolved_type_name(arg_name, &ty) {
+                    if !self.is_name_of_failed_import(arg_name) {
+                        let suggestion = self.did_you_mean_type(arg_name);
+                        let arg_span = self.type_name_span(arg_name, arg_ordinal);
+                        self.error(
+                            "unresolved-type-argument",
+                            format!(
+                                "Type parameter '{}' of record '{}' expects a type, and '{}' is not a visible type{}",
+                                param, name, arg_name, suggestion
+                            ),
+                            arg_span,
+                        );
+                    }
                     failed = true;
                 }
             }
@@ -5425,6 +5698,12 @@ impl<'a> InferenceContext<'a> {
                 ),
                 span,
             );
+            return Some(Type::Error);
+        }
+
+        // The site's type is already an error, reported where it was written: there is nothing
+        // to resolve the name against, and nothing more worth saying about it.
+        if expected.is_error() {
             return Some(Type::Error);
         }
 
@@ -6245,6 +6524,8 @@ impl<'a> InferenceContext<'a> {
                         binding.visible_name.clone(),
                         TypeAliasInfo {
                             target: alias.ty.clone(),
+                            // A workspace peer's alias arrives raw, just as a local one does.
+                            foreign: origin.module_identity() != self.module.module_identity(),
                         },
                     );
                 }
@@ -6252,7 +6533,10 @@ impl<'a> InferenceContext<'a> {
                     if let Some(alias) = interface_type_alias(item) {
                         self.type_aliases.insert(
                             binding.visible_name.clone(),
-                            TypeAliasInfo { target: alias.ty },
+                            TypeAliasInfo {
+                                target: alias.ty,
+                                foreign: true,
+                            },
                         );
                     } else if let Some(mut union_def) = interface_union(item) {
                         union_def.name = binding.visible_name.clone();
@@ -6319,6 +6603,42 @@ impl<'a> InferenceContext<'a> {
     /// reports a malformed applied type where it was written.</para>
     fn validate_local_record_defaults(&mut self) {
         let local_items = self.module.raw_module().items().to_vec();
+        // The inline emit payloads of a component that resolution already rejected for typing a
+        // payload field by one of its type parameters, each with the parameter names that are no
+        // type outside the component. Those names resolve to an error in the payload, so the
+        // rejected field is not reported again as an unresolved type, while every other name the
+        // payloads write still is.
+        let rejected_payload_parameters: FxHashMap<Name, Vec<Name>> = local_items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Component(component) => Some(component),
+                _ => None,
+            })
+            .filter_map(
+                |component| match self.effective_component_contract(&component.name) {
+                    Err(nx_hir::ComponentResolutionError::TypeParameterInEmitPayload {
+                        parameter,
+                        ..
+                    }) => Some((component, parameter)),
+                    _ => None,
+                },
+            )
+            .flat_map(|(component, parameter)| {
+                // The rejected parameter may be inherited, so it is not always a declared one.
+                let mut parameters: Vec<Name> = component
+                    .type_params
+                    .iter()
+                    .map(|param| param.name.clone())
+                    .collect();
+                parameters.push(parameter);
+                component
+                    .emits
+                    .iter()
+                    .filter(|emit| emit.kind == nx_hir::ComponentEmitKind::Inline)
+                    .map(|emit| (emit.action_name.clone(), parameters.clone()))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
         for item in local_items {
             if let Item::Record(record_def) = item {
                 // A derived update record's fields are copies of its target's, with defaults
@@ -6333,10 +6653,13 @@ impl<'a> InferenceContext<'a> {
                     .iter()
                     .map(|param| param.name.clone())
                     .collect();
-                let previous_scope = std::mem::replace(
-                    &mut self.type_parameter_scope,
-                    Self::rigid_type_parameter_scope(&type_param_names, owner),
-                );
+                let mut scope = Self::rigid_type_parameter_scope(&type_param_names, owner);
+                if let Some(parameters) = rejected_payload_parameters.get(&record_def.name) {
+                    for parameter in parameters {
+                        scope.entry(parameter.clone()).or_insert(Type::Error);
+                    }
+                }
+                let previous_scope = std::mem::replace(&mut self.type_parameter_scope, scope);
                 for prop in &record_def.properties {
                     let expected = self.property_slot_type(prop.span, &prop.name, &prop.ty);
                     if let Some(default_expr) = prop.default {
@@ -6407,7 +6730,9 @@ impl<'a> InferenceContext<'a> {
         let mut seen = FxHashSet::default();
         seen.insert(name.clone());
         let enclosing_span = std::mem::replace(&mut self.type_ref_span, span);
+        let enclosing_ordinals = std::mem::take(&mut self.type_name_ordinals);
         let ty = self.type_from_type_ref_walk(None, target, &mut seen, false);
+        self.type_name_ordinals = enclosing_ordinals;
         self.type_ref_span = enclosing_span;
         ty
     }
@@ -6566,7 +6891,8 @@ impl<'a> InferenceContext<'a> {
                         self.reject_reserved_intrinsic_name(&value.name, "value", value.span);
                         let actual = self.infer_expr(value.value);
                         if let Some(ty_ref) = value.ty.as_ref() {
-                            let expected = self.type_from_type_ref_at(value.span, ty_ref);
+                            let annotation_span = self.annotation_span(value.span);
+                            let expected = self.type_from_type_ref_at(annotation_span, ty_ref);
                             self.check_typed_binding_for(
                                 Some(value.value),
                                 &actual,
@@ -6874,12 +7200,19 @@ impl<'a> InferenceContext<'a> {
             // line that names neither the target nor what is wrong with it. So the span is the
             // alias's for the length of the walk, and the caller's is put back afterwards.
             let target = alias.target.clone();
+            let foreign = alias.foreign;
             let enclosing_span = self
                 .local_type_alias_spans
                 .get(name)
                 .copied()
                 .map(|alias_span| std::mem::replace(&mut self.type_ref_span, alias_span));
+            // The target is a reference of its own, whose names are counted apart from the
+            // reference that reached the alias.
+            let enclosing_ordinals = std::mem::take(&mut self.type_name_ordinals);
+            self.foreign_alias_depth += usize::from(foreign);
             let ty = self.type_from_type_ref_walk(None, &target, seen, false);
+            self.foreign_alias_depth -= usize::from(foreign);
+            self.type_name_ordinals = enclosing_ordinals;
             if let Some(enclosing_span) = enclosing_span {
                 self.type_ref_span = enclosing_span;
             }

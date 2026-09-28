@@ -92,7 +92,7 @@ action SearchSubmitted = {
 - Actions remain record-compatible, so existing record construction paths keep working.
 - The distinction matters only for contexts that explicitly require actions.
 
-```nx
+```nx fragment
 component <SearchBox
   placeholder:string
   emits {

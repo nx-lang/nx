@@ -21,9 +21,11 @@ used](#where-the-logo-is-used)).
 | `nx-mark.svg`, `nx-mark-on-dark.svg` | The bracket X alone, where the N would be redundant or too small. |
 | `nx-icon.svg` | The app icon: the X on an ink tile. Favicons, extension and app icons, avatars. |
 | `nx-icon-light.svg` | The app icon on a white tile, for dark surroundings where an ink tile disappears. |
+| `nx-avatar.svg`, `png/nx-avatar-512.png` | The app icon with square corners, for places that round or crop the image themselves: the GitHub organization's avatar, social profiles. |
 | `png/nx-icon-*.png` | The app icon at 512, 256, 180 (Apple touch icon), 128, 32 and 16 pixels. |
 | `png/nx-logo-1200.png`, `png/nx-logo-on-dark-1200.png` | The logo as images, for places that don't take SVG. |
 | `png/nx-social-card.png` | The 1200×630 card shown when a page of the website is shared: the logo, the tagline and the site's address. |
+| `png/nx-github-social-preview.png` | The same card at 1280×640, GitHub's size, for the `nx-lang/nx` repository's social preview. |
 
 The SVGs are drawn as shapes with no text, so they need no fonts and look the same everywhere.
 They are cropped tight to the drawing: add space around them where you place them.
@@ -167,6 +169,7 @@ The logo is drawn on an 84-unit cap height. The numbers live at the top of `gene
 | Space between the N and the `>` | 16 |
 | Width of each bracket | 42 |
 | App icon | The brackets fill 62% of the tile's width; corner radius 22% |
+| Avatar | The brackets fill 70% of the tile's width; square corners |
 
 ### Changing the logo
 
@@ -196,6 +199,14 @@ their own folders. `generate.mjs` writes all of them:
 | `src/vscode/images/icon.png` | `png/nx-icon-128.png`, the Marketplace and Open VSX icon |
 
 If you add the logo somewhere new, add the copy to the end of `generate.mjs` and to this table.
+
+GitHub takes two images that can only be uploaded in its web settings, so they aren't copied
+anywhere. Upload them again after changing the logo:
+
+| Setting | Image |
+| --- | --- |
+| [Organization profile](https://github.com/organizations/nx-lang/settings/profile) → Profile picture | `png/nx-avatar-512.png` |
+| [Repository settings](https://github.com/nx-lang/nx/settings) → Social preview | `png/nx-github-social-preview.png` |
 
 ### Origin
 

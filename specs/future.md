@@ -1352,8 +1352,14 @@ flattened order the runtimes use.
 HIR's `ast::TypeRef` has no source span and no way to say "this reference is malformed". Both
 gaps show up as diagnostics that are harder to read than they need to be.
 
-**Diagnostics underline the whole declaration.** A diagnostic about a type reference points at
-the declaration or slot that holds it rather than at the reference itself.
+`report-unresolved-type-names` closed part of this without the rework: lowering records where each
+type name was written in a side table on `LoweredModule` (`type_name_span_within`), which
+`unresolved-type` and `unresolved-type-argument` use to underline the name itself, and a type node
+that failed to parse lowers to `TypeRef::recovery()`, which the checker resolves to `Type::Error`
+without a report. What follows is what is left.
+
+**Diagnostics underline the whole declaration.** Every other diagnostic about a type reference
+points at the declaration or slot that holds it rather than at the reference itself.
 `let b:<Box T=int?/> = <Box T=int value=1 />` underlines the whole `let` for "A type argument must
 be exactly one value", and `type Bad = <Box T=int+/>` underlines the whole alias declaration. The
 checker reports at `type_ref_span`, which the caller sets to the enclosing declaration's span
@@ -1363,13 +1369,12 @@ value-binding annotation).
 **A malformed reference is lowered to a well-formed one.** `x:string??` is reported by post-parse
 validation ("Type already carries an occurrence"). Lowering then keeps the first suffix, so the
 checker sees `x:string?` and also reports the property-slot rule ("admits zero; write
-`x?:string`"). A type node that failed to parse fares worse: it lowers to `TypeRef::name("error")`,
-which resolves as an unknown named type and can produce messages such as "expects error, found
-string". An error form, lowered for either case and resolved by the checker to `Type::Error`,
-would silence everything downstream of a reference that was already reported.
+`x?:string`"). Lowering such a reference to `TypeRef::recovery()` too, as a node that failed to
+parse already is, would silence everything downstream of a reference that was already reported.
 
 The fix for both is the same rework: give `TypeRef` (or each of its name and argument nodes) a
-span and an `Error` variant when lowering it, and report at that span. Every crate that builds or
+span and a real `Error` variant when lowering it, and report at that span, retiring the side table
+and the reserved recovery name. Every crate that builds or
 matches a `TypeRef` changes with it: the checker, codegen, typegen and the language service, about
 a dozen files. Found by the `occurrence-cardinality` review (RF39, RF48).
 
@@ -1460,26 +1465,34 @@ Content And Property Values Are Never Type-Checked" above, which covers what is 
 element. A fix has to decide what a host element is: an open set of lowercase HTML-style tags, a
 declared set a host supplies, or anything not starting with an uppercase letter.
 
-## `emits` accepts a brace-less reference to an action that doesn't exist
+## An imported alias's target is resolved in the importing module
 
-**Observed.** The `component-syntax` spec says a brace-less entry in `emits { ... }` must name an
-existing action, but no error is reported when it doesn't:
+**Observed.** A type alias another module declared is registered in the importing module with its
+target as written, and `resolve_named_type` walks that target with no declaring module
+(`crates/nx-types/src/infer.rs`), so the target's names are looked up in the importer's namespace
+rather than the one that wrote them. A bare target no longer reports anything there:
+`report-unresolved-type-names` added `TypeAliasInfo.foreign` and `foreign_alias_depth` so a consumer
+does not report a library's own reference. The resolution is still wrong in two ways:
 
-```nx
-component <Search query:string emits { Submitted } /> = {
-  <input value={query} />
-}
+- **An applied target fails in the consumer.** With `shared/types.nx` doing
+  `import { Contact, Page } from "./base.nx"` and `export type Ps = <Page T=Contact/>`, a module
+  that imports only `Ps` reports `'Page' is not a generic record, so it cannot be applied`: a
+  library's reference, reported by its consumer, at the consumer's span.
+- **A bare target loses its identity.** `export type Cs = Contact+` resolves in the consumer to an
+  origin-less `Contact`, which is not the library's declaration, and a local type the consumer
+  declares under the same name answers for it instead.
 
-<Search query="nx" />
-```
+**Why it matters.** Neither case reaches ReachMe today: its built-in libraries declare no alias
+whose target names another type (their `type X = a | b` declarations are constant unions, not
+aliases). A library that does will see both problems, and in a host where local declarations
+shadow implicit imports, a tenant's same-named type can silently stand in for the library's.
 
-This compiles and runs, and nothing declares `Submitted`. The `SearchBox` block on the Functions
-reference page passes the code-block check only because of this: `SearchSubmitted` is declared in the
-block before it.
-
-**Why it matters.** A typo in an emitted action's name is found only when a handler for it never
-fires. Adding the check will fail code that compiles today, the docs among it, which the website's
-code-block check will point to.
+**Fix.** Carry the declaring module on `TypeAliasInfo` and walk the target through it, as
+`foreign_nominal_type` already does for an alias reached through a peer entry
+(`nominal_type_in_module`). That retires `foreign_alias_depth` and `TypeAliasInfo.foreign`. It
+touches alias caching (`resolved_type_aliases` is keyed by the visible name), cycle detection
+across modules, and the quiet-resolution rollback, so it wants its own change, with an `nx-api`
+workspace test for each case above. Found as RF6 of the `report-unresolved-type-names` review.
 
 ## `examples/nx/types.nx` no longer compiles
 

@@ -15,8 +15,9 @@ use std::ptr;
 
 use nx_api::{
     build_workspace_program_artifact, diagnostics_to_api_with_source_entries,
-    eval_program_artifact_nx_text_with_limits, load_program_artifact_from_source, LibraryRegistry,
-    NxDiagnostic, NxSeverity, NxWorkspace, NxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
+    eval_program_artifact_nx_text_with_limits, load_program_artifact_from_source,
+    validate_workspace, LibraryRegistry, NxDiagnostic, NxLibraryModule, NxLibrarySource,
+    NxSeverity, NxWorkspace, NxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
     ResourceLimits,
 };
 use nx_codegen::{emit_nx_ir, explain_nx_ir_image, write_nx_ir_bundle, NxIrEmitOptions};
@@ -27,7 +28,7 @@ use serde::{Deserialize, Serialize};
 
 /// ABI version the loader checks before it makes any other call. Bump it whenever an export's
 /// signature, a status code or a payload shape changes.
-pub const ABI_VERSION: u32 = 3;
+pub const ABI_VERSION: u32 = 4;
 
 /// The operation succeeded; the payload is its JSON result.
 pub const STATUS_OK: u32 = 0;
@@ -60,8 +61,9 @@ struct BuildRequest {
 struct WorkspaceBuildRequest {
     modules: Vec<WorkspaceModuleRequest>,
     entry: String,
+    /// Replaces the build context's implicit imports when present, an empty list included.
     #[serde(default)]
-    implicit_imports: Vec<String>,
+    implicit_imports: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -70,6 +72,44 @@ struct WorkspaceModuleRequest {
     identity: String,
     source: String,
     version: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceValidateRequest {
+    modules: Vec<WorkspaceModuleRequest>,
+    /// Replaces the build context's implicit imports when present, an empty list included.
+    #[serde(default)]
+    implicit_imports: Option<Vec<String>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LibrariesRequest {
+    libraries: Vec<LibraryRequest>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LibraryRequest {
+    root: String,
+    version: Option<String>,
+    modules: Vec<LibraryModuleRequest>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LibraryModuleRequest {
+    identity: String,
+    source: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BuildContextRequest {
+    visible_roots: Option<Vec<String>>,
+    #[serde(default)]
+    implicit_imports: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -158,14 +198,103 @@ pub unsafe extern "C" fn nx_wasm_program_build(ptr: *const u8, len: usize) -> *m
     into_result(build_program(argument(ptr, len)))
 }
 
-/// Builds a program artifact from `{ modules: [{ identity, source }], entry, implicitImports }`
-/// JSON and answers with its handle.
+/// Builds a program artifact from `{ modules: [{ identity, source, version? }], entry,
+/// implicitImports }` JSON against the build context `context` names, or an empty one when it is
+/// null, and answers with its handle. Implicit imports the request names replace the context's.
 ///
 /// # Safety
-/// `ptr` and `len` must describe UTF-8 bytes in the module's memory.
+/// `context` must be null or a live handle from [`nx_wasm_build_context_new`]; `ptr` and `len` must
+/// describe UTF-8 bytes in the module's memory.
 #[no_mangle]
-pub unsafe extern "C" fn nx_wasm_workspace_build(ptr: *const u8, len: usize) -> *mut NxWasmResult {
-    into_result(build_workspace(argument(ptr, len)))
+pub unsafe extern "C" fn nx_wasm_workspace_build(
+    context: *mut ProgramBuildContext,
+    ptr: *const u8,
+    len: usize,
+) -> *mut NxWasmResult {
+    into_result(build_workspace(context.as_ref(), argument(ptr, len)))
+}
+
+/// Validates `{ modules: [{ identity, source, version? }], implicitImports }` JSON against the
+/// build context `context` names, or an empty one when it is null, and answers with every
+/// diagnostic — errors, warnings, info and hints — as a JSON array. NX diagnostics, including a
+/// workspace the SDK cannot form, are the answer rather than a failure.
+///
+/// # Safety
+/// `context` must be null or a live handle from [`nx_wasm_build_context_new`]; `ptr` and `len` must
+/// describe UTF-8 bytes in the module's memory.
+#[no_mangle]
+pub unsafe extern "C" fn nx_wasm_workspace_validate(
+    context: *mut ProgramBuildContext,
+    ptr: *const u8,
+    len: usize,
+) -> *mut NxWasmResult {
+    into_result(validate(context.as_ref(), argument(ptr, len)))
+}
+
+/// Creates an empty library registry and answers with its handle.
+#[no_mangle]
+pub extern "C" fn nx_wasm_registry_new() -> *mut NxWasmResult {
+    into_result(Ok(handle_json(Box::into_raw(Box::new(
+        LibraryRegistry::new(),
+    )))))
+}
+
+/// Loads `{ libraries: [{ root, version?, modules: [{ identity, source }] }] }` JSON into the
+/// registry `handle` names, in dependency order, and answers with the libraries' own warnings, info
+/// and hints as a JSON diagnostic array, which workspace validation and builds leave out. A library
+/// that cannot be loaded answers with diagnostics; libraries of the request loaded before it stay
+/// loaded.
+///
+/// # Safety
+/// `handle` must be a live handle from [`nx_wasm_registry_new`]; `ptr` and `len` must describe
+/// UTF-8 bytes in the module's memory.
+#[no_mangle]
+pub unsafe extern "C" fn nx_wasm_registry_load(
+    handle: *mut LibraryRegistry,
+    ptr: *const u8,
+    len: usize,
+) -> *mut NxWasmResult {
+    into_result(load_libraries(&*handle, argument(ptr, len)))
+}
+
+/// Releases the registry `handle` names. Build contexts created from it stay usable: each holds
+/// the libraries it can see.
+///
+/// # Safety
+/// `handle` must be a live handle from [`nx_wasm_registry_new`] and must not be used afterwards.
+#[no_mangle]
+pub unsafe extern "C" fn nx_wasm_registry_free(handle: *mut LibraryRegistry) {
+    if !handle.is_null() {
+        drop(Box::from_raw(handle));
+    }
+}
+
+/// Creates a build context over the registry `registry` names from `{ visibleRoots?,
+/// implicitImports }` JSON — every loaded library visible when `visibleRoots` is omitted — and
+/// answers with its handle.
+///
+/// # Safety
+/// `registry` must be a live handle from [`nx_wasm_registry_new`]; `ptr` and `len` must describe
+/// UTF-8 bytes in the module's memory.
+#[no_mangle]
+pub unsafe extern "C" fn nx_wasm_build_context_new(
+    registry: *mut LibraryRegistry,
+    ptr: *const u8,
+    len: usize,
+) -> *mut NxWasmResult {
+    into_result(new_build_context(&*registry, argument(ptr, len)))
+}
+
+/// Releases the build context `handle` names.
+///
+/// # Safety
+/// `handle` must be a live handle from [`nx_wasm_build_context_new`] and must not be used
+/// afterwards.
+#[no_mangle]
+pub unsafe extern "C" fn nx_wasm_build_context_free(handle: *mut ProgramBuildContext) {
+    if !handle.is_null() {
+        drop(Box::from_raw(handle));
+    }
 }
 
 /// Emits NX IR from the artifact `handle` names, for the modules the `{ modules, debug }` JSON
@@ -313,25 +442,122 @@ fn build_program(argument: Result<&str, OperationError>) -> Operation {
     Ok(handle_json(Box::into_raw(Box::new(program))))
 }
 
-fn build_workspace(argument: Result<&str, OperationError>) -> Operation {
+fn build_workspace(
+    context: Option<&ProgramBuildContext>,
+    argument: Result<&str, OperationError>,
+) -> Operation {
     let request: WorkspaceBuildRequest = parse_request(argument?)?;
-    let mut modules = Vec::with_capacity(request.modules.len());
-    for module in request.modules {
-        let workspace_module = NxWorkspaceModule::from_source(module.identity, module.source)
-            .map_err(|error| workspace_input_error(error.to_string()))?;
-        modules.push(match module.version {
-            Some(version) => workspace_module.with_version(version),
-            None => workspace_module,
-        });
-    }
-    let workspace =
-        NxWorkspace::new(modules).map_err(|error| workspace_input_error(error.to_string()))?;
-    let build_context =
-        ProgramBuildContext::empty().with_implicit_imports(request.implicit_imports);
+    let workspace = workspace_from_request(request.modules)?;
+    let build_context = workspace_build_context(context, request.implicit_imports);
     let program = build_workspace_program_artifact(&workspace, &request.entry, &build_context)
         .map_err(evaluation_error)?;
 
     Ok(handle_json(Box::into_raw(Box::new(program))))
+}
+
+fn validate(
+    context: Option<&ProgramBuildContext>,
+    argument: Result<&str, OperationError>,
+) -> Operation {
+    let request: WorkspaceValidateRequest = parse_request(argument?)?;
+    let diagnostics = match workspace_from_request(request.modules) {
+        Ok(workspace) => validate_workspace(
+            &workspace,
+            &workspace_build_context(context, request.implicit_imports),
+        ),
+        Err(error) => serde_json::from_str(&error.payload).unwrap_or_default(),
+    };
+    result_json(&diagnostics)
+}
+
+fn workspace_from_request(
+    modules: Vec<WorkspaceModuleRequest>,
+) -> Result<NxWorkspace, OperationError> {
+    let mut workspace_modules = Vec::with_capacity(modules.len());
+    for module in modules {
+        let workspace_module = NxWorkspaceModule::from_source(module.identity, module.source)
+            .map_err(|error| workspace_input_error(error.to_string()))?;
+        workspace_modules.push(match module.version {
+            Some(version) => workspace_module.with_version(version),
+            None => workspace_module,
+        });
+    }
+    NxWorkspace::new(workspace_modules).map_err(|error| workspace_input_error(error.to_string()))
+}
+
+/// The context a workspace call runs against: the caller's, or an empty one, naming the implicit
+/// imports the request names when it names a list, even an empty one, so a caller can build a
+/// module without the context's implicit imports.
+fn workspace_build_context(
+    context: Option<&ProgramBuildContext>,
+    implicit_imports: Option<Vec<String>>,
+) -> ProgramBuildContext {
+    let context = context.cloned().unwrap_or_else(ProgramBuildContext::empty);
+    match implicit_imports {
+        Some(implicit_imports) => context.with_implicit_imports(implicit_imports),
+        None => context,
+    }
+}
+
+fn load_libraries(registry: &LibraryRegistry, argument: Result<&str, OperationError>) -> Operation {
+    let request: LibrariesRequest = parse_request(argument?)?;
+    let libraries = request
+        .libraries
+        .into_iter()
+        .map(|library| {
+            let source = NxLibrarySource::new(
+                library.root,
+                library
+                    .modules
+                    .into_iter()
+                    .map(|module| NxLibraryModule::new(module.identity, module.source))
+                    .collect(),
+            );
+            match library.version {
+                Some(version) => source.with_version(version),
+                None => source,
+            }
+        })
+        .collect::<Vec<_>>();
+    let loaded = registry
+        .load_libraries_from_sources(&libraries)
+        .map_err(evaluation_error)?;
+    // Workspace validation and builds leave a library's own warnings out, so the load is where the
+    // host reads them: each library's once, in the order the libraries were given.
+    let mut reported = std::collections::HashSet::new();
+    let diagnostics = loaded
+        .iter()
+        .filter(|library| reported.insert(library.root_path.clone()))
+        .flat_map(|library| library.api_diagnostics())
+        .collect::<Vec<_>>();
+    result_json(&diagnostics)
+}
+
+fn new_build_context(
+    registry: &LibraryRegistry,
+    argument: Result<&str, OperationError>,
+) -> Operation {
+    let argument = argument?;
+    let request: BuildContextRequest = if argument.trim().is_empty() {
+        BuildContextRequest {
+            visible_roots: None,
+            implicit_imports: Vec::new(),
+        }
+    } else {
+        parse_request(argument)?
+    };
+    let context = match request.visible_roots {
+        None => registry.build_context(),
+        Some(roots) => registry
+            .build_context_with_visible_roots(roots)
+            .map_err(|error| workspace_input_error(error.to_string()))?,
+    };
+    let context = if request.implicit_imports.is_empty() {
+        context
+    } else {
+        context.with_implicit_imports(request.implicit_imports)
+    };
+    Ok(handle_json(Box::into_raw(Box::new(context))))
 }
 
 fn program_nx_ir(program: &ProgramArtifact, argument: Result<&str, OperationError>) -> Operation {
@@ -625,6 +851,274 @@ mod tests {
         payload.parse().expect("handle is a decimal pointer")
     }
 
+    /// Runs an operation on a handle the way the loader does.
+    fn call_on<T>(
+        handle: *mut T,
+        operation: unsafe extern "C" fn(*mut T, *const u8, usize) -> *mut NxWasmResult,
+        argument: &str,
+    ) -> (u32, String) {
+        let bytes = argument.as_bytes();
+        let input = nx_wasm_alloc(bytes.len());
+        unsafe {
+            ptr::copy_nonoverlapping(bytes.as_ptr(), input, bytes.len());
+            let result = operation(handle, input, bytes.len());
+            nx_wasm_free(input, bytes.len());
+
+            let status = (*result).status;
+            let payload = read_payload(result);
+            nx_wasm_result_free(result);
+            (status, payload)
+        }
+    }
+
+    fn take_handle(result: *mut NxWasmResult) -> usize {
+        unsafe {
+            assert_eq!((*result).status, STATUS_OK);
+            let payload = read_payload(result);
+            nx_wasm_result_free(result);
+            handle_from(&payload)
+        }
+    }
+
+    /// Every image of the program `handle` names, keyed by identity.
+    fn all_images(handle: *mut ProgramArtifact) -> Vec<(String, Vec<u8>)> {
+        let options = r#"{"modules":[]}"#;
+        let bytes = options.as_bytes();
+        unsafe {
+            let input = nx_wasm_alloc(bytes.len());
+            ptr::copy_nonoverlapping(bytes.as_ptr(), input, bytes.len());
+            let result = nx_wasm_program_nx_ir(handle, input, bytes.len());
+            nx_wasm_free(input, bytes.len());
+            assert_eq!((*result).status, STATUS_OK);
+            let artifacts =
+                read_nx_ir_bundle(&read_payload_bytes(result)).expect("IR payload is a bundle");
+            nx_wasm_result_free(result);
+            artifacts
+                .into_iter()
+                .map(|artifact| (artifact.identity, artifact.bytes))
+                .collect()
+        }
+    }
+
+    fn libraries_request() -> String {
+        serde_json::json!({
+            "libraries": [
+                {
+                    "root": "libraries/chat-link",
+                    "modules": [{
+                        "identity": "ChatLinkConfig.nx",
+                        "source": "import \"../question-flow\"\nexport type ChatLinkConfig = { title:string questionFlow:QuestionFlow }"
+                    }]
+                },
+                {
+                    "root": "libraries/question-flow",
+                    "version": "3",
+                    "modules": [
+                        { "identity": "Step.nx", "source": "export type Step = { id:string }" },
+                        { "identity": "QuestionFlow.nx", "source": "export type QuestionFlow = { firstStep:Step }" }
+                    ]
+                }
+            ]
+        })
+        .to_string()
+    }
+
+    fn tenant_request(title: &str) -> String {
+        serde_json::json!({
+            "modules": [{
+                "identity": "chat-link.nx",
+                "source": format!("let root() = <ChatLinkConfig title=\"{title}\" questionFlow={{<QuestionFlow firstStep={{<Step id=\"a\" />}} />}} />")
+            }],
+            "entry": "chat-link.nx"
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn libraries_load_once_and_every_build_in_a_context_reuses_them() {
+        let registry = take_handle(nx_wasm_registry_new()) as *mut LibraryRegistry;
+        let (status, payload) = call_on(registry, nx_wasm_registry_load, &libraries_request());
+        assert_eq!(status, STATUS_OK, "{payload}");
+        // The libraries have no warnings of their own to report.
+        let diagnostics: Vec<serde_json::Value> = serde_json::from_str(&payload).unwrap();
+        assert!(diagnostics.is_empty(), "{payload}");
+
+        let (status, payload) = call_on(
+            registry,
+            nx_wasm_build_context_new,
+            r#"{"implicitImports":["libraries/chat-link","libraries/question-flow"]}"#,
+        );
+        assert_eq!(status, STATUS_OK, "{payload}");
+        let context = handle_from(&payload) as *mut ProgramBuildContext;
+        // The context holds what it can see, so it outlives the registry's handle.
+        unsafe { nx_wasm_registry_free(registry) };
+
+        let (status, payload) = call_on(context, nx_wasm_workspace_build, &tenant_request("One"));
+        assert_eq!(status, STATUS_OK, "{payload}");
+        let first = handle_from(&payload) as *mut ProgramArtifact;
+        let (status, payload) = call_on(context, nx_wasm_workspace_build, &tenant_request("Two"));
+        assert_eq!(status, STATUS_OK, "{payload}");
+        let second = handle_from(&payload) as *mut ProgramArtifact;
+
+        unsafe {
+            // Both builds read the one analyzed snapshot of each library rather than analyzing it.
+            for library in &(*first).libraries {
+                assert!(
+                    (*second)
+                        .libraries
+                        .iter()
+                        .any(|other| std::sync::Arc::ptr_eq(library, other)),
+                    "{} was analyzed again",
+                    library.root_path.display()
+                );
+            }
+
+            let first_images = all_images(first);
+            let second_images = all_images(second);
+            let library_images = |images: &[(String, Vec<u8>)]| {
+                images
+                    .iter()
+                    .filter(|(identity, _)| identity.starts_with("libraries/"))
+                    .cloned()
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(library_images(&first_images).len(), 3);
+            assert_eq!(
+                library_images(&first_images),
+                library_images(&second_images)
+            );
+            let step = first_images
+                .iter()
+                .find(|(identity, _)| identity == "libraries/question-flow/Step.nx")
+                .expect("the step module's image");
+            let image = NxIrImage::open(&step.1).expect("a valid image");
+            assert_eq!(image.modules().next().unwrap().version, "3");
+
+            nx_wasm_program_free(first);
+            nx_wasm_program_free(second);
+            nx_wasm_build_context_free(context);
+        }
+    }
+
+    #[test]
+    fn a_library_that_cannot_load_answers_with_diagnostics() {
+        let registry = take_handle(nx_wasm_registry_new()) as *mut LibraryRegistry;
+        let (status, payload) = call_on(
+            registry,
+            nx_wasm_registry_load,
+            &serde_json::json!({
+                "libraries": [{
+                    "root": "libraries/chat-link",
+                    "modules": [{ "identity": "ChatLinkConfig.nx", "source": "import \"../question-flow\"" }]
+                }]
+            })
+            .to_string(),
+        );
+        assert_eq!(status, STATUS_EVALUATION_ERROR, "{payload}");
+        assert!(payload.contains("library-dependency-missing"), "{payload}");
+        unsafe { nx_wasm_registry_free(registry) };
+    }
+
+    #[test]
+    fn validation_answers_with_every_diagnostic_as_data() {
+        let registry = take_handle(nx_wasm_registry_new()) as *mut LibraryRegistry;
+        let (status, payload) = call_on(registry, nx_wasm_registry_load, &libraries_request());
+        assert_eq!(status, STATUS_OK, "{payload}");
+        let context = take_handle(unsafe { nx_wasm_build_context_new(registry, ptr::null(), 0) })
+            as *mut ProgramBuildContext;
+
+        let (status, payload) = call_on(
+            context,
+            nx_wasm_workspace_validate,
+            &serde_json::json!({
+                "modules": [{ "identity": "chat-link.nx", "source": "let root() = <ChatLinkConfig title={1} />" }],
+                "implicitImports": ["libraries/chat-link", "libraries/question-flow"]
+            })
+            .to_string(),
+        );
+        assert_eq!(status, STATUS_OK, "{payload}");
+        let diagnostics: Vec<serde_json::Value> = serde_json::from_str(&payload).unwrap();
+        assert!(!diagnostics.is_empty());
+        assert_eq!(diagnostics[0]["severity"], "error");
+        assert_eq!(diagnostics[0]["labels"][0]["file"], "chat-link.nx");
+
+        let (status, payload) = call_on(
+            context,
+            nx_wasm_workspace_validate,
+            &serde_json::json!({
+                "modules": [
+                    { "identity": "a.nx", "source": "let root() = 1" },
+                    { "identity": "a.nx", "source": "let root() = 2" }
+                ]
+            })
+            .to_string(),
+        );
+        assert_eq!(status, STATUS_OK, "{payload}");
+        assert!(payload.contains("workspace-input-error"), "{payload}");
+
+        unsafe {
+            nx_wasm_build_context_free(context);
+            nx_wasm_registry_free(registry);
+        }
+    }
+
+    #[test]
+    fn an_empty_implicit_import_list_replaces_the_contexts_own() {
+        let registry = take_handle(nx_wasm_registry_new()) as *mut LibraryRegistry;
+        let (status, payload) = call_on(registry, nx_wasm_registry_load, &libraries_request());
+        assert_eq!(status, STATUS_OK, "{payload}");
+        let (status, payload) = call_on(
+            registry,
+            nx_wasm_build_context_new,
+            r#"{"implicitImports":["libraries/question-flow"]}"#,
+        );
+        assert_eq!(status, STATUS_OK, "{payload}");
+        let context = handle_from(&payload) as *mut ProgramBuildContext;
+        let request = |implicit_imports: Option<&[&str]>| {
+            let mut request = serde_json::json!({
+                "modules": [{ "identity": "step.nx", "source": "let root() = <Step id={1} />" }],
+                "entry": "step.nx"
+            });
+            if let Some(implicit_imports) = implicit_imports {
+                request["implicitImports"] = serde_json::json!(implicit_imports);
+            }
+            request.to_string()
+        };
+
+        // Omitted, the context's implicit imports apply: `Step` is the library's record, whose
+        // `id` is a string.
+        let (status, payload) = call_on(context, nx_wasm_workspace_build, &request(None));
+        assert_eq!(status, STATUS_EVALUATION_ERROR, "{payload}");
+        assert!(payload.contains("Step"), "{payload}");
+
+        // An empty list replaces them, so nothing is imported and `Step` is an element NX does
+        // not check.
+        let (status, payload) = call_on(context, nx_wasm_workspace_build, &request(Some(&[])));
+        assert_eq!(status, STATUS_OK, "{payload}");
+        unsafe { nx_wasm_program_free(handle_from(&payload) as *mut ProgramArtifact) };
+
+        unsafe {
+            nx_wasm_build_context_free(context);
+            nx_wasm_registry_free(registry);
+        }
+    }
+
+    #[test]
+    fn a_visible_root_that_is_not_loaded_is_named_in_the_error() {
+        let registry = take_handle(nx_wasm_registry_new()) as *mut LibraryRegistry;
+        let (status, payload) = call_on(
+            registry,
+            nx_wasm_build_context_new,
+            r#"{"visibleRoots":["libraries/nope"]}"#,
+        );
+        assert_ne!(status, STATUS_OK, "{payload}");
+        assert!(
+            payload.contains("Visible root 'libraries/nope' is not a loaded library"),
+            "{payload}"
+        );
+        unsafe { nx_wasm_registry_free(registry) };
+    }
+
     #[test]
     fn abi_version_is_the_one_the_loader_checks() {
         assert_eq!(nx_wasm_abi_version(), ABI_VERSION);
@@ -758,7 +1252,8 @@ mod tests {
 
     #[test]
     fn a_workspace_builds_with_implicit_imports_and_emits_the_entry_alone() {
-        let (status, payload) = call(
+        let (status, payload) = call_on(
+            ptr::null_mut::<ProgramBuildContext>(),
             nx_wasm_workspace_build,
             &serde_json::json!({
                 "modules": [

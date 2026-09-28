@@ -458,6 +458,9 @@ pub struct PreparedModule {
     peer_modules: FxHashMap<String, Arc<LoweredModule>>,
     peer_namespaces: FxHashMap<String, Arc<ModuleNamespace>>,
     diagnostics: Vec<LoweringDiagnostic>,
+    /// The spans of the imports whose names are not all there: ones that did not resolve, and
+    /// ones whose target module lost a declaration to an error.
+    incomplete_imports: Vec<TextSpan>,
 }
 
 impl PreparedModule {
@@ -471,6 +474,7 @@ impl PreparedModule {
             peer_modules: FxHashMap::default(),
             peer_namespaces: FxHashMap::default(),
             diagnostics: Vec::new(),
+            incomplete_imports: Vec::new(),
         };
         prepared.add_local_bindings();
         prepared
@@ -514,6 +518,22 @@ impl PreparedModule {
     /// Records one prepared-binding diagnostic.
     pub fn add_diagnostic(&mut self, diagnostic: LoweringDiagnostic) {
         self.diagnostics.push(diagnostic);
+    }
+
+    /// Records that the import written at `span` did not bind every name its author meant it
+    /// to: it did not resolve, or its target module lost a declaration to an error and binds only
+    /// the declarations that survived.
+    ///
+    /// <para>A diagnostic already says why — at the import, or in the target. A later phase uses
+    /// this to leave alone the names such an import would have made visible, rather than
+    /// reporting each one as missing. It changes nothing about what the import binds.</para>
+    pub fn mark_import_incomplete(&mut self, span: TextSpan) {
+        self.incomplete_imports.push(span);
+    }
+
+    /// Whether the import written at `span` did not bind every name its author meant it to.
+    pub fn is_import_incomplete(&self, span: TextSpan) -> bool {
+        self.incomplete_imports.contains(&span)
     }
 
     /// Registers a peer raw module that local prepared bindings may resolve into.
@@ -853,14 +873,7 @@ pub fn interface_union(item: &InterfaceItem) -> Option<UnionDef> {
                     fields: case
                         .fields
                         .iter()
-                        .map(|field| UnionCaseField {
-                            name: field.name.clone(),
-                            ty: field.ty.clone(),
-                            is_content: field.is_content,
-                            optional: field.optional,
-                            default: None,
-                            span: field.span,
-                        })
+                        .map(UnionCaseField::from_interface_field)
                         .collect(),
                     span: case.span,
                 })

@@ -19,8 +19,20 @@ export interface NativeNxWorkspaceConstructor {
   new (modules: readonly NativeWorkspaceModule[]): NativeNxWorkspace;
 }
 
+export interface NativeLibraryModule {
+  readonly identity: string;
+  readonly source: string | Buffer;
+}
+
+export interface NativeLibrary {
+  readonly root: string;
+  readonly version?: string;
+  readonly modules: readonly NativeLibraryModule[];
+}
+
 export interface NativeNxLibraryRegistry {
   loadLibraryFromDirectory(rootPath: string): void;
+  loadLibraries(libraries: readonly NativeLibrary[]): string;
   createBuildContext(): NativeNxProgramBuildContext;
   dispose(): void;
 }

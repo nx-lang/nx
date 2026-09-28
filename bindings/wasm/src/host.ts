@@ -24,6 +24,7 @@ import {
   NxWasmError
 } from "./errors.js";
 import type {
+  NxBuildContextOptions,
   NxDiagnostic,
   NxDiagnosticLabel,
   NxGeneratedNxIr,
@@ -31,12 +32,14 @@ import type {
   NxIrMetadata,
   NxLanguageDocumentInput,
   NxLanguageSnapshotOptions,
+  NxLibraryInput,
   NxSourceBuildOptions,
   NxTextSpan,
   NxValueNode,
   NxValueRole,
   NxValueText,
-  NxWorkspaceBuildOptions
+  NxWorkspaceBuildOptions,
+  NxWorkspaceValidateOptions
 } from "./types.js";
 
 const encoder = new TextEncoder();
@@ -82,6 +85,24 @@ export interface NxHost {
   buildWorkspaceArtifact(options: NxWorkspaceBuildOptions): NxProgramArtifact;
 
   /**
+   * Analyzes a workspace of in-memory modules without building it, and answers with every
+   * diagnostic — errors, warnings, info and hints — each against the identity of the module it
+   * belongs to. NX diagnostics are the answer rather than an error, including a workspace the SDK
+   * cannot form, such as one with two modules of the same identity.
+   *
+   * @throws NxHostCrashedError when the module traps, or has already trapped.
+   */
+  validateWorkspace(options: NxWorkspaceValidateOptions): readonly NxDiagnostic[];
+
+  /**
+   * Creates an empty library registry in this host. Libraries loaded into it are analyzed once and
+   * reused by every build and validation in a build context created from it.
+   *
+   * @throws NxHostCrashedError when the module traps, or has already trapped.
+   */
+  createLibraryRegistry(): NxLibraryRegistry;
+
+  /**
    * Analyzes in-memory documents into an immutable snapshot that answers editor queries.
    *
    * @throws NxEvaluationError when a URI is unparseable or two documents share an identity.
@@ -109,6 +130,77 @@ export interface NxHost {
    * @throws NxHostCrashedError when the module traps, or has already trapped.
    */
   explainNxIr(image: Uint8Array): string;
+}
+
+/**
+ * Libraries loaded from memory into one host, analyzed once and shared by every build context
+ * created from the registry.
+ *
+ * <para>A library root is immutable for the registry's life: loading it again with the same
+ * modules and version does nothing, and loading it with different ones fails. A host that needs to
+ * reclaim the memory its libraries hold is replaced, not emptied.</para>
+ */
+export interface NxLibraryRegistry {
+  /**
+   * Loads one library. Every library it imports must already be loaded.
+   *
+   * @returns The library's own warnings, info and hints. Workspace validation and builds against
+   * the library leave them out, since they are about text a workspace's author cannot edit, so
+   * this is where a host reads them.
+   * @throws NxEvaluationError when the library's analysis reports errors, a library it imports is
+   * not loaded, or its root is already loaded with other modules or another version. A library that
+   * fails to load is not retained.
+   * @throws NxDisposedResourceError when this registry has been disposed.
+   * @throws NxHostCrashedError when the module traps, or has already trapped.
+   */
+  loadLibrary(library: NxLibraryInput): readonly NxDiagnostic[];
+
+  /**
+   * Loads several libraries in dependency order, whatever order they are given in. A library a
+   * library of the list imports must be in the list or already loaded.
+   *
+   * @returns Each listed library's own warnings, info and hints, in the order the libraries were
+   * given; see {@link loadLibrary}.
+   * @throws NxEvaluationError as {@link loadLibrary} does, or when the libraries import each other
+   * in a cycle. Libraries of the list loaded before the failing one stay loaded.
+   * @throws NxDisposedResourceError when this registry has been disposed.
+   * @throws NxHostCrashedError when the module traps, or has already trapped.
+   */
+  loadLibraries(libraries: Iterable<NxLibraryInput>): readonly NxDiagnostic[];
+
+  /**
+   * Creates a build context that sees this registry's loaded libraries, all of them unless
+   * `options.visibleRoots` names some.
+   *
+   * <para>The context holds the libraries it sees, so it stays usable after the registry is
+   * disposed.</para>
+   *
+   * @throws NxEvaluationError when a visible root is not a loaded library.
+   * @throws NxDisposedResourceError when this registry has been disposed.
+   * @throws NxHostCrashedError when the module traps, or has already trapped.
+   */
+  createBuildContext(options?: NxBuildContextOptions): NxProgramBuildContext;
+
+  /**
+   * Releases the registry inside the module. Calling `dispose` more than once is allowed.
+   */
+  dispose(): void;
+
+  [Symbol.dispose](): void;
+}
+
+/**
+ * The libraries, and the implicit imports, a workspace is built or validated against. Pass it as
+ * `buildContext` to {@link NxHost.buildWorkspaceArtifact} or {@link NxHost.validateWorkspace} on
+ * the host that created it.
+ */
+export interface NxProgramBuildContext {
+  /**
+   * Releases the build context inside the module. Calling `dispose` more than once is allowed.
+   */
+  dispose(): void;
+
+  [Symbol.dispose](): void;
 }
 
 /**
@@ -249,19 +341,44 @@ class WasmHost implements NxHost {
   }
 
   buildWorkspaceArtifact(options: NxWorkspaceBuildOptions): NxProgramArtifact {
+    const context = this.#contextHandle(options.buildContext);
     const handle = this.#handle("nx_wasm_workspace_build", (argument) =>
-      this.#exports.nx_wasm_workspace_build(argument.pointer, argument.length),
-      {
-        modules: options.modules.map((module) => ({
-          identity: module.identity,
-          source: module.source,
-          ...(module.version === undefined ? {} : { version: module.version })
-        })),
-        entry: options.entry,
-        implicitImports: Array.from(options.implicitImports ?? [])
-      }
+      this.#exports.nx_wasm_workspace_build(context, argument.pointer, argument.length),
+      { ...workspacePayload(options), entry: options.entry }
     );
     return new WasmProgramArtifact(this, handle);
+  }
+
+  validateWorkspace(options: NxWorkspaceValidateOptions): readonly NxDiagnostic[] {
+    const context = this.#contextHandle(options.buildContext);
+    const raw = this.callWithArgument<unknown>(
+      "nx_wasm_workspace_validate",
+      (exports, pointer, length) => exports.nx_wasm_workspace_validate(context, pointer, length),
+      workspacePayload(options)
+    );
+    return normalizeDiagnostics(raw);
+  }
+
+  createLibraryRegistry(): NxLibraryRegistry {
+    const operation = "nx_wasm_registry_new";
+    const handle = asHandle(
+      operation,
+      this.call<unknown>(operation, (exports) => exports.nx_wasm_registry_new())
+    );
+    return new WasmLibraryRegistry(this, handle);
+  }
+
+  /**
+   * The module handle of a build context this host created, or `0` for none.
+   */
+  #contextHandle(context: NxProgramBuildContext | undefined): number {
+    if (context === undefined) {
+      return 0;
+    }
+    if (!(context instanceof WasmProgramBuildContext) || !context.belongsTo(this)) {
+      throw new NxWasmError("The build context was not created by this host.");
+    }
+    return context.live();
   }
 
   createLanguageSnapshot(
@@ -373,15 +490,14 @@ class WasmHost implements NxHost {
     run: (argument: { pointer: number; length: number }) => number,
     argument: unknown
   ): number {
-    const handle = this.callWithArgument<unknown>(
+    return asHandle(
       operation,
-      (_exports, pointer, length) => run({ pointer, length }),
-      argument
+      this.callWithArgument<unknown>(
+        operation,
+        (_exports, pointer, length) => run({ pointer, length }),
+        argument
+      )
     );
-    if (typeof handle !== "number" || !Number.isInteger(handle) || handle <= 0) {
-      throw new NxWasmError(`${operation} answered with something that is not a handle.`);
-    }
-    return handle;
   }
 
   #write(operation: string, bytes: Uint8Array): number {
@@ -524,6 +640,124 @@ class WasmProgramArtifact implements NxProgramArtifact {
   }
 }
 
+class WasmLibraryRegistry implements NxLibraryRegistry {
+  readonly #host: WasmHost;
+  #handle: number | undefined;
+
+  constructor(host: WasmHost, handle: number) {
+    this.#host = host;
+    this.#handle = handle;
+  }
+
+  loadLibrary(library: NxLibraryInput): readonly NxDiagnostic[] {
+    return this.loadLibraries([library]);
+  }
+
+  loadLibraries(libraries: Iterable<NxLibraryInput>): readonly NxDiagnostic[] {
+    const handle = this.#live();
+    const raw = this.#host.callWithArgument<unknown>(
+      "nx_wasm_registry_load",
+      (exports, pointer, length) => exports.nx_wasm_registry_load(handle, pointer, length),
+      {
+        libraries: Array.from(libraries, (library) => ({
+          root: library.root,
+          ...(library.version === undefined ? {} : { version: library.version }),
+          modules: library.modules.map((module) => ({
+            identity: module.identity,
+            source: module.source
+          }))
+        }))
+      }
+    );
+    return normalizeDiagnostics(raw);
+  }
+
+  createBuildContext(options: NxBuildContextOptions = {}): NxProgramBuildContext {
+    const handle = this.#live();
+    const operation = "nx_wasm_build_context_new";
+    const context = asHandle(
+      operation,
+      this.#host.callWithArgument<unknown>(
+        operation,
+        (exports, pointer, length) => exports.nx_wasm_build_context_new(handle, pointer, length),
+        {
+          ...(options.visibleRoots === undefined
+            ? {}
+            : { visibleRoots: Array.from(options.visibleRoots) }),
+          implicitImports: Array.from(options.implicitImports ?? [])
+        }
+      )
+    );
+    return new WasmProgramBuildContext(this.#host, context);
+  }
+
+  dispose(): void {
+    const handle = this.#handle;
+    if (handle === undefined) {
+      return;
+    }
+
+    this.#handle = undefined;
+    this.#host.free("nx_wasm_registry_free", (exports) => exports.nx_wasm_registry_free(handle));
+  }
+
+  [Symbol.dispose](): void {
+    this.dispose();
+  }
+
+  #live(): number {
+    if (this.#handle === undefined) {
+      throw new NxDisposedResourceError("NxLibraryRegistry");
+    }
+    return this.#handle;
+  }
+}
+
+class WasmProgramBuildContext implements NxProgramBuildContext {
+  readonly #host: WasmHost;
+  #handle: number | undefined;
+
+  constructor(host: WasmHost, handle: number) {
+    this.#host = host;
+    this.#handle = handle;
+  }
+
+  /**
+   * Whether `host` created this context: a handle means nothing in another instance's memory.
+   *
+   * @internal
+   */
+  belongsTo(host: WasmHost): boolean {
+    return this.#host === host;
+  }
+
+  /**
+   * @internal
+   */
+  live(): number {
+    if (this.#handle === undefined) {
+      throw new NxDisposedResourceError("NxProgramBuildContext");
+    }
+    return this.#handle;
+  }
+
+  dispose(): void {
+    const handle = this.#handle;
+    if (handle === undefined) {
+      return;
+    }
+
+    this.#handle = undefined;
+    this.#host.free("nx_wasm_build_context_free", (exports) =>
+      exports.nx_wasm_build_context_free(handle)
+    );
+  }
+
+  [Symbol.dispose](): void {
+    this.dispose();
+  }
+}
+
 class WasmLanguageSnapshot implements NxLanguageSnapshot {
   readonly #host: WasmHost;
   #handle: number | undefined;
@@ -623,6 +857,33 @@ function readNxIrBundle(operation: string, bundle: Uint8Array): readonly NxGener
       metadata: entry["metadata"] as NxIrMetadata
     };
   });
+}
+
+/**
+ * The JSON a workspace build or validation sends for its modules and implicit imports.
+ */
+function workspacePayload(options: NxWorkspaceValidateOptions): {
+  modules: unknown[];
+  implicitImports?: string[];
+} {
+  return {
+    modules: options.modules.map((module) => ({
+      identity: module.identity,
+      source: module.source,
+      ...(module.version === undefined ? {} : { version: module.version })
+    })),
+    // Sent only when given: a list, even an empty one, replaces the build context's own.
+    ...(options.implicitImports === undefined
+      ? {}
+      : { implicitImports: Array.from(options.implicitImports) })
+  };
+}
+
+function asHandle(operation: string, handle: unknown): number {
+  if (typeof handle !== "number" || !Number.isInteger(handle) || handle <= 0) {
+    throw new NxWasmError(`${operation} answered with something that is not a handle.`);
+  }
+  return handle;
 }
 
 function parseJson(operation: string, payload: string): unknown {

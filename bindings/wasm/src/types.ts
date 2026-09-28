@@ -1,3 +1,5 @@
+import type { NxProgramBuildContext } from "./host.js";
+
 /**
  * Severity level reported for an NX diagnostic.
  */
@@ -305,18 +307,84 @@ export interface NxWorkspaceModuleInput {
 /**
  * Options for building a program artifact from a workspace of in-memory modules.
  */
-export interface NxWorkspaceBuildOptions {
-  readonly modules: readonly NxWorkspaceModuleInput[];
-
+export interface NxWorkspaceBuildOptions extends NxWorkspaceValidateOptions {
   /**
    * Identity of the module the program is built for.
    */
   readonly entry: string;
+}
+
+/**
+ * Options for validating a workspace of in-memory modules.
+ */
+export interface NxWorkspaceValidateOptions {
+  readonly modules: readonly NxWorkspaceModuleInput[];
 
   /**
    * Identities every other module imports implicitly, as if it began with a wildcard import of
-   * each. A listed module imports nothing implicitly itself. An identity the workspace does not
-   * hold fails the build with a diagnostic naming it.
+   * each: a workspace module, or the root of a library the build context can see. A listed module
+   * imports nothing implicitly itself. An identity that names neither fails the build with a
+   * diagnostic naming it, and one that names both is ambiguous. When given, even as an empty list,
+   * it replaces the build context's own implicit imports.
+   */
+  readonly implicitImports?: readonly string[];
+
+  /**
+   * The libraries the workspace is analyzed against, from this host's registry. Without one the
+   * workspace sees no libraries.
+   */
+  readonly buildContext?: NxProgramBuildContext;
+}
+
+/**
+ * One module of a library loaded from memory.
+ */
+export interface NxLibraryModuleInput {
+  /**
+   * Identity relative to the library's root, such as `QuestionFlow.nx` or `steps/Choice.nx`.
+   */
+  readonly identity: string;
+
+  /**
+   * Complete source text.
+   */
+  readonly source: string;
+}
+
+/**
+ * A library loaded from memory into an {@link NxLibraryRegistry}.
+ */
+export interface NxLibraryInput {
+  /**
+   * Logical root the library is named by, such as `libraries/question-flow`. Its modules are named
+   * `<root>/<identity>` in diagnostics and NX IR, and another library imports it by a relative
+   * path to this root, such as `import "../question-flow"`.
+   */
+  readonly root: string;
+
+  /**
+   * The version every NX IR image of one of the library's modules records, so a runtime linking an
+   * entry against a prepared library module can tell whether it is the one the entry was built
+   * against. NX never reads it. Records `""` when omitted.
+   */
+  readonly version?: string;
+
+  readonly modules: readonly NxLibraryModuleInput[];
+}
+
+/**
+ * Options for creating a build context from a registry.
+ */
+export interface NxBuildContextOptions {
+  /**
+   * The roots of the loaded libraries the context makes visible, with the libraries they depend on.
+   * Every loaded library is visible when omitted.
+   */
+  readonly visibleRoots?: readonly string[];
+
+  /**
+   * Identities every workspace module built or validated in this context imports implicitly; see
+   * {@link NxWorkspaceValidateOptions.implicitImports}.
    */
   readonly implicitImports?: readonly string[];
 }

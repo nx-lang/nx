@@ -38,8 +38,8 @@ unchanged: `object` continues to be carried as a named type rather than as a var
 #### Scenario: `void` no longer resolves in type position
 - **WHEN** a file contains `type Handler = { result:void }` and no type named `void` is declared
 - **THEN** analysis SHALL NOT treat the field as a primitive type
-- **AND** SHALL resolve the name by exactly the rules it applies to any other undeclared name, so a
-  value that does not satisfy the named type SHALL be rejected at the binding
+- **AND** SHALL resolve the name by exactly the rules it applies to any other undeclared name, so it
+  SHALL report `unresolved-type` naming `void` at the reference
 - **AND** code generation SHALL NOT map the field to a host `void` type
 
 #### Scenario: A user declaration may take the name `void`

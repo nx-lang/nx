@@ -3,8 +3,8 @@ use napi_derive::napi;
 use nx_api::{
     build_workspace_program_artifact, diagnostics_to_api_with_source_entries,
     eval_program_artifact, load_program_artifact_from_source, validate_workspace, EvalResult,
-    LibraryRegistry, NxDiagnostic, NxSeverity, NxWorkspace, NxWorkspaceModule, ProgramArtifact,
-    ProgramBuildContext,
+    LibraryRegistry, NxDiagnostic, NxLibraryModule, NxLibrarySource, NxSeverity, NxWorkspace,
+    NxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
 };
 use nx_codegen::{emit_nx_ir, explain_nx_ir_image, NxIrEmitOptions};
 use nx_language_service::{
@@ -102,6 +102,21 @@ impl NativeNxWorkspace {
     }
 }
 
+/// One module of a library loaded from memory.
+#[napi(object)]
+pub struct NativeLibraryModule {
+    pub identity: String,
+    pub source: Either<String, Buffer>,
+}
+
+/// A library loaded from memory: a logical root, an optional version and its modules.
+#[napi(object)]
+pub struct NativeLibrary {
+    pub root: String,
+    pub version: Option<String>,
+    pub modules: Vec<NativeLibraryModule>,
+}
+
 #[napi]
 pub struct NativeNxLibraryRegistry {
     registry: Option<LibraryRegistry>,
@@ -126,6 +141,40 @@ impl NativeNxLibraryRegistry {
             .load_library_from_directory(root_path)
             .map(|_| ())
             .map_err(evaluation_error)
+    }
+
+    /// Loads libraries from memory in dependency order, whatever order they are given in, and
+    /// answers with the libraries' own warnings, info and hints as diagnostics JSON, which
+    /// workspace validation and builds leave out.
+    #[napi]
+    pub fn load_libraries(&self, libraries: Vec<NativeLibrary>) -> Result<String> {
+        let registry = self.registry()?;
+        let mut sources = Vec::with_capacity(libraries.len());
+        for library in libraries {
+            let mut modules = Vec::with_capacity(library.modules.len());
+            for module in library.modules {
+                modules.push(NxLibraryModule::new(
+                    module.identity,
+                    source_input_to_string(module.source)?,
+                ));
+            }
+            let source = NxLibrarySource::new(library.root, modules);
+            sources.push(match library.version {
+                Some(version) => source.with_version(version),
+                None => source,
+            });
+        }
+        let loaded = registry
+            .load_libraries_from_sources(&sources)
+            .map_err(evaluation_error)?;
+        // Each library's once, in the order the libraries were given, as the wasm SDK answers.
+        let mut reported = std::collections::HashSet::new();
+        let diagnostics = loaded
+            .iter()
+            .filter(|library| reported.insert(library.root_path.clone()))
+            .flat_map(|library| library.api_diagnostics())
+            .collect::<Vec<_>>();
+        diagnostics_json(&diagnostics)
     }
 
     #[napi]

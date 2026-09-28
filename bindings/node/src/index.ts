@@ -28,6 +28,7 @@ import type {
   NxSourceByteEvaluationOptions,
   NxIrEmitOptions,
   NxIrMetadata,
+  NxLibraryInput,
   NxSourceBuildOptions,
   NxSourceEvaluationOptions,
   NxSourceInput,
@@ -69,6 +70,8 @@ export type {
   NxIrMetadata,
   NxJsonRecord,
   NxJsonValue,
+  NxLibraryInput,
+  NxLibraryModuleInput,
   NxOutputFormat,
   NxSeverity,
   NxSourceByteEvaluationOptions,
@@ -173,6 +176,48 @@ export class NxLibraryRegistry {
    */
   public loadFromDirectory(rootPath: string): void {
     invokeNative(() => getRegistryNative(this).loadLibraryFromDirectory(rootPath));
+  }
+
+  /**
+   * Loads one library from in-memory modules. Every library it imports must already be loaded.
+   *
+   * A library root is immutable for the registry's life: loading it again with the same modules and
+   * version does nothing, and loading it with different ones fails.
+   *
+   * @returns The library's own warnings, info and hints. Workspace validation and builds against
+   * the library leave them out, since they are about text a workspace's author cannot edit, so this
+   * is where a host reads them.
+   * @throws NxEvaluationError when the library's analysis reports errors, a library it imports is
+   * not loaded, or its root is already loaded with other modules or another version. A library that
+   * fails to load is not retained.
+   * @throws NxDisposedResourceError when this registry has already been disposed.
+   */
+  public loadLibrary(library: NxLibraryInput): readonly NxDiagnostic[] {
+    return this.loadLibraries([library]);
+  }
+
+  /**
+   * Loads several libraries from in-memory modules, in dependency order whatever order they are
+   * given in.
+   *
+   * @returns Each listed library's own warnings, info and hints, in the order the libraries were
+   * given; see `loadLibrary`.
+   * @throws NxEvaluationError as `loadLibrary` does, or when the libraries import each other in a
+   * cycle. Libraries of the list loaded before the failing one stay loaded.
+   * @throws NxDisposedResourceError when this registry has already been disposed.
+   */
+  public loadLibraries(libraries: Iterable<NxLibraryInput>): readonly NxDiagnostic[] {
+    const nativeLibraries = Array.from(libraries, (library) => ({
+      root: library.root,
+      ...(library.version === undefined ? {} : { version: library.version }),
+      modules: library.modules.map((module) => ({
+        identity: module.identity,
+        source: normalizeSourceInput(module.source)
+      }))
+    }));
+    return parseDiagnosticsJson(
+      invokeNative(() => getRegistryNative(this).loadLibraries(nativeLibraries))
+    );
   }
 
   /**

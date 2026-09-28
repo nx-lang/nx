@@ -103,6 +103,90 @@ describe("NX IR parity with the Node SDK", () => {
     }
   });
 
+  it("emits identical entry and library images, and equal diagnostics, for in-memory libraries", () => {
+    const libraries = [
+      {
+        root: "libraries/chat-link",
+        modules: [
+          {
+            identity: "ChatLinkConfig.nx",
+            source:
+              'import "../question-flow"\nexport type ChatLinkConfig = { title:string questionFlow:QuestionFlow }'
+          }
+        ]
+      },
+      {
+        root: "libraries/question-flow",
+        version: "3",
+        modules: [
+          { identity: "Step.nx", source: "export type Step = { id:string label?:string }" },
+          { identity: "QuestionFlow.nx", source: "export type QuestionFlow = { firstStep:Step steps?:Step+ }" }
+        ]
+      },
+      {
+        // Not imported by the tenant: here only for the warning its load answers with.
+        root: "libraries/warns",
+        modules: [{ identity: "Warns.nx", source: "export let f(n:int) = { n ?? 0 }" }]
+      }
+    ];
+    const implicitImports = ["libraries/chat-link", "libraries/question-flow"];
+    const tenant = [
+      {
+        identity: "chat-link.nx",
+        source:
+          'let root() = <ChatLinkConfig title="Hi" questionFlow={<QuestionFlow firstStep={<Step id="a" />} />} />\nlet key() = {Step.Property.label}'
+      }
+    ];
+    const broken = [{ identity: "chat-link.nx", source: "let root() = <ChatLinkConfig title={1} />" }];
+
+    const nodeRegistry = new NodeLibraryRegistry();
+    const nodeLoadDiagnostics = nodeRegistry.loadLibraries(libraries);
+    const nodeContext = nodeRegistry.createBuildContext();
+    const nodeWorkspace = new NodeWorkspace(tenant);
+    const nodeBroken = new NodeWorkspace(broken);
+    const fromNode = NodeProgramArtifact.buildWorkspace(nodeWorkspace, {
+      buildContext: nodeContext,
+      entryIdentity: "chat-link.nx",
+      implicitImports
+    });
+
+    const wasmRegistry = host.createLibraryRegistry();
+    const wasmLoadDiagnostics = wasmRegistry.loadLibraries(libraries);
+    const wasmContext = wasmRegistry.createBuildContext({ implicitImports });
+    const fromWasm = host.buildWorkspaceArtifact({
+      modules: tenant,
+      entry: "chat-link.nx",
+      buildContext: wasmContext
+    });
+    try {
+      const nodeArtifacts = fromNode.generateNxIr({ modules: [] });
+      const wasmArtifacts = fromWasm.generateNxIr({ modules: [] });
+      expect(wasmArtifacts.map((entry) => entry.identity)).toEqual(nodeArtifacts.map((entry) => entry.identity));
+      expect(wasmArtifacts.map((entry) => entry.identity)).toContain("libraries/question-flow/Step.nx");
+      wasmArtifacts.forEach((entry, index) => {
+        expect(Buffer.compare(Buffer.from(entry.bytes), nodeArtifacts[index]!.bytes)).toBe(0);
+        expect(entry.metadata).toEqual(nodeArtifacts[index]!.metadata);
+      });
+
+      expect(wasmLoadDiagnostics.map((diagnostic) => diagnostic.code)).toEqual(["fallback-never-taken"]);
+      expect(wasmLoadDiagnostics).toEqual(nodeLoadDiagnostics);
+
+      const nodeDiagnostics = nodeBroken.validate(nodeContext, { implicitImports });
+      const wasmDiagnostics = host.validateWorkspace({ modules: broken, buildContext: wasmContext });
+      expect(wasmDiagnostics.length).toBeGreaterThan(0);
+      expect(wasmDiagnostics).toEqual(nodeDiagnostics);
+    } finally {
+      fromWasm.dispose();
+      wasmContext.dispose();
+      wasmRegistry.dispose();
+      fromNode.dispose();
+      nodeWorkspace.dispose();
+      nodeBroken.dispose();
+      nodeContext.dispose();
+      nodeRegistry.dispose();
+    }
+  });
+
   it("reports the same diagnostics for source that does not compile", () => {
     const fileName = "broken.nx";
 

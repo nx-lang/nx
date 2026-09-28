@@ -170,6 +170,7 @@ fn an_update_tag_for_an_unknown_target_is_rejected() {
 fn a_stateless_component_has_no_update_record() {
     let result = check_str(
         r#"
+        action Tapped = { }
         external component <Button emits { Tapped } />
         component <Form /> = { <Button onTapped=<Update /> /> }
         "#,
@@ -197,6 +198,7 @@ fn a_stateless_component_has_no_update_record() {
     assert_error(
         r#"
         type User = { name:string }
+        action Tapped = { }
         external component <Button emits { Tapped } />
         component <Form /> = { <Button onTapped=<User.Update name="Ada" /> /> }
         "#,
@@ -384,6 +386,7 @@ fn handler_body_record(result: &TypeCheckResult, component: &str) -> String {
 fn bare_update_in_a_handler_body_resolves_to_the_component() {
     let result = assert_ok(
         r#"
+        action Tapped = { }
         external component <Button emits { Tapped } />
         component <Counter /> = { state { count:int = 0 } <Button onTapped=<Update count={count + 1} /> /> }
         "#,
@@ -393,6 +396,7 @@ fn bare_update_in_a_handler_body_resolves_to_the_component() {
 
     assert_error(
         r#"
+        action Tapped = { }
         external component <Button emits { Tapped } />
         component <Counter /> = { state { count:int = 0 } <Button onTapped=<Update count="one" /> /> }
         "#,
@@ -430,6 +434,7 @@ fn bare_update_takes_precedence_over_a_same_named_declaration_inside_a_component
     let result = assert_ok(
         r#"
         type Update = { note:string }
+        action Tapped = { }
         external component <Button emits { Tapped } />
         component <Counter /> = { state { count:int = 0 } <Button onTapped=<Update count=1 /> /> }
         "#,
@@ -470,6 +475,7 @@ fn a_mistyped_update_field_in_a_handler_is_rejected() {
 fn a_misspelled_state_field_in_a_handler_is_rejected() {
     assert_error(
         r#"
+        action Tapped = { }
         external component <Button emits { Tapped } />
         component <Counter /> = { state { count:int = 0 } <Button onTapped=<Update cont={count + 1} /> /> }
         "#,
@@ -483,6 +489,7 @@ fn a_misspelled_state_field_in_a_handler_is_rejected() {
 fn a_handler_whose_result_is_not_an_action_or_update_is_rejected() {
     assert_error(
         r#"
+        action Tapped = { }
         external component <Button emits { Tapped } />
         component <Counter /> = { state { count:int = 0 } <Button onTapped={count + 1} /> }
         "#,
@@ -496,6 +503,7 @@ fn a_handler_whose_result_is_not_an_action_or_update_is_rejected() {
 fn enclosing_loop_variables_are_visible_inside_a_handler() {
     assert_ok(
         r#"
+        action Tapped = { }
         external component <Row emits { Tapped } />
         let remove(items:string+, item:string): string+ = { items }
         component <List /> = {
@@ -514,6 +522,7 @@ fn enclosing_let_bindings_are_visible_inside_a_handler() {
     // A block has no local `let`, so the enclosing bindings a handler can see are the module's.
     assert_ok(
         r#"
+        action Tapped = { }
         external component <Row emits { Tapped } />
         let remove(items:string+, item:string): string+ = { items }
         let first = "x"
@@ -532,6 +541,7 @@ fn a_match_result_is_routed_arm_by_arm() {
         r#"
         action Saved = { }
         action Cleared = { }
+        action Tapped = { }
         external component <Button emits { Tapped } />
         component <Form emits { Saved Cleared } /> = {
           state { mode:string = "a" }
@@ -545,6 +555,7 @@ fn a_match_result_is_routed_arm_by_arm() {
         r#"
         action Saved = { }
         action Cleared = { }
+        action Tapped = { }
         external component <Button emits { Tapped } />
         component <Form emits { Saved } /> = {
           state { mode:string = "a" }
@@ -561,6 +572,7 @@ fn a_match_result_is_routed_arm_by_arm() {
 fn an_empty_result_is_rejected() {
     assert_error(
         r#"
+        action Tapped = { }
         external component <Button emits { Tapped } />
         component <Counter /> = { state { count:int = 0 } <Button onTapped={} /> }
         "#,
@@ -578,6 +590,7 @@ fn an_empty_result_is_rejected() {
 fn update_of_the_enclosing_component_is_accepted() {
     assert_ok(
         r#"
+        action Tapped = { }
         external component <Button emits { Tapped } />
         component <Counter /> = { state { count:int = 0 } <Button onTapped=<Update count={count + 1} /> /> }
         "#,
@@ -590,6 +603,7 @@ fn emitted_action_is_accepted_inside_a_component() {
     assert_ok(
         r#"
         action Saved = { }
+        action Tapped = { }
         external component <Button emits { Tapped } />
         component <Form emits { Saved } /> = { <Button onTapped=<Saved /> /> }
         "#,
@@ -602,6 +616,7 @@ fn action_the_component_does_not_emit_is_rejected_with_a_fix() {
     assert_error(
         r#"
         action Saved = { }
+        action Tapped = { }
         external component <Button emits { Tapped } />
         component <Form /> = { <Button onTapped=<Saved /> /> }
         "#,
@@ -616,6 +631,7 @@ fn update_record_of_another_type_is_rejected_inside_a_component() {
     assert_error(
         r#"
         type User = { name:string }
+        action Tapped = { }
         external component <Button emits { Tapped } />
         component <Form /> = { state { draft:string = "" } <Button onTapped=<User.Update name="Ada" /> /> }
         "#,
@@ -657,6 +673,7 @@ fn a_mixed_result_list_is_routed_item_by_item() {
     assert_ok(
         r#"
         action Saved = { }
+        action Tapped = { }
         external component <Button emits { Tapped } />
         component <Form emits { Saved } /> = { state { dirty:boolean = true } <Button onTapped={<Update dirty=false /> <Saved />} /> }
         "#,
@@ -666,6 +683,7 @@ fn a_mixed_result_list_is_routed_item_by_item() {
     assert_error(
         r#"
         action Saved = { }
+        action Tapped = { }
         external component <Button emits { Tapped } />
         component <Form /> = { state { dirty:boolean = true } <Button onTapped={<Update dirty=false /> <Saved />} /> }
         "#,
@@ -680,6 +698,7 @@ fn an_inherited_emit_can_be_re_emitted() {
     assert_ok(
         r#"
         action Saved = { }
+        action Tapped = { }
         external component <Button emits { Tapped } />
         abstract component <FormBase emits { Saved } />
         component <Form extends FormBase /> = { <Button onTapped=<Saved /> /> }
@@ -692,6 +711,7 @@ fn an_inherited_emit_can_be_re_emitted() {
 fn an_inline_emit_can_be_re_emitted() {
     assert_ok(
         r#"
+        action Tapped = { }
         external component <Button emits { Tapped } />
         component <Form emits { Cleared { } } /> = { <Button onTapped=<Form.Cleared /> /> }
         "#,

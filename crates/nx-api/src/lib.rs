@@ -36,11 +36,14 @@ mod source_graph;
 mod value;
 mod workspace;
 
+#[cfg(test)]
+mod library_source_tests;
+
 pub use artifacts::{
     analyze_workspace_modules, build_library_artifact_from_directory,
     build_program_artifact_from_source, build_workspace_program_artifact, prelude_library,
-    validate_workspace, LibraryArtifact, LibraryExport, LibraryRegistry, ProgramArtifact,
-    ProgramBuildContext, ProgramSourceEntry,
+    validate_workspace, LibraryArtifact, LibraryExport, LibraryRegistry, NxLibraryModule,
+    NxLibrarySource, ProgramArtifact, ProgramBuildContext, ProgramSourceEntry,
 };
 pub use component::{
     dispatch_component_actions_program_artifact, dispatch_component_actions_source,
