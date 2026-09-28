@@ -1,10 +1,9 @@
 /**
  * Hover, completions, diagnostics and document symbols, answered in the app's compiler worker.
  *
- * <para>The same host that compiles answers these, over the same catalog module, so a hover range
- * and a compile diagnostic land on the same line of the author's own text. Each query carries the
- * editor's `AbortSignal`: an answer the editor has typed past is dropped rather than waited for.
- * </para>
+ * <para>The same host that evaluates answers these, so a hover range and a diagnostic land on the
+ * same line of the visitor's own text. Each query carries the editor's `AbortSignal`: an answer
+ * the editor has typed past is dropped rather than waited for.</para>
  */
 import type {
   CompletionList,

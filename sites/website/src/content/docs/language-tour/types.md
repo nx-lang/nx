@@ -193,6 +193,14 @@ let loadLabel = {
     LoadState.loaded => "Loaded"
   }
 }
+
+let root() = { <Summary name={user.name} tone={badgeTone} load={loadLabel} /> }
+
+type Summary = { name:string tone:string load:string }
+```
+
+```nx output title="Evaluates to"
+<Summary load="Network unavailable" name="Ada" tone="warning" />
 ```
 
 Union matches narrow the matched identifier inside each case arm, so `state.message` is available in

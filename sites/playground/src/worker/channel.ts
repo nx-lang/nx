@@ -29,9 +29,9 @@ import {
 /**
  * How long one request may take, once the worker is ready, before it is assumed stuck.
  *
- * A cold compile of the catalog and an example takes tens of milliseconds; this is far above
- * anything healthy, so reaching it means the module is not coming back. The module's own download
- * is outside this budget — see the note above.
+ * A cold compile and evaluation of an example takes tens of milliseconds; this is far above
+ * anything healthy, so reaching it means the module is not coming back, or the program recurses
+ * without end. The module's own download is outside this budget — see the note above.
  */
 export const DEFAULT_DEADLINE_MS = 10_000;
 
@@ -51,7 +51,7 @@ export interface WorkerChannelOptions {
   readonly deadlineMs?: number;
 }
 
-/** The one channel the compile seam and the language service both go through. */
+/** The one channel the evaluate seam and the language service both go through. */
 export interface WorkerChannel {
   /**
    * Sends `request` and resolves with the worker's answer.

@@ -1,7 +1,7 @@
 /**
  * ABI version this loader is written against. It must equal the module's `nx_wasm_abi_version`.
  */
-export const abiVersion = 2;
+export const abiVersion = 3;
 
 /**
  * The operation succeeded; the payload is its result, JSON unless the export says otherwise.
@@ -39,6 +39,7 @@ export interface NxWasmExports {
   nx_wasm_program_build(pointer: number, length: number): number;
   nx_wasm_workspace_build(pointer: number, length: number): number;
   nx_wasm_program_nx_ir(handle: number, pointer: number, length: number): number;
+  nx_wasm_program_evaluate_nx(handle: number): number;
   nx_wasm_ir_explain(pointer: number, length: number): number;
   nx_wasm_program_free(handle: number): void;
   nx_wasm_snapshot_new(pointer: number, length: number): number;

@@ -33,6 +33,9 @@ import type {
   NxLanguageSnapshotOptions,
   NxSourceBuildOptions,
   NxTextSpan,
+  NxValueNode,
+  NxValueRole,
+  NxValueText,
   NxWorkspaceBuildOptions
 } from "./types.js";
 
@@ -121,6 +124,20 @@ export interface NxProgramArtifact {
    * @throws NxHostCrashedError when the module traps, or has already trapped.
    */
   generateNxIr(options?: NxIrEmitOptions): readonly NxGeneratedNxIr[];
+
+  /**
+   * Evaluates the entry module's `root` and spells the value as NX text, the text `nxlang run`
+   * prints, with nodes that say what each part of it is.
+   *
+   * <para>The artifact stays usable afterwards, whether the evaluation succeeds or not.</para>
+   *
+   * @throws NxEvaluationError when there is no `root`, evaluating it fails at run time (with the
+   * failing expression's span when it is in the entry module), or the value has no NX spelling
+   * (code `nx-text-unspellable`), as a value holding an action handler has none.
+   * @throws NxDisposedResourceError when this artifact has already been disposed.
+   * @throws NxHostCrashedError when the module traps, or has already trapped.
+   */
+  evaluateNx(): NxValueText;
 
   /**
    * Releases the artifact inside the module. Calling `dispose` more than once is allowed.
@@ -477,6 +494,14 @@ class WasmProgramArtifact implements NxProgramArtifact {
     return readNxIrBundle(operation, bundle);
   }
 
+  evaluateNx(): NxValueText {
+    const handle = this.#live();
+    const raw = this.#host.call<unknown>("nx_wasm_program_evaluate_nx", (exports) =>
+      exports.nx_wasm_program_evaluate_nx(handle)
+    );
+    return normalizeValueText(raw);
+  }
+
   dispose(): void {
     const handle = this.#handle;
     if (handle === undefined) {
@@ -660,6 +685,49 @@ function normalizeTextSpan(raw: unknown): NxTextSpan {
     startColumn: numericField(value, "start_column", "startColumn"),
     endLine: numericField(value, "end_line", "endLine"),
     endColumn: numericField(value, "end_column", "endColumn")
+  };
+}
+
+const valueRoles: ReadonlySet<string> = new Set<NxValueRole>([
+  "record",
+  "property",
+  "sequence",
+  "case",
+  "scalar",
+  "function",
+  "empty"
+]);
+
+/**
+ * Reads `{ text, nodes }` from the module, turning each declaration's snake_case span into the
+ * SDK's `NxTextSpan` and leaving out what the module left out.
+ */
+function normalizeValueText(raw: unknown): NxValueText {
+  const value = asRecord(raw, "evaluated value");
+  if (typeof value["text"] !== "string" || !Array.isArray(value["nodes"])) {
+    throw new NxWasmError("The NX wasm module returned an evaluated value in an unexpected shape.");
+  }
+  return { text: value["text"], nodes: value["nodes"].map(normalizeValueNode) };
+}
+
+function normalizeValueNode(raw: unknown): NxValueNode {
+  const value = asRecord(raw, "value node");
+  const role = value["role"];
+  if (typeof role !== "string" || !valueRoles.has(role)) {
+    throw new NxWasmError(`The NX wasm module returned a value node with an unknown role.`);
+  }
+  return {
+    start: typeof value["start"] === "number" ? value["start"] : 0,
+    end: typeof value["end"] === "number" ? value["end"] : 0,
+    role: role as NxValueRole,
+    ...(typeof value["parent"] === "number" ? { parent: value["parent"] } : {}),
+    ...(typeof value["type"] === "string" ? { type: value["type"] } : {}),
+    ...(typeof value["name"] === "string" ? { name: value["name"] } : {}),
+    ...(value["optional"] === true ? { optional: true } : {}),
+    ...(typeof value["count"] === "number" ? { count: value["count"] } : {}),
+    ...(value["declaration"] === undefined || value["declaration"] === null
+      ? {}
+      : { declaration: normalizeTextSpan(value["declaration"]) })
   };
 }
 

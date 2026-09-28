@@ -33,6 +33,14 @@ let evens:int* = { for n in numbers { if (n % 2 == 0) { n } } }
 let root() = { squares }
 ```
 
+```nx output title="Evaluates to"
+1
+4
+9
+16
+25
+```
+
 The last two are worth reading twice. A `for` concatenates what its body yields, so a body that
 yields one item per iteration gives one item per iteration, and a body that yields nothing on an
 iteration contributes nothing at all. An `if` with no `else` is read as having an `else { }`, so
@@ -202,6 +210,12 @@ let users:User+ = {
 }
 
 let root() = { users }
+```
+
+```nx output title="Evaluates to"
+<User email="alice@example.com" id="1" name="Alice" />
+<User email="bob@example.com" id="2" name="Bob" />
+<User email="carol@example.com" id="3" name="Carol" />
 ```
 
 This duality simplifies data modelling, component authoring, and tooling: the same grammar powers

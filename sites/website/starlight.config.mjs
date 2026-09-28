@@ -1,4 +1,5 @@
 import nxGrammar from '../../src/vscode/syntaxes/nx.tmLanguage.json' with { type: 'json' };
+import { openInPlayground } from './src/expressive-code/playground-link.mjs';
 
 const nxLanguage = {
   ...nxGrammar,
@@ -78,6 +79,8 @@ const config = {
     }
   ],
   expressiveCode: {
+    // Complete NX programs get an "Open in playground" link, computed at build time.
+    plugins: [openInPlayground()],
     themes: ['dark-plus', 'light-plus'],
     useStarlightUiThemeColors: false,
     shiki: {

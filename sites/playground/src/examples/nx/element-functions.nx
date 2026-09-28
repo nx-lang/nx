@@ -1,0 +1,22 @@
+// An element-style function is declared and called like an element. Its
+// properties declare names, types and defaults, and a call supplies values in
+// their place.
+
+type User = { name:string role:string }
+
+let <UserCard user:User tone:string = "neutral" /> =
+  <div class={"card " + tone}>
+    <h3>{user.name}</h3>
+    <p>{user.role}</p>
+  </div>
+
+let team:User+ = {
+  <User name="Ada" role="Engineer" />
+  <User name="Grace" role="Admiral" />
+}
+
+<ul>
+  for user in team {
+    <li><UserCard user={user} tone="info" /></li>
+  }
+</ul>

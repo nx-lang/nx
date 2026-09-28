@@ -1,0 +1,8 @@
+// An NX program has no print statement: the playground shows what `root`
+// returns. A top-level element is the program's root.
+
+type Greeting = { to:string message:string }
+
+let greet(name:string) = { "Hello, " + name + "!" }
+
+<Greeting to="NX" message={greet("NX")} />

@@ -6,7 +6,7 @@ description: 'Incorporate design tokens into NX workflows.'
 Design tokens in NX are just typed data. This tutorial shows how to declare tokens, pass them through components, and enforce usage with the type system. It builds on the [Language Tour](/language-tour/elements) and the [Building Your First Component](/tutorials/building-your-first-component) tutorial.
 
 ## 1) Define token types
-Start a file named `tokens.nx`, or work in the [playground](/playground):
+Start a file named `tokens.nx`, or work in the [playground](/play):
 
 ```nx
 type ColorToken = { name:string value:string }
@@ -83,8 +83,8 @@ let <App theme:Theme/> =
 Drop in an alternate `Theme` instance to re-skin the UI without touching component code.
 
 ## 5) Validate usage
-- Paste the whole file into the [playground](/playground): it compiles as you type and reports
-  errors against your source.
+- Paste the whole file into the [playground](/play): it runs as you type, shows what `root`
+  returns, and reports errors against your source.
 - When you pass tokens through props, the type checker flags missing or mistyped fields—no separate JSON/YAML schema required.
 
 ## 6) Extend the pattern

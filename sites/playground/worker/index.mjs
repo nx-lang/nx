@@ -2,7 +2,7 @@
  * The playground's Cloudflare Worker. Its static assets are `dist/`, and this script runs only for
  * a request no file answered.
  *
- * The client router owns the prefix itself and one path segment below it (`/playground/<id>`), so
+ * The client router owns the prefix itself and one path segment below it (`/play/<id>`), so
  * those get the shell. Everything else is not found: a missing asset answered with HTML turns a
  * broken path into a puzzling runtime error, and the playground serves no API.
  */

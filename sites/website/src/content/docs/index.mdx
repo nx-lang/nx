@@ -13,7 +13,7 @@ hero:
       link: /tutorials/getting-started/
       icon: right-arrow
     - text: Try the playground
-      link: /playground
+      link: /play
       variant: minimal
 ---
 
@@ -41,7 +41,7 @@ let <TaskList tasks:Task+ /> =
 </div>
 <div>
 
-```nx fragment title="Evaluates to" wrap
+```nx output title="Evaluates to" wrap
 <ul
   content={<li checked=true content="Write the docs" /> <li checked=false content="Ship the site" />}
 />
@@ -84,6 +84,6 @@ let <TaskList tasks:Task+ /> =
 <CardGrid>
   <LinkCard title="Getting Started" href="/tutorials/getting-started/" description="Try NX, then use it from .NET or JavaScript." />
   <LinkCard title="Language Tour" href="/language-tour/elements/" description="Elements, functions, expressions and types, one page each." />
-  <LinkCard title="Playground" href="/playground" description="Edit NX in your browser and see the result as you type." />
+  <LinkCard title="Playground" href="/play" description="Edit NX in your browser and see what it evaluates to as you type." />
   <LinkCard title="Reference" href="/reference/syntax/elements/" description="The exact rules for every construct." />
 </CardGrid>

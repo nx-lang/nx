@@ -2,7 +2,7 @@
 
 The site served at https://nxlang.org: the landing page and the NX language documentation, built
 with [Astro Starlight](https://starlight.astro.build). The playground is a separate site
-(`sites/playground`) served under `/playground` on the same domain.
+(`sites/playground`) served under `/play` on the same domain.
 
 ### Running it
 

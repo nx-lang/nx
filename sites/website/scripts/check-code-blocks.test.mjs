@@ -40,6 +40,27 @@ test("an example of an error must still be an error", () => {
   ]);
 });
 
+test("output shown after a block is checked against what the block evaluates to", () => {
+  assert.deepEqual(check("output.md"), []);
+});
+
+test("stale output fails, naming the page and the output block's line, and showing both texts", () => {
+  const failures = check("output-stale.md");
+  assert.equal(failures.length, 1);
+  assert.match(failures[0], /^output-stale\.md:12:1: the output shown is not what the block before it evaluates to/);
+  assert.match(failures[0], /--- shown\n<User id="1" name="Grace" \/>/);
+  assert.match(failures[0], /--- evaluated\n<User id="1" name="Ada" \/>/);
+});
+
+test("output with no unmarked block before it fails", () => {
+  const failures = check("output-orphan.md");
+  assert.deepEqual(
+    failures.map((failure) => failure.split(": ")[0]),
+    ["output-orphan.md:5:1", "output-orphan.md:13:1", "output-orphan.md:21:1"]
+  );
+  assert.ok(failures.every((failure) => failure.includes("must follow an unmarked `nx` block")));
+});
+
 test("fence words other than the kinds are ignored, and two kinds are refused", () => {
   const [titled, both] = findNxBlocks('```nx title="a.nx"\nlet x = 1\n```\n\n```nx fragment invalid\n```\n');
   assert.equal(titled.kind, "complete");

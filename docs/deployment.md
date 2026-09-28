@@ -18,8 +18,9 @@ The tag workflow, `release.yml`, creates a draft GitHub Release titled `NX 1.2.3
 - the verified `NxLang.Sdk` `.nupkg` and `.snupkg`;
 - one npm tarball per package: the `@nx-lang/language` editor assets and the workspace packages
   `@nx-lang/language-protocol`, `@nx-lang/language-core`, `@nx-lang/language-client`,
-  `@nx-lang/ir-runtime`, `@nx-lang/sdk-wasm` (with the WebAssembly module inside) and
-  `@nx-lang/monaco`. A workspace package's dependency on another is pinned to the release version;
+  `@nx-lang/ir-runtime`, `@nx-lang/sdk-wasm` (with the WebAssembly module inside),
+  `@nx-lang/monaco` and `@nx-lang/value-view`. A workspace package's dependency on another is pinned
+  to the release version;
 - one VSIX per extension target (`linux-x64`, `darwin-arm64`, `win32-x64`), each with its
   platform's `nx-lsp`;
 - a release manifest and checksums.
@@ -184,12 +185,11 @@ Public registry versions are immutable. When a published artifact is bad:
 
 | Worker | Serves | Built from | Deployed by |
 |---|---|---|---|
-| `nxlang-website` | everything except `/playground` | `sites/website` | `.github/workflows/deploy-website.yml` |
-| `nxlang-playground` | `/playground` and everything under it | `sites/playground` | `.github/workflows/deploy-playground.yml` |
+| `nxlang-website` | everything except `/play` | `sites/website` | `.github/workflows/deploy-website.yml` |
+| `nxlang-playground` | `/play` and everything under it | `sites/playground` | `.github/workflows/deploy-playground.yml` |
 
 Each Worker's `wrangler.jsonc` sits beside its site and declares its routes. The playground's routes
-are more specific than the website's `nxlang.org/*`, so Cloudflare sends `/playground` requests to
-it. Neither is part of the tag-driven release above.
+are more specific than the website's `nxlang.org/*`, so Cloudflare sends `/play` requests to it. Neither is part of the tag-driven release above.
 
 ### Deploy
 
@@ -221,13 +221,14 @@ npx wrangler@4.141.0 deploy
 curl -sI https://nxlang.org/                                   # 200, the landing page
 curl -sI https://nxlang.org/language-tour/types/               # 200
 curl -sI https://nxlang.org/nope                               # 404, the site's not-found page
-curl -sI https://nxlang.org/playground                         # 200, cache-control: no-cache
-curl -sI https://nxlang.org/playground/shapes                  # 200, the same shell
-curl -sI https://nxlang.org/playground/assets/nx-<hash>.wasm   # 200, immutable for a year
-curl -sI https://nxlang.org/playground/assets/missing.js       # 404, not the shell
+curl -sI https://nxlang.org/play                               # 200, cache-control: no-cache
+curl -sI https://nxlang.org/play/records                       # 200, the same shell
+curl -sI https://nxlang.org/play/assets/nx-<hash>.wasm         # 200, immutable for a year
+curl -sI https://nxlang.org/play/assets/missing.js             # 404, not the shell
 ```
 
-Then open the playground, choose an example and edit it: the result follows and hover answers.
+Then open the playground, choose an example and edit it: the output follows, and hover answers in
+the source and in the output.
 
 ### Roll back
 
@@ -240,6 +241,10 @@ npx wrangler@4.141.0 rollback            # back to the previous version, or name
 
 A rollback takes effect at once. The playground's immutable assets are safe across it, because the
 shell is never cached and names the assets of whichever version is live.
+
+A rollback restores a Worker's files, not its routes. After a change that moved a site's routes, as
+moving the playground from `/playground` to `/play` did, roll back by reverting the change and
+letting the workflows deploy again, or the old files answer on the new routes.
 
 ### Change the hosting configuration
 

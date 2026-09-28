@@ -257,3 +257,134 @@ describe("language snapshots", () => {
     expect(() => snapshot.dispose()).not.toThrow();
   });
 });
+
+describe("evaluating root to NX text", () => {
+  let host: NxHost;
+
+  beforeAll(() => {
+    host = createNxHost(nxModule);
+  });
+
+  function evaluate(source: string) {
+    const artifact = host.buildProgramArtifact(source);
+    try {
+      return artifact.evaluateNx();
+    } finally {
+      artifact.dispose();
+    }
+  }
+
+  function failure(source: string): NxEvaluationError {
+    const artifact = host.buildProgramArtifact(source);
+    try {
+      artifact.evaluateNx();
+    } catch (error) {
+      expect(error).toBeInstanceOf(NxEvaluationError);
+      return error as NxEvaluationError;
+    } finally {
+      artifact.dispose();
+    }
+    throw new Error("evaluateNx() should have thrown");
+  }
+
+  const userSource = `type User = { id:string name:string }
+<User id="1" name="Ada" />`;
+
+  it("spells a record as NX", () => {
+    expect(evaluate(userSource).text).toBe('<User id="1" name="Ada" />');
+  });
+
+  it("annotates the record and its properties with types and declarations", () => {
+    const value = evaluate(userSource);
+    const [user, ...properties] = value.nodes;
+
+    expect(user).toMatchObject({ start: 0, end: value.text.length, role: "record", type: "User" });
+    expect(user!.parent).toBeUndefined();
+    expect(user!.declaration).toMatchObject({ startLine: 1, startColumn: 1 });
+
+    expect(properties.map((node) => node.name)).toEqual(["id", "name"]);
+    for (const property of properties) {
+      expect(property).toMatchObject({ role: "property", type: "string", parent: 0 });
+      expect(property.declaration?.startLine).toBe(1);
+    }
+    expect(value.text.slice(properties[0]!.start, properties[0]!.end)).toBe('id="1"');
+    expect(value.text.slice(properties[1]!.start, properties[1]!.end)).toBe('name="Ada"');
+  });
+
+  it("gives a sequence its item type and count, and parents each item", () => {
+    const value = evaluate(`type User = { id:string }
+let root(): User* = { <User id="1" /> <User id="2" /> <User id="3" /> }`);
+    expect(value.nodes[0]).toMatchObject({
+      role: "sequence",
+      type: "User*",
+      count: 3,
+      start: 0,
+      end: value.text.length
+    });
+    const records = value.nodes.filter((node) => node.role === "record");
+    expect(records).toHaveLength(3);
+    expect(records.every((node) => node.parent === 0)).toBe(true);
+  });
+
+  it("gives a property its declared type and marks it optional", () => {
+    const value = evaluate(`type Card = { title:string subtitle?:string }
+<Card title="a" subtitle="b" />`);
+    const subtitle = value.nodes.find((node) => node.name === "subtitle");
+    expect(subtitle).toMatchObject({ type: "string", optional: true });
+    expect(value.nodes.find((node) => node.name === "title")?.optional).toBeUndefined();
+  });
+
+  it("counts offsets in UTF-16 code units", () => {
+    const value = evaluate(`type Note = { a:string b:int }
+<Note a="😀" b=1 />`);
+    const b = value.nodes.find((node) => node.name === "b")!;
+    expect(value.text.slice(b.start, b.end)).toBe("b=1");
+  });
+
+  it("reports a missing root", () => {
+    const error = failure("type User = { id:string }");
+    expect(error.diagnostics[0]?.code).toBe("no-root");
+  });
+
+  it("reports a runtime error at the expression that failed", () => {
+    const error = failure("let root() = { 1 / 0 }");
+    const diagnostic = error.diagnostics[0]!;
+    expect(diagnostic.code).toBe("runtime-error");
+    expect(diagnostic.message).toBe("Division by zero");
+    expect(diagnostic.labels[0]?.span).toMatchObject({ startByte: 15, endByte: 20, startLine: 1 });
+  });
+
+  it("reports runaway recursion as the interpreter's limit, without trapping", () => {
+    const error = failure("let f(n:int): int = { f(n + 1) }\nlet root() = { f(0) }");
+    expect(error.diagnostics[0]?.code).toBe("runtime-error");
+    expect(error.message).toMatch(/recursion depth/);
+    expect(host.crashed).toBe(false);
+    expect(evaluate("let root() = { 42 }").text).toBe("42");
+  });
+
+  it("reports a value with no NX spelling rather than returning part of it", () => {
+    const error = failure(`action SearchRequested = { query:string }
+action DoSearch = { query:string }
+external component <SearchBox emits { SearchRequested } />
+let root() = { <SearchBox onSearchRequested=<DoSearch query={action.query} /> /> }`);
+    expect(error.diagnostics[0]?.code).toBe("nx-text-unspellable");
+    expect(error.message).toContain("action handler");
+  });
+
+  it("leaves the artifact usable after a failed evaluation", () => {
+    const artifact = host.buildProgramArtifact("let root() = { 1 / 0 }");
+    try {
+      expect(() => artifact.evaluateNx()).toThrow(NxEvaluationError);
+      expect(artifact.generateNxIr()).toHaveLength(1);
+      expect(() => artifact.evaluateNx()).toThrow(NxEvaluationError);
+    } finally {
+      artifact.dispose();
+    }
+  });
+
+  it("refuses a disposed artifact", () => {
+    const artifact = host.buildProgramArtifact("let root() = { 42 }");
+    artifact.dispose();
+    expect(() => artifact.evaluateNx()).toThrow(NxDisposedResourceError);
+  });
+});

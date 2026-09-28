@@ -1,0 +1,25 @@
+// A type names one value unless a suffix says otherwise: `?` zero or one, `+`
+// one or more, `*` zero or more. On a field or parameter, "may be left out"
+// is a `?` on the name.
+
+type Person = { name:string }
+
+type Book = {
+  title:string
+  subtitle?:string
+  authors:Person+
+  tags?:string+
+}
+
+let root(): Book+ = {
+  <Book
+    title="Good Omens"
+    authors={<Person name="Terry Pratchett" /> <Person name="Neil Gaiman" />}
+  />
+  <Book
+    title="Dune"
+    subtitle="Book one"
+    authors={<Person name="Frank Herbert" />}
+    tags={"sci-fi" "classic"}
+  />
+}

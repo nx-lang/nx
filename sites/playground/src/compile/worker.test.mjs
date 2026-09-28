@@ -45,23 +45,38 @@ test("a worker that stopped says it will be started again", () => {
   assert.match(message, /started again/);
 });
 
+test("recursion too deep for the browser says what to look for, and is not retried", async () => {
+  const message = compileFailureMessage(
+    named("NxStackOverflowError", "The program recursed deeper than the browser can run."),
+  );
+  assert.match(message, /recursed deeper/);
+  assert.match(message, /calls itself/);
+  let attempts = 0;
+  const compile = retrying(() => {
+    attempts += 1;
+    return Promise.reject(named("NxStackOverflowError", "The program recursed deeper than the browser can run."));
+  });
+  await assert.rejects(compile("let root() = { 1 }"), /recursed deeper/);
+  assert.equal(attempts, 1);
+});
+
 test("anything else is still readable", () => {
   assert.match(compileFailureMessage(new Error("something odd")), /The compiler failed: something odd/);
   assert.match(compileFailureMessage("not an error"), /The compiler failed: not an error/);
 });
 
-test("a recoverable fault is retried once, so a preview that never edits still draws", async () => {
+test("a recoverable fault is retried once, so the output shows without another keystroke", async () => {
   const attempts = [];
   const compile = retrying((source) => {
     attempts.push(source);
     return attempts.length === 1
       ? Promise.reject(named("TimeoutError", "The compiler did not answer within 10s."))
-      : Promise.resolve({ ir: { ok: true }, diagnostics: [] });
+      : Promise.resolve({ diagnostics: [], outcome: { kind: "noRoot" } });
   });
 
   const result = await compile("let root() = { 42 }");
 
-  assert.deepEqual(result.ir, { ok: true });
+  assert.deepEqual(result.outcome, { kind: "noRoot" });
   assert.equal(attempts.length, 2);
 });
 

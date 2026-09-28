@@ -1,0 +1,25 @@
+// `if` is an expression. A condition list takes the first arm whose condition
+// holds, and an `if` with no `else` is empty when its condition is false.
+
+type Report = { celsius:int feel:string advice?:string }
+
+let feel(celsius:int): string = {
+  if {
+    celsius <= 0 => "freezing"
+    celsius < 15 => "cold"
+    celsius < 25 => "mild"
+    else => "hot"
+  }
+}
+
+let advice(celsius:int): string? = {
+  if celsius > 35 { "Stay in the shade" }
+}
+
+let readings:int+ = { 0 10 20 40 }
+
+let root() = {
+  for celsius in readings {
+    <Report celsius={celsius} feel={feel(celsius)} advice={advice(celsius)} />
+  }
+}

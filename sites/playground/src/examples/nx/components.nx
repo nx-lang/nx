@@ -1,0 +1,22 @@
+// A component declares the actions it emits and the state it keeps. As a
+// value, a component is the element that invokes it, with its properties: a
+// host initializes it to render it and run its handlers, and the DrawnUI
+// fiddle does that to draw one.
+
+external component <Button label:string emits { Tapped { } } />
+
+component <Counter start:int = 0 /> = {
+  state { count:int = {start} }
+  <Row>
+    <Label text={"Count: " + count} />
+    <Button label="Add" />
+  </Row>
+}
+
+let <Toolbar /> =
+  <Row>
+    <Counter start=3 />
+    <Button label="Reset" />
+  </Row>
+
+<Toolbar />

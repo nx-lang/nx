@@ -1,0 +1,20 @@
+// A sequence is written in braces, with nothing between items. A sequence
+// never holds a sequence: one written where items are collected contributes
+// its items.
+
+let primes:int+ = { 2 3 5 7 }
+let more:int+ = { 11 13 }
+
+// One sequence of six numbers, not a sequence of two sequences.
+let all:int+ = { primes more }
+
+// `{}` is the empty sequence, and also the absent value.
+let none:int* = {}
+
+type Summary = {
+  all:int+
+  none?:int+
+  hasNone:boolean
+}
+
+<Summary all={all} none={none} hasNone={none?} />

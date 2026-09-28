@@ -5,6 +5,8 @@ use smol_str::SmolStr;
 use std::fmt;
 use text_size::TextRange;
 
+use crate::RuntimeModuleId;
+
 /// Runtime error kinds that can occur during interpretation
 ///
 /// Represents all possible runtime errors that can be detected during
@@ -293,6 +295,11 @@ pub struct RuntimeError {
     kind: RuntimeErrorKind,
     /// Source location where the error occurred
     location: Option<TextRange>,
+    /// Module of a resolved program whose source `location` is in, when the interpreter knows it.
+    module: Option<RuntimeModuleId>,
+    /// The first location the error passed through in each other module while unwinding, innermost
+    /// first: for an error inside an imported function, where the importing module called it.
+    outer_sites: Vec<(RuntimeModuleId, TextRange)>,
     /// Call stack at the time of error
     call_stack: Vec<CallFrame>,
 }
@@ -303,6 +310,8 @@ impl RuntimeError {
         Self {
             kind,
             location: None,
+            module: None,
+            outer_sites: Vec::new(),
             call_stack: Vec::new(),
         }
     }
@@ -311,6 +320,40 @@ impl RuntimeError {
     pub fn with_location(mut self, location: TextRange) -> Self {
         self.location = Some(location);
         self
+    }
+
+    /// Set the source location of the error and the module of a resolved program it is in.
+    pub fn with_module_location(
+        mut self,
+        module: Option<RuntimeModuleId>,
+        location: TextRange,
+    ) -> Self {
+        self.module = module;
+        self.location = Some(location);
+        self
+    }
+
+    /// Records where the error passed through `module` while unwinding, unless it is the module of
+    /// its own location or already has a site there. The first site in each module is kept, which
+    /// is the innermost one in that module.
+    pub fn with_outer_site(mut self, module: RuntimeModuleId, location: TextRange) -> Self {
+        if self.module != Some(module) && self.site_in(module).is_none() {
+            self.outer_sites.push((module, location));
+        }
+        self
+    }
+
+    /// Where the error happened as seen from `module`: its own location when it is in `module`,
+    /// otherwise the innermost place it passed through there, such as the call into another
+    /// module that failed.
+    pub fn site_in(&self, module: RuntimeModuleId) -> Option<TextRange> {
+        if self.module == Some(module) {
+            return self.location;
+        }
+        self.outer_sites
+            .iter()
+            .find(|(candidate, _)| *candidate == module)
+            .map(|(_, location)| *location)
     }
 
     /// Set the call stack
@@ -327,6 +370,11 @@ impl RuntimeError {
     /// Get the source location
     pub fn location(&self) -> Option<TextRange> {
         self.location
+    }
+
+    /// Get the module of a resolved program that the source location is in, if known.
+    pub fn module(&self) -> Option<RuntimeModuleId> {
+        self.module
     }
 
     /// Get the call stack

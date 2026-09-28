@@ -1,0 +1,4 @@
+<Circle color="red" name="dot" radius=2.0 />
+<Rectangle color="black" height=4.0 name="card" width=3.0 />
+<Label text="dot (red)" />
+<Label text="card (black)" />

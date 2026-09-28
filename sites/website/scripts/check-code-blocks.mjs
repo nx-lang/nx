@@ -6,7 +6,9 @@
  *
  * - none: the block compiles with no error diagnostics;
  * - `fragment`: the block has no syntax diagnostics, so it may use names declared elsewhere;
- * - `invalid`: the block produces at least one error, because it shows a form NX rejects.
+ * - `invalid`: the block produces at least one error, because it shows a form NX rejects;
+ * - `output`: the block is what the unmarked block just before it evaluates to, its `root` printed
+ *   as NX text, compared with trailing whitespace ignored.
  *
  * Failures print as `file:line:column: message`, and any failure exits nonzero.
  *
@@ -23,7 +25,7 @@ import { createNxHost, loadNxModule, NxEvaluationError } from "@nx-lang/sdk-wasm
 const siteRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(siteRoot, "../..");
 
-export const KINDS = ["fragment", "invalid"];
+export const KINDS = ["fragment", "invalid", "output"];
 
 /**
  * Diagnostic codes the parser and syntax validation report, read from the syntax crate so the list
@@ -103,6 +105,49 @@ export function checkBlock(host, block) {
   }
 }
 
+/**
+ * Checks an `nx output` block against `previous`, the `nx` block before it on the page, and returns
+ * its problems. An output block is not compiled: it is a value, not a program.
+ */
+export function checkOutput(host, block, previous) {
+  if (block.kinds.length > 1) {
+    return [{ line: 0, column: 1, message: `a block is one of ${KINDS.join(" or ")}, not both` }];
+  }
+  if (previous === undefined || previous.kind !== "complete") {
+    return [
+      {
+        line: 0,
+        column: 1,
+        message: "an `nx output` block must follow an unmarked `nx` block, whose value it shows"
+      }
+    ];
+  }
+  let text;
+  try {
+    const artifact = host.buildProgramArtifact(previous.code);
+    try {
+      text = artifact.evaluateNx().text;
+    } finally {
+      artifact.dispose();
+    }
+  } catch (error) {
+    if (error instanceof NxEvaluationError) {
+      return [{ line: 0, column: 1, message: `the block before this output does not evaluate: ${error.message}` }];
+    }
+    throw error;
+  }
+  if (text.trimEnd() === block.code.trimEnd()) {
+    return [];
+  }
+  return [
+    {
+      line: 0,
+      column: 1,
+      message: `the output shown is not what the block before it evaluates to\n--- shown\n${block.code.trimEnd()}\n--- evaluated\n${text.trimEnd()}`
+    }
+  ];
+}
+
 function compileErrors(host, source) {
   try {
     host.buildProgramArtifact(source).dispose();
@@ -131,8 +176,10 @@ export function checkFiles(host, files, base = process.cwd()) {
   for (const file of files) {
     const blocks = findNxBlocks(readFileSync(file, "utf8"), { mdx: extname(file) === ".mdx" });
     blockCount += blocks.length;
-    for (const block of blocks) {
-      for (const problem of checkBlock(host, block)) {
+    for (const [index, block] of blocks.entries()) {
+      const problems =
+        block.kind === "output" ? checkOutput(host, block, blocks[index - 1]) : checkBlock(host, block);
+      for (const problem of problems) {
         const line = block.line + problem.line;
         failures.push(`${relative(base, file)}:${line}:${problem.column}: ${problem.message}`);
       }

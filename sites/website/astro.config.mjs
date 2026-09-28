@@ -10,8 +10,8 @@ export default defineConfig({
     starlight({
       ...starlightConfig,
       plugins: [
-        // The playground is a separate site under /playground on the same domain.
-        starlightLinksValidator({ exclude: ['/playground', '/playground/**'] }),
+        // The playground is a separate site under /play on the same domain.
+        starlightLinksValidator({ exclude: ['/play', '/play/**'] }),
         starlightLlmsTxt({
           projectName: 'NX',
           description:

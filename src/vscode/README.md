@@ -16,7 +16,7 @@ let <TaskList tasks:Task+ /> =
 ```
 
 New to NX? Start with [Getting Started](https://nxlang.org/tutorials/getting-started/) or try it
-without installing anything in the [playground](https://nxlang.org/playground).
+without installing anything in the [playground](https://nxlang.org/play).
 
 ## Features
 
@@ -41,7 +41,7 @@ for Windows (x64), macOS (Apple silicon) and Linux (x64).
 ## Links
 
 - Documentation: [nxlang.org](https://nxlang.org)
-- Playground: [nxlang.org/playground](https://nxlang.org/playground)
+- Playground: [nxlang.org/play](https://nxlang.org/play)
 - Issues and source: [github.com/nx-lang/nx](https://github.com/nx-lang/nx)
 - Building, testing and releasing the extension:
   [CONTRIBUTING.md](https://github.com/nx-lang/nx/blob/main/src/vscode/CONTRIBUTING.md)

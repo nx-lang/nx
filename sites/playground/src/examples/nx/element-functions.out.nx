@@ -1,0 +1,13 @@
+<ul
+  content={<li
+    content=<div
+      class="card info"
+      content={<h3 content="Ada" /> <p content="Engineer" />}
+    />
+  /> <li
+    content=<div
+      class="card info"
+      content={<h3 content="Grace" /> <p content="Admiral" />}
+    />
+  />}
+/>

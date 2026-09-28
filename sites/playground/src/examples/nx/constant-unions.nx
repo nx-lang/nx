@@ -1,0 +1,22 @@
+// A union whose cases carry nothing is NX's enum. `if ... is` picks an arm by
+// case.
+
+type Stage = draft | review | published
+
+type Badge = { stage:Stage tone:string }
+
+let tone(stage:Stage) = {
+  if stage is {
+    Stage.draft => "neutral"
+    Stage.review => "warning"
+    Stage.published => "success"
+  }
+}
+
+let badge(stage:Stage) = <Badge stage={stage} tone={tone(stage)} />
+
+let root() = {
+  badge(Stage.draft)
+  badge(Stage.review)
+  badge(Stage.published)
+}

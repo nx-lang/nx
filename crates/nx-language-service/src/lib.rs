@@ -2616,6 +2616,39 @@ mod tests {
     }
 
     /// The completion list is the primitive set, and `void` is no longer in it.
+    /// A name directly after `<` hovers at its first character, as a record type's name does at
+    /// its own. The `<` ends where the name starts, and used to take the position.
+    #[test]
+    fn hover_answers_on_the_first_character_of_a_name_after_an_angle_bracket() {
+        const SOURCE: &str = "external component <Button label:string />\n\
+                              component <Counter start:int = 0 /> = {\n  <Button label=\"a\" />\n}\n\
+                              let <Card t:string /> = <div />\n\
+                              let root() = { <Counter start=1 /> <Card t=\"x\" /> }\n";
+        for (marked, expected) in [
+            (
+                "external component <⟨cursor⟩Button",
+                "external component <Button",
+            ),
+            ("component <⟨cursor⟩Counter start", "component <Counter"),
+            ("let <⟨cursor⟩Card t", "let <Card"),
+            (
+                "  <⟨cursor⟩Button label=\"a\"",
+                "external component <Button",
+            ),
+            ("{ <⟨cursor⟩Counter start=1", "component <Counter"),
+        ] {
+            let unmarked = marked.replace("⟨cursor⟩", "");
+            let source = SOURCE.replacen(&unmarked, marked, 1);
+            assert_ne!(source, SOURCE, "fixture should contain {unmarked:?}");
+            let hover = hover_at(&source).unwrap_or_else(|| panic!("no hover at {marked:?}"));
+            assert!(
+                hover.contents.contains(expected),
+                "{marked:?}: {}",
+                hover.contents
+            );
+        }
+    }
+
     #[test]
     fn primitive_type_completions_are_exactly_the_canonical_names() {
         assert_eq!(

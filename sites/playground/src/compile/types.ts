@@ -1,19 +1,19 @@
-import type { NxDiagnostic, NxSeverity, NxTextSpan } from "@nx-lang/sdk-wasm";
+import type { NxDiagnostic, NxSeverity, NxTextSpan, NxValueText } from "@nx-lang/sdk-wasm";
 
 /**
  * Where a diagnostic points, and therefore how the app is allowed to present it.
  *
  * - `source`: the visitor's document. The diagnostic carries a span in its own coordinates.
- * - `catalog`: the DrawnUI catalog module. The visitor cannot have caused it.
- * - `program`: the program as a whole, with no location.
+ * - `program`: the program as a whole, or the compiler's own prelude, with no position the visitor
+ *   can be shown.
  */
-export type DiagnosticOrigin = "source" | "catalog" | "program";
+export type DiagnosticOrigin = "source" | "program";
 
 export type DiagnosticSpan = NxTextSpan;
 
 /**
- * `source` diagnostics carry a span in the author's own coordinates and are marked in the editor.
- * `catalog` and `program` diagnostics are application faults, reported without a position.
+ * `source` diagnostics carry a span in the visitor's own coordinates and are marked in the editor.
+ * `program` diagnostics are reported without a position.
  */
 export interface Diagnostic {
   readonly severity: NxSeverity;
@@ -24,30 +24,30 @@ export interface Diagnostic {
   readonly span: DiagnosticSpan | null;
 }
 
-/**
- * One module's NX IR artifact: the image, as bytes.
- *
- * Opaque on this side of the seam: the renderer prepares it with the IR runtime, which owns the
- * layout. A compiled snippet's artifact names the catalog in its module table and carries none of
- * the catalog's declarations; the catalog's own artifact is bundled at build time. The bytes are
- * the artifact's own buffer, so a worker transfers them rather than copying.
- */
-export type CompiledArtifact = Uint8Array;
+/** What evaluating a program that compiled came to. */
+export type Outcome =
+  /** `root`'s value as annotated NX text, cut to the output limit when `truncated`. */
+  | { readonly kind: "value"; readonly value: NxValueText; readonly truncated: boolean }
+  /** The program compiled but declares no `root` and ends in no element. */
+  | { readonly kind: "noRoot" }
+  /** Evaluating `root` failed at run time, or its value has no NX spelling. */
+  | { readonly kind: "error"; readonly diagnostics: readonly Diagnostic[] };
 
-export interface CompileResult {
-  /** The visitor's module as an NX IR artifact, or null when compilation failed. */
-  readonly ir: CompiledArtifact | null;
+export interface EvaluateResult {
+  /** What compiling reported. Non-empty means the program did not compile. */
   readonly diagnostics: readonly Diagnostic[];
+  /** What evaluating came to, or null when the program did not compile. */
+  readonly outcome: Outcome | null;
 }
 
 /**
- * The one seam between authoring and compilation.
+ * The one seam between authoring and evaluation.
  *
- * Compilation happens in the browser, in a worker over the WebAssembly build of the compiler.
- * Everything upstream of this interface — the editor, the renderer, the gallery — is written
- * against the interface alone and knows nothing of where the compiler runs.
+ * Evaluation happens in the browser, in a worker over the WebAssembly build of the compiler.
+ * Everything upstream of this interface — the editor and the output pane — is written against the
+ * interface alone and knows nothing of where the compiler runs.
  */
-export type Compile = (source: string) => Promise<CompileResult>;
+export type Evaluate = (source: string) => Promise<EvaluateResult>;
 
 /** The raw diagnostic shape the SDK reports, re-exported for the classifier. */
 export type SdkDiagnostic = NxDiagnostic;

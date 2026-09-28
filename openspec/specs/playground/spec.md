@@ -2,578 +2,45 @@
 
 ## Purpose
 
-The public NX Playground at `https://nxlang.org/playground`: a browser site where a visitor picks an
-example from a gallery, edits its NX source, and sees the interface it describes drawn live beside the
-editor. Today it draws with DrawnUI; the site is shaped so that further targets can join later.
+The public NX Playground at `https://nxlang.org/play`: a browser page for trying the NX language. A
+visitor writes NX source on one side and sees the value its `root` evaluates to on the other, shown
+by the `value-view` element as highlighted NX text. Short examples grouped by topic get a visitor
+started, and the source travels in the page's address so it can be shared. Everything runs in the
+browser; the DrawnUI fiddle is where NX draws interfaces.
 
 ## Requirements
 
-### Requirement: Site is served under the playground path
-Everything the site serves — the gallery, each example's editor view, and every static asset —
-SHALL live under the `/playground` path prefix, so that the rest of the domain is served by the
-website without the playground changing.
-
-#### Scenario: Gallery address
-- **WHEN** a visitor opens `/playground` or `/playground/`
-- **THEN** the gallery SHALL be shown
-
-#### Scenario: Example editor address
-- **WHEN** a visitor opens `/playground/<id>` for a gallery example's id
-- **THEN** the editor view SHALL open with that example loaded, without passing through the gallery
-
-#### Scenario: Unknown example
-- **WHEN** a visitor opens `/playground/<id>` and no example has that id
-- **THEN** the site SHALL show the gallery rather than an error page
-
-#### Scenario: API lives under the prefix
-- **WHEN** a request names a path under `/playground/api/`
-- **THEN** the site SHALL answer not found, since it serves no API: the client compiles and answers
-  language queries itself, and a static site has no health route
-
-#### Scenario: Assets live under the prefix
-- **WHEN** the shell loads its scripts, styles, fonts, images, the CanvasKit binary and the NX
-  compiler module
-- **THEN** every one of those requests SHALL be for a path under `/playground/`
-
-#### Scenario: Root redirects to the playground
-- **WHEN** a visitor opens `/`
-- **THEN** the website's landing page SHALL answer, with no redirect to `/playground`
-- **AND** the landing page and the site header SHALL link to `/playground`
-
-#### Scenario: Paths outside the prefix are not the shell
-- **WHEN** a request names a path that is not under `/playground`
-- **THEN** the website SHALL answer it, and the playground's shell SHALL NOT be served
-
-#### Scenario: A missing asset is not the shell
-- **WHEN** a request under `/playground/assets/` names a file the build did not produce
-- **THEN** the site SHALL answer not found rather than serving the shell
-
-### Requirement: Site is branded as the NX Playground
-The site SHALL present itself as the NX Playground — a place to try NX — and SHALL say, secondarily,
-that what it draws today is DrawnUI, so that the general purpose and the current scope are both
-visible at a glance.
-
-#### Scenario: Gallery heading and subtitle
-- **WHEN** a visitor opens the gallery
-- **THEN** the primary heading SHALL name the NX Playground
-- **AND** a subtitle SHALL name DrawnUI as what the playground currently draws with
-
-#### Scenario: Document titles
-- **WHEN** a visitor is on the gallery or on an example's editor view
-- **THEN** the browser tab title SHALL name the NX Playground, and on the editor view the example as
-  well
-
-#### Scenario: Fiddle is gone from the visitor's view
-- **WHEN** the site's text, addresses and document titles are inspected
-- **THEN** none of them SHALL use the word "fiddle"
-
-### Requirement: Gallery presents the DrawnUI example set
-The site SHALL open on a gallery that mirrors the top-level structure of the DrawnUI React demo
-site, listing its examples so that a visitor can see what the control set can do before writing any
-NX.
-
-#### Scenario: Gallery lists the examples
-- **WHEN** a visitor opens the gallery
-- **THEN** the gallery SHALL list an entry for each example carried over from the DrawnUI demo site
-- **AND** each entry SHALL be identified by the same name the demo site gives it
-
-#### Scenario: Each entry draws its example
-- **WHEN** a visitor views a gallery entry
-- **THEN** that entry's example SHALL be drawn from its NX source through the same pipeline the
-  editor view uses
-- **AND** the drawing SHALL NOT require the visitor to open the editor view first
-
-### Requirement: Every gallery entry opens in the editor view
-Each gallery entry SHALL offer an affordance that opens the editor view with that entry's NX loaded,
-and the editor view for an entry SHALL be reachable by its own address so it can be linked to
-directly.
-
-#### Scenario: Opening an example
-- **WHEN** a visitor activates a gallery entry's edit affordance
-- **THEN** the editor view SHALL open with that entry's NX in the source pane
-- **AND** the output pane SHALL draw that example
-- **AND** the address SHALL change to that example's editor address
-
-#### Scenario: Editing an example does not alter the gallery
-- **WHEN** a visitor edits an example in the editor view and returns to the gallery
-- **THEN** the gallery entry SHALL still show the example as originally authored
-
-#### Scenario: Returning to the gallery
-- **WHEN** a visitor is in the editor view
-- **THEN** there SHALL be a way back to the gallery
-- **AND** taking it SHALL change the address to the gallery address
-
-### Requirement: Examples declare how completely they cover the original
-Each example SHALL declare its coverage as one of three states, so that a gap in NX's expressiveness
-is never mistaken for a broken example, and so that an example whose drawing is correct is not
-presented as if it were faulty:
-
-- **complete** — nothing the DrawnUI original does is missing;
-- **static** — the drawing is correct and complete, but some of the motion or interaction the
-  original has is absent;
-- **reduced** — the example is scaled down because NX cannot express the mechanism the original
-  demonstrates.
-
-#### Scenario: A complete example carries no coverage note
-- **WHEN** an example's NX covers everything the DrawnUI original does
-- **THEN** it SHALL NOT carry a coverage note or badge
-
-#### Scenario: A static example is distinguished from a reduced one
-- **WHEN** an example draws the original correctly but omits some of its motion or interaction
-- **THEN** it SHALL declare itself static rather than reduced
-
-#### Scenario: A static example that responds is not described as inert
-- **WHEN** a static example's coverage note is shown
-- **THEN** the note SHALL say that some of the original's motion or interaction is absent
-- **AND** it SHALL NOT say that nothing in the example responds
-
-#### Scenario: A reduced example states what the original demonstrates
-- **WHEN** an example is scaled down from the original
-- **THEN** it SHALL declare itself reduced
-- **AND** what the original demonstrates SHALL be stated where the visitor can read it
-
-#### Scenario: Coverage marking is proportionate
-- **WHEN** a static or reduced example is presented
-- **THEN** it SHALL NOT be presented as an error or failure
-- **AND** its wording SHALL be addressed to a visitor, not to a maintainer surveying gaps
-
-#### Scenario: Omitted examples are accounted for
-- **WHEN** a DrawnUI demo page has no NX example at all
-- **THEN** the site's documentation SHALL name it and say why
-- **AND** the gallery SHALL NOT show an entry for it
-
-### Requirement: Missing capabilities are named from a shared vocabulary
-An example that is not complete SHALL attribute its gap to one or more named capabilities drawn
-from a fixed vocabulary shared across all examples, rather than to prose written per example, so
-that gaps can be counted, compared, and found again when a capability lands. The vocabulary SHALL
-distinguish a capability NX does not have from one NX has and the port does not use yet, so that
-a landed capability is not presented as missing from NX. List virtualization SHALL NOT be in the
-vocabulary of capabilities NX lacks: the two examples built on it, Cells and Uneven Cells, SHALL
-be ported with the virtualization the originals demonstrate and SHALL NOT be reduced.
-
-#### Scenario: A gap names a capability
-- **WHEN** an example declares itself static or reduced
-- **THEN** it SHALL name at least one capability from the shared vocabulary as the reason
-
-#### Scenario: Coverage notes derive from the named capabilities
-- **WHEN** an example's coverage is shown to a visitor
-- **THEN** the wording SHALL derive from the capabilities it names
-- **AND** two examples blocked by the same capability SHALL describe it the same way
-
-#### Scenario: A landed capability reads as a porting gap
-- **WHEN** an example names event handlers or component state as its gap
-- **THEN** the wording SHALL say the port does not use them yet
-- **AND** it SHALL NOT say NX lacks them
-
-#### Scenario: Gaps can be surveyed across the example set
-- **WHEN** the example set is inspected
-- **THEN** it SHALL be possible to determine which examples are blocked by any given capability
-
-#### Scenario: The list examples are virtualized
-- **WHEN** the Cells or Uneven Cells example is opened
-- **THEN** its source SHALL bind the original's item count through `ItemsSource` and an element
-  function through `ItemTemplate`, with the original's recycling and measuring settings
-- **AND** it SHALL NOT declare itself reduced
-- **AND** its source SHALL NOT say that NX cannot express a collection or a template
-
-### Requirement: Example source marks where dropped behavior belonged
-Where an example omits behavior the DrawnUI original has, its NX source SHALL say so at the point
-the behavior would have appeared, so that a visitor who opens the editor to find out why nothing
-happens reads the answer in the code.
-
-#### Scenario: The source explains an omission in place
-- **WHEN** a visitor opens a static or reduced example in the editor view
-- **THEN** the source SHALL carry a note at the point the omitted behavior would have been written
-- **AND** that note SHALL name the same capability the example's coverage names
-
-### Requirement: Every gallery entry is backed by working NX
-Every gallery entry SHALL have NX source that compiles and draws, and its edit affordance SHALL open
-that source. No entry SHALL be a placeholder standing in for an example that does not exist.
-
-#### Scenario: A reduced example still opens in the editor view
-- **WHEN** a visitor opens a reduced example's edit affordance
-- **THEN** the editor view SHALL open with that example's NX
-- **AND** the output pane SHALL draw it
-
-#### Scenario: No entry lacks source
-- **WHEN** the gallery is inspected
-- **THEN** every entry SHALL resolve to NX source that compiles
-
-### Requirement: A static example rests in a sensible state
-Where an example omits interaction that would otherwise move a control into a particular position,
-the example SHALL be authored so that the state it rests in is a deliberate one.
-
-#### Scenario: A frozen control does not read as broken
-- **WHEN** an example draws a control whose original was driven by interaction, such as a carousel or
-  a drawer
-- **THEN** the control SHALL be drawn at a resting position that looks intentional rather than
-  mid-transition
-
-### Requirement: Examples format numbers and booleans into their readouts
-Where a DrawnUI original formats a number or a boolean into text a visitor reads, such as a tap
-count, a selected index, a slider's value, a speed or an `IsOpen` flag, and the value is one NX can
-hold, the example SHALL hold it in component state and build the text with the language's implicit
-conversion, rather than drawing a fixed string in its place. A value is one NX can hold when it is
-the example's own state or arrives in the payload of an action the catalog declares. Where the
-original numbers a run of items from an index, the example SHALL generate the run from a loop's
-index rather than spelling each item out.
-
-#### Scenario: A counter follows its taps
-- **WHEN** a visitor taps the counting button on the Transforms or the Accessibility example
-- **THEN** the button's text SHALL read `Tapped 1×`, then `Tapped 2×` on the next tap
-
-#### Scenario: A readout follows the control it reports
-- **WHEN** a visitor swipes a carousel on the Carousel & Drawer example
-- **THEN** that carousel's `SelectedIndex=` readout SHALL show the index the carousel reports
-- **AND** a whole index SHALL be shown without a fraction
-
-#### Scenario: A boolean is shown as the language prints it
-- **WHEN** a visitor opens the drawer on the Carousel & Drawer example
-- **THEN** its readout SHALL read `IsOpen: true`
-
-#### Scenario: Numbered rows come from a loop
-- **WHEN** the SkiaScroll example's source is read
-- **THEN** its numbered rows SHALL be produced by a loop that joins a prefix to the loop's index
-- **AND** the drawing SHALL show the same rows the original shows
-
-#### Scenario: A value NX cannot reach keeps its note
-- **WHEN** the original reads the value from a control or an engine object, such as a Lottie's frame
-  count or the accessibility manager's node count
-- **THEN** the example SHALL leave that part of the readout out
-- **AND** its source SHALL say so at that point, naming the code-behind capability
-
-### Requirement: Example NX is authored against the catalog
-Every example SHALL be NX source that compiles through the site's own pipeline, rather than a
-hand-built value tree or a drawing produced some other way, and the example check SHALL expand
-every authored component in every example the way the renderer does.
-
-#### Scenario: Examples compile
-- **WHEN** the site's examples are checked
-- **THEN** every example SHALL compile with no diagnostics
-
-#### Scenario: Examples are expanded as the renderer draws them
-- **WHEN** the site's examples are checked
-- **THEN** every authored component use in every example SHALL be initialized under the instance
-  that encloses it, handler properties resolved through the parent
-- **AND** a failure inside any component body SHALL fail the check
-
-#### Scenario: An example is exactly what the editor loads
-- **WHEN** a visitor opens an example in the editor view
-- **THEN** the source shown SHALL be the same source the gallery drew
-
-### Requirement: An example counts with a range rather than by hand
-Where an example needs a collection of a given size whose items follow from their position, its
-source SHALL derive that collection from a range — a `for` over `a..b` or `a..=b` — rather than
-from a written-out seed list, a repeated element, or a helper that concatenates shifted copies of
-one. No example's source SHALL say that NX has no range, and no example SHALL carry scaffolding
-whose only purpose is to reach a count. This SHALL hold for a collection of any size an example
-draws, including the hundred thousand cells the Cells example binds.
-
-#### Scenario: A list example's collection is one loop
-- **WHEN** the Cells or Uneven Cells example is opened
-- **THEN** its collection SHALL be built by one `for` over a range whose bound is the item count
-  the DrawnUI original demonstrates
-- **AND** the source SHALL declare no seed list, shift function, or multiplying helper
-
-#### Scenario: No example claims the language cannot count
-- **WHEN** the example set's sources are inspected
-- **THEN** none SHALL state that NX has no range, and none SHALL excuse code by that absence
-
-#### Scenario: A gap that remains is still stated in place
-- **WHEN** an example cycles a palette or otherwise needs to read a list by position, which NX has
-  no operator for
-- **THEN** its source SHALL say so where the value is chosen, and SHALL NOT attribute the
-  workaround to the absence of a range
-
-#### Scenario: The rewritten examples still compile and draw
-- **WHEN** the example check runs over the set
-- **THEN** every example SHALL compile with no diagnostics and evaluate, as before the rewrite
-
-### Requirement: Two-pane editor view renders authored NX
-The editor view SHALL present a source pane and an output pane, and SHALL draw the interface
-described by the source pane's NX into the output pane.
-
-#### Scenario: The editor view always opens on working source
-- **WHEN** a visitor opens the editor view, whether from a gallery entry or directly
-- **THEN** the source pane SHALL contain NX using catalog controls
-- **AND** the output pane SHALL draw it without any visitor action
-
-#### Scenario: Edits update the drawing
-- **WHEN** a visitor edits the source pane so that it still compiles
-- **THEN** the output pane SHALL be redrawn from the edited source
-
-#### Scenario: Updates are not issued per keystroke
-- **WHEN** a visitor types continuously
-- **THEN** the site SHALL coalesce the edits and compile once the visitor pauses, rather than
-  compiling on every keystroke
-
-#### Scenario: Last good drawing survives a broken edit
-- **WHEN** an edit makes the source fail to compile
-- **THEN** the output pane SHALL continue to show the last successfully drawn interface
-- **AND** the failure SHALL be reported as a diagnostic rather than by clearing the output
-
-### Requirement: Source pane is an NX-aware editor
-The source pane SHALL highlight NX using the syntax definition the repository already publishes for
-editors, so that highlighting in the playground and in the editor extension cannot drift apart, and
-it SHALL obtain that highlighting through the shared Monaco integration rather than a site-local
-bridge. The source pane SHALL offer hover and completion answered by the NX language service, with
-catalog declarations visible to both, so that a visitor can discover the control set from inside the
-editor.
-
-#### Scenario: NX is syntax highlighted
-- **WHEN** the source pane contains NX
-- **THEN** it SHALL be highlighted according to the repository's published NX grammar
-
-#### Scenario: Grammar is not duplicated
-- **WHEN** the repository's published NX grammar changes
-- **THEN** the playground SHALL pick up the change without a separate grammar being edited
-
-#### Scenario: Highlighting is not site-specific
-- **WHEN** the playground's editor is inspected
-- **THEN** it SHALL contain no TextMate bridge, tokenizer, or theme of its own
-- **AND** highlighting SHALL come from the shared Monaco integration
-
-#### Scenario: Hover on a catalog component
-- **WHEN** a visitor hovers a tag naming a DrawnUI catalog component
-- **THEN** the source pane SHALL show that component's signature, including its properties and their
-  types, rendered as highlighted NX
-
-#### Scenario: Hover on the visitor's own declarations
-- **WHEN** a visitor hovers a name declared in their own source
-- **THEN** the source pane SHALL show what the language service reports for it
-
-#### Scenario: Completions inside a catalog tag
-- **WHEN** a visitor requests completions inside the opening tag of a catalog component
-- **THEN** the source pane SHALL offer that component's properties not yet supplied
-
-#### Scenario: Positions are not shifted by catalog injection
-- **WHEN** the visitor hovers or requests completions at a position
-- **THEN** the query SHALL be answered for the position the visitor sees, and any returned range
-  SHALL be in the visitor's own lines and columns
-
-#### Scenario: Language features degrade without breaking editing
-- **WHEN** the compiler that answers language queries cannot be loaded or fails
-- **THEN** hover and completion SHALL silently offer nothing
-- **AND** the source pane SHALL remain editable and compilation SHALL continue to work
-
-### Requirement: Compilation reports diagnostics against authored source
-The site SHALL compile the visitor's NX and report every resulting diagnostic, positioned against
-the source the visitor actually wrote.
-
-#### Scenario: Diagnostics are shown in the source pane
-- **WHEN** compilation reports a diagnostic with a source position
-- **THEN** the source pane SHALL mark the reported span
-- **AND** the diagnostic message SHALL be readable by the visitor
-
-#### Scenario: Positions are not shifted by catalog injection
-- **WHEN** the site compiles the visitor's source together with the control catalog
-- **THEN** a diagnostic on the visitor's source SHALL report the line and column the visitor sees in
-  the source pane
-
-#### Scenario: Catalog-internal failures are not blamed on the visitor
-- **WHEN** a diagnostic's position falls inside the injected catalog rather than the visitor's source
-- **THEN** the site SHALL report it as an application fault
-- **AND** it SHALL NOT mark a span in the visitor's source
-
-#### Scenario: A position with no width is still a position
-- **WHEN** a diagnostic names a point rather than a range, as a missing token's insertion point does
-- **THEN** the site SHALL report it against the visitor's source rather than as a fault with no
-  position
-- **AND** the source pane SHALL mark it visibly
-
-#### Scenario: Compilation errors do not break the session
-- **WHEN** compilation fails for any reason, including a compiler that crashed or did not load
-- **THEN** the site SHALL report the failure and remain editable
-
-### Requirement: Catalog is available to authored source without being shown
-The visitor SHALL be able to use catalog controls without declaring or importing them, and the
-catalog SHALL NOT appear in the source pane.
-
-The catalog SHALL be a module of its own that every compile and every language query imports
-implicitly, so that the visitor's document is analyzed exactly as written. Any source the language
-accepts as a whole file SHALL compile in the playground, and SHALL do so with the diagnostics and
-positions the visitor would see compiling that same text on its own.
-
-A compile SHALL answer with the visitor's module alone: an NX IR artifact that names the catalog in
-its module table and carries none of the catalog's declarations and no debug section. The catalog's
-own artifact SHALL be emitted once, at build time, through the same compiler module the browser
-loads, and the site SHALL prepare it once per page and link every compile against that preparation.
-The catalog source SHALL remain the one committed form; the artifact SHALL NOT be committed.
-
-#### Scenario: Controls are used without an import
-- **WHEN** a visitor writes an element naming a catalog control
-- **THEN** compilation SHALL resolve it with no import statement present
-
-#### Scenario: Catalog is not editable
-- **WHEN** a visitor inspects the source pane
-- **THEN** the catalog declarations SHALL NOT be present in it
-
-#### Scenario: A file that is a single trailing element compiles
-- **WHEN** a visitor's source declares no `root` and consists of one element expression, such as
-  `<SkiaLayer VerticalOptions=Fill></SkiaLayer>`
-- **THEN** compilation SHALL accept it and return IR
-- **AND** it SHALL NOT report a syntax error caused by the catalog
-
-#### Scenario: A compile carries the visitor's module alone
-- **WHEN** a visitor's source compiles
-- **THEN** the result SHALL be one NX IR artifact whose module table names the visitor's module
-  first and the catalog second
-- **AND** it SHALL contain no declaration of the catalog and no debug section
-
-#### Scenario: The catalog artifact is built once and linked every time
-- **WHEN** the site is built
-- **THEN** the bundle SHALL carry the catalog's NX IR artifact, emitted from the catalog source by the
-  same compiler module the worker loads
-- **AND** a visitor's compiles SHALL be linked against one preparation of that artifact
-- **AND** the example check SHALL link each example against the catalog artifact emitted the same way
-
-#### Scenario: A catalog that lacks a control the visitor names is an application fault
-- **WHEN** the bundled catalog artifact does not declare a control a compiled snippet references
-- **THEN** linking SHALL fail naming the control
-- **AND** the site SHALL report the failure rather than draw a partial tree
-
-### Requirement: Evaluated NX values are translated to drawn controls
-The site SHALL evaluate compiled NX to a value tree and translate that tree into DrawnUI controls,
-mapping each element to the control its type names, each property to that control's corresponding
-input, and each handler property to that control's corresponding event.
-
-#### Scenario: Element types select controls
-- **WHEN** the evaluated tree contains an element naming a catalog control
-- **THEN** the site SHALL instantiate the corresponding DrawnUI control
-
-#### Scenario: Nested content is drawn as child controls
-- **WHEN** an element carries content, whether a single child or several
-- **THEN** all of that content SHALL be drawn as children of the containing control in authored order
-
-#### Scenario: Union values are passed as their case name
-- **WHEN** a property's evaluated value is a union case
-- **THEN** the control SHALL receive the case name as its value
-
-#### Scenario: Record values are reconstructed
-- **WHEN** a property's evaluated value is a record such as a thickness or corner radius
-- **THEN** the site SHALL reconstruct the value in the form DrawnUI expects, rather than passing the
-  raw record
-
-#### Scenario: Handler properties become event callbacks
-- **WHEN** a drawn control carries a handler property `on<Event>` whose value is a handler record
-  with a token
-- **THEN** the control SHALL receive a callback under DrawnUI's event name `<Event>`
-- **AND** the callback SHALL build the emit's action record from the event's arguments, by the
-  parameter names the catalog metadata records, and dispatch it under the token
-
-#### Scenario: Authored components are drawn as instances
-- **WHEN** the evaluated tree contains a descriptor of a component the author declared
-- **THEN** the site SHALL initialize an instance from the descriptor's fields, with the enclosing
-  instance as its parent when there is one
-- **AND** it SHALL draw what the instance rendered in the descriptor's place
-
-#### Scenario: Unset properties keep DrawnUI defaults
-- **WHEN** an evaluated property carries no value
-- **THEN** the site SHALL leave the control's own default in place
-
-#### Scenario: Unknown elements are reported, not drawn
-- **WHEN** the evaluated tree contains an element that names no known control
-- **THEN** the site SHALL report the unknown element to the visitor
-- **AND** it SHALL NOT abort drawing the rest of the tree
-
-### Requirement: Authored handlers run in the output pane
-The site SHALL draw every use of an authored component as a component instance held by the
-renderer, SHALL turn each handler an author binds on a drawn control into that control's DrawnUI
-event, and on the event SHALL dispatch the handler against the instance whose body bound it and
-redraw from the result. Results SHALL be routed as the language defines them: an update record
-patches the state of the instance that owns the handler; an action a component emits is delivered
-to the handler its parent bound for that emit, through the token the parent's rendered output
-carries, and the parent's state is patched in turn; anything else is a host effect. Every dispatch
-SHALL be atomic with respect to the instance it targets, and a dispatch that fails SHALL leave the
-drawing as it was.
-
-#### Scenario: A tap patches state and redraws
-- **WHEN** a visitor's source declares `component <Counter /> = { state { count:int = 0 } <SkiaStack><SkiaLabel Text={if count > 0 { "tapped" } else { "untapped" }} /><SkiaButton Text="Tap" onTapped=<Update count={count + 1} /> /></SkiaStack> }` and a root of `<Counter />`
-- **AND** the visitor taps the drawn button
-- **THEN** the label SHALL redraw as `tapped`
-- **AND** no compile SHALL be issued
-
-#### Scenario: Live state across taps
-- **WHEN** the button above is tapped twice
-- **THEN** the second tap's handler SHALL read the state the first tap left, so `count` is `2`
-
-#### Scenario: An emitted action reaches the parent's handler
-- **WHEN** a child component declares `emits { Chosen { name:string } }` and its body binds `onTapped=<Child.Chosen name="a" />` on a button
-- **AND** a parent component with state `picked:string = ""` uses it as `<Child onChosen=<Update picked={action.name} /> />` and draws `picked` in a label
-- **AND** the visitor taps the child's button
-- **THEN** the parent's label SHALL redraw as `a`
-
-#### Scenario: A handler in a content child patches its owner
-- **WHEN** a parent component's body places a button with `onTapped=<Update ... />` inside the content of an authored component
-- **AND** the visitor taps that button
-- **THEN** the parent's state SHALL be patched and its drawing updated
-- **AND** the content component's instance SHALL keep its own state
-
-#### Scenario: Child state survives a parent redraw
-- **WHEN** an authored child with its own state is drawn inside a parent whose state changes
-- **THEN** after the parent redraws, the child SHALL be drawn from the parent's new props and the
-  state the child held before
-
-#### Scenario: A handler outside a component is inert and reported
-- **WHEN** a visitor's source binds `onTapped` on a control in the root function rather than inside a
-  component
-- **THEN** the control SHALL draw without a callback
-- **AND** the site SHALL report, as it reports an unknown control, that handlers run inside a
-  component
-
-#### Scenario: A failed dispatch leaves the drawing
-- **WHEN** a handler's dispatch fails with a runtime diagnostic
-- **THEN** the site SHALL show the diagnostic's message in the diagnostics pane
-- **AND** the drawing SHALL be the one from before the event
-
-#### Scenario: Editing resets the instances
-- **WHEN** the visitor edits the source and it recompiles
-- **THEN** every instance SHALL start again from its initial state
-
-### Requirement: Effects the tree does not handle are shown to the visitor
-An action a handler returns that no instance in the tree handles — an emitted action nobody bound,
-or an action outside the component's contract, such as `<DoSearch />` from a page component — SHALL
-be shown to the visitor as a host effect, naming the action and the instance that produced it, so
-that a visitor can see an action leave the tree even though the site has no host to receive it.
-
-#### Scenario: An unbound emit is listed
-- **WHEN** a component declares `emits { Saved }`, its body returns `<Saved />` from a handler, and
-  its use binds no `onSaved`
-- **AND** the handler is dispatched
-- **THEN** the diagnostics pane SHALL list a `Saved` effect from that component
-
-#### Scenario: Effects are cleared on recompile
-- **WHEN** the visitor edits the source and it recompiles
-- **THEN** the listed effects SHALL be cleared
-
 ### Requirement: Compilation and language queries run in the browser behind the same seam
-The site SHALL compile NX and answer hover, completion, diagnostics and symbol queries in the
-visitor's browser, off the main thread, and SHALL keep the choice of where that work happens
-confined to the single compile seam and the language service interface, so editing and drawing do
+The site SHALL compile and evaluate NX and answer hover, completion, diagnostics and symbol queries
+in the visitor's browser, off the main thread, and SHALL keep the choice of where that work happens
+confined to the single compile seam and the language service interface, so editing and output do
 not change when the implementation does.
 
 #### Scenario: The browser holds the compiler
 - **WHEN** the site is loaded and the visitor edits
-- **THEN** NX IR and language answers SHALL be produced without any request leaving the browser
+- **THEN** diagnostics, the evaluated value and language answers SHALL be produced without any
+  request leaving the browser
 
 #### Scenario: The seam is uniform
-- **WHEN** compilation is requested
-- **THEN** it SHALL be requested through one interface that takes NX source and yields IR and
-  diagnostics
-- **AND** editing and drawing SHALL depend on that interface rather than on how it is fulfilled
+- **WHEN** evaluation is requested
+- **THEN** it SHALL be requested through one interface that takes NX source and yields diagnostics
+  and either the value as annotated NX text or the reason there is none
+- **AND** editing and the output pane SHALL depend on that interface rather than on how it is
+  fulfilled
 
 #### Scenario: The editor stays responsive during a compile
-- **WHEN** a compile or language query is in progress
+- **WHEN** a compile, evaluation or language query is in progress
 - **THEN** the source pane SHALL keep accepting input and painting
 
 #### Scenario: The same compiler is tested and shipped
 - **WHEN** the example check runs
-- **THEN** it SHALL compile every example through the same in-browser compiler package the site
-  ships, with the same catalog handling
+- **THEN** it SHALL compile and evaluate every example through the same in-browser compiler package
+  the site ships
 
 ### Requirement: A failed compiler costs one request
-A compile or language call that traps or overruns its deadline SHALL cost that request only: the
-site SHALL report it as a failure, replace the compiler, and answer the next request normally.
+A compile, evaluation or language call that traps or overruns its deadline SHALL cost that request
+only: the site SHALL report it as a failure, replace the compiler, and answer the next request
+normally.
 
 #### Scenario: A trap is reported and recovered from
 - **WHEN** the compiler traps while handling a request
@@ -585,6 +52,12 @@ site SHALL report it as a failure, replace the compiler, and answer the next req
 - **THEN** it SHALL be reported as a failure
 - **AND** the compiler that was running it SHALL be discarded rather than waited on
 
+#### Scenario: Recursion too deep for the browser is named
+- **WHEN** evaluating traps because the browser's stack ran out, as recursion with calls heavier
+  than the module's recursion limit allows for can make it
+- **THEN** the site SHALL say that the program recursed deeper than the browser can run, replace
+  the compiler, and not retry the request
+
 #### Scenario: A compiler that has not loaded yet is waited for
 - **WHEN** a request is made while the compiler is still being loaded
 - **THEN** the deadline SHALL measure the compiler's own work rather than the wait for the load
@@ -595,126 +68,23 @@ site SHALL report it as a failure, replace the compiler, and answer the next req
 - **THEN** the site SHALL report a failure the visitor can read rather than wait on it indefinitely
 
 #### Scenario: A recovered failure draws without an edit
-- **WHEN** a compile fails in a way a replaced compiler can answer, on a view that compiles once and
-  is never edited
-- **THEN** the site SHALL compile again of its own accord rather than leave the failure standing
+- **WHEN** an evaluation fails in a way a replaced compiler can answer, on source the visitor has not
+  edited since
+- **THEN** the site SHALL evaluate again of its own accord and show the output, rather than leave
+  the failure standing
 
 ### Requirement: Public deployment is fronted by an edge that serves assets
 The playground SHALL be served from Cloudflare's edge as static files, over TLS, with no origin
 process behind it. No rate limit SHALL be required, since no request costs more than a file.
 
 #### Scenario: The site is reachable at its public address
-- **WHEN** a visitor opens `https://nxlang.org/playground`
-- **THEN** the gallery SHALL be served over TLS
-- **AND** `http://nxlang.org/playground` SHALL redirect to it
+- **WHEN** a visitor opens `https://nxlang.org/play`
+- **THEN** the playground SHALL be served over TLS
+- **AND** `http://nxlang.org/play` SHALL redirect to it
 
 #### Scenario: Assets are served from the edge
-- **WHEN** a hashed asset, the CanvasKit binary or the NX compiler module is requested
+- **WHEN** a hashed asset or the NX compiler module is requested
 - **THEN** it SHALL be served from Cloudflare's edge, with no request reaching an origin server
-
-### Requirement: Site documents how to run, sync and deploy it
-The site SHALL carry documentation covering how to build and run it locally, what it depends on
-including the wasm toolchain, how to move its `drawnui-react` pin and refresh the DrawnUI assets
-copied from upstream, and how it is deployed, including the one-time edge setup.
-
-#### Scenario: Local run is documented
-- **WHEN** a contributor reads the site's documentation
-- **THEN** it SHALL describe the prerequisites, the wasm toolchain among them, and the steps to run
-  the site locally under the `/playground` prefix with no compile server
-
-#### Scenario: Vendored source provenance is recorded
-- **WHEN** a contributor inspects the DrawnUI assets the site copies from upstream (fonts, images,
-  animations, shaders and the reference demo pages)
-- **THEN** the upstream tag they were taken from SHALL be recorded
-- **AND** that tag SHALL be the release of the `drawnui-react` version the site pins
-
-#### Scenario: Deployment is documented
-- **WHEN** a maintainer needs to deploy, roll back, or set the site up on a fresh hosting account
-- **THEN** the repository's deployment docs SHALL describe the day-to-day flow and the one-time
-  setup, including every edge setting the site depends on
-- **AND** they SHALL NOT describe a rate limit, a health route or an origin service the site no
-  longer has
-
-### Requirement: Drawn text uses the demo's font configuration
-The site SHALL register the same fonts and the same font defaults as the DrawnUI demo site, so that
-an example ported from a demo page measures and draws its text as the original does, including
-where the original names no font family.
-
-#### Scenario: A label with no font family draws in the demo's text font
-- **WHEN** an example draws a label that does not set a font family
-- **THEN** the label SHALL be drawn in the text font the demo registers, not in the engine's
-  built-in face
-
-#### Scenario: A button caption follows the same default
-- **WHEN** an example draws a button that does not set a font family
-- **THEN** its caption SHALL be drawn in the same text font
-
-#### Scenario: A named font family still wins
-- **WHEN** an example sets a font family on a label or button
-- **THEN** that family SHALL be used rather than the default
-
-### Requirement: Item templates draw virtualized cells
-When a drawn control carries an `ItemTemplate` whose value is a `Function` record and an
-`ItemsSource`, the site SHALL hand DrawnUI a cell factory for that control, so that DrawnUI
-decides which cells exist, realizes them, recycles them and measures them by its own strategy.
-Each cell SHALL be a host control that, whenever DrawnUI binds it to an item, calls the function
-with `Item` bound to that item and `Index` to the item's index, and draws the resulting value as
-its content by the same translation the output pane applies to the root. The items DrawnUI is
-given SHALL be the evaluated items themselves, so that what a cell receives is what the author's
-collection holds. A cell that is rebound to another item SHALL redraw with the new item. A
-function call that fails SHALL be reported in the diagnostics pane once per failure and SHALL
-leave that cell empty rather than abort the drawing. A handler bound inside a cell SHALL be
-drawn inert and reported as such, since a cell's content is not an instance of the tree.
-
-#### Scenario: A templated list draws only the cells DrawnUI asks for
-- **WHEN** the evaluated tree contains a `SkiaLayout` with `ItemsSource` of ten thousand items,
-  `ItemTemplate` bound to a function and `RecyclingTemplate=Enabled`
-- **THEN** the site SHALL realize cells for the visible range and reuse them as the visitor scrolls
-- **AND** SHALL NOT call the function once per item up front
-
-#### Scenario: A cell is drawn from the function's result
-- **WHEN** DrawnUI binds a cell to the item at index 3
-- **THEN** the cell SHALL show what the function renders for `Item` = that item and `Index` = 3
-
-#### Scenario: Cells of uneven height are measured by the strategy the author set
-- **WHEN** a templated `SkiaLayout` sets `MeasureItemsStrategy=MeasureAll` and its template
-  renders cells of differing heights
-- **THEN** each cell SHALL be laid out at its own height
-
-#### Scenario: A failing template reports and continues
-- **WHEN** the function fails for one item
-- **THEN** the diagnostics pane SHALL show the failure with the item's index
-- **AND** the rest of the list SHALL still draw
-
-#### Scenario: An ItemTemplate without ItemsSource draws nothing templated
-- **WHEN** a control carries `ItemTemplate` and no `ItemsSource`
-- **THEN** the site SHALL pass the factory and leave DrawnUI to draw the control's static content,
-  as DrawnUI does
-
-### Requirement: The site draws with the pinned DrawnUI package
-The site SHALL draw with the published `drawnui-react` package, pinned to an exact version, and
-SHALL carry no copy of DrawnUI's runtime source. Every DrawnUI class, control and React entry the
-site uses SHALL come from the package's published entry points. The package version SHALL be the
-one the DrawnUI fiddle pins when both are updated together, so that the two sites' catalogs describe
-the same controls.
-
-#### Scenario: No vendored runtime source
-- **WHEN** a contributor searches the site's sources for DrawnUI's runtime code
-- **THEN** there SHALL be none
-- **AND** every DrawnUI import SHALL name the `drawnui-react` package or one of its published
-  subpath entries
-
-#### Scenario: Controls outside React are built from exported classes
-- **WHEN** the site builds a control outside the React reconciler, as a templated list's cell does
-- **THEN** it SHALL construct the control from the class the package exports under the tag's name
-- **AND** it SHALL report an unknown tag once and draw nothing in its place, rather than failing the
-  cell
-
-#### Scenario: Moving the pin is one reviewable step
-- **WHEN** a maintainer moves the `drawnui-react` pin and regenerates the catalog
-- **THEN** the site's tests and example checks SHALL pass only once the catalog records the new
-  version
-- **AND** the catalog's changes SHALL show as an ordinary diff
 
 ### Requirement: Static files declare their cache policy
 The site's static files SHALL declare cache headers that let browsers hold content-addressed assets
@@ -757,4 +127,273 @@ SHALL be committed in the repository.
 #### Scenario: The deploy is verified
 - **WHEN** a deployment finishes
 - **THEN** the workflow SHALL fetch the shell and the compiler module from
-  `https://nxlang.org/playground`, and fail if either does not answer
+  `https://nxlang.org/play`, and fail if either does not answer
+
+### Requirement: Addresses under the playground prefix
+Everything the playground serves SHALL live under `/play`. The playground SHALL always open
+on source in the editor view: an example chosen by its address, source carried in the address's
+fragment, or the default example.
+
+#### Scenario: The prefix opens the default example
+- **WHEN** a visitor opens `/play` or `/play/` with no fragment
+- **THEN** the editor view SHALL open with the default example loaded and its output shown
+
+#### Scenario: An example's address
+- **WHEN** a visitor opens `/play/<id>` for an example's id
+- **THEN** the editor view SHALL open with that example loaded and selected in the examples
+  drop-down
+
+#### Scenario: An unknown example
+- **WHEN** a visitor opens `/play/<id>` and no example has that id
+- **THEN** the playground SHALL open the default example and say that the requested example was not
+  found, rather than show an error page
+
+#### Scenario: The fragment wins
+- **WHEN** a visitor opens an address under the prefix carrying a `#code=` fragment
+- **THEN** the source pane SHALL hold the source the fragment encodes, whatever the path names
+
+#### Scenario: Assets live under the prefix
+- **WHEN** the shell loads its scripts, styles and the NX compiler module
+- **THEN** every one of those requests SHALL be for a path under `/play/`
+
+#### Scenario: No API is served
+- **WHEN** a request names a path under `/play/api/`
+- **THEN** the playground SHALL answer not found
+
+#### Scenario: A missing asset is not the shell
+- **WHEN** a request under `/play/assets/` names a file the build did not produce
+- **THEN** the playground SHALL answer not found rather than serving the shell
+
+### Requirement: The playground carries the site header and names itself
+The playground SHALL show the same header links as the website (NX, Docs, Playground, GitHub), with
+Playground marked current, and SHALL present itself as the NX Playground: a place to try the
+language. It SHALL point visitors who want to see NX draw interfaces to the DrawnUI fiddle.
+
+#### Scenario: Header links
+- **WHEN** a visitor opens the playground
+- **THEN** the header SHALL link to the website's documentation, to `/play`, and to
+  `https://github.com/nx-lang/nx`
+
+#### Scenario: Document titles
+- **WHEN** the source is exactly an example's, whether its address is the example's or a fragment
+- **THEN** the browser tab title SHALL name the NX Playground and the example
+- **AND** for any other source, it SHALL name the NX Playground alone
+
+#### Scenario: The fiddle is pointed to
+- **WHEN** a visitor opens the playground
+- **THEN** its toolbar SHALL link to `https://fiddle.drawnui.net` as where NX draws interfaces
+
+### Requirement: The output pane shows the value as NX text
+The playground SHALL evaluate the `root` of the visitor's source in the browser and show what it
+returns in the output pane through the `<nx-value>` element of `value-view`. The text SHALL be
+identical to what `nxlang run` prints for the same source, for any program whose calls nest no
+deeper than the wasm SDK's limit of 200; one that nests deeper shows the recursion-limit error
+instead, as the sdk-wasm capability specifies. The pane SHALL update after the visitor pauses
+typing, not on every keystroke.
+
+#### Scenario: A record
+- **WHEN** the source is `type User = { id:string name:string }` followed by
+  `<User id="1" name="Ada" />`
+- **THEN** the output pane SHALL show `<User id="1" name="Ada" />`
+
+#### Scenario: A sequence
+- **WHEN** `root` evaluates to a sequence of three integers
+- **THEN** the output pane SHALL show the three values, one per line, as `nxlang run` does
+
+#### Scenario: The empty value
+- **WHEN** `root` evaluates to the empty value
+- **THEN** the output pane SHALL show `{}`
+
+#### Scenario: A constant union case
+- **WHEN** `root` evaluates to the case `active` of the union `Status`
+- **THEN** the output pane SHALL show `Status.active`
+
+#### Scenario: No root
+- **WHEN** the source compiles but declares no `root` and ends in no element
+- **THEN** the output pane SHALL say that there is no `root` to evaluate, and how to add one
+
+#### Scenario: A runtime error
+- **WHEN** evaluating `root` fails at run time
+- **THEN** the output pane SHALL show the error's message, and the source pane SHALL mark its span
+  when it has one
+
+#### Scenario: A value with no NX spelling
+- **WHEN** `root` evaluates to a value NX text cannot spell, such as one holding an action handler
+- **THEN** the output pane SHALL say which part of the value has no spelling, rather than show
+  partial text
+
+#### Scenario: A very large value
+- **WHEN** the NX text of `root`'s value is longer than 100,000 characters
+- **THEN** the output pane SHALL show the first 100,000 characters followed by a notice that the rest
+  was cut, and the page SHALL stay responsive
+
+#### Scenario: Runaway recursion is a runtime error
+- **WHEN** `root` recurses without end, as `let f(n:int): int = { f(n + 1) }` does from `f(0)`
+- **THEN** the output pane SHALL show the interpreter's recursion limit as a runtime error, with its
+  span marked in the source pane, and the compiler SHALL go on answering without being replaced
+
+#### Scenario: Last good output survives a broken edit
+- **WHEN** an edit makes the source fail to compile
+- **THEN** the output pane SHALL keep the last value it showed, marked as out of date
+- **AND** the failure SHALL be reported as diagnostics in the source pane
+
+#### Scenario: Updates are not issued per keystroke
+- **WHEN** a visitor types continuously
+- **THEN** the playground SHALL coalesce the edits and evaluate once the visitor pauses
+
+#### Scenario: Hover in the output explains with the source's own hover
+- **WHEN** the source declares `type Task = { title:string done:boolean = false }`, `root`
+  returns a `Task`, and the visitor hovers `Task` in the output pane
+- **THEN** the output pane SHALL show the same hover the source pane shows for the declaration of
+  `Task`
+
+#### Scenario: Hover in stale output falls back
+- **WHEN** the output is marked out of date and the visitor hovers a node in it
+- **THEN** the output pane SHALL show the element's default hover for that node, since the source's
+  spans no longer match the value
+
+#### Scenario: From the output to the declaration
+- **WHEN** the visitor clicks a type name, property or case in the output whose declaration is in the
+  source
+- **THEN** the source pane SHALL select that declaration and scroll it into view
+
+#### Scenario: A long value folds
+- **WHEN** `root` returns a sequence of records that each span several lines
+- **THEN** the output pane SHALL offer to fold each record, and each nested record, property and
+  sequence that starts its line, as `value-view` specifies; the value as a whole does not fold
+
+### Requirement: Source travels in the address
+The playground SHALL encode the source pane's text in the address fragment as
+`#code=<payload>`. The payload SHALL be the UTF-8 text, compressed with raw DEFLATE, in unpadded
+base64url. The playground SHALL decode any address in that form, so that other sites, the website
+among them, can build playground links without the playground's code.
+
+#### Scenario: Share
+- **WHEN** a visitor presses Share
+- **THEN** the playground SHALL copy to the clipboard an absolute `https://nxlang.org/play#code=…`
+  address for the current source, and confirm that it did
+
+#### Scenario: A shared address opens the same source
+- **WHEN** another visitor opens that address
+- **THEN** their source pane SHALL hold exactly the shared text, and the output pane SHALL show its
+  value
+
+#### Scenario: Edits keep the address current
+- **WHEN** a visitor edits the source and pauses
+- **THEN** the address SHALL be replaced with one encoding the new source, without adding a history
+  entry
+- **AND** reloading the page SHALL restore that source
+
+#### Scenario: An undecodable fragment
+- **WHEN** the `#code=` payload is not valid base64url, does not inflate, or is not UTF-8
+- **THEN** the playground SHALL open the default example and say that the link could not be read
+
+#### Scenario: The encoding is fixed by a shared fixture
+- **WHEN** the playground's tests run
+- **THEN** they SHALL decode a committed fixture address to its committed source, the same fixture
+  the website's encoder is tested against
+
+### Requirement: Examples get a visitor started
+The playground SHALL offer between 10 and 20 short examples, grouped by topic, that together cover
+the language's main features. They SHALL be offered from a single drop-down in the toolbar and SHALL
+NOT be featured anywhere else on the page, because their purpose is to show what NX to write rather
+than to be browsed. Each SHALL be small enough to read without scrolling on a laptop, and each SHALL
+link to the documentation page for its topic.
+
+#### Scenario: Topics
+- **WHEN** a visitor opens the examples drop-down
+- **THEN** it SHALL offer examples, grouped under their topic, for at least: basic values, records
+  and defaults, unions, occurrences (`?`, `+`, `*`), sequences, `if`, `for` with a range, functions
+  and function values, components, and text with interpolation
+
+#### Scenario: The examples stay in the background
+- **WHEN** a visitor opens the playground
+- **THEN** the examples SHALL be reachable only through the toolbar's drop-down, which SHALL name
+  the current example, or say the source is edited once it no longer matches one
+
+#### Scenario: Choosing an example
+- **WHEN** a visitor chooses an example from the drop-down
+- **THEN** the source pane SHALL load it, the output pane SHALL show its value, and the address SHALL
+  become `/play/<id>` with no fragment
+
+#### Scenario: Leaving edits behind
+- **WHEN** a visitor has edited the source and chooses another example
+- **THEN** the edited source SHALL remain reachable through the browser's Back button, since its
+  address held it
+
+#### Scenario: From an example to its docs
+- **WHEN** an example is loaded
+- **THEN** the toolbar SHALL show a small link to the documentation page for its topic
+
+### Requirement: Every example is checked against its expected output
+Every example SHALL have its expected output committed beside it. The playground's tests SHALL
+compile and evaluate every example through the same compiler module the site ships, and SHALL fail
+when an example reports any diagnostic or its output differs from the committed text.
+
+#### Scenario: An example drifts
+- **WHEN** a language change alters what an example evaluates to
+- **THEN** the playground's tests SHALL fail naming the example and showing both texts
+
+#### Scenario: Every example links to a page that exists
+- **WHEN** the playground's tests run
+- **THEN** each example's docs link SHALL name a page the website builds
+
+### Requirement: Source pane offers NX language features
+The source pane SHALL highlight NX with the grammar the repository publishes for editors, through the
+shared Monaco integration, and SHALL offer hover and completion answered by the NX language service
+over the visitor's source and the prelude.
+
+#### Scenario: NX is syntax highlighted by the shared grammar
+- **WHEN** the source pane contains NX
+- **THEN** it SHALL be highlighted by the repository's published grammar through the shared Monaco
+  integration, with no grammar, tokenizer or theme of the playground's own
+
+#### Scenario: Hover on the visitor's own declarations
+- **WHEN** a visitor hovers a name declared in their own source
+- **THEN** the source pane SHALL show what the language service reports for it
+
+#### Scenario: Completions
+- **WHEN** a visitor requests completions inside the opening tag of an element-style function
+- **THEN** the source pane SHALL offer its properties not yet supplied
+
+#### Scenario: Language features degrade without breaking editing
+- **WHEN** the compiler that answers language queries cannot be loaded or fails
+- **THEN** hover and completion SHALL silently offer nothing
+- **AND** the source pane SHALL remain editable and evaluation SHALL continue to work
+
+### Requirement: Diagnostics are reported against the visitor's source
+The playground SHALL report every diagnostic from compiling the visitor's source, positioned at the
+line and column the visitor sees.
+
+#### Scenario: Diagnostics are shown in the source pane
+- **WHEN** compilation reports a diagnostic with a source position
+- **THEN** the source pane SHALL mark the reported span, and the message SHALL be readable by the
+  visitor
+
+#### Scenario: A position with no width is still a position
+- **WHEN** a diagnostic names a point rather than a range, as a missing token's insertion point does
+- **THEN** the source pane SHALL mark it visibly
+
+#### Scenario: Compilation errors do not break the session
+- **WHEN** compilation fails for any reason, including a compiler that crashed or did not load
+- **THEN** the playground SHALL report the failure and remain editable
+
+### Requirement: The layout works on a phone
+The playground SHALL be usable at a viewport 375 pixels wide: the panes SHALL stack with the source
+above the output, the toolbar and its examples drop-down SHALL stay usable, and the page SHALL not
+scroll horizontally.
+
+#### Scenario: Narrow viewport
+- **WHEN** a visitor opens the playground at 375 × 800
+- **THEN** the source and output panes SHALL both be visible by vertical scrolling, and the page's
+  width SHALL not exceed the viewport
+
+### Requirement: Site documents how to run and deploy it
+The playground SHALL carry documentation covering its prerequisites, the wasm toolchain among them,
+how to run it locally under `/play`, how to add an example and its expected output, and where
+its deployment is documented.
+
+#### Scenario: Adding an example is documented
+- **WHEN** a contributor reads the playground's README
+- **THEN** it SHALL say where an example's source, expected output, topic and docs link go, and which
+  command checks them

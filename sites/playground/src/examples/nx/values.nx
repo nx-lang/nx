@@ -1,0 +1,24 @@
+// Numbers, strings and booleans. A literal takes the numeric type of the
+// place it is written.
+
+type Screen = {
+  name:string
+  width:int
+  height:int
+  pixels:int
+  scale:float64
+  retina:boolean
+}
+
+let width = 2880
+let height = 1800
+let scale = 2.0
+
+<Screen
+  name={"Laptop " + width + "x" + height}
+  width={width}
+  height={height}
+  pixels={width * height}
+  scale={scale}
+  retina={scale >= 2.0}
+/>

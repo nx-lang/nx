@@ -1,78 +1,55 @@
-import metadata from "./examples.json";
-import type { Capability, Coverage, Example } from "./types";
-import accessibility from "./nx/accessibility.nx?raw";
-import animations from "./nx/animations.nx?raw";
-import cells from "./nx/cells.nx?raw";
-import editor from "./nx/editor.nx?raw";
-import images from "./nx/images.nx?raw";
-import keyboard from "./nx/keyboard.nx?raw";
-import layouts from "./nx/layouts.nx?raw";
-import looks from "./nx/looks.nx?raw";
-import reorder from "./nx/reorder.nx?raw";
-import rootMenu from "./nx/root.nx?raw";
-import scroll from "./nx/scroll.nx?raw";
-import shaders from "./nx/shaders.nx?raw";
-import shapes from "./nx/shapes.nx?raw";
-import shell from "./nx/shell.nx?raw";
-import snapping from "./nx/snapping.nx?raw";
-import sprites from "./nx/sprites.nx?raw";
-import svg from "./nx/svg.nx?raw";
-import text from "./nx/text.nx?raw";
-import transforms from "./nx/transforms.nx?raw";
-import unevenCells from "./nx/uneven-cells.nx?raw";
-
-/** Every example's NX, by the id its metadata gives it. */
-const SOURCES: Record<string, string> = {
-  accessibility,
-  animations,
-  cells,
-  editor,
-  images,
-  keyboard,
-  layouts,
-  looks,
-  reorder,
-  root: rootMenu,
-  scroll,
-  shaders,
-  shapes,
-  shell,
-  snapping,
-  sprites,
-  svg,
-  text,
-  transforms,
-  "uneven-cells": unevenCells,
-};
-
 /**
- * The example set, in the order the DrawnUI demo site lists it, with the names it gives them.
+ * The examples: short programs, one or two per topic, that give a visitor something to start from.
  *
- * Every entry is NX compiled through the app's own pipeline — never the original TSX page rendered
- * natively. A gallery of originals would always look right while proving nothing; compiling the
- * ports means a gap in the catalog or the renderer shows up as a broken example, which is the
- * feedback this app exists to produce. For the same reason an entry with no NX behind it is a
- * build-time failure rather than a card that opens onto nothing.
+ * <para>Each is `nx/<id>.nx`, with what its `root` prints committed beside it as `nx/<id>.out.nx`.
+ * `scripts/check-examples.mjs` evaluates every one through the module the site ships and fails when
+ * an output drifts, so an example cannot rot.</para>
  */
+import metadata from "./examples.json";
+import type { Example, ExampleGroup } from "./types";
+
+const sources = import.meta.glob<string>(["./nx/*.nx", "!./nx/*.out.nx"], {
+  query: "?raw",
+  import: "default",
+  eager: true
+});
+
+/** Every example, in the order the drop-down lists them. */
 export const EXAMPLES: readonly Example[] = metadata.map((entry) => {
-  const source = SOURCES[entry.id];
+  const source = sources[`./nx/${entry.id}.nx`];
   if (source === undefined) {
     throw new Error(`Example '${entry.id}' has metadata but no NX source.`);
   }
-  return {
-    id: entry.id,
-    name: entry.name,
-    blurb: entry.blurb,
-    coverage: entry.coverage as Coverage,
-    capabilities: entry.capabilities as Capability[],
-    demonstrates: "demonstrates" in entry ? (entry.demonstrates as string) : undefined,
-    source,
-  };
+  return { ...entry, source };
 });
+
+/** The example the playground opens with. */
+export const DEFAULT_EXAMPLE: Example = EXAMPLES.find((example) => example.id === "hello") ?? EXAMPLES[0]!;
+
+/** The examples grouped by topic, each group in the order its first example appears. */
+export const EXAMPLE_GROUPS: readonly ExampleGroup[] = EXAMPLES.reduce<ExampleGroup[]>((groups, example) => {
+  const group = groups.find((candidate) => candidate.topic === example.topic);
+  if (group === undefined) {
+    groups.push({ topic: example.topic, examples: [example] });
+  } else {
+    (group.examples as Example[]).push(example);
+  }
+  return groups;
+}, []);
 
 export function exampleById(id: string): Example | undefined {
   return EXAMPLES.find((example) => example.id === id);
 }
 
-export { coverageNote } from "./types";
-export type { Capability, Coverage, Example } from "./types";
+/** The example whose source is exactly `source`, if any. */
+export function exampleWithSource(source: string): Example | undefined {
+  return EXAMPLES.find((example) => example.source === source);
+}
+
+/** The website address of an example's docs page. */
+export function docsUrl(example: Example): string {
+  const [page, anchor] = example.docs.split("#");
+  return `/${page}/${anchor === undefined ? "" : `#${anchor}`}`;
+}
+
+export type { Example, ExampleGroup } from "./types";

@@ -23,6 +23,9 @@ export type {
   NxSeverity,
   NxSourceBuildOptions,
   NxTextSpan,
+  NxValueNode,
+  NxValueRole,
+  NxValueText,
   NxWorkspaceBuildOptions,
   NxWorkspaceModuleInput
 } from "./types.js";

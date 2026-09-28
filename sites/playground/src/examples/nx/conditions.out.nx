@@ -1,0 +1,4 @@
+<Report celsius=0 feel="freezing" />
+<Report celsius=10 feel="cold" />
+<Report celsius=20 feel="mild" />
+<Report advice="Stay in the shade" celsius=40 feel="hot" />

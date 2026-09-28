@@ -6,7 +6,7 @@ description: 'Walk through composing an interactive NX component from scratch.'
 This tutorial builds a small, realistic component with typed props, actions, layout, and conditional rendering. It assumes you’ve completed [Getting Started](/tutorials/getting-started) and skimmed the [Language Tour](/language-tour/elements).
 
 ## 1) Define types and props
-Start a file named `profile-card.nx`, or work in the [playground](/playground):
+Start a file named `profile-card.nx`, or work in the [playground](/play):
 
 ```nx
 type User = { id:string name:string title?:string avatarUrl?:string }
@@ -93,8 +93,8 @@ its bound handler. A host initializes that record to render the card and dispatc
 it.
 
 ## 5) Validate and iterate
-- Paste the whole file into the [playground](/playground): it compiles as you type and reports
-  errors against your source.
+- Paste the whole file into the [playground](/play): it runs as you type, shows what `root`
+  returns, and reports errors against your source.
 - Use the patterns from the Reference (especially [Functions & Components](/reference/syntax/functions) and [if](/reference/syntax/if)) to refactor as the component grows.
 
 ## 6) Extend the pattern

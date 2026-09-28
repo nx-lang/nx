@@ -2187,8 +2187,21 @@ impl Interpreter {
         }
     }
 
-    /// Evaluate an expression (T013 - skeleton)
+    /// Evaluates an expression, giving a failure the location of the expression that failed.
+    ///
+    /// <para>A thin wrapper so the arms' own frame stays the size it was: the location is attached
+    /// here, on the way out, rather than by holding the arms' result in `eval_expr_arms`.</para>
     fn eval_expr(
+        &self,
+        module: &LoweredModule,
+        ctx: &mut ExecutionContext,
+        expr_id: ExprId,
+    ) -> Result<Value, RuntimeError> {
+        self.eval_expr_arms(module, ctx, expr_id)
+            .map_err(|error| self.locate_error(error, module, expr_id))
+    }
+
+    fn eval_expr_arms(
         &self,
         module: &LoweredModule,
         ctx: &mut ExecutionContext,
@@ -2296,6 +2309,37 @@ impl Interpreter {
             ast::Expr::Error(_) => Err(Self::unchecked_expression_error(
                 "an expression that failed to lower",
             )),
+        }
+    }
+
+    /// Gives an error the span of the expression it came out of.
+    ///
+    /// <para>Every expression passes its failure up through here, so the first one to see the
+    /// error is the innermost: the expression that failed, which becomes its location. Further out,
+    /// the first expression in each other module is recorded too, so an error inside an imported
+    /// function can still be shown at the call in the module that imported it. The module is
+    /// resolved only on this path, which a successful evaluation never takes.</para>
+    #[cold]
+    fn locate_error(
+        &self,
+        error: RuntimeError,
+        module: &LoweredModule,
+        expr_id: ExprId,
+    ) -> RuntimeError {
+        let span = match module.known_expr_span(expr_id) {
+            Some(span) if !span.is_empty() => span,
+            // Leave it to an enclosing expression that knows where it is.
+            _ => return error,
+        };
+        let module_id = self.current_module_id(module);
+        if error.location().is_none() {
+            return error.with_module_location(module_id, span);
+        }
+        match module_id {
+            Some(module_id) if error.site_in(module_id).is_none() => {
+                error.with_outer_site(module_id, span)
+            }
+            _ => error,
         }
     }
 

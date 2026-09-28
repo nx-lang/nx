@@ -1,0 +1,19 @@
+// A function is a value: name it without calling it and pass it on. A
+// function-typed parameter is called as an element, with its arguments by
+// name.
+
+let double(n:int): int = { n * 2 }
+let square(n:int): int = { n * n }
+
+let applyAll(numbers:int+, transform:<function n:int />:int): int+ = {
+  for n in numbers { <transform n={n} /> }
+}
+
+type Applied = { name:string results:int+ }
+
+let numbers:int+ = { 1 2 3 4 }
+
+let root() = {
+  <Applied name="double" results={applyAll(numbers, double)} />
+  <Applied name="square" results={applyAll(numbers, square)} />
+}

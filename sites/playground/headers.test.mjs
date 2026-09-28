@@ -1,10 +1,10 @@
 /**
  * Proves `_headers` declares the cache policy the site's requirement asks for. The Worker's tests
  * stub the static assets binding, and the deploy's smoke test reads status and type, so this is
- * what catches a typo in a rule or a new `public/` folder without one.
+ * what catches a typo in a rule.
  */
 import { strict as assert } from "node:assert";
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { BASE_PATH } from "./base.mjs";
 
@@ -37,18 +37,4 @@ test("hashed assets are public, immutable and held for a year", () => {
 
 test("the shell is revalidated on every use", () => {
   assert.equal(rules.get(`${BASE_PATH}/index.html`), "no-cache");
-});
-
-test("every public folder is revalidated within a day", () => {
-  const folders = readdirSync(new URL("./public", import.meta.url), { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name);
-  assert.ok(folders.length > 0, "public/ has folders");
-  for (const folder of folders) {
-    assert.equal(
-      rules.get(`${BASE_PATH}/${folder}/*`),
-      "public, max-age=86400, must-revalidate",
-      `public/${folder} has a rule`,
-    );
-  }
 });

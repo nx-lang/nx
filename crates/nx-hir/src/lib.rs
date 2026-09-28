@@ -1250,6 +1250,22 @@ impl LoweredModule {
         self.expr_spans.insert(id, span);
     }
 
+    /// Returns an expression's source span when one is known: the recorded span, or else the
+    /// expression's own, except for an identifier, which has only a recorded one.
+    ///
+    /// <para>Unlike [`Self::expr_span`], this does not assert, so it suits a caller that holds any
+    /// expression, a runtime error locating where it failed for one, including in modules built by
+    /// hand without spans.</para>
+    pub fn known_expr_span(&self, id: ExprId) -> Option<TextSpan> {
+        if let Some(span) = self.expr_spans.get(&id) {
+            return Some(*span);
+        }
+        match self.expr(id) {
+            ast::Expr::Ident(_) => None,
+            expr => Some(expr.span()),
+        }
+    }
+
     /// Returns the best available source span for an expression.
     pub fn expr_span(&self, id: ExprId) -> TextSpan {
         if let Some(span) = self.expr_spans.get(&id) {

@@ -26,7 +26,8 @@ Set up ownership before enabling publication:
 - NuGet.org: reserve or own `NxLang.Sdk`.
 - npm: own the `@nx-lang` scope and every package the publish job pushes: `@nx-lang/language`
   (editor assets) and the workspace packages `@nx-lang/language-protocol`, `@nx-lang/language-core`,
-  `@nx-lang/language-client`, `@nx-lang/ir-runtime`, `@nx-lang/sdk-wasm` and `@nx-lang/monaco`.
+  `@nx-lang/language-client`, `@nx-lang/ir-runtime`, `@nx-lang/sdk-wasm`, `@nx-lang/monaco` and
+  `@nx-lang/value-view`.
   `scripts/pack-packages.mjs` packs every workspace member that is not `private`, so a package
   joins this list by dropping `private`, and leaves it by adding it back.
 - Visual Studio Marketplace: own publisher `nx-lang` and extension `nx-language`.
@@ -144,8 +145,8 @@ artifacts receive unique prerelease versions, while VSIX artifacts use registry-
 ## Website And Playground Hosting
 
 `nxlang.org` is a Cloudflare zone served by two Workers with static assets and no origin:
-`nxlang-website` on `nxlang.org/*`, and `nxlang-playground` on `nxlang.org/playground` and
-`nxlang.org/playground/*`. Each Worker's name, routes and assets settings are in its site's
+`nxlang-website` on `nxlang.org/*`, and `nxlang-playground` on `nxlang.org/play` and
+`nxlang.org/play/*`. Each Worker's name, routes and assets settings are in its site's
 `wrangler.jsonc`, and a deploy creates the Worker and its routes. Everything below is done once by
 hand, and this section is the record of it.
 
@@ -206,14 +207,14 @@ its routes, and its smoke test fetches the new build through `https://nxlang.org
 
 ```bash
 curl -sI http://nxlang.org/language-tour/types/ | grep -i location     # https://nxlang.org/language-tour/types/
-curl -sI https://www.nxlang.org/playground | grep -i location           # https://nxlang.org/playground
+curl -sI https://www.nxlang.org/play | grep -i location                 # https://nxlang.org/play
 curl -sI https://nxlang.org/                                            # 200, the landing page
-curl -sI https://nxlang.org/playground                                  # 200, the playground's shell
+curl -sI https://nxlang.org/play                                        # 200, the playground's shell
 curl -s -H 'accept: text/html' https://nxlang.org/ | grep -c cloudflareinsights            # 1
-curl -s -H 'accept: text/html' https://nxlang.org/playground | grep -c cloudflareinsights  # 1
+curl -s -H 'accept: text/html' https://nxlang.org/play | grep -c cloudflareinsights        # 1
 #   the edge injects the Web Analytics beacon only into responses to requests that accept HTML,
 #   so a bare curl shows none and proves nothing
 ```
 
-Open `https://nxlang.org` and `https://nxlang.org/playground` in a browser, search the docs, and
+Open `https://nxlang.org` and `https://nxlang.org/play` in a browser, search the docs, and
 open and edit a playground example. Web Analytics should show the visits within a few minutes.
