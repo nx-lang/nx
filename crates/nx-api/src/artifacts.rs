@@ -2057,6 +2057,7 @@ fn apply_graph_imports(
                 ),
                 span: import.span,
             });
+            module.mark_import_incomplete(import.span);
             continue;
         }
 
@@ -2068,6 +2069,7 @@ fn apply_graph_imports(
                 ),
                 span: import.span,
             });
+            module.mark_import_incomplete(import.span);
             continue;
         }
 
@@ -2084,6 +2086,7 @@ fn apply_graph_imports(
                     ),
                     span: import.span,
                 });
+                module.mark_import_incomplete(import.span);
                 continue;
             }
         };
@@ -2217,6 +2220,7 @@ fn apply_graph_imports(
                     ),
                     span: import.span,
                 });
+                module.mark_import_incomplete(import.span);
                 continue;
             }
             LogicalLibraryResolution::Missing => {}
@@ -2229,6 +2233,7 @@ fn apply_graph_imports(
             ),
             span: import.span,
         });
+        module.mark_import_incomplete(import.span);
     }
 
     resolved_imports
@@ -2264,6 +2269,71 @@ fn add_library_wildcard_bindings(
     }
 }
 
+/// Whether a workspace module lost a top-level declaration to an error.
+///
+/// <para>Only a module with an error can have lost one. It has when an error lies outside every
+/// declaration that lowered — an unclosed `export type Contact = {` at the end of the file, a
+/// removed `enum` form — or when a declaration begins at the start of a line where no lowered
+/// declaration begins: an unclosed declaration before it ran on over it and swallowed it. An
+/// error inside a declaration that lowered and swallowed nothing — a validation error such as
+/// `tags:string[]`, or a syntax error in a field type or a body — leaves every name in place.</para>
+fn lost_a_declaration(source_file: &GraphSourceFile, module: &LoweredModule) -> bool {
+    let error_spans: Vec<TextSpan> = source_file
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.severity() == Severity::Error)
+        .filter_map(|diagnostic| {
+            diagnostic
+                .labels()
+                .iter()
+                .find(|label| label.primary)
+                .map(|label| label.range)
+        })
+        .collect();
+    if error_spans.is_empty() {
+        return false;
+    }
+    let items = module.items();
+    let outside_every_declaration = error_spans
+        .iter()
+        .any(|range| !items.iter().any(|item| item.span().contains_range(*range)));
+    outside_every_declaration
+        || declaration_line_starts(&source_file.source).any(|offset| {
+            !items
+                .iter()
+                .any(|item| usize::from(item.span().start()) == offset)
+        })
+}
+
+/// The byte offset of each line that begins a top-level declaration: at the start of the line, an
+/// optional `export` or `private`, `abstract` and `external`, then `type`, `action`, `let`,
+/// `component` or the removed `enum`.
+///
+/// <para>A text scan rather than the syntax tree, because a declaration swallowed by an unclosed
+/// one before it is no longer a node of its own there. It is consulted only for a module with an
+/// error, and a line it mistakes for a declaration only makes the module count as having lost one,
+/// which hides more rather than less.</para>
+fn declaration_line_starts(source: &str) -> impl Iterator<Item = usize> + '_ {
+    const MODIFIERS: [&str; 4] = ["export", "private", "abstract", "external"];
+    const KEYWORDS: [&str; 5] = ["type", "action", "let", "component", "enum"];
+    let mut offset = 0;
+    source.split_inclusive('\n').filter_map(move |line| {
+        let line_offset = offset;
+        offset += line.len();
+        let mut words = line.split_whitespace();
+        let mut word = words.next()?;
+        // Only a declaration written from the first column counts; an indented keyword is inside
+        // something else.
+        if !line.starts_with(word) {
+            return None;
+        }
+        while MODIFIERS.contains(&word) {
+            word = words.next()?;
+        }
+        KEYWORDS.contains(&word).then_some(line_offset)
+    })
+}
+
 fn add_workspace_import_bindings(
     module: &mut PreparedModule,
     target_source_file: &GraphSourceFile,
@@ -2278,8 +2348,15 @@ fn add_workspace_import_bindings(
             ),
             span: import.span,
         });
+        module.mark_import_incomplete(import.span);
         return;
     };
+    // A target that lost a declaration to a syntax error does not provide every name the author
+    // meant to import; its own error is the report, not each use of a name it failed to provide.
+    // What it did bind is bound all the same.
+    if lost_a_declaration(target_source_file, target_module) {
+        module.mark_import_incomplete(import.span);
+    }
 
     match &import.kind {
         ImportKind::Wildcard { alias } => {
@@ -2563,6 +2640,16 @@ fn apply_build_context_imports(
                     span: full_source_span(source),
                 });
             }
+            // None of the module's imports is resolved, so none of them binds anything.
+            let import_spans: Vec<TextSpan> = module
+                .raw_module()
+                .imports
+                .iter()
+                .map(|import| import.span)
+                .collect();
+            for span in import_spans {
+                module.mark_import_incomplete(span);
+            }
             return Vec::new();
         }
     };
@@ -2580,6 +2667,7 @@ fn apply_build_context_imports(
                 ),
                 span: import.span,
             });
+            module.mark_import_incomplete(import.span);
             continue;
         }
 
@@ -2591,6 +2679,7 @@ fn apply_build_context_imports(
                 ),
                 span: import.span,
             });
+            module.mark_import_incomplete(import.span);
             continue;
         }
 
@@ -2605,6 +2694,7 @@ fn apply_build_context_imports(
                         ),
                         span: import.span,
                     });
+                    module.mark_import_incomplete(import.span);
                     continue;
                 }
             }
@@ -2619,6 +2709,7 @@ fn apply_build_context_imports(
                         ),
                         span: import.span,
                     });
+                    module.mark_import_incomplete(import.span);
                     continue;
                 }
             }
@@ -2632,6 +2723,7 @@ fn apply_build_context_imports(
                 ),
                 span: import.span,
             });
+            module.mark_import_incomplete(import.span);
             continue;
         }
 
@@ -2661,6 +2753,7 @@ fn apply_build_context_imports(
                 ),
                 span: import.span,
             });
+            module.mark_import_incomplete(import.span);
             continue;
         };
 
@@ -5000,6 +5093,10 @@ let root() = { answer() }"#;
                 .contains("Local library import resolution was skipped because source file path")
                 && diagnostic.message.contains("could not be resolved")
         }));
+        // The skipped import bound nothing, so the names it would have provided are not
+        // reported as missing types one by one.
+        let import_span = module.raw_module().imports[0].span;
+        assert!(module.is_import_incomplete(import_span));
     }
 
     #[test]

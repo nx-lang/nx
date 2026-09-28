@@ -1865,8 +1865,8 @@ mod tests {
     #[test]
     fn test_content_multi_value_rejected_for_scalar_annotation() {
         let source = r#"
-            let <Single content item: div />: div = { item }
-            let root(): div = { <Single><div /><span /></Single> }
+            let <Single content item: Element />: Element = { item }
+            let root(): Element = { <Single><div /><span /></Single> }
         "#;
         let result = check_str(source, "content-reject.nx");
 

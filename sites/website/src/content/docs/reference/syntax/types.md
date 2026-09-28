@@ -5,6 +5,22 @@ description: 'Declaring and using types in NX.'
 
 This page describes type declarations and usage. For formal grammar, see [nx-grammar.md](https://github.com/nx-lang/nx/blob/main/nx-grammar.md#types).
 
+## Type Names
+A name written where a type goes must name a type visible in that module: a primitive, a record,
+union, alias, component or action declared in or imported into the module, `Element`, `Range` from
+the prelude, a type parameter in scope, or a derived `Name.Property` or `Name.Update`. Any other name
+is an error, `unresolved-type`, reported where it was written and suggesting the closest visible name:
+
+```nx invalid
+type Contact = { name:string }
+let people: Contatc+ = {}   // error: `Contatc` is not a visible type; did you mean `Contact`?
+```
+
+The check covers every place a type is written: fields, props, state, emits, parameters, return
+types, `let` annotations, aliases and function types. A name is resolved in the module that wrote
+it, so a type a library declares is checked when the library loads, and a library that names an
+unresolved type does not load. An unresolved `extends` base and type argument keep their own errors.
+
 ## Type Aliases
 Use aliases to name primitive or composite types.
 

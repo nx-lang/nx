@@ -291,6 +291,21 @@ impl TypeRef {
             return_type: Box::new(return_type),
         }
     }
+
+    /// The reference lowering stands in for a type it could not lower: a syntax error, a missing
+    /// type, or a construct post-parse validation has already rejected.
+    ///
+    /// <para>Its name is empty, which no source can spell, so the checker tells it apart from a
+    /// written name and resolves it to an error without a report of its own: the syntax or
+    /// validation error already says what is wrong there.</para>
+    pub fn recovery() -> Self {
+        Self::Name(Name::new(""))
+    }
+
+    /// Whether `name` is the one [`Self::recovery`] carries rather than one the source wrote.
+    pub fn is_recovery_name(name: &Name) -> bool {
+        name.as_str().is_empty()
+    }
 }
 
 /// One parameter of a function type, already spelled: whether it takes body content, its name,

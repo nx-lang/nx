@@ -19,6 +19,7 @@ use nx_diagnostics::{TextSize, TextSpan};
 use nx_syntax::{property_definition_is_type_parameter, SyntaxKind, SyntaxNode};
 use rustc_hash::FxHashMap;
 use smol_str::SmolStr;
+use std::cell::RefCell;
 
 /// Context for lowering operations.
 ///
@@ -175,6 +176,11 @@ pub struct LoweringContext {
     /// <para>Inside a component a bare `Update` tag names that component's update record, a bare
     /// `Property` names its property union, and a handler bound there is owned by it.</para>
     current_component: Option<Name>,
+    /// Every type name lowered, with where it was written. Moved into the module by
+    /// [`Self::finish`]; kept here because type lowering borrows the context immutably.
+    type_name_spans: RefCell<Vec<(Name, TextSpan)>>,
+    /// The `T:type` parameters of the function types being lowered, which validation rejects.
+    rejected_type_parameters: RefCell<Vec<Name>>,
 }
 
 impl LoweringContext {
@@ -192,11 +198,15 @@ impl LoweringContext {
             property_unions: FxHashMap::default(),
             pending_property_items: Vec::new(),
             current_component: None,
+            type_name_spans: RefCell::new(Vec::new()),
+            rejected_type_parameters: RefCell::new(Vec::new()),
         }
     }
 
     /// Consumes the context and returns the completed module.
-    pub fn finish(self) -> LoweredModule {
+    pub fn finish(mut self) -> LoweredModule {
+        self.module
+            .set_type_name_spans(self.type_name_spans.into_inner());
         self.module
     }
 
@@ -1902,16 +1912,21 @@ impl LoweringContext {
     }
 
     /// Lowers a type reference.
+    ///
+    /// <para>What cannot be lowered — an error node, a missing type, a construct validation has
+    /// already rejected — becomes [`TypeRef::recovery`], which the checker resolves to an error
+    /// without a report of its own. Each type name lowered is recorded with its span, so a
+    /// diagnostic about the name can underline it rather than the declaration that wrote it.</para>
     pub fn lower_type(&self, node: SyntaxNode) -> TypeRef {
         if node.is_error() {
-            return TypeRef::name("error");
+            return TypeRef::recovery();
         }
 
         match node.kind() {
             SyntaxKind::TYPE => {
                 let mut children = node.children_with_tokens();
                 let Some(base_node) = children.next() else {
-                    return TypeRef::name("unknown");
+                    return TypeRef::recovery();
                 };
 
                 let mut ty = self.lower_type(base_node);
@@ -1932,15 +1947,24 @@ impl LoweringContext {
 
                 ty
             }
-            SyntaxKind::PRIMITIVE_TYPE => TypeRef::name(node.text()),
+            SyntaxKind::PRIMITIVE_TYPE => self.lower_type_name(node, TypeRef::name(node.text())),
             // Parentheses group; they add no layer of their own.
             SyntaxKind::PARENTHESIZED_TYPE => node
                 .child_by_field("type")
                 .map(|inner| self.lower_type(inner))
-                .unwrap_or_else(|| TypeRef::name("unknown")),
+                .unwrap_or_else(TypeRef::recovery),
             SyntaxKind::FUNCTION_TYPE => {
                 // Validation has already rejected a default, a `type` parameter and a second
                 // `content` parameter, so each parameter is a name, a type and the modifier.
+                //
+                // A rejected `T:type` parameter declares nothing, so a use of `T` in the same
+                // function type is a stand-in too: the validation error is the one report.
+                let enclosing = self.rejected_type_parameters.borrow().len();
+                self.rejected_type_parameters.borrow_mut().extend(
+                    node.children()
+                        .filter(property_definition_is_type_parameter)
+                        .map(Self::property_definition_name),
+                );
                 let params = node
                     .children()
                     .filter(|child| child.kind() == SyntaxKind::PROPERTY_DEFINITION)
@@ -1957,7 +1981,10 @@ impl LoweringContext {
                 let return_type = node
                     .child_by_field("result")
                     .map(|result| self.lower_type(result))
-                    .unwrap_or_else(|| TypeRef::name("unknown"));
+                    .unwrap_or_else(TypeRef::recovery);
+                self.rejected_type_parameters
+                    .borrow_mut()
+                    .truncate(enclosing);
                 TypeRef::function(params, return_type)
             }
             SyntaxKind::APPLIED_TYPE => {
@@ -1966,12 +1993,11 @@ impl LoweringContext {
                 // property union. A bare `Update` tag is not rewritten here: that is
                 // `resolve_bare_update_tag`, which belongs to element lowering, and a component's
                 // update record has no type parameters to apply in the first place.
-                let name = match node
-                    .child_by_field("name")
-                    .map(|name| self.resolve_bare_property_type(name.text()))
-                {
+                let name = match node.child_by_field("name").map(|name| {
+                    self.lower_type_name(name, self.resolve_bare_property_type(name.text()))
+                }) {
                     Some(TypeRef::Name(name)) => name,
-                    _ => Name::new("unknown"),
+                    _ => Name::new(""),
                 };
                 let args = node
                     .children()
@@ -1984,21 +2010,42 @@ impl LoweringContext {
                         let ty = argument
                             .child_by_field("type")
                             .map(|ty| self.lower_type(ty))
-                            .unwrap_or_else(|| TypeRef::name("unknown"));
+                            .unwrap_or_else(TypeRef::recovery);
                         (arg_name, ty)
                     })
                     .collect();
                 TypeRef::Applied { name, args }
             }
-            SyntaxKind::IDENTIFIER => self.resolve_bare_property_type(node.text()),
+            SyntaxKind::IDENTIFIER | SyntaxKind::QUALIFIED_NAME => {
+                self.lower_type_name(node, self.resolve_bare_property_type(node.text()))
+            }
             SyntaxKind::USER_DEFINED_TYPE => node
                 .children()
                 .next()
                 .map(|child| self.lower_type(child))
-                .unwrap_or_else(|| self.resolve_bare_property_type(node.text())),
-            SyntaxKind::QUALIFIED_NAME => self.resolve_bare_property_type(node.text()),
-            _ => TypeRef::name("unknown"),
+                .unwrap_or_else(|| {
+                    self.lower_type_name(node, self.resolve_bare_property_type(node.text()))
+                }),
+            _ => TypeRef::recovery(),
         }
+    }
+
+    /// Records where the type name `ty` was written, and returns it.
+    ///
+    /// <para>A name a rejected function-type `T:type` parameter would have declared lowers to
+    /// [`TypeRef::recovery`] inside that function type.</para>
+    fn lower_type_name(&self, node: SyntaxNode, ty: TypeRef) -> TypeRef {
+        if let TypeRef::Name(name) = &ty {
+            if self.rejected_type_parameters.borrow().contains(name) {
+                return TypeRef::recovery();
+            }
+            if !TypeRef::is_recovery_name(name) {
+                self.type_name_spans
+                    .borrow_mut()
+                    .push((name.clone(), node.span()));
+            }
+        }
+        ty
     }
 
     /// Lowers a type alias definition node.
@@ -2024,9 +2071,11 @@ impl LoweringContext {
             .child_by_field("name")
             .map(|n| Name::new(n.text()))
             .unwrap_or_else(|| Name::new("unknown"));
-        let ty = node
-            .child_by_field("type")
-            .map(|type_node| self.lower_type(type_node));
+        let ty = node.child_by_field("type").map(|type_node| {
+            self.module
+                .set_annotation_span(node.span(), type_node.span());
+            self.lower_type(type_node)
+        });
         let value = node
             .child_by_field("value")
             .map(|value_node| self.lower_expr(value_node))
@@ -2201,9 +2250,10 @@ impl LoweringContext {
         }
 
         // Lower the optional return type annotation if present
-        let return_type = node
-            .child_by_field("return_type")
-            .map(|n| self.lower_type(n));
+        let return_type = node.child_by_field("return_type").map(|n| {
+            self.module.set_annotation_span(span, n.span());
+            self.lower_type(n)
+        });
 
         // Lower the body expression
         let body = node

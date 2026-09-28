@@ -691,3 +691,339 @@ fn a_union_case_field_default_declared_in_a_library_applies_to_a_tenant_construc
         EvalResult::Err(diagnostics) => panic!("evaluation failed: {diagnostics:?}"),
     }
 }
+
+fn unresolved_types(diagnostics: &[NxDiagnostic]) -> Vec<&NxDiagnostic> {
+    diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code.as_deref() == Some("unresolved-type"))
+        .collect()
+}
+
+#[test]
+fn a_library_naming_an_unresolved_type_does_not_load() {
+    let registry = LibraryRegistry::new();
+    let diagnostics = registry
+        .load_libraries_from_sources(&[NxLibrarySource::new(
+            "libraries/broken",
+            vec![NxLibraryModule::new(
+                "Broken.nx",
+                "export type Broken = { id: MissingType }\n",
+            )],
+        )])
+        .expect_err("a library naming an unresolved type must not load");
+
+    let unresolved = unresolved_types(&diagnostics);
+    assert_eq!(unresolved.len(), 1, "{diagnostics:?}");
+    assert!(
+        unresolved[0].message.contains("`MissingType`"),
+        "{diagnostics:?}"
+    );
+    assert!(
+        unresolved[0].labels[0].file.ends_with("Broken.nx"),
+        "the diagnostic belongs to the library module: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn a_consumer_does_not_report_a_loaded_librarys_own_references() {
+    // The library's alias and field name `QuestionFlow`, which it imports and the consumer does
+    // not: resolved in the consumer's namespace they would reach nothing.
+    let registry = LibraryRegistry::new();
+    registry
+        .load_libraries_from_sources(&[
+            question_flow(),
+            NxLibrarySource::new(
+                CHAT_LINK_ROOT,
+                vec![NxLibraryModule::new(
+                    "ChatLinkConfig.nx",
+                    "import \"../question-flow\"\n\
+                     export type Flows = QuestionFlow+\n\
+                     export type ChatLinkConfig = { title:string questionFlow:QuestionFlow flows?:Flows }",
+                )],
+            ),
+        ])
+        .unwrap_or_else(|diagnostics| panic!("libraries load: {diagnostics:?}"));
+    let context = registry
+        .build_context()
+        .with_implicit_imports([CHAT_LINK_ROOT]);
+    let files = [(
+        "tenant/a.nx",
+        "let flows(xs:Flows): Flows = { xs }\nlet root() = <ChatLinkConfig title=\"Hi\" questionFlow={{}} />",
+    )];
+
+    let diagnostics = validate_workspace(&workspace(&files), &context);
+    assert!(
+        unresolved_types(&diagnostics).is_empty(),
+        "a library's references are the library's to report: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn imported_and_prelude_types_are_visible() {
+    let files = [
+        (
+            "app/main.nx",
+            "import { Contact, Names } from \"../shared/types.nx\"\n\
+             type Uses = { c:Contact n:Names r:<Range T=int/> p:Contact.Property }\n\
+             let root() = { 1 }",
+        ),
+        (
+            "shared/types.nx",
+            "export type Contact = { name:string }\nexport type Names = string+",
+        ),
+    ];
+
+    let diagnostics = validate_workspace(&workspace(&files), &ProgramBuildContext::empty());
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+}
+
+#[test]
+fn a_workspace_peers_unresolved_reference_is_reported_once_in_the_peer() {
+    let files = [
+        (
+            "app/main.nx",
+            "import { Broken, Ids } from \"../shared/types.nx\"\n\
+             type Uses = { b:Broken ids:Ids }\n\
+             let root() = { 1 }",
+        ),
+        (
+            "shared/types.nx",
+            "export type Broken = { id:MissingType }\nexport type Ids = Id+",
+        ),
+    ];
+
+    let diagnostics = validate_workspace(&workspace(&files), &ProgramBuildContext::empty());
+    let unresolved = unresolved_types(&diagnostics);
+    assert_eq!(unresolved.len(), 2, "{diagnostics:?}");
+    assert!(
+        unresolved
+            .iter()
+            .all(|diagnostic| diagnostic.labels[0].file == "shared/types.nx"),
+        "each reference is reported by the module that wrote it: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn a_name_an_unresolved_import_would_have_bound_is_not_reported_again() {
+    // The import's own diagnostic is the one report; each use of each name it would have made
+    // visible is not an `unresolved-type` on top of it.
+    for (source, import_error) in [
+        (
+            "import { Contact, Kind } from \"../nope/types.nx\"\n\
+             type Mode = | a | b\n\
+             type Uses = { c:Contact d:Contact.Property m:Mode = a k:Kind = open }\n\
+             let f(c:Contact): Contact = { c }\n\
+             let root() = { 1 }",
+            "Missing workspace module",
+        ),
+        (
+            "import \"../nope\" as S\n\
+             type Uses = { c:S.Contact b:<S.Box T=int/> }\n\
+             let root() = { 1 }",
+            "Missing workspace module",
+        ),
+        (
+            "import \"../nope\"\n\
+             type Uses = { c:Contact }\n\
+             let root() = { 1 }",
+            "Missing workspace module",
+        ),
+        (
+            "import { Contact, Contactt } from \"../shared/types.nx\"\n\
+             type Uses = { c:Contact d:Contactt }\n\
+             let root() = { 1 }",
+            "does not export 'Contactt'",
+        ),
+    ] {
+        let files = [
+            ("app/main.nx", source),
+            ("shared/types.nx", "export type Contact = { name:string }"),
+        ];
+        let diagnostics = validate_workspace(&workspace(&files), &ProgramBuildContext::empty());
+        assert_eq!(diagnostics.len(), 1, "{source}: {diagnostics:?}");
+        assert!(
+            diagnostics[0].message.contains(import_error),
+            "{source}: {diagnostics:?}"
+        );
+    }
+}
+
+#[test]
+fn a_resolved_import_does_not_hide_a_misspelled_name() {
+    let files = [
+        (
+            "app/main.nx",
+            "import \"../shared/types.nx\" as S\n\
+             import { Person } from \"../shared/people.nx\"\n\
+             type Uses = { a:S.Contatc b:Persn }\n\
+             let root() = { 1 }",
+        ),
+        ("shared/types.nx", "export type Contact = { name:string }"),
+        ("shared/people.nx", "export type Person = { name:string }"),
+    ];
+    let diagnostics = validate_workspace(&workspace(&files), &ProgramBuildContext::empty());
+    let messages: Vec<&str> = unresolved_types(&diagnostics)
+        .iter()
+        .map(|diagnostic| diagnostic.message.as_str())
+        .collect();
+    assert_eq!(
+        messages,
+        [
+            "`S.Contatc` is not a visible type; did you mean `S.Contact`?",
+            "`Persn` is not a visible type; did you mean `Person`?",
+        ],
+        "{diagnostics:?}"
+    );
+}
+
+#[test]
+fn a_repeated_import_that_resolved_does_not_hide_an_unresolved_type() {
+    // Only an import that did not resolve stands in for names nobody can see; one flagged for
+    // being written twice still bound its names, so a local typo is reported.
+    let files = [
+        (
+            "app/main.nx",
+            "import \"../shared/types.nx\"\n\
+             import \"../shared/types.nx\"\n\
+             type Uses = { c:Contact t:Typo }\n\
+             let root() = { 1 }",
+        ),
+        ("shared/types.nx", "export type Contact = { name:string }"),
+    ];
+    let diagnostics = validate_workspace(&workspace(&files), &ProgramBuildContext::empty());
+    let messages: Vec<&str> = unresolved_types(&diagnostics)
+        .iter()
+        .map(|diagnostic| diagnostic.message.as_str())
+        .collect();
+    assert_eq!(
+        messages,
+        ["`Typo` is not a visible type"],
+        "{diagnostics:?}"
+    );
+}
+
+#[test]
+fn a_library_whose_wildcard_import_does_not_resolve_reports_only_the_import() {
+    let registry = LibraryRegistry::new();
+    let diagnostics = registry
+        .load_libraries_from_sources(&[NxLibrarySource::new(
+            "libraries/broken",
+            vec![NxLibraryModule::new(
+                "Broken.nx",
+                "import \"../missing\"\nexport type Uses = { c:Contact }\n",
+            )],
+        )])
+        .expect_err("a library whose import does not resolve must not load");
+    assert!(unresolved_types(&diagnostics).is_empty(), "{diagnostics:?}");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code.as_deref() == Some("library-dependency-missing")),
+        "{diagnostics:?}"
+    );
+}
+
+#[test]
+fn an_import_of_a_module_with_a_syntax_error_reports_only_that_error() {
+    // A shared module mid-edit keeps only the declarations that survived; its syntax error is the
+    // report, not every use of a name it failed to provide in each module that imports it.
+    for importer in [
+        "import \"../shared/bad.nx\"\n\
+         type Uses = { c:Contact g:Good }\n\
+         let root() = { 1 }",
+        "import \"../shared/bad.nx\" as B\n\
+         type Uses = { c:B.Contact g:B.Good }\n\
+         let root() = { 1 }",
+    ] {
+        let files = [
+            ("app/main.nx", importer),
+            (
+                "shared/bad.nx",
+                "export type Good = { n:string }\nexport type Contact = {\n",
+            ),
+        ];
+        let diagnostics = validate_workspace(&workspace(&files), &ProgramBuildContext::empty());
+        assert!(
+            unresolved_types(&diagnostics).is_empty(),
+            "{importer}: {diagnostics:?}"
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.labels[0].file == "shared/bad.nx"),
+            "only the broken module reports: {importer}: {diagnostics:?}"
+        );
+    }
+}
+
+#[test]
+fn an_error_that_leaves_every_declaration_in_place_hides_nothing_in_an_importer() {
+    // Only a declaration the target lost stands in for names the importer cannot see. An error
+    // inside a declaration that still lowered — a validation error, or a syntax error in a body
+    // or a field — binds every name, so the importer's own typo is reported.
+    for target in [
+        "export type Contact = { name:string tags:string[] }",
+        "export type Contact = { name:string }\ntype H = { f?:<function T:type />: string }",
+        "export type Contact = { name:string }\nlet f() = { 1 + }",
+        "export type Contact = { name: }",
+        // Every declaration form begins where it lowered, so none of them reads as swallowed.
+        "export type Contact = { name:string }\n\
+         type H = { f?:<function T:type />: string }\n\
+         export abstract component <Card title:string /> = { <div /> }\n\
+         external component <Button />\n\
+         export action Go = { n:int }\n\
+         private let v: int = 1\n\
+         export type B = | a | b",
+    ] {
+        let files = [
+            (
+                "app/main.nx",
+                "import \"../shared/t.nx\"\n\
+                 type Uses = { c:Contact t:Typo }\n\
+                 let root() = { 1 }",
+            ),
+            ("shared/t.nx", target),
+        ];
+        let diagnostics = validate_workspace(&workspace(&files), &ProgramBuildContext::empty());
+        let messages: Vec<&str> = unresolved_types(&diagnostics)
+            .iter()
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect();
+        assert_eq!(
+            messages,
+            ["`Typo` is not a visible type"],
+            "{target}: {diagnostics:?}"
+        );
+    }
+}
+
+#[test]
+fn a_declaration_swallowed_by_an_unclosed_one_before_it_is_lost_too() {
+    // The unclosed declaration lowers in part and holds the error, but it has run on over the
+    // declaration after it, which the importer then cannot see; the target's error is the report.
+    for target in [
+        "export type Contact = { name:string\nexport type B = { y:int }",
+        "export type Contact = { name:string }\nexport let f() = { 1 +\nexport type B = { y:int }",
+    ] {
+        let files = [
+            (
+                "app/main.nx",
+                "import \"../shared/t.nx\"\n\
+                 type Uses = { c:Contact b:B }\n\
+                 let root() = { 1 }",
+            ),
+            ("shared/t.nx", target),
+        ];
+        let diagnostics = validate_workspace(&workspace(&files), &ProgramBuildContext::empty());
+        assert!(
+            unresolved_types(&diagnostics).is_empty(),
+            "{target}: {diagnostics:?}"
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.labels[0].file == "shared/t.nx"),
+            "only the broken module reports: {target}: {diagnostics:?}"
+        );
+    }
+}

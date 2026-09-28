@@ -20,20 +20,21 @@ fn errors(source: &str) -> Vec<String> {
 
 #[test]
 fn void_in_type_position_is_an_ordinary_named_type() {
-    // Not a primitive: a string does not satisfy it, exactly as it would not satisfy any other
-    // undeclared name. NX reports nothing at the declaration for an undeclared name — the same
-    // for `void` as for `Undeclared` — so the observable difference is at the binding.
-    let named = errors("type Holder = { n:void }\n<Holder n=\"x\" />");
+    // Not a primitive, so an undeclared `void` is reported exactly as any other undeclared name
+    // is: as an unresolved type, at the reference.
+    let named = errors("type Holder = { n:void }");
     assert!(
-        named.iter().any(|message| message.contains("expects void")),
-        "expected `void` to behave as a named type, got: {named:?}"
+        named
+            .iter()
+            .any(|message| message.contains("`void` is not a visible type")),
+        "expected `void` to be an unresolved name, got: {named:?}"
     );
 
-    let undeclared = errors("type Holder = { n:Undeclared }\n<Holder n=\"x\" />");
+    let undeclared = errors("type Holder = { n:Undeclared }");
     assert!(
         undeclared
             .iter()
-            .any(|message| message.contains("expects Undeclared")),
+            .any(|message| message.contains("`Undeclared` is not a visible type")),
         "an undeclared name should behave the same way, got: {undeclared:?}"
     );
 }
