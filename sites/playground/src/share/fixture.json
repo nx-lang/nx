@@ -1,0 +1,5 @@
+{
+  "comment": "Made with node:zlib's deflateRawSync and base64url. The playground's tests decode payload to source; the website's tests encode source to payload.",
+  "source": "// Shared from the NX Playground — ünïcødé, 日本語 and 🎉 survive the trip.\ntype Greeting = { text:string }\n<Greeting text=\"Hello, NX!\" />\n",
+  "payload": "09dXCM5ILEpNUUgrys9VKMlIVfCLUAjISaxML8ovzUtReNQwReHwnrzD65MP70g5vFJH4dn0pc_mrHmxap5CYl6Kwof5fZ0KxaVFZZllqWDdJUWZBXpcJZUFqQruRampJZl56Qq2CtUKJakVJVbFJUUgfi2XDVwOJG6r5JGak5Ovo-AXoaikoG_HBQA"
+}

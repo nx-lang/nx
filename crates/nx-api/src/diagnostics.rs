@@ -178,7 +178,7 @@ fn diagnostic_to_api(
     }
 }
 
-fn text_range_to_span(range: TextRange, source: &str, index: &LineIndex) -> NxTextSpan {
+pub(crate) fn text_range_to_span(range: TextRange, source: &str, index: &LineIndex) -> NxTextSpan {
     let start: usize = range.start().into();
     let end: usize = range.end().into();
     let (start_line, start_col) = index.byte_offset_to_line_col(source, start);
@@ -198,12 +198,12 @@ fn text_range_to_span(range: TextRange, source: &str, index: &LineIndex) -> NxTe
     }
 }
 
-struct LineIndex {
+pub(crate) struct LineIndex {
     line_starts: Vec<usize>,
 }
 
 impl LineIndex {
-    fn new(text: &str) -> Self {
+    pub(crate) fn new(text: &str) -> Self {
         let mut line_starts = vec![0usize];
         for (idx, ch) in text.char_indices() {
             if ch == '\n' {

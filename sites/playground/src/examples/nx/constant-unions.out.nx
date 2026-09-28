@@ -1,0 +1,3 @@
+<Badge stage=draft tone="neutral" />
+<Badge stage=review tone="warning" />
+<Badge stage=published tone="success" />

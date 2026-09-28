@@ -49,8 +49,8 @@ function channelWith(options = {}) {
 test("correlates answers by id, whatever order they arrive in", async () => {
   const driver = channelWith();
   const { channel } = driver;
-  const first = channel.send({ kind: "compile", source: "a" });
-  const second = channel.send({ kind: "compile", source: "b" });
+  const first = channel.send({ kind: "evaluate", source: "a" });
+  const second = channel.send({ kind: "evaluate", source: "b" });
   const worker = driver.worker;
 
   assert.deepEqual(worker.sent.map((message) => message.source), ["a", "b"]);
@@ -68,7 +68,7 @@ test("correlates answers by id, whatever order they arrive in", async () => {
 test("rejects with the worker's error, keeping the class name", async () => {
   const driver = channelWith();
   const { channel } = driver;
-  const pending = channel.send({ kind: "compile", source: "a" });
+  const pending = channel.send({ kind: "evaluate", source: "a" });
   const worker = driver.worker;
 
   worker.fail(worker.sent[0].id, { name: "NxHostCrashedError", message: "it crashed" });
@@ -85,7 +85,7 @@ test("a cancelled request rejects at once and its late answer is dropped", async
   const driver = channelWith();
   const { channel } = driver;
   const controller = new AbortController();
-  const pending = channel.send({ kind: "compile", source: "a" }, controller.signal);
+  const pending = channel.send({ kind: "evaluate", source: "a" }, controller.signal);
   const worker = driver.worker;
 
   controller.abort();
@@ -104,7 +104,7 @@ test("an already-cancelled signal is refused without reaching the worker", async
   controller.abort();
 
   await assert.rejects(
-    () => channel.send({ kind: "compile", source: "a" }, controller.signal),
+    () => channel.send({ kind: "evaluate", source: "a" }, controller.signal),
     (error) => error.name === "AbortError",
   );
   assert.equal(record.started.length, 0);
@@ -113,8 +113,8 @@ test("an already-cancelled signal is refused without reaching the worker", async
 
 test("a request past the deadline terminates the worker, fails everything in flight, and the next request starts a fresh one", async () => {
   const { channel, record } = channelWith({ deadlineMs: 20 });
-  const stuck = channel.send({ kind: "compile", source: "a" });
-  const behind = channel.send({ kind: "compile", source: "b" });
+  const stuck = channel.send({ kind: "evaluate", source: "a" });
+  const behind = channel.send({ kind: "evaluate", source: "b" });
   const first = record.started[0];
   first.ready();
 
@@ -123,7 +123,7 @@ test("a request past the deadline terminates the worker, fails everything in fli
   assert.equal(first.terminated, true);
   assert.equal(record.started.length, 1);
 
-  const next = channel.send({ kind: "compile", source: "c" });
+  const next = channel.send({ kind: "evaluate", source: "c" });
   assert.equal(record.started.length, 2);
   const replacement = record.started[1];
   replacement.ready();
@@ -135,7 +135,7 @@ test("a request past the deadline terminates the worker, fails everything in fli
 
 test("a worker that stops unexpectedly fails what it was carrying", async () => {
   const { channel, record } = channelWith();
-  const pending = channel.send({ kind: "compile", source: "a" });
+  const pending = channel.send({ kind: "evaluate", source: "a" });
   record.started[0].onerror?.({});
 
   await assert.rejects(pending, (error) => /stopped unexpectedly/.test(error.message));
@@ -153,7 +153,7 @@ test("start loads the worker before anything is asked of it", () => {
 
 test("a request sent before the worker is ready waits for the module rather than timing out", async () => {
   const { channel, record } = channelWith({ deadlineMs: 20 });
-  const pending = channel.send({ kind: "compile", source: "a" });
+  const pending = channel.send({ kind: "evaluate", source: "a" });
   const worker = record.started[0];
 
   // Long past the deadline, but the worker has not said it is ready: it is still fetching a module
@@ -171,7 +171,7 @@ test("a request sent before the worker is ready waits for the module rather than
 
 test("the deadline starts when the worker becomes ready, not when the request was sent", async () => {
   const { channel, record } = channelWith({ deadlineMs: 40 });
-  const pending = channel.send({ kind: "compile", source: "a" });
+  const pending = channel.send({ kind: "evaluate", source: "a" });
   const worker = record.started[0];
 
   await delay(60);
@@ -198,13 +198,13 @@ test("a worker that will not start rejects its request and leaves no deadline be
   });
 
   await assert.rejects(
-    channel.send({ kind: "compile", source: "a" }),
+    channel.send({ kind: "evaluate", source: "a" }),
     /Worker construction is not allowed/,
   );
 
   // The refused request must not still be holding a timer: when it fired it would terminate the
   // worker this one is waiting on and fail it with a timeout it had nothing to do with.
-  const next = channel.send({ kind: "compile", source: "b" });
+  const next = channel.send({ kind: "evaluate", source: "b" });
   const worker = record.started.at(-1);
   await delay(50);
   worker.ready();

@@ -1,0 +1,8 @@
+{
+  "user": "type User = { id:string name:string }\n<User id=\"1\" name=\"Ada\" />\n",
+  "card": "type Card = { title:string subtitle?:string }\n<Card title=\"a\" subtitle=\"b\" />\n",
+  "person": "type Address = { city:string }\ntype Person = { name:string home:Address }\n<Person name=\"Ada\" home=<Address city=\"London\" /> />\n",
+  "tasks": "type Person = { name:string }\ntype Task = { title:string done:boolean = false owner:Person }\nlet root(): Task+ = {\n  <Task title=\"Write\" owner=<Person name=\"Ada\" /> />\n  <Task title=\"Test\" owner=<Person name=\"Ada\" /> />\n  <Task title=\"Ship\" owner=<Person name=\"Ada\" /> />\n}\n",
+  "nested": "type User = { name:string role:string }\nlet <UserCard user:User /> =\n  <div class=\"card\">\n    <h3>{user.name}</h3>\n    <p>{user.role}</p>\n  </div>\nlet team:User+ = { <User name=\"Ada\" role=\"Engineer\" /> <User name=\"Grace\" role=\"Admiral\" /> }\n<ul>\n  for user in team {\n    <li><UserCard user={user} /></li>\n  }\n</ul>\n",
+  "greeting": "let root() = { \"Hello\" }\n"
+}

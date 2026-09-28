@@ -181,11 +181,12 @@ CI/PR builds, release-publication registry writes, and artifact-based pull reque
 ### Requirement: Workspace npm packages ship on the package release track
 The package release track SHALL treat the workspace's publishable npm packages
 (`@nx-lang/sdk-wasm`, `@nx-lang/ir-runtime`, `@nx-lang/language-core`, `@nx-lang/language-protocol`,
-`@nx-lang/language-client` and `@nx-lang/monaco`) the same way it treats the `@nx-lang/language`
-editor-assets package: built and verified on pull request and `main` builds, packed at the release
-tag's version, attached to the draft GitHub Release, and published to npm from the `production`
-environment when the release is published. Their versions SHALL be the release tag's version, and
-workspace references between them SHALL resolve to that version in the packed artifacts.
+`@nx-lang/language-client`, `@nx-lang/monaco` and `@nx-lang/value-view`) the same way it treats the
+`@nx-lang/language` editor-assets package: built and verified on pull request and `main` builds,
+packed at the release tag's version, attached to the draft GitHub Release, and published to npm from
+the `production` environment when the release is published. Their versions SHALL be the release
+tag's version, and workspace references between them SHALL resolve to that version in the packed
+artifacts.
 
 #### Scenario: Pull request builds pack every npm package
 - **WHEN** a pull request build runs for package-related changes

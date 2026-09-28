@@ -2,23 +2,21 @@
  * The compiler and language service the worker runs, and its recovery from a crashed host.
  *
  * <para>Kept apart from the worker shell so it can be driven directly by a test under Node with the
- * same module the browser loads: the shell is the four lines that fetch the module and wire
+ * same module the browser loads: the shell is the few lines that fetch the module and wire
  * `onmessage`, and everything with behaviour is here.</para>
  */
 import type { SnapshotLanguageService } from "@nx-lang/language-core";
 import type { LanguageQueryName } from "@nx-lang/language-protocol";
 import { NxHostCrashedError, createLanguageService, createNxHost, type NxHost } from "@nx-lang/sdk-wasm";
 
-import { CATALOG_IDENTITY, compileWithCatalog } from "../compile/catalog.ts";
-import type { CompileResult } from "../compile/types.ts";
+import { evaluateSource } from "../compile/evaluate.ts";
+import type { EvaluateResult } from "../compile/types.ts";
 import type { WorkerRequest } from "./protocol.ts";
 
 /** What `createNxSession` accepts. */
 export interface NxSessionOptions {
   /** The compiled module. A replacement host is created from it, so it is never fetched twice. */
   readonly module: WebAssembly.Module;
-  /** The DrawnUI catalog, a module every compile and every language query imports implicitly. */
-  readonly catalog: string;
   /** Creates a host from the module. A test replaces this to force a crash. */
   readonly createHost?: (module: WebAssembly.Module) => NxHost;
 }
@@ -33,22 +31,11 @@ export interface NxSession {
   dispose(): void;
 }
 
-/** The catalog as the language service sees it: a document of its own, implicitly imported. */
-function languageOptions(catalog: string) {
-  return {
-    documents: [{ uri: `nx://playground/${CATALOG_IDENTITY}`, identity: CATALOG_IDENTITY, source: catalog }],
-    implicitImports: [CATALOG_IDENTITY]
-  };
-}
-
-/**
- * Creates the session: a host over `module`, a language service over that host's snapshots, and
- * the catalog visible to both as an implicitly imported module.
- */
+/** Creates the session: a host over `module`, and a language service over that host's snapshots. */
 export function createNxSession(options: NxSessionOptions): NxSession {
   const createHost = options.createHost ?? createNxHost;
   let host: NxHost = createHost(options.module);
-  let language: SnapshotLanguageService = createLanguageService(host, languageOptions(options.catalog));
+  let language: SnapshotLanguageService = createLanguageService(host);
   let replacements = 0;
 
   /**
@@ -60,14 +47,14 @@ export function createNxSession(options: NxSessionOptions): NxSession {
   function replaceHost(): void {
     replacements += 1;
     host = createHost(options.module);
-    language = createLanguageService(host, languageOptions(options.catalog));
+    language = createLanguageService(host);
   }
 
   return {
     async answer(request: WorkerRequest): Promise<unknown> {
       try {
-        return request.kind === "compile"
-          ? (compileWithCatalog(host, options.catalog, request.source) satisfies CompileResult)
+        return request.kind === "evaluate"
+          ? (evaluateSource(host, request.source) satisfies EvaluateResult)
           : await answerLanguage(language, request.query, request.request);
       } catch (error) {
         // A trap ended the instance. The caller is told what happened to its request, and the next
@@ -75,6 +62,9 @@ export function createNxSession(options: NxSessionOptions): NxSession {
         // session.
         if (error instanceof NxHostCrashedError) {
           replaceHost();
+          if (isStackOverflow(error.cause)) {
+            throw stackOverflowError();
+          }
         }
         throw error;
       }
@@ -87,6 +77,22 @@ export function createNxSession(options: NxSessionOptions): NxSession {
       host.dispose();
     }
   };
+}
+
+/**
+ * Whether a trap was the engine's stack running out. The module lowers the interpreter's recursion
+ * limit so its own error comes first, but a program whose calls are heavier than those it was
+ * measured with can still reach the engine's limit, and the browser names that as it throws.
+ */
+export function isStackOverflow(cause: unknown): boolean {
+  return cause instanceof Error && /call stack|too much recursion/i.test(cause.message);
+}
+
+/** A crash that was the program recursing too deeply: not the compiler's fault, and not retried. */
+function stackOverflowError(): Error {
+  const error = new Error("The program recursed deeper than the browser can run.");
+  error.name = "NxStackOverflowError";
+  return error;
 }
 
 function answerLanguage(

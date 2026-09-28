@@ -1,0 +1,671 @@
+{
+  "user": {
+    "text": "<User id=\"1\" name=\"Ada\" />",
+    "nodes": [
+      {
+        "start": 0,
+        "end": 26,
+        "role": "record",
+        "type": "User",
+        "declaration": {
+          "startByte": 0,
+          "endByte": 37,
+          "startLine": 1,
+          "startColumn": 1,
+          "endLine": 1,
+          "endColumn": 38
+        }
+      },
+      {
+        "start": 6,
+        "end": 12,
+        "role": "property",
+        "parent": 0,
+        "type": "string",
+        "name": "id",
+        "declaration": {
+          "startByte": 14,
+          "endByte": 23,
+          "startLine": 1,
+          "startColumn": 15,
+          "endLine": 1,
+          "endColumn": 24
+        }
+      },
+      {
+        "start": 13,
+        "end": 23,
+        "role": "property",
+        "parent": 0,
+        "type": "string",
+        "name": "name",
+        "declaration": {
+          "startByte": 24,
+          "endByte": 35,
+          "startLine": 1,
+          "startColumn": 25,
+          "endLine": 1,
+          "endColumn": 36
+        }
+      }
+    ]
+  },
+  "card": {
+    "text": "<Card subtitle=\"b\" title=\"a\" />",
+    "nodes": [
+      {
+        "start": 0,
+        "end": 31,
+        "role": "record",
+        "type": "Card",
+        "declaration": {
+          "startByte": 0,
+          "endByte": 45,
+          "startLine": 1,
+          "startColumn": 1,
+          "endLine": 1,
+          "endColumn": 46
+        }
+      },
+      {
+        "start": 6,
+        "end": 18,
+        "role": "property",
+        "parent": 0,
+        "type": "string",
+        "name": "subtitle",
+        "optional": true,
+        "declaration": {
+          "startByte": 27,
+          "endByte": 43,
+          "startLine": 1,
+          "startColumn": 28,
+          "endLine": 1,
+          "endColumn": 44
+        }
+      },
+      {
+        "start": 19,
+        "end": 28,
+        "role": "property",
+        "parent": 0,
+        "type": "string",
+        "name": "title",
+        "declaration": {
+          "startByte": 14,
+          "endByte": 26,
+          "startLine": 1,
+          "startColumn": 15,
+          "endLine": 1,
+          "endColumn": 27
+        }
+      }
+    ]
+  },
+  "person": {
+    "text": "<Person\n  home=<Address city=\"London\" />\n  name=\"Ada\"\n/>",
+    "nodes": [
+      {
+        "start": 0,
+        "end": 56,
+        "role": "record",
+        "type": "Person",
+        "declaration": {
+          "startByte": 31,
+          "endByte": 73,
+          "startLine": 2,
+          "startColumn": 1,
+          "endLine": 2,
+          "endColumn": 43
+        }
+      },
+      {
+        "start": 10,
+        "end": 40,
+        "role": "property",
+        "parent": 0,
+        "type": "Address",
+        "name": "home",
+        "declaration": {
+          "startByte": 59,
+          "endByte": 71,
+          "startLine": 2,
+          "startColumn": 29,
+          "endLine": 2,
+          "endColumn": 41
+        }
+      },
+      {
+        "start": 15,
+        "end": 40,
+        "role": "record",
+        "parent": 1,
+        "type": "Address",
+        "declaration": {
+          "startByte": 0,
+          "endByte": 30,
+          "startLine": 1,
+          "startColumn": 1,
+          "endLine": 1,
+          "endColumn": 31
+        }
+      },
+      {
+        "start": 24,
+        "end": 37,
+        "role": "property",
+        "parent": 2,
+        "type": "string",
+        "name": "city",
+        "declaration": {
+          "startByte": 17,
+          "endByte": 28,
+          "startLine": 1,
+          "startColumn": 18,
+          "endLine": 1,
+          "endColumn": 29
+        }
+      },
+      {
+        "start": 43,
+        "end": 53,
+        "role": "property",
+        "parent": 0,
+        "type": "string",
+        "name": "name",
+        "declaration": {
+          "startByte": 47,
+          "endByte": 58,
+          "startLine": 2,
+          "startColumn": 17,
+          "endLine": 2,
+          "endColumn": 28
+        }
+      }
+    ]
+  },
+  "tasks": {
+    "text": "<Task\n  done=false\n  owner=<Person name=\"Ada\" />\n  title=\"Write\"\n/>\n<Task\n  done=false\n  owner=<Person name=\"Ada\" />\n  title=\"Test\"\n/>\n<Task\n  done=false\n  owner=<Person name=\"Ada\" />\n  title=\"Ship\"\n/>",
+    "nodes": [
+      {
+        "start": 0,
+        "end": 201,
+        "role": "sequence",
+        "type": "Task*",
+        "count": 3
+      },
+      {
+        "start": 0,
+        "end": 67,
+        "role": "record",
+        "parent": 0,
+        "type": "Task",
+        "declaration": {
+          "startByte": 30,
+          "endByte": 92,
+          "startLine": 2,
+          "startColumn": 1,
+          "endLine": 2,
+          "endColumn": 63
+        }
+      },
+      {
+        "start": 8,
+        "end": 18,
+        "role": "property",
+        "parent": 1,
+        "type": "boolean",
+        "name": "done",
+        "declaration": {
+          "startByte": 57,
+          "endByte": 77,
+          "startLine": 2,
+          "startColumn": 28,
+          "endLine": 2,
+          "endColumn": 48
+        }
+      },
+      {
+        "start": 21,
+        "end": 48,
+        "role": "property",
+        "parent": 1,
+        "type": "Person",
+        "name": "owner",
+        "declaration": {
+          "startByte": 78,
+          "endByte": 90,
+          "startLine": 2,
+          "startColumn": 49,
+          "endLine": 2,
+          "endColumn": 61
+        }
+      },
+      {
+        "start": 27,
+        "end": 48,
+        "role": "record",
+        "parent": 3,
+        "type": "Person",
+        "declaration": {
+          "startByte": 0,
+          "endByte": 29,
+          "startLine": 1,
+          "startColumn": 1,
+          "endLine": 1,
+          "endColumn": 30
+        }
+      },
+      {
+        "start": 35,
+        "end": 45,
+        "role": "property",
+        "parent": 4,
+        "type": "string",
+        "name": "name",
+        "declaration": {
+          "startByte": 16,
+          "endByte": 27,
+          "startLine": 1,
+          "startColumn": 17,
+          "endLine": 1,
+          "endColumn": 28
+        }
+      },
+      {
+        "start": 51,
+        "end": 64,
+        "role": "property",
+        "parent": 1,
+        "type": "string",
+        "name": "title",
+        "declaration": {
+          "startByte": 44,
+          "endByte": 56,
+          "startLine": 2,
+          "startColumn": 15,
+          "endLine": 2,
+          "endColumn": 27
+        }
+      },
+      {
+        "start": 68,
+        "end": 134,
+        "role": "record",
+        "parent": 0,
+        "type": "Task",
+        "declaration": {
+          "startByte": 30,
+          "endByte": 92,
+          "startLine": 2,
+          "startColumn": 1,
+          "endLine": 2,
+          "endColumn": 63
+        }
+      },
+      {
+        "start": 76,
+        "end": 86,
+        "role": "property",
+        "parent": 7,
+        "type": "boolean",
+        "name": "done",
+        "declaration": {
+          "startByte": 57,
+          "endByte": 77,
+          "startLine": 2,
+          "startColumn": 28,
+          "endLine": 2,
+          "endColumn": 48
+        }
+      },
+      {
+        "start": 89,
+        "end": 116,
+        "role": "property",
+        "parent": 7,
+        "type": "Person",
+        "name": "owner",
+        "declaration": {
+          "startByte": 78,
+          "endByte": 90,
+          "startLine": 2,
+          "startColumn": 49,
+          "endLine": 2,
+          "endColumn": 61
+        }
+      },
+      {
+        "start": 95,
+        "end": 116,
+        "role": "record",
+        "parent": 9,
+        "type": "Person",
+        "declaration": {
+          "startByte": 0,
+          "endByte": 29,
+          "startLine": 1,
+          "startColumn": 1,
+          "endLine": 1,
+          "endColumn": 30
+        }
+      },
+      {
+        "start": 103,
+        "end": 113,
+        "role": "property",
+        "parent": 10,
+        "type": "string",
+        "name": "name",
+        "declaration": {
+          "startByte": 16,
+          "endByte": 27,
+          "startLine": 1,
+          "startColumn": 17,
+          "endLine": 1,
+          "endColumn": 28
+        }
+      },
+      {
+        "start": 119,
+        "end": 131,
+        "role": "property",
+        "parent": 7,
+        "type": "string",
+        "name": "title",
+        "declaration": {
+          "startByte": 44,
+          "endByte": 56,
+          "startLine": 2,
+          "startColumn": 15,
+          "endLine": 2,
+          "endColumn": 27
+        }
+      },
+      {
+        "start": 135,
+        "end": 201,
+        "role": "record",
+        "parent": 0,
+        "type": "Task",
+        "declaration": {
+          "startByte": 30,
+          "endByte": 92,
+          "startLine": 2,
+          "startColumn": 1,
+          "endLine": 2,
+          "endColumn": 63
+        }
+      },
+      {
+        "start": 143,
+        "end": 153,
+        "role": "property",
+        "parent": 13,
+        "type": "boolean",
+        "name": "done",
+        "declaration": {
+          "startByte": 57,
+          "endByte": 77,
+          "startLine": 2,
+          "startColumn": 28,
+          "endLine": 2,
+          "endColumn": 48
+        }
+      },
+      {
+        "start": 156,
+        "end": 183,
+        "role": "property",
+        "parent": 13,
+        "type": "Person",
+        "name": "owner",
+        "declaration": {
+          "startByte": 78,
+          "endByte": 90,
+          "startLine": 2,
+          "startColumn": 49,
+          "endLine": 2,
+          "endColumn": 61
+        }
+      },
+      {
+        "start": 162,
+        "end": 183,
+        "role": "record",
+        "parent": 15,
+        "type": "Person",
+        "declaration": {
+          "startByte": 0,
+          "endByte": 29,
+          "startLine": 1,
+          "startColumn": 1,
+          "endLine": 1,
+          "endColumn": 30
+        }
+      },
+      {
+        "start": 170,
+        "end": 180,
+        "role": "property",
+        "parent": 16,
+        "type": "string",
+        "name": "name",
+        "declaration": {
+          "startByte": 16,
+          "endByte": 27,
+          "startLine": 1,
+          "startColumn": 17,
+          "endLine": 1,
+          "endColumn": 28
+        }
+      },
+      {
+        "start": 186,
+        "end": 198,
+        "role": "property",
+        "parent": 13,
+        "type": "string",
+        "name": "title",
+        "declaration": {
+          "startByte": 44,
+          "endByte": 56,
+          "startLine": 2,
+          "startColumn": 15,
+          "endLine": 2,
+          "endColumn": 27
+        }
+      }
+    ]
+  },
+  "nested": {
+    "text": "<ul\n  content={<li\n    content=<div\n      class=\"card\"\n      content={<h3 content=\"Ada\" /> <p content=\"Engineer\" />}\n    />\n  /> <li\n    content=<div\n      class=\"card\"\n      content={<h3 content=\"Grace\" /> <p content=\"Admiral\" />}\n    />\n  />}\n/>",
+    "nodes": [
+      {
+        "start": 0,
+        "end": 247,
+        "role": "record",
+        "type": "ul"
+      },
+      {
+        "start": 6,
+        "end": 244,
+        "role": "property",
+        "parent": 0,
+        "type": "li*",
+        "name": "content"
+      },
+      {
+        "start": 14,
+        "end": 244,
+        "role": "sequence",
+        "parent": 1,
+        "type": "li*",
+        "count": 2
+      },
+      {
+        "start": 15,
+        "end": 128,
+        "role": "record",
+        "parent": 2,
+        "type": "li"
+      },
+      {
+        "start": 23,
+        "end": 123,
+        "role": "property",
+        "parent": 3,
+        "type": "div",
+        "name": "content"
+      },
+      {
+        "start": 31,
+        "end": 123,
+        "role": "record",
+        "parent": 4,
+        "type": "div"
+      },
+      {
+        "start": 42,
+        "end": 54,
+        "role": "property",
+        "parent": 5,
+        "type": "string",
+        "name": "class"
+      },
+      {
+        "start": 61,
+        "end": 116,
+        "role": "property",
+        "parent": 5,
+        "type": "object*",
+        "name": "content"
+      },
+      {
+        "start": 69,
+        "end": 116,
+        "role": "sequence",
+        "parent": 7,
+        "type": "object*",
+        "count": 2
+      },
+      {
+        "start": 70,
+        "end": 90,
+        "role": "record",
+        "parent": 8,
+        "type": "h3"
+      },
+      {
+        "start": 74,
+        "end": 87,
+        "role": "property",
+        "parent": 9,
+        "type": "string",
+        "name": "content"
+      },
+      {
+        "start": 91,
+        "end": 115,
+        "role": "record",
+        "parent": 8,
+        "type": "p"
+      },
+      {
+        "start": 94,
+        "end": 112,
+        "role": "property",
+        "parent": 11,
+        "type": "string",
+        "name": "content"
+      },
+      {
+        "start": 129,
+        "end": 243,
+        "role": "record",
+        "parent": 2,
+        "type": "li"
+      },
+      {
+        "start": 137,
+        "end": 238,
+        "role": "property",
+        "parent": 13,
+        "type": "div",
+        "name": "content"
+      },
+      {
+        "start": 145,
+        "end": 238,
+        "role": "record",
+        "parent": 14,
+        "type": "div"
+      },
+      {
+        "start": 156,
+        "end": 168,
+        "role": "property",
+        "parent": 15,
+        "type": "string",
+        "name": "class"
+      },
+      {
+        "start": 175,
+        "end": 231,
+        "role": "property",
+        "parent": 15,
+        "type": "object*",
+        "name": "content"
+      },
+      {
+        "start": 183,
+        "end": 231,
+        "role": "sequence",
+        "parent": 17,
+        "type": "object*",
+        "count": 2
+      },
+      {
+        "start": 184,
+        "end": 206,
+        "role": "record",
+        "parent": 18,
+        "type": "h3"
+      },
+      {
+        "start": 188,
+        "end": 203,
+        "role": "property",
+        "parent": 19,
+        "type": "string",
+        "name": "content"
+      },
+      {
+        "start": 207,
+        "end": 230,
+        "role": "record",
+        "parent": 18,
+        "type": "p"
+      },
+      {
+        "start": 210,
+        "end": 227,
+        "role": "property",
+        "parent": 21,
+        "type": "string",
+        "name": "content"
+      }
+    ]
+  },
+  "greeting": {
+    "text": "Hello",
+    "nodes": [
+      {
+        "start": 0,
+        "end": 5,
+        "role": "scalar",
+        "type": "string"
+      }
+    ]
+  }
+}

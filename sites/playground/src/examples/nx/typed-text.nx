@@ -1,0 +1,16 @@
+// A text type after the tag, `<Note:markdown>`, keeps line breaks for its
+// processor, and `@{}` puts a value into the text.
+
+type Note = { content text:string }
+
+let <TaskNote count:int owner:string /> =
+  <Note:markdown>
+    # Tasks for @{owner}
+
+    You have @{count} open.
+
+    - write the docs
+    - ship the site
+  </Note>
+
+<TaskNote count=2 owner="Ada" />

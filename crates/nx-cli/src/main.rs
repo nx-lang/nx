@@ -8,7 +8,6 @@
 //! - `nxlang check <file>` - Type check and report errors (future)
 //! - `nxlang format <file>` - Format NX source code (future)
 
-mod format;
 mod json;
 mod typegen;
 
@@ -905,7 +904,7 @@ fn format_output(
     format: OutputFormat,
 ) -> Result<String, String> {
     match format {
-        OutputFormat::Nx => format::format_value(value),
+        OutputFormat::Nx => nx_api::format_nx_text(value),
         OutputFormat::Json => json::format_value_json_pretty(value, result_type),
     }
 }
@@ -2798,7 +2797,7 @@ let z = {
 
         let value = evaluate(&format!("{preamble}\nlet root() = {root_body}\n"))
             .expect("the original program should analyze and evaluate");
-        let formatted = format::format_value(&value).expect("the value should have an NX spelling");
+        let formatted = nx_api::format_nx_text(&value).expect("the value should have an NX spelling");
         let read_back = evaluate(&format!("{preamble}\nlet root() = {formatted}\n"));
 
         RoundTrip {

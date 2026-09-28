@@ -1,6 +1,6 @@
 import { nxWorkerChannel } from "../worker/index.ts";
 
-import type { Compile, CompileResult } from "./types.ts";
+import type { Evaluate, EvaluateResult } from "./types.ts";
 
 /**
  * The faults a fresh worker can answer: the channel has already discarded the one that failed.
@@ -11,21 +11,20 @@ import type { Compile, CompileResult } from "./types.ts";
 const recoverable = new Set(["TimeoutError", "WorkerStoppedError", "NxHostCrashedError"]);
 
 /**
- * Compiles in the browser, in the app's compiler worker.
+ * Evaluates in the browser, in the app's compiler worker.
  *
  * <para>Everything a failure here can be is an application fault: a module that would not load, a
  * compiler that crashed, or one that overran its deadline. An authoring error is not a failure —
- * it comes back in `diagnostics`. So a rejection is passed through with a readable message and the
+ * it comes back in the result. So a rejection is passed through with a readable message and the
  * editor view reports it as a fault.</para>
  *
- * <para>A recoverable fault is retried once, against the replacement worker the channel starts.
- * The editor would recover on its own at the visitor's next keystroke, but a gallery preview
- * compiles once and never again, and would otherwise carry the failure until the page is reloaded.
- * Once only: a crash the source itself causes is reproducible, and a second failure is the
- * visitor's to read.</para>
+ * <para>A recoverable fault is retried once, against the replacement worker the channel starts, so
+ * a crash that a fresh compiler answers shows the output without waiting for the visitor's next
+ * keystroke. Once only: a crash or a runaway recursion the source itself causes is reproducible,
+ * and a second failure is the visitor's to read.</para>
  */
-export const compileInBrowser: Compile = retrying(
-  (source) => nxWorkerChannel().send({ kind: "compile", source }) as Promise<CompileResult>
+export const evaluateInBrowser: Evaluate = retrying(
+  (source) => nxWorkerChannel().send({ kind: "evaluate", source }) as Promise<EvaluateResult>
 );
 
 /**
@@ -33,8 +32,8 @@ export const compileInBrowser: Compile = retrying(
  *
  * Exported so a test can drive the retry without a worker; the site has one implementation.
  */
-export function retrying(attempt: (source: string) => Promise<CompileResult>): Compile {
-  return async (source: string): Promise<CompileResult> => {
+export function retrying(attempt: (source: string) => Promise<EvaluateResult>): Evaluate {
+  return async (source: string): Promise<EvaluateResult> => {
     try {
       return await attempt(source);
     } catch (error) {
@@ -73,6 +72,8 @@ export function compileFailureMessage(error: unknown): string {
       return `${error.message} It will be started again on the next compile.`;
     case "NxModuleLoadError":
       return `${error.message} Reload the page to try again.`;
+    case "NxStackOverflowError":
+      return `${error.message} Look for a function that calls itself without stopping, or nests calls less deeply.`;
     case "AbortError":
       return "The compile was cancelled.";
     default:

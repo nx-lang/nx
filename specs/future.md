@@ -193,6 +193,21 @@ If this is revisited in the future:
   uneven spacing and a binary minus operator normally should not have a space
   before it and no space after it.
 
+**What an author sees today.** Whatever is decided about the syntax, the diagnostics for the form
+need fixing now. Found writing the playground's examples, `let readings:int+ = { -5 10 20 40 }`
+reports three problems, and none of them names the rule:
+
+```
+error: Expected ? here                                                     (at `10`)
+warning: A value of type int is always present, so the `?` test is always true   (at `-5`)
+error: Initializer for value 'readings' expects int+, found object+
+```
+
+The parser tries to read the list as something with a `?` in it, and the type error that follows is
+about a type the author never wrote. A targeted message at the first item — "a negative number in a
+braced list is written in parentheses: `(-5)`" — would say what to do, and the two follow-on
+diagnostics should not be reported once it is.
+
 ## Brace Recovery Reports A Closed Brace As Unclosed
 
 Admitting the empty list (`empty-list-spelling`) made `{` immediately followed by `}` a valid parse.
@@ -675,9 +690,9 @@ lexes escapes and a lowering that ignores them. Nothing in the reference documen
 The four candidates are not exclusive:
 
 - **Backslash escapes** (`\n`, `\t`, `\r`, `\\`, `\"`, possibly `\u{...}`). What the grammar's
-  escape branch and the TextMate grammar already presume, and what the playground's examples
-  presume *against* — `sites/playground/src/examples/nx/text.nx` tells authors that "a backslash in
-  a string stays a backslash", which is true today.
+  escape branch and the TextMate grammar already presume, and what the former DrawnUI playground's
+  text example presumed *against*: it told authors that "a backslash in a string stays a
+  backslash", which is true today.
 - **Character entities**, which is the answer this language already gives for text content:
   `$.entity` is an external token admitted in `text_run` and `embed_text_run`, and
   `crates/nx-syntax/src/scanner.c` scans named, decimal `&#DDDD;` and hex `&#xHHHH;` forms with a
@@ -686,9 +701,9 @@ The four candidates are not exclusive:
   to contain a `&name;`-shaped run.
 - **Single-quoted literals**, which is how XML and HTML answer this in the first instance: delimit
   with the quote the content does not use. This is purely additive — `'` has no token in the grammar
-  and there is no `char_literal` rule — and the corpus already reaches for it from the other side:
-  `sites/playground/src/examples/nx/svg.nx` writes its embedded SVG with single-quoted XML
-  attributes precisely so the NX string can keep its double quotes.
+  and there is no `char_literal` rule — and authors already reach for it from the other side: the
+  former DrawnUI playground's SVG example wrote its embedded SVG with single-quoted XML attributes
+  precisely so the NX string could keep its double quotes.
 - **No escapes at all**, making a backslash ordinary as it is in XML, which requires one of the two
   mechanisms above to exist first or a `"` stays unwritable.
 
@@ -716,8 +731,8 @@ whichever mechanism is chosen:
    are decoded, so the highlighter is describing an intended language rather than the real one.
    Whatever is chosen, that grammar and the formatter have to be brought into agreement with it.
 5. **Nothing tells an author any of this.** No reference page states the escape set, so every item
-   above is discovered by experiment. The playground recorded it as F11 in
-   `sites/playground/docs/FINDINGS.md` rather than in the language's own documentation.
+   above is discovered by experiment. The former DrawnUI playground recorded it as F11 in its own
+   findings file rather than in the language's own documentation.
 
 **What would settle it.** Confirm the mechanism, then decode in exactly one place in lowering so
 every backend sees the same value; decide whether an unknown escape or entity name is an error or
@@ -879,41 +894,33 @@ callback and its authorization header through `@nx-lang/language-client`; mount
 build context it already validates with; rename the `nx-language` `file:` link to
 `@nx-lang/language`; and remove the submodule once every package it consumed is on the registry.
 
-## Playground: What `add-playground-site` Left For Later
+## Playground: What `rebuild-language-playground` Left For Later
 
-The playground at `nxlang.org/playground` (`sites/playground`, spec `openspec/specs/playground`)
-shipped as the DrawnUI fiddle under a public address: a gallery and an editor view. Compilation
-and language queries were server-side then; `add-wasm-sdk` moved both into the visitor's browser,
-as a WebAssembly module in a Web Worker, and `launch-nxlang-website` made the site static files on a
-Cloudflare Worker beside the website, deployed by `.github/workflows/deploy-playground.yml`. The
-items below are what the site deliberately does not do yet.
+The playground at `nxlang.org/play` (`sites/playground`, spec `openspec/specs/playground`) is a
+language playground: NX source on one side and what its `root` returns on the other, shown by the
+`<nx-value>` element of `@nx-lang/value-view` (spec `openspec/specs/value-view`), with the source
+carried in the address and 17 checked examples. It began as a DrawnUI gallery
+(`add-playground-site`); `rebuild-language-playground` removed DrawnUI, which the fiddle now owns.
+The items below are what it deliberately does not do yet.
 
-### Shareable edited source
+### A table for a sequence of records
 
-An edit lives only in the session. A visitor who writes something worth showing has no address for
-it: `/playground/<id>` always opens the example as authored. The URL scheme leaves the query and
-fragment of that address free for this — the smallest version encodes the source in the fragment
-(compressed, so a typical example fits a browser's URL limit), and a stored version would need
-somewhere to keep it and a policy for how long. Either one is a client change plus, for storage, a
-route; nothing in the current address scheme has to move.
+The output shows every value as NX text, which is the one view. A sequence of records of one type is
+where that is weakest: every row repeats the property names, and values don't line up to compare.
+A table toggle on such a sequence — the property names as columns, one row per record, as
+`console.table` and notebook tools show them — would fix that without a second format elsewhere.
+The node annotations `evaluateNx()` returns already say which nodes are a sequence of `Task`, so
+this is `value-view` work alone.
 
-### NX IR size
+### Evaluating on hover in the editor
 
-Every compile produces the whole program's IR as pretty-printed JSON, and the program is the
-visitor's source plus the entire flattened catalog: a few hundred kilobytes of text per keystroke
-pause, built inside the worker and structured-cloned to the main thread. It is fast enough that no
-one notices, and it is the single largest thing the pipeline moves. Two independent wins are
-available: emitting compact JSON rather than pretty-printed, and not re-emitting the catalog's
-declarations on every compile. Neither changes a seam.
-
-### The catalog as a library artifact
-
-The catalog is a second source module the visitor's document names as an implicit import, so every
-compile reanalyzes ~600 lines of external component declarations that never change. It is a source
-module rather than a dependency because an imported external component loses its defaults and its
-inherited properties (NXE12/NXE13). Once that is fixed, the catalog can be a library artifact
-analyzed once per worker and shared by every compile — the win is proportional to how much of each
-compile is the catalog, which today is most of it.
+Hovering a function in the language service shows its signature. When its arguments are known
+from the source — a call with literal or constant arguments, or a function with no required
+parameters such as `root` — hover could also show the value it returns, printed with the formatter
+`nx-api` now owns (`format_nx_text`). NX is pure, so evaluating on hover has no side effects to
+guard against, only cost: it needs a step budget, and an LSP hover is markdown, so it shows NX text
+rather than the `<nx-value>` element. It touches `nx-language-service` and every editor host, which
+is why it was left for a change of its own.
 
 ## The DrawnUI Fiddle: What `add-nx-to-drawnui-fiddle` Left For Later
 
@@ -925,15 +932,23 @@ and play without the compiler. Nothing DrawnUI-specific entered this repository 
 the host-context build in the wasm SDK, compact IR, the Monaco peer range, and the npm release
 track for the workspace packages. The items below were deliberately left out.
 
-### Removing DrawnUI from the playground
+### The catalog as a library artifact
 
-The playground draws with the same `drawnui-react` package as the fiddle, and its catalog generator
-is a copy of the fiddle's (`update-fiddle-to-nx-occurrences`). It still keeps its own coercion and
-renderer under `sites/playground`, duplicating what the fiddle owns. With the fiddle as the
-public DrawnUI playground for NX, the playground can drop its DrawnUI target and become a
-general-purpose site. Blocked on deciding what a general-purpose playground draws instead — the
-examples, the gallery and the renderer all assume DrawnUI — which is a change of its own rather
-than a deletion.
+The catalog is a second source module the visitor's document names as an implicit import, so every
+compile reanalyzes the external component declarations, which never change. It is a source module
+rather than a dependency because an imported external component loses its defaults and its
+inherited properties (NXE12/NXE13). Once that is fixed, the catalog can be a library artifact
+analyzed once and shared by every compile — the win is proportional to how much of each compile
+is the catalog, which is most of it.
+
+### `@nx-lang/ir-runtime` against a large catalog has no test here
+
+The NX playground was this repository's only end-to-end run of `@nx-lang/ir-runtime` against a
+large, real catalog: every DrawnUI example compiled to NX IR and evaluated through it. With DrawnUI
+gone from the playground, the runtime keeps its conformance corpus here, and the fiddle's own tests
+run it against the fiddle's catalog on each NX update. A regression that only a catalog of that
+size shows would now surface in the fiddle first. If that proves too late, the fiddle's catalog and
+a few of its presets could be copied into the runtime's tests as a fixture.
 
 ### The fiddle's compile in a Web Worker
 
@@ -1382,6 +1397,47 @@ component examples that pass content, including the language tour's `Card` and t
 tutorial. The .NET SDK evaluates with the same interpreter and is likely affected, but wasn't tried.
 It was found while checking the documentation's code blocks, and the check only compiles them, so it
 doesn't catch this.
+
+**Now visible on the website.** `rebuild-language-playground` gave every complete `nx` code block on
+the website an "Open in playground" link, and the playground evaluates with this interpreter. The
+tour's `Card` block (`sites/website/src/content/docs/language-tour/elements.md`, "Content-marked
+body parameters") therefore opens showing this runtime error rather than a value. An `nx output`
+block after it would make the docs check fail on it, which is the way to keep it fixed once it is.
+
+## A built-in element given both `content=` and a body fails at run time
+
+**Observed.** Two documentation pages show markup in an attribute this way, and the checker accepts
+it:
+
+```nx
+<Tooltip
+  content=<span:>
+    <strong>Bold</strong> and <em>italic</em> text
+  </span>
+>
+  Hover over me
+</Tooltip>
+```
+
+Evaluating it fails: `Type mismatch in element intrinsic call: expected content for 'content' passed
+either as a named property or as element body, got both a 'content' property and element body
+content`. `Tooltip` names no declaration, so it is a built-in element, and a built-in element's
+body binds to a property named `content`. The attribute and the body are then two values for one
+property.
+
+**Where.** `sites/website/src/content/docs/language-tour/elements.md` ("Attributes can be
+expressions or inline markup") and `sites/website/src/content/docs/reference/syntax/elements.md`.
+Both are complete blocks, so their "Open in playground" links open to this error.
+
+**Why the checker misses it.** Nothing under a built-in tag is checked (see "Built-In Element
+Content And Property Values Are Never Type-Checked" above), so the collision is found only by the
+interpreter.
+
+**To decide.** Either the examples are wrong, and should name the attribute something other than
+`content` (`tip=` says what it is), or a built-in element's body should not claim the name
+`content` when the element also sets it. Whichever it is, the checker should report the collision
+for a built-in tag as it would for a declared one, and an `nx output` block after each example
+would keep the docs honest.
 
 ## A misspelled component compiles as a plain element
 

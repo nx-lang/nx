@@ -1,5 +1,5 @@
 # Deploys the NX website (sites/website) to its Cloudflare Worker, `nxlang-website`, which serves
-# https://nxlang.org except /playground. The build needs no Rust: the code-block check, which does,
+# https://nxlang.org except /play. The build needs no Rust: the code-block check, which does,
 # runs in build.yml on every pull request, so a page reaches main already checked. The link check
 # runs inside `astro build`, so a broken link fails here and nothing deploys. Setup (API token,
 # secrets, routes) is in docs/deployment-setup.md.

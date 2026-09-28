@@ -3,11 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- The site's <base href> is injected by vite.config.ts from base.mjs. -->
+    <meta name="description" content="Try NX in your browser: edit a program and see what its root returns." />
     <title>NX Playground</title>
-    <style>
-      html, body, #root { margin: 0; height: 100%; background: #16191d; }
-    </style>
+    <!-- The website's icon; the playground is served from the same origin. -->
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <script>
+      // The website's theme choice, applied before the first paint so the page does not flash the
+      // other theme. theme.ts keeps it current afterwards.
+      try {
+        const stored = localStorage.getItem("starlight-theme");
+        document.documentElement.dataset.theme =
+          stored === "light" || stored === "dark"
+            ? stored
+            : matchMedia("(prefers-color-scheme: light)").matches
+              ? "light"
+              : "dark";
+      } catch {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

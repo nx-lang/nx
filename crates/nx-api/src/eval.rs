@@ -3,11 +3,12 @@ use crate::artifacts::{
     ProgramArtifact, ProgramBuildContext,
 };
 use crate::diagnostics::{diagnostics_to_api, diagnostics_to_api_with_sources};
+use crate::nx_text::{annotate_nx_text, NxValueText};
 use crate::value::entry_result_to_nx_value;
 use crate::NxDiagnostic;
 use nx_diagnostics::{Diagnostic, Label, Severity};
-use nx_hir::{Item, Name};
-use nx_interpreter::{Interpreter, RuntimeError};
+use nx_hir::{Item, LoweredModule, Name};
+use nx_interpreter::{Interpreter, ResourceLimits, RuntimeError, RuntimeModuleId, Value};
 use nx_types::Type;
 use nx_value::NxValue;
 use std::fs;
@@ -132,9 +133,20 @@ fn no_root_diagnostics(file_name: &str, source: &str) -> Vec<NxDiagnostic> {
     diagnostics_to_api(&[diag], source)
 }
 
-fn eval_program_artifact_with_source(program: &ProgramArtifact, source: &str) -> EvalResult {
+/// What evaluating the entry module's `root` produced, with the module it ran in.
+struct RootEvaluation<'a> {
+    value: Value,
+    file_name: &'a str,
+    module: &'a LoweredModule,
+}
+
+fn evaluate_root<'a>(
+    program: &'a ProgramArtifact,
+    source: &str,
+    limits: ResourceLimits,
+) -> Result<RootEvaluation<'a>, Vec<NxDiagnostic>> {
     if let Some(diagnostics) = program_artifact_error_diagnostics(program, source) {
-        return EvalResult::Err(diagnostics);
+        return Err(diagnostics);
     }
 
     let Some(root_module) = program
@@ -142,17 +154,17 @@ fn eval_program_artifact_with_source(program: &ProgramArtifact, source: &str) ->
         .iter()
         .find(|module| module.file_name == program.entry_identity)
     else {
-        return EvalResult::Err(no_root_diagnostics("input.nx", source));
+        return Err(no_root_diagnostics("input.nx", source));
     };
     let Some(entry_module_id) = program.entry_module_id else {
-        return EvalResult::Err(no_root_diagnostics(&root_module.file_name, source));
+        return Err(no_root_diagnostics(&root_module.file_name, source));
     };
     let Some(module) = program
         .resolved_program
         .module(entry_module_id)
         .map(|module| module.lowered_module.as_ref())
     else {
-        return EvalResult::Err(no_root_diagnostics(&root_module.file_name, source));
+        return Err(no_root_diagnostics(&root_module.file_name, source));
     };
 
     let has_root = module
@@ -160,17 +172,85 @@ fn eval_program_artifact_with_source(program: &ProgramArtifact, source: &str) ->
         .iter()
         .any(|item| matches!(item, Item::Function(f) if f.name.as_str() == "root"));
     if !has_root {
-        return EvalResult::Err(no_root_diagnostics(&root_module.file_name, source));
+        return Err(no_root_diagnostics(&root_module.file_name, source));
     }
 
     let interpreter = Interpreter::from_resolved_program(program.resolved_program.clone());
-    match interpreter.execute_resolved_program_module_function(entry_module_id, "root", vec![]) {
-        Ok(value) => EvalResult::Ok(entry_result_to_nx_value(
-            &value,
-            entry_result_type(program, &root_module.file_name, "root"),
+    match interpreter.execute_resolved_program_module_function_with_limits(
+        entry_module_id,
+        "root",
+        vec![],
+        limits,
+    ) {
+        Ok(value) => Ok(RootEvaluation {
+            value,
+            file_name: &root_module.file_name,
+            module,
+        }),
+        Err(error) => Err(located_runtime_error_diagnostics(
+            &root_module.file_name,
+            source,
+            entry_module_id,
+            error,
         )),
-        Err(error) => EvalResult::Err(runtime_error_diagnostics(source, error)),
     }
+}
+
+/// A runtime error evaluating the entry module's `root`, labeled in the entry module: at the
+/// expression that failed, or, when that was in another module, at the entry module's call that
+/// led there.
+fn located_runtime_error_diagnostics(
+    file_name: &str,
+    source: &str,
+    entry_module_id: RuntimeModuleId,
+    error: RuntimeError,
+) -> Vec<NxDiagnostic> {
+    let mut diag = Diagnostic::error("runtime-error").with_message(error.to_string());
+    if let Some(location) = error.site_in(entry_module_id) {
+        diag = diag.with_label(Label::primary(file_name, location));
+    }
+    diagnostics_to_api(&[diag.build()], source)
+}
+
+fn eval_program_artifact_with_source(program: &ProgramArtifact, source: &str) -> EvalResult {
+    match evaluate_root(program, source, ResourceLimits::default()) {
+        Ok(root) => EvalResult::Ok(entry_result_to_nx_value(
+            &root.value,
+            entry_result_type(program, root.file_name, "root"),
+        )),
+        Err(diagnostics) => EvalResult::Err(diagnostics),
+    }
+}
+
+/// Evaluates the `root()` entrypoint of a previously built [`ProgramArtifact`] and spells the
+/// result as NX text, annotated with what each part of the text is.
+///
+/// <para>The text is what `nxlang run` prints for the same source. Types and declarations come
+/// from the entry module. A value with no NX spelling, one holding an action handler for example,
+/// is reported as an `nx-text-unspellable` diagnostic rather than spelled in part.</para>
+pub fn eval_program_artifact_nx_text(
+    program: &ProgramArtifact,
+) -> Result<NxValueText, Vec<NxDiagnostic>> {
+    eval_program_artifact_nx_text_with_limits(program, ResourceLimits::default())
+}
+
+/// [`eval_program_artifact_nx_text`] with the interpreter's limits set by the host.
+///
+/// <para>A host whose native stack is smaller than the default recursion limit needs, a browser
+/// worker running the WebAssembly build for one, lowers `max_recursion_depth` so runaway recursion
+/// ends in the interpreter's readable error rather than a stack overflow.</para>
+pub fn eval_program_artifact_nx_text_with_limits(
+    program: &ProgramArtifact,
+    limits: ResourceLimits,
+) -> Result<NxValueText, Vec<NxDiagnostic>> {
+    let source = program_root_source(program);
+    let root = evaluate_root(program, &source, limits)?;
+    annotate_nx_text(&root.value, root.module, &source).map_err(|message| {
+        let diag = Diagnostic::error("nx-text-unspellable")
+            .with_message(message)
+            .build();
+        diagnostics_to_api(&[diag], &source)
+    })
 }
 
 /// The declared or inferred result type of the function `name` in the source-provider module

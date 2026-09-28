@@ -39,6 +39,99 @@ export interface NxTextSpan {
 }
 
 /**
+ * A value spelled as NX text, with a node for each value, property and sequence in it.
+ *
+ * <para>The text is what `nxlang run` prints for the same program. Nodes are in text order, and
+ * each parent comes before its children.</para>
+ */
+export interface NxValueText {
+  /**
+   * The value's NX spelling.
+   */
+  readonly text: string;
+
+  /**
+   * What each part of `text` is.
+   */
+  readonly nodes: readonly NxValueNode[];
+}
+
+/**
+ * What kind of thing an {@link NxValueNode} is.
+ *
+ * - `record`: a record, written as an element.
+ * - `property`: one `name=value` property of a record.
+ * - `sequence`: a sequence with at least one item.
+ * - `case`: a constant union case.
+ * - `scalar`: a number, string or boolean.
+ * - `function`: a function value.
+ * - `empty`: the empty value, `{}`.
+ */
+export type NxValueRole =
+  | "record"
+  | "property"
+  | "sequence"
+  | "case"
+  | "scalar"
+  | "function"
+  | "empty";
+
+/**
+ * What one range of an {@link NxValueText}'s text is.
+ *
+ * <para>A number, string, boolean or `{}` written directly as a property's value has no node of
+ * its own: the property's node describes it.</para>
+ */
+export interface NxValueNode {
+  /**
+   * First UTF-16 code unit of the node's text, so `text.slice(start, end)` is the node.
+   */
+  readonly start: number;
+
+  /**
+   * UTF-16 code unit one past the node's text.
+   */
+  readonly end: number;
+
+  /**
+   * Index in `nodes` of the enclosing node, or absent at the top.
+   */
+  readonly parent?: number;
+
+  /**
+   * What kind of thing the node is.
+   */
+  readonly role: NxValueRole;
+
+  /**
+   * The node's type spelled in NX: `Task`, `string`, `Status`, `Task*`. A property's is its
+   * declared type. An empty value and a function value have none.
+   */
+  readonly type?: string;
+
+  /**
+   * A property's name, or a function value's.
+   */
+  readonly name?: string;
+
+  /**
+   * Whether a property is declared optional, as `subtitle?:string` is.
+   */
+  readonly optional?: boolean;
+
+  /**
+   * A sequence's length.
+   */
+  readonly count?: number;
+
+  /**
+   * Where the entry module declares what the node is: its record or component, union case,
+   * property or function. Absent when the entry module does not declare it.
+   */
+  readonly declaration?: NxTextSpan;
+}
+
+/**
  * Source location attached to an NX diagnostic.
  */
 export interface NxDiagnosticLabel {

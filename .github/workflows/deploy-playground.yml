@@ -1,5 +1,5 @@
 # Deploys the NX Playground (sites/playground) to its Cloudflare Worker, `nxlang-playground`, which
-# serves https://nxlang.org/playground and everything under it. A push to `main` is built and tested
+# serves https://nxlang.org/play and everything under it. A push to `main` is built and tested
 # here, the WebAssembly compiler included, and the built files are uploaded with `wrangler deploy`.
 # A Workers deploy is atomic, so the previous version keeps serving until every file of the new one
 # is in place. Setup (API token, secrets, routes) is in docs/deployment-setup.md.
@@ -38,7 +38,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  SITE_URL: https://nxlang.org/playground
+  SITE_URL: https://nxlang.org/play
   WRANGLER_VERSION: 4.141.0
 
 jobs:
@@ -81,7 +81,7 @@ jobs:
     timeout-minutes: 15
     environment:
       name: production
-      url: https://nxlang.org/playground
+      url: https://nxlang.org/play
 
     steps:
       # For wrangler.jsonc and the Worker script beside the built files.
@@ -112,8 +112,8 @@ jobs:
         working-directory: sites/playground
         run: |
           set -euo pipefail
-          entry=$(grep -o 'assets/index-[^"]*\.js' dist/playground/index.html | head -1)
-          compiler=$(cd dist/playground && find assets -name "nx-*.wasm" | head -1)
+          entry=$(grep -o 'assets/index-[^"]*\.js' dist/play/index.html | head -1)
+          compiler=$(cd dist/play && find assets -name "nx-*.wasm" | head -1)
           for attempt in $(seq 1 12); do
             shell=$(curl -sS --max-time 15 -A "nx-playground-deploy" "$SITE_URL" || true)
             module=$(curl -sS --max-time 30 -A "nx-playground-deploy" -o /dev/null -w '%{http_code} %{content_type}' "$SITE_URL/$compiler" || true)

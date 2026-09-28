@@ -1,0 +1,19 @@
+// A value that may be empty is used through `x?` (is it there?), `x?.m` (read
+// through it) and `x ?? y` (or else y).
+
+type Person = { name:string }
+type Book = { title:string author?:Person }
+
+type Credit = { title:string hasAuthor:boolean byline:string }
+
+let credit(book:Book) =
+  <Credit
+    title={book.title}
+    hasAuthor={book.author?}
+    byline={"by " + book.author?.name ?? "anonymous"}
+  />
+
+let root() = {
+  credit(<Book title="Dune" author={<Person name="Frank Herbert" />} />)
+  credit(<Book title="Beowulf" />)
+}

@@ -1,7 +1,7 @@
 /**
  * What the main thread and the compiler worker say to each other.
  *
- * <para>One channel carries both compilation and language queries, because both are answered by
+ * <para>One channel carries both evaluation and language queries, because both are answered by
  * the same host inside the worker and a second worker would mean a second copy of the module and
  * a second analysis of the same text.</para>
  *
@@ -14,7 +14,7 @@ import type { LanguageQueryName } from "@nx-lang/language-protocol";
 
 /** A request from the main thread, before the channel gives it its id. */
 export type WorkerCall =
-  | { readonly kind: "compile"; readonly source: string }
+  | { readonly kind: "evaluate"; readonly source: string }
   | { readonly kind: "language"; readonly query: LanguageQueryName; readonly request: unknown };
 
 /** A request from the main thread, as the worker receives it. */

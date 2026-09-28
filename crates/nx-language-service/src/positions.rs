@@ -181,6 +181,11 @@ fn ancestor_chain(root: SyntaxNode<'_>, offset: usize) -> Vec<SyntaxNode<'_>> {
 /// inside, the node that ends there, the node that starts there, and a zero-width node standing in
 /// for text not typed yet. A cursor belongs to what it is inside, then to what was just typed
 /// before it, then to what comes after — which is the order an editor's own selection follows.</para>
+///
+/// <para>One exception: punctuation that ends at the offset yields to a name that starts there.
+/// In `<Button`, the position before `B` is where an editor asks for hover on the name, and `<`
+/// has nothing to say; without a space between them there is no other position for the name's
+/// first character.</para>
 fn child_at(node: SyntaxNode<'_>, offset: usize) -> Option<SyntaxNode<'_>> {
     let mut interior = None;
     let mut empty = None;
@@ -205,7 +210,24 @@ fn child_at(node: SyntaxNode<'_>, offset: usize) -> Option<SyntaxNode<'_>> {
         }
     }
 
+    if let (Some(before), Some(after)) = (ends_here, starts_here) {
+        if !ends_in_word(before) && starts_with_word(after) {
+            return interior.or(empty).or(starts_here);
+        }
+    }
     interior.or(empty).or(ends_here).or(starts_here)
+}
+
+fn is_word_char(ch: char) -> bool {
+    ch.is_alphanumeric() || ch == '_'
+}
+
+fn ends_in_word(node: SyntaxNode<'_>) -> bool {
+    node.text().chars().next_back().is_some_and(is_word_char)
+}
+
+fn starts_with_word(node: SyntaxNode<'_>) -> bool {
+    node.text().chars().next().is_some_and(is_word_char)
 }
 
 /// Property-name, property-value, and tag-name positions inside an element's opening tag.

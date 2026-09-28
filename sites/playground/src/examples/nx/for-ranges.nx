@@ -1,0 +1,23 @@
+// `for` builds a sequence from a sequence or a range: `a..b` stops before b,
+// `a..=b` includes it. A body that yields nothing, such as an `if` with no
+// `else`, filters.
+
+let squares:int* = { for i in 1..=6 { i * i } }
+
+let evens:int* = { for n in squares { if n % 2 == 0 { n } } }
+
+let names:string+ = { "Ada" "Grace" "Barbara" }
+
+type Row = { index:int name:string }
+
+type Result = {
+  squares?:int+
+  evens?:int+
+  rows?:Row+
+}
+
+<Result
+  squares={squares}
+  evens={evens}
+  rows={for name, index in names { <Row index={index} name={name} /> }}
+/>

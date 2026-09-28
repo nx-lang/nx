@@ -1,0 +1,3 @@
+<Row
+  content={<Counter start=3 /> <Button label="Reset" />}
+/>

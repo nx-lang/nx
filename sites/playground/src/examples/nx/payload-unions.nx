@@ -1,0 +1,23 @@
+// Cases can carry their own fields. Inside a matching arm, the value has that
+// case's fields.
+
+type LoadState =
+  | idle
+  | loading
+  | failed { message:string retryable:boolean = true }
+  | loaded { count:int }
+
+let describe(state:LoadState): string = {
+  if state is {
+    LoadState.idle => "Nothing requested yet"
+    LoadState.loading => "Loading…"
+    LoadState.failed => "Failed: " + state.message
+    LoadState.loaded => "Loaded " + state.count + " items"
+  }
+}
+
+let root() = {
+  describe(LoadState.idle)
+  describe(<LoadState.failed message="Network unavailable" />)
+  describe(<LoadState.loaded count=12 />)
+}

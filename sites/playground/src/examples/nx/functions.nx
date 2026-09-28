@@ -1,0 +1,12 @@
+// Parameters a caller may leave out, optional or defaulted, come last. A call
+// may stop before them, and the function fills each one in.
+
+let formatName(name:string, title?:string, separator:string = " "): string = {
+  if title? { title + separator + name } else { name }
+}
+
+let root() = {
+  formatName("Ada Lovelace")
+  formatName("Ada Lovelace", "Countess")
+  formatName("Lovelace", "Lady", ", ")
+}

@@ -8,8 +8,8 @@ through a published package, using only the package manager you already have.
 
 ## 1) Try it in the playground
 
-Open the [playground](/playground), pick an example, and edit it. It compiles as you type, in your
-browser, and reports errors against your source.
+Open the [playground](/play), pick an example, and edit it. It runs as you type, in your browser,
+shows what your program's `root` returns, and reports errors against your source.
 
 Here is a small NX program to paste in. It declares a record type, a component that takes one, and
 ends with the element that is the program's result:

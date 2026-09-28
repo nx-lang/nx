@@ -1,0 +1,54 @@
+{
+  "name": "@nx-lang/value-view",
+  "version": "0.1.0",
+  "description": "An <nx-value> custom element that shows an NX value as NX text: highlighted with the editors' grammar, folding where it is long, and explaining itself on hover. No framework.",
+  "license": "MIT",
+  "homepage": "https://nxlang.org",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nx-lang/nx.git",
+    "directory": "packages/value-view"
+  },
+  "type": "module",
+  "files": [
+    "dist",
+    "!dist/test",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    }
+  },
+  "types": "./dist/src/index.d.ts",
+  "sideEffects": [
+    "./dist/src/index.js"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.json && node --test \"dist/test/**/*.test.js\"",
+    "prepack": "pnpm run build",
+    "verify:package": "node ../../scripts/verify-package.mjs",
+    "update-fixtures": "node --no-warnings scripts/update-fixtures.mjs"
+  },
+  "peerDependencies": {
+    "@nx-lang/language": ">=0.1.0",
+    "shiki": "^4.0.0"
+  },
+  "devDependencies": {
+    "@nx-lang/language": "file:../../src/vscode",
+    "@nx-lang/sdk-wasm": "workspace:*",
+    "@types/jsdom": "^21.1.7",
+    "@types/node": "^22.20.0",
+    "jsdom": "^26.1.0",
+    "shiki": "^4.4.3",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

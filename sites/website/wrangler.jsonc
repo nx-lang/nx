@@ -1,5 +1,5 @@
 // The website's Cloudflare Worker: the static files under dist/, with no script. The playground's
-// Worker claims the more specific /playground routes, so this one serves the rest of the domain.
+// Worker claims the more specific /play routes, so this one serves the rest of the domain.
 // Deployed by .github/workflows/deploy-website.yml; setup is in docs/deployment-setup.md.
 {
   "name": "nxlang-website",

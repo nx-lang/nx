@@ -1,0 +1,3 @@
+<Task done=true priority=2 title="Write the docs" />
+<Task done=false priority=1 title="Ship the site" />
+<Task done=false notes="After the site ships" priority=2 title="Plan the next release" />

@@ -4,6 +4,8 @@
 //! - [`eval_source`]: evaluate NX source text to a stable [`NxValue`](nx_value::NxValue)
 //! - [`eval_program_artifact`]: evaluate the `root()` entrypoint of a previously built
 //!   [`ProgramArtifact`]
+//! - [`eval_program_artifact_nx_text`] / [`format_nx_text`]: spell a value as NX text, the form
+//!   `nxlang run` prints, optionally annotated with what each part of the text is
 //! - [`evaluate_component_source`] / [`evaluate_component_program_artifact`]: pure component
 //!   rendering from explicit props and host-owned current state, returning the rendered value
 //!   directly without lifecycle wrapper fields
@@ -29,6 +31,7 @@ mod artifacts;
 mod component;
 mod diagnostics;
 mod eval;
+mod nx_text;
 mod source_graph;
 mod value;
 mod workspace;
@@ -50,9 +53,12 @@ pub use diagnostics::{
     diagnostics_to_api_with_source_entries, NxDiagnostic, NxDiagnosticLabel, NxSeverity, NxTextSpan,
 };
 pub use eval::{
-    eval_program_artifact, eval_program_artifact_function, eval_source,
-    load_library_artifact_from_directory, load_program_artifact_from_source, EvalResult,
+    eval_program_artifact, eval_program_artifact_function, eval_program_artifact_nx_text,
+    eval_program_artifact_nx_text_with_limits, eval_source, load_library_artifact_from_directory,
+    load_program_artifact_from_source, EvalResult,
 };
+pub use nx_interpreter::ResourceLimits;
+pub use nx_text::{format_nx_text, NxValueNode, NxValueRole, NxValueText};
 pub use value::{entry_result_to_nx_value, from_nx_value, to_nx_value, FromNxValueError};
 pub use workspace::{
     NxWorkspace, NxWorkspaceDirectoryError, NxWorkspaceInputError, NxWorkspaceModule,

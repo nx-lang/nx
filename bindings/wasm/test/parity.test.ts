@@ -1,4 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   NxLanguageSnapshot as NodeLanguageSnapshot,
@@ -13,12 +19,22 @@ import { createNxHost } from "../src/node.js";
 import { nxModule } from "./support.js";
 
 /**
- * Sources chosen to reach the parts the playground uses: a value, a typed function, a component
- * with children, and a program that does not compile.
+ * Sources chosen to reach the parts the playground uses: a value, a typed function, records, a
+ * sequence, a union case, a component with children, and a program that does not compile.
  */
 const sources = {
   value: "let root() = { 42 }",
   typed: "let answer(): int = { 42 }\nlet root() = { answer() }",
+  record: `type Address = { city:string zip?:string }
+type Person = { name:string home:Address tags?:string+ }
+<Person name="Ada" home=<Address city="London" /> tags={"a" "b"} />`,
+  sequence: `type Task = { title:string done:boolean = false }
+let titles:string+ = { "Write" "Ship" }
+let root(): Task+ = { for title in titles { <Task title={title} /> } }`,
+  union: "type Status = active | retired\nlet root(): Status = retired",
+  text: `type Label = { content text:string }
+let <Total count:int /> = <Label>Total: {count}</Label>
+<Total count=3 />`,
   component: `let <Greeting
   name:string
 /> =
@@ -145,4 +161,84 @@ function captureDiagnostics(run: () => unknown): readonly unknown[] {
   }
 
   throw new Error("Expected the source not to compile.");
+}
+
+describe("evaluation parity with the command line", () => {
+  const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+  let nxlang: string;
+  let directory: string;
+
+  beforeAll(() => {
+    nxlang = buildCommandLine(repositoryRoot);
+    directory = mkdtempSync(path.join(tmpdir(), "nx-parity-"));
+  }, 600_000);
+
+  afterAll(() => {
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  for (const [name, source] of Object.entries(sources)) {
+    if (!/\blet root\(|^<|\n</.test(source)) {
+      continue;
+    }
+
+    it(`prints what nxlang run prints for ${name}`, () => {
+      const file = path.join(directory, `${name}.nx`);
+      writeFileSync(file, source);
+      const printed = execFileSync(nxlang, ["run", file], { encoding: "utf8" });
+
+      const artifact = host.buildProgramArtifact(source, { fileName: `${name}.nx` });
+      try {
+        // `nxlang run` ends its output with a newline; the text is the value alone.
+        expect(artifact.evaluateNx().text).toBe(printed.replace(/\n$/, ""));
+      } finally {
+        artifact.dispose();
+      }
+    });
+  }
+});
+
+describe("recursion past the module's limit", () => {
+  const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+
+  it("is an error here and a value from nxlang run, which allows deeper calls", () => {
+    const source = "let f(n:int): int = { if n == 0 { 0 } else { f(n - 1) } }\nlet root() = { f(250) }";
+    const directory = mkdtempSync(path.join(tmpdir(), "nx-parity-"));
+    try {
+      const file = path.join(directory, "deep.nx");
+      writeFileSync(file, source);
+      expect(execFileSync(buildCommandLine(repositoryRoot), ["run", file], { encoding: "utf8" })).toBe("0\n");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+
+    const artifact = host.buildProgramArtifact(source);
+    try {
+      expect(() => artifact.evaluateNx()).toThrow(/recursion depth 200 exceeded/);
+    } finally {
+      artifact.dispose();
+    }
+  }, 600_000);
+});
+
+/**
+ * Builds `nxlang` with cargo, the binary `cargo test` builds, and returns its path, read from
+ * cargo's own report so a custom target directory is honored.
+ */
+function buildCommandLine(repositoryRoot: string): string {
+  const report = execFileSync(
+    "cargo",
+    ["build", "-q", "-p", "nx-cli", "--bin", "nxlang", "--message-format=json"],
+    { cwd: repositoryRoot, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 }
+  );
+  for (const line of report.split("\n")) {
+    if (!line.startsWith("{")) {
+      continue;
+    }
+    const message = JSON.parse(line) as { reason?: string; executable?: string | null };
+    if (message.reason === "compiler-artifact" && typeof message.executable === "string") {
+      return message.executable;
+    }
+  }
+  throw new Error("cargo built nxlang but did not report where.");
 }

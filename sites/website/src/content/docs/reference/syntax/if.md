@@ -141,6 +141,10 @@ let tag:string? = { if c { "new" } }
 let root() = { tag }
 ```
 
+```nx output title="Evaluates to"
+new
+```
+
 `tag` holds one string when `c` is true and is empty when it is false. That is exactly what an
 optional site expects, so no `else` is needed to bind one:
 
@@ -149,6 +153,10 @@ let hasErrors = false
 let hint:string? = { if hasErrors { "Fix the errors above" } }
 
 let root() = { hint }
+```
+
+```nx output title="Evaluates to"
+{}
 ```
 
 The same `if` at an exactly-one site is rejected as `expects string, found string?`; give it an

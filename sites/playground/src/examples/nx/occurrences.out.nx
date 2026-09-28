@@ -1,0 +1,10 @@
+<Book
+  authors={<Person name="Terry Pratchett" /> <Person name="Neil Gaiman" />}
+  title="Good Omens"
+/>
+<Book
+  authors={<Person name="Frank Herbert" />}
+  subtitle="Book one"
+  tags={"sci-fi" "classic"}
+  title="Dune"
+/>

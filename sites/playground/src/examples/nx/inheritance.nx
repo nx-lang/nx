@@ -1,0 +1,24 @@
+// An abstract record is a shared shape. Records that extend it get its fields
+// and defaults, and stand wherever the shape is expected.
+
+abstract type Shape = {
+  name:string
+  color:string = "black"
+}
+
+type Circle extends Shape = { radius:float64 }
+type Rectangle extends Shape = { width:float64 height:float64 }
+
+type Label = { text:string }
+
+let label(shape:Shape) = <Label text={shape.name + " (" + shape.color + ")"} />
+
+let dot = <Circle name="dot" radius=2.0 color="red" />
+let card = <Rectangle name="card" width=3.0 height=4.0 />
+
+let root() = {
+  dot
+  card
+  label(dot)
+  label(card)
+}

@@ -5,16 +5,19 @@ WebAssembly module. No server, no native addon.
 
 This package is separate from `@nx-lang/ir-runtime` under `runtime/typescript`: use `@nx-lang/sdk-wasm`
 when JavaScript needs to *compile* NX source or answer editor queries over it, and the IR runtime when
-JavaScript only needs to *execute* an already persisted NX IR image. Filesystem-backed
-workflows — library registries loaded from disk, workspace directories, `root()` evaluation to values —
-belong to [`@nx-lang/sdk-node`](../node/README.md); this package sees only the source text it is handed.
+JavaScript only needs to *execute* an already persisted NX IR image. It also evaluates a program's
+`root()` to NX text, the form `nxlang run` prints, for showing a value to a person. Filesystem-backed
+workflows — library registries loaded from disk, workspace directories, `root()` evaluation to JSON
+values — belong to [`@nx-lang/sdk-node`](../node/README.md); this package sees only the source text
+it is handed.
 
 ## Scope
 
 | Provided                                                   | Not provided                                 |
 | ---------------------------------------------------------- | -------------------------------------------- |
 | Build a program artifact from in-memory modules            | Library registries and workspace directories |
-| Emit one NX IR artifact per module, with metadata          | Evaluating NX to values (use the IR runtime) |
+| Emit one NX IR artifact per module, with metadata          | Evaluating NX to JSON values (use the IR runtime) |
+| Evaluate `root` to annotated NX text                       |                                              |
 | Hover, completions, diagnostics, document symbols          | Threads, streaming, incremental analysis     |
 | An in-process `NxLanguageService` over host documents      |                                              |
 
@@ -149,6 +152,57 @@ without only in that section. The metadata beside each artifact names the module
 the schema and ABI, the required features, and the module's function and component entrypoints by
 name.
 
+## Evaluating root to NX text
+
+`artifact.evaluateNx()` runs the entry module's `root` and returns `{ text, nodes }`. `text` is the
+value spelled in NX, the text `nxlang run` prints for the same program, and the package's parity
+tests hold the two to it. `nodes` says what each part of the text is, for a viewer such as
+`@nx-lang/value-view`:
+
+```ts
+const artifact = host.buildProgramArtifact(`type User = { id:string name:string }
+<User id="1" name="Ada" />`);
+try {
+  const { text, nodes } = artifact.evaluateNx();
+  console.log(text); // <User id="1" name="Ada" />
+  for (const node of nodes) {
+    console.log(node.role, node.type, text.slice(node.start, node.end));
+  }
+  // record User <User id="1" name="Ada" />
+  // property string id="1"
+  // property string name="Ada"
+} finally {
+  artifact.dispose();
+}
+```
+
+Each node has:
+
+| Field         | Meaning                                                                          |
+| ------------- | -------------------------------------------------------------------------------- |
+| `start`, `end` | UTF-16 offsets into `text`, so `text.slice(start, end)` is the node                |
+| `parent`      | Index of the enclosing node, absent at the top; parents come before children     |
+| `role`        | `record`, `property`, `sequence`, `case`, `scalar`, `function` or `empty`         |
+| `type`        | The type in NX: `User`, `string`, `Status`, `User*`; a property's declared type   |
+| `name`        | A property's name, or a function value's                                          |
+| `optional`    | `true` for a property declared optional, as `subtitle?:string` is                  |
+| `count`       | A sequence's length                                                               |
+| `declaration` | Where the entry module declares the record, component, case, property or function, if it does |
+
+A number, string, boolean or `{}` written directly as a property's value has no node of its own; the
+property's node describes it. A sequence's type is its items' common type with `*`, or `object*`.
+
+`evaluateNx()` throws `NxEvaluationError` when there is no `root` (code `no-root`), when evaluating
+it fails at run time (`runtime-error`, labeled at the expression that failed, or at the entry
+module's call into the module where it failed), and when the value has no NX spelling
+(`nx-text-unspellable`): one holding an action handler, or a sequence directly inside a sequence.
+The artifact stays usable either way.
+
+Calls nest at most 200 deep when the module evaluates, a fifth of the interpreter's default, because
+a browser keeps the module's frames on a native stack the module cannot size: in a Chromium worker
+it ran out between 325 and 517 calls. Runaway recursion therefore ends in a `runtime-error` naming
+the limit rather than a trapped host.
+
 ## The image
 
 `NxGeneratedNxIr.bytes` is the artifact as an NX IR image: a binary of 32-bit cells that
@@ -192,7 +246,7 @@ editor stays live.
 
 | Error                      | Thrown when                                                          |
 | -------------------------- | -------------------------------------------------------------------- |
-| `NxEvaluationError`        | NX reports diagnostics: source that does not compile, an unparseable snapshot URI, duplicate identities. Carries `diagnostics`. |
+| `NxEvaluationError`        | NX reports diagnostics: source that does not compile, a `root` that is missing, fails or has no NX spelling, an unparseable snapshot URI, duplicate identities. Carries `diagnostics`. |
 | `NxDisposedResourceError`  | An operation is attempted on a disposed artifact, snapshot or host. Disposing twice is allowed. |
 | `NxHostCrashedError`       | The module trapped, and on every later call to that host. Carries `operation`. |
 | `NxWasmError`              | The module's ABI version is not the loader's, or it answered in a shape the loader cannot read. |
@@ -202,7 +256,8 @@ The names and shapes match `@nx-lang/sdk-node`, so code can move between the two
 ## ABI
 
 The module exports `nx_wasm_abi_version`, which the loader checks before any other call and refuses
-when it disagrees, naming both versions. Arguments cross as UTF-8 JSON in buffers from
+when it disagrees, naming both versions. The current version is 3, which added
+`nx_wasm_program_evaluate_nx`. Arguments cross as UTF-8 JSON in buffers from
 `nx_wasm_alloc`, or as an image's bytes for `nx_wasm_ir_explain`; every operation answers with a
 pointer to a `{ status, ptr, len }` record whose payload is UTF-8 JSON, except that
 `nx_wasm_program_nx_ir` answers with an NX IR bundle (a `u32` header length, a JSON header

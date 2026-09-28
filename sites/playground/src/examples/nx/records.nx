@@ -1,0 +1,15 @@
+// A record declares its fields. A field with a default may be left out, and a
+// field marked `?` may be left out and holds the empty value `{}`.
+
+type Task = {
+  title:string
+  done:boolean = false
+  priority:int = 2
+  notes?:string
+}
+
+let root(): Task+ = {
+  <Task title="Write the docs" done=true />
+  <Task title="Ship the site" priority=1 />
+  <Task title="Plan the next release" notes="After the site ships" />
+}
