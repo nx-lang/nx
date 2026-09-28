@@ -291,8 +291,8 @@ impl CallFrame {
 /// ```
 #[derive(Debug, Clone)]
 pub struct RuntimeError {
-    /// Error kind
-    kind: RuntimeErrorKind,
+    /// Error kind, boxed so a `Result<_, RuntimeError>` stays small on the success path
+    kind: Box<RuntimeErrorKind>,
     /// Source location where the error occurred
     location: Option<TextRange>,
     /// Module of a resolved program whose source `location` is in, when the interpreter knows it.
@@ -308,7 +308,7 @@ impl RuntimeError {
     /// Create a new runtime error
     pub fn new(kind: RuntimeErrorKind) -> Self {
         Self {
-            kind,
+            kind: Box::new(kind),
             location: None,
             module: None,
             outer_sites: Vec::new(),
