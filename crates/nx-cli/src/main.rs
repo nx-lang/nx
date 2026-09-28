@@ -2797,7 +2797,8 @@ let z = {
 
         let value = evaluate(&format!("{preamble}\nlet root() = {root_body}\n"))
             .expect("the original program should analyze and evaluate");
-        let formatted = nx_api::format_nx_text(&value).expect("the value should have an NX spelling");
+        let formatted =
+            nx_api::format_nx_text(&value).expect("the value should have an NX spelling");
         let read_back = evaluate(&format!("{preamble}\nlet root() = {formatted}\n"));
 
         RoundTrip {
