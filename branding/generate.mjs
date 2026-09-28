@@ -34,7 +34,10 @@ const geometry = {
   nToBracket: 16, // Space between the N and the closing bracket.
   bracketWidth: 42, // Outside width of each bracket, from the flat ends to the tip.
   iconFill: 0.62, // Share of the icon tile's width the brackets take up.
-  iconRadius: 0.22 // Icon tile corner radius, as a share of the tile's width.
+  iconRadius: 0.22, // Icon tile corner radius, as a share of the tile's width.
+  // Share of the avatar's width the brackets take up. Larger than the icon's, since avatars are
+  // shown small and rounded by the site; above 0.72 a circular crop cuts off the X's corners.
+  avatarFill: 0.7
 };
 
 const colors = {
@@ -115,8 +118,11 @@ function logo({ n, close, open }) {
   return svg(`${round(s.left)} ${geometry.top} ${round(s.right - s.left)} ${height}`, body);
 }
 
-/** The brackets alone: cropped tight, or centered on a rounded square tile. */
-function mark({ close, open }, tile) {
+/**
+ * The brackets alone: cropped tight, or centered on a square tile. The tile defaults to the app
+ * icon's fill and corner radius.
+ */
+function mark({ close, open }, tile, { fill = geometry.iconFill, radius = geometry.iconRadius } = {}) {
   const s = shapes(false);
   const width = s.right - s.left;
   const height = geometry.bottom - geometry.top;
@@ -125,11 +131,11 @@ function mark({ close, open }, tile) {
   if (!tile) {
     return svg(`${round(s.left)} ${geometry.top} ${round(width)} ${height}`, brackets);
   }
-  const side = round(Math.max(width, height) / geometry.iconFill);
+  const side = round(Math.max(width, height) / fill);
   const dx = round((side - width) / 2 - s.left);
   const dy = round((side - height) / 2 - geometry.top);
   const body =
-    `<rect width="${side}" height="${side}" rx="${round(side * geometry.iconRadius)}" fill="${tile}"/>` +
+    `<rect width="${side}" height="${side}" rx="${round(side * radius)}" fill="${tile}"/>` +
     `<g transform="translate(${dx} ${dy})">${brackets}</g>`;
   return svg(`0 0 ${side} ${side}`, body);
 }
@@ -141,10 +147,11 @@ const tagline = {
 };
 
 /**
- * The 1200×630 card shown when a page of the website is shared: the logo, then the tagline in the
- * dark-theme style (line 2 all gold), then the site's address.
+ * The card shown when a link is shared: the logo, then the tagline in the dark-theme style (line 2
+ * all gold), then the site's address. The website's card is 1200×630; GitHub's social preview is
+ * 1280×640. Both keep the content at the same place and only the ink background grows.
  */
-function socialCard() {
+function socialCard(width, height) {
   const s = shapes(true);
   const logoHeight = 120;
   const scale = logoHeight / (geometry.bottom - geometry.top);
@@ -155,14 +162,14 @@ function socialCard() {
     `<polygon points="${s.close}" fill="${colors.blueOnDark}"/>` +
     `<polygon points="${s.open}" fill="${colors.goldOnDark}"/>`;
   const body =
-    `<rect width="1200" height="630" fill="${colors.ink}"/>` +
+    `<rect width="${width}" height="${height}" fill="${colors.ink}"/>` +
     `<g transform="translate(${round(x)} ${round(y)}) scale(${round(scale * 1000) / 1000})">${drawing}</g>` +
     `<text x="96" y="318" font-family="Geist" font-weight="600" font-size="40" letter-spacing="-0.4" ` +
     `fill="${colors.paper}">${tagline.line1}</text>` +
     `<text x="96" y="376" font-family="Geist" font-weight="400" font-size="30" ` +
     `fill="${colors.goldOnDark}">${tagline.line2}</text>` +
     `<text x="96" y="532" font-family="Geist Mono" font-size="22" fill="#8C8D95">nxlang.org</text>`;
-  return svg("0 0 1200 630", body, 1200, 630);
+  return svg(`0 0 ${width} ${height}`, body, width, height);
 }
 
 // Geist, by Vercel, under the SIL Open Font License (fonts/OFL.txt).
@@ -199,7 +206,9 @@ const files = {
   "nx-mark.svg": mark(light),
   "nx-mark-on-dark.svg": mark(dark),
   "nx-icon.svg": mark(dark, colors.ink),
-  "nx-icon-light.svg": mark(light, colors.white)
+  "nx-icon-light.svg": mark(light, colors.white),
+  // Square corners, for places that round or crop the image themselves, such as GitHub avatars.
+  "nx-avatar.svg": mark(dark, colors.ink, { fill: geometry.avatarFill, radius: 0 })
 };
 
 console.log("branding/");
@@ -211,8 +220,10 @@ for (const size of [512, 256, 180, 128, 32, 16]) {
 }
 write(join("branding", "png", "nx-logo-1200.png"), png(files["nx-logo.svg"], 1200));
 write(join("branding", "png", "nx-logo-on-dark-1200.png"), png(files["nx-logo-on-dark.svg"], 1200));
-const card = png(socialCard(), 1200);
+write(join("branding", "png", "nx-avatar-512.png"), png(files["nx-avatar.svg"], 512));
+const card = png(socialCard(1200, 630), 1200);
 write(join("branding", "png", "nx-social-card.png"), card);
+write(join("branding", "png", "nx-github-social-preview.png"), png(socialCard(1280, 640), 1280));
 
 // The copies other parts of the repository serve. They can't reference branding/ directly: the
 // website serves its own public/ folder and the VS Code extension packages its own images/.
