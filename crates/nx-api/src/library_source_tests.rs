@@ -647,3 +647,47 @@ fn a_directory_library_warning_is_still_reported_by_workspace_validation() {
     );
     assert_eq!(warning.labels[0].span.start_line, 2);
 }
+
+#[test]
+fn a_union_case_field_default_declared_in_a_library_applies_to_a_tenant_construction() {
+    let registry = LibraryRegistry::new();
+    registry
+        .load_libraries_from_sources(&[NxLibrarySource::new(
+            "libraries/scale",
+            vec![NxLibraryModule::new(
+                "Scale.nx",
+                "export type ScaleConfig =\n  | numeric { min:int = 0 max:int = 10 step:int = 1 label?:string }\n  | labeled { options:string+ }\n",
+            )],
+        )])
+        .unwrap_or_else(|diagnostics| panic!("library loads: {diagnostics:?}"));
+    let context = registry
+        .build_context()
+        .with_implicit_imports(["libraries/scale"]);
+    let files = [("tenant/a.nx", "let root() = <ScaleConfig.numeric max=5 />")];
+
+    let diagnostics = validate_workspace(&workspace(&files), &context);
+    assert!(
+        diagnostics.is_empty(),
+        "an omitted field with a default is not missing: {diagnostics:?}"
+    );
+
+    let omitted_required = validate_workspace(
+        &workspace(&[("tenant/a.nx", "let root() = <ScaleConfig.labeled />")]),
+        &context,
+    );
+    assert!(
+        has_code(&omitted_required, "missing-union-case-field"),
+        "a field with neither a default nor `?` is still required: {omitted_required:?}"
+    );
+
+    match eval_program_artifact(&build(&files, &context)) {
+        EvalResult::Ok(NxValue::Record { properties, .. }) => {
+            assert_eq!(properties.get("min"), Some(&NxValue::Int(0)));
+            assert_eq!(properties.get("max"), Some(&NxValue::Int(5)));
+            assert_eq!(properties.get("step"), Some(&NxValue::Int(1)));
+            assert!(!properties.contains_key("label"));
+        }
+        EvalResult::Ok(value) => panic!("expected a record, got {value:?}"),
+        EvalResult::Err(diagnostics) => panic!("evaluation failed: {diagnostics:?}"),
+    }
+}

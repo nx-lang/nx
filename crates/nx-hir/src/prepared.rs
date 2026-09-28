@@ -853,14 +853,7 @@ pub fn interface_union(item: &InterfaceItem) -> Option<UnionDef> {
                     fields: case
                         .fields
                         .iter()
-                        .map(|field| UnionCaseField {
-                            name: field.name.clone(),
-                            ty: field.ty.clone(),
-                            is_content: field.is_content,
-                            optional: field.optional,
-                            default: None,
-                            span: field.span,
-                        })
+                        .map(UnionCaseField::from_interface_field)
                         .collect(),
                     span: case.span,
                 })

@@ -361,8 +361,13 @@ pub struct UnionCaseField {
     pub is_content: bool,
     /// Whether the field carries the `?` mark: omitted at construction it is the empty value.
     pub optional: bool,
-    /// Default value expression, if present.
+    /// Default value expression, if present in this module.
     pub default: Option<ExprId>,
+    /// Whether the field declares a default. True wherever `default` is, and also for a field
+    /// imported from another module's interface, which publishes that a default exists but not
+    /// its expression. The parser rejects `?` together with a default
+    /// (`optional-property-with-default`), so `has_default` and `optional` are never both true.
+    pub has_default: bool,
     /// Source span
     pub span: TextSpan,
 }
@@ -381,6 +386,7 @@ impl UnionCaseField {
             ty,
             is_content,
             optional: false,
+            has_default: default.is_some(),
             default,
             span,
         }
@@ -393,9 +399,32 @@ impl UnionCaseField {
             ty: field.ty,
             is_content: field.is_content,
             optional: field.optional,
+            has_default: field.default.is_some(),
             default: field.default,
             span: field.span,
         }
+    }
+
+    /// Converts imported interface metadata into union case metadata without a raw default body.
+    ///
+    /// The interface publishes whether a field is required, not its default expression. Since `?`
+    /// and a default are mutually exclusive, a field that is neither required nor optional is
+    /// exactly one with a default; this is the inverse of [`UnionCaseField::is_required`].
+    pub fn from_interface_field(field: &crate::prepared::InterfaceField) -> Self {
+        Self {
+            name: field.name.clone(),
+            ty: field.ty.clone(),
+            is_content: field.is_content,
+            optional: field.optional,
+            default: None,
+            has_default: !field.is_required && !field.optional,
+            span: field.span,
+        }
+    }
+
+    /// Whether a construction must supply the field: it has neither a default nor the `?` mark.
+    pub fn is_required(&self) -> bool {
+        !self.has_default && !self.optional
     }
 }
 

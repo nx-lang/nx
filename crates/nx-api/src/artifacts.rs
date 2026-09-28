@@ -3412,7 +3412,7 @@ fn union_case_field_to_interface_field(field: &UnionCaseField) -> LibraryInterfa
         ty: field.ty.clone(),
         is_content: field.is_content,
         optional: field.optional,
-        is_required: field.default.is_none() && !field.optional,
+        is_required: field.is_required(),
         span: field.span,
     }
 }

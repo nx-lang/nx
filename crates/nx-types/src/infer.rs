@@ -4257,7 +4257,7 @@ impl<'a> InferenceContext<'a> {
 
         for field in &case.fields {
             let ty = self.type_from_type_ref_in_quietly(declaring_module, &field.ty);
-            let is_required = field.default.is_none() && !field.optional;
+            let is_required = field.is_required();
             if field.is_content {
                 content_property = Some(field.name.clone());
             }
