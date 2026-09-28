@@ -151,6 +151,26 @@ const snapshot = new NxLanguageSnapshot(documents, { buildContext });
 Without one, a name that only a library declares is unresolved — hover says nothing about it and
 diagnostics report the import as missing, exactly as the compiler would without that context.
 
+A registry also loads libraries a host holds in memory rather than on disk, with the same analysis a
+directory load does. Each is a logical root, an optional version that every NX IR image of one of its
+modules records, and its modules named relative to the root; `loadLibraries` loads a list in
+dependency order, and one library imports another by a relative path to its root:
+
+```ts
+registry.loadLibraries([
+  { root: "libraries/chat-link", modules: [{ identity: "ChatLinkConfig.nx", source: chatLink }] },
+  { root: "libraries/question-flow", version: "3", modules: questionFlowModules }
+]);
+```
+
+`loadLibraries` and `loadLibrary` answer with the libraries' own warnings, info and hints, which
+workspace validation and builds leave out for in-memory libraries; a directory library's warnings are
+still reported by validation. A loaded root is immutable: loading it again with the same
+modules and version does nothing, and loading it with different ones throws. A workspace module whose
+identity lies under a loaded library's root fails with `workspace-module-in-library-root`. An implicit import may name a loaded library's root, with the
+meaning of a written wildcard import of the library. `@nx-lang/sdk-wasm` loads libraries the same way,
+and the two SDKs emit byte-identical images for them.
+
 **Implicit imports.** A host whose own declarations live in documents of its own can have every
 queried document import them without an import line:
 

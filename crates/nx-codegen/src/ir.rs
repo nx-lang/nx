@@ -642,7 +642,8 @@ fn module_source<'a>(program: &'a CodegenProgram, module: &CodegenModule) -> Opt
     module_source_entry(program, module).map(|entry| entry.source.as_str())
 }
 
-/// The version string the host gave a module; `""` for one it gave none, and for a library module.
+/// The version string the host gave a module, or the one it gave a library module's library; `""`
+/// for one it gave none.
 ///
 /// <para>The prelude is the exception: no host supplies it, so it carries the compiler's
 /// [`nx_hir::PRELUDE_VERSION`] instead. That is what lets linking tell a runtime's built-in prelude

@@ -15,6 +15,14 @@ describe("the wasm loader", () => {
     );
   });
 
+  it("refuses a module built for the previous ABI version", async () => {
+    const stub = await WebAssembly.compile(abiVersionOnlyModule(abiVersion - 1));
+
+    expect(() => createNxHost(stub)).toThrowError(
+      new RegExp(`ABI version ${abiVersion - 1}\\b[\\s\\S]*ABI version ${abiVersion}\\b`)
+    );
+  });
+
   it("refuses a module that does not implement the ABI at all", async () => {
     const empty = await WebAssembly.compile(Uint8Array.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0, 0, 0]));
 

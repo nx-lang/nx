@@ -42,10 +42,16 @@ pub type LibraryInterfaceField = InterfaceField;
 pub type LibraryInterfaceKind = InterfaceItemKind;
 pub type LibraryInterfaceItem = InterfaceItem;
 
-/// File-preserving artifact for one local NX library directory.
+/// File-preserving artifact for one NX library, loaded from a directory or from memory.
 #[derive(Debug, Clone)]
 pub struct LibraryArtifact {
+    /// The library's root: the canonical directory path for a directory load, or the normalized
+    /// logical root identity (always relative, such as `libraries/question-flow`) for an in-memory
+    /// load. The two never collide, because a canonical path is always absolute.
     pub root_path: PathBuf,
+    /// The version string the host gave the library, if any. Every NX IR image of one of its
+    /// modules records it, so a runtime linking against the library can tell its releases apart.
+    pub version: Option<String>,
     pub modules: Vec<ModuleArtifact>,
     pub exports: FxHashMap<String, LibraryExport>,
     pub interface_items: Vec<LibraryInterfaceItem>,
@@ -65,6 +71,19 @@ pub struct LibraryArtifact {
     pub dependency_roots: Vec<PathBuf>,
     pub diagnostics: Vec<Diagnostic>,
     pub fingerprint: u64,
+}
+
+impl LibraryArtifact {
+    /// The library's own diagnostics, rendered against its modules' source text.
+    ///
+    /// <para>A library loaded from memory with errors is not retained, so for one that loaded these
+    /// are its warnings, info and hints. Validation and builds of a workspace leave an in-memory
+    /// library's warnings out, since they are about text the workspace's author cannot edit; this
+    /// is where a host reads them, once, when it loads the library. A directory library's
+    /// diagnostics are still reported by validation too.</para>
+    pub fn api_diagnostics(&self) -> Vec<NxDiagnostic> {
+        diagnostics_to_api_with_sources(&self.diagnostics, "", &self.sources)
+    }
 }
 
 /// File-preserving artifact for one resolved NX program.
@@ -123,6 +142,93 @@ impl ProgramArtifact {
     }
 }
 
+/// One module of a library a host loads from memory: its identity relative to the library's root,
+/// and its source text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NxLibraryModule {
+    pub identity: String,
+    pub source: Arc<str>,
+}
+
+impl NxLibraryModule {
+    pub fn new(identity: impl Into<String>, source: impl Into<Arc<str>>) -> Self {
+        Self {
+            identity: identity.into(),
+            source: source.into(),
+        }
+    }
+}
+
+/// A library a host loads from memory rather than from a directory.
+///
+/// <para>The root is a logical identity, such as `libraries/question-flow`, normalized with the
+/// workspace identity rules. Its modules are named relative to it, so the module `QuestionFlow.nx`
+/// of that library is `libraries/question-flow/QuestionFlow.nx` wherever NX names it: in
+/// diagnostics, in the resolved program, and in the NX IR images emitted for it.</para>
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NxLibrarySource {
+    pub root: String,
+    /// The host's name for this revision of the library, recorded by every NX IR image of one of
+    /// its modules. An empty string is no version.
+    pub version: Option<String>,
+    pub modules: Vec<NxLibraryModule>,
+}
+
+impl NxLibrarySource {
+    pub fn new(root: impl Into<String>, modules: Vec<NxLibraryModule>) -> Self {
+        Self {
+            root: root.into(),
+            version: None,
+            modules,
+        }
+    }
+
+    pub fn with_version(mut self, version: impl Into<String>) -> Self {
+        let version = version.into();
+        self.version = (!version.is_empty()).then_some(version);
+        self
+    }
+}
+
+/// An in-memory library parsed and checked for shape, ready to analyze once its dependencies are
+/// loaded.
+struct PreparedInMemoryLibrary {
+    root: PathBuf,
+    version: Option<String>,
+    source_files: Vec<LibrarySourceFile>,
+    dependency_roots: Vec<PathBuf>,
+}
+
+impl PreparedInMemoryLibrary {
+    fn root_identity(&self) -> String {
+        self.root.to_string_lossy().to_string()
+    }
+
+    /// Whether `library` was loaded from exactly these sources under this version.
+    fn matches(&self, library: &LibraryArtifact) -> bool {
+        library.version == self.version
+            && library.sources.len() == self.source_files.len()
+            && self.source_files.iter().all(|source_file| {
+                library
+                    .sources
+                    .get(&source_file.file_name)
+                    .is_some_and(|source| source.as_ref() == source_file.source)
+            })
+    }
+
+    fn source_map(&self) -> FxHashMap<String, Arc<str>> {
+        self.source_files
+            .iter()
+            .map(|source_file| {
+                (
+                    source_file.file_name.clone(),
+                    Arc::<str>::from(source_file.source.as_str()),
+                )
+            })
+            .collect()
+    }
+}
+
 #[derive(Debug, Default)]
 struct LibraryRegistryState {
     libraries: FxHashMap<PathBuf, Arc<LibraryArtifact>>,
@@ -178,6 +284,132 @@ impl LibraryRegistry {
         self.load_library_from_directory_internal(root_path.as_ref())
     }
 
+    /// Loads a library from in-memory modules under a logical root.
+    ///
+    /// <para>The library is analyzed exactly as the same modules read from a directory would be.
+    /// Its imports of other libraries resolve against the logical roots already loaded into this
+    /// registry, so a library it depends on must be loaded first; an import of a root that is not
+    /// loaded fails the load. A library whose analysis reports errors is not retained, and neither
+    /// is one whose dependency is missing. The warnings, info and hints of a library that loads are
+    /// answered by [`LibraryArtifact::api_diagnostics`] on the returned artifact, since workspace
+    /// validation and builds against the library leave them out.</para>
+    ///
+    /// <para>A root is immutable for the registry's life: loading it again with identical sources
+    /// and version returns the snapshot already loaded, and loading it with different ones fails
+    /// with a diagnostic naming the root.</para>
+    pub fn load_library_from_sources(
+        &self,
+        library: &NxLibrarySource,
+    ) -> Result<Arc<LibraryArtifact>, Vec<crate::NxDiagnostic>> {
+        let mut loaded = self.load_libraries_from_sources(std::slice::from_ref(library))?;
+        Ok(loaded.remove(0))
+    }
+
+    /// Loads several in-memory libraries, in dependency order whatever order they are given in.
+    ///
+    /// <para>Each library is loaded as [`load_library_from_sources`](Self::load_library_from_sources)
+    /// loads one, after every library of the batch it imports. A dependency outside the batch must
+    /// already be loaded, and a cycle among the batch's libraries fails the load before any of them
+    /// is analyzed. The artifacts are returned in the order the libraries were given.</para>
+    pub fn load_libraries_from_sources(
+        &self,
+        libraries: &[NxLibrarySource],
+    ) -> Result<Vec<Arc<LibraryArtifact>>, Vec<crate::NxDiagnostic>> {
+        let mut prepared = Vec::with_capacity(libraries.len());
+        let mut errors = Vec::new();
+        for library in libraries {
+            match prepare_in_memory_library(library) {
+                Ok(library) => prepared.push(library),
+                Err(diagnostic) => errors.push(*diagnostic),
+            }
+        }
+        if !errors.is_empty() {
+            return Err(crate::diagnostics::diagnostics_to_api(&errors, ""));
+        }
+
+        let order = in_memory_load_order(&prepared)
+            .map_err(|diagnostic| crate::diagnostics::diagnostics_to_api(&[*diagnostic], ""))?;
+
+        let mut loaded = FxHashMap::<PathBuf, Arc<LibraryArtifact>>::default();
+        for index in order {
+            let library = &prepared[index];
+            if loaded.contains_key(&library.root) {
+                continue;
+            }
+            let artifact = self.load_prepared_in_memory_library(library)?;
+            loaded.insert(library.root.clone(), artifact);
+        }
+
+        Ok(prepared
+            .iter()
+            .map(|library| loaded[&library.root].clone())
+            .collect())
+    }
+
+    fn load_prepared_in_memory_library(
+        &self,
+        library: &PreparedInMemoryLibrary,
+    ) -> Result<Arc<LibraryArtifact>, Vec<crate::NxDiagnostic>> {
+        if let Some(existing) = self.get_loaded_library(&library.root) {
+            return if library.matches(&existing) {
+                Ok(existing)
+            } else {
+                Err(crate::diagnostics::diagnostics_to_api(
+                    &[library_root_conflict_diagnostic(&library.root_identity())],
+                    "",
+                ))
+            };
+        }
+
+        let missing = library
+            .dependency_roots
+            .iter()
+            .filter(|root| self.get_loaded_library(root).is_none())
+            .flat_map(|root| missing_library_dependency_diagnostics(library, root))
+            .collect::<Vec<_>>();
+        if !missing.is_empty() {
+            return Err(crate::diagnostics::diagnostics_to_api_with_sources(
+                &missing,
+                "",
+                &library.source_map(),
+            ));
+        }
+
+        let artifact = build_library_artifact_from_sources(
+            library.root.clone(),
+            library.version.clone(),
+            library.source_files.clone(),
+            self,
+        );
+        if has_error_diagnostics(&artifact.diagnostics) {
+            return Err(crate::diagnostics::diagnostics_to_api_with_sources(
+                &artifact.diagnostics,
+                "",
+                &artifact.sources,
+            ));
+        }
+
+        let artifact = Arc::new(artifact);
+        let mut state = self.inner.write().expect("library registry lock poisoned");
+        let entry = state
+            .libraries
+            .entry(library.root.clone())
+            .or_insert_with(|| artifact.clone())
+            .clone();
+        // Another thread may have loaded the root between the check above and this write; its
+        // snapshot stands, and a different one is the same conflict as a reload.
+        if !Arc::ptr_eq(&entry, &artifact) && !library.matches(&entry) {
+            return Err(crate::diagnostics::diagnostics_to_api(
+                &[library_root_conflict_diagnostic(&library.root_identity())],
+                "",
+            ));
+        }
+        state
+            .dependency_graph
+            .insert(library.root.clone(), entry.dependency_roots.clone());
+        Ok(entry)
+    }
+
     pub fn build_context(&self) -> ProgramBuildContext {
         ProgramBuildContext {
             registry: self.clone(),
@@ -196,7 +428,39 @@ impl LibraryRegistry {
     {
         let mut visible_roots = FxHashSet::default();
         for root in roots {
-            visible_roots.insert(fs::canonicalize(root.as_ref())?);
+            let root = root.as_ref();
+            // A loaded in-memory library is named by its logical root; anything else is a
+            // directory, named by its canonical path as the directory load keyed it.
+            if let Some(logical_root) = self.loaded_logical_root(root) {
+                visible_roots.insert(logical_root);
+            } else {
+                // A relative spelling may still be a directory relative to the working directory,
+                // so it is only refused when no such directory exists either; the error then names
+                // the root rather than surfacing the bare OS error, which is all a host without a
+                // filesystem, such as the wasm SDK, would otherwise see.
+                let canonical = fs::canonicalize(root).map_err(|error| {
+                    if is_logical_library_path(root) {
+                        io::Error::new(
+                            error.kind(),
+                            format!(
+                                "Visible root '{}' is not a loaded library, and no directory exists at it: {}",
+                                root.display(),
+                                error
+                            ),
+                        )
+                    } else {
+                        io::Error::new(
+                            error.kind(),
+                            format!(
+                                "Visible root '{}' could not be resolved to a directory: {}",
+                                root.display(),
+                                error
+                            ),
+                        )
+                    }
+                })?;
+                visible_roots.insert(canonical);
+            }
         }
 
         Ok(ProgramBuildContext {
@@ -204,6 +468,16 @@ impl LibraryRegistry {
             visible_roots,
             implicit_imports: Vec::new(),
         })
+    }
+
+    fn loaded_logical_root(&self, root: &Path) -> Option<PathBuf> {
+        if !is_logical_library_path(root) {
+            return None;
+        }
+        let identity =
+            normalize_workspace_identity(&root.to_string_lossy().replace('\\', "/")).ok()?;
+        let root = PathBuf::from(identity);
+        self.get_loaded_library(&root).map(|_| root)
     }
 
     fn loaded_roots(&self) -> Vec<PathBuf> {
@@ -324,9 +598,10 @@ impl LibraryRegistry {
 pub struct ProgramBuildContext {
     registry: LibraryRegistry,
     visible_roots: FxHashSet<PathBuf>,
-    /// Workspace identities every other module is analyzed as though it began with a wildcard
-    /// import of. This is a host's context — a catalog a playground puts in scope — not something
-    /// the module's own text says.
+    /// Identities every other module is analyzed as though it began with a wildcard import of:
+    /// workspace modules, or roots of libraries this context can see. This is a host's context — a
+    /// catalog a playground puts in scope, or the libraries a server compiles every tenant
+    /// against — not something the module's own text says.
     implicit_imports: Vec<String>,
 }
 
@@ -352,8 +627,11 @@ impl ProgramBuildContext {
     /// Returns this context with `identities` implicitly imported: every workspace module other
     /// than those identities is analyzed as though it began with `import "<identity>"`.
     ///
-    /// <para>An identity the workspace does not contain fails the build with a diagnostic naming
-    /// it, rather than silently putting nothing in scope.</para>
+    /// <para>Each identity names a workspace module or the logical root of a library this context
+    /// can see, which then behaves as a written wildcard import of that library. An identity that
+    /// names neither fails the build with a diagnostic naming it, rather than silently putting
+    /// nothing in scope, and one that names both a workspace module and a visible library root is
+    /// refused as ambiguous.</para>
     pub fn with_implicit_imports<I, S>(mut self, identities: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -369,7 +647,8 @@ impl ProgramBuildContext {
         self
     }
 
-    /// The workspace identities every other module implicitly wildcard-imports.
+    /// The identities, workspace modules or library roots, every other module implicitly
+    /// wildcard-imports.
     pub fn implicit_imports(&self) -> &[String] {
         &self.implicit_imports
     }
@@ -393,6 +672,17 @@ impl ProgramBuildContext {
             .into_iter()
             .filter_map(|root| self.registry.get_loaded_library(root))
             .collect()
+    }
+
+    /// Whether a visible library's root is spelled exactly `identity`, as an in-memory library's
+    /// logical root is. Unlike [`visible_library_by_logical_identity`](Self::visible_library_by_logical_identity)
+    /// this ignores suffix matches, so a directory library whose path merely ends in `identity` is
+    /// not a claim on the name.
+    fn has_visible_library_root(&self, identity: &str) -> bool {
+        self.visible_roots.iter().any(|root| {
+            logical_identity_for_path(root).as_deref() == Some(identity)
+                && self.registry.get_loaded_library(root).is_some()
+        })
     }
 
     fn visible_library_by_logical_identity(&self, identity: &str) -> LogicalLibraryResolution {
@@ -517,6 +807,36 @@ impl LogicalProgramAnalysis {
         }
         diagnostics
     }
+
+    /// The diagnostics a caller who submitted the workspace is answered with: the build request's
+    /// own, every workspace module's, and every linked library's, except the warnings, info and
+    /// hints of a library loaded from memory.
+    ///
+    /// <para>An in-memory library's warnings are about text the workspace's author cannot edit,
+    /// and they would repeat in every workspace built against the library, so they are left out; a
+    /// host sees them once, when the load answers with them. Its errors stay, since they fail the
+    /// build. A directory library's diagnostics all stay, as they always have: its load answers
+    /// with no warnings, so validation is still where its callers see them.</para>
+    fn workspace_diagnostics(&self) -> Vec<Diagnostic> {
+        let mut diagnostics = self.program_diagnostics.clone();
+        for module in &self.modules {
+            diagnostics.extend(module.diagnostics.iter().cloned());
+        }
+        for library in &self.libraries {
+            let loaded_from_memory = is_logical_library_path(&library.root_path)
+                && !Arc::ptr_eq(library, prelude_library());
+            diagnostics.extend(
+                library
+                    .diagnostics
+                    .iter()
+                    .filter(|diagnostic| {
+                        !loaded_from_memory || diagnostic.severity() == Severity::Error
+                    })
+                    .cloned(),
+            );
+        }
+        diagnostics
+    }
 }
 
 /// Builds a file-preserving library artifact from a local directory.
@@ -542,7 +862,7 @@ pub fn validate_workspace(
     };
 
     let analysis = analyze_logical_module_graph(&graph, build_context);
-    diagnostics_to_api_with_sources(&analysis.diagnostics(), "", &analysis.source_map)
+    diagnostics_to_api_with_sources(&analysis.workspace_diagnostics(), "", &analysis.source_map)
 }
 
 /// Analyzes every module of a logical workspace and returns their analysis artifacts.
@@ -597,13 +917,16 @@ pub fn build_workspace_program_artifact(
         return Err(diagnostics_to_api(&[diagnostic], ""));
     }
 
-    let artifact = build_program_artifact_from_graph(&graph, &entry_identity, build_context);
-    if has_error_diagnostics(&artifact.diagnostics) {
-        let source_map = graph.source_map();
+    // A failed build answers with exactly what validation of the same input answers with: the same
+    // diagnostics, rendered against the same sources, library modules' and the prelude's included.
+    let analysis = analyze_logical_module_graph(&graph, build_context);
+    let diagnostics = analysis.workspace_diagnostics();
+    let artifact = program_artifact_from_analysis(&graph, &entry_identity, build_context, analysis);
+    if has_error_diagnostics(&diagnostics) {
         return Err(diagnostics_to_api_with_sources(
-            &artifact.diagnostics,
+            &diagnostics,
             "",
-            &source_map,
+            &artifact.source_map,
         ));
     }
 
@@ -618,6 +941,7 @@ fn build_library_artifact_with_registry(
     let source_files = read_library_source_files(&root_path)?;
     Ok(build_library_artifact_from_sources(
         root_path,
+        None,
         source_files,
         registry,
     ))
@@ -626,14 +950,17 @@ fn build_library_artifact_with_registry(
 /// Builds a library artifact from sources already in memory.
 ///
 /// <para>Split from [`build_library_artifact_with_registry`] so the prelude, whose source the
-/// compiler carries rather than reads, is built by the same code as a library on disk.</para>
+/// compiler carries rather than reads, and a library a host loads from memory are built by the
+/// same code as a library on disk.</para>
 fn build_library_artifact_from_sources(
     root_path: PathBuf,
+    version: Option<String>,
     source_files: Vec<LibrarySourceFile>,
     registry: &LibraryRegistry,
 ) -> LibraryArtifact {
     let mut hasher = DefaultHasher::new();
     root_path.hash(&mut hasher);
+    version.hash(&mut hasher);
 
     let mut dependency_roots = FxHashSet::default();
     for source_file in &source_files {
@@ -725,6 +1052,7 @@ fn build_library_artifact_from_sources(
 
     LibraryArtifact {
         root_path,
+        version,
         modules,
         exports,
         interface_items,
@@ -772,6 +1100,7 @@ fn build_prelude_library() -> LibraryArtifact {
     // name, and every consumer that keys a library by its root gets a stable, reserved key.
     build_library_artifact_from_sources(
         PathBuf::from(&file_name),
+        None,
         vec![source_file],
         &LibraryRegistry::new(),
     )
@@ -862,6 +1191,221 @@ fn apply_prelude_bindings(module: &mut PreparedModule) {
             });
         }
     }
+}
+
+/// Checks an in-memory library's root and module identities and parses its modules.
+fn prepare_in_memory_library(
+    library: &NxLibrarySource,
+) -> Result<PreparedInMemoryLibrary, Box<Diagnostic>> {
+    let root = normalize_workspace_identity(&library.root).map_err(|error| {
+        Diagnostic::error("library-root-invalid")
+            .with_message(format!(
+                "Library root '{}' is invalid: {}",
+                library.root, error
+            ))
+            .build()
+    })?;
+
+    let mut identities = FxHashSet::default();
+    let mut modules = Vec::with_capacity(library.modules.len());
+    for module in &library.modules {
+        let identity = normalize_workspace_identity(&module.identity).map_err(|error| {
+            Diagnostic::error("library-module-identity-invalid")
+                .with_message(format!(
+                    "Module identity '{}' of library '{}' is invalid: {}",
+                    module.identity, root, error
+                ))
+                .build()
+        })?;
+        if !identities.insert(identity.clone()) {
+            return Err(Diagnostic::error("library-module-duplicate")
+                .with_message(format!(
+                    "Library '{}' holds more than one module with identity '{}'",
+                    root, identity
+                ))
+                .build()
+                .into());
+        }
+        modules.push((identity, module.source.clone()));
+    }
+    // A directory load reads its files in path order; an in-memory load analyzes in the same order
+    // whatever order the host listed the modules in.
+    modules.sort_by(|lhs, rhs| lhs.0.cmp(&rhs.0));
+
+    let source_files = modules
+        .into_iter()
+        .map(|(identity, source)| {
+            let file_name = format!("{root}/{identity}");
+            let parse_result = syntax_parse_str(&source, &file_name);
+            let source_id = SourceId::new(parse_result.source_id.as_u32());
+            let diagnostics = normalize_diagnostics_file_name(parse_result.errors, &file_name);
+            let preserved_module = parse_result.tree.map(|tree| lower(tree.root(), source_id));
+            LibrarySourceFile {
+                path: PathBuf::from(&file_name),
+                file_name,
+                source: source.to_string(),
+                source_id,
+                diagnostics,
+                preserved_module,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let root = PathBuf::from(root);
+    let mut dependency_roots = FxHashSet::default();
+    for source_file in &source_files {
+        if let Some(module) = source_file.preserved_module.as_ref() {
+            collect_library_dependencies(&module.imports, &source_file.path, &mut dependency_roots);
+        }
+    }
+    if dependency_roots.contains(&root) {
+        return Err(Diagnostic::error("library-dependency-cycle")
+            .with_message(circular_library_dependency_message(&[
+                root.clone(),
+                root.clone(),
+            ]))
+            .build()
+            .into());
+    }
+    let mut dependency_roots = dependency_roots.into_iter().collect::<Vec<_>>();
+    dependency_roots.sort();
+
+    Ok(PreparedInMemoryLibrary {
+        root,
+        version: library
+            .version
+            .clone()
+            .filter(|version| !version.is_empty()),
+        source_files,
+        dependency_roots,
+    })
+}
+
+/// The order to load a batch of in-memory libraries in: every library after the libraries of the
+/// batch it imports, and otherwise in the order given.
+///
+/// <para>The same root given twice with the same sources is loaded once; given with different
+/// sources it is a conflict. A cycle among the batch's libraries is refused naming its chain.</para>
+fn in_memory_load_order(
+    libraries: &[PreparedInMemoryLibrary],
+) -> Result<Vec<usize>, Box<Diagnostic>> {
+    let mut by_root = FxHashMap::<&Path, usize>::default();
+    for (index, library) in libraries.iter().enumerate() {
+        match by_root.get(library.root.as_path()) {
+            Some(&first) => {
+                let first = &libraries[first];
+                let same =
+                    first.version == library.version
+                        && first.source_files.len() == library.source_files.len()
+                        && first.source_files.iter().zip(&library.source_files).all(
+                            |(lhs, rhs)| lhs.file_name == rhs.file_name && lhs.source == rhs.source,
+                        );
+                if !same {
+                    return Err(library_root_conflict_diagnostic(&library.root_identity()).into());
+                }
+            }
+            None => {
+                by_root.insert(library.root.as_path(), index);
+            }
+        }
+    }
+
+    fn visit(
+        index: usize,
+        libraries: &[PreparedInMemoryLibrary],
+        by_root: &FxHashMap<&Path, usize>,
+        done: &mut FxHashSet<usize>,
+        stack: &mut Vec<usize>,
+        order: &mut Vec<usize>,
+    ) -> Result<(), Box<Diagnostic>> {
+        if done.contains(&index) {
+            return Ok(());
+        }
+        if let Some(position) = stack.iter().position(|entry| *entry == index) {
+            let mut cycle = stack[position..]
+                .iter()
+                .map(|entry| libraries[*entry].root.clone())
+                .collect::<Vec<_>>();
+            cycle.push(libraries[index].root.clone());
+            return Err(Diagnostic::error("library-dependency-cycle")
+                .with_message(circular_library_dependency_message(&cycle))
+                .build()
+                .into());
+        }
+        stack.push(index);
+        for dependency in &libraries[index].dependency_roots {
+            if let Some(&dependency_index) = by_root.get(dependency.as_path()) {
+                visit(dependency_index, libraries, by_root, done, stack, order)?;
+            }
+        }
+        stack.pop();
+        done.insert(index);
+        order.push(index);
+        Ok(())
+    }
+
+    let mut done = FxHashSet::default();
+    let mut order = Vec::with_capacity(libraries.len());
+    for index in 0..libraries.len() {
+        let index = by_root[libraries[index].root.as_path()];
+        visit(
+            index,
+            libraries,
+            &by_root,
+            &mut done,
+            &mut Vec::new(),
+            &mut order,
+        )?;
+    }
+    Ok(order)
+}
+
+fn library_root_conflict_diagnostic(root: &str) -> Diagnostic {
+    Diagnostic::error("library-root-conflict")
+        .with_message(format!(
+            "Library '{}' is already loaded with different sources or version",
+            root
+        ))
+        .with_help("A loaded library root cannot change for the life of its registry; load the new sources into a new registry.")
+        .build()
+}
+
+/// One diagnostic per import in `library` that names the unloaded root `missing`, labelled at the
+/// import.
+fn missing_library_dependency_diagnostics(
+    library: &PreparedInMemoryLibrary,
+    missing: &Path,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    for source_file in &library.source_files {
+        let Some(module) = source_file.preserved_module.as_ref() else {
+            continue;
+        };
+        for import in &module.imports {
+            if library_import_root(&source_file.path, &import.library_path).as_deref()
+                != Some(missing)
+            {
+                continue;
+            }
+            diagnostics.push(
+                Diagnostic::error("library-dependency-missing")
+                    .with_message(format!(
+                        "Library '{}' imports '{}', but no library is loaded at '{}'",
+                        library.root.display(),
+                        import.library_path,
+                        missing.display()
+                    ))
+                    .with_label(Label::primary(&source_file.file_name, import.span))
+                    .with_help(format!(
+                        "Load '{}' into the registry before '{}', or load both in one batch.",
+                        missing.display(),
+                        library.root.display()
+                    ))
+                    .build(),
+            );
+        }
+    }
+    diagnostics
 }
 
 fn discover_library_dependency_roots(root_path: &Path) -> io::Result<Vec<PathBuf>> {
@@ -1071,7 +1615,7 @@ fn analyze_logical_module_graph(
         nx_hir::PRELUDE_MODULE_IDENTITY.to_string(),
         Arc::<str>::from(PRELUDE_SOURCE),
     );
-    let program_diagnostics = unknown_implicit_import_diagnostics(graph, build_context);
+    let mut program_diagnostics = unknown_implicit_import_diagnostics(graph, build_context);
     let mut modules = Vec::with_capacity(source_files.len());
     let mut libraries_by_root = FxHashMap::<PathBuf, Arc<LibraryArtifact>>::default();
 
@@ -1114,6 +1658,20 @@ fn analyze_logical_module_graph(
     // library — the resolved program, codegen, the language service's visible libraries — reads it
     // too, and its fingerprint is part of the program's.
     libraries.insert(0, Arc::clone(prelude_library()));
+    // A library module's text is part of the program's sources like a workspace module's, so its
+    // diagnostics render against it and the NX IR image emitted for it fingerprints and carries it.
+    for library in &libraries {
+        for (identity, source) in &library.sources {
+            source_map
+                .entry(identity.clone())
+                .or_insert_with(|| source.clone());
+        }
+    }
+    program_diagnostics.extend(library_namespace_diagnostics(
+        graph,
+        build_context,
+        &libraries,
+    ));
 
     LogicalProgramAnalysis {
         modules,
@@ -1121,6 +1679,73 @@ fn analyze_logical_module_graph(
         source_map,
         program_diagnostics,
     }
+}
+
+/// Reports every workspace module whose identity lies inside the root of a library the program can
+/// see or links against.
+///
+/// <para>An in-memory library's modules are named `<root>/<module>`, which is also a valid
+/// workspace identity. A workspace module under that root would share its identity, or the
+/// namespace the library's future modules are named in, with the library: the program would hold
+/// two modules under one identity, and the library's own references could resolve to the
+/// workspace's declaration. A library root therefore reserves its whole namespace, and a workspace
+/// that claims part of it fails the build. A directory library's root is an absolute path, which no
+/// workspace identity can be, so only logical roots (the prelude's included) can collide.</para>
+fn library_namespace_diagnostics(
+    graph: &LogicalModuleGraph,
+    build_context: &ProgramBuildContext,
+    libraries: &[Arc<LibraryArtifact>],
+) -> Vec<Diagnostic> {
+    let mut roots = build_context
+        .visible_roots
+        .iter()
+        .chain(libraries.iter().map(|library| &library.root_path))
+        .filter(|root| is_logical_library_path(root))
+        .map(|root| root.to_string_lossy().replace('\\', "/"))
+        .collect::<Vec<_>>();
+    roots.sort();
+    roots.dedup();
+    let library_modules = libraries
+        .iter()
+        .flat_map(|library| {
+            library
+                .modules
+                .iter()
+                .map(move |module| (module.file_name.as_str(), library))
+        })
+        .collect::<FxHashMap<_, _>>();
+
+    graph
+        .modules()
+        .iter()
+        .filter_map(|module| {
+            let identity = module.identity.as_str();
+            let root = library_modules
+                .get(identity)
+                .map(|library| library.root_path.to_string_lossy().replace('\\', "/"))
+                .or_else(|| {
+                    roots
+                        .iter()
+                        .find(|root| {
+                            identity
+                                .strip_prefix(root.as_str())
+                                .is_some_and(|rest| rest.starts_with('/'))
+                        })
+                        .cloned()
+                })?;
+            Some(
+                Diagnostic::error("workspace-module-in-library-root")
+                    .with_message(format!(
+                        "Workspace module '{}' lies inside the root of loaded library '{}'",
+                        identity, root
+                    ))
+                    .with_help(
+                        "A library's root names its modules; move the workspace module outside it.",
+                    )
+                    .build(),
+            )
+        })
+        .collect()
 }
 
 fn parse_logical_source_files(graph: &LogicalModuleGraph) -> Vec<GraphSourceFile> {
@@ -1283,11 +1908,15 @@ fn prepare_logical_source_file(
     }
 }
 
-/// Reports every implicitly imported identity the workspace does not hold.
+/// Reports every implicitly imported identity that names neither a workspace module nor a loaded
+/// library root, or names both.
 ///
-/// An implicit import is the host's claim about what the workspace contains; a claim the workspace
-/// does not bear out is a fault in the build request, not in any module's text, so it is reported
-/// with no file or span and fails the build.
+/// An implicit import is the host's claim about what the workspace and its build context contain; a
+/// claim they do not bear out is a fault in the build request, not in any module's text, so it is
+/// reported with no file or span and fails the build. An identity is looked up among the workspace's
+/// modules and the context's visible library roots exactly as a written import of it would be, and
+/// one that is both a workspace module and exactly a visible library's root is refused rather than
+/// silently resolved to the workspace module.
 fn unknown_implicit_import_diagnostics(
     graph: &LogicalModuleGraph,
     build_context: &ProgramBuildContext,
@@ -1295,14 +1924,40 @@ fn unknown_implicit_import_diagnostics(
     build_context
         .implicit_imports()
         .iter()
-        .filter(|identity| !graph.contains_identity(identity))
-        .map(|identity| {
-            Diagnostic::error("implicit-import-not-found")
-                .with_message(format!(
-                    "Implicitly imported module '{}' was not found in the workspace",
-                    identity
-                ))
-                .build()
+        .filter_map(|identity| {
+            if graph.contains_identity(identity) {
+                // Only a library whose root is spelled exactly this identity competes with the
+                // workspace module. A directory library whose path merely ends in it is no claim on
+                // the name, and a written import of the identity resolves to the workspace module.
+                return build_context.has_visible_library_root(identity).then(|| {
+                    Diagnostic::error("implicit-import-ambiguous")
+                        .with_message(format!(
+                            "Implicitly imported '{}' names both a workspace module and a loaded library",
+                            identity
+                        ))
+                        .build()
+                });
+            }
+            match build_context.visible_library_by_logical_identity(identity) {
+                LogicalLibraryResolution::Found(..) => None,
+                LogicalLibraryResolution::Ambiguous(roots) => Some(
+                    Diagnostic::error("implicit-import-ambiguous")
+                        .with_message(format!(
+                            "Implicitly imported '{}' matches multiple visible library roots: {}",
+                            identity,
+                            format_library_roots(&roots)
+                        ))
+                        .build(),
+                ),
+                LogicalLibraryResolution::Missing => Some(
+                    Diagnostic::error("implicit-import-not-found")
+                        .with_message(format!(
+                            "Implicitly imported module '{}' was not found in the workspace or its loaded libraries",
+                            identity
+                        ))
+                        .build(),
+                ),
+            }
         })
         .collect()
 }
@@ -1449,6 +2104,16 @@ fn apply_graph_imports(
                         &import,
                         &mut imported_visible_names,
                     );
+                } else if let LogicalLibraryResolution::Found(_, library) =
+                    build_context.visible_library_by_logical_identity(&target_identity)
+                {
+                    add_library_wildcard_bindings(
+                        module,
+                        &library,
+                        None,
+                        import.span,
+                        &mut imported_visible_names,
+                    );
                 }
                 continue;
             }
@@ -1487,29 +2152,13 @@ fn apply_graph_imports(
 
                 match &import.kind {
                     ImportKind::Wildcard { alias } => {
-                        let mut export_names =
-                            library.exported_items.keys().cloned().collect::<Vec<_>>();
-                        export_names.sort();
-
-                        for export_name in export_names {
-                            let visible_name = alias
-                                .as_ref()
-                                .map(|prefix| format!("{}.{}", prefix.as_str(), export_name))
-                                .unwrap_or_else(|| export_name.clone());
-
-                            let Some(item_indices) = library.exported_items.get(&export_name)
-                            else {
-                                continue;
-                            };
-                            add_imported_interface_bindings(
-                                module,
-                                &visible_name,
-                                import.span,
-                                &library,
-                                item_indices,
-                                &mut imported_visible_names,
-                            );
-                        }
+                        add_library_wildcard_bindings(
+                            module,
+                            &library,
+                            alias.as_ref(),
+                            import.span,
+                            &mut imported_visible_names,
+                        );
                     }
                     ImportKind::Selective { entries } => {
                         for entry in entries {
@@ -1583,6 +2232,36 @@ fn apply_graph_imports(
     }
 
     resolved_imports
+}
+
+/// Binds every export of `library` in `module`, each under `alias.` when the import has an alias.
+fn add_library_wildcard_bindings(
+    module: &mut PreparedModule,
+    library: &LibraryArtifact,
+    alias: Option<&Name>,
+    span: TextSpan,
+    imported_visible_names: &mut FxHashMap<(PreparedNamespace, String), String>,
+) {
+    let mut export_names = library.exported_items.keys().cloned().collect::<Vec<_>>();
+    export_names.sort();
+
+    for export_name in export_names {
+        let visible_name = alias
+            .map(|prefix| format!("{}.{}", prefix.as_str(), export_name))
+            .unwrap_or_else(|| export_name.clone());
+
+        let Some(item_indices) = library.exported_items.get(&export_name) else {
+            continue;
+        };
+        add_imported_interface_bindings(
+            module,
+            &visible_name,
+            span,
+            library,
+            item_indices,
+            imported_visible_names,
+        );
+    }
 }
 
 fn add_workspace_import_bindings(
@@ -1758,6 +2437,15 @@ fn build_program_artifact_from_graph(
     build_context: &ProgramBuildContext,
 ) -> ProgramArtifact {
     let analysis = analyze_logical_module_graph(graph, build_context);
+    program_artifact_from_analysis(graph, entry_identity, build_context, analysis)
+}
+
+fn program_artifact_from_analysis(
+    graph: &LogicalModuleGraph,
+    entry_identity: &str,
+    build_context: &ProgramBuildContext,
+    analysis: LogicalProgramAnalysis,
+) -> ProgramArtifact {
     let mut hasher = DefaultHasher::new();
     entry_identity.hash(&mut hasher);
     for module in graph.modules() {
@@ -1779,6 +2467,7 @@ fn build_program_artifact_from_graph(
     let diagnostics = analysis.diagnostics();
     let root_modules = analysis.modules;
     let libraries = analysis.libraries;
+    let version_map = program_version_map(graph, &libraries);
     let source_map = analysis.source_map;
 
     let fingerprint = hasher.finish();
@@ -1794,8 +2483,26 @@ fn build_program_artifact_from_graph(
         fingerprint,
         resolved_program,
         source_map,
-        version_map: graph.version_map(),
+        version_map,
     }
+}
+
+/// The version of every module of the program that has one: the workspace modules' own, and each
+/// library module's library's.
+fn program_version_map(
+    graph: &LogicalModuleGraph,
+    libraries: &[Arc<LibraryArtifact>],
+) -> FxHashMap<String, String> {
+    let mut versions = graph.version_map();
+    for library in libraries {
+        let Some(version) = library.version.as_ref() else {
+            continue;
+        };
+        for module in &library.modules {
+            versions.insert(module.file_name.clone(), version.clone());
+        }
+    }
+    versions
 }
 
 fn parse_failure_artifact(
@@ -1833,7 +2540,14 @@ fn apply_build_context_imports(
     build_context: &ProgramBuildContext,
     source: &str,
 ) -> Vec<ResolvedBuildContextImport> {
-    let root_path = match fs::canonicalize(root_path) {
+    // A module of an in-memory library is named by its logical identity, and its imports resolve
+    // against the logical roots loaded beside it: there is no directory to canonicalize or probe.
+    let logical = is_logical_library_path(root_path);
+    let root_path = match if logical {
+        Ok(root_path.to_path_buf())
+    } else {
+        fs::canonicalize(root_path)
+    } {
         Ok(root_path) => root_path,
         Err(error) => {
             if module.raw_module().imports.iter().any(|import| {
@@ -1880,21 +2594,37 @@ fn apply_build_context_imports(
             continue;
         }
 
-        let normalized_root = match normalize_local_library_path(&root_path, &import.library_path) {
-            Ok(path) => path,
-            Err(_) => {
-                module.add_diagnostic(LoweringDiagnostic {
-                    message: format!(
-                        "Local library import '{}' could not be resolved to a directory",
-                        import.library_path
-                    ),
-                    span: import.span,
-                });
-                continue;
+        let normalized_root = if logical {
+            match normalize_logical_library_path(&root_path, &import.library_path) {
+                Ok(path) => path,
+                Err(error) => {
+                    module.add_diagnostic(LoweringDiagnostic {
+                        message: format!(
+                            "Library import '{}' is invalid: {}",
+                            import.library_path, error
+                        ),
+                        span: import.span,
+                    });
+                    continue;
+                }
+            }
+        } else {
+            match normalize_local_library_path(&root_path, &import.library_path) {
+                Ok(path) => path,
+                Err(_) => {
+                    module.add_diagnostic(LoweringDiagnostic {
+                        message: format!(
+                            "Local library import '{}' could not be resolved to a directory",
+                            import.library_path
+                        ),
+                        span: import.span,
+                    });
+                    continue;
+                }
             }
         };
 
-        if !normalized_root.is_dir() {
+        if !logical && !normalized_root.is_dir() {
             module.add_diagnostic(LoweringDiagnostic {
                 message: format!(
                     "Local library import '{}' must resolve to a directory",
@@ -1941,27 +2671,13 @@ fn apply_build_context_imports(
 
         match &import.kind {
             ImportKind::Wildcard { alias } => {
-                let mut export_names = library.exported_items.keys().cloned().collect::<Vec<_>>();
-                export_names.sort();
-
-                for export_name in export_names {
-                    let visible_name = alias
-                        .as_ref()
-                        .map(|prefix| format!("{}.{}", prefix.as_str(), export_name))
-                        .unwrap_or_else(|| export_name.clone());
-
-                    let Some(item_indices) = library.exported_items.get(&export_name) else {
-                        continue;
-                    };
-                    add_imported_interface_bindings(
-                        module,
-                        &visible_name,
-                        import.span,
-                        &library,
-                        item_indices,
-                        &mut imported_visible_names,
-                    );
-                }
+                add_library_wildcard_bindings(
+                    module,
+                    &library,
+                    alias.as_ref(),
+                    import.span,
+                    &mut imported_visible_names,
+                );
             }
             ImportKind::Selective { entries } => {
                 for entry in entries {
@@ -2825,7 +3541,7 @@ fn collect_library_dependencies(
     dependency_roots: &mut FxHashSet<PathBuf>,
 ) {
     for import in imports {
-        let Some(root) = normalize_supported_library_path(source_file, &import.library_path) else {
+        let Some(root) = library_import_root(source_file, &import.library_path) else {
             continue;
         };
         dependency_roots.insert(root);
@@ -2854,6 +3570,36 @@ fn normalize_supported_library_path(base_file: &Path, library_path: &str) -> Opt
     }
 
     normalize_local_library_path(base_file, library_path).ok()
+}
+
+/// The root a library module's import names: a logical root for a module of an in-memory library,
+/// a canonical directory for a module read from disk.
+fn library_import_root(base_file: &Path, library_path: &str) -> Option<PathBuf> {
+    if is_http_library_path(library_path) || is_git_library_path(library_path) {
+        return None;
+    }
+
+    if is_logical_library_path(base_file) {
+        return normalize_logical_library_path(base_file, library_path).ok();
+    }
+
+    normalize_local_library_path(base_file, library_path).ok()
+}
+
+/// Whether `path` names a module of an in-memory library. Its logical identity is always relative,
+/// where a module read from disk is named by its canonical, absolute path.
+fn is_logical_library_path(path: &Path) -> bool {
+    !path.is_absolute()
+}
+
+/// Resolves `library_path` against the logical module `base_file` with the workspace identity rules:
+/// `.` and `..` are normalized, and a path that climbs above the logical root is refused.
+fn normalize_logical_library_path(
+    base_file: &Path,
+    library_path: &str,
+) -> Result<PathBuf, crate::workspace::WorkspaceIdentityError> {
+    let base_file = base_file.to_string_lossy().replace('\\', "/");
+    normalize_workspace_import_identity(&base_file, library_path).map(PathBuf::from)
 }
 
 fn is_http_library_path(path: &str) -> bool {

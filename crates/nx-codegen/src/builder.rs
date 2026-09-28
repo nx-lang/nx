@@ -274,19 +274,18 @@ fn build_module(
         return None;
     };
 
-    // The prelude's image is the one a runtime ships, so it carries every declaration a using
-    // image could reference, derived ones included, rather than only those this program reached.
-    let is_prelude = matches!(
-        &module.source,
-        ResolvedModuleSource::Library { module_path, .. }
-            if module_path == std::path::Path::new(nx_hir::PRELUDE_MODULE_IDENTITY)
-    );
+    // A library module's image — the prelude's among them — is shared by every program built
+    // against the library: a runtime prepares it once and links many entry images to it. So it
+    // carries every declaration a using image could reference, derived ones included, rather than
+    // only those this program reached, which is what keeps it the same image whichever program
+    // emitted it.
+    let is_library = matches!(&module.source, ResolvedModuleSource::Library { .. });
 
     let mut declarations = Vec::new();
     for (index, item) in lowered_module.items().iter().enumerate() {
         let definition_id = LocalDefinitionId::new(index as u32);
         if is_derived_item(item)
-            && !is_prelude
+            && !is_library
             && !referenced_updates.contains(&(module.id.as_u32(), definition_id))
         {
             continue;

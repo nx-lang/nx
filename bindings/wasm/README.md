@@ -9,14 +9,16 @@ JavaScript only needs to *execute* an already persisted NX IR image. It also eva
 `root()` to NX text, the form `nxlang run` prints, for showing a value to a person. Filesystem-backed
 workflows — library registries loaded from disk, workspace directories, `root()` evaluation to JSON
 values — belong to [`@nx-lang/sdk-node`](../node/README.md); this package sees only the source text
-it is handed.
+it is handed, including the sources of the libraries a host loads into a registry.
 
 ## Scope
 
 | Provided                                                   | Not provided                                 |
 | ---------------------------------------------------------- | -------------------------------------------- |
-| Build a program artifact from in-memory modules            | Library registries and workspace directories |
-| Emit one NX IR artifact per module, with metadata          | Evaluating NX to JSON values (use the IR runtime) |
+| Build a program artifact from in-memory modules            | Libraries and workspaces read from directories |
+| Library registries loaded from in-memory modules           | Evaluating NX to JSON values (use the IR runtime) |
+| Validate a workspace, answering diagnostics as data        |                                              |
+| Emit one NX IR artifact per module, library modules too    |                                              |
 | Evaluate `root` to annotated NX text                       |                                              |
 | Hover, completions, diagnostics, document symbols          | Threads, streaming, incremental analysis     |
 | An in-process `NxLanguageService` over host documents      |                                              |
@@ -152,6 +154,74 @@ without only in that section. The metadata beside each artifact names the module
 the schema and ABI, the required features, and the module's function and component entrypoints by
 name.
 
+## Libraries
+
+A server that compiles many tenants' NX against the same libraries loads them once per host into a
+registry, then builds and validates every tenant's workspace against a build context from it. A
+library is a logical root, an optional version, and its modules named relative to the root; one
+library imports another by a relative path to its root, exactly as a directory library would:
+
+```ts
+const registry = host.createLibraryRegistry();
+const libraryWarnings = registry.loadLibraries([
+  { root: "libraries/chat-link", modules: [{ identity: "ChatLinkConfig.nx", source: chatLinkSource }] },
+  { root: "libraries/question-flow", version: "3", modules: questionFlowModules }
+]);
+const context = registry.createBuildContext({
+  implicitImports: ["libraries/chat-link", "libraries/question-flow"]
+});
+
+const diagnostics = host.validateWorkspace({ modules: tenantModules, buildContext: context });
+const artifact = host.buildWorkspaceArtifact({
+  modules: tenantModules,
+  entry: "chat-link.nx",
+  buildContext: context
+});
+```
+
+`loadLibraries` loads a list in dependency order, whatever order it is given in; `loadLibrary`
+loads one whose dependencies are already loaded. A library whose analysis reports errors, or that
+imports a root nothing loaded, is not retained, and the call throws `NxEvaluationError` with the
+diagnostics. A library that loads answers with its own warnings, info and hints, rendered against
+its source; this is the one place a host sees them, since validation and builds of a workspace leave
+them out. A root is immutable for the registry's life: loading it again with the same modules and
+version does nothing, and loading it with different ones throws naming the root. A build context
+holds the libraries it sees, so it stays usable after its registry is disposed; one created with
+`visibleRoots` sees only those libraries and what they depend on, and a visible root that is not a
+loaded library throws naming it.
+
+An implicit import may name a loaded library's root as well as a workspace module, with the meaning
+of a written wildcard import of the library, so tenant source uses the libraries' declarations with
+no import line. An identity that is both a workspace module and exactly a library's root is refused
+as ambiguous. `implicitImports` given to a build or validation replaces the context's own, so
+`implicitImports: []` builds without them.
+
+A library's root names its modules, so it reserves its whole namespace: a workspace module whose
+identity lies under a visible or linked library's root, such as `libraries/question-flow/Step.nx`,
+fails validation and the build with `workspace-module-in-library-root` rather than standing in for
+the library's module.
+
+`validateWorkspace` analyzes a workspace without building it and answers with every diagnostic of
+the submitted modules — errors, warnings, info and hints — as data, never throwing for NX
+diagnostics. An in-memory library's own warnings are not among them; its errors, which fail a
+build, are. It is
+what an editor or an authoring API reports to the person writing the source; a build then throws
+only for what validation already said, with the same diagnostics.
+
+Every module of a library a program links is a module of the program: `generateNxIr({ modules:
+[] })` emits an image for each, named `<root>/<module>` (for example
+`libraries/question-flow/QuestionFlow.nx`) and recording the library's version. A library module's
+image is the same bytes whichever tenant's program emitted it — it carries every declaration a using
+image could reach, derived ones included — so a runtime prepares it once with `@nx-lang/ir-runtime`
+and links every tenant's entry image against it:
+
+```ts
+const prepared = new Map(libraryImages.map((image) => [image.identity, prepareNxIrModule(image.bytes)]));
+const program = linkNxIrProgram(prepareNxIrModule(entry.bytes), {
+  resolve: (identity) => prepared.get(identity)
+});
+```
+
 ## Evaluating root to NX text
 
 `artifact.evaluateNx()` runs the entry module's `root` and returns `{ text, nodes }`. `text` is the
@@ -246,8 +316,8 @@ editor stays live.
 
 | Error                      | Thrown when                                                          |
 | -------------------------- | -------------------------------------------------------------------- |
-| `NxEvaluationError`        | NX reports diagnostics: source that does not compile, a `root` that is missing, fails or has no NX spelling, an unparseable snapshot URI, duplicate identities. Carries `diagnostics`. |
-| `NxDisposedResourceError`  | An operation is attempted on a disposed artifact, snapshot or host. Disposing twice is allowed. |
+| `NxEvaluationError`        | NX reports diagnostics: source that does not compile, a `root` that is missing, fails or has no NX spelling, an unparseable snapshot URI, duplicate identities, a library that cannot be loaded. Carries `diagnostics`. |
+| `NxDisposedResourceError`  | An operation is attempted on a disposed artifact, snapshot, registry, build context or host. Disposing twice is allowed. |
 | `NxHostCrashedError`       | The module trapped, and on every later call to that host. Carries `operation`. |
 | `NxWasmError`              | The module's ABI version is not the loader's, or it answered in a shape the loader cannot read. |
 
@@ -256,14 +326,18 @@ The names and shapes match `@nx-lang/sdk-node`, so code can move between the two
 ## ABI
 
 The module exports `nx_wasm_abi_version`, which the loader checks before any other call and refuses
-when it disagrees, naming both versions. The current version is 3, which added
-`nx_wasm_program_evaluate_nx`. Arguments cross as UTF-8 JSON in buffers from
+when it disagrees, naming both versions. The current version is 4, which added library registries
+(`nx_wasm_registry_new`, `nx_wasm_registry_load`, `nx_wasm_registry_free`), build contexts
+(`nx_wasm_build_context_new`, `nx_wasm_build_context_free`) and `nx_wasm_workspace_validate`, and
+gave `nx_wasm_workspace_build` a build-context handle argument (null for none). Arguments cross as
+UTF-8 JSON in buffers from
 `nx_wasm_alloc`, or as an image's bytes for `nx_wasm_ir_explain`; every operation answers with a
 pointer to a `{ status, ptr, len }` record whose payload is UTF-8 JSON, except that
 `nx_wasm_program_nx_ir` answers with an NX IR bundle (a `u32` header length, a JSON header
 `[{ identity, metadata, offset, length }]`, padding to four bytes, then the images), released
-through `nx_wasm_result_free` before the call returns. Handles to artifacts and snapshots are
-opaque to the loader.
+through `nx_wasm_result_free` before the call returns. Handles to artifacts, snapshots, registries
+and build contexts are opaque to the loader, and a build context is refused by any host but the one
+that created it.
 
 The Rust side is `bindings/wasm/native` (crate `nx-sdk-wasm-native`), over `nx-api`, `nx-codegen` and
 `nx-language-service`. Its NX IR and diagnostic payloads are the ones the Node binding serializes, and

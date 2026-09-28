@@ -65,4 +65,39 @@ describe("a trapped host", () => {
     expect(() => snapshot.documentSymbols("nx://demo/input.nx")).toThrowError(NxHostCrashedError);
     expect(() => snapshot.dispose()).not.toThrow();
   });
+
+  it("invalidates its registries and build contexts, and a fresh host loads the libraries again", () => {
+    const library = {
+      root: "libraries/question-flow",
+      modules: [{ identity: "Step.nx", source: "export type Step = { id:string }" }]
+    };
+    const host = createNxHost(nxDebugTrapModule);
+    const registry = host.createLibraryRegistry();
+    registry.loadLibrary(library);
+    const context = registry.createBuildContext({ implicitImports: ["libraries/question-flow"] });
+    const workspace = {
+      modules: [{ identity: "main.nx", source: 'let root() = <Step id="a" />' }],
+      buildContext: context
+    };
+    expect(host.validateWorkspace(workspace)).toEqual([]);
+
+    expect(() => trap(host)).toThrowError(NxHostCrashedError);
+    expect(() => registry.loadLibrary(library)).toThrowError(NxHostCrashedError);
+    expect(() => registry.createBuildContext()).toThrowError(NxHostCrashedError);
+    expect(() => host.validateWorkspace(workspace)).toThrowError(NxHostCrashedError);
+    expect(() => context.dispose()).not.toThrow();
+    expect(() => registry.dispose()).not.toThrow();
+
+    const replacement = createNxHost(nxDebugTrapModule);
+    try {
+      const fresh = replacement.createLibraryRegistry();
+      fresh.loadLibrary(library);
+      const freshContext = fresh.createBuildContext({ implicitImports: ["libraries/question-flow"] });
+      expect(replacement.validateWorkspace({ ...workspace, buildContext: freshContext })).toEqual([]);
+      freshContext.dispose();
+      fresh.dispose();
+    } finally {
+      replacement.dispose();
+    }
+  });
 });

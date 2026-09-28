@@ -239,6 +239,125 @@ let root(): int = { answer() }`;
     }
   });
 
+  it("loads libraries from memory and builds against them with implicit imports", () => {
+    const registry = new NxLibraryRegistry();
+    registry.loadLibraries([
+      {
+        root: "libraries/chat-link",
+        modules: [
+          {
+            identity: "ChatLinkConfig.nx",
+            source: 'import "../question-flow"\nexport type ChatLinkConfig = { title:string questionFlow:QuestionFlow }'
+          }
+        ]
+      },
+      {
+        root: "libraries/question-flow",
+        version: "3",
+        modules: [
+          { identity: "Step.nx", source: Buffer.from("export type Step = { id:string }") },
+          { identity: "QuestionFlow.nx", source: "export type QuestionFlow = { firstStep:Step }" }
+        ]
+      }
+    ]);
+    const buildContext = registry.createBuildContext();
+    const workspace = new NxWorkspace([
+      {
+        identity: "chat-link.nx",
+        source:
+          'let root() = <ChatLinkConfig title="Hi" questionFlow={<QuestionFlow firstStep={<Step id="a" />} />} />'
+      }
+    ]);
+    const implicitImports = ["libraries/chat-link", "libraries/question-flow"];
+
+    try {
+      expect(workspace.validate(buildContext, { implicitImports })).toEqual([]);
+      const artifact = NxProgramArtifact.buildWorkspace(workspace, {
+        buildContext,
+        entryIdentity: "chat-link.nx",
+        implicitImports
+      });
+      try {
+        expect(artifact.evaluateJson()).toMatchObject({ $type: "ChatLinkConfig", title: "Hi" });
+        const images = artifact.generateNxIr({ modules: [] });
+        expect(images.map((image) => image.identity)).toContain("libraries/question-flow/Step.nx");
+      } finally {
+        artifact.dispose();
+      }
+
+      const missing = captureEvaluationError(() =>
+        new NxLibraryRegistry().loadLibrary({
+          root: "libraries/chat-link",
+          modules: [{ identity: "ChatLinkConfig.nx", source: 'import "../question-flow"' }]
+        })
+      );
+      expect(missing.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+        "library-dependency-missing"
+      );
+    } finally {
+      workspace.dispose();
+      buildContext.dispose();
+      registry.dispose();
+    }
+  });
+
+  it("answers a library's warnings at load and leaves them out of workspace validation", () => {
+    const registry = new NxLibraryRegistry();
+    const warnings = registry.loadLibrary({
+      root: "libraries/warns",
+      modules: [
+        {
+          identity: "Warns.nx",
+          source: "export type Warns = { id:string }\nexport let f(n:int) = { n ?? 0 }"
+        }
+      ]
+    });
+    const buildContext = registry.createBuildContext();
+    const workspace = new NxWorkspace([
+      { identity: "tenant.nx", source: 'let root() = <Warns id="a" />' }
+    ]);
+
+    try {
+      expect(warnings.map((diagnostic) => diagnostic.code)).toEqual(["fallback-never-taken"]);
+      expect(warnings[0]!.labels[0]!.file).toBe("libraries/warns/Warns.nx");
+      expect(warnings[0]!.labels[0]!.span.startLine).toBe(2);
+      expect(workspace.validate(buildContext, { implicitImports: ["libraries/warns"] })).toEqual([]);
+    } finally {
+      workspace.dispose();
+      buildContext.dispose();
+      registry.dispose();
+    }
+  });
+
+  it("still reports a directory library's warnings through workspace validation", () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), "nx-sdk-node-"));
+    const uiDir = join(tempRoot, "ui");
+    mkdirSync(uiDir, { recursive: true });
+    writeFileSync(
+      join(uiDir, "Label.nx"),
+      "export type Label = { text:string }\nexport let f(n:int) = { n ?? 0 }"
+    );
+    const registry = new NxLibraryRegistry();
+    registry.loadFromDirectory(uiDir);
+    const buildContext = registry.createBuildContext();
+    const workspace = new NxWorkspace([
+      { identity: "input.nx", source: 'import "./ui"\nlet root() = <Label text="hi" />' }
+    ]);
+
+    try {
+      // Only an in-memory library's warnings move to its load; a directory load answers with
+      // nothing, so validation still reports them.
+      const diagnostics = workspace.validate(buildContext);
+      const warning = diagnostics.find((diagnostic) => diagnostic.code === "fallback-never-taken");
+      expect(warning?.labels[0]?.span.startLine).toBe(2);
+    } finally {
+      workspace.dispose();
+      buildContext.dispose();
+      registry.dispose();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("generates NX IR for directory-loaded cross-library type graphs", () => {
     const tempRoot = mkdtempSync(join(tmpdir(), "nx-sdk-node-"));
     const flowStepDir = join(tempRoot, "flow-step");

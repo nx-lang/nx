@@ -15,7 +15,8 @@ use crate::{
 };
 use nx_api::{
     build_program_artifact_from_source, build_workspace_program_artifact, LibraryRegistry,
-    NxWorkspace, NxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
+    NxLibraryModule, NxLibrarySource, NxWorkspace, NxWorkspaceModule, ProgramArtifact,
+    ProgramBuildContext,
 };
 use std::collections::BTreeMap;
 use std::fs;
@@ -2396,4 +2397,268 @@ fn iterating_a_range_does_not_change_the_schema_version() {
     assert_eq!(with_range.schema_version, NX_IR_SCHEMA_VERSION);
     assert_eq!(with_range.schema_version, without.schema_version);
     assert_eq!(NX_IR_SCHEMA_VERSION, 5);
+}
+
+// ------------------------------------------------------------------------------------------------
+// Libraries loaded from memory
+// ------------------------------------------------------------------------------------------------
+
+const QUESTION_FLOW_ROOT: &str = "libraries/question-flow";
+const CHAT_LINK_ROOT: &str = "libraries/chat-link";
+const STEP_SOURCE: &str = "export type Step = { id:string }";
+const QUESTION_FLOW_SOURCE: &str = "export type QuestionFlow = { firstStep:Step }";
+const CHAT_LINK_SOURCE: &str =
+    "import \"../question-flow\"\nexport type ChatLinkConfig = { title:string questionFlow:QuestionFlow }";
+const TENANT_SOURCE: &str = "let root() = <ChatLinkConfig title=\"Hi\" questionFlow={<QuestionFlow firstStep={<Step id=\"a\" />} />} />";
+
+fn in_memory_libraries(question_flow_version: Option<&str>) -> Vec<NxLibrarySource> {
+    let mut question_flow = NxLibrarySource::new(
+        QUESTION_FLOW_ROOT,
+        vec![
+            NxLibraryModule::new("Step.nx", STEP_SOURCE),
+            NxLibraryModule::new("QuestionFlow.nx", QUESTION_FLOW_SOURCE),
+        ],
+    );
+    if let Some(version) = question_flow_version {
+        question_flow = question_flow.with_version(version);
+    }
+    vec![
+        question_flow,
+        NxLibrarySource::new(
+            CHAT_LINK_ROOT,
+            vec![NxLibraryModule::new("ChatLinkConfig.nx", CHAT_LINK_SOURCE)],
+        ),
+    ]
+}
+
+fn in_memory_registry(question_flow_version: Option<&str>) -> LibraryRegistry {
+    let registry = LibraryRegistry::new();
+    registry
+        .load_libraries_from_sources(&in_memory_libraries(question_flow_version))
+        .unwrap_or_else(|diagnostics| panic!("libraries: {diagnostics:?}"));
+    registry
+}
+
+fn implicitly_importing(registry: &LibraryRegistry) -> ProgramBuildContext {
+    registry
+        .build_context()
+        .with_implicit_imports([CHAT_LINK_ROOT, QUESTION_FLOW_ROOT])
+}
+
+/// The images `emit_nx_ir` produces for every module of the program, keyed by identity.
+fn all_images(artifact: &ProgramArtifact) -> BTreeMap<String, Vec<u8>> {
+    emit_nx_ir(
+        artifact,
+        &NxIrEmitOptions {
+            modules: Some(Vec::new()),
+            ..NxIrEmitOptions::default()
+        },
+    )
+    .expect("nx ir")
+    .into_iter()
+    .map(|generated| (generated.identity, generated.bytes))
+    .collect()
+}
+
+#[test]
+fn a_library_module_image_is_the_same_whichever_program_emitted_it() {
+    let registry = in_memory_registry(Some("3"));
+    let context = implicitly_importing(&registry);
+    let plain = all_images(&artifact_from_workspace_with(
+        &[("chat-link.nx", TENANT_SOURCE)],
+        "chat-link.nx",
+        &context,
+    ));
+    // This program also reaches a derived declaration of the library, which a program-wide
+    // selection would add to the library's image only here.
+    let reaching = all_images(&artifact_from_workspace_with(
+        &[(
+            "chat-link.nx",
+            &format!("{TENANT_SOURCE}\nlet key() = {{Step.Property.id}}"),
+        )],
+        "chat-link.nx",
+        &context,
+    ));
+
+    for identity in [
+        "libraries/question-flow/QuestionFlow.nx",
+        "libraries/question-flow/Step.nx",
+        "libraries/chat-link/ChatLinkConfig.nx",
+    ] {
+        let lhs = plain
+            .get(identity)
+            .unwrap_or_else(|| panic!("{identity} in {:?}", plain.keys()));
+        let rhs = reaching.get(identity).expect("the same library module");
+        assert_eq!(lhs, rhs, "{identity} differs between the two programs");
+    }
+
+    let step = read_back(&plain["libraries/question-flow/Step.nx"]);
+    assert_eq!(step.modules[0].identity, "libraries/question-flow/Step.nx");
+    assert_eq!(step.modules[0].version, "3");
+    let chat_link = read_back(&plain["libraries/chat-link/ChatLinkConfig.nx"]);
+    assert_eq!(chat_link.modules[0].version, "");
+    assert!(
+        chat_link.modules.iter().any(|entry| entry.identity
+            == "libraries/question-flow/QuestionFlow.nx"
+            && entry.version == "3"),
+        "{:?}",
+        chat_link.modules
+    );
+}
+
+#[test]
+fn a_library_module_fingerprints_its_own_source() {
+    let emit = |source: &str| {
+        let registry = LibraryRegistry::new();
+        registry
+            .load_library_from_sources(&NxLibrarySource::new(
+                QUESTION_FLOW_ROOT,
+                vec![NxLibraryModule::new("Step.nx", source)],
+            ))
+            .expect("library");
+        let artifact = artifact_from_workspace_with(
+            &[("main.nx", "let root() = <Step id=\"a\" />")],
+            "main.nx",
+            &registry
+                .build_context()
+                .with_implicit_imports([QUESTION_FLOW_ROOT]),
+        );
+        read_back(&all_images(&artifact)["libraries/question-flow/Step.nx"]).modules[0].fingerprint
+    };
+    assert_ne!(
+        emit(STEP_SOURCE),
+        emit("export type Step = { id:string label?:string }")
+    );
+}
+
+#[test]
+fn an_implicitly_imported_library_compiles_as_its_written_wildcard_import() {
+    let registry = in_memory_registry(None);
+    let implicit = artifact_from_workspace_with(
+        &[("chat-link.nx", TENANT_SOURCE)],
+        "chat-link.nx",
+        &implicitly_importing(&registry),
+    );
+    let written = artifact_from_workspace_with(
+        &[(
+            "chat-link.nx",
+            &format!(
+                "import \"./libraries/chat-link\"\nimport \"./libraries/question-flow\"\n{TENANT_SOURCE}"
+            ),
+        )],
+        "chat-link.nx",
+        &registry.build_context(),
+    );
+
+    // The entry's own text differs by the import lines, so its fingerprint does; everything it
+    // compiles to does not.
+    let without_fingerprint = |mut artifact: NxIrArtifact| {
+        artifact.modules[0].fingerprint = 0;
+        artifact
+    };
+    assert_eq!(
+        without_fingerprint(entry_artifact(&implicit)),
+        without_fingerprint(entry_artifact(&written))
+    );
+    let implicit_images = all_images(&implicit);
+    let written_images = all_images(&written);
+    for (identity, image) in &implicit_images {
+        if identity.starts_with("libraries/") {
+            assert_eq!(Some(image), written_images.get(identity), "{identity}");
+        }
+    }
+}
+
+#[test]
+fn in_memory_and_directory_loads_of_the_same_sources_emit_the_same_ir() {
+    let temp = TempDir::new().expect("temp dir");
+    let question_flow_dir = temp.path().join(QUESTION_FLOW_ROOT);
+    let chat_link_dir = temp.path().join(CHAT_LINK_ROOT);
+    fs::create_dir_all(&question_flow_dir).expect("dir");
+    fs::create_dir_all(&chat_link_dir).expect("dir");
+    fs::write(question_flow_dir.join("Step.nx"), STEP_SOURCE).expect("write");
+    fs::write(
+        question_flow_dir.join("QuestionFlow.nx"),
+        QUESTION_FLOW_SOURCE,
+    )
+    .expect("write");
+    fs::write(chat_link_dir.join("ChatLinkConfig.nx"), CHAT_LINK_SOURCE).expect("write");
+
+    let directory_registry = LibraryRegistry::new();
+    directory_registry
+        .load_library_from_directory(&question_flow_dir)
+        .expect("question-flow");
+    directory_registry
+        .load_library_from_directory(&chat_link_dir)
+        .expect("chat-link");
+    let memory_registry = in_memory_registry(None);
+
+    let tenant = [("chat-link.nx", TENANT_SOURCE)];
+    let from_directory = all_images(&artifact_from_workspace_with(
+        &tenant,
+        "chat-link.nx",
+        &implicitly_importing(&directory_registry),
+    ));
+    let from_memory = all_images(&artifact_from_workspace_with(
+        &tenant,
+        "chat-link.nx",
+        &implicitly_importing(&memory_registry),
+    ));
+
+    // A directory load names a library by its canonical path, an in-memory load by its logical
+    // root. With that spelling, and the fingerprints that hash it, set aside, the images agree.
+    let prefix = format!(
+        "{}/",
+        fs::canonicalize(temp.path()).expect("canonical").display()
+    );
+    let normalized = |bytes: &[u8]| {
+        let mut artifact = read_back(bytes);
+        for string in &mut artifact.strings {
+            if let Some(rest) = string.strip_prefix(&prefix) {
+                *string = rest.to_string();
+            }
+        }
+        for entry in &mut artifact.modules {
+            if let Some(rest) = entry.identity.strip_prefix(&prefix) {
+                entry.identity = rest.to_string();
+            }
+            entry.fingerprint = 0;
+        }
+        artifact
+    };
+    let from_directory = from_directory
+        .iter()
+        .map(|(identity, bytes)| {
+            (
+                identity
+                    .strip_prefix(&prefix)
+                    .unwrap_or(identity)
+                    .to_string(),
+                normalized(bytes),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let from_memory = from_memory
+        .iter()
+        .map(|(identity, bytes)| (identity.clone(), normalized(bytes)))
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(
+        from_directory.keys().collect::<Vec<_>>(),
+        from_memory.keys().collect::<Vec<_>>()
+    );
+    assert_eq!(from_directory, from_memory);
+
+    // The same broken tenant reports the same diagnostics against either.
+    let broken = NxWorkspace::new(vec![NxWorkspaceModule::from_source(
+        "chat-link.nx",
+        "let root() = <ChatLinkConfig title={1} />",
+    )
+    .expect("module")])
+    .expect("workspace");
+    let directory_diagnostics =
+        nx_api::validate_workspace(&broken, &implicitly_importing(&directory_registry));
+    let memory_diagnostics =
+        nx_api::validate_workspace(&broken, &implicitly_importing(&memory_registry));
+    assert!(!memory_diagnostics.is_empty());
+    assert_eq!(directory_diagnostics, memory_diagnostics);
 }
