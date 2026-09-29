@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.5.0
+The extension now ships with the NX packages, from one tag and at one version, so extension 0.5.0
+understands the same NX as `@nx-lang/sdk-wasm` and `NxLang.Sdk` 0.5.0. This is why the version
+jumps from 0.1.0.
+
+### Diagnostics
+- A type name that resolves to no visible type is now an error, `unresolved-type`, reported where
+  the name is written with a "did you mean" suggestion: `people: Contatc+` says `Contatc` is not a
+  visible type and suggests `Contact`. Files that validated before can show new errors; fix each by
+  correcting the name, declaring the type or importing it.
+- A union imported from a library no longer reports its defaulted case fields as missing when they
+  are left out.
+
+### Hover
+- Hover now works on the first character of a name written directly after `<`, as in `<Button`.
+
 ## 0.1.0
 The first release on the Visual Studio Marketplace and Open VSX.
 - TextMate grammar for `.nx` files and for `nx` code blocks in Markdown, and language configuration
