@@ -60,11 +60,15 @@ for (const example of examples) {
   }
 
   const result = evaluateSource(host, readFileSync(sourcePath, "utf8"));
+  // Why a program does not compile, or the warnings of one that does: an example has neither.
+  for (const diagnostic of result.diagnostics) {
+    failures.push(`${label}: ${where(diagnostic)}${diagnostic.message}`);
+  }
   if (result.outcome === null) {
-    for (const diagnostic of result.diagnostics) {
-      failures.push(`${label}: ${where(diagnostic)}${diagnostic.message}`);
-    }
-  } else if (result.outcome.kind !== "value") {
+    console.log(`not ok - ${example.title}`);
+    continue;
+  }
+  if (result.outcome.kind !== "value") {
     const problems =
       result.outcome.kind === "noRoot"
         ? ["it has no root"]

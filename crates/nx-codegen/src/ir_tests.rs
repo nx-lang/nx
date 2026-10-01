@@ -156,6 +156,40 @@ fn an_image_reads_back_as_the_model_it_was_written_from() {
     assert_eq!(read_back(&bytes), artifact);
 }
 
+/// Documentation is not executable content: a documented program emits the same NX IR as the
+/// undocumented one, apart from the fingerprint, which hashes the source text.
+#[test]
+fn doc_comments_do_not_change_the_emitted_nx_ir() {
+    let plain = r#"type Theme = light | dark
+type User = {
+  name:string
+  score:int = 42
+}
+let root() = { <User name="Ada" /> }
+"#;
+    let documented = r#"/// A theme.
+type Theme = light | dark
+/// A user.
+type User = {
+  /// The name.
+  name:string
+  score:int = 42   /// The score.
+}
+/// The root.
+let root() = { <User name="Ada" /> }
+"#;
+    let without_fingerprints = |mut artifact: NxIrArtifact| {
+        for module in &mut artifact.modules {
+            module.fingerprint = 0;
+        }
+        artifact
+    };
+    assert_eq!(
+        without_fingerprints(entry_artifact(&artifact_from_source(documented))),
+        without_fingerprints(entry_artifact(&artifact_from_source(plain)))
+    );
+}
+
 #[test]
 fn nx_ir_output_is_deterministic() {
     let source = r#"

@@ -8,7 +8,7 @@ use crate::{
 };
 use la_arena::{Arena, Idx};
 use nx_diagnostics::{Diagnostic, Label, TextSpan};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Index into the scope arena.
 pub type ScopeId = Idx<Scope>;
@@ -203,6 +203,24 @@ impl ScopeManager {
         None
     }
 
+    /// Whether `name`, looked up from `scope`, is bound by a scope nested in the root rather than by
+    /// the root scope itself.
+    pub fn resolves_below_root(&self, name: &Name, scope: ScopeId) -> bool {
+        let root = self.root();
+        let mut current = Some(scope);
+        while let Some(scope_id) = current {
+            if scope_id == root {
+                return false;
+            }
+            let scope = &self.scopes[scope_id];
+            if scope.lookup_local(name).is_some() {
+                return true;
+            }
+            current = scope.parent;
+        }
+        false
+    }
+
     /// Defines a symbol in the given scope.
     pub fn define(&mut self, scope: ScopeId, symbol: Symbol) {
         self.scopes[scope].define(symbol);
@@ -264,6 +282,20 @@ pub fn check_undefined_identifiers(
     checker.finish()
 }
 
+/// The identifier expressions in a prepared module that name a local binding — a parameter, a
+/// component property or `state` field, a `let`, or a `for` binding — rather than a top-level
+/// declaration of the same spelling, which a local shadows.
+///
+/// <para>Resolved by the same scope walk that reports undefined identifiers, so an editor that asks
+/// which declaration a name means gets the compiler's answer rather than a guess from its
+/// type.</para>
+pub fn local_references(module: &PreparedModule) -> FxHashSet<ExprId> {
+    let (scope_manager, _) = build_scopes(module);
+    let mut checker = UndefinedIdentifierChecker::new(module, &scope_manager);
+    checker.check();
+    checker.local_references
+}
+
 fn symbol_kind_from_prepared_kind(kind: PreparedItemKind) -> SymbolKind {
     match kind {
         PreparedItemKind::Function => SymbolKind::Function,
@@ -300,6 +332,8 @@ struct UndefinedIdentifierChecker<'a> {
     module: &'a PreparedModule,
     scope_manager: ScopeManager,
     diagnostics: Vec<Diagnostic>,
+    /// The identifier expressions that resolved to a binding below the module scope.
+    local_references: FxHashSet<ExprId>,
 }
 
 impl<'a> UndefinedIdentifierChecker<'a> {
@@ -308,6 +342,7 @@ impl<'a> UndefinedIdentifierChecker<'a> {
             module,
             scope_manager: scope_manager.clone(),
             diagnostics: Vec::new(),
+            local_references: FxHashSet::default(),
         }
     }
 
@@ -441,6 +476,8 @@ impl<'a> UndefinedIdentifierChecker<'a> {
             ast::Expr::Ident(name) => {
                 if self.scope_manager.resolve(name, scope).is_none() {
                     self.report_undefined(name, self.module.raw_module().expr_span(expr_id));
+                } else if self.scope_manager.resolves_below_root(name, scope) {
+                    self.local_references.insert(expr_id);
                 }
             }
             ast::Expr::BinaryOp { lhs, rhs, .. } | ast::Expr::Concat { lhs, rhs, .. } => {
@@ -855,6 +892,7 @@ mod tests {
             emits: Vec::new(),
             state: Vec::new(),
             body: Some(body),
+            doc: None,
             span,
         }));
 
@@ -879,6 +917,7 @@ mod tests {
             visibility: crate::Visibility::Export,
             ty: Some(crate::ast::TypeRef::name("int")),
             value,
+            doc: None,
             span,
         }));
 
@@ -903,6 +942,7 @@ mod tests {
             visibility: crate::Visibility::Private,
             ty: Some(crate::ast::TypeRef::name("int")),
             value,
+            doc: None,
             span,
         }));
 
@@ -940,11 +980,13 @@ mod tests {
                     is_content: false,
                     optional: false,
                     has_default: false,
+                    doc: None,
                     span: TextSpan::default(),
                 }],
                 return_type: ast::TypeRef::name("int"),
                 span: TextSpan::default(),
             },
+            doc: None,
         };
         prepared.insert_binding(PreparedBinding {
             visible_name: Name::new("Math.addOne"),
@@ -954,7 +996,7 @@ mod tests {
                 module_identity: imported_function.module_identity.clone(),
             },
             target: PreparedBindingTarget::Imported {
-                item: imported_function,
+                item: Box::new(imported_function),
                 raw: None,
             },
         });

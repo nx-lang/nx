@@ -78,6 +78,7 @@ fn test_factorial_recursion() {
         params,
         return_type: None,
         body: if_expr,
+        doc: None,
         span: span(0, 40),
     };
 
@@ -185,6 +186,7 @@ fn test_fibonacci_recursion() {
         params,
         return_type: None,
         body: if_expr,
+        doc: None,
         span: span(0, 40),
     };
 
@@ -248,6 +250,7 @@ fn test_recursion_depth_limit() {
         params,
         return_type: None,
         body: recursive_call,
+        doc: None,
         span: span(0, 25),
     };
 
@@ -328,6 +331,7 @@ fn test_deep_recursion_within_limit() {
         params,
         return_type: None,
         body: if_expr,
+        doc: None,
         span: span(0, 35),
     };
 

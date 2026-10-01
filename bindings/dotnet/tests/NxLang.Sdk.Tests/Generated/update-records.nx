@@ -21,3 +21,29 @@ export external component <Ticker step:int /> = { state { count:int = 0 } }
 // `AppliedTypeFields_RoundTripAsTheirInstantiations` are what say that works.
 export type Range = { T:type start:T end:T endInclusive:boolean }
 export type Schedule = { week:<Range T=int/> spans?:<Range T=float64/>+ patch:<Range.Update T=int/> many:<Range.Update T=int/>+ }
+// Documentation in every Markdown form the C# mapping converts. This build, with XML documentation
+// warnings as errors, is what says the generated comments are well-formed.
+/// A shelf of *books*, with **one** [Book] per slot.
+///
+/// Sorted by `title`; see [the guide](https://nxlang.org/guide). A & B < C, and <br> stays text.
+///
+/// # Layout
+///
+/// - first
+/// - second
+///
+/// 1. one
+/// 2. two
+///
+/// ```nx
+/// let x = <Shelf label="A" />
+/// ```
+export type Shelf = {
+  /// The shelf's *visible* label.
+  label:string
+  facing?:Facing   /// Which way it faces.
+}
+/// Which way a shelf faces.
+export type Facing =
+  | front   /// Toward the room.
+  | back

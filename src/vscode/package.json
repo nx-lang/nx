@@ -95,6 +95,16 @@
     "vscode-textmate": "^9.0.0"
   },
   "contributes": {
+    "configurationDefaults": {
+      "[nx]": {
+        "editor.quickSuggestions": {
+          "other": "on",
+          "comments": "on",
+          "strings": "off"
+        },
+        "editor.wordBasedSuggestions": "off"
+      }
+    },
     "languages": [
       {
         "id": "nx",

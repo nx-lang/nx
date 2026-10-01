@@ -76,7 +76,8 @@ export function reduceEvaluation(state: Evaluation, event: EvaluationEvent): Eva
         outcome: result.outcome,
         outcomeSource: source,
         stale: false,
-        diagnostics: result.outcome.kind === "error" ? result.outcome.diagnostics : result.diagnostics,
+        diagnostics:
+          result.outcome.kind === "error" ? [...result.diagnostics, ...result.outcome.diagnostics] : result.diagnostics,
         diagnosticsSource: source,
         failure: null,
         evaluating: false,

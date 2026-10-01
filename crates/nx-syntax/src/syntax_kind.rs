@@ -153,6 +153,7 @@ pub enum SyntaxKind {
     MARKUP_IDENTIFIER,
 
     // === Comments ===
+    DOC_COMMENT,
     LINE_COMMENT,
     BLOCK_COMMENT,
     HTML_BLOCK_COMMENT,
@@ -302,6 +303,7 @@ impl SyntaxKind {
                 | SyntaxKind::ESCAPED_LBRACE
                 | SyntaxKind::ESCAPED_RBRACE
                 | SyntaxKind::ESCAPED_AT
+                | SyntaxKind::DOC_COMMENT
                 | SyntaxKind::LINE_COMMENT
                 | SyntaxKind::BLOCK_COMMENT
                 | SyntaxKind::HTML_BLOCK_COMMENT
@@ -340,7 +342,10 @@ impl SyntaxKind {
     pub fn is_comment(self) -> bool {
         matches!(
             self,
-            SyntaxKind::LINE_COMMENT | SyntaxKind::BLOCK_COMMENT | SyntaxKind::HTML_BLOCK_COMMENT
+            SyntaxKind::DOC_COMMENT
+                | SyntaxKind::LINE_COMMENT
+                | SyntaxKind::BLOCK_COMMENT
+                | SyntaxKind::HTML_BLOCK_COMMENT
         )
     }
 
@@ -483,6 +488,7 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "escaped_lbrace" => SyntaxKind::ESCAPED_LBRACE,
         "escaped_rbrace" => SyntaxKind::ESCAPED_RBRACE,
         "escaped_at" => SyntaxKind::ESCAPED_AT,
+        "doc_comment" => SyntaxKind::DOC_COMMENT,
         "line_comment" => SyntaxKind::LINE_COMMENT,
         "block_comment" => SyntaxKind::BLOCK_COMMENT,
         "html_block_comment" => SyntaxKind::HTML_BLOCK_COMMENT,
@@ -586,6 +592,7 @@ mod tests {
 
     #[test]
     fn test_is_comment() {
+        assert!(SyntaxKind::DOC_COMMENT.is_comment());
         assert!(SyntaxKind::LINE_COMMENT.is_comment());
         assert!(SyntaxKind::BLOCK_COMMENT.is_comment());
         assert!(!SyntaxKind::IDENTIFIER.is_comment());

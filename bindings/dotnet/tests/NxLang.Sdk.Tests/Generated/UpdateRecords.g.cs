@@ -183,6 +183,65 @@ namespace NxLang.Sdk.Tests.Generated
         public Range_update<long>[] Many { get; set; } = default!;
     }
 
+    /// <summary>A shelf of <i>books</i>, with <b>one</b> <c>Book</c> per slot.</summary>
+    /// <remarks>
+    /// <para>Sorted by <c>title</c>; see <a href="https://nxlang.org/guide">the guide</a>. A &amp; B &lt; C, and &lt;br&gt; stays text.</para>
+    /// <para><b>Layout</b></para>
+    /// <list type="bullet">
+    /// <item><description>first</description></item>
+    /// <item><description>second</description></item>
+    /// </list>
+    /// <list type="number">
+    /// <item><description>one</description></item>
+    /// <item><description>two</description></item>
+    /// </list>
+    /// <code>
+    /// let x = &lt;Shelf label="A" /&gt;
+    /// </code>
+    /// </remarks>
+    [MessagePackObject]
+    public sealed class Shelf
+    {
+        /// <summary>The shelf's <i>visible</i> label.</summary>
+        [Key("label")]
+        [JsonPropertyName("label")]
+        public string Label { get; set; } = default!;
+
+        /// <summary>Which way it faces.</summary>
+        [Key("facing")]
+        [JsonPropertyName("facing")]
+        public Facing? Facing { get; set; }
+    }
+
+    /// <summary>Which way a shelf faces.</summary>
+    [JsonConverter(typeof(NxEnumJsonConverter<Facing, FacingWireFormat>))]
+    [MessagePackFormatter(typeof(NxEnumMessagePackFormatter<Facing, FacingWireFormat>))]
+    public enum Facing
+    {
+        /// <summary>Toward the room.</summary>
+        Front,
+        Back
+    }
+
+    internal sealed class FacingWireFormat : INxEnumWireFormat<Facing>
+    {
+        public static string Format(Facing value) =>
+            value switch
+            {
+                Facing.Front => "front",
+                Facing.Back => "back",
+                _ => throw new FormatException("Unknown NX enum value."),
+            };
+
+        public static Facing Parse(string value) =>
+            value switch
+            {
+                "front" => Facing.Front,
+                "back" => Facing.Back,
+                _ => throw new FormatException("Unknown NX enum member."),
+            };
+    }
+
     [JsonConverter(typeof(NxUpdateRecordJsonConverter<User_update>))]
     [MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<User_update>))]
     public sealed class User_update : NxUpdate<User>
@@ -1049,6 +1108,72 @@ namespace NxLang.Sdk.Tests.Generated
         }
     }
 
+    [JsonConverter(typeof(NxUpdateRecordJsonConverter<Shelf_update>))]
+    [MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<Shelf_update>))]
+    public sealed class Shelf_update : NxUpdate<Shelf>
+    {
+        private static readonly NxUpdateSchema FieldSchema = new(
+            "Shelf.Update",
+            ShelfProperties.Label,
+            ShelfProperties.Facing);
+
+        public Shelf_update()
+            : base(FieldSchema)
+        {
+        }
+
+        public string NxType => "Shelf.Update";
+
+        /// <summary>The shelf's <i>visible</i> label.</summary>
+        public NxOptional<string> Label
+        {
+            get => base.Get<string>("label");
+            set => base.Set("label", value);
+        }
+
+        /// <summary>Which way it faces.</summary>
+        public NxOptional<Facing?> Facing
+        {
+            get => base.Get<Facing?>("facing");
+            set => base.Set("facing", value);
+        }
+
+        public bool IsSet(Shelf_property property) => base.IsSet(Shelf_propertyWireFormat.Format(property));
+
+        public void Unset(Shelf_property property) => base.Unset(Shelf_propertyWireFormat.Format(property));
+
+        public Shelf_property[] Changed() => Array.ConvertAll(base.ChangedNames(), Shelf_propertyWireFormat.Parse);
+
+        public static Shelf_update Diff(Shelf before, Shelf after) => NxUpdate<Shelf>.Diff<Shelf_update>(before, after);
+    }
+
+    public static class ShelfProperties
+    {
+        public static readonly NxProperty<Shelf, string> Label = new(
+            Shelf_propertyWireFormat.Format(Shelf_property.Label),
+            record => record.Label,
+            (record, value) => record.Label = value,
+            clearable: false);
+
+        public static readonly NxProperty<Shelf, Facing?> Facing = new(
+            Shelf_propertyWireFormat.Format(Shelf_property.Facing),
+            record => record.Facing,
+            (record, value) => record.Facing = value);
+
+        public static NxProperty<Shelf> Of(Shelf_property property)
+        {
+            switch (property)
+            {
+                case Shelf_property.Label:
+                    return Label;
+                case Shelf_property.Facing:
+                    return Facing;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(property));
+            }
+        }
+    }
+
     [JsonConverter(typeof(NxEnumJsonConverter<User_property, User_propertyWireFormat>))]
     [MessagePackFormatter(typeof(NxEnumMessagePackFormatter<User_property, User_propertyWireFormat>))]
     public enum User_property
@@ -1408,6 +1533,35 @@ namespace NxLang.Sdk.Tests.Generated
                 "spans" => Schedule_property.Spans,
                 "patch" => Schedule_property.Patch,
                 "many" => Schedule_property.Many,
+                _ => throw new FormatException("Unknown NX enum member."),
+            };
+    }
+
+    [JsonConverter(typeof(NxEnumJsonConverter<Shelf_property, Shelf_propertyWireFormat>))]
+    [MessagePackFormatter(typeof(NxEnumMessagePackFormatter<Shelf_property, Shelf_propertyWireFormat>))]
+    public enum Shelf_property
+    {
+        /// <summary>The shelf's <i>visible</i> label.</summary>
+        Label,
+        /// <summary>Which way it faces.</summary>
+        Facing
+    }
+
+    internal sealed class Shelf_propertyWireFormat : INxEnumWireFormat<Shelf_property>
+    {
+        public static string Format(Shelf_property value) =>
+            value switch
+            {
+                Shelf_property.Label => "label",
+                Shelf_property.Facing => "facing",
+                _ => throw new FormatException("Unknown NX enum value."),
+            };
+
+        public static Shelf_property Parse(string value) =>
+            value switch
+            {
+                "label" => Shelf_property.Label,
+                "facing" => Shelf_property.Facing,
                 _ => throw new FormatException("Unknown NX enum member."),
             };
     }

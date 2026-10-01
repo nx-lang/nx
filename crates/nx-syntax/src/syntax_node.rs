@@ -29,6 +29,11 @@ impl<'tree> SyntaxNode<'tree> {
         self.node.utf8_text(self.source.as_bytes()).unwrap_or("")
     }
 
+    /// Returns the whole source text this node was parsed from.
+    pub(crate) fn source_text(&self) -> &'tree str {
+        self.source
+    }
+
     /// Returns the text range (span) of this node in the source.
     pub fn span(&self) -> TextRange {
         let start = TextSize::from(

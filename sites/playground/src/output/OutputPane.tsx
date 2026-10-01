@@ -8,6 +8,7 @@ import {
 } from "@nx-lang/value-view";
 import type { Diagnostic } from "../compile";
 import { outputNotice, type Evaluation } from "../evaluation.ts";
+import { EDITOR_THEMES } from "../theme.ts";
 
 export interface OutputPaneProps {
   readonly evaluation: Evaluation;
@@ -76,6 +77,7 @@ export function OutputPane({ evaluation, describe, onNavigate }: OutputPaneProps
             truncated={value.truncated}
             stale={stale}
             describe={describe}
+            themes={EDITOR_THEMES}
           />
         )}
       </div>

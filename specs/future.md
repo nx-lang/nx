@@ -805,7 +805,39 @@ reason that has nothing to do with the position.
   `()` is valid only as an item of a list or value list (`grammar.js`), and it lowers to no literal
   expression, so unlike the cases above there is nothing recorded for a lookup to find.
 
+## Editor Completion: Record Tags And Tags Still Being Typed
+
+Property-name completion answers only a closed tag that names a component. Measured against the
+language service with `type Contact = { name:string email?:string }` and
+`component <Card title:string />`:
+
+| At the cursor | Offered |
+| --- | --- |
+| `<Card ⟨here⟩/>` | `title`, with its documentation |
+| `<Contact ⟨here⟩/>` | keywords and names only |
+| `{ <Card ⟨here⟩ }` | keywords and names only |
+| `let foo = <Contact ⟨here⟩` | keywords and names only |
+
+- **Record and action tags.** `completions` in `crates/nx-language-service/src/lib.rs` offers
+  properties only when `scope.visible[tag]` is a `Component`, while hover goes through
+  `DocumentScope::element`, which also accepts a record. So hovering `name` in `<Contact name="a" />`
+  answers and completing it does not. Neither path accepts an action, though `<Saved id=1 />`
+  constructs one. Completion should use `element`, and `element` should accept actions. The
+  editor-language-service spec promises property completions only "for a known component", so the
+  spec widens with it.
+- **A tag still being typed.** Until a tag is closed it does not parse as an `element`, and the
+  position resolver recognizes property slots only inside one. Tree-sitter recovers each unclosed
+  tag differently: `let foo = <Contact ` loses the `<` and reads `Contact ` as embedded text,
+  `{ <Card }` keeps a bare `<` and identifier in an `ERROR` node, and `{ <Card title="a" }` keeps
+  `element_name` and a `property_list` inside the `ERROR`. The resolver already reads raw tokens
+  inside a recovered region to find a type annotation after `:`; the same approach would scan back
+  from the cursor for an unclosed `<Name`, skipping strings and braced values, and collect the
+  `name=` pairs already written so they are not offered again. This is the case an author is in
+  most of the time while typing, so it matters more than the record case.
+
 ## Editor Navigation: Go-To-Definition And Rename
+
+Go-to-definition is proposed in the OpenSpec change `add-go-to-definition`; rename is not.
 
 `resolve-editor-positions` built a position resolver that answers "what construct is the cursor on?"
 for hover and completion. Go-to-definition and rename need the same question answered and one thing
@@ -1505,3 +1537,38 @@ wasn't noticed when duplicate top-level names became an error.
 renaming one of the two, and consider compiling every file under `examples/nx/` in CI, the way the
 website's code blocks are checked. Compiling is the right bar rather than running: `loops.nx` and
 `simple.nx` have no root, and `function.nx` imports a library directory.
+
+## Block comments don't nest, and two closers are missed
+
+**Decided.** Block comments nest with openers of the same kind, as `nx-grammar.md` and
+`nx-grammar-spec.md` already specify: `/* */` inside `/* */`, and `<!-- -->` inside `<!-- -->`. That
+lets an author comment out a stretch of code that already contains block comments, as Rust, Swift,
+Kotlin, Scala, and Haskell allow. The cost is the one those languages accept: an unmatched opener in
+commented-out prose, such as the glob `src/**/*.nx`, leaves the comment open, and strings inside a
+comment are not recognized. An unterminated block comment should be reported at its opener, so the
+cause is where the error points.
+
+**Observed.** The parser matches the specification in none of these cases. `block_comment` and
+`html_block_comment` in `crates/nx-syntax/grammar.js` are regular-expression tokens, which cannot
+count depth:
+
+- `/* outer /* inner */ still outer */` ends at the first `*/`, and the rest of the line parses as
+  an `ERROR`.
+- `/* a **/` never closes: `\*[^/]` consumes the `**`, so the final `*/` is never seen and the rest
+  of the file is an `ERROR`. `<!-- a --->` fails the same way on `--[^>]`.
+
+The TextMate grammar (`src/vscode/syntaxes/nx.tmLanguage.json`, repository `comments`) does nest,
+but differently from the specification. Each block rule includes all of `#comments`, so the two
+kinds nest inside each other, and a `//` line comment is matched *inside* a block comment. The
+line-comment match runs to the end of the line and swallows the closer: in `/* see http://x */`,
+the `*/` is scoped `comment.line.double-slash.nx`, and every following line is highlighted as
+comment.
+
+**Fix.** Lex both block comment kinds in the external scanner (`crates/nx-syntax/src/scanner.c`) with
+a depth counter, which fixes the `**/` and `--->` closers at the same time. In the TextMate grammar,
+have each block rule include only itself, not `#comments`. Add parser and grammar tests for:
+
+- nesting of each kind, including mixed kinds (which must not nest);
+- `**/` and `--->` closers;
+- `//` inside a block comment;
+- an unterminated nested comment.

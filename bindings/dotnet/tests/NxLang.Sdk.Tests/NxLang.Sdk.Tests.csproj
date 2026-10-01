@@ -6,6 +6,11 @@
     <NxSdkFailIfNativeLibraryMissing>true</NxSdkFailIfNativeLibraryMissing>
     <!-- MessagePack generates the same resolver type name in this assembly and the SDK assembly. -->
     <NoWarn>$(NoWarn);CS0436</NoWarn>
+    <!-- Parse the XML doc comments so the ones typegen writes into Generated/ are checked: malformed
+         XML or a bad cref fails the build. Undocumented members are fine in tests. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <WarningsAsErrors>$(WarningsAsErrors);CS1570;CS1571;CS1572;CS1573;CS1574;CS1584;CS1587</WarningsAsErrors>
   </PropertyGroup>
 
   <ItemGroup>

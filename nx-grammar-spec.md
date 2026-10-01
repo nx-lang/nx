@@ -83,7 +83,8 @@ Special
 
 Trivia (whitespace/comments; skipped by lexer)
 - WHITESPACE (spaces, tabs, newlines)
-- LINE_COMMENT ("//" to end of line)
+- DOC_COMMENT ("///" not followed by a fourth "/", to end of line)
+- LINE_COMMENT ("//" to end of line, including "////" and longer)
 - BLOCK_COMMENT ("/*" … "*/"; nests with same-kind openers)
 - HTML_BLOCK_COMMENT ("<!--" … "-->"; nests with same-kind openers)
 
@@ -92,6 +93,15 @@ Notes
 - Comments and whitespace may appear between any tokens.
 - Block comments are nestable with same-kind openers only. The lexer maintains a depth counter: increment on opener, decrement on closer, emit one token at depth 0. Unterminated blocks are lexing errors.
 - Comments are not recognized inside string literals or text content tokens (TEXT_CHUNK/ENTITY/ESCAPED_*, EMBED_TEXT_CHUNK, RAW_TEXT_CHUNK).
+- A DOC_COMMENT is trivia to the parser like any comment. A post-parse pass attaches it by line
+  position: consecutive leading `///` lines document the outermost declaration or member whose
+  first token starts the next line, and a trailing `///` documents the one outermost item that
+  starts and ends on its line. A trailing `///` continues onto the `///` lines directly below it
+  that start at its column. A doc comment that documents nothing, a trailing one whose line has
+  more than one such item, a `///` line directly below a trailing one but not aligned with it, and
+  an item documented both ways are each a syntax error (`dangling-doc-comment`,
+  `ambiguous-trailing-doc-comment`, `misaligned-doc-comment-continuation`,
+  `duplicate-doc-comment`).
 
 Raw text tokens
 - RAW_TEXT_CHUNK — produced only inside raw text content; scanners treat '{', '}', '&' as ordinary characters.

@@ -4594,3 +4594,80 @@ fn test_validate_optional_property_with_default_quotes_both_forms() {
         );
     }
 }
+
+// ============================================================================
+// Doc comments
+// ============================================================================
+
+/// Every comment token in the tree, as (kind, text), in source order.
+fn comment_tokens(source: &str) -> Vec<(SyntaxKind, String)> {
+    fn walk(node: &nx_syntax::SyntaxNode, out: &mut Vec<(SyntaxKind, String)>) {
+        if node.kind().is_comment() {
+            out.push((node.kind(), node.text().to_string()));
+            return;
+        }
+        for child in node.children_with_tokens() {
+            walk(&child, out);
+        }
+    }
+
+    let result = parse_str(source, "test.nx");
+    assert!(result.is_ok(), "{source}: {:?}", result.errors);
+    let mut out = Vec::new();
+    walk(&result.root().expect("root"), &mut out);
+    out
+}
+
+#[test]
+fn test_three_slashes_lex_as_a_doc_comment() {
+    assert_eq!(
+        comment_tokens("/// Theme.\ntype Theme = string\n"),
+        vec![(SyntaxKind::DOC_COMMENT, "/// Theme.".to_string())]
+    );
+    assert_eq!(
+        comment_tokens("type Size = int   /// Size in pixels.\n"),
+        vec![(SyntaxKind::DOC_COMMENT, "/// Size in pixels.".to_string())]
+    );
+}
+
+#[test]
+fn test_a_bare_doc_marker_is_a_doc_comment() {
+    assert_eq!(
+        comment_tokens("/// Summary.\n///\n/// Details.\ntype Theme = string\n"),
+        vec![
+            (SyntaxKind::DOC_COMMENT, "/// Summary.".to_string()),
+            (SyntaxKind::DOC_COMMENT, "///".to_string()),
+            (SyntaxKind::DOC_COMMENT, "/// Details.".to_string()),
+        ]
+    );
+}
+
+#[test]
+fn test_a_bare_doc_marker_before_crlf_is_a_doc_comment() {
+    assert_eq!(
+        comment_tokens("////\r\n/// Summary.\r\n///\r\ntype Theme = string\r\n"),
+        vec![
+            (SyntaxKind::LINE_COMMENT, "////\r".to_string()),
+            (SyntaxKind::DOC_COMMENT, "/// Summary.\r".to_string()),
+            (SyntaxKind::DOC_COMMENT, "///\r".to_string()),
+        ]
+    );
+}
+
+#[test]
+fn test_two_or_four_slashes_lex_as_a_line_comment() {
+    assert_eq!(
+        comment_tokens("// note\n//// Section\n////////\ntype Theme = string\n"),
+        vec![
+            (SyntaxKind::LINE_COMMENT, "// note".to_string()),
+            (SyntaxKind::LINE_COMMENT, "//// Section".to_string()),
+            (SyntaxKind::LINE_COMMENT, "////////".to_string()),
+        ]
+    );
+}
+
+#[test]
+fn test_three_slashes_in_text_content_are_not_a_comment() {
+    assert_eq!(comment_tokens("let t = <p>a /// b</p>\n"), vec![]);
+    assert_eq!(comment_tokens("let s = \"a /// b\"\n"), vec![]);
+}

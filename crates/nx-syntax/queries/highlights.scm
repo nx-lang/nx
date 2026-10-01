@@ -207,6 +207,7 @@
   close_name: (element_name) @tag)
 
 ;; Comments
+(doc_comment) @comment.documentation
 (line_comment) @comment
 (block_comment) @comment
 (html_block_comment) @comment

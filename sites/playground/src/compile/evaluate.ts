@@ -50,8 +50,10 @@ export function evaluateSource(host: NxHost, source: string): EvaluateResult {
     throw error;
   }
 
+  // A program that compiles can still have warnings, such as a doc link that names nothing.
+  const warnings = artifact.diagnostics().map(classifyDiagnostic);
   try {
-    return { diagnostics: [], outcome: valueOutcome(artifact.evaluateNx()) };
+    return { diagnostics: warnings, outcome: valueOutcome(artifact.evaluateNx()) };
   } catch (error) {
     if (!(error instanceof NxEvaluationError)) {
       throw error;
@@ -60,7 +62,7 @@ export function evaluateSource(host: NxHost, source: string): EvaluateResult {
     const outcome: Outcome = diagnostics.some((diagnostic) => diagnostic.code === "no-root")
       ? { kind: "noRoot" }
       : { kind: "error", diagnostics };
-    return { diagnostics: [], outcome };
+    return { diagnostics: warnings, outcome };
   } finally {
     artifact.dispose();
   }

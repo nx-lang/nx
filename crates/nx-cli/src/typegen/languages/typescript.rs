@@ -1,3 +1,4 @@
+use crate::typegen::languages::typescript_doc::typescript_doc_lines;
 use crate::typegen::model::{
     erase_field_type_parameters, update_companion_type_params, ExportedAlias,
     ExportedExternalState, ExportedModule, ExportedRecord, ExportedRecordField, ExportedType,
@@ -346,7 +347,21 @@ fn emit_declaration(writer: &mut CodeWriter, declaration: &ExportedType, types: 
     }
 }
 
+/// Writes the `/** */` comment for a declaration or member's NX documentation, if it has any.
+fn emit_doc(writer: &mut CodeWriter, doc: Option<&str>) {
+    for line in doc.map(typescript_doc_lines).unwrap_or_default() {
+        writer.line(&line);
+    }
+}
+
+/// Writes a field with its documentation.
+fn emit_field(writer: &mut CodeWriter, field: &ExportedRecordField, line: &str) {
+    emit_doc(writer, field.doc.as_deref());
+    writer.line(line);
+}
+
 fn emit_alias(writer: &mut CodeWriter, alias: &ExportedAlias, types: ModuleTypes<'_>) {
+    emit_doc(writer, alias.doc.as_deref());
     writer.line(&format!(
         "export type {} = {};",
         sanitize_ts_type_name(&alias.name),
@@ -373,12 +388,13 @@ fn emit_record(writer: &mut CodeWriter, record: &ExportedRecord, types: ModuleTy
         extends
     );
 
+    emit_doc(writer, record.doc.as_deref());
     writer.block(&header, |writer| {
         if base.is_some() && !record.is_abstract {
             writer.line(&format!("$type: \"{}\";", escape_ts_string(&record.name)));
         }
         for field in &record.fields {
-            writer.line(&ts_field_line(field, types));
+            emit_field(writer, field, &ts_field_line(field, types));
         }
     });
 }
@@ -443,6 +459,9 @@ fn emit_union(writer: &mut CodeWriter, union_def: &ExportedUnion, types: ModuleT
             .map(|case| format!("\"{}\"", escape_ts_string(&case.name)))
             .collect::<Vec<_>>()
             .join(" | ");
+        // A constant case is a string literal in the union and has no declaration of its own to
+        // carry documentation.
+        emit_doc(writer, union_def.doc.as_deref());
         writer.line(&format!(
             "export type {} = {};",
             sanitize_ts_type_name(&union_def.name),
@@ -485,6 +504,7 @@ fn emit_union(writer: &mut CodeWriter, union_def: &ExportedUnion, types: ModuleT
             .join(" | ")
     };
 
+    emit_doc(writer, union_def.doc.as_deref());
     writer.line(&format!(
         "export type {} = {};",
         sanitize_ts_type_name(&union_def.name),
@@ -522,13 +542,14 @@ fn emit_union_case(
         extends
     );
 
+    emit_doc(writer, case.doc.as_deref());
     writer.block(&header, |writer| {
         // A case extending a base narrows the base's `$type` to its own name.
         if base.is_some() {
             writer.line(&format!("$type: \"{type_name}\";"));
         }
         for field in &case.fields {
-            writer.line(&ts_field_line(field, types));
+            emit_field(writer, field, &ts_field_line(field, types));
         }
     });
 }
@@ -542,11 +563,12 @@ fn emit_external_state(
     types: ModuleTypes<'_>,
 ) {
     let fields = erase_field_type_parameters(&state.fields, &state.type_params);
+    emit_doc(writer, state.doc.as_deref());
     writer.block(
         &format!("export interface {}", sanitize_ts_type_name(&state.name)),
         |writer| {
             for field in fields.iter() {
-                writer.line(&ts_field_line(field, types));
+                emit_field(writer, field, &ts_field_line(field, types));
             }
         },
     );
@@ -573,6 +595,7 @@ fn emit_update(writer: &mut CodeWriter, update: &ExportedUpdate, types: ModuleTy
     } else {
         format!("<{}>", type_params.join(", "))
     };
+    emit_doc(writer, update.doc.as_deref());
     writer.block(
         &format!(
             "export interface {}{generics}",
@@ -587,7 +610,7 @@ fn emit_update(writer: &mut CodeWriter, update: &ExportedUpdate, types: ModuleTy
                 let key = ts_property_key(&field.name);
                 let ty = ts_type(&field.ty, types);
                 let ty = if field.optional { ts_nullable(ty) } else { ty };
-                writer.line(&format!("{key}?: {ty};"));
+                emit_field(writer, field, &format!("{key}?: {ty};"));
             }
         },
     );

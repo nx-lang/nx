@@ -95,6 +95,11 @@ pub(crate) enum PositionContext {
     },
     /// Inside an expression, but not on a name.
     Expression { span: TextRange },
+    /// Inside a comment, where nothing is code.
+    ///
+    /// <para>`doc_link` is the doc link being written at the cursor, when the comment is a `///`
+    /// doc comment and the cursor follows an open `[` outside a code span.</para>
+    Comment { doc_link: Option<DocLinkPrefix> },
     /// No construct the language service can identify.
     Unresolved,
 }
@@ -112,9 +117,104 @@ impl PositionContext {
             | Self::MemberAccess { span, .. }
             | Self::LocalDeclaration { span, .. }
             | Self::Expression { span } => Some(*span),
-            Self::Unresolved => None,
+            Self::Comment { .. } | Self::Unresolved => None,
         }
     }
+}
+
+/// A doc link written up to the cursor: `[LoadState.fa` is the qualifier `LoadState` and the
+/// partial name `fa`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DocLinkPrefix {
+    /// The identifiers before the last `.`, each complete.
+    pub qualifier: Vec<String>,
+    /// What has been written of the identifier at the cursor, possibly nothing.
+    pub partial: String,
+}
+
+/// The doc link being written at `offset` in the comment `token`, if there is one.
+///
+/// <para>The link starts at the last `[` before the cursor on the comment's line, and everything
+/// from there to the cursor must be a dotted identifier path in the making, optionally opened by
+/// a backtick. A `[` in code is not a link: inside a code span or code block of the documentation
+/// the comment belongs to, found by CommonMark's rules, or after a code span opened on the line
+/// and not closed yet, which is code being typed.</para>
+fn doc_link_prefix(
+    root: SyntaxNode<'_>,
+    token: SyntaxNode<'_>,
+    offset: usize,
+) -> Option<DocLinkPrefix> {
+    if token.kind() != SyntaxKind::DOC_COMMENT {
+        return None;
+    }
+    let text = token.text();
+    let before = text.get(3..offset.checked_sub(token.start_byte())?)?;
+    let open = before.rfind('[')?;
+    let bracket = token.start_byte() + 3 + open;
+    if opens_code_span(&before[..open]) || in_documented_code(root, bracket) {
+        return None;
+    }
+    let written = &before[open + 1..];
+    let path = written.strip_prefix('`').unwrap_or(written);
+    let is_identifier_char = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
+    if !path.chars().all(|c| is_identifier_char(c) || c == '.') {
+        return None;
+    }
+    let mut parts = path.split('.').map(str::to_string).collect::<Vec<_>>();
+    let partial = parts.pop().unwrap_or_default();
+    let starts_well = |part: &String| {
+        part.chars()
+            .next()
+            .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+    };
+    if !parts.iter().all(starts_well) || partial.starts_with(|c: char| c.is_ascii_digit()) {
+        return None;
+    }
+    Some(DocLinkPrefix {
+        qualifier: parts,
+        partial,
+    })
+}
+
+/// Whether `line` ends inside a code span it opened: a backtick run that no later run of the same
+/// length closes.
+fn opens_code_span(line: &str) -> bool {
+    let mut open: Option<usize> = None;
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '`' {
+            continue;
+        }
+        let mut run = 1;
+        while chars.next_if_eq(&'`').is_some() {
+            run += 1;
+        }
+        open = match open {
+            None => Some(run),
+            Some(length) if length == run => None,
+            still_open => still_open,
+        };
+    }
+    open.is_some()
+}
+
+/// Whether the source offset `offset` is in a code span or code block of the documentation an
+/// attached doc comment there spells.
+fn in_documented_code(root: SyntaxNode<'_>, offset: usize) -> bool {
+    nx_syntax::doc_comments(&root).iter().any(|doc| {
+        if !(usize::from(doc.span.start()) <= offset && offset < usize::from(doc.span.end())) {
+            return false;
+        }
+        let mut text_offset = 0;
+        for (line, start) in doc.text.split('\n').zip(&doc.line_starts) {
+            let start = usize::from(*start);
+            if start <= offset && offset <= start + line.len() {
+                return nx_hir::doc::in_code(&doc.text, text_offset + (offset - start) + 1);
+            }
+            text_offset += line.len() + 1;
+        }
+        false
+    })
 }
 
 /// Resolves the context of a byte offset in one parsed document.
@@ -123,6 +223,13 @@ pub(crate) fn resolve(tree: &SyntaxTree, offset: usize) -> PositionContext {
     let Some(innermost) = chain.last().copied() else {
         return PositionContext::Unresolved;
     };
+
+    // A comment can sit inside any construct, an opening tag included, and nothing in it is code.
+    if innermost.kind().is_comment() {
+        return PositionContext::Comment {
+            doc_link: doc_link_prefix(tree.root(), innermost, offset),
+        };
+    }
 
     if let Some(context) = element_context(&chain, offset) {
         return context;

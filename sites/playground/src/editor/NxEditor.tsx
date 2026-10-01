@@ -5,8 +5,9 @@ import editorWorker from "monaco-editor/editor/editor.worker.js?worker";
 import { NX_LANGUAGE_ID, registerNxLanguage } from "@nx-lang/monaco";
 import type { Diagnostic, DiagnosticSpan } from "../compile";
 import { createWorkerLanguageService } from "../language/worker.ts";
-import type { Theme } from "../theme.ts";
+import { EDITOR_THEMES, type Theme } from "../theme.ts";
 import { offsetOf, positionAt } from "./positions.ts";
+import { openSuggestionDetailsOnce } from "./suggestDetails.ts";
 
 // Monaco expects to be told where its workers live; Vite supplies them as module workers.
 self.MonacoEnvironment = { getWorker: () => new editorWorker() };
@@ -14,7 +15,6 @@ self.MonacoEnvironment = { getWorker: () => new editorWorker() };
 /** The one document the playground edits, under the logical URI the language service sees it by. */
 export const MODEL_URI = "nx://playground/playground.nx";
 
-const MONACO_THEMES = { dark: "github-dark", light: "github-light" } as const satisfies Record<Theme, string>;
 
 /** The language service the editor's hover and completion use, and the output pane's hover too. */
 export const languageService = createWorkerLanguageService();
@@ -28,7 +28,7 @@ export const languageService = createWorkerLanguageService();
  */
 const registration = registerNxLanguage(monaco, {
   service: languageService,
-  themes: [MONACO_THEMES.dark, MONACO_THEMES.light],
+  themes: [EDITOR_THEMES.dark, EDITOR_THEMES.light],
   onError: (error) => console.debug("nx language", error),
 });
 
@@ -83,6 +83,7 @@ export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, them
   useEffect(() => {
     let disposed = false;
     let subscription: monaco.IDisposable | undefined;
+    let suggestDetails: monaco.IDisposable | undefined;
     void registration.ready.then(() => {
       if (disposed || host.current === null) {
         return;
@@ -99,13 +100,21 @@ export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, them
         tabSize: 2,
         renderLineHighlight: "none",
         fixedOverflowWidgets: true,
+        // Monaco suggests as you type everywhere but comments by default. The language service
+        // answers inside a comment only for a doc link being written, so turning it on there offers
+        // link names as they are typed and nothing in an ordinary comment — provided Monaco does
+        // not fill the silence with the document's own words, which it does wherever a language
+        // offers nothing. The language service offers everything worth offering in NX.
+        quickSuggestions: { other: "on", comments: "on", strings: "off" },
+        wordBasedSuggestions: "off",
       });
       editor.current = instance;
+      suggestDetails = openSuggestionDetailsOnce(instance);
       setEditorReady(true);
       // Through `setTheme`, once the highlighter is installed, so the Shiki bridge tokenizes with the
       // theme Monaco draws with. A theme passed to `create` reaches Monaco without the bridge
       // knowing, and a document set later is then colored from the other theme's palette.
-      monaco.editor.setTheme(MONACO_THEMES[latestTheme.current]);
+      monaco.editor.setTheme(EDITOR_THEMES[latestTheme.current]);
       subscription = instance.onDidChangeModelContent(() => {
         if (!settingValue.current) {
           latestChange.current(instance.getValue());
@@ -115,6 +124,7 @@ export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, them
     return () => {
       disposed = true;
       subscription?.dispose();
+      suggestDetails?.dispose();
       const model = editor.current?.getModel();
       editor.current?.dispose();
       model?.dispose();
@@ -139,7 +149,7 @@ export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, them
 
   useEffect(() => {
     if (editor.current !== null) {
-      monaco.editor.setTheme(MONACO_THEMES[theme]);
+      monaco.editor.setTheme(EDITOR_THEMES[theme]);
     }
   }, [theme]);
 

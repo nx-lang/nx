@@ -19,6 +19,8 @@ use std::sync::{Arc, OnceLock};
 pub struct ExportedAlias {
     pub name: String,
     pub target: TypeRef,
+    /// The NX documentation, as Markdown with each doc link replaced by its label in a code span.
+    pub doc: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -40,6 +42,8 @@ pub struct ExportedRecordField {
     /// carry one. The field's type was written in that module's namespace, which is where it has
     /// to be resolved.</para>
     pub declaring_module: Option<String>,
+    /// The NX documentation, as Markdown with each doc link replaced by its label in a code span.
+    pub doc: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -79,12 +83,16 @@ pub struct ExportedRecord {
     /// contract's are erased in C#, because the host receives the component dynamically and has
     /// nothing to bind them to, while a generic record's are a real generic the host names.</para>
     pub is_component_contract: bool,
+    /// The NX documentation, as Markdown with each doc link replaced by its label in a code span.
+    pub doc: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExportedUnionCase {
     pub name: String,
     pub fields: Vec<ExportedRecordField>,
+    /// The NX documentation, as Markdown with each doc link replaced by its label in a code span.
+    pub doc: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -98,6 +106,8 @@ pub struct ExportedUnion {
     /// name: one constant case per effective field, so it generates exactly what a constant union
     /// generates.</para>
     pub property_target: Option<String>,
+    /// The NX documentation, as Markdown with each doc link replaced by its label in a code span.
+    pub doc: Option<String>,
 }
 
 impl ExportedUnion {
@@ -135,6 +145,8 @@ pub struct ExportedExternalState {
     /// The component's effective type parameters, inherited first. A state field may name one,
     /// and both emitters erase it: the host holds state as data and never names its instantiation.
     pub type_params: Vec<String>,
+    /// The NX documentation, as Markdown with each doc link replaced by its label in a code span.
+    pub doc: Option<String>,
 }
 
 /// The generated `<Target>_update` companion of an exported record, action, or stateful component.
@@ -158,6 +170,8 @@ pub struct ExportedUpdate {
     /// and both emitters erase it: a patch carries no type argument on the wire, and a component's
     /// instantiation was fixed at an NX use site the host never sees.
     pub type_params: Vec<String>,
+    /// The NX documentation, as Markdown with each doc link replaced by its label in a code span.
+    pub doc: Option<String>,
 }
 
 /// The type parameters an update companion declares: a plain generic record's own, and none for
@@ -1861,10 +1875,17 @@ fn build_cached_imported_library(
     })
 }
 
+/// NX documentation as the typegen model holds it: Markdown with each doc link replaced by its
+/// label in a code span, so neither writer needs to know what a doc link is.
+fn typegen_doc(doc: Option<&nx_hir::Doc>) -> Option<String> {
+    doc.map(|doc| doc.replace_links(|link| Some(link.code_span())))
+}
+
 fn export_alias(def: &TypeAlias) -> ExportedAlias {
     ExportedAlias {
         name: def.name.as_str().to_string(),
         target: def.ty.clone(),
+        doc: typegen_doc(def.doc.as_ref()),
     }
 }
 
@@ -1885,6 +1906,7 @@ fn export_record(module: &LoweredModule, def: &RecordDef) -> ExportedRecord {
             .iter()
             .map(|field| export_record_field(module, field))
             .collect(),
+        doc: typegen_doc(def.doc.as_ref()),
     }
 }
 
@@ -1898,6 +1920,7 @@ fn export_union(module: &LoweredModule, def: &UnionDef) -> ExportedUnion {
             .map(|case| export_union_case(module, case))
             .collect(),
         property_target: None,
+        doc: typegen_doc(def.doc.as_ref()),
     }
 }
 
@@ -1913,9 +1936,12 @@ fn export_property_union(def: &UnionDef, target: &nx_hir::Name) -> ExportedUnion
             .map(|case| ExportedUnionCase {
                 name: case.name.as_str().to_string(),
                 fields: Vec::new(),
+                // A case names one field of the target, and carries that field's doc.
+                doc: typegen_doc(case.doc.as_ref()),
             })
             .collect(),
         property_target: Some(target.as_str().to_string()),
+        doc: None,
     }
 }
 
@@ -1927,6 +1953,7 @@ fn export_union_case(module: &LoweredModule, case: &UnionCaseDef) -> ExportedUni
             .iter()
             .map(|field| export_union_case_field(module, field))
             .collect(),
+        doc: typegen_doc(case.doc.as_ref()),
     }
 }
 
@@ -1954,6 +1981,7 @@ fn export_external_component_contract(
             .map(|field| export_record_field(module, field))
             .collect(),
         type_params: effective_component_type_params(module, prepared, component),
+        doc: typegen_doc(component.doc.as_ref()),
     })
 }
 
@@ -2070,6 +2098,7 @@ fn export_update(
                 .into_iter()
                 .map(|field| ExportedRecordField {
                     name: field.name.as_str().to_string(),
+                    doc: typegen_doc(field.doc.as_ref()),
                     ty: field.ty,
                     optional: field.optional,
                     default_value: None,
@@ -2088,6 +2117,7 @@ fn export_update(
                     optional: field.optional,
                     default_value: None,
                     declaring_module: None,
+                    doc: typegen_doc(field.doc.as_ref()),
                 })
                 .collect()
         });
@@ -2112,6 +2142,8 @@ fn export_update(
         discriminator: record.name.as_str().to_string(),
         fields,
         type_params,
+        // A companion is generated, not declared; its fields carry the docs they mirror.
+        doc: None,
     }
 }
 
@@ -2136,9 +2168,12 @@ fn export_external_state(
                 optional: field.optional,
                 default_value: None,
                 declaring_module: None,
+                doc: typegen_doc(field.doc.as_ref()),
             })
             .collect(),
         type_params: effective_component_type_params(module, prepared, component),
+        // The `state` group itself is not documentable; its fields are.
+        doc: None,
     })
 }
 
@@ -2149,6 +2184,7 @@ fn export_record_field(module: &LoweredModule, field: &RecordField) -> ExportedR
         optional: field.optional,
         default_value: export_field_default(module, field.default),
         declaring_module: None,
+        doc: typegen_doc(field.doc.as_ref()),
     }
 }
 
@@ -2159,6 +2195,7 @@ fn export_union_case_field(module: &LoweredModule, field: &UnionCaseField) -> Ex
         optional: field.optional,
         default_value: export_field_default(module, field.default),
         declaring_module: None,
+        doc: typegen_doc(field.doc.as_ref()),
     }
 }
 
@@ -3105,5 +3142,96 @@ export type User extends Named = { email:string }
             "{:?}",
             build.warnings
         );
+    }
+
+    #[test]
+    fn exported_declarations_carry_their_documentation() {
+        let module = analyze_module(
+            r#"
+/// A size in pixels.
+export type Size = int
+
+/// A contact. See [Theme].
+export type Contact = {
+  /// The display name.
+  name:string
+  email?:string
+}
+
+export type Theme =
+  /// Light text on dark.
+  | dark
+  | light
+
+export type LoadState =
+  | idle
+  /// It failed.
+  | failed {
+    message:string   /// Why, see [LoadState.idle].
+  }
+
+/// A counter.
+export external component <Counter
+  step:int   /// How far to count.
+/> = {
+  state {
+    count:int   /// The current count.
+  }
+}
+"#,
+            "types.nx",
+        );
+        let build = ExportedTypeGraph::from_module_with_warnings(&module, Path::new("types.nx"))
+            .expect("graph build");
+        let item = |name: &str| &build.graph.declaration(name).expect(name).item;
+
+        let ExportedType::Alias(size) = item("Size") else {
+            panic!("Size");
+        };
+        assert_eq!(size.doc.as_deref(), Some("A size in pixels."));
+
+        let contact = build.graph.record("Contact").expect("Contact");
+        assert_eq!(contact.doc.as_deref(), Some("A contact. See `Theme`."));
+        assert_eq!(contact.fields[0].doc.as_deref(), Some("The display name."));
+        assert_eq!(contact.fields[1].doc, None);
+
+        let ExportedType::Union(theme) = item("Theme") else {
+            panic!("Theme");
+        };
+        assert_eq!(theme.doc, None);
+        assert_eq!(theme.cases[0].doc.as_deref(), Some("Light text on dark."));
+        assert_eq!(theme.cases[1].doc, None);
+
+        let ExportedType::Union(load_state) = item("LoadState") else {
+            panic!("LoadState");
+        };
+        assert_eq!(load_state.cases[1].doc.as_deref(), Some("It failed."));
+        assert_eq!(
+            load_state.cases[1].fields[0].doc.as_deref(),
+            Some("Why, see `LoadState.idle`.")
+        );
+
+        let counter = build.graph.record("Counter").expect("Counter contract");
+        assert_eq!(counter.doc.as_deref(), Some("A counter."));
+        assert_eq!(counter.fields[0].doc.as_deref(), Some("How far to count."));
+
+        let ExportedType::ExternalState(state) = item("Counter_state") else {
+            panic!("Counter_state");
+        };
+        assert_eq!(state.doc, None);
+        assert_eq!(state.fields[0].doc.as_deref(), Some("The current count."));
+
+        let update = update_companion(&build.graph, "Contact_update");
+        assert_eq!(update.doc, None);
+        assert_eq!(update.fields[0].doc.as_deref(), Some("The display name."));
+        let state_update = update_companion(&build.graph, "Counter_update");
+        assert_eq!(
+            state_update.fields[0].doc.as_deref(),
+            Some("The current count.")
+        );
+
+        let property = property_companion(&build.graph, "Contact_property");
+        assert_eq!(property.doc, None);
+        assert_eq!(property.cases[0].doc.as_deref(), Some("The display name."));
     }
 }

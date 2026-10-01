@@ -72,6 +72,7 @@ fn test_for_loop_simple() {
         params,
         return_type: None,
         body: for_expr,
+        doc: None,
         span: span(0, 40),
     };
 
@@ -130,6 +131,7 @@ fn test_for_loop_with_index() {
         params,
         return_type: None,
         body: for_expr,
+        doc: None,
         span: span(0, 45),
     };
 
@@ -183,6 +185,7 @@ fn test_nested_for_loops() {
         params,
         return_type: None,
         body: for_expr,
+        doc: None,
         span: span(0, 40),
     };
 
@@ -229,6 +232,7 @@ fn test_for_loop_empty_array() {
         params,
         return_type: None,
         body: for_expr,
+        doc: None,
         span: span(0, 30),
     };
 
@@ -278,6 +282,7 @@ fn test_for_loop_over_a_single_item_iterates_once() {
         params,
         return_type: None,
         body: for_expr,
+        doc: None,
         span: span(0, 30),
     };
 
@@ -400,6 +405,7 @@ fn test_for_loop_index_arithmetic() {
         params,
         return_type: None,
         body: for_expr,
+        doc: None,
         span: span(0, 45),
     };
 
@@ -542,6 +548,7 @@ fn test_for_loop_float_array() {
         params,
         return_type: None,
         body: for_expr,
+        doc: None,
         span: span(0, 40),
     };
 

@@ -12,9 +12,9 @@
 
 use nx_hir::{
     ast::{Expr, TypeRef},
-    Component, Function, Item, RecordDef, RecordField, UnionDef,
+    Component, Doc, Function, Item, RecordDef, RecordField, UnionDef,
 };
-use nx_types::Type;
+use nx_types::{ResolvedDocLink, Type};
 
 use crate::{type_ref_display, DocumentSymbolKind};
 
@@ -39,6 +39,26 @@ pub(crate) fn union_case_expression(expr: &Expr, ty: &Type) -> Option<String> {
         Expr::ContextualName { .. } | Expr::ResolvedUnionCase { .. } | Expr::Member { .. }
     )
     .then(|| union_case(case_ty.union.as_str(), case_ty.case.as_str()))
+}
+
+/// Documentation as hover shows it: each doc link that resolved, in `resolved`, as its path in a
+/// code span; every other link as written.
+pub(crate) fn render_doc(doc: &Doc, resolved: &[ResolvedDocLink]) -> String {
+    doc.replace_links(|link| {
+        resolved
+            .iter()
+            .any(|resolved| resolved.span == link.span)
+            .then(|| link.code_span())
+    })
+}
+
+/// Hover content with documentation after it: the fragment first and unchanged, then a blank line
+/// and the documentation. No documentation leaves the content as it was.
+pub(crate) fn with_doc(content: String, doc: Option<&str>) -> String {
+    match doc {
+        Some(doc) if !doc.trim().is_empty() => format!("{content}\n\n{}", doc.trim_end()),
+        _ => content,
+    }
 }
 
 /// Wraps one NX fragment in the fenced block hover content is made of.

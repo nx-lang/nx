@@ -24,6 +24,7 @@ pub mod ast;
 pub mod components;
 pub mod db;
 pub mod declarations;
+pub mod doc;
 pub mod lower;
 pub mod prepared;
 pub mod records;
@@ -35,6 +36,7 @@ use nx_diagnostics::{Diagnostic, Label, Severity, TextSize, TextSpan};
 use rustc_hash::FxHashMap;
 use smol_str::SmolStr;
 
+pub use doc::{Doc, DocData, DocLink};
 // Re-export lowering function
 pub use lower::lower;
 pub use prepared::{
@@ -71,7 +73,8 @@ pub use records::{
     RecordResolutionError,
 };
 pub use scope::{
-    build_scopes, check_undefined_identifiers, Scope, ScopeId, ScopeManager, Symbol, SymbolKind,
+    build_scopes, check_undefined_identifiers, local_references, Scope, ScopeId, ScopeManager,
+    Symbol, SymbolKind,
 };
 pub use unions::{
     complete_property_unions, resolve_union_definition, validate_union_definitions,
@@ -252,6 +255,8 @@ pub struct Param {
     /// library can change a default without its callers being rebuilt; it may read the
     /// parameters declared before it.
     pub default: Option<ExprId>,
+    /// Documentation from `///` doc comments, if any.
+    pub doc: Option<Doc>,
     /// Source location
     pub span: TextSpan,
 }
@@ -270,6 +275,7 @@ impl Param {
             is_content,
             optional: false,
             default: None,
+            doc: None,
             span,
         }
     }
@@ -311,6 +317,8 @@ pub struct Function {
     pub return_type: Option<ast::TypeRef>,
     /// Function body expression
     pub body: ExprId,
+    /// Documentation from `///` doc comments, if any.
+    pub doc: Option<Doc>,
     /// Source location
     pub span: TextSpan,
 }
@@ -333,6 +341,8 @@ pub struct ValueDef {
     pub ty: Option<ast::TypeRef>,
     /// Initializer expression
     pub value: ExprId,
+    /// Documentation from `///` doc comments, if any.
+    pub doc: Option<Doc>,
     /// Source location
     pub span: TextSpan,
 }
@@ -346,6 +356,8 @@ pub struct TypeAlias {
     pub visibility: Visibility,
     /// Target type reference
     pub ty: ast::TypeRef,
+    /// Documentation from `///` doc comments, if any.
+    pub doc: Option<Doc>,
     /// Source span
     pub span: TextSpan,
 }
@@ -368,6 +380,8 @@ pub struct UnionCaseField {
     /// its expression. The parser rejects `?` together with a default
     /// (`optional-property-with-default`), so `has_default` and `optional` are never both true.
     pub has_default: bool,
+    /// Documentation from `///` doc comments, if any.
+    pub doc: Option<Doc>,
     /// Source span
     pub span: TextSpan,
 }
@@ -388,6 +402,7 @@ impl UnionCaseField {
             optional: false,
             has_default: default.is_some(),
             default,
+            doc: None,
             span,
         }
     }
@@ -401,6 +416,7 @@ impl UnionCaseField {
             optional: field.optional,
             has_default: field.default.is_some(),
             default: field.default,
+            doc: field.doc,
             span: field.span,
         }
     }
@@ -418,6 +434,7 @@ impl UnionCaseField {
             optional: field.optional,
             default: None,
             has_default: !field.is_required && !field.optional,
+            doc: field.doc.clone(),
             span: field.span,
         }
     }
@@ -435,6 +452,8 @@ pub struct UnionCaseDef {
     pub name: Name,
     /// Case-specific payload fields.
     pub fields: Vec<UnionCaseField>,
+    /// Documentation from `///` doc comments, if any.
+    pub doc: Option<Doc>,
     /// Source span
     pub span: TextSpan,
 }
@@ -485,6 +504,8 @@ pub struct UnionDef {
     /// component's state fields), in declaration order with inherited fields first. It has no
     /// base, cannot be extended, and has no derived declarations of its own.</para>
     pub property_target: Option<Name>,
+    /// Documentation from `///` doc comments, if any.
+    pub doc: Option<Doc>,
     /// Source span
     pub span: TextSpan,
 }
@@ -633,6 +654,8 @@ pub struct RecordField {
     pub optional: bool,
     /// Default value expression (if present)
     pub default: Option<ExprId>,
+    /// Documentation from `///` doc comments, if any.
+    pub doc: Option<Doc>,
     /// Source span
     pub span: TextSpan,
 }
@@ -652,6 +675,7 @@ impl RecordField {
             is_content,
             optional: false,
             default,
+            doc: None,
             span,
         }
     }
@@ -734,6 +758,8 @@ pub struct EffectiveField {
     pub default: Option<QualifiedExprRef>,
     /// Whether callers must provide this field explicitly.
     pub is_required: bool,
+    /// Documentation from `///` doc comments, if any.
+    pub doc: Option<Doc>,
     /// Source span
     pub span: TextSpan,
 }
@@ -754,6 +780,7 @@ impl EffectiveField {
             module_identity,
             default,
             is_required,
+            doc: field.doc,
             span: field.span,
         }
     }
@@ -771,6 +798,7 @@ impl EffectiveField {
             module_identity: module_identity.into(),
             default: None,
             is_required: field.is_required,
+            doc: field.doc.clone(),
             span: field.span,
         }
     }
@@ -856,6 +884,8 @@ pub struct RecordDef {
     pub type_params: Vec<TypeParameter>,
     /// Property definitions
     pub properties: Vec<RecordField>,
+    /// Documentation from `///` doc comments, if any.
+    pub doc: Option<Doc>,
     /// Source span
     pub span: TextSpan,
 }
@@ -903,6 +933,8 @@ pub struct ComponentEmit {
     pub action_name: Name,
     /// Whether this emit was defined inline or referenced.
     pub kind: ComponentEmitKind,
+    /// Documentation from `///` doc comments, if any.
+    pub doc: Option<Doc>,
     /// Source span
     pub span: TextSpan,
 }
@@ -930,6 +962,8 @@ pub struct Component {
     pub state: Vec<RecordField>,
     /// Lowered component body expression when this is a concrete NX-bodied component.
     pub body: Option<ExprId>,
+    /// Documentation from `///` doc comments, if any.
+    pub doc: Option<Doc>,
     /// Source span
     pub span: TextSpan,
 }
@@ -1130,6 +1164,18 @@ impl Item {
             Item::TypeAlias(alias) => alias.visibility,
             Item::Union(union_def) => union_def.visibility,
             Item::Record(record_def) => record_def.visibility,
+        }
+    }
+
+    /// Get the item's documentation, if it has any.
+    pub fn doc(&self) -> Option<&Doc> {
+        match self {
+            Item::Function(func) => func.doc.as_ref(),
+            Item::Value(value) => value.doc.as_ref(),
+            Item::Component(component) => component.doc.as_ref(),
+            Item::TypeAlias(alias) => alias.doc.as_ref(),
+            Item::Union(union_def) => union_def.doc.as_ref(),
+            Item::Record(record_def) => record_def.doc.as_ref(),
         }
     }
 }
@@ -1484,6 +1530,7 @@ mod tests {
             params: Vec::new(),
             return_type: None,
             body: module.alloc_expr(ast::Expr::Literal(ast::Literal::Int(0))),
+            doc: None,
             span: TextSpan::new(TextSize::from(0), TextSize::from(10)),
         };
 

@@ -1,9 +1,11 @@
 /**
- * The output cap: where a value too long to show is cut.
+ * The output cap: where a value too long to show is cut. And what compiling reports alongside a
+ * value.
  */
+import { createNxHost, loadNxModule } from "@nx-lang/sdk-wasm";
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { MAX_OUTPUT_CHARACTERS, cutPoint, valueOutcome } from "./evaluate.ts";
+import { MAX_OUTPUT_CHARACTERS, cutPoint, evaluateSource, valueOutcome } from "./evaluate.ts";
 
 test("a value within the limit is whole", () => {
   const value = { text: "1\n2", nodes: [] };
@@ -25,4 +27,18 @@ test("one long line is cut at the limit, never between a surrogate pair's halves
   const { value } = valueOutcome({ text: emoji, nodes: [{ start: 0, end: emoji.length, role: "scalar", type: "string" }] });
   assert.equal(value.text.length, MAX_OUTPUT_CHARACTERS - 1);
   assert.equal(value.nodes[0].end, MAX_OUTPUT_CHARACTERS - 1);
+});
+
+test("a program that compiles with a warning reports it beside its value", async () => {
+  const host = createNxHost(await loadNxModule());
+  try {
+    const result = evaluateSource(host, "/// See [Missing].\nlet root() = { 42 }");
+    assert.equal(result.outcome?.kind, "value");
+    assert.deepEqual(
+      result.diagnostics.map(({ severity, code, origin, span }) => [severity, code, origin, span?.startLine]),
+      [["warning", "unresolved-doc-link", "source", 1]]
+    );
+  } finally {
+    host.dispose();
+  }
 });

@@ -183,6 +183,7 @@ pub fn complete_property_unions(module: &mut PreparedModule) {
                 .map(|field| UnionCaseDef {
                     name: field.name.clone(),
                     fields: Vec::new(),
+                    doc: field.doc.clone(),
                     span: field.span,
                 })
                 .collect::<Vec<_>>();

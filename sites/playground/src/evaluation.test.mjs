@@ -46,6 +46,17 @@ test("a runtime error's diagnostics are the ones the editor marks", () => {
   assert.equal(outputNotice(state), "none");
 });
 
+test("a warning beside a value or a runtime error is marked too", () => {
+  const warning = { severity: "warning", message: "Doc link `[Missing]` does not name a visible declaration", origin: "source", span: null };
+  const withValue = answer(initialEvaluation, "good", { diagnostics: [warning], outcome: value("42") });
+  assert.deepEqual(withValue.diagnostics, [warning]);
+  assert.equal(outputNotice(withValue), "none");
+
+  const runtime = [error("Division by zero")];
+  const withError = answer(initialEvaluation, "1 / 0", { diagnostics: [warning], outcome: { kind: "error", diagnostics: runtime } });
+  assert.deepEqual(withError.diagnostics, [warning, ...runtime]);
+});
+
 test("a compiler failure is reported, keeping the last value stale", () => {
   const good = answer(initialEvaluation, "good", { diagnostics: [], outcome: value("42") });
   const failed = reduceEvaluation(good, { kind: "failed", message: "The compiler crashed." });

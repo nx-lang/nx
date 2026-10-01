@@ -1182,7 +1182,7 @@ fn apply_prelude_bindings(module: &mut PreparedModule) {
                     module_identity: interface_item.module_identity.clone(),
                 },
                 target: PreparedBindingTarget::Imported {
-                    item: interface_item.clone(),
+                    item: Box::new(interface_item.clone()),
                     raw: Some(ImportedRawRef {
                         module_identity: interface_item.module_identity.clone(),
                         definition_id: interface_item.definition_id,
@@ -2600,6 +2600,7 @@ fn parse_failure_artifact(
         function_value_calls: Default::default(),
         range_for_expressions: Default::default(),
         prepared_module: None,
+        doc_links: Vec::new(),
     }
 }
 
@@ -2895,7 +2896,7 @@ fn add_imported_interface_bindings(
                 module_identity: interface_item.module_identity.clone(),
             },
             target: PreparedBindingTarget::Imported {
-                item: interface_item,
+                item: Box::new(interface_item),
                 raw: Some(ImportedRawRef {
                     module_identity: library.interface_items[indices[0]].module_identity.clone(),
                     definition_id: library.interface_items[indices[0]].definition_id,
@@ -3385,6 +3386,7 @@ fn build_interface_item(
 ) -> Option<LibraryInterfaceItem> {
     let item_name = item.name().as_str().to_string();
     let visibility = item.visibility();
+    let doc = item.doc().cloned();
     let item = match item {
         Item::Function(function) => {
             let return_type = function.return_type.clone().or_else(|| {
@@ -3405,6 +3407,7 @@ fn build_interface_item(
                         is_content: param.is_content,
                         optional: param.optional,
                         has_default: param.default.is_some(),
+                        doc: param.doc.clone(),
                         span: param.span,
                     })
                     .collect(),
@@ -3460,6 +3463,7 @@ fn build_interface_item(
                         .iter()
                         .map(union_case_field_to_interface_field)
                         .collect(),
+                    doc: case.doc.clone(),
                     span: case.span,
                 })
                 .collect(),
@@ -3485,6 +3489,7 @@ fn build_interface_item(
         definition_id: local_definition_id(item_index),
         visibility,
         item,
+        doc,
     })
 }
 
@@ -3495,6 +3500,7 @@ fn record_field_to_interface_field(field: &RecordField) -> LibraryInterfaceField
         is_content: field.is_content,
         optional: field.optional,
         is_required: field.default.is_none() && !field.optional,
+        doc: field.doc.clone(),
         span: field.span,
     }
 }
@@ -3506,6 +3512,7 @@ fn union_case_field_to_interface_field(field: &UnionCaseField) -> LibraryInterfa
         is_content: field.is_content,
         optional: field.optional,
         is_required: field.is_required(),
+        doc: field.doc.clone(),
         span: field.span,
     }
 }
@@ -4019,6 +4026,170 @@ mod tests {
             artifact.exported_items.get("TextField").map(Vec::len),
             Some(1)
         );
+    }
+
+    /// The DrawnUI catalogs document their components in `///` comments. Every one attaches, and
+    /// every doc link resolves, so the catalogs stay an example of the rules rather than a list of
+    /// exceptions to them.
+    #[test]
+    fn drawnui_catalog_documentation_attaches_and_resolves() {
+        let catalogs = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/drawnui-proposal");
+        for library in ["core", "ui", "graphics"] {
+            let artifact = build_library_artifact_from_directory(catalogs.join(library))
+                .unwrap_or_else(|error| panic!("{library}: {error}"));
+            let doc_diagnostics: Vec<_> = artifact
+                .modules
+                .iter()
+                .flat_map(|module| module.diagnostics.iter())
+                .chain(artifact.diagnostics.iter())
+                .filter(|diagnostic| {
+                    diagnostic.code().is_some_and(|code| {
+                        code.contains("doc-comment") || code.contains("doc-link")
+                    })
+                })
+                .collect();
+            assert!(doc_diagnostics.is_empty(), "{library}: {doc_diagnostics:?}");
+            assert!(
+                artifact.modules.iter().any(|module| {
+                    module.lowered_module.as_ref().is_some_and(|lowered| {
+                        lowered.items().iter().any(|item| item.doc().is_some())
+                    })
+                }),
+                "{library}: expected documented declarations"
+            );
+        }
+    }
+
+    /// The prelude documents `Range`, and building any program analyzes it without a doc
+    /// diagnostic.
+    #[test]
+    fn prelude_documentation_attaches() {
+        let artifact = build_program_artifact_from_source(
+            "let root() = { 1..5 }",
+            "main.nx",
+            &ProgramBuildContext::empty(),
+        )
+        .expect("Expected program artifact");
+        assert!(
+            artifact.diagnostics.iter().all(|diagnostic| diagnostic
+                .code()
+                .is_none_or(|code| !code.contains("doc-comment") && !code.contains("doc-link"))),
+            "{:?}",
+            artifact.diagnostics
+        );
+    }
+
+    /// Documentation travels with a library's interface, so a consumer's view of an imported
+    /// declaration, and of the fields a record inherits from it, keeps the docs.
+    #[test]
+    fn library_interface_items_and_inherited_fields_keep_their_docs() {
+        let temp = TempDir::new().expect("temp dir");
+        let app_dir = temp.path().join("app");
+        let people_dir = temp.path().join("people");
+        fs::create_dir_all(&app_dir).expect("app dir");
+        fs::create_dir_all(&people_dir).expect("people dir");
+        fs::write(
+            people_dir.join("User.nx"),
+            r#"/// Something with a name.
+export abstract type Named = {
+  /// The display name.
+  name:string
+}
+
+/// A person.
+export type User extends Named = {
+  email?:string   /// Where to write.
+}
+
+/// Greets someone.
+export let greet(
+  /// Who to greet.
+  who:string
+): string = {who}
+
+export type Mode =
+  /// Light text on dark.
+  | dark
+  | light"#,
+        )
+        .expect("people file");
+
+        let library =
+            build_library_artifact_from_directory(&people_dir).expect("Expected library artifact");
+        assert!(
+            !has_error_diagnostics(&library.diagnostics),
+            "{:?}",
+            library.diagnostics
+        );
+        let interface_item = |name: &str| {
+            library
+                .interface_items
+                .iter()
+                .find(|item| item.item_name == name)
+                .unwrap_or_else(|| panic!("Expected interface item {name}"))
+        };
+        let doc_text = |doc: &Option<nx_hir::Doc>| doc.as_ref().map(|doc| doc.text.to_string());
+
+        let user = interface_item("User");
+        assert_eq!(doc_text(&user.doc).as_deref(), Some("A person."));
+        match &user.item {
+            LibraryInterfaceKind::Record { properties, .. } => {
+                assert_eq!(
+                    doc_text(&properties[0].doc).as_deref(),
+                    Some("Where to write.")
+                );
+            }
+            other => panic!("Expected record interface item, got {other:?}"),
+        }
+        match &interface_item("greet").item {
+            LibraryInterfaceKind::Function { params, .. } => {
+                assert_eq!(doc_text(&params[0].doc).as_deref(), Some("Who to greet."));
+            }
+            other => panic!("Expected function interface item, got {other:?}"),
+        }
+        match &interface_item("Mode").item {
+            LibraryInterfaceKind::Union { cases, .. } => {
+                assert_eq!(
+                    doc_text(&cases[0].doc).as_deref(),
+                    Some("Light text on dark.")
+                );
+                assert_eq!(cases[1].doc, None);
+            }
+            other => panic!("Expected union interface item, got {other:?}"),
+        }
+
+        let registry = LibraryRegistry::new();
+        registry
+            .load_library_from_directory(&people_dir)
+            .expect("Expected people registry load");
+        let path = app_dir.join("main.nx");
+        let source = r#"import { User } from "../people"
+let ada = <User name="Ada" />"#;
+        fs::write(&path, source).expect("main file");
+        let artifact = build_program_artifact_from_source(
+            source,
+            &path.display().to_string(),
+            &registry.build_context(),
+        )
+        .expect("Expected program artifact");
+        let prepared = artifact.root_modules[0]
+            .prepared_module
+            .as_ref()
+            .expect("Expected a prepared module");
+        let shape = nx_hir::effective_record_shape_for_name(prepared, &Name::new("User"))
+            .expect("Expected the imported record to resolve")
+            .expect("Expected a record shape");
+        let field_doc = |name: &str| {
+            shape
+                .fields
+                .iter()
+                .find(|field| field.name.as_str() == name)
+                .and_then(|field| field.doc.as_ref())
+                .map(|doc| doc.text.to_string())
+        };
+        assert_eq!(field_doc("name").as_deref(), Some("The display name."));
+        assert_eq!(field_doc("email").as_deref(), Some("Where to write."));
+        assert_eq!(doc_text(&shape.record.doc).as_deref(), Some("A person."));
     }
 
     /// A record's derived declarations travel with it: importing `User` makes `User.Property` and

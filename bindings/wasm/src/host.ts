@@ -232,6 +232,16 @@ export interface NxProgramArtifact {
   evaluateNx(): NxValueText;
 
   /**
+   * The diagnostics the build reported without failing — warnings, info and hints — each against
+   * the identity of the module it belongs to. A build that reports an error throws instead, so
+   * none of these is an error.
+   *
+   * @throws NxDisposedResourceError when this artifact has already been disposed.
+   * @throws NxHostCrashedError when the module traps, or has already trapped.
+   */
+  diagnostics(): readonly NxDiagnostic[];
+
+  /**
    * Releases the artifact inside the module. Calling `dispose` more than once is allowed.
    */
   dispose(): void;
@@ -616,6 +626,14 @@ class WasmProgramArtifact implements NxProgramArtifact {
       exports.nx_wasm_program_evaluate_nx(handle)
     );
     return normalizeValueText(raw);
+  }
+
+  diagnostics(): readonly NxDiagnostic[] {
+    const handle = this.#live();
+    const raw = this.#host.call<unknown>("nx_wasm_program_diagnostics", (exports) =>
+      exports.nx_wasm_program_diagnostics(handle)
+    );
+    return normalizeDiagnostics(raw);
   }
 
   dispose(): void {

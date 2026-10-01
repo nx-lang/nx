@@ -6,7 +6,7 @@ declare module "react" {
   namespace JSX {
     interface IntrinsicElements {
       "nx-value": DetailedHTMLProps<HTMLAttributes<NxValueElement>, NxValueElement> &
-        Partial<Pick<NxValueElement, "value" | "stale" | "truncated" | "describe" | "highlighter">>;
+        Partial<Pick<NxValueElement, "value" | "stale" | "truncated" | "describe" | "highlighter" | "themes">>;
     }
   }
 }

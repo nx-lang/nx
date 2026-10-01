@@ -1,7 +1,7 @@
 use crate::{
-    ast, Component, ComponentEmit, FunctionForm, Item, LoweredModule, LoweringDiagnostic, Name,
-    RecordField, RecordKind, SourceId, TypeAlias, TypeParameter, UnionCaseDef, UnionCaseField,
-    UnionDef, Visibility,
+    ast, Component, ComponentEmit, Doc, FunctionForm, Item, LoweredModule, LoweringDiagnostic,
+    Name, RecordField, RecordKind, SourceId, TypeAlias, TypeParameter, UnionCaseDef,
+    UnionCaseField, UnionDef, Visibility,
 };
 use nx_diagnostics::TextSpan;
 use rustc_hash::FxHashMap;
@@ -72,6 +72,7 @@ pub struct InterfaceParam {
     pub optional: bool,
     /// Whether the parameter has a default, which the declaring function evaluates.
     pub has_default: bool,
+    pub doc: Option<Doc>,
     pub span: TextSpan,
 }
 
@@ -91,6 +92,7 @@ pub struct InterfaceField {
     /// Whether the field carries the `?` mark.
     pub optional: bool,
     pub is_required: bool,
+    pub doc: Option<Doc>,
     pub span: TextSpan,
 }
 
@@ -99,6 +101,7 @@ pub struct InterfaceField {
 pub struct InterfaceUnionCase {
     pub name: Name,
     pub fields: Vec<InterfaceField>,
+    pub doc: Option<Doc>,
     pub span: TextSpan,
 }
 
@@ -176,6 +179,7 @@ pub struct InterfaceItem {
     pub definition_id: LocalDefinitionId,
     pub visibility: Visibility,
     pub item: InterfaceItemKind,
+    pub doc: Option<Doc>,
 }
 
 /// Origin of one prepared visible binding.
@@ -197,7 +201,8 @@ pub enum PreparedBindingTarget {
         definition_id: LocalDefinitionId,
     },
     Imported {
-        item: InterfaceItem,
+        /// Boxed, since an interface item is several times the size of the other variants.
+        item: Box<InterfaceItem>,
         raw: Option<ImportedRawRef>,
     },
 }
@@ -678,7 +683,7 @@ impl PreparedModule {
                     origin: binding.origin.clone(),
                 }),
             PreparedBindingTarget::Imported { item, raw } => Some(ResolvedPreparedItem::Imported {
-                item: item.clone(),
+                item: item.as_ref().clone(),
                 raw: raw.clone(),
                 origin: binding.origin.clone(),
             }),
@@ -764,6 +769,7 @@ pub fn interface_type_alias(item: &InterfaceItem) -> Option<TypeAlias> {
             name: Name::new(item.item_name.as_str()),
             visibility: item.visibility,
             ty: ty.clone(),
+            doc: item.doc.clone(),
             span: *span,
         }),
         _ => None,
@@ -782,6 +788,7 @@ pub fn interface_record(item: &InterfaceItem) -> Option<crate::RecordDef> {
             span,
         } => Some(crate::RecordDef {
             name: Name::new(item.item_name.as_str()),
+            doc: item.doc.clone(),
             visibility: item.visibility,
             kind: kind.clone(),
             is_abstract: *is_abstract,
@@ -795,6 +802,7 @@ pub fn interface_record(item: &InterfaceItem) -> Option<crate::RecordDef> {
                     is_content: field.is_content,
                     optional: field.optional,
                     default: None,
+                    doc: field.doc.clone(),
                     span: field.span,
                 })
                 .collect(),
@@ -818,6 +826,7 @@ pub fn interface_component(item: &InterfaceItem) -> Option<Component> {
             span,
         } => Some(Component {
             name: Name::new(item.item_name.as_str()),
+            doc: item.doc.clone(),
             visibility: item.visibility,
             is_abstract: *is_abstract,
             is_external: *is_external,
@@ -831,6 +840,7 @@ pub fn interface_component(item: &InterfaceItem) -> Option<Component> {
                     is_content: field.is_content,
                     optional: field.optional,
                     default: None,
+                    doc: field.doc.clone(),
                     span: field.span,
                 })
                 .collect(),
@@ -843,6 +853,7 @@ pub fn interface_component(item: &InterfaceItem) -> Option<Component> {
                     is_content: field.is_content,
                     optional: field.optional,
                     default: None,
+                    doc: field.doc.clone(),
                     span: field.span,
                 })
                 .collect(),
@@ -863,6 +874,7 @@ pub fn interface_union(item: &InterfaceItem) -> Option<UnionDef> {
             span,
         } => Some(UnionDef {
             name: Name::new(item.item_name.as_str()),
+            doc: item.doc.clone(),
             visibility: item.visibility,
             base: base.clone(),
             property_target: property_target.clone(),
@@ -875,6 +887,7 @@ pub fn interface_union(item: &InterfaceItem) -> Option<UnionDef> {
                         .iter()
                         .map(UnionCaseField::from_interface_field)
                         .collect(),
+                    doc: case.doc.clone(),
                     span: case.span,
                 })
                 .collect(),

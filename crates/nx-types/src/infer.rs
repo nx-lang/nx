@@ -7818,6 +7818,7 @@ mod tests {
             params: vec![],
             return_type: Some(TypeRef::name("float64")),
             body: converted_body,
+            doc: None,
             span,
         }));
         module.add_item(Item::Function(Function {
@@ -7827,6 +7828,7 @@ mod tests {
             params: vec![],
             return_type: None,
             body: untouched_body,
+            doc: None,
             span,
         }));
 
@@ -7865,6 +7867,7 @@ mod tests {
             params: vec![param],
             return_type: None,
             body,
+            doc: None,
             span,
         };
 
@@ -7898,6 +7901,7 @@ mod tests {
             params: vec![Param::new(Name::new("value"), TypeRef::name("int"), span)],
             return_type: None,
             body,
+            doc: None,
             span,
         };
         module.add_item(Item::Function(function));
@@ -7952,6 +7956,7 @@ mod tests {
             ],
             return_type: Some(TypeRef::name("int")),
             body: add_body,
+            doc: None,
             span,
         };
         module.add_item(Item::Function(add_fn));
@@ -7972,6 +7977,7 @@ mod tests {
             params: vec![Param::new(Name::new("value"), TypeRef::name("int"), span)],
             return_type: Some(TypeRef::name("int")),
             body: double_body,
+            doc: None,
             span,
         };
         module.add_item(Item::Function(double_fn));
@@ -7998,6 +8004,7 @@ mod tests {
             params: vec![Param::new(Name::new("n"), TypeRef::name("int"), span)],
             return_type: Some(TypeRef::name("int")),
             body: compute_body,
+            doc: None,
             span,
         };
         module.add_item(Item::Function(compute_fn));
@@ -8043,15 +8050,18 @@ mod tests {
                 UnionCaseDef {
                     name: Name::new("north"),
                     fields: Vec::new(),
+                    doc: None,
                     span,
                 },
                 UnionCaseDef {
                     name: Name::new("south"),
                     fields: Vec::new(),
+                    doc: None,
                     span,
                 },
             ],
             property_target: None,
+            doc: None,
             span,
         };
         module.add_item(Item::Union(union_def));
@@ -8091,9 +8101,11 @@ mod tests {
             cases: vec![UnionCaseDef {
                 name: Name::new("active"),
                 fields: Vec::new(),
+                doc: None,
                 span,
             }],
             property_target: None,
+            doc: None,
             span,
         };
         module.add_item(Item::Union(union_def));
@@ -8124,9 +8136,11 @@ mod tests {
             cases: vec![UnionCaseDef {
                 name: Name::new("active"),
                 fields: Vec::new(),
+                doc: None,
                 span,
             }],
             property_target: None,
+            doc: None,
             span,
         };
         module.add_item(Item::Union(union_def));
@@ -8134,6 +8148,7 @@ mod tests {
             name: Name::new("State"),
             visibility: nx_hir::Visibility::Export,
             ty: ast::TypeRef::name("Status"),
+            doc: None,
             span,
         };
         module.add_item(Item::TypeAlias(alias));
@@ -8167,9 +8182,11 @@ mod tests {
             cases: vec![UnionCaseDef {
                 name: Name::new("north"),
                 fields: Vec::new(),
+                doc: None,
                 span,
             }],
             property_target: None,
+            doc: None,
             span,
         };
         module.add_item(Item::Union(union_def));
@@ -8187,6 +8204,7 @@ mod tests {
             params: vec![],
             return_type: None,
             body: member,
+            doc: None,
             span,
         };
         module.add_item(Item::Function(func));

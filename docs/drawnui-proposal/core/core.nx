@@ -30,7 +30,7 @@
 // Document model (§4)
 // ---------------------------------------------------------------------------
 
-export type ElementId = string      // ^[A-Za-z_][A-Za-z0-9_.-]{0,63}$
+export type ElementId = string      /// `^[A-Za-z_][A-Za-z0-9_.-]{0,63}$`
 
 // NX gap: `elements` is a map from ElementId to Element on the wire. NX has no map type, so the
 // listing uses a sequence, which loses key uniqueness and O(1) lookup. It costs little in practice:
@@ -45,8 +45,8 @@ export type NxUiDocument = {
 }
 
 export type CatalogUse = {
-  id: string                        // reverse-DNS catalog ID: `nx.ui`, `nx.graphics`
-  version: string                   // exact semantic version; MVP core version is 0.1.0
+  id: string                        /// reverse-DNS catalog ID: `nx.ui`, `nx.graphics`
+  version: string                   /// exact semantic version; MVP core version is 0.1.0
 }
 
 export type DocumentMetadata = {
@@ -74,12 +74,11 @@ export type Distribution = start | center | end | spaceBetween | spaceAround | s
 export type ObjectFit = contain | cover | fill | none | scaleDown
 export type FontStyle = normal | italic
 
-// `auto` is intrinsic sizing; percentages resolve against the containing content box, and a
-// percentage against an intrinsically sized parent resolves as `auto`, so layout never depends on a
-// circular constraint. No calc(), no viewport units, no arbitrary strings.
-//
 // NX gap: the wire form also allows a bare scalar (`120`) and a string (`"auto"`, `"50%"`).
 // NX union cases are named, so a union cannot mix a numeric scalar with an alternative shape.
+/// `auto` is intrinsic sizing; percentages resolve against the containing content box, and a
+/// percentage against an intrinsically sized parent resolves as `auto`, so layout never depends on a
+/// circular constraint. No calc(), no viewport units, no arbitrary strings.
 export type Length =
   | auto
   | px { value: float64 }
@@ -93,8 +92,8 @@ export type Point = {
 export type ViewBox = {
   x: float64
   y: float64
-  width: float64                    // must be positive
-  height: float64                   // must be positive
+  width: float64                    /// must be positive
+  height: float64                   /// must be positive
 }
 
 // NX gap: the wire form also allows one scalar meaning all four sides, so `padding: 20` here has to
@@ -118,20 +117,20 @@ export type CornerRadii = {
 // Color and paint (§5.2)
 // ---------------------------------------------------------------------------
 
-// The portable subset of CSS Color 4: named colors, `transparent`, hex, rgb()/rgba(), hsl()/hsla().
-// Renderers normalize; CSS-wide keywords and environment-dependent values are invalid.
+/// The portable subset of CSS Color 4: named colors, `transparent`, hex, rgb()/rgba(), hsl()/hsla().
+/// Renderers normalize; CSS-wide keywords and environment-dependent values are invalid.
 export type Color = string
 
 export type GradientUnits = objectBoundingBox | userSpaceOnUse
 
 export type GradientStop = {
-  offset: float64                   // 0..1
+  offset: float64                   /// 0..1
   color: Color
-  opacity: float64 = 1              // 0..1
+  opacity: float64 = 1              /// 0..1
 }
 
-// At least two stops, in non-decreasing offset order; renderers clamp offsets but must not reorder.
-// Terms and coordinate modes follow SVG gradients.
+/// At least two stops, in non-decreasing offset order; renderers clamp offsets but must not reorder.
+/// Terms and coordinate modes follow SVG gradients.
 export type Paint =
   | none
   | solid { color: Color }
@@ -161,11 +160,10 @@ export type Paint =
 export type LineCap = butt | round | square
 export type LineJoin = miter | round | bevel
 
-// A stroke is scaled by the transforms in effect, as in SVG; there is no MVP equivalent of
-// `vector-effect: non-scaling-stroke`.
-//
 // `name?: T+` here and throughout: an optional sequence field that is omitted, or written `{}`,
 // is the empty value, which is how "defaults to empty" is spelled.
+/// A stroke is scaled by the transforms in effect, as in SVG; there is no MVP equivalent of
+/// `vector-effect: non-scaling-stroke`.
 export type Stroke = {
   paint: Paint
   width: float64 = 1
@@ -180,17 +178,16 @@ export type Shadow = {
   color: Color
   offsetX: float64 = 0
   offsetY: float64 = 0
-  blur: float64 = 0                 // >= 0
+  blur: float64 = 0                 /// `>= 0`
 }
 
-// Equivalent to an SVG transform list read left to right: matrices concatenate in array order, so
-// the *last* entry is the one applied first to the node's own geometry. `rotate` is positive
-// clockwise in NX's y-down space, matching SVG.
-//
 // NX gap: a default cannot reference a sibling property, so `scale.y` cannot default to `scale.x`.
+/// Equivalent to an SVG transform list read left to right: matrices concatenate in array order, so
+/// the *last* entry is the one applied first to the node's own geometry. `rotate` is positive
+/// clockwise in NX's y-down space, matching SVG.
 export type Transform =
   | translate { x: float64 y: float64 }
-  | scale { x: float64 y?: float64 }        // an omitted y means uniform scale
+  | scale { x: float64 y?: float64 }        /// an omitted y means uniform scale
   | rotate { degrees: float64 cx: float64 = 0 cy: float64 = 0 }
   | skewX { degrees: float64 }
   | skewY { degrees: float64 }
@@ -206,16 +203,16 @@ export type Border = {
 // Image source and accessibility (§5.4)
 // ---------------------------------------------------------------------------
 
-// The host, not the generated document, controls permitted schemes, domains, authentication, fetch
-// limits, caching, and decoding. Inline base64 is deliberately omitted, to hold down both token
-// volume and denial-of-service risk.
+/// The host, not the generated document, controls permitted schemes, domains, authentication, fetch
+/// limits, caching, and decoding. Inline base64 is deliberately omitted, to hold down both token
+/// volume and denial-of-service risk.
 export type ImageSource =
   | uri { uri: string }
-  | resource { name: string }       // trusted host resource registry
+  | resource { name: string }       /// trusted host resource registry
 
-// Renderers derive semantic roles from component types; the MVP allows no arbitrary ARIA roles.
+/// Renderers derive semantic roles from component types; the MVP allows no arbitrary ARIA roles.
 export type Accessibility = {
   label?: string
   description?: string
-  hidden: boolean = false           // true means decorative / ignored by accessibility APIs
+  hidden: boolean = false           /// true means decorative / ignored by accessibility APIs
 }

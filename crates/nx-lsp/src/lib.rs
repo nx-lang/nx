@@ -16,10 +16,11 @@ use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
     Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity as LspDiagnosticSeverity,
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse, Hover, HoverContents,
-    HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
-    Location, MarkupContent, MarkupKind, MessageType, NumberOrString, OneOf, Position, Range,
-    ServerCapabilities, SymbolKind, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
+    DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse, Documentation, Hover,
+    HoverContents, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
+    InitializedParams, Location, MarkupContent, MarkupKind, MessageType, NumberOrString, OneOf,
+    Position, Range, ServerCapabilities, SymbolKind, TextDocumentSyncCapability,
+    TextDocumentSyncKind, Url,
 };
 use tower_lsp::{async_trait, Client, LanguageServer, LspService, Server};
 
@@ -498,6 +499,12 @@ fn to_lsp_completion(item: nx_language_service::CompletionItem) -> CompletionIte
             ServiceCompletionItemKind::Member => CompletionItemKind::ENUM_MEMBER,
         }),
         detail: item.detail,
+        documentation: item.documentation.map(|value| {
+            Documentation::MarkupContent(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value,
+            })
+        }),
         ..CompletionItem::default()
     }
 }
@@ -808,6 +815,38 @@ component <Card title:string subtitle:string /> = {
         assert!(completions
             .iter()
             .any(|completion| completion.label == "subtitle"));
+    }
+
+    #[test]
+    fn completion_documentation_is_markdown_markup() {
+        let uri = "nx://tenant/form.nx";
+        let source = "component <Card\n  title:string   /// The **heading**.\n  subtitle:string\n/> = { <div /> }\nlet root() = { <Card  /> }\n";
+        let snapshot =
+            snapshot_for_open_documents(None, &one_document(uri, source, 1)).expect("snapshot");
+
+        let completions = snapshot
+            .completions(&DocumentUri::new(uri), TextPosition::new(4, 21))
+            .expect("completions")
+            .items
+            .into_iter()
+            .map(to_lsp_completion)
+            .collect::<Vec<_>>();
+        let title = completions
+            .iter()
+            .find(|completion| completion.label == "title")
+            .expect("title completion");
+        assert_eq!(
+            title.documentation,
+            Some(Documentation::MarkupContent(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: "The **heading**.".to_string(),
+            }))
+        );
+        let subtitle = completions
+            .iter()
+            .find(|completion| completion.label == "subtitle")
+            .expect("subtitle completion");
+        assert_eq!(subtitle.documentation, None);
     }
 
     #[tokio::test]

@@ -131,6 +131,24 @@ fn highlights_capture_the_parts_of_an_applied_type() {
 }
 
 #[test]
+fn highlights_capture_doc_comments_as_documentation() {
+    let captures = highlight_captures(
+        "/// Theme.\ntype Theme = string   /// Trailing.\n//// Section\ntype Size = int\n",
+    );
+    let has = |name: &str, text: &str| captures.iter().any(|(n, t)| n == name && t == text);
+    assert!(has("comment.documentation", "/// Theme."), "{captures:?}");
+    assert!(
+        has("comment.documentation", "/// Trailing."),
+        "{captures:?}"
+    );
+    assert!(has("comment", "//// Section"), "{captures:?}");
+    assert!(
+        !has("comment.documentation", "//// Section"),
+        "{captures:?}"
+    );
+}
+
+#[test]
 fn highlights_capture_the_range_operators() {
     let captures = highlight_captures("let xs = {for i in 0..count {i}}\nlet r = {1..=5}");
     let has = |name: &str, text: &str| captures.iter().any(|(n, t)| n == name && t == text);

@@ -51,6 +51,7 @@ fn test_add_function_direct_hir() {
         params,
         return_type: None,
         body: add_expr,
+        doc: None,
         span: span(0, 10),
     };
 
@@ -99,6 +100,7 @@ fn test_subtract_function_direct_hir() {
         params,
         return_type: None,
         body: sub_expr,
+        doc: None,
         span: span(0, 10),
     };
 
@@ -146,6 +148,7 @@ fn test_multiply_function_direct_hir() {
         params,
         return_type: None,
         body: mul_expr,
+        doc: None,
         span: span(0, 10),
     };
 
@@ -193,6 +196,7 @@ fn test_divide_function_direct_hir() {
         params,
         return_type: None,
         body: div_expr,
+        doc: None,
         span: span(0, 10),
     };
 
@@ -240,6 +244,7 @@ fn test_division_by_zero_direct_hir() {
         params,
         return_type: None,
         body: div_expr,
+        doc: None,
         span: span(0, 10),
     };
 
@@ -290,6 +295,7 @@ fn test_string_concat_direct_hir() {
         params,
         return_type: None,
         body: concat_expr,
+        doc: None,
         span: span(0, 10),
     };
 
@@ -355,6 +361,7 @@ fn test_block_with_variables_direct_hir() {
         params,
         return_type: None,
         body: block_expr,
+        doc: None,
         span: span(0, 20),
     };
 
@@ -417,6 +424,7 @@ fn test_complex_arithmetic_direct_hir() {
         params,
         return_type: None,
         body: add_expr,
+        doc: None,
         span: span(0, 15),
     };
 
@@ -458,6 +466,7 @@ fn array_index_module(index: i64) -> LoweredModule {
         params: Vec::new(),
         return_type: None,
         body,
+        doc: None,
         span: span(0, 20),
     }));
 

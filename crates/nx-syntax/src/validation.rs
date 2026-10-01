@@ -88,6 +88,9 @@ pub fn validate(tree: &SyntaxTree, file_name: &str) -> Vec<Diagnostic> {
     // Report the removed `enum` keyword by name.
     validate_reserved_enum_keyword(tree, file_name, &mut diagnostics);
 
+    // Report doc comments that document nothing, or document an item ambiguously or twice.
+    crate::doc_comments::validate_doc_comments(&root, file_name, &mut diagnostics);
+
     diagnostics
 }
 

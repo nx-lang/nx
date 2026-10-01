@@ -4853,4 +4853,330 @@ export external component <Table sortBy?:User.Property columns:User.Property+ pa
         assert!(typescript.contains("  low: number;"), "{typescript}");
         assert!(typescript.contains("bounds: Range;"), "{typescript}");
     }
+
+    // ============================================================================================
+    // Documentation
+    // ============================================================================================
+
+    /// The trimmed lines of `output` from the one containing `from` up to and including the first
+    /// line after it that contains `to`.
+    fn lines_between<'a>(output: &'a str, from: &str, to: &str) -> Vec<&'a str> {
+        let lines: Vec<&str> = output.lines().map(str::trim).collect();
+        let start = lines
+            .iter()
+            .position(|line| line.contains(from))
+            .unwrap_or_else(|| panic!("no line with {from:?} in:\n{output}"));
+        let end = start
+            + lines[start..]
+                .iter()
+                .position(|line| line.contains(to))
+                .unwrap_or_else(|| panic!("no line with {to:?} after {from:?} in:\n{output}"));
+        lines[start..=end].to_vec()
+    }
+
+    /// Spec: "A documented C# record property carries a summary".
+    #[test]
+    fn a_documented_csharp_record_property_carries_a_summary() {
+        let output = generate_for(
+            "export type Search = {\n  placeholder:string   /// Hint text.\n}\n",
+            TargetLanguage::CSharp,
+        );
+
+        let lines = lines_between(&output, "<summary>Hint text.</summary>", "Placeholder");
+        assert_eq!(lines[0], "/// <summary>Hint text.</summary>");
+        assert!(
+            lines[1..lines.len() - 1]
+                .iter()
+                .all(|line| line.starts_with('[')),
+            "only attributes come between the summary and the property: {lines:?}"
+        );
+    }
+
+    /// Spec: "C# documentation splits summary and remarks".
+    #[test]
+    fn csharp_documentation_splits_summary_and_remarks() {
+        let output = generate_for(
+            "/// A contact.\n///\n/// Shown in lists.\nexport type Contact = { name:string }\n",
+            TargetLanguage::CSharp,
+        );
+
+        let lines = lines_between(&output, "<summary>", "class Contact");
+        assert_eq!(lines[0], "/// <summary>A contact.</summary>");
+        assert_eq!(lines[1], "/// <remarks>Shown in lists.</remarks>");
+    }
+
+    /// Spec: "C# documentation escapes XML".
+    #[test]
+    fn csharp_documentation_escapes_xml() {
+        let output = generate_for(
+            "/// True when a < b & c.\nexport type Check = { ok:boolean }\n",
+            TargetLanguage::CSharp,
+        );
+
+        assert!(
+            output.contains("/// <summary>True when a &lt; b &amp; c.</summary>"),
+            "{output}"
+        );
+    }
+
+    /// Spec: "C# documentation converts Markdown emphasis and links".
+    #[test]
+    fn csharp_documentation_converts_markdown_emphasis_and_links() {
+        let output = generate_for(
+            "type Grid = { rows:int }\n/// Use **only** with [Grid]; see [the guide](https://nxlang.org/guide).\nexport type Cell = { row:int }\n",
+            TargetLanguage::CSharp,
+        );
+
+        let summary = lines_between(&output, "<summary>", "</summary>").join("\n");
+        assert!(summary.contains("<b>only</b>"), "{summary}");
+        assert!(summary.contains("<c>Grid</c>"), "{summary}");
+        assert!(
+            summary.contains("<a href=\"https://nxlang.org/guide\">the guide</a>"),
+            "{summary}"
+        );
+        assert!(!summary.contains("**"), "{summary}");
+    }
+
+    /// Spec: "C# documentation converts a bulleted list".
+    #[test]
+    fn csharp_documentation_converts_a_bulleted_list() {
+        let output = generate_for(
+            "/// Modes.\n///\n/// - fill\n/// - cover\nexport type Fit = { mode:string }\n",
+            TargetLanguage::CSharp,
+        );
+
+        let remarks = lines_between(&output, "<remarks>", "</remarks>");
+        assert!(
+            remarks.contains(&"/// <list type=\"bullet\">"),
+            "{remarks:?}"
+        );
+        assert!(
+            remarks.contains(&"/// <item><description>fill</description></item>"),
+            "{remarks:?}"
+        );
+        assert!(
+            remarks.contains(&"/// <item><description>cover</description></item>"),
+            "{remarks:?}"
+        );
+    }
+
+    /// Spec: "C# documentation keeps unsupported Markdown as text".
+    #[test]
+    fn csharp_documentation_keeps_raw_html_as_text() {
+        let output = generate_for(
+            "/// Line one<br>line two.\nexport type Note = { text:string }\n",
+            TargetLanguage::CSharp,
+        );
+
+        assert!(output.contains("&lt;br&gt;"), "{output}");
+        assert!(!output.contains("<br>"), "{output}");
+    }
+
+    /// Spec: "A documented constant case documents its enum member".
+    #[test]
+    fn a_documented_constant_case_documents_its_csharp_enum_member() {
+        let output = generate_for(
+            "export type Theme =\n  | light\n  | dark   /// Light text on dark.\n",
+            TargetLanguage::CSharp,
+        );
+
+        let lines = lines_between(&output, "Light text on dark.", "Dark");
+        assert_eq!(
+            lines,
+            vec!["/// <summary>Light text on dark.</summary>", "Dark"]
+        );
+    }
+
+    #[test]
+    fn documented_csharp_unions_cases_and_payload_fields_carry_summaries() {
+        let output = generate_for(
+            concat!(
+                "/// A load state.\n",
+                "export type LoadState =\n",
+                "  | idle   /// Not started.\n",
+                "  | failed {\n",
+                "    message:string   /// Why.\n",
+                "  }\n",
+            ),
+            TargetLanguage::CSharp,
+        );
+
+        for (doc, declaration) in [
+            ("A load state.", "abstract class LoadState"),
+            ("Not started.", "class LoadStateIdle"),
+            ("Why.", "Message"),
+        ] {
+            let lines = lines_between(&output, &format!("<summary>{doc}</summary>"), declaration);
+            assert!(
+                lines[1..lines.len() - 1]
+                    .iter()
+                    .all(|line| line.starts_with('[')),
+                "{doc}: {lines:?}"
+            );
+        }
+        // The constant case's `Instance` keeps its own fixed summary.
+        assert!(
+            output.contains("/// <summary>The single instance of this constant case.</summary>"),
+            "{output}"
+        );
+    }
+
+    #[test]
+    fn documented_csharp_state_and_update_fields_carry_summaries() {
+        let output = generate_for(
+            concat!(
+                "/// A counter.\n",
+                "export external component <Counter\n",
+                "  step:int   /// How far to count.\n",
+                "/> = {\n",
+                "  state {\n",
+                "    count:int   /// The current count.\n",
+                "  }\n",
+                "}\n",
+            ),
+            TargetLanguage::CSharp,
+        );
+
+        assert!(
+            output.contains("/// <summary>A counter.</summary>"),
+            "{output}"
+        );
+        assert!(
+            output.contains("/// <summary>How far to count.</summary>"),
+            "{output}"
+        );
+        // On the state contract's field, the update companion's accessor, and the property
+        // companion's enum member.
+        assert_eq!(
+            output
+                .matches("/// <summary>The current count.</summary>")
+                .count(),
+            3,
+            "{output}"
+        );
+    }
+
+    /// Spec: "A documented TypeScript property carries a JSDoc comment".
+    #[test]
+    fn a_documented_typescript_property_carries_a_jsdoc_comment() {
+        let output = generate_for(
+            "export type Search = {\n  placeholder:string   /// Hint text.\n}\n",
+            TargetLanguage::TypeScript,
+        );
+
+        let lines = lines_between(&output, "/**", "placeholder: string;");
+        assert_eq!(
+            lines,
+            vec!["/**", "* Hint text.", "*/", "placeholder: string;"]
+        );
+    }
+
+    /// Spec: "TypeScript documentation keeps Markdown".
+    #[test]
+    fn typescript_documentation_keeps_markdown() {
+        let output = generate_for(
+            "type Grid = { rows:int }\n/// Use **only** with [Grid].\nexport type Cell = { row:int }\n",
+            TargetLanguage::TypeScript,
+        );
+
+        assert!(output.contains(" * Use **only** with `Grid`."), "{output}");
+    }
+
+    /// Spec: "An at sign in documentation is not a JSDoc tag".
+    #[test]
+    fn an_at_sign_in_typescript_documentation_is_not_a_tag() {
+        let output = generate_for(
+            "/// Summary.\n///\n/// @nx/prelude provides `@nx/prelude` too.\nexport type Cell = { row:int }\n",
+            TargetLanguage::TypeScript,
+        );
+
+        assert!(
+            output.contains(" * \\@nx/prelude provides `@nx/prelude` too."),
+            "{output}"
+        );
+    }
+
+    /// Spec: "A documented constant case documents its enum member" — and not TypeScript's.
+    #[test]
+    fn a_constant_case_is_not_documented_in_typescript() {
+        let output = generate_for(
+            "/// A theme.\nexport type Theme =\n  | light\n  | dark   /// Light text on dark.\n",
+            TargetLanguage::TypeScript,
+        );
+
+        assert!(output.contains(" * A theme."), "{output}");
+        assert!(!output.contains("Light text on dark."), "{output}");
+    }
+
+    /// Spec: "A comment terminator in documentation does not end the TypeScript comment", and every
+    /// documented declaration type-checks.
+    #[test]
+    fn documented_typescript_type_checks() {
+        let source = concat!(
+            "/// A size. Ends */ early?\n",
+            "export type Size = int\n",
+            "/// A contact, see @types.\n",
+            "export type Contact = {\n",
+            "  name:string   /// The **name** */.\n",
+            "}\n",
+            "/// A load state.\n",
+            "export type LoadState =\n",
+            "  | idle   /// Not started.\n",
+            "  | failed {\n",
+            "    message:string   /// Why.\n",
+            "  }\n",
+            "/// A counter.\n",
+            "export external component <Counter\n",
+            "  step:int   /// How far.\n",
+            "/> = {\n",
+            "  state {\n",
+            "    count:int   /// The count.\n",
+            "  }\n",
+            "}\n",
+        );
+        let generated = generate_for(source, TargetLanguage::TypeScript);
+        assert!(generated.contains("Ends *\\/ early?"), "{generated}");
+        assert!(generated.contains(" * Why."), "{generated}");
+        assert!(generated.contains(" * The count."), "{generated}");
+
+        let temp_dir = TempDir::new().expect("temp dir");
+        fs::write(temp_dir.path().join("types.ts"), &generated).expect("types.ts");
+        fs::write(
+            temp_dir.path().join("host.ts"),
+            "import type { Contact, LoadState, Counter_update } from \"./types\";\n\
+             const contact: Contact = { $type: \"Contact\", name: \"Ada\" };\n\
+             declare const state: LoadState;\n\
+             const patch: Counter_update = { $type: \"Counter.Update\", count: 1 };\n\
+             void contact; void state; void patch;\n",
+        )
+        .expect("host.ts");
+
+        let output = tsc_command()
+            .args([
+                "--strict", "--noEmit", "--target", "es2022", "--module", "es2022",
+            ])
+            .args(["--moduleResolution", "bundler"])
+            .arg(temp_dir.path().join("host.ts"))
+            .output()
+            .expect("run tsc");
+        assert!(
+            output.status.success(),
+            "tsc failed:\n{}{}\n{generated}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    /// Spec: "An undocumented declaration generates as before".
+    #[test]
+    fn an_undocumented_declaration_generates_no_documentation() {
+        for language in [TargetLanguage::CSharp, TargetLanguage::TypeScript] {
+            let output = generate_for(
+                "// Not documentation.\nexport type Contact = { name:string }\n",
+                language,
+            );
+            assert!(!output.contains("/**"), "{output}");
+            assert!(!output.contains("<summary>"), "{output}");
+        }
+    }
 }

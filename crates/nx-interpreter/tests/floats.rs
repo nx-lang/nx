@@ -549,6 +549,7 @@ fn test_float_in_conditional() {
         params,
         return_type: None,
         body: if_expr,
+        doc: None,
         span: span(0, 30),
     };
     module.add_item(Item::Function(func));

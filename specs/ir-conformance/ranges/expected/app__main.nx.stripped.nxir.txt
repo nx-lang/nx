@@ -1,5 +1,5 @@
 module app/main.nx fingerprint 8748983150417179035
-links @nx/prelude.nx version "1" fingerprint 16429037828798365428
+links @nx/prelude.nx version "1" fingerprint 3805895034114390176
 links shared/bounds.nx version "" fingerprint 9215827138459482051
 requires ranges-v1
 entrypoints functions [squares pages none imported equal passedAlong root] components []

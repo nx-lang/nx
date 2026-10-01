@@ -93,5 +93,14 @@
   },
   "folding": {
     "offSide": false
-  }
+  },
+  "onEnterRules": [
+    {
+      "beforeText": "^\\s*///(?!/)",
+      "action": {
+        "indent": "none",
+        "appendText": "/// "
+      }
+    }
+  ]
 }

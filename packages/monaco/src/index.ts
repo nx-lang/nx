@@ -18,7 +18,7 @@ import {
   type NxLanguageService,
 } from "@nx-lang/language-protocol";
 import type * as Monaco from "monaco-editor";
-import type { BundledTheme, LanguageInput, ThemeInput } from "shiki";
+import type { BundledTheme, LanguageInput, ThemeInput, ThemeRegistrationAny } from "shiki";
 
 export type { NxLanguageService } from "@nx-lang/language-protocol";
 
@@ -175,8 +175,22 @@ export function toMonacoLanguageConfiguration(): Monaco.languages.LanguageConfig
       decreaseIndentPattern: new RegExp(configuration.indentationRules.decreaseIndentPattern),
     },
     folding: configuration.folding,
+    // Enter at the end of a leading `///` line continues the doc block. The rule only matches a
+    // line that starts with `///`, so a trailing doc comment is never continued.
+    onEnterRules: configuration.onEnterRules.map((rule) => ({
+      beforeText: new RegExp(rule.beforeText),
+      action: { indentAction: indentActions[rule.action.indent] ?? 0, appendText: rule.action.appendText },
+    })),
   };
 }
+
+/** Monaco's `IndentAction` values, by the names VS Code's language configuration spells them. */
+const indentActions: Record<string, Monaco.languages.IndentAction> = {
+  none: 0,
+  indent: 1,
+  indentOutdent: 2,
+  outdent: 3,
+};
 
 /** The published grammar as a Shiki language, under the id Monaco knows. */
 export function nxShikiLanguage(): LanguageInput {
@@ -281,8 +295,9 @@ async function prepareHighlighter(
     }
     return bundled;
   });
+  const resolved = await Promise.all(themeInputs.map(resolveTheme));
   const highlighter = await createHighlighterCore({
-    themes: themeInputs,
+    themes: resolved.map(withNxDocCommentStyles),
     langs: [nxShikiLanguage()],
     engine: createOnigurumaEngine(import("shiki/wasm")),
   });
@@ -291,6 +306,62 @@ async function prepareHighlighter(
     shikiToMonaco(highlighter, monaco as unknown as Parameters<typeof shikiToMonaco>[1]);
     return highlighter.getLoadedThemes();
   };
+}
+
+/** A theme input as the registration object it is or loads. */
+async function resolveTheme(input: ThemeInput): Promise<ThemeRegistrationAny> {
+  const loaded = await (typeof input === "function" ? input() : input);
+  return "default" in loaded ? loaded.default : loaded;
+}
+
+/**
+ * `theme` with rules for the Markdown in NX doc comments, so it reads the way documentation does in
+ * other editors rather than the way a Markdown file does.
+ *
+ * <para>A theme's Markdown rules give emphasis and link text the body color, which is right in a
+ * `.md` file and stands out as bright text inside a dim comment. Here emphasis keeps the comment's
+ * color and changes only the font, a code span takes the theme's code-span color, and a doc link,
+ * which names code, takes that color too and an underline. A color is the theme's rule for the
+ * scope or, failing that, for a language-specific form of it, such as `markup.inline.raw.markdown`.
+ * A doc link in a theme with no code-span color keeps the comment's color; any other rule whose
+ * color the theme lacks sets only the font.</para>
+ */
+export function withNxDocCommentStyles(theme: ThemeRegistrationAny): ThemeRegistrationAny {
+  const rules = theme.tokenColors ?? theme.settings ?? [];
+  const selectors = rules.flatMap((rule) =>
+    [rule.scope ?? []]
+      .flat()
+      .flatMap((scopes) => scopes.split(","))
+      .map((selector) => ({ selector: selector.trim(), foreground: rule.settings.foreground })),
+  );
+  // A theme's own rule for `scope`, or failing that for one of its language-specific forms, such
+  // as `markup.inline.raw.markdown` for `markup.inline.raw`.
+  const colorOf = (scope: string): string | undefined =>
+    (
+      selectors.find(({ selector, foreground }) => foreground !== undefined && selector === scope) ??
+      selectors.find(({ selector, foreground }) => foreground !== undefined && selector.startsWith(`${scope}.`))
+    )?.foreground;
+  const comment = colorOf("comment");
+  const code = colorOf("markup.inline.raw");
+  const rule = (scope: string, fontStyle: string, foreground: string | undefined) => ({
+    scope,
+    settings: foreground === undefined ? { fontStyle } : { fontStyle, foreground },
+  });
+  const docRules = [
+    rule("markup.bold.nx", "bold", comment),
+    rule("markup.italic.nx", "italic", comment),
+    rule("markup.bold.nx markup.italic.nx", "bold italic", comment),
+    rule("markup.italic.nx markup.bold.nx", "bold italic", comment),
+    ...(code === undefined ? [] : [rule("markup.inline.raw.nx", "", code)]),
+    // A doc link names code, so it takes the code color; a theme without one keeps it in the
+    // comment's, underlined.
+    rule("markup.underline.link.reference.nx", "underline", code ?? comment),
+    rule("markup.underline.link.text.nx", "underline", comment),
+    rule("markup.underline.link.nx", "underline", comment),
+  ];
+  return theme.tokenColors !== undefined
+    ? { ...theme, tokenColors: [...theme.tokenColors, ...docRules] }
+    : { ...theme, settings: [...(theme.settings ?? []), ...docRules] };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -354,6 +425,7 @@ function registerProviders(
             insertText: item.label,
             range,
             ...(item.detail === null ? {} : { detail: item.detail }),
+            ...(item.documentation === undefined ? {} : { documentation: { value: item.documentation } }),
           })),
         };
       } catch (error) {

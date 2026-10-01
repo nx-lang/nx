@@ -52,6 +52,13 @@ promise that resolves once the highlighter is loaded.
 | `themes` | `["github-light", "github-dark"]` | Shiki themes to load and define in Monaco, by bundled name or theme object. Pick one with the editor's `theme` option or `monaco.editor.setTheme`; without a pick, the first becomes active once the highlighter loads. |
 | `onError` | none | Called when a service call rejects or the highlighter fails to load. Nothing is thrown into Monaco. |
 
+**Doc comments.** Every theme loaded gets rules for the Markdown in `///` doc comments, so it reads
+the way documentation does in other editors rather than the way a Markdown file does: `**bold**`
+and `*italic*` keep the comment's color and change only the font, a code span takes the theme's
+code-span color, and a doc link such as `[Name]` takes that color with an underline (the comment's
+color, underlined, in a theme with no code-span color). `withNxDocCommentStyles(theme)` applies the
+same rules to a theme object, for a host that defines its themes some other way.
+
 **Idempotent.** A repeat call on the same Monaco namespace returns a handle onto the existing
 registration rather than registering again, so `@monaco-editor/react`'s `beforeMount` and `onMount`
 pair, and React strict mode's double mount, register one set of providers and every completion

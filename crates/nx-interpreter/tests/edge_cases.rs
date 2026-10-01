@@ -68,6 +68,7 @@ fn test_variable_shadowing_in_block() {
         params,
         return_type: None,
         body: inner_y,
+        doc: None,
         span: span(0, 40),
     };
 
@@ -214,6 +215,7 @@ fn test_deeply_nested_blocks() {
         params,
         return_type: None,
         body,
+        doc: None,
         span: span(0, 40),
     };
 
@@ -360,6 +362,7 @@ fn test_boolean_double_negation() {
         params,
         return_type: None,
         body: not_not_x,
+        doc: None,
         span: span(0, 20),
     };
 

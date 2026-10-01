@@ -23,6 +23,7 @@ nx-value = { path = "../nx-value" }
 clap = { version = "4", features = ["derive"] }
 smol_str = { workspace = true }
 rustc-hash = { workspace = true }
+pulldown-cmark = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }

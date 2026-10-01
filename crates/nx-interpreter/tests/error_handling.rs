@@ -47,6 +47,7 @@ fn test_division_by_zero_int() {
         params: vec![],
         return_type: None,
         body: div_expr,
+        doc: None,
         span: span(0, 20),
     };
 
@@ -149,6 +150,7 @@ fn test_paren_function_invalid_return_type_usage() {
         params: vec![param],
         return_type: None,
         body: if_expr,
+        doc: None,
         span: span(0, 20),
     };
     module.add_item(Item::Function(func));
@@ -188,6 +190,7 @@ fn test_undeclared_union_runtime_error() {
         params: Vec::new(),
         return_type: None,
         body: member,
+        doc: None,
         span,
     };
     module.add_item(Item::Function(func));

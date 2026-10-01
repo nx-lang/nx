@@ -558,8 +558,17 @@ Whitespace  ::=
     " " | "\t" | "\r" | "\n"
 
 (* Comments are treated as whitespace/trivia and ignored by the parser. *)
-Comment              ::= LineComment | BlockComment
+Comment              ::= DocComment | LineComment | BlockComment
 LineComment          ::= "//" { ? any character except "\r" and "\n" ? } [ "\r" | "\n" ]
+
+(* A doc comment is a line comment with exactly three slashes; four or more is a LineComment. It is
+   trivia to the parser, and a post-parse pass attaches it to the declaration or member it
+   documents: a leading block of `///` lines documents the item on the next line, and a trailing
+   `///` documents the one item that starts and ends on its line, continuing onto the `///` lines
+   directly below it that start at its column. Its text is CommonMark. See the
+   language reference's Comments page for the attachment rules and their errors. *)
+DocComment           ::= "///" [ ? any character except "/", "\r" and "\n" ?
+                                 { ? any character except "\r" and "\n" ? } ] [ "\r" | "\n" ]
 
 (* Block comments support nesting of the same kind. *)
 BlockComment         ::= CBlockComment | HtmlBlockComment

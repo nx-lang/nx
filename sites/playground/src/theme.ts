@@ -10,6 +10,16 @@ import { useEffect, useState } from "react";
 
 export type Theme = "light" | "dark";
 
+/**
+ * The Shiki theme the source and the output are colored with in each site theme: GitHub's current
+ * ones. Their comments are readable (6.2:1 against the dark background, where `github-dark`'s are
+ * 3.1:1), and a doc comment is there to be read.
+ */
+export const EDITOR_THEMES = { dark: "github-dark-default", light: "github-light-default" } as const satisfies Record<
+  Theme,
+  string
+>;
+
 const STORAGE_KEY = "starlight-theme";
 
 function systemTheme(): Theme {

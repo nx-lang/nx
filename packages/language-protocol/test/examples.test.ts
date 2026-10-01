@@ -60,7 +60,7 @@ export const completionsAnswer: CompletionList = {
   uri: "nx://tenant/form.nx",
   identity: "tenant/form.nx",
   version: 7,
-  items: [{ label: "label", kind: "Property", detail: "label:string" }],
+  items: [{ label: "label", kind: "Property", detail: "label:string", documentation: "The caption." }],
 };
 
 export const diagnosticsRequest: DiagnosticsRequest = { documents, uri: "nx://tenant/form.nx" };

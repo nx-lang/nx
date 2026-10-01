@@ -88,11 +88,13 @@ const answer: CompletionList = {
   uri: "nx://tenant/form.nx",
   identity: "tenant/form.nx",
   version: 7,
-  items: [{ label: "label", kind: "Property", detail: "label:string" }],
+  items: [{ label: "label", kind: "Property", detail: "label:string", documentation: "The caption." }],
 };
 ```
 
 `kind` is one of `Keyword`, `Type`, `Declaration`, `Component`, `Property`, `Member`.
+`documentation` is the `///` documentation of what the item names, as markdown, and is absent when
+it has none.
 
 ### `diagnostics`
 

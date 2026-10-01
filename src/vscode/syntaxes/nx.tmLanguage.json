@@ -97,10 +97,135 @@
           ]
         },
         {
+          "name": "comment.line.documentation.nx",
+          "begin": "///(?!/)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.comment.nx"
+            }
+          },
+          "end": "$",
+          "patterns": [
+            {
+              "include": "#doc-markdown"
+            }
+          ]
+        },
+        {
           "name": "comment.line.double-slash.nx",
           "match": "//.*$"
         }
       ]
+    },
+    "doc-markdown": {
+      "comment": "Inline CommonMark in a `///` doc comment, one line at a time. A code span is matched first, so nothing inside it is a link or emphasis.",
+      "patterns": [
+        {
+          "include": "#doc-code-span"
+        },
+        {
+          "include": "#doc-link"
+        },
+        {
+          "include": "#doc-bold"
+        },
+        {
+          "include": "#doc-italic"
+        }
+      ]
+    },
+    "doc-code-span": {
+      "name": "markup.inline.raw.nx",
+      "match": "(`+)(?!`).*?(?<!`)\\1(?!`)"
+    },
+    "doc-link": {
+      "comment": "A doc link, `[Name]` or `[Type.member]`, optionally in backticks, and not followed by `(` or `[`; or a link with a destination, `[text](url)`.",
+      "patterns": [
+        {
+          "name": "meta.link.reference.nx",
+          "match": "(\\[)(`?[A-Za-z_][A-Za-z0-9_-]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*`?)(\\])(?![\\[(])",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.link.title.begin.nx"
+            },
+            "2": {
+              "name": "markup.underline.link.reference.nx"
+            },
+            "3": {
+              "name": "punctuation.definition.link.title.end.nx"
+            }
+          }
+        },
+        {
+          "name": "meta.link.inline.nx",
+          "match": "(\\[)([^\\]]+)(\\])(\\()([^)\\s]+)(\\))",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.link.title.begin.nx"
+            },
+            "2": {
+              "name": "markup.underline.link.text.nx"
+            },
+            "3": {
+              "name": "punctuation.definition.link.title.end.nx"
+            },
+            "4": {
+              "name": "punctuation.definition.metadata.nx"
+            },
+            "5": {
+              "name": "markup.underline.link.nx"
+            },
+            "6": {
+              "name": "punctuation.definition.metadata.nx"
+            }
+          }
+        }
+      ]
+    },
+    "doc-bold": {
+      "name": "markup.bold.nx",
+      "match": "(\\*\\*|__)(?=\\S)(.+?)(?<=\\S)\\1",
+      "captures": {
+        "2": {
+          "patterns": [
+            {
+              "include": "#doc-code-span"
+            },
+            {
+              "include": "#doc-link"
+            },
+            {
+              "include": "#doc-italic"
+            }
+          ]
+        }
+      }
+    },
+    "doc-italic": {
+      "name": "markup.italic.nx",
+      "match": "(?<![\\w*])\\*(?=[^\\s*])(.+?)(?<=[^\\s*])\\*(?![\\w*])|(?<![\\w_])_(?=[^\\s_])(.+?)(?<=[^\\s_])_(?![\\w_])",
+      "captures": {
+        "1": {
+          "patterns": [
+            {
+              "include": "#doc-code-span"
+            },
+            {
+              "include": "#doc-link"
+            }
+          ]
+        },
+        "2": {
+          "patterns": [
+            {
+              "include": "#doc-code-span"
+            },
+            {
+              "include": "#doc-link"
+            }
+          ]
+        }
+      }
     },
     "entities": {
       "patterns": [

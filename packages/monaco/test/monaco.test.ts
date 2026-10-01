@@ -9,6 +9,7 @@ import {
   toMonacoLanguageConfiguration,
   toMonacoMarkers,
   toProtocolPosition,
+  withNxDocCommentStyles,
 } from "../src/index.js";
 import { cancellationToken, createFakeMonaco, fakeModel } from "./fake-monaco.js";
 
@@ -33,7 +34,7 @@ function fakeService(overrides: Partial<NxLanguageService> = {}): NxLanguageServ
       identity: "model/1",
       version: 1,
       items: [
-        { label: "mode", kind: "Property" as const, detail: "mode:Mode" },
+        { label: "mode", kind: "Property" as const, detail: "mode:Mode", documentation: "The **color** scheme." },
         { label: "Panel", kind: "Component" as const, detail: null },
       ],
     }),
@@ -72,6 +73,56 @@ test("loads the themes the host asks for", async () => {
   await registerNxLanguage(fake.namespace, { themes: ["nord"] }).ready;
   assert.deepEqual([...fake.themes.keys()], ["nord"]);
   assert.equal(fake.currentTheme, "nord");
+});
+
+test("doc comment emphasis keeps the comment color, and a doc link takes the code color", async () => {
+  const fake = createFakeMonaco();
+  await registerNxLanguage(fake.namespace, { themes: ["github-dark-default"] }).ready;
+  const provider = fake.tokensProviders.get(NX_LANGUAGE_ID)!;
+  const line = "/// A **b** *i* [Link] `c`.";
+  const scopes = provider.tokenize(line, provider.getInitialState()).tokens.map((token) => token.scopes);
+  assert.ok(scopes.includes("markup.bold.nx") && scopes.includes("markup.underline.link.reference.nx"), String(scopes));
+
+  const rules = fake.themes.get("github-dark-default")!.rules;
+  const ruleFor = (token: string) => rules.find((rule) => rule.token === token);
+  const comment = ruleFor("comment")!.foreground;
+  assert.deepEqual(
+    [ruleFor("markup.bold.nx"), ruleFor("markup.italic.nx")].map((rule) => [rule?.foreground, rule?.fontStyle]),
+    [
+      [comment, "bold"],
+      [comment, "italic"],
+    ],
+  );
+  const link = ruleFor("markup.underline.link.reference.nx")!;
+  assert.deepEqual([link.foreground, link.fontStyle], [ruleFor("markup.inline.raw")!.foreground, "underline"]);
+});
+
+test("a code color written for one language's Markdown is the theme's code color", async () => {
+  const fake = createFakeMonaco();
+  await registerNxLanguage(fake.namespace, { themes: ["one-dark-pro"] }).ready;
+  const rules = fake.themes.get("one-dark-pro")!.rules;
+  const link = rules.find((rule) => rule.token === "markup.underline.link.reference.nx")!;
+  // one-dark-pro colors code spans only as `markup.inline.raw.markdown`.
+  assert.equal(link.foreground, "98c379");
+  assert.equal(rules.find((rule) => rule.token === "markup.inline.raw.nx")?.foreground, "98c379");
+});
+
+test("doc comment rules use only colors the theme has", () => {
+  const theme = withNxDocCommentStyles({
+    name: "plain",
+    tokenColors: [{ scope: "comment", settings: { foreground: "#888888" } }],
+  });
+  const rules = theme.tokenColors!.map((rule) => [rule.scope, rule.settings]);
+  assert.deepEqual(rules.find(([scope]) => scope === "markup.bold.nx")?.[1], {
+    fontStyle: "bold",
+    foreground: "#888888",
+  });
+  // No code-span color: a link falls back to the comment's.
+  assert.deepEqual(rules.find(([scope]) => scope === "markup.underline.link.reference.nx")?.[1], {
+    fontStyle: "underline",
+    foreground: "#888888",
+  });
+  assert.equal(withNxDocCommentStyles({ name: "bare", settings: [] }).settings?.[0]?.settings.foreground, undefined);
 });
 
 test("two registrations register once, and providers go when the last handle is disposed", async () => {
@@ -277,10 +328,12 @@ test("completions carry trigger characters, map kinds, and insert over the word 
   assert.equal(mode.label, "mode");
   assert.equal(mode.kind, fake.namespace.languages.CompletionItemKind.Property);
   assert.equal(mode.detail, "mode:Mode");
+  assert.deepEqual(mode.documentation, { value: "The **color** scheme." });
   assert.equal(mode.insertText, "mode");
   assert.deepEqual(mode.range, { startLineNumber: 1, endLineNumber: 1, startColumn: 8, endColumn: 10 });
   assert.equal(panel.kind, fake.namespace.languages.CompletionItemKind.Constructor);
   assert.equal(panel.detail, undefined);
+  assert.equal(panel.documentation, undefined);
   registration.dispose();
 });
 
@@ -355,4 +408,12 @@ test("diagnostics map to markers: severity, one-based columns, widened insertion
   ]);
   assert.deepEqual(toProtocolPosition({ lineNumber: 3, column: 1 }), { line: 2, character: 0 });
   assert.deepEqual(toMonacoLanguageConfiguration().brackets, [["{", "}"], ["[", "]"], ["(", ")"]]);
+  const [docRule] = toMonacoLanguageConfiguration().onEnterRules ?? [];
+  assert.ok(docRule);
+  assert.deepEqual(docRule.action, { indentAction: 0, appendText: "/// " });
+  assert.ok(docRule.beforeText.test("  /// A leading doc line."));
+  assert.ok(docRule.beforeText.test("///"));
+  assert.ok(!docRule.beforeText.test("  placeholder:string   /// A trailing doc comment."));
+  assert.ok(!docRule.beforeText.test("//// Section"));
+  assert.ok(!docRule.beforeText.test("// A comment."));
 });

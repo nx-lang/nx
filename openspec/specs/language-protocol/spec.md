@@ -72,7 +72,7 @@ malformed answer.
 #### Scenario: Completion answer shape
 - **WHEN** the service has completions for the queried position
 - **THEN** each item SHALL carry a label, a kind drawn from the language service's completion kinds,
-  and an optional detail string
+  an optional detail string, and optional documentation as markdown
 
 #### Scenario: Diagnostics answer shape
 - **WHEN** a diagnostics query is answered

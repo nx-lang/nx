@@ -70,6 +70,9 @@ try {
 ```
 
 `buildProgramArtifact` is the one-module case of a workspace build; see *Workspace builds* below.
+A build that reports an error throws `NxEvaluationError`. One that succeeds can still have
+warnings, such as a doc link that names nothing; `artifact.diagnostics()` returns them, with info and
+hints, in the same shape.
 
 `compileNxModule` also accepts the module's bytes or an already-compiled `WebAssembly.Module`, so a
 caller that has one already can pass it through without a special case.

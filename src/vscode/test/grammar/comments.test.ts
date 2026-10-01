@@ -110,4 +110,107 @@ describe('NX comments', function () {
     expect(offenders, `contexts where a comment loses to a code rule:\n${offenders.join('\n')}`)
       .to.deep.equal([]);
   });
+
+  describe('doc comments', function () {
+    const DOC = 'comment.line.documentation.nx';
+    const LINE = 'comment.line.double-slash.nx';
+
+    it('scopes a leading doc comment as documentation from `///` to the end of the line', function () {
+      const line = '/// A text box.';
+      const result = tokenizeLines(grammar, [line, 'component <SearchBox />']);
+      const tokens = result[0].tokens;
+      expect(tokens.map(t => line.slice(t.startIndex, t.endIndex))).to.deep.equal(['///', ' A text box.']);
+      for (const token of tokens) {
+        expectScopes(token.scopes, 'leading doc comment').toInclude(DOC).toNotInclude(LINE);
+      }
+      expectScopes(tokens[0].scopes, '///').toInclude('punctuation.definition.comment.nx');
+    });
+
+    it('scopes a trailing doc comment on a property and keeps the declaration open', function () {
+      const result = tokenizeLines(grammar, [
+        'export external component <SearchBox',
+        '  placeholder:string   /// Hint text; shown when empty.',
+        '  tone: string',
+        '/>'
+      ]);
+      expectScopes(scopesAt(result, 'placeholder', '/// Hint'), 'doc comment start').toInclude(DOC);
+      expectScopes(scopesAt(result, 'placeholder', ';'), 'semicolon in the doc comment')
+        .toInclude(DOC);
+      // The doc comment must not have ended the declaration.
+      expectScopes(scopesAt(result, 'tone', 'tone'), 'tone').toInclude('variable.other.property.nx');
+    });
+
+    describe('Markdown', function () {
+      const LINK = 'markup.underline.link.reference.nx';
+      const LINK_TEXT = 'markup.underline.link.text.nx';
+      const RAW = 'markup.inline.raw.nx';
+      const BOLD = 'markup.bold.nx';
+      const ITALIC = 'markup.italic.nx';
+
+      function scopes(line: string, substring: string, occurrence = 1): string[] {
+        return scopesAt(tokenizeLines(grammar, [line]), line, substring, occurrence);
+      }
+
+      it('scopes a doc link and a member path as a link', function () {
+        const line = '/// See [renderNotice] and [LoadState.idle], or [`Grid`].';
+        expectScopes(scopes(line, 'renderNotice'), 'name').toInclude(DOC, LINK);
+        expectScopes(scopes(line, 'LoadState.idle'), 'member path').toInclude(DOC, LINK);
+        expectScopes(scopes(line, '`Grid`'), 'name in backticks').toInclude(LINK);
+        expectScopes(scopes('/// Read [Box.aria-label] first.', 'Box.aria-label'), 'hyphenated member')
+          .toInclude(LINK);
+        expectScopes(scopes(line, '['), 'bracket').toInclude('punctuation.definition.link.title.begin.nx');
+      });
+
+      it('scopes a link with a destination, and nothing that is not a link', function () {
+        const line = '/// Read [the spec](https://nxlang.org) on [plain words] or [x][y].';
+        expectScopes(scopes(line, 'the spec'), 'link text').toInclude(LINK_TEXT).toNotInclude(LINK);
+        expectScopes(scopes(line, 'https://nxlang.org'), 'destination').toInclude('markup.underline.link.nx');
+        expectScopes(scopes(line, 'plain words'), 'a phrase in brackets').toInclude(DOC).toNotInclude(LINK);
+        expectScopes(scopes(line, '[x]'), 'a full reference').toNotInclude(LINK);
+      });
+
+      it('scopes a code span as code, with no link inside it', function () {
+        const line = '/// Read `items[index]` and ``a ` b`` first.';
+        expectScopes(scopes(line, '`items[index]`'), 'code span').toInclude(DOC, RAW).toNotInclude(LINK);
+        expectScopes(scopes(line, 'index'), 'brackets in code').toNotInclude(LINK);
+        expectScopes(scopes(line, '``a ` b``'), 'double-backtick code span').toInclude(RAW);
+      });
+
+      it('scopes strong emphasis and emphasis, keeping the markers', function () {
+        const line = '/// Use **only** once, *or* _twice_, **with [Grid]**.';
+        expectScopes(scopes(line, '**only**'), 'strong').toInclude(DOC, BOLD);
+        expectScopes(scopes(line, '*or*'), 'emphasis').toInclude(DOC, ITALIC).toNotInclude(BOLD);
+        expectScopes(scopes(line, '_twice_'), 'underscore emphasis').toInclude(ITALIC);
+        expectScopes(scopes(line, 'Grid'), 'a link inside strong').toInclude(BOLD, LINK);
+      });
+
+      it('does not read arithmetic or snake_case as emphasis', function () {
+        const line = '/// Computes a * b * c for snake_case_name and 2*3.';
+        for (const part of ['b', 'case', '3']) {
+          expectScopes(scopes(line, part), part).toInclude(DOC).toNotInclude(ITALIC, BOLD);
+        }
+      });
+
+      it('leaves an ordinary comment plain', function () {
+        const line = '// Use **only** [Grid] and `code`.';
+        for (const part of ['only', 'Grid', 'code']) {
+          expectScopes(scopes(line, part), part).toInclude(LINE).toNotInclude(BOLD, LINK, RAW);
+        }
+      });
+    });
+
+    it('keeps four slashes an ordinary comment', function () {
+      for (const line of ['//// Section', '//////////']) {
+        const result = tokenizeLines(grammar, [line]);
+        expectScopes(result[0].tokens[0].scopes, line).toInclude(LINE).toNotInclude(DOC);
+      }
+    });
+
+    it('keeps `///` as literal text inside text content', function () {
+      const result = tokenizeLines(grammar, ['<p:>', '  a /// b', '</p>']);
+      expectScopes(scopesAt(result, 'a /// b', '///'), 'text content')
+        .toNotInclude(DOC)
+        .toNotInclude(LINE);
+    });
+  });
 });

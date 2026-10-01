@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 
 /// ABI version the loader checks before it makes any other call. Bump it whenever an export's
 /// signature, a status code or a payload shape changes.
-pub const ABI_VERSION: u32 = 4;
+pub const ABI_VERSION: u32 = 5;
 
 /// The operation succeeded; the payload is its JSON result.
 pub const STATUS_OK: u32 = 0;
@@ -334,6 +334,18 @@ pub unsafe extern "C" fn nx_wasm_program_evaluate_nx(
 #[no_mangle]
 pub unsafe extern "C" fn nx_wasm_ir_explain(ptr: *const u8, len: usize) -> *mut NxWasmResult {
     into_result(explain_ir(bytes_argument(ptr, len)))
+}
+
+/// Answers with the diagnostics the build of the artifact `handle` names reported without failing
+/// it — warnings, info and hints — as a JSON array.
+///
+/// # Safety
+/// `handle` must be a live handle from [`nx_wasm_program_build`] or [`nx_wasm_workspace_build`].
+#[no_mangle]
+pub unsafe extern "C" fn nx_wasm_program_diagnostics(
+    handle: *mut ProgramArtifact,
+) -> *mut NxWasmResult {
+    into_result(program_diagnostics(&*handle))
 }
 
 /// Releases the artifact `handle` names.
@@ -722,7 +734,19 @@ fn evaluation_error(diagnostics: Vec<NxDiagnostic>) -> OperationError {
     }
 }
 
+fn program_diagnostics(program: &ProgramArtifact) -> Operation {
+    result_json(&program_diagnostics_to_api(program, &program.diagnostics))
+}
+
 fn codegen_error(error: nx_codegen::CodegenError, program: &ProgramArtifact) -> OperationError {
+    evaluation_error(program_diagnostics_to_api(program, &error.diagnostics))
+}
+
+/// `diagnostics`, reported against `program`, with positions counted in the module each names.
+fn program_diagnostics_to_api(
+    program: &ProgramArtifact,
+    diagnostics: &[nx_diagnostics::Diagnostic],
+) -> Vec<NxDiagnostic> {
     let fallback_source = program
         .source_text(&program.entry_identity)
         .unwrap_or_default();
@@ -730,11 +754,7 @@ fn codegen_error(error: nx_codegen::CodegenError, program: &ProgramArtifact) -> 
         .source_entries()
         .into_iter()
         .map(|entry| (entry.identity, entry.source));
-    evaluation_error(diagnostics_to_api_with_source_entries(
-        &error.diagnostics,
-        fallback_source,
-        sources,
-    ))
+    diagnostics_to_api_with_source_entries(diagnostics, fallback_source, sources)
 }
 
 fn workspace_input_error(message: String) -> OperationError {
@@ -1160,6 +1180,33 @@ mod tests {
         assert_eq!(status, STATUS_INTERNAL_ERROR);
         let message: String = serde_json::from_str(&payload).expect("payload is a JSON string");
         assert!(message.contains("not valid JSON"), "{message}");
+    }
+
+    #[test]
+    fn a_program_that_builds_reports_its_warnings() {
+        let (status, payload) = call(
+            nx_wasm_program_build,
+            &serde_json::json!({
+                "source": "/// See [Missing].\nlet root() = { 42 }",
+                "fileName": "input.nx",
+            })
+            .to_string(),
+        );
+        assert_eq!(status, STATUS_OK, "{payload}");
+
+        let handle = handle_from(&payload) as *mut ProgramArtifact;
+        unsafe {
+            let result = nx_wasm_program_diagnostics(handle);
+            assert_eq!((*result).status, STATUS_OK);
+            let diagnostics: Vec<serde_json::Value> =
+                serde_json::from_str(&read_payload(result)).unwrap();
+            assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+            assert_eq!(diagnostics[0]["severity"], "warning");
+            assert_eq!(diagnostics[0]["code"], "unresolved-doc-link");
+            assert_eq!(diagnostics[0]["labels"][0]["span"]["start_line"], 1);
+            nx_wasm_result_free(result);
+            nx_wasm_program_free(handle);
+        }
     }
 
     #[test]

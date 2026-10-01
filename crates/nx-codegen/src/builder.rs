@@ -1057,6 +1057,7 @@ fn effective_union_case_fields(
                 is_content: field.is_content,
                 optional: field.optional,
                 default: field.default,
+                doc: None,
                 span: field.span,
             },
             module_identity.clone(),

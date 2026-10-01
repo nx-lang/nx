@@ -28,10 +28,10 @@
     sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
   --sl-font-system-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
     monospace;
-  --pane-background: #24292e; /* github-dark, the editor's theme */
-  --pane-foreground: #e1e4e8;
-  --error: #f97583;
-  --warning: #ffab70;
+  --pane-background: #0d1117; /* github-dark-default, the editor's theme */
+  --pane-foreground: #e6edf3;
+  --error: #f85149;
+  --warning: #d29922;
 }
 
 :root[data-theme="light"] {
@@ -51,10 +51,10 @@
   --sl-color-bg-nav: var(--sl-color-gray-7);
   --sl-color-hairline: var(--sl-color-gray-6);
   --sl-color-hairline-shade: var(--sl-color-gray-6);
-  --pane-background: #ffffff; /* github-light */
-  --pane-foreground: #24292e;
-  --error: #cb2431;
-  --warning: #b08800;
+  --pane-background: #ffffff; /* github-light-default */
+  --pane-foreground: #1f2328;
+  --error: #cf222e;
+  --warning: #9a6700;
 }
 
 html,

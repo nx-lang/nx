@@ -34,7 +34,10 @@ export type Outcome =
   | { readonly kind: "error"; readonly diagnostics: readonly Diagnostic[] };
 
 export interface EvaluateResult {
-  /** What compiling reported. Non-empty means the program did not compile. */
+  /**
+   * What compiling reported: why the program did not compile when `outcome` is null, and otherwise
+   * the warnings, info and hints of a program that did.
+   */
   readonly diagnostics: readonly Diagnostic[];
   /** What evaluating came to, or null when the program did not compile. */
   readonly outcome: Outcome | null;

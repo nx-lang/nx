@@ -356,6 +356,41 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
+    /// Documentation never changes what a program means.
+    #[test]
+    fn doc_comments_do_not_change_evaluation() {
+        let plain = r#"type User = {
+  name:string
+  score:int = 42
+}
+let label(user:User): string = {user.name}
+let root() = { <User name={label(<User name="Ada" />)} /> }
+"#;
+        let documented = r#"/// A user.
+type User = {
+  /// The name.
+  name:string
+  score:int = 42   /// The score.
+}
+/// A label for [User].
+let label(
+  /// Whose label.
+  user:User
+): string = {user.name}
+/// The root.
+let root() = { <User name={label(<User name="Ada" />)} /> }
+"#;
+        let evaluate = |source: &str| match eval_source(
+            source,
+            "documented.nx",
+            &ProgramBuildContext::empty(),
+        ) {
+            EvalResult::Ok(value) => value,
+            EvalResult::Err(diagnostics) => panic!("{diagnostics:?}"),
+        };
+        assert_eq!(evaluate(plain), evaluate(documented));
+    }
+
     #[test]
     fn eval_source_evaluates_an_int_literal_at_a_float_site_to_a_float() {
         let written_as_int = eval_source(

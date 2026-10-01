@@ -160,6 +160,11 @@ export interface CompletionItem {
   label: string;
   kind: CompletionItemKind;
   detail: string | null;
+  /**
+   * The documentation of what the item names, as markdown rendered the way hover renders it.
+   * Absent when it has none.
+   */
+  documentation?: string;
 }
 
 /** The answer to a completions query. */

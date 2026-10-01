@@ -133,6 +133,7 @@
 //! - Incremental checking is supported via the session API
 
 pub mod check;
+pub mod doc_links;
 pub mod env;
 pub mod infer;
 pub mod semantics;
@@ -142,6 +143,10 @@ pub mod ty;
 pub use check::{
     analyze_prepared_module, analyze_str, check_file, check_str, ModuleArtifact,
     SourceAnalysisResult, TypeCheckResult, TypeCheckSession,
+};
+pub use doc_links::{
+    doc_link_candidates, resolve_doc_links, DocLinkCandidate, DocLinkMember, DocLinkTarget,
+    ResolvedDocLink,
 };
 pub use env::{TypeBinding, TypeEnvironment};
 pub use infer::{ContextualResolution, InferenceContext, TypeInference};

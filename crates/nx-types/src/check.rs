@@ -1,6 +1,6 @@
 //! High-level type checking and source-analysis API.
 
-use crate::{InferenceContext, Type, TypeEnvironment};
+use crate::{resolve_doc_links, InferenceContext, ResolvedDocLink, Type, TypeEnvironment};
 use nx_diagnostics::{Diagnostic, Label, Severity};
 use nx_hir::{
     lower, ElementId, ExprId, Import, LoweredModule, LoweringDiagnostic, Name, PreparedBinding,
@@ -57,6 +57,11 @@ pub struct ModuleArtifact {
     /// inherited fields from a library base, say — resolves through this rather than through a
     /// parallel resolver of its own.</para>
     pub prepared_module: Option<Arc<PreparedModule>>,
+    /// The doc links in this module's documentation that resolve, with what each names.
+    ///
+    /// <para>An editor renders a resolved link as code and answers a hover on it as a hover on
+    /// its target; a link that is not here did not resolve.</para>
+    pub doc_links: Vec<ResolvedDocLink>,
 }
 
 impl ModuleArtifact {
@@ -253,6 +258,9 @@ pub fn analyze_prepared_module(
     let function_value_calls = ctx.function_value_calls().clone();
     let (mut type_env, type_diagnostics) = ctx.finish();
     diagnostics.extend(normalize_diagnostics_file_name(type_diagnostics, file_name));
+
+    let (doc_links, doc_link_diagnostics) = resolve_doc_links(&prepared_module, file_name);
+    diagnostics.extend(doc_link_diagnostics);
     // A resolution reached a union declaration, so it has an origin. One without cannot be
     // rewritten, and an unrewritten contextual name is not an error anywhere below type checking:
     // the interpreter fails on it as an undefined name. Reporting it here is what keeps that
@@ -371,6 +379,7 @@ pub fn analyze_prepared_module(
         function_value_calls,
         range_for_expressions,
         prepared_module: Some(Arc::new(prepared_module)),
+        doc_links,
     }
 }
 
@@ -487,6 +496,7 @@ fn module_artifact(
         function_value_calls: FxHashMap::default(),
         range_for_expressions: FxHashSet::default(),
         prepared_module: None,
+        doc_links: Vec::new(),
     }
 }
 

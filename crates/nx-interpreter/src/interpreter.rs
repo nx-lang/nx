@@ -5936,6 +5936,7 @@ mod tests {
             params: vec![],
             return_type: None,
             body,
+            doc: None,
             span: span(0, 0),
         }));
 

@@ -10,6 +10,7 @@ module.exports = grammar({
 
   extras: $ => [
     /\s/,
+    $.doc_comment,
     $.line_comment,
     $.block_comment,
     $.html_block_comment,
@@ -1068,6 +1069,13 @@ module.exports = grammar({
     markup_identifier: $ => /[a-zA-Z_][a-zA-Z0-9_\-]*/,
 
     // ===== Comments =====
+    // Exactly three slashes. For `/// text` both comment tokens match the same length, and the
+    // tie goes to the rule declared first, this one. For `//// text` this token can only match
+    // `///`, so the longer line_comment wins and four or more slashes stay an ordinary comment.
+    // It must not have a precedence: lexical precedence outranks match length. `\r` may follow
+    // `///` so that an empty `///` line in a CRLF file ties with line_comment rather than losing.
+    doc_comment: $ => token(seq('///', optional(seq(/[^\/\n]/, /.*/)))),
+
     line_comment: $ => token(seq('//', /.*/)),
 
     block_comment: $ => token(seq(

@@ -1,3 +1,4 @@
+use crate::typegen::languages::csharp_doc::csharp_doc_lines;
 use crate::typegen::model::{
     erase_field_type_parameters, update_companion_type_params, ExportedExternalState,
     ExportedFieldDefault, ExportedLiteralDefault, ExportedModule, ExportedPolymorphicDescendant,
@@ -457,6 +458,7 @@ fn emit_update(
     // over the same arguments the companion is closed over.
     let formatter_name = format!("{class_name}Formatter");
     let emit_open_formatter_shim = !type_params.is_empty();
+    emit_doc(writer, update.doc.as_deref());
     if type_params.is_empty() {
         writer.line(&format!(
             "[JsonConverter(typeof(NxUpdateRecordJsonConverter<{class_name}>))]"
@@ -536,6 +538,7 @@ fn emit_update(
                     "public"
                 };
                 writer.blank_line();
+                emit_doc(writer, field.doc.as_deref());
                 writer.block(
                     &format!("{modifier} NxOptional<{}> {member}", field_type.text),
                     |writer| {
@@ -877,9 +880,18 @@ fn csharp_typeof_operand(field_type: &CSharpType) -> String {
     }
 }
 
+/// Writes the XML documentation comment for a declaration or member's NX documentation, if it has
+/// any. It precedes the member's attributes.
+fn emit_doc(writer: &mut CodeWriter, doc: Option<&str>) {
+    for line in doc.map(csharp_doc_lines).unwrap_or_default() {
+        writer.line(&line);
+    }
+}
+
 /// Emits a constant union as a CLR `enum` with its authored-string wire format (design D4).
 fn emit_constant_union(writer: &mut CodeWriter, union: &ExportedUnion) {
     let enum_name = sanitize_csharp_identifier(&union.name);
+    emit_doc(writer, union.doc.as_deref());
     writer.line(&format!(
         "[JsonConverter(typeof(NxEnumJsonConverter<{enum_name}, {enum_name}WireFormat>))]"
     ));
@@ -893,6 +905,7 @@ fn emit_constant_union(writer: &mut CodeWriter, union: &ExportedUnion) {
             } else {
                 ","
             };
+            emit_doc(writer, case.doc.as_deref());
             writer.line(&format!(
                 "{}{}",
                 sanitize_csharp_member_name(&case.name),
@@ -936,6 +949,7 @@ fn emit_record(
         format!("<{}>", record.type_params.join(", "))
     };
 
+    emit_doc(writer, record.doc.as_deref());
     emit_record_json_polymorphism_attributes(writer, record, context);
 
     let polymorphic_root = polymorphic_message_pack_root_name(record, context);
@@ -1001,6 +1015,7 @@ fn emit_union(
     }
 
     let union_name = sanitize_csharp_identifier(&union_def.name);
+    emit_doc(writer, union_def.doc.as_deref());
 
     // A union with a constant case beside a payload case has two wire shapes, so it needs a
     // converter (design D4). System.Text.Json will not accept a converter alongside
@@ -1065,6 +1080,7 @@ fn emit_union_case(
     let case_type_name = csharp_union_case_type_name(&union_def.name, &case.name);
     let is_constant = union_def.is_constant_case(case);
 
+    emit_doc(writer, case.doc.as_deref());
     if is_constant {
         writer.line(&format!(
             "[NxConstantCase(\"{}\")]",
@@ -1095,6 +1111,7 @@ fn emit_external_state(
     state: &ExportedExternalState,
     context: &CSharpRenderContext<'_>,
 ) {
+    emit_doc(writer, state.doc.as_deref());
     writer.line("[MessagePackObject]");
     writer.block(
         &format!(
@@ -1533,6 +1550,7 @@ fn emit_record_fields(
         emit_dual_annotated_auto_property(
             writer,
             &field.name,
+            field.doc.as_deref(),
             &property_declaration,
             needs_leading_blank_line,
             closed_update_formatter_for(&field.ty, context).as_ref(),
@@ -1616,6 +1634,7 @@ fn csharp_float_literal(value: nx_hir::ast::OrderedFloat, field_type: &CSharpTyp
 fn emit_dual_annotated_auto_property(
     writer: &mut CodeWriter,
     wire_name: &str,
+    doc: Option<&str>,
     declaration: &str,
     has_emitted_property: bool,
     closed_update_formatter: Option<&ClosedUpdateFormatter>,
@@ -1624,6 +1643,7 @@ fn emit_dual_annotated_auto_property(
         writer.blank_line();
     }
 
+    emit_doc(writer, doc);
     emit_dual_wire_name_attributes(writer, wire_name);
     // A member typed by one instantiation of a generic companion names its formatter here, because
     // the open generic on the companion itself is one MessagePack's source generator cannot close.

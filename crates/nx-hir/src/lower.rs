@@ -8,12 +8,12 @@ use crate::ast::{
     Stmt, TypeRef, UnOp,
 };
 use crate::{
-    property_union_name, update_record_name, Component, ComponentEmit, ComponentEmitKind, Element,
-    ExprId, Function, FunctionForm, Import, ImportKind, Item, LoweredModule, LoweringDiagnostic,
-    Name, Param, Property, PropertyConditionArm, PropertyEntry, PropertyMatchArm, RecordDef,
-    RecordField, RecordKind, SelectiveImport, SourceId, TypeAlias, TypeParameter, UnionCaseDef,
-    UnionCaseField, UnionDef, ValueDef, Visibility, WhitespaceRun, PROPERTY_UNION_SUFFIX,
-    UPDATE_RECORD_SUFFIX,
+    property_union_name, update_record_name, Component, ComponentEmit, ComponentEmitKind, Doc,
+    Element, ExprId, Function, FunctionForm, Import, ImportKind, Item, LoweredModule,
+    LoweringDiagnostic, Name, Param, Property, PropertyConditionArm, PropertyEntry,
+    PropertyMatchArm, RecordDef, RecordField, RecordKind, SelectiveImport, SourceId, TypeAlias,
+    TypeParameter, UnionCaseDef, UnionCaseField, UnionDef, ValueDef, Visibility, WhitespaceRun,
+    PROPERTY_UNION_SUFFIX, UPDATE_RECORD_SUFFIX,
 };
 use nx_diagnostics::{TextSize, TextSpan};
 use nx_syntax::{property_definition_is_type_parameter, SyntaxKind, SyntaxNode};
@@ -181,6 +181,8 @@ pub struct LoweringContext {
     type_name_spans: RefCell<Vec<(Name, TextSpan)>>,
     /// The `T:type` parameters of the function types being lowered, which validation rejects.
     rejected_type_parameters: RefCell<Vec<Name>>,
+    /// The doc comments of the file, keyed by the start of the node each documents.
+    docs: nx_syntax::DocComments,
 }
 
 impl LoweringContext {
@@ -200,7 +202,13 @@ impl LoweringContext {
             current_component: None,
             type_name_spans: RefCell::new(Vec::new()),
             rejected_type_parameters: RefCell::new(Vec::new()),
+            docs: nx_syntax::DocComments::default(),
         }
+    }
+
+    /// The documentation attached to the declaration or member `node`, if any.
+    fn doc_for(&self, node: SyntaxNode) -> Option<Doc> {
+        self.docs.get(node.span().start()).map(Doc::from_comment)
     }
 
     /// Consumes the context and returns the completed module.
@@ -773,6 +781,7 @@ impl LoweringContext {
                     prop.span(),
                 );
                 field.optional = Self::property_definition_is_optional(prop);
+                field.doc = self.doc_for(prop);
                 field
             })
             .collect()
@@ -833,6 +842,7 @@ impl LoweringContext {
                     ..field.clone()
                 })
                 .collect(),
+            doc: None,
             span,
         };
         self.predeclared_records
@@ -848,10 +858,12 @@ impl LoweringContext {
                 .map(|field| UnionCaseDef {
                     name: field.name.clone(),
                     fields: Vec::new(),
+                    doc: field.doc.clone(),
                     span: field.span,
                 })
                 .collect(),
             property_target: Some(target.clone()),
+            doc: None,
             span,
         };
         self.property_unions.insert(target.clone(), union);
@@ -1020,6 +1032,7 @@ impl LoweringContext {
             let mut field =
                 RecordField::with_content(field_name, ty, is_content, default, prop.span());
             field.optional = optional;
+            field.doc = self.doc_for(prop);
             properties.push(field);
         }
 
@@ -1116,6 +1129,7 @@ impl LoweringContext {
                                 .map(|base| Name::new(base.text())),
                             type_params: Vec::new(),
                             properties: self.lower_record_fields_from_node(emit_node, false),
+                            doc: self.doc_for(emit_node),
                             span: emit_node.span(),
                         };
                         self.predeclared_records
@@ -1132,6 +1146,7 @@ impl LoweringContext {
                             name: emit_name,
                             action_name,
                             kind: ComponentEmitKind::Inline,
+                            doc: self.doc_for(emit_node),
                             span: emit_node.span(),
                         });
                     }
@@ -1169,6 +1184,7 @@ impl LoweringContext {
                             name: local_name,
                             action_name,
                             kind: ComponentEmitKind::Shared,
+                            doc: self.doc_for(emit_node),
                             span: emit_node.span(),
                         });
                     }
@@ -1284,6 +1300,7 @@ impl LoweringContext {
             emits,
             state,
             body,
+            doc: self.doc_for(node),
             span,
         }
     }
@@ -2061,6 +2078,7 @@ impl LoweringContext {
             name,
             visibility: Self::lower_visibility(node),
             ty,
+            doc: self.doc_for(node),
             span: node.span(),
         }
     }
@@ -2093,6 +2111,7 @@ impl LoweringContext {
             visibility,
             ty,
             value,
+            doc: self.doc_for(node),
             span: node.span(),
         }
     }
@@ -2145,6 +2164,7 @@ impl LoweringContext {
                 .map(|base| Name::new(base.text())),
             type_params,
             properties,
+            doc: self.doc_for(node),
             span: node.span(),
         }
     }
@@ -2174,6 +2194,7 @@ impl LoweringContext {
                 .map(|base| Name::new(base.text())),
             cases,
             property_target: None,
+            doc: self.doc_for(node),
             span: node.span(),
         }
     }
@@ -2192,6 +2213,7 @@ impl LoweringContext {
         UnionCaseDef {
             name,
             fields,
+            doc: self.doc_for(node),
             span: node.span(),
         }
     }
@@ -2244,6 +2266,7 @@ impl LoweringContext {
                 let mut param = Param::with_content(param_name, param_type, is_content, param_span);
                 param.optional = optional;
                 param.default = default;
+                param.doc = self.doc_for(child);
                 self.define_name(&param.name, TypeTag::from_type_ref(&param.ty));
                 params.push(param);
             }
@@ -2279,6 +2302,7 @@ impl LoweringContext {
             params,
             return_type,
             body,
+            doc: self.doc_for(node),
             span,
         }
     }
@@ -2810,6 +2834,7 @@ impl LoweringContext {
                         params: vec![],
                         return_type: None,
                         body,
+                        doc: None,
                         span,
                     };
 
@@ -2833,6 +2858,7 @@ impl LoweringContext {
 /// Lower a CST root node to a HIR LoweredModule.
 pub fn lower(root: SyntaxNode, source_id: SourceId) -> LoweredModule {
     let mut ctx = LoweringContext::new(source_id);
+    ctx.docs = nx_syntax::doc_comments(&root);
     ctx.lower_module(root);
     ctx.finish()
 }
@@ -6452,5 +6478,183 @@ type Mode = light | dark"#;
             "Expected prop/type parameter collision diagnostic, got {:?}",
             module.diagnostics
         );
+    }
+
+    fn lower_documented(source: &str) -> LoweredModule {
+        let parse_result = parse_str(source, "documented.nx");
+        assert!(parse_result.errors.is_empty(), "{:?}", parse_result.errors);
+        lower(parse_result.tree.expect("parse").root(), SourceId::new(0))
+    }
+
+    fn doc_text(doc: &Option<Doc>) -> Option<&str> {
+        doc.as_ref().map(|doc| &*doc.text)
+    }
+
+    #[test]
+    fn test_lower_attaches_docs_to_every_documentable_kind() {
+        let module = lower_documented(
+            r#"/// An alias.
+type Size = int
+
+/// A record.
+type Contact = {
+  /// A field.
+  name:string
+}
+
+/// An action.
+action Saved = {
+  id:int   /// The saved id.
+}
+
+/// A union.
+type LoadState =
+  /// Nothing yet.
+  | idle
+  /// Failed.
+  | failed {
+    /// Why.
+    message:string
+  }
+
+/// A value.
+let answer = 42
+
+/// A function.
+let add(
+  /// The count.
+  count:int
+): int = {count + 1}
+
+/// An element function.
+let <Badge
+  label:string   /// The label.
+/> = <span>{label}</span>
+
+/// A component.
+component <Search
+  /// The query hint.
+  placeholder:string
+  emits {
+    /// Fired on change.
+    Changed { value:string }
+    Saved   /// A shared action.
+  }
+/> = {
+  state {
+    query:string   /// The current query.
+  }
+  <span />
+}
+"#,
+        );
+
+        let Some(Item::TypeAlias(alias)) = module.find_item("Size") else {
+            panic!("Size");
+        };
+        assert_eq!(doc_text(&alias.doc), Some("An alias."));
+
+        let Some(Item::Record(contact)) = module.find_item("Contact") else {
+            panic!("Contact");
+        };
+        assert_eq!(doc_text(&contact.doc), Some("A record."));
+        assert_eq!(doc_text(&contact.properties[0].doc), Some("A field."));
+
+        let Some(Item::Record(saved)) = module.find_item("Saved") else {
+            panic!("Saved");
+        };
+        assert_eq!(doc_text(&saved.doc), Some("An action."));
+        assert_eq!(doc_text(&saved.properties[0].doc), Some("The saved id."));
+
+        let Some(Item::Union(load_state)) = module.find_item("LoadState") else {
+            panic!("LoadState");
+        };
+        assert_eq!(doc_text(&load_state.doc), Some("A union."));
+        assert_eq!(doc_text(&load_state.cases[0].doc), Some("Nothing yet."));
+        assert_eq!(doc_text(&load_state.cases[1].doc), Some("Failed."));
+        assert_eq!(doc_text(&load_state.cases[1].fields[0].doc), Some("Why."));
+
+        let Some(Item::Value(answer)) = module.find_item("answer") else {
+            panic!("answer");
+        };
+        assert_eq!(doc_text(&answer.doc), Some("A value."));
+
+        let Some(Item::Function(add)) = module.find_item("add") else {
+            panic!("add");
+        };
+        assert_eq!(doc_text(&add.doc), Some("A function."));
+        assert_eq!(doc_text(&add.params[0].doc), Some("The count."));
+
+        let Some(Item::Function(badge)) = module.find_item("Badge") else {
+            panic!("Badge");
+        };
+        assert_eq!(doc_text(&badge.doc), Some("An element function."));
+        assert_eq!(doc_text(&badge.params[0].doc), Some("The label."));
+
+        let Some(Item::Component(search)) = module.find_item("Search") else {
+            panic!("Search");
+        };
+        assert_eq!(doc_text(&search.doc), Some("A component."));
+        assert_eq!(doc_text(&search.props[0].doc), Some("The query hint."));
+        assert_eq!(doc_text(&search.emits[0].doc), Some("Fired on change."));
+        assert_eq!(doc_text(&search.emits[1].doc), Some("A shared action."));
+        assert_eq!(doc_text(&search.state[0].doc), Some("The current query."));
+    }
+
+    #[test]
+    fn test_lower_carries_docs_onto_synthesized_members() {
+        let module = lower_documented(
+            r#"type Contact = {
+  /// The display name.
+  name:string
+}
+
+component <Search
+  emits {
+    /// Fired on change.
+    Changed {
+      value:string   /// The new text.
+    }
+  }
+/> = {
+  state {
+    query:string   /// The current query.
+  }
+  <span />
+}
+"#,
+        );
+
+        // The inline action record of an `emits` entry takes the entry's doc.
+        let Some(Item::Record(changed)) = module.find_item("Search.Changed") else {
+            panic!("Search.Changed");
+        };
+        assert_eq!(doc_text(&changed.doc), Some("Fired on change."));
+        assert_eq!(doc_text(&changed.properties[0].doc), Some("The new text."));
+
+        // An update record's fields take the docs of the fields they mirror.
+        let Some(Item::Record(update)) = module.find_item("Contact.Update") else {
+            panic!("Contact.Update");
+        };
+        assert_eq!(doc_text(&update.doc), None);
+        assert_eq!(
+            doc_text(&update.properties[0].doc),
+            Some("The display name.")
+        );
+
+        // So do the cases of a derived property union.
+        let Some(Item::Union(property)) = module.find_item("Contact.Property") else {
+            panic!("Contact.Property");
+        };
+        assert_eq!(doc_text(&property.cases[0].doc), Some("The display name."));
+    }
+
+    #[test]
+    fn test_lower_leaves_undocumented_items_without_docs() {
+        let module = lower_documented("// A note.\ntype Size = int\n");
+        let Some(Item::TypeAlias(alias)) = module.find_item("Size") else {
+            panic!("Size");
+        };
+        assert_eq!(alias.doc, None);
     }
 }

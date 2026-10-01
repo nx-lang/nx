@@ -198,10 +198,33 @@ let root() = <Book title="A" tags={"x"} />`;
     expect(label.span.startColumn).toBeGreaterThan(0);
   });
 
+  it("reports the warnings of a build that succeeds, against the given file name", () => {
+    const artifact = host.buildProgramArtifact("/// See [Missing].\nlet root() = { 42 }", {
+      fileName: "linked.nx"
+    });
+    try {
+      const diagnostics = artifact.diagnostics();
+      expect(diagnostics.map((diagnostic) => [diagnostic.severity, diagnostic.code])).toEqual([
+        ["warning", "unresolved-doc-link"]
+      ]);
+      const label = diagnostics[0]!.labels[0]!;
+      expect(label.file).toBe("linked.nx");
+      expect([label.span.startLine, label.span.startColumn]).toEqual([1, 9]);
+      expect(artifact.evaluateNx().text).toBe("42");
+
+      const clean = host.buildProgramArtifact("let root() = { 42 }");
+      expect(clean.diagnostics()).toEqual([]);
+      clean.dispose();
+    } finally {
+      artifact.dispose();
+    }
+  });
+
   it("throws a disposed-resource error after dispose, and tolerates a second dispose", () => {
     const artifact = host.buildProgramArtifact("let root() = { 42 }");
     artifact.dispose();
 
+    expect(() => artifact.diagnostics()).toThrowError(NxDisposedResourceError);
     expect(() => artifact.generateNxIr()).toThrowError(NxDisposedResourceError);
     expect(() => artifact.generateNxIr()).toThrowError(/NxProgramArtifact has been disposed/);
     expect(() => artifact.dispose()).not.toThrow();
