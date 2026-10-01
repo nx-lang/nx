@@ -20,7 +20,8 @@ use nx_api::{
     NxSeverity, NxWorkspace, NxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
     ResourceLimits,
 };
-use nx_codegen::{emit_nx_ir, explain_nx_ir_image, write_nx_ir_bundle, NxIrEmitOptions};
+use nx_codegen::{emit_nx_ir, write_nx_ir_bundle, NxIrEmitOptions};
+use nx_ir::explain_nx_ir_image;
 use nx_language_service::{
     DocumentInput, DocumentUri, SnapshotError, TextPosition, WorkspaceSnapshot,
 };
@@ -605,8 +606,8 @@ fn explain_ir(argument: Result<&[u8], OperationError>) -> Operation {
             severity: NxSeverity::Error,
             code: Some(
                 match error {
-                    nx_codegen::ExplainError::SchemaVersion { .. } => "nx-ir-schema-version",
-                    nx_codegen::ExplainError::Malformed(_) => "nx-ir-malformed",
+                    nx_ir::ExplainError::SchemaVersion { .. } => "nx-ir-schema-version",
+                    nx_ir::ExplainError::Malformed(_) => "nx-ir-malformed",
                 }
                 .to_string(),
             ),
@@ -833,7 +834,8 @@ unsafe fn release(ptr: *mut u8, len: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nx_codegen::{read_nx_ir_bundle, NxIrImage};
+    use nx_codegen::read_nx_ir_bundle;
+    use nx_ir::NxIrImage;
 
     /// Runs an operation the way the loader does: JSON in through `nx_wasm_alloc`, a result record
     /// out, read and released.

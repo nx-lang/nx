@@ -4,19 +4,20 @@
 //! one renderer of that meaning, so a test reads its output the way a person would read
 //! `nxlang ir explain`, and a change to the encoding that keeps the meaning changes no test here.
 
-use crate::ir::{kinds, NxIrArtifact, NxIrEmitOptions, NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1};
-use crate::ir_image::{write_nx_ir_image, NxIrImage};
-use crate::{
-    build_nx_ir_artifacts, emit_nx_ir, explain_nx_ir, explain_nx_ir_image, ExplainError,
-    NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1, NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1,
-    NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1, NX_IR_REQUIRED_FEATURE_RANGES_V1,
-    NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1, NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
-    NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
-};
+use crate::ir::NxIrEmitOptions;
+use crate::{build_nx_ir_artifacts, emit_nx_ir};
 use nx_api::{
     build_program_artifact_from_source, build_workspace_program_artifact, LibraryRegistry,
     NxLibraryModule, NxLibrarySource, NxWorkspace, NxWorkspaceModule, ProgramArtifact,
     ProgramBuildContext,
+};
+use nx_ir::{
+    explain_nx_ir, explain_nx_ir_image, kinds, write_nx_ir_image, ExplainError, NxIrArtifact,
+    NxIrImage, NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1,
+    NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1, NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1,
+    NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1, NX_IR_REQUIRED_FEATURE_RANGES_V1,
+    NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1, NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
+    NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
 };
 use std::collections::BTreeMap;
 use std::fs;
@@ -1079,7 +1080,7 @@ fn loops_matches_union_cases_and_big_integers_read_as_written() {
         .expect("the digits are interned") as i64;
     assert_eq!(
         big.constants,
-        vec![crate::IrItem::ints([kinds::constant::BIGINT, digits])]
+        vec![nx_ir::IrItem::ints([kinds::constant::BIGINT, digits])]
     );
     assert_line(&explain(&big), "  9007199254740993");
 }
@@ -1139,9 +1140,9 @@ fn an_int_literal_at_a_float_site_is_not_emitted_as_an_integer_constant() {
     // Asserting only equality with the real spelling would pass if both emitted an integer.
     assert_eq!(
         artifact.constants,
-        vec![crate::IrItem::list([
-            crate::IrItem::Int(kinds::constant::FLOAT),
-            crate::IrItem::Float(24.0)
+        vec![nx_ir::IrItem::list([
+            nx_ir::IrItem::Int(kinds::constant::FLOAT),
+            nx_ir::IrItem::Float(24.0)
         ])]
     );
     assert_line(&explain(&artifact), "  <B v=24.0 />");
@@ -1236,7 +1237,7 @@ fn node_index_of_kind(artifact: &NxIrArtifact, kind: i64) -> Option<usize> {
     artifact.nodes.iter().position(|node| {
         node.as_list()
             .and_then(|entry| entry.first())
-            .and_then(crate::ir::IrItem::as_int)
+            .and_then(nx_ir::IrItem::as_int)
             == Some(kind)
     })
 }
@@ -1423,7 +1424,7 @@ fn a_declaration_carries_its_declared_result_and_whether_it_is_optional() {
     let maybe = read
         .declarations
         .iter()
-        .filter_map(crate::ir::IrItem::as_list)
+        .filter_map(nx_ir::IrItem::as_list)
         .find(|entry| {
             entry[1]
                 .as_int()
@@ -1438,7 +1439,7 @@ fn declaration_param_flags(artifact: &NxIrArtifact, name: &str) -> Vec<i64> {
     let entry = artifact
         .declarations
         .iter()
-        .filter_map(crate::ir::IrItem::as_list)
+        .filter_map(nx_ir::IrItem::as_list)
         .find(|entry| {
             entry[0].as_int() == Some(kinds::declaration::FUNCTION)
                 && entry[1]
@@ -1487,7 +1488,7 @@ fn a_parameter_default_is_the_functions_and_a_call_leaves_the_parameter_out() {
     let entry = artifact
         .declarations
         .iter()
-        .filter_map(crate::ir::IrItem::as_list)
+        .filter_map(nx_ir::IrItem::as_list)
         .find(|entry| {
             entry[0].as_int() == Some(kinds::declaration::FUNCTION)
                 && entry[1]
@@ -1512,7 +1513,7 @@ fn a_parameter_default_is_the_functions_and_a_call_leaves_the_parameter_out() {
     let call_args = artifact
         .nodes
         .iter()
-        .filter_map(crate::ir::IrItem::as_list)
+        .filter_map(nx_ir::IrItem::as_list)
         .find(|node| node[0].as_int() == Some(kinds::node::CALL))
         .map(|node| {
             node[2]
@@ -1572,7 +1573,7 @@ fn the_retired_kinds_are_refused_as_malformed() {
 
     for retired in [kinds::ty::ARRAY, kinds::ty::NULLABLE] {
         let mut doctored = model.clone();
-        doctored.types[seq_index] = crate::IrItem::ints([retired, item]);
+        doctored.types[seq_index] = nx_ir::IrItem::ints([retired, item]);
         let error = write_nx_ir_image(&doctored).expect_err("a retired type kind is not written");
         assert!(
             error.to_string().contains(&format!("kind {retired}")),
@@ -1588,7 +1589,7 @@ fn the_retired_kinds_are_refused_as_malformed() {
     let number_index =
         node_index_of_kind(&model, kinds::node::NUMBER).expect("the literal 1 is a number node");
     let mut doctored = model.clone();
-    doctored.nodes[number_index] = crate::IrItem::ints([kinds::node::NULL]);
+    doctored.nodes[number_index] = nx_ir::IrItem::ints([kinds::node::NULL]);
     let error = write_nx_ir_image(&doctored).expect_err("a null node is not written");
     assert!(error.to_string().contains("kind 0"), "{error}");
     let error = explain_nx_ir(&doctored).expect_err("a null node is malformed");
@@ -1830,7 +1831,7 @@ let root() = { <SearchBox onSearchSubmitted=<DoSearch search={action.searchStrin
 "#;
 
 /// The node with `kind`, and its entry, from an artifact's node table.
-fn node_of_kind(artifact: &NxIrArtifact, kind: i64) -> &[crate::IrItem] {
+fn node_of_kind(artifact: &NxIrArtifact, kind: i64) -> &[nx_ir::IrItem] {
     artifact
         .nodes
         .iter()
@@ -2366,7 +2367,7 @@ fn a_range_loop_is_a_for_range_node() {
         entry.nodes.iter().any(|node| {
             node.as_list()
                 .and_then(|entry| entry.first())
-                .and_then(crate::ir::IrItem::as_int)
+                .and_then(nx_ir::IrItem::as_int)
                 == Some(kinds::node::FOR_RANGE)
         }),
         "the body is a forRange node"
@@ -2406,7 +2407,7 @@ fn a_list_loop_is_unchanged_by_ranges() {
         entry.nodes.iter().any(|node| {
             node.as_list()
                 .and_then(|entry| entry.first())
-                .and_then(crate::ir::IrItem::as_int)
+                .and_then(nx_ir::IrItem::as_int)
                 == Some(kinds::node::FOR)
         }),
         "a list loop stays a for node"

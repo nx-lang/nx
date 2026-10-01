@@ -1081,8 +1081,64 @@ mean `int32` IR operators like the `float32` ones, or a range check the runtime 
 operator's checked type. Add conformance corpus cases for overflow on each operator.
 
 **Related.** `int` has the same shape at a larger scale: the interpreter wraps an `i64`, and
-JavaScript loses precision beyond 2^53. RF21 in the `add-range-type-and-operators` review records
-the range path to this section. "Range follow-ups" above lists what else `Range` landed without.
+JavaScript loses precision beyond 2^53; the next section records how the Rust IR runtime behaves
+there. RF21 in the `add-range-type-and-operators` review records the range path to this section.
+"Range follow-ups" above lists what else `Range` landed without.
+
+## Integers past 2^53: the Rust IR runtime computes, the TypeScript one refuses or rounds
+
+**Observed.** `int` is specified as exact over ±(2^53−1) with checked arithmetic, and no engine
+enforces it. Outside that range the two IR runtimes do different things with the same image:
+
+| Expression | Rust (`nx-ir-runtime`) | TypeScript (`@nx-lang/ir-runtime`) |
+| --- | --- | --- |
+| `3037000500 * 3037000500` | `-9223372036709301616` (wrapped at 64 bits) | `9223372037000250000` (rounded) |
+| `9007199254740991 * 9007199254740991` | `-18014398509481983` | `8.112963841460666e+31` |
+| `9007199254740992 + 1` | `9007199254740993` | fails with `nx-ir-number` |
+| `9007199254740993 > 1` | `true` | fails with `nx-ir-number` |
+
+The Rust runtime carries every integer as an `i64` and uses wrapping `add`, `sub`, `mul` and `mod`
+(`binary` in `crates/nx-ir-runtime/src/eval.rs`). The TypeScript runtime carries an integer as a
+`number`, so a result past 2^53 silently loses precision, and it reads a constant outside the safe
+range as an `nx.int` record that arithmetic and comparison refuse. Inside the safe range the two
+agree, which is everything the conformance corpus computes.
+
+This was a decision, not an oversight (`add-rust-ir-runtime` review, RF2): making the Rust runtime
+fail or round as JavaScript does would give up exact 64-bit integers to match the other host's
+limitation, for behavior that is specified to become an error anyway. The difference is written
+into the `rust-ir-runtime` spec as its one exception to "the same value and the same code as the
+TypeScript runtime", into `docs/nx-ir-format.md`, and pinned by
+`integers_past_the_float_safe_range_compute_as_wrapping_int64` in
+`crates/nx-codegen/src/ir_runtime_tests.rs`.
+
+**Why it might matter.** None of the three behaviors is the specified one, and two of them are
+silent: a wrapped product and a rounded product are both wrong numbers that look like results. A
+program that overflows gets a different wrong answer on each host, and only some overflows on one
+host report anything. Once `retire-hir-interpreter` lands, the Rust runtime is the engine behind
+`nxlang run`, the bindings and the corpus's recorded results, so wrapping becomes what NX does
+natively by default rather than one runtime's detail.
+
+**What would settle it.** The range-enforcement change described under "Bounds checks are specified
+but not enforced" above, done in both IR runtimes at once so they agree again:
+
+- Give overflow its own diagnostic code, shared by both runtimes, rather than reusing
+  `nx-ir-number`.
+- Rust: replace the wrapping operators with `checked_*` plus a range check, including negation and
+  `MIN / -1`.
+- TypeScript: check each integer result with `Number.isSafeInteger` (about 2.5 ns per add, measured
+  above), which also catches the silent rounding.
+- Decide what the range is per type. `int` is ±(2^53−1) on every backend; `int32` is its own range
+  and needs the operator's checked type, since the IR erases the integer width (see the previous
+  section); `int64` cannot be checked on the TypeScript side until it is carried as a `bigint` (see
+  "`int64` is still a JavaScript `number`"). Until then the Rust runtime can either check `int64`
+  at 64 bits, and so compute values the TypeScript runtime cannot, or hold it to the `int` range.
+- Decide whether a constant outside the safe range is an error where it is written, as the checker
+  could report, or only where it is computed with.
+- Remove the exception from the `rust-ir-runtime` requirement, and add conformance corpus cases for
+  overflow on each operator, which both runtimes then have to pass.
+
+**Related.** The previous section is the same problem at 32 bits. `retire-hir-interpreter` lists
+checked arithmetic as a non-goal and only removes the interpreter's 32-bit wrap.
 
 ## Entities in text content are kept as written
 

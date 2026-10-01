@@ -39,6 +39,22 @@ crates/
 └── nx-cli/           📝 Phases 1-6 - Command-line tools
 ```
 
+### NX IR crates
+
+The NX IR — the compiled form a host runs — has crates of its own, split so that a host running
+compiled images depends on none of the compiler:
+
+```
+nx-ir           The image format: constants, kind numbers, the artifact model, the image writer,
+                the validating in-place reader and the explainer. No dependencies.
+nx-ir-runtime   Prepares, links and evaluates images. Depends on nx-ir and nx-value only.
+nx-codegen      The emitter. Writes images through nx-ir; its tests run them on nx-ir-runtime
+                and compare with nx-interpreter.
+```
+
+See [nx-ir-runtime/README.md](nx-ir-runtime/README.md) and
+[../docs/nx-ir-format.md](../docs/nx-ir-format.md).
+
 ## Dependency Graph
 
 ```

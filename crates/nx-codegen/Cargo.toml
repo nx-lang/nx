@@ -13,6 +13,7 @@ nx-api = { path = "../nx-api" }
 nx-diagnostics = { path = "../nx-diagnostics" }
 nx-hir = { path = "../nx-hir" }
 nx-interpreter = { path = "../nx-interpreter" }
+nx-ir = { path = "../nx-ir" }
 nx-types = { path = "../nx-types" }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
@@ -20,5 +21,6 @@ serde_json = { workspace = true }
 smol_str = { workspace = true }
 
 [dev-dependencies]
+nx-ir-runtime = { path = "../nx-ir-runtime" }
 nx-value = { path = "../nx-value" }
 tempfile = "3"

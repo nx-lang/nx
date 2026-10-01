@@ -14,10 +14,11 @@ use nx_api::{
     NxWorkspaceModule as ApiNxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
 };
 use nx_codegen::{
-    emit_js_program_module, emit_nx_ir, explain_nx_ir_image, write_nx_ir_bundle,
-    GeneratedJsProgramModule, GeneratedJsProgramModuleComponentExport,
-    GeneratedJsProgramModuleFunctionExport, JsProgramModuleOptions, NxIrEmitOptions,
+    emit_js_program_module, emit_nx_ir, write_nx_ir_bundle, GeneratedJsProgramModule,
+    GeneratedJsProgramModuleComponentExport, GeneratedJsProgramModuleFunctionExport,
+    JsProgramModuleOptions, NxIrEmitOptions,
 };
+use nx_ir::explain_nx_ir_image;
 use nx_value::NxValue;
 use serde::Serialize;
 use std::any::Any;
@@ -1095,8 +1096,8 @@ pub unsafe extern "C" fn nx_ir_explain(
         Ok(text) => Ok((NxEvalStatus::Ok, FfiPayload::Bytes(text.into_bytes()))),
         Err(error) => {
             let code = match error {
-                nx_codegen::ExplainError::SchemaVersion { .. } => "nx-ir-schema-version",
-                nx_codegen::ExplainError::Malformed(_) => "nx-ir-malformed",
+                nx_ir::ExplainError::SchemaVersion { .. } => "nx-ir-schema-version",
+                nx_ir::ExplainError::Malformed(_) => "nx-ir-malformed",
             };
             let diagnostics = vec![NxDiagnostic {
                 severity: NxSeverity::Error,

@@ -8,15 +8,16 @@
 //! `NX_UPDATE_CORPUS=1` to rewrite the expected files after an intended change, then review the
 //! diff of the explained text.</para>
 
-use crate::ir::{kinds, NxIrArtifact, NxIrEmitOptions};
-use crate::ir_image::{write_nx_ir_image, NxIrImage};
-use crate::{build_codegen_program, build_nx_ir_artifacts, explain_nx_ir, explain_nx_ir_image};
+use crate::ir::NxIrEmitOptions;
+use crate::{build_codegen_program, build_nx_ir_artifacts};
 use nx_api::{
     build_workspace_program_artifact, dispatch_component_actions_program_artifact,
     eval_program_artifact_function, initialize_component_program_artifact,
     ComponentDispatchEvalResult, ComponentInitEvalResult, EvalResult, NxWorkspace,
     NxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
 };
+use nx_ir::{explain_nx_ir, explain_nx_ir_image};
+use nx_ir::{kinds, write_nx_ir_image, NxIrArtifact, NxIrImage};
 use nx_value::NxValue;
 use serde::Deserialize;
 use serde_json::Value;
@@ -465,7 +466,7 @@ fn coverage_of(artifact: &NxIrArtifact) -> BTreeMap<&'static str, BTreeSet<Strin
             .unwrap_or_else(|| panic!("{table} kind {kind} is not one the schema assigns"));
         coverage.entry(table).or_default().insert(name);
     };
-    let first = |entry: &crate::IrItem, position: usize| -> i64 {
+    let first = |entry: &nx_ir::IrItem, position: usize| -> i64 {
         entry
             .as_list()
             .and_then(|items| items.get(position))

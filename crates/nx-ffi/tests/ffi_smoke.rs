@@ -4,7 +4,7 @@ use nx_api::{
     load_program_artifact_from_source, ComponentDispatchResult, ComponentInitResult, NxDiagnostic,
     ProgramBuildContext,
 };
-use nx_codegen::{read_nx_ir_bundle, NxIrImage};
+use nx_codegen::read_nx_ir_bundle;
 use nx_ffi::{
     nx_build_program_artifact, nx_build_workspace_program_artifact, nx_codegen_js_program_module,
     nx_codegen_nx_ir, nx_component_dispatch_actions_program_artifact,
@@ -17,6 +17,7 @@ use nx_ffi::{
     NxUtf8Slice, NxWorkspaceModule, NX_FFI_ABI_VERSION,
 };
 use nx_interpreter::Interpreter;
+use nx_ir::NxIrImage;
 use nx_value::NxValue;
 use serde::Deserialize;
 use tempfile::TempDir;

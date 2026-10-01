@@ -1,0 +1,65 @@
+//! The update helpers a host calls on values it holds.
+
+use crate::error::Result;
+use crate::program::Program;
+use crate::update;
+use crate::value::{from_host, to_host, Value};
+use nx_value::NxValue;
+
+fn record<'a>(value: &'a Value, helper: &str) -> Result<&'a crate::value::Record> {
+    update::record_argument(Some(value), helper)
+}
+
+/// `apply(record, update)`: the record with each field present in the update replaced, and each
+/// field the update clears — present as `null` or the empty value — left out of the result,
+/// which is how the canonical encoding writes an empty optional field. The update must be the
+/// record's own `<Type>.Update`.
+pub fn apply(target: &NxValue, update: &NxValue) -> Result<NxValue> {
+    let (target, update) = (from_host(target)?, from_host(update)?);
+    to_host(
+        &update::apply(record(&target, "apply")?, record(&update, "apply")?)?,
+        None,
+    )
+}
+
+/// `merge(first, second)`: every field present in either update, the second winning, a cleared
+/// field included. A cleared field is `null` in the result, as the canonical encoding spells it.
+pub fn merge(first: &NxValue, second: &NxValue) -> Result<NxValue> {
+    let (first, second) = (from_host(first)?, from_host(second)?);
+    to_host(
+        &update::merge(record(&first, "merge")?, record(&second, "merge")?)?,
+        None,
+    )
+}
+
+/// `diff(before, after)`: the `<Type>.Update` carrying exactly the fields whose values differ,
+/// each with its value from `after`, comparing records and lists structurally. A field either
+/// record leaves out is empty there, so a field `after` clears is present and `null` in the
+/// result.
+pub fn diff(before: &NxValue, after: &NxValue) -> Result<NxValue> {
+    let (before, after) = (from_host(before)?, from_host(after)?);
+    to_host(
+        &update::diff(record(&before, "diff")?, record(&after, "diff")?)?,
+        None,
+    )
+}
+
+impl Program {
+    /// `changed(update)`: the names of the fields present in the update, cleared ones included,
+    /// in the order the update record's declaration in this program lists them. Fails when the
+    /// program does not declare the update record, since the order is then unknowable from the
+    /// value.
+    pub fn changed(&self, update: &NxValue) -> Result<Vec<String>> {
+        let update = from_host(update)?;
+        let update = record(&update, "changed")?;
+        let order = update::declared_order(&self.data, update)?;
+        Ok(match update::changed(update, &order)? {
+            Value::Seq(names) => names
+                .iter()
+                .filter_map(Value::as_text)
+                .map(str::to_string)
+                .collect(),
+            _ => Vec::new(),
+        })
+    }
+}

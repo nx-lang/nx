@@ -3,8 +3,8 @@
 NX programs with the images the compiler emits for them, the explained text of each image, the
 values a runtime evaluates them to, and what a runtime renders and emits when a host drives their
 component lifecycles. The emitter's tests pin the images byte for byte and keep the text in step;
-the TypeScript runtime's tests evaluate them, dispatch them, and refuse every truncation and cell
-overwrite of them; a second runtime starts here. Together the programs cover every node, type,
+the TypeScript runtime's tests and the Rust runtime's tests each evaluate them, dispatch them, and
+refuse every truncation and cell overwrite of them; another runtime starts here. Together the programs cover every node, type,
 constant and declaration kind of the schema, every binary operator and intrinsic, a program
 spanning two images, derived declarations, a snippet compiled against an implicitly imported
 catalog, a document that is a single trailing element, components that bind action handlers, and

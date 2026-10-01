@@ -1,0 +1,17 @@
+[package]
+name = "nx-ir-runtime"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+nx-ir = { path = "../nx-ir" }
+nx-value = { path = "../nx-value" }
+serde = { workspace = true, features = ["rc"] }
+
+[dev-dependencies]
+serde_json = { workspace = true }

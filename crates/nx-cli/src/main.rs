@@ -17,12 +17,13 @@ use nx_api::{
     NxDiagnostic, NxWorkspace, ProgramArtifact, ProgramBuildContext,
 };
 use nx_codegen::{
-    emit_js_program_module, emit_nx_ir, emit_program, explain_nx_ir_image, CodegenOptions,
-    JsProgramModuleOptions, NxIrEmitOptions,
+    emit_js_program_module, emit_nx_ir, emit_program, CodegenOptions, JsProgramModuleOptions,
+    NxIrEmitOptions,
 };
 use nx_diagnostics::{render_diagnostics_cli, Diagnostic, Severity};
 use nx_hir::{lower_source_module, Item, LoweredModule, Name};
 use nx_interpreter::{Interpreter, Value};
+use nx_ir::explain_nx_ir_image;
 use nx_types::Type;
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
@@ -969,8 +970,8 @@ fn render_source_diagnostics(
 mod tests {
     use super::*;
     use nx_api::LibraryRegistry;
-    use nx_codegen::NxIrImage;
     use nx_hir::{lower, SourceId};
+    use nx_ir::NxIrImage;
     use nx_syntax::parse_file;
     use nx_value::NxValue;
     use std::fs;

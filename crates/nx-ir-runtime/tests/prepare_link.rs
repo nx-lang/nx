@@ -1,0 +1,425 @@
+//! Preparation and linking, over corpus images and images altered through the format crate.
+
+mod common;
+
+use common::{canonical_eq, load_corpus, prepare_all, CorpusProgram};
+use nx_ir::{kinds, write_nx_ir_image, IrItem, NxIrArtifact, NxIrImage, NxIrModuleEntry};
+use nx_ir_runtime::{
+    LinkOptions, NxIrRuntimeError, PreparedModule, Program, RuntimeOptions, NX_IR_RUNTIME_ABI,
+    NX_IR_SCHEMA_VERSION, NX_PRELUDE_MODULE_IDENTITY,
+};
+use nx_value::NxValue;
+use std::collections::BTreeMap;
+
+fn corpus_program(name: &str) -> CorpusProgram {
+    load_corpus()
+        .into_iter()
+        .find(|program| program.name == name)
+        .unwrap_or_else(|| panic!("the corpus has no program '{name}'"))
+}
+
+fn image(program: &CorpusProgram, identity: &str) -> Vec<u8> {
+    program
+        .stripped_images
+        .iter()
+        .find(|(candidate, _)| candidate == identity)
+        .map(|(_, bytes)| bytes.clone())
+        .unwrap_or_else(|| panic!("{} emits no image for {identity}", program.name))
+}
+
+fn artifact(bytes: &[u8]) -> NxIrArtifact {
+    NxIrImage::open(bytes).expect("a valid image").to_artifact()
+}
+
+/// Writes an artifact, first adding to its string table any string its header names: the writer
+/// finds header strings in the table rather than adding them.
+fn write(mut artifact: NxIrArtifact) -> Vec<u8> {
+    let named: Vec<String> = std::iter::once(artifact.runtime_abi.clone())
+        .chain(artifact.required_features.iter().cloned())
+        .chain(
+            artifact
+                .modules
+                .iter()
+                .flat_map(|module| [module.identity.clone(), module.version.clone()]),
+        )
+        .collect();
+    for text in named {
+        if !artifact.strings.contains(&text) {
+            artifact.strings.push(text);
+        }
+    }
+    write_nx_ir_image(&artifact).expect("an image")
+}
+
+fn rewritten(bytes: &[u8], change: impl FnOnce(&mut NxIrArtifact)) -> Vec<u8> {
+    let mut artifact = artifact(bytes);
+    change(&mut artifact);
+    write(artifact)
+}
+
+fn error_of<T>(result: Result<T, NxIrRuntimeError>) -> NxIrRuntimeError {
+    match result {
+        Ok(_) => panic!("expected a failure"),
+        Err(error) => error,
+    }
+}
+
+fn codes(error: &NxIrRuntimeError) -> Vec<&'static str> {
+    error
+        .diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.code)
+        .collect()
+}
+
+fn no_modules(_: &str) -> Option<PreparedModule> {
+    None
+}
+
+/// An artifact with no tables: one module, the declarations and nodes a test adds.
+fn bare_artifact() -> NxIrArtifact {
+    NxIrArtifact {
+        schema_version: NX_IR_SCHEMA_VERSION,
+        runtime_abi: NX_IR_RUNTIME_ABI.to_string(),
+        required_features: Vec::new(),
+        modules: vec![NxIrModuleEntry {
+            identity: "main.nx".to_string(),
+            version: String::new(),
+            fingerprint: 7,
+        }],
+        function_entrypoints: Vec::new(),
+        component_entrypoints: Vec::new(),
+        strings: Vec::new(),
+        types: Vec::new(),
+        constants: Vec::new(),
+        nodes: Vec::new(),
+        declarations: Vec::new(),
+        debug: None,
+    }
+}
+
+#[test]
+fn a_valid_image_prepares_and_lists_its_entrypoints() {
+    let program = corpus_program("two-module");
+    let module = PreparedModule::prepare(image(&program, "app/main.nx")).expect("prepares");
+
+    assert_eq!(module.identity(), "app/main.nx");
+    assert_eq!(
+        module.referenced_modules().collect::<Vec<_>>(),
+        ["shared/model.nx"]
+    );
+    let functions: Vec<&str> = module.function_entrypoints().collect();
+    for name in ["total", "user", "card", "local", "root"] {
+        assert!(functions.contains(&name), "{functions:?} lacks {name}");
+    }
+    assert!(module.component_entrypoints().any(|name| name == "Panel"));
+    assert_eq!(module.image().schema_version(), NX_IR_SCHEMA_VERSION);
+}
+
+#[test]
+fn an_unsupported_schema_abi_or_feature_is_refused_by_name() {
+    let program = corpus_program("expressions");
+    let bytes = image(&program, "main.nx");
+
+    let mut other_schema = bytes.clone();
+    other_schema[4..8].copy_from_slice(&99u32.to_le_bytes());
+    let error = error_of(PreparedModule::prepare(other_schema));
+    assert_eq!(codes(&error), ["nx-ir-schema-version"]);
+    assert!(error.to_string().contains("99"), "{error}");
+
+    let error = error_of(PreparedModule::prepare(rewritten(&bytes, |artifact| {
+        artifact.runtime_abi = "nx-ir-runtime-v9".to_string();
+    })));
+    assert_eq!(codes(&error), ["nx-ir-runtime-abi"]);
+    assert!(error.to_string().contains("nx-ir-runtime-v9"), "{error}");
+
+    let error = error_of(PreparedModule::prepare(rewritten(&bytes, |artifact| {
+        artifact
+            .required_features
+            .push("time-travel-v1".to_string());
+    })));
+    assert_eq!(codes(&error), ["nx-ir-required-feature"]);
+    assert!(error.to_string().contains("time-travel-v1"), "{error}");
+
+    let error = error_of(PreparedModule::prepare(b"not an image".to_vec()));
+    assert_eq!(codes(&error), ["nx-ir-format"]);
+}
+
+#[test]
+fn a_presence_operator_without_its_feature_is_malformed() {
+    let program = corpus_program("occurrences");
+    let bytes = image(&program, "main.nx");
+    assert!(PreparedModule::prepare(bytes.clone()).is_ok());
+
+    let error = error_of(PreparedModule::prepare(rewritten(&bytes, |artifact| {
+        artifact
+            .required_features
+            .retain(|feature| feature != "occurrence-v1");
+    })));
+    assert!(
+        codes(&error).iter().all(|code| *code == "nx-ir-malformed"),
+        "{error}"
+    );
+    assert!(error.to_string().contains("occurrence-v1"), "{error}");
+
+    let program = corpus_program("occurrence-patterns");
+    let error = error_of(PreparedModule::prepare(rewritten(
+        &image(&program, "main.nx"),
+        |artifact| {
+            artifact
+                .required_features
+                .retain(|feature| feature != "occurrence-v1");
+        },
+    )));
+    assert!(error.to_string().contains("'{}' pattern"), "{error}");
+}
+
+#[test]
+fn an_unlinked_module_is_refused_and_a_self_contained_one_is_a_program() {
+    let program = corpus_program("two-module");
+    let entry = PreparedModule::prepare(image(&program, "app/main.nx")).expect("prepares");
+    assert_eq!(codes(&error_of(entry.program())), ["nx-ir-unlinked"]);
+
+    let shared = PreparedModule::prepare(image(&program, "shared/model.nx")).expect("prepares");
+    let value = shared
+        .program()
+        .expect("a self-contained module")
+        .evaluate_function("answer", &[], &RuntimeOptions::default())
+        .expect("evaluates");
+    assert!(canonical_eq(
+        &value,
+        &common::value(&program.results["shared/model.nx::answer"])
+    ));
+
+    let value = Program::prepare(image(&program, "shared/model.nx"))
+        .expect("prepares and links")
+        .evaluate_function("answer", &[], &RuntimeOptions::default())
+        .expect("evaluates");
+    assert!(canonical_eq(
+        &value,
+        &common::value(&program.results["shared/model.nx::answer"])
+    ));
+}
+
+#[test]
+fn linking_reports_a_missing_module_a_version_mismatch_and_a_missing_declaration() {
+    let program = corpus_program("two-module");
+    let entry = PreparedModule::prepare(image(&program, "app/main.nx")).expect("prepares");
+    let shared_bytes = image(&program, "shared/model.nx");
+
+    let error = error_of(Program::link(&entry, no_modules, &LinkOptions::default()));
+    assert_eq!(codes(&error), ["nx-ir-link-missing-module"]);
+    assert!(error.to_string().contains("shared/model.nx"), "{error}");
+
+    let recorded = artifact(&image(&program, "app/main.nx")).modules[1]
+        .version
+        .clone();
+    let newer = PreparedModule::prepare(rewritten(&shared_bytes, |artifact| {
+        artifact.modules[0].version = "next".to_string();
+    }))
+    .expect("prepares");
+    let error = error_of(Program::link(
+        &entry,
+        |_| Some(newer.clone()),
+        &LinkOptions::default(),
+    ));
+    assert_eq!(codes(&error), ["nx-ir-link-version"]);
+    let message = error.to_string();
+    assert!(
+        message.contains("shared/model.nx")
+            && message.contains(&format!("'{recorded}'"))
+            && message.contains("'next'"),
+        "{message}"
+    );
+    let linked = Program::link(
+        &entry,
+        |_| Some(newer.clone()),
+        &LinkOptions {
+            allow_version_mismatch: true,
+        },
+    )
+    .expect("links across versions");
+    assert!(linked
+        .evaluate_function("total", &[], &RuntimeOptions::default())
+        .is_ok());
+
+    // The shared module with one declaration the entry references renamed away.
+    let referenced = artifact(&image(&program, "app/main.nx"));
+    let wanted = referenced
+        .nodes
+        .iter()
+        .filter_map(IrItem::as_list)
+        .find(|node| {
+            node[0].as_int() == Some(kinds::node::REFERENCE) && node[1].as_int() == Some(1)
+        })
+        .map(|node| referenced.strings[node[2].as_int().unwrap() as usize].clone())
+        .expect("a reference into the shared module");
+    let lacking = PreparedModule::prepare(rewritten(&shared_bytes, |artifact| {
+        let index = artifact
+            .strings
+            .iter()
+            .position(|text| *text == wanted)
+            .expect("the name");
+        artifact.strings[index] = format!("{wanted}Renamed");
+    }))
+    .expect("prepares");
+    let error = error_of(Program::link(
+        &entry,
+        |_| Some(lacking.clone()),
+        &LinkOptions::default(),
+    ));
+    assert!(
+        codes(&error).contains(&"nx-ir-link-missing-declaration"),
+        "{error}"
+    );
+    assert!(error.to_string().contains(&wanted), "{error}");
+
+    let impostor = PreparedModule::prepare(image(&program, "app/main.nx")).expect("prepares");
+    let error = error_of(Program::link(
+        &entry,
+        |_| Some(impostor.clone()),
+        &LinkOptions::default(),
+    ));
+    assert!(codes(&error).contains(&"nx-ir-link-identity"), "{error}");
+}
+
+#[test]
+fn the_prelude_is_supplied_unless_the_host_supplies_one() {
+    let program = corpus_program("ranges");
+    let (identity, bytes) = program
+        .stripped_images
+        .iter()
+        .find(|(_, bytes)| {
+            artifact(bytes)
+                .modules
+                .iter()
+                .any(|module| module.identity == NX_PRELUDE_MODULE_IDENTITY)
+        })
+        .expect("a module that names the prelude");
+    let modules = prepare_all(&program.stripped_images);
+    let entry = modules.get(identity).expect("prepared");
+    assert!(artifact(bytes).modules.len() >= 2);
+
+    // The program's own modules only: the prelude's slot is filled by the built-in image.
+    let linked = Program::link(
+        entry,
+        |wanted| modules.get(wanted).cloned(),
+        &LinkOptions::default(),
+    )
+    .expect("links");
+    assert!(linked
+        .modules()
+        .any(|module| module == NX_PRELUDE_MODULE_IDENTITY));
+
+    // A host that supplies the prelude gets its own: one of another version is refused by the
+    // version check, which the built-in one passes.
+    let built_in = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/src/prelude.nxir"))
+        .expect("the prelude image");
+    let other = PreparedModule::prepare(rewritten(&built_in, |artifact| {
+        artifact.modules[0].version = "host-prelude".to_string();
+    }))
+    .expect("prepares");
+    let error = error_of(Program::link(
+        entry,
+        |wanted| {
+            if wanted == NX_PRELUDE_MODULE_IDENTITY {
+                Some(other.clone())
+            } else {
+                modules.get(wanted).cloned()
+            }
+        },
+        &LinkOptions::default(),
+    ));
+    assert!(
+        codes(&error)
+            .iter()
+            .all(|code| *code == "nx-ir-link-version"),
+        "{error}"
+    );
+    assert!(error.to_string().contains("host-prelude"), "{error}");
+}
+
+#[test]
+fn one_prepared_module_serves_programs_on_several_threads() {
+    let program = corpus_program("two-module");
+    let shared = PreparedModule::prepare(image(&program, "shared/model.nx")).expect("prepares");
+    let entry_bytes = image(&program, "app/main.nx");
+    let expected = common::value(&program.results["app/main.nx::total"]);
+
+    let results: Vec<NxValue> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let shared = shared.clone();
+                let entry_bytes = entry_bytes.clone();
+                scope.spawn(move || {
+                    let entry = PreparedModule::prepare(entry_bytes).expect("prepares");
+                    Program::link(&entry, |_| Some(shared.clone()), &LinkOptions::default())
+                        .expect("links")
+                        .evaluate_function("total", &[], &RuntimeOptions::default())
+                        .expect("evaluates")
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|handle| handle.join().expect("no panic"))
+            .collect()
+    });
+    assert!(results.iter().all(|value| canonical_eq(value, &expected)));
+}
+
+#[test]
+fn a_name_that_is_not_an_entrypoint_is_not_callable() {
+    let program = corpus_program("expressions");
+    let linked = Program::prepare(image(&program, "main.nx")).expect("prepares");
+    let error =
+        error_of(linked.evaluate_function("noSuchFunction", &[], &RuntimeOptions::default()));
+    assert_eq!(codes(&error), ["nx-ir-missing-entrypoint"]);
+    let error = error_of(linked.initialize_component(
+        "NoSuchComponent",
+        &BTreeMap::new(),
+        &Default::default(),
+        &RuntimeOptions::default(),
+    ));
+    assert_eq!(codes(&error), ["nx-ir-component"]);
+}
+
+/// `let root() = { not not … not true }`, nested `depth` deep.
+fn nested_program(depth: usize) -> Vec<u8> {
+    let mut artifact = bare_artifact();
+    artifact.strings = vec!["root".to_string()];
+    artifact.nodes.push(IrItem::ints([kinds::node::BOOL, 1]));
+    for index in 0..depth as i64 {
+        artifact
+            .nodes
+            .push(IrItem::ints([kinds::node::UNARY, kinds::unary::NOT, index]));
+    }
+    artifact.declarations.push(IrItem::list([
+        IrItem::Int(kinds::declaration::FUNCTION),
+        IrItem::Int(0),
+        IrItem::list([]),
+        IrItem::Int(depth as i64),
+        IrItem::Int(-1),
+        IrItem::Int(0),
+    ]));
+    artifact.function_entrypoints = vec![0];
+    write(artifact)
+}
+
+#[test]
+fn expression_nesting_ends_in_a_diagnostic_not_a_stack_overflow() {
+    let options = RuntimeOptions::default();
+    let shallow = Program::prepare(nested_program(100)).expect("prepares");
+    assert_eq!(
+        shallow.evaluate_function("root", &[], &options),
+        Ok(NxValue::Bool(true))
+    );
+
+    let deep = Program::prepare(nested_program(200_000)).expect("prepares");
+    let error = error_of(deep.evaluate_function("root", &[], &options));
+    assert_eq!(codes(&error), ["nx-ir-resource-limit"]);
+    assert_eq!(
+        error.diagnostics[0].declaration.as_deref(),
+        Some("main.nx::root")
+    );
+}

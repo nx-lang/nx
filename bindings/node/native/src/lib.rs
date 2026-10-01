@@ -6,7 +6,8 @@ use nx_api::{
     LibraryRegistry, NxDiagnostic, NxLibraryModule, NxLibrarySource, NxSeverity, NxWorkspace,
     NxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
 };
-use nx_codegen::{emit_nx_ir, explain_nx_ir_image, NxIrEmitOptions};
+use nx_codegen::{emit_nx_ir, NxIrEmitOptions};
+use nx_ir::explain_nx_ir_image;
 use nx_language_service::{
     DocumentInput, DocumentUri, SnapshotError, TextPosition, WorkspaceSnapshot,
 };
@@ -37,8 +38,8 @@ pub struct NativeGeneratedNxIr {
 pub fn explain_nx_ir(image: Buffer) -> Result<String> {
     explain_nx_ir_image(&image).map_err(|error| {
         let code = match error {
-            nx_codegen::ExplainError::SchemaVersion { .. } => "nx-ir-schema-version",
-            nx_codegen::ExplainError::Malformed(_) => "nx-ir-malformed",
+            nx_ir::ExplainError::SchemaVersion { .. } => "nx-ir-schema-version",
+            nx_ir::ExplainError::Malformed(_) => "nx-ir-malformed",
         };
         input_error_message(code, error.to_string())
     })

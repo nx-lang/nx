@@ -6,8 +6,8 @@
 //! Tests and the CLI both go through it, so there is no second interpretation of the tables to
 //! drift from this one.</para>
 
-use crate::ir::{kinds, IrItem, NxIrArtifact};
-use crate::ir_image::{NxIrImage, NxIrImageError};
+use crate::image::{NxIrImage, NxIrImageError};
+use crate::model::{kinds, IrItem, NxIrArtifact};
 use std::fmt::Write as _;
 
 /// Why an artifact could not be explained.
@@ -225,9 +225,10 @@ impl<'a> Explainer<'a> {
                 )))
             }
             kinds::ty::FUNCTION => {
-                // The parts are read here; the spelling is `nx-hir`'s, shared with the checker's
-                // diagnostics and the editor's hovers.
-                let mut params: Vec<(bool, String, bool, String)> = Vec::new();
+                // Spelled as source writes a function type and as `nx-hir` spells one in
+                // diagnostics and hovers. This crate cannot depend on the compiler, so the
+                // spelling is repeated here and held in step by the corpus's explained text.
+                let mut text = String::from("<function");
                 for param in self.list_operand(entry, 2, "function type")? {
                     let param = self.list(param, "function type parameter")?;
                     let name = self.string(self.int_operand(param, 0, "parameter name")?)?;
@@ -241,25 +242,21 @@ impl<'a> Explainer<'a> {
                     } else {
                         ty
                     };
-                    params.push((
-                        flags & kinds::ty::FUNCTION_PARAM_CONTENT != 0,
-                        name.to_string(),
-                        optional,
-                        ty,
-                    ));
+                    text.push(' ');
+                    if flags & kinds::ty::FUNCTION_PARAM_CONTENT != 0 {
+                        text.push_str("content ");
+                    }
+                    text.push_str(name);
+                    if optional {
+                        text.push('?');
+                    }
+                    text.push(':');
+                    text.push_str(&ty);
                 }
                 let result = self.ty(self.int_operand(entry, 1, "function result")?)?;
-                nx_hir::ast::spell_function_type(
-                    params.iter().map(|(is_content, name, optional, ty)| {
-                        nx_hir::ast::SpelledParam {
-                            is_content: *is_content,
-                            name,
-                            optional: *optional,
-                            ty,
-                        }
-                    }),
-                    &result,
-                )
+                text.push_str(" />: ");
+                text.push_str(&result);
+                text
             }
             other => return Err(self.malformed(format!("unknown type kind {other}"))),
         })
@@ -879,8 +876,27 @@ fn call_like(callee: String, args: Vec<Lines>) -> Lines {
     lines
 }
 
+/// A string as a JSON string literal.
 fn json_string(value: &str) -> String {
-    serde_json::to_string(value).unwrap_or_else(|_| format!("{value:?}"))
+    let mut text = String::with_capacity(value.len() + 2);
+    text.push('"');
+    for character in value.chars() {
+        match character {
+            '"' => text.push_str("\\\""),
+            '\\' => text.push_str("\\\\"),
+            '\n' => text.push_str("\\n"),
+            '\r' => text.push_str("\\r"),
+            '\t' => text.push_str("\\t"),
+            '\u{8}' => text.push_str("\\b"),
+            '\u{c}' => text.push_str("\\f"),
+            control if (control as u32) < 0x20 => {
+                let _ = write!(text, "\\u{:04x}", control as u32);
+            }
+            other => text.push(other),
+        }
+    }
+    text.push('"');
+    text
 }
 
 fn format_float(value: f64) -> String {

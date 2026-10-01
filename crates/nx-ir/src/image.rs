@@ -12,9 +12,11 @@
 //! kind's layout. After it returns `Ok`, every index the image contains is in range, so a reader
 //! can follow them without further checks.</para>
 
-use crate::ir::{
+use crate::model::{
     kinds, IrItem, NxIrArtifact, NxIrDebug, NxIrDebugSpans, NxIrModuleEntry, NX_IR_SCHEMA_VERSION,
 };
+use std::ops::Range;
+use std::sync::Arc;
 
 /// The first four bytes of every image.
 pub const NX_IR_MAGIC: [u8; 4] = *b"NXIR";
@@ -529,7 +531,8 @@ fn write_debug(debug: &NxIrDebug) -> Result<Vec<u8>, NxIrImageError> {
 pub struct Cells<'a>(&'a [u8]);
 
 impl<'a> Cells<'a> {
-    fn from_bytes(bytes: &'a [u8]) -> Self {
+    /// Cells over `bytes`, whose length is a multiple of four.
+    pub fn from_bytes(bytes: &'a [u8]) -> Self {
         debug_assert_eq!(bytes.len() % 4, 0);
         Self(bytes)
     }
@@ -598,7 +601,8 @@ impl<'a> Offsets<'a> {
 #[derive(Debug, Clone, Copy)]
 struct StringTable<'a> {
     offsets: Offsets<'a>,
-    blob: &'a str,
+    /// UTF-8, checked by `read_strings`, with every offset on a character boundary.
+    blob: &'a [u8],
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -623,7 +627,8 @@ struct DebugSection<'a> {
     declaration_spans: Cells<'a>,
     /// Two cells per node.
     node_spans: Cells<'a>,
-    source: &'a str,
+    /// UTF-8, checked by `read_debug`.
+    source: &'a [u8],
 }
 
 /// One entry of the module table, borrowed from an image.
@@ -704,7 +709,7 @@ impl<'a> NxIrImage<'a> {
     /// String `index`, borrowed from the image, or `None` past the table's end.
     pub fn string(&self, index: u32) -> Option<&'a str> {
         let (start, end) = self.strings.offsets.range(index as usize)?;
-        self.strings.blob.get(start..end)
+        std::str::from_utf8(self.strings.blob.get(start..end)?).ok()
     }
 
     fn string_at(&self, index: u32) -> &'a str {
@@ -770,7 +775,7 @@ impl<'a> NxIrImage<'a> {
 
     /// The module's source text, when the debug section is present.
     pub fn source(&self) -> Option<&'a str> {
-        self.debug.map(|debug| debug.source)
+        std::str::from_utf8(self.debug?.source).ok()
     }
 
     /// The span of declaration `index`, when the debug section is present and the span is known.
@@ -787,6 +792,30 @@ impl<'a> NxIrImage<'a> {
     pub fn declaration_name(&self, index: u32) -> Option<&'a str> {
         let entry = self.entry(Table::Declarations, index)?;
         self.string(entry.get(1)?)
+    }
+
+    /// Calls `visit` with the module slot and the name's string index of every reference any
+    /// entry of any table holds, an absent optional reference excepted.
+    ///
+    /// <para>This is what a linker needs before it reads a single node: which declarations of
+    /// which other modules the image names, and which of its own.</para>
+    pub fn for_each_reference(&self, mut visit: impl FnMut(u32, u32)) {
+        for table in Table::ALL {
+            for index in 0..self.entry_count(table) {
+                let Some(entry) = self.entry(table, index as u32) else {
+                    continue;
+                };
+                let mut cursor = Cursor::new(entry);
+                let Some(layout) = cursor
+                    .next()
+                    .ok()
+                    .and_then(|kind| table.layout(i64::from(kind)))
+                else {
+                    continue;
+                };
+                visit_references(&mut cursor, layout, &mut visit);
+            }
+        }
     }
 
     /// Rebuilds the owned artifact model from the image.
@@ -818,7 +847,7 @@ impl<'a> NxIrImage<'a> {
                     declarations: spans(debug.declaration_spans),
                     nodes: spans(debug.node_spans),
                 },
-                source: debug.source.to_string(),
+                source: String::from_utf8_lossy(debug.source).into_owned(),
             }
         });
         NxIrArtifact {
@@ -842,6 +871,149 @@ impl<'a> NxIrImage<'a> {
             declarations: table(Table::Declarations),
             debug,
         }
+    }
+}
+
+/// Where each part of a validated image lies in its bytes.
+///
+/// <para>[`NxIrImage`] borrows the bytes, so something that owns them cannot also hold the view.
+/// It holds this instead: the ranges validation found, from which the view is rebuilt by slicing,
+/// without reading a cell.</para>
+#[derive(Debug, Clone)]
+struct Layout {
+    schema_version: u32,
+    string_count: usize,
+    string_offsets: Range<usize>,
+    string_blob: Range<usize>,
+    runtime_abi: u32,
+    features: Range<usize>,
+    modules: Range<usize>,
+    function_entrypoints: Range<usize>,
+    component_entrypoints: Range<usize>,
+    /// Entry count, offsets and pool of each cell table, in [`Table::ALL`] order.
+    tables: [(usize, Range<usize>, Range<usize>); 4],
+    /// Declaration spans, node spans and source.
+    debug: Option<(Range<usize>, Range<usize>, Range<usize>)>,
+}
+
+/// The range `part` occupies in `bytes`. `part` is a subslice of `bytes`, or empty.
+fn range_in(bytes: &[u8], part: &[u8]) -> Range<usize> {
+    let start = (part.as_ptr() as usize).wrapping_sub(bytes.as_ptr() as usize);
+    match start.checked_add(part.len()) {
+        Some(end) if !part.is_empty() && end <= bytes.len() => start..end,
+        _ => 0..0,
+    }
+}
+
+impl Layout {
+    fn of(bytes: &[u8], image: &NxIrImage<'_>) -> Self {
+        let range = |part: &[u8]| range_in(bytes, part);
+        let table = |table: &CellTable<'_>| {
+            (
+                table.offsets.count,
+                range(table.offsets.offsets.0),
+                range(table.pool.0),
+            )
+        };
+        Self {
+            schema_version: image.schema_version,
+            string_count: image.strings.offsets.count,
+            string_offsets: range(image.strings.offsets.offsets.0),
+            string_blob: range(image.strings.blob),
+            runtime_abi: image.module.runtime_abi,
+            features: range(image.module.features.0),
+            modules: range(image.module.modules.0),
+            function_entrypoints: range(image.module.function_entrypoints.0),
+            component_entrypoints: range(image.module.component_entrypoints.0),
+            tables: [
+                table(&image.tables[0]),
+                table(&image.tables[1]),
+                table(&image.tables[2]),
+                table(&image.tables[3]),
+            ],
+            debug: image.debug.map(|debug| {
+                (
+                    range(debug.declaration_spans.0),
+                    range(debug.node_spans.0),
+                    range(debug.source),
+                )
+            }),
+        }
+    }
+
+    fn view<'a>(&self, bytes: &'a [u8]) -> NxIrImage<'a> {
+        let part = |range: &Range<usize>| bytes.get(range.clone()).unwrap_or(&[]);
+        let cells = |range: &Range<usize>| Cells(part(range));
+        let table = |(count, offsets, pool): &(usize, Range<usize>, Range<usize>)| CellTable {
+            offsets: Offsets {
+                count: *count,
+                offsets: cells(offsets),
+            },
+            pool: cells(pool),
+        };
+        NxIrImage {
+            schema_version: self.schema_version,
+            strings: StringTable {
+                offsets: Offsets {
+                    count: self.string_count,
+                    offsets: cells(&self.string_offsets),
+                },
+                blob: part(&self.string_blob),
+            },
+            module: ModuleSection {
+                runtime_abi: self.runtime_abi,
+                features: cells(&self.features),
+                modules: cells(&self.modules),
+                function_entrypoints: cells(&self.function_entrypoints),
+                component_entrypoints: cells(&self.component_entrypoints),
+            },
+            tables: [
+                table(&self.tables[0]),
+                table(&self.tables[1]),
+                table(&self.tables[2]),
+                table(&self.tables[3]),
+            ],
+            debug: self
+                .debug
+                .as_ref()
+                .map(|(declarations, nodes, source)| DebugSection {
+                    declaration_spans: cells(declarations),
+                    node_spans: cells(nodes),
+                    source: part(source),
+                }),
+        }
+    }
+}
+
+/// A validated image together with the bytes it reads.
+///
+/// <para>[`NxIrImage`] borrows its bytes, which suits a caller that reads an image and drops it.
+/// A caller that keeps an image — a runtime holding a prepared module — owns the bytes here
+/// instead. The image is validated once, by [`NxIrImageBuf::open`]; [`NxIrImageBuf::image`] then
+/// rebuilds the view from the recorded layout and reads nothing, so it is cheap enough to call
+/// wherever a view is wanted. The bytes are shared, never copied, by a clone.</para>
+#[derive(Debug, Clone)]
+pub struct NxIrImageBuf {
+    bytes: Arc<[u8]>,
+    layout: Layout,
+}
+
+impl NxIrImageBuf {
+    /// Validates `bytes` as [`NxIrImage::open`] does and keeps them.
+    pub fn open(bytes: impl Into<Arc<[u8]>>) -> Result<Self, NxIrImageError> {
+        let bytes: Arc<[u8]> = bytes.into();
+        let layout = Layout::of(&bytes, &NxIrImage::open(&bytes)?);
+        Ok(Self { bytes, layout })
+    }
+
+    /// The image's bytes.
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    /// The validated view, rebuilt without validating again.
+    pub fn image(&self) -> NxIrImage<'_> {
+        self.layout.view(&self.bytes)
     }
 }
 
@@ -985,7 +1157,10 @@ fn read_strings(bytes: &[u8]) -> Result<StringTable<'_>, NxIrImageError> {
             )));
         }
     }
-    Ok(StringTable { offsets, blob })
+    Ok(StringTable {
+        offsets,
+        blob: blob.as_bytes(),
+    })
 }
 
 fn read_table(bytes: &[u8], table: Table) -> Result<CellTable<'_>, NxIrImageError> {
@@ -1306,13 +1481,53 @@ fn read_debug<'a>(bytes: &'a [u8], bounds: &Bounds) -> Result<DebugSection<'a>, 
     Ok(DebugSection {
         declaration_spans,
         node_spans,
-        source,
+        source: source.as_bytes(),
     })
 }
 
 // ------------------------------------------------------------------------------------------------
 // Decoder
 // ------------------------------------------------------------------------------------------------
+
+/// Walks a validated entry's operands by its layout, reporting each reference.
+fn visit_references(cursor: &mut Cursor<'_>, ops: &[Op], visit: &mut impl FnMut(u32, u32)) {
+    for op in ops {
+        match *op {
+            Op::Int
+            | Op::Code(_)
+            | Op::Str
+            | Op::Type
+            | Op::Const
+            | Op::Node
+            | Op::OptNode
+            | Op::OptSlot
+            | Op::OptStr
+            | Op::OptType => {
+                let _ = cursor.next();
+            }
+            Op::I64 | Op::F64 => {
+                let _ = cursor.next();
+                let _ = cursor.next();
+            }
+            Op::Ref | Op::RefPair | Op::OptRef => {
+                if let (Ok(slot), Ok(name)) = (cursor.next(), cursor.next()) {
+                    if slot != NONE {
+                        visit(slot, name);
+                    }
+                }
+            }
+            Op::List(shape) => {
+                let count = cursor.next().unwrap_or(0);
+                for _ in 0..count {
+                    if cursor.finished() {
+                        break;
+                    }
+                    visit_references(cursor, shape, visit);
+                }
+            }
+        }
+    }
+}
 
 /// Rebuilds a validated entry as the model's nested list. The cursor cannot run out or meet an
 /// unknown kind, because validation walked the same layout; a `None` is a bug in this file.
@@ -1383,438 +1598,5 @@ fn decode_op(cursor: &mut Cursor<'_>, op: Op, items: &mut Vec<IrItem>) {
             let high = next() as u64;
             items.push(IrItem::Float(f64::from_bits(low | (high << 32))));
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::ir_corpus_tests::{emit, load_programs};
-
-    fn cell_at(bytes: &[u8], offset: usize) -> u32 {
-        u32::from_le_bytes([
-            bytes[offset],
-            bytes[offset + 1],
-            bytes[offset + 2],
-            bytes[offset + 3],
-        ])
-    }
-
-    /// Every corpus artifact, with and without debug data, as the model and its image.
-    fn corpus_images() -> Vec<(String, NxIrArtifact, Vec<u8>)> {
-        let mut images = Vec::new();
-        for program in load_programs() {
-            for debug in [false, true] {
-                for artifact in emit(&program, debug) {
-                    let label = format!(
-                        "{}/{}{}",
-                        program.name,
-                        artifact.modules[0].identity,
-                        if debug { " +debug" } else { "" }
-                    );
-                    let bytes = write_nx_ir_image(&artifact).expect("image");
-                    images.push((label, artifact, bytes));
-                }
-            }
-        }
-        images
-    }
-
-    fn snippet_input() -> NxIrArtifact {
-        let program = load_programs()
-            .into_iter()
-            .find(|program| program.name == "snippet")
-            .expect("the snippet program");
-        emit(&program, false)
-            .into_iter()
-            .find(|artifact| artifact.modules[0].identity == "input.nx")
-            .expect("input.nx")
-    }
-
-    /// The image of the corpus's `snippet` program, checked cell by cell against the layout
-    /// `docs/nx-ir-format.md` gives.
-    #[test]
-    fn the_snippet_image_is_laid_out_as_the_document_says() {
-        let artifact = snippet_input();
-        let bytes = write_nx_ir_image(&artifact).expect("image");
-
-        assert_eq!(&bytes[0..4], b"NXIR");
-        assert_eq!(cell_at(&bytes, 4), 5, "schema version");
-        assert_eq!(cell_at(&bytes, 8) as usize, bytes.len(), "total length");
-        assert_eq!(cell_at(&bytes, 12), 6, "six sections without debug");
-
-        // The directory: kinds 0 to 5, contiguous, each four-byte aligned.
-        let mut expected_offset = 16 + 6 * 12;
-        let mut sections = Vec::new();
-        for entry in 0..6 {
-            let at = 16 + entry * 12;
-            assert_eq!(cell_at(&bytes, at), entry as u32, "section kind");
-            assert_eq!(
-                cell_at(&bytes, at + 4) as usize,
-                expected_offset,
-                "section offset"
-            );
-            let length = cell_at(&bytes, at + 8) as usize;
-            assert_eq!(length % 4, 0);
-            sections.push((expected_offset, length));
-            expected_offset += length;
-        }
-        assert_eq!(expected_offset, bytes.len());
-
-        // Strings: count, count + 1 offsets, blob. The first string is "title".
-        let (strings, _) = sections[0];
-        assert_eq!(cell_at(&bytes, strings) as usize, artifact.strings.len());
-        assert_eq!(cell_at(&bytes, strings + 4), 0);
-        assert_eq!(cell_at(&bytes, strings + 8), 5);
-        let blob = strings + 4 + 4 * (artifact.strings.len() + 1);
-        assert_eq!(&bytes[blob..blob + 5], b"title");
-
-        // Module: runtime ABI, no features, two modules, entrypoints [1] and [].
-        let (module, module_len) = sections[1];
-        let cells = Cells::from_bytes(&bytes[module..module + module_len]).to_vec();
-        let string_index =
-            |value: &str| artifact.strings.iter().position(|s| s == value).unwrap() as u32;
-        let abi = string_index("nx-ir-runtime-v2");
-        let drawnui = artifact.modules[1].fingerprint;
-        assert_eq!(
-            cells,
-            vec![
-                abi,
-                0,
-                2,
-                string_index("input.nx"),
-                string_index(""),
-                artifact.modules[0].fingerprint as u32,
-                (artifact.modules[0].fingerprint >> 32) as u32,
-                string_index("drawnui.nx"),
-                string_index("9"),
-                drawnui as u32,
-                (drawnui >> 32) as u32,
-                1,
-                1,
-                0,
-            ]
-        );
-
-        // Declarations: `[1, 0, 0, -1]` (value title = node 0, no declared type) and
-        // `[0, 2, [], 13, -1, 0]` (function root, no declared result, not optional).
-        let (declarations, declarations_len) = sections[5];
-        let cells =
-            Cells::from_bytes(&bytes[declarations..declarations + declarations_len]).to_vec();
-        assert_eq!(
-            cells,
-            vec![2, 0, 4, 10, 1, 0, 0, NONE, 0, 2, 0, 13, NONE, 0]
-        );
-
-        // Node 13, `[18, 1, 14, [[3, 1], [5, 2]], [5, 7, 9, 12]]`: the component descriptor of
-        // `SkiaLayout` with two properties and four children.
-        let image = NxIrImage::open(&bytes).expect("valid");
-        let node = image.entry(Table::Nodes, 13).expect("node 13").to_vec();
-        assert_eq!(node, vec![18, 1, 14, 2, 3, 1, 5, 2, 4, 5, 7, 9, 12]);
-        assert_eq!(image.string(14), Some("SkiaLayout"));
-    }
-
-    #[test]
-    fn every_corpus_image_reads_back_as_its_model() {
-        for (label, artifact, bytes) in corpus_images() {
-            let image = NxIrImage::open(&bytes).unwrap_or_else(|error| panic!("{label}: {error}"));
-            assert_eq!(image.to_artifact(), artifact, "{label}");
-            assert_eq!(image.has_debug(), artifact.debug.is_some(), "{label}");
-        }
-    }
-
-    #[test]
-    fn a_stripped_image_and_a_debug_image_differ_only_in_the_debug_section() {
-        for program in load_programs() {
-            let stripped = emit(&program, false);
-            let with_debug = emit(&program, true);
-            for (stripped, with_debug) in stripped.iter().zip(&with_debug) {
-                let stripped_bytes = write_nx_ir_image(stripped).expect("image");
-                let debug_bytes = write_nx_ir_image(with_debug).expect("image");
-                // Past the header and directory, the debug image is the stripped image's sections
-                // followed by the debug section.
-                let stripped_body = &stripped_bytes[16 + 6 * 12..];
-                let debug_body = &debug_bytes[16 + 7 * 12..];
-                assert!(debug_body.starts_with(stripped_body), "{}", program.name);
-            }
-        }
-    }
-
-    #[test]
-    fn an_unknown_section_is_skipped() {
-        let bytes = write_nx_ir_image(&snippet_input()).expect("image");
-        // Rebuild the image with an extra directory entry of kind 99 pointing at four zero bytes
-        // appended to the end.
-        let count = 7u32;
-        let directory_len = 16 + 7 * 12;
-        let mut image = Vec::new();
-        image.extend_from_slice(&bytes[..12]);
-        image.extend_from_slice(&count.to_le_bytes());
-        for entry in 0..6 {
-            let at = 16 + entry * 12;
-            image.extend_from_slice(&bytes[at..at + 4]);
-            image.extend_from_slice(&(cell_at(&bytes, at + 4) + 12).to_le_bytes());
-            image.extend_from_slice(&bytes[at + 8..at + 12]);
-        }
-        image.extend_from_slice(&99u32.to_le_bytes());
-        image.extend_from_slice(&((bytes.len() + 12) as u32).to_le_bytes());
-        image.extend_from_slice(&4u32.to_le_bytes());
-        image.extend_from_slice(&bytes[16 + 6 * 12..]);
-        image.extend_from_slice(&[0, 0, 0, 0]);
-        assert_eq!(image.len(), bytes.len() + 16);
-        assert_eq!(directory_len, 16 + 7 * 12);
-        let total = image.len() as u32;
-        image[8..12].copy_from_slice(&total.to_le_bytes());
-
-        let opened = NxIrImage::open(&image).expect("the unknown section is skipped");
-        assert_eq!(opened.to_artifact(), snippet_input());
-    }
-
-    #[test]
-    fn bytes_that_are_not_an_image_are_refused() {
-        assert_eq!(
-            NxIrImage::open(b"").unwrap_err(),
-            NxIrImageError::NotAnImage
-        );
-        assert_eq!(
-            NxIrImage::open(b"{\"format\":\"nx-ir-json\"}").unwrap_err(),
-            NxIrImageError::NotAnImage
-        );
-        assert_eq!(
-            NxIrImage::open(b"NXI").unwrap_err(),
-            NxIrImageError::NotAnImage
-        );
-    }
-
-    #[test]
-    fn another_schema_version_is_refused_naming_both() {
-        let mut bytes = write_nx_ir_image(&snippet_input()).expect("image");
-        bytes[4..8].copy_from_slice(&3u32.to_le_bytes());
-        assert_eq!(
-            NxIrImage::open(&bytes).unwrap_err(),
-            NxIrImageError::SchemaVersion {
-                found: 3,
-                supported: 5
-            }
-        );
-    }
-
-    /// A `seq` type whose occurrence cell spells no suffix, and one whose item is itself a `seq`,
-    /// are refused, as the TypeScript reader refuses them.
-    #[test]
-    fn a_malformed_seq_type_is_refused() {
-        use crate::ir::IrItem;
-        let base = snippet_input();
-        let int = base.types.len() as i64;
-        let seq = int + 1;
-        for (extra, needle) in [
-            (IrItem::ints([kinds::ty::SEQ, int, 0]), "occurrence cell 0"),
-            (IrItem::ints([kinds::ty::SEQ, int, 4]), "occurrence cell 4"),
-            (
-                IrItem::ints([kinds::ty::SEQ, seq, kinds::ty::OCCURRENCE_EMPTY]),
-                "is itself a seq type",
-            ),
-        ] {
-            let mut artifact = base.clone();
-            let name = artifact.strings.len() as i64;
-            artifact.strings.push("int".to_string());
-            artifact
-                .types
-                .push(IrItem::ints([kinds::ty::PRIMITIVE, name]));
-            artifact.types.push(IrItem::ints([
-                kinds::ty::SEQ,
-                int,
-                kinds::ty::OCCURRENCE_MANY,
-            ]));
-            artifact.types.push(extra);
-            let bytes = write_nx_ir_image(&artifact).expect("image");
-            match NxIrImage::open(&bytes) {
-                Err(NxIrImageError::Malformed(message)) => {
-                    assert!(message.contains(needle), "{message}")
-                }
-                other => panic!("expected a malformed image, got {other:?}"),
-            }
-        }
-    }
-
-    /// Cut at every four-byte boundary, an image is refused rather than read short.
-    #[test]
-    fn a_truncated_image_is_refused_at_every_boundary() {
-        for (label, _, bytes) in corpus_images() {
-            for end in (0..bytes.len()).step_by(4) {
-                let error = NxIrImage::open(&bytes[..end]).err().unwrap_or_else(|| {
-                    panic!(
-                        "{label}: an image cut at {end} of {} bytes opened",
-                        bytes.len()
-                    )
-                });
-                assert!(
-                    matches!(
-                        error,
-                        NxIrImageError::NotAnImage | NxIrImageError::Malformed(_)
-                    ),
-                    "{label} at {end}: {error}"
-                );
-            }
-        }
-    }
-
-    /// The image whose header says it is longer than it is, and the one that says it is shorter.
-    #[test]
-    fn a_wrong_total_length_is_refused() {
-        let bytes = write_nx_ir_image(&snippet_input()).expect("image");
-        let mut longer = bytes.clone();
-        longer[8..12].copy_from_slice(&((bytes.len() + 4) as u32).to_le_bytes());
-        assert!(NxIrImage::open(&longer).is_err());
-        let mut shorter = bytes.clone();
-        shorter[8..12].copy_from_slice(&((bytes.len() - 4) as u32).to_le_bytes());
-        assert!(NxIrImage::open(&shorter).is_err());
-        let mut padded = bytes.clone();
-        padded.extend_from_slice(&[0, 0, 0, 0]);
-        assert!(NxIrImage::open(&padded).is_err());
-    }
-
-    /// Opens damaged bytes and, when they open, reads everything the view answers, so that a
-    /// damaged image is either refused or explained and never panics.
-    fn open_damaged(damaged: &[u8]) -> bool {
-        match NxIrImage::open(damaged) {
-            Ok(image) => {
-                // Everything the view answers must come from inside the image.
-                let artifact = image.to_artifact();
-                let _ = crate::explain_nx_ir(&artifact);
-                true
-            }
-            Err(_) => false,
-        }
-    }
-
-    /// Every cell of `bytes`, overwritten with each of four values: `open` either refuses the image
-    /// or answers with a view whose every accessor is in range, and never panics.
-    fn damage_every_cell(label: &str, bytes: &[u8]) {
-        let mut opened = 0;
-        let mut refused = 0;
-        for offset in (0..bytes.len()).step_by(4) {
-            for value in [0u32, 1, NONE, 0x7FFF_FFF0] {
-                let mut damaged = bytes.to_vec();
-                damaged[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
-                if open_damaged(&damaged) {
-                    opened += 1;
-                } else {
-                    refused += 1;
-                }
-            }
-        }
-        println!("{label}: {opened} damaged images opened, {refused} refused");
-        assert!(refused > 0);
-    }
-
-    /// The smallest corpus image, which is always a stripped one, the smallest that carries a
-    /// debug section, so that span offsets and the source length are damaged too, and the smallest
-    /// that carries an action handler, so that its node and a non-empty `emits` list are too.
-    #[test]
-    fn every_cell_can_be_damaged_without_a_panic() {
-        let images = corpus_images();
-        let (label, _, bytes) = images
-            .iter()
-            .filter(|(_, artifact, _)| {
-                artifact.nodes.iter().any(|node| {
-                    node.as_list().and_then(|entry| entry[0].as_int())
-                        == Some(kinds::node::ACTION_HANDLER)
-                })
-            })
-            .min_by_key(|(_, _, bytes)| bytes.len())
-            .expect("a corpus image with an action handler");
-        damage_every_cell(label, bytes);
-        let (label, _, bytes) = images
-            .iter()
-            .min_by_key(|(_, _, bytes)| bytes.len())
-            .expect("a corpus image");
-        damage_every_cell(label, bytes);
-        let (label, _, bytes) = images
-            .iter()
-            .filter(|(_, artifact, _)| artifact.debug.is_some())
-            .min_by_key(|(_, _, bytes)| bytes.len())
-            .expect("a corpus image with a debug section");
-        damage_every_cell(label, bytes);
-    }
-
-    /// The byte offset of cell `cell` of entry `index` in `table`, read from the directory.
-    fn table_cell_offset(bytes: &[u8], table: Table, index: usize, cell: usize) -> usize {
-        let kind = match table {
-            Table::Types => section::TYPES,
-            Table::Constants => section::CONSTANTS,
-            Table::Nodes => section::NODES,
-            Table::Declarations => section::DECLARATIONS,
-        };
-        let section_offset = cell_at(bytes, 16 + kind as usize * 12 + 4) as usize;
-        let count = cell_at(bytes, section_offset) as usize;
-        let start = cell_at(bytes, section_offset + 4 + 4 * index) as usize;
-        section_offset + 4 + 4 * (count + 1) + 4 * (start + cell)
-    }
-
-    /// A node that names itself as a child is refused, since the explainer recurses over children
-    /// and the format promises that a child precedes its parent.
-    #[test]
-    fn a_self_referencing_node_is_refused() {
-        let artifact = snippet_input();
-        let bytes = write_nx_ir_image(&artifact).expect("image");
-        let image = NxIrImage::open(&bytes).expect("valid");
-        // Node 13 is `[18, 1, 14, [[3, 1], [5, 2]], [5, 7, 9, 12]]`; its first child is cell 9.
-        assert_eq!(image.entry(Table::Nodes, 13).unwrap().get(9), Some(5));
-        let offset = table_cell_offset(&bytes, Table::Nodes, 13, 9);
-        let mut cyclic = bytes.clone();
-        cyclic[offset..offset + 4].copy_from_slice(&13u32.to_le_bytes());
-        let error = NxIrImage::open(&cyclic).unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("node 13: node index 13 is out of range"),
-            "{error}"
-        );
-        // A child that follows its parent is refused the same way.
-        let mut forward = bytes.clone();
-        forward[offset..offset + 4].copy_from_slice(&14u32.to_le_bytes());
-        assert!(NxIrImage::open(&forward).is_err());
-    }
-
-    /// Every node and type cell of every corpus image, overwritten with its own entry index: the
-    /// image is refused or explained, and the explainer's walk over children terminates.
-    #[test]
-    fn every_node_and_type_cell_can_name_its_own_entry_without_a_panic() {
-        for (label, _, bytes) in corpus_images() {
-            let image = NxIrImage::open(&bytes).expect("valid");
-            for table in [Table::Nodes, Table::Types] {
-                for index in 0..image.entry_count(table) {
-                    let len = image.entry(table, index as u32).unwrap().len();
-                    for cell in 0..len {
-                        let offset = table_cell_offset(&bytes, table, index, cell);
-                        let mut damaged = bytes.clone();
-                        damaged[offset..offset + 4].copy_from_slice(&(index as u32).to_le_bytes());
-                        let _ = open_damaged(&damaged);
-                    }
-                }
-            }
-            println!("{label}: every node and type cell probed with its own index");
-        }
-    }
-
-    #[test]
-    fn an_index_past_a_table_is_refused_rather_than_followed() {
-        let artifact = snippet_input();
-        let bytes = write_nx_ir_image(&artifact).expect("image");
-        let image = NxIrImage::open(&bytes).expect("valid");
-        // Node 0 is `[2, 1]`, the string literal "Conformance"; point it past the string table.
-        let node_section = 16 + 4 * 12;
-        let nodes_offset = cell_at(&bytes, node_section + 4) as usize;
-        let node_count = cell_at(&bytes, nodes_offset) as usize;
-        let pool = nodes_offset + 4 + 4 * (node_count + 1);
-        assert_eq!(image.entry(Table::Nodes, 0).unwrap().to_vec(), vec![2, 1]);
-        let mut damaged = bytes.clone();
-        damaged[pool + 4..pool + 8].copy_from_slice(&(artifact.strings.len() as u32).to_le_bytes());
-        let error = NxIrImage::open(&damaged).unwrap_err();
-        assert!(
-            error.to_string().contains("node 0: string index"),
-            "{error}"
-        );
     }
 }

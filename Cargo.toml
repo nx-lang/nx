@@ -6,6 +6,8 @@ members = [
     "crates/nx-hir",
     "crates/nx-types",
     "crates/nx-value",
+    "crates/nx-ir",
+    "crates/nx-ir-runtime",
     "crates/nx-api",
     "crates/nx-language-service",
     "crates/nx-lsp",

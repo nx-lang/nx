@@ -1,10 +1,10 @@
 //! Keeps the prelude's published surface in step with the compiler's: the image the TypeScript
-//! runtime ships, and the version an image records for it.
+//! and Rust runtimes ship, and the version an image records for it.
 //!
 //! <para>The runtime ships the prelude so no host has to, which only works while the image it ships
-//! is the one this compiler emits. The first test emits the prelude and compares it with the
-//! checked-in file; set `NX_UPDATE_PRELUDE_IMAGE=1` to rewrite the file after an intended change to
-//! `prelude.nx`, and review the diff.</para>
+//! is the one this compiler emits. The first two tests emit the prelude and compare it with each
+//! runtime's checked-in file; set `NX_UPDATE_PRELUDE_IMAGE=1` to rewrite both after an intended
+//! change to `prelude.nx`, and review the diff.</para>
 //!
 //! <para>The second pins the prelude's declaration shape beside
 //! [`nx_hir::PRELUDE_VERSION`](nx_hir::PRELUDE_VERSION), which is what linking compares. The
@@ -12,16 +12,18 @@
 //! cannot be derived, and this is what keeps it from falling behind the declarations it stands
 //! for.</para>
 
-use crate::ir::{NxIrArtifact, NxIrEmitOptions};
-use crate::ir_explain::explain_nx_ir_image;
-use crate::ir_image::write_nx_ir_image;
+use crate::ir::NxIrEmitOptions;
 use crate::{build_codegen_program, build_nx_ir_artifacts};
 use nx_api::{build_program_artifact_from_source, ProgramBuildContext};
+use nx_ir::{explain_nx_ir_image, write_nx_ir_image, NxIrArtifact};
 use std::fs;
 use std::path::PathBuf;
 
-/// Where the runtime keeps the image, relative to the repository root.
+/// Where the TypeScript runtime keeps the image, relative to the repository root.
 const PRELUDE_IMAGE_PATH: &str = "runtime/typescript/src/prelude-image.ts";
+
+/// Where the Rust runtime keeps the image, which it embeds as bytes.
+const RUST_PRELUDE_IMAGE_PATH: &str = "crates/nx-ir-runtime/src/prelude.nxir";
 
 /// The command that rewrites the file.
 const UPDATE_COMMAND: &str =
@@ -114,6 +116,25 @@ fn the_runtimes_prelude_image_is_the_one_the_compiler_emits() {
     assert_eq!(
         actual,
         expected,
+        "{} is out of date; run `{UPDATE_COMMAND}`",
+        path.display()
+    );
+}
+
+#[test]
+fn the_rust_runtimes_prelude_image_is_the_one_the_compiler_emits() {
+    let path = repository_root().join(RUST_PRELUDE_IMAGE_PATH);
+    let expected = emit_prelude_image();
+
+    if std::env::var_os("NX_UPDATE_PRELUDE_IMAGE").is_some() {
+        fs::create_dir_all(path.parent().expect("parent")).expect("runtime src directory");
+        fs::write(&path, &expected).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        return;
+    }
+
+    let actual = fs::read(&path).unwrap_or_default();
+    assert!(
+        actual == expected,
         "{} is out of date; run `{UPDATE_COMMAND}`",
         path.display()
     );

@@ -20,7 +20,7 @@ converter.
 
 The image is described bottom-up: cells and how an entry's operands become cells, then the tables,
 then the sections that hold them and the header that lists the sections. The kind numbers and the
-layout of every entry are the same as the emitter's model in `crates/nx-codegen/src/ir.rs`, and
+layout of every entry are the same as the model in the format crate, `crates/nx-ir`, and
 `nxlang ir explain` renders any image as text with every index resolved, so a person reads the
 text and a program reads the cells.
 
@@ -387,7 +387,8 @@ site, and that is the exposure every record of a shared name has rather than one
 Erasure also settles what an item's carrier is. NX's `int`, `int32` and `int64` are a distinction the
 checker draws; below it, a backend binds items with whatever numeric types it has. An engine with a
 separate 32-bit integer and a separate float, such as the NX interpreter, can bind a narrow item and
-will refuse a range whose bounds are floats. JavaScript has one number type, so an `int32` item is an
+will refuse a range whose bounds are floats. The Rust IR runtime has a 64-bit integer and a float,
+and computes every integer width as the one integer. JavaScript has one number type, so an `int32` item is an
 `int` — as every `int32` is in that backend, not only a range's — and a range of `float64` whose
 bounds happen to be integral iterates, because `4.0` and `4` are one value.
 
@@ -395,7 +396,8 @@ Of those two, only the float range is out of reach from checked NX, because `ran
 refuses a non-integer range iterable outright; it takes a host value or a hand-built image. The
 carrier is reachable, and it is observable, because the interpreter wraps `int32` arithmetic where a
 JavaScript backend widens: `for i in lo..hi { i * 2 }` over an `int32` range at the top of the range
-yields `-294967296` under the interpreter and `4000000000` under both JavaScript backends. That
+yields `-294967296` under the interpreter and `4000000000` under both JavaScript backends and the
+Rust IR runtime. That
 divergence is not the range's — `let a:int32 = 2000000000` with `a + a` divides the backends the
 same way — but a range is one of the places a program meets it.
 
@@ -445,15 +447,17 @@ pass every read is in bounds, so evaluation reads cells without further checks. 
 truncated image is refused with a diagnostic rather than an exception, and no input can make a
 reader read outside the image.
 
-Both the Rust reader (`NxIrImage::open`) and the TypeScript runtime (`prepareNxIrModule`) are
-tested against the corpus: each truncates every image at every four-byte boundary, and each
+The Rust reader (`NxIrImage::open` in `nx-ir`), the Rust runtime (`PreparedModule::prepare` in
+`nx-ir-runtime`, which reads through that reader) and the TypeScript runtime (`prepareNxIrModule`)
+are tested against the corpus: each truncates every image at every four-byte boundary, and each
 overwrites every cell of a chosen image with four values, refusing the result or reading it as valid
 but never failing another way. The Rust suite damages the smallest image and the smallest image
 carrying a debug section, so span offsets and the source length are damaged too, and probes every
 node and type cell of every image with its own entry index, which is the bound the paragraph above
 describes. The TypeScript suite damages the smallest image that owns a function entrypoint and links
 and evaluates every damaged image it accepted, so a hostile artifact is exercised through evaluation
-and not only through opening.
+and not only through opening. The Rust runtime's suite does the same over every cell of every
+corpus image, running each damaged image's function entrypoints and component lifecycles.
 
 ## Required features
 
@@ -562,7 +566,8 @@ module's version equals the version recorded in the entry's table, unless the ho
 linking across versions, and that every declaration the entry references is present. A module whose
 table holds only itself is a program on its own.
 
-The prelude is the one module no host has to supply. The `@nx-lang/ir-runtime` package ships the
+The prelude is the one module no host has to supply. Each runtime — the `@nx-lang/ir-runtime`
+package and the `nx-ir-runtime` crate — ships the
 compiled image of the prelude its release was built with, and linking serves it for the prelude's
 reserved identity whenever the host's resolver returns nothing for that identity — at any depth of
 the link, including for a module the resolver did supply. The built-in prelude is prepared at most
@@ -762,6 +767,36 @@ the entrypoint tables. A module that names another module in its table must be l
 evaluated. An instance is an immutable value the host holds between calls; the runtime keeps no
 state of its own, and a dispatch that fails leaves the instance it was given usable.
 
+## Rust runtime
+
+The Rust runtime is the crate `crates/nx-ir-runtime`. It depends on the format crate `nx-ir` and
+on `nx-value`, and on no part of the compiler, and offers the operations above as methods of a
+linked `Program`: `PreparedModule::prepare`, `Program::link` and `Program::prepare`, then
+`evaluate_function`, `call_function`, `construct_component_descriptor`, `initialize_component`,
+`evaluate_component`, `dispatch_component_actions`, `normalize_component_state` and
+`apply_component_state_patch`, with `apply`, `merge`, `diff` and `Program::changed` for the update
+intrinsics. Values cross the API as `NxValue`, and every operation returns a `Result` whose error
+carries diagnostics with the TypeScript runtime's codes.
+
+It differs from the TypeScript runtime in what Rust makes possible or necessary:
+
+- Integers are 64-bit. An integer outside JavaScript's safe range is an `NxValue::Int` rather than
+  the `nx.int` wrapper, which it also accepts as input, and it computes: `9007199254740992 + 1` is
+  `9007199254740993`, where the TypeScript runtime refuses a wide operand with `nx-ir-number`.
+  Integer `add`, `sub`, `mul` and `mod` wrap at 64 bits, where a JavaScript number loses precision
+  past 2^53 instead. Inside the safe range the two runtimes agree.
+- The host's `null` is the empty value before any type is known. At an `object` site, which holds
+  any value, a `null` is therefore the empty list, at the top level and inside an untyped value,
+  where the TypeScript runtime rejects the first and keeps the second.
+- An instance serializes, and `Program::restore_component_instance` validates a stored one against
+  the program once, when it is restored. An instance belongs to the exact images that rendered it,
+  compared by a hash of each image's bytes, since a handler names its node and its captured slots
+  by index.
+
+And because a native stack overflow cannot be caught, evaluation is bounded by a fixed
+expression-nesting limit and a stack budget as well as by the host's call-depth limit. The crate's
+`README.md` has the API, the limits and the diagnostic codes.
+
 ## Conformance corpus
 
 `specs/ir-conformance/` holds NX programs with their expected images, with and without the debug
@@ -769,8 +804,9 @@ section, the explained text of each image beside it, the expected canonical valu
 entrypoint, and, for every lifecycle a program names, the rendered output of initialization and
 the rendered output and effects of each dispatched batch, tokens included. The emitter's tests pin
 the images byte for byte and check that each committed text is the explanation of its committed
-image; the TypeScript runtime's tests evaluate the images, drive the lifecycles, and refuse every
-truncation and cell overwrite of them; and the corpus is where a second runtime starts. It covers
+image; the TypeScript runtime's tests and the Rust runtime's tests each evaluate the images, drive
+the lifecycles, and refuse every truncation and cell overwrite of them; and the corpus is where
+another runtime starts. It covers
 every node, type and declaration kind, a program spanning two images, derived declarations, a
 document that is a single trailing element, and components that bind action handlers. It also holds
 the size budget: an image emitted without its debug section is at most six times the UTF-8 length
