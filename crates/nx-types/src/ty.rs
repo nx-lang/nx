@@ -225,6 +225,20 @@ pub enum Type {
         ret: Box<Type>,
     },
 
+    /// Function reference type: a function type whose parameters are not stated, satisfied by a
+    /// function of any parameters whose result satisfies `ret`.
+    ///
+    /// <para>A variant of its own rather than a [`Type::Function`] with a flag: everything that
+    /// reads a function type's parameters means "a function I can call with these", and a value
+    /// of this type cannot be called from NX, because its parameters are not known where it is
+    /// checked. `<function ... />: object*` is the type every function satisfies.</para>
+    ///
+    /// Example: `<function ... />: HttpArguments`
+    AnyFunction {
+        /// Return type
+        ret: Box<Type>,
+    },
+
     /// A nominal type reached by name: a record, a component, a built-in like `Element`, or a
     /// name resolution reached no declaration for.
     ///
@@ -348,6 +362,9 @@ pub enum FunctionMismatch {
     },
     /// The function's result is not acceptable where the type's result is expected.
     Result { returned: Type, expected: Type },
+    /// The value has a function reference type, so its parameters are not known, and the site
+    /// expects a function type that states them.
+    ParametersNotStated,
 }
 
 impl fmt::Display for FunctionMismatch {
@@ -376,6 +393,10 @@ impl fmt::Display for FunctionMismatch {
                 let (returned, expected) = display_type_pair(returned, expected);
                 write!(f, "the result {returned} is not {expected}")
             }
+            FunctionMismatch::ParametersNotStated => f.write_str(
+                "the value's parameters are not stated, so it cannot stand in for a function \
+                 type that states them",
+            ),
         }
     }
 }
@@ -425,6 +446,57 @@ pub fn check_function_satisfies(
         });
     }
     Ok(())
+}
+
+/// Checks a value's type against an expected type when both are function types, with stated or
+/// unspecified parameters; `None` when either is not.
+///
+/// <para>A function reference type compares the result alone, covariantly: a function of any
+/// parameters, or a function reference type, satisfies `<function ... />: R` when its result
+/// satisfies `R`. A function reference type never satisfies a function type with stated
+/// parameters, whatever they are, because its own are not known.</para>
+#[allow(clippy::result_large_err)]
+pub fn check_function_types(
+    actual: &Type,
+    expected: &Type,
+    satisfies: &mut dyn FnMut(&Type, &Type) -> bool,
+) -> Option<Result<(), FunctionMismatch>> {
+    match (actual, expected) {
+        (
+            Type::Function {
+                params: actual_params,
+                ret: actual_ret,
+            },
+            Type::Function {
+                params: expected_params,
+                ret: expected_ret,
+            },
+        ) => Some(check_function_satisfies(
+            actual_params,
+            actual_ret,
+            expected_params,
+            expected_ret,
+            satisfies,
+        )),
+        (
+            Type::Function {
+                ret: actual_ret, ..
+            }
+            | Type::AnyFunction { ret: actual_ret },
+            Type::AnyFunction { ret: expected_ret },
+        ) => Some(if satisfies(actual_ret, expected_ret) {
+            Ok(())
+        } else {
+            Err(FunctionMismatch::Result {
+                returned: (**actual_ret).clone(),
+                expected: (**expected_ret).clone(),
+            })
+        }),
+        (Type::AnyFunction { .. }, Type::Function { .. }) => {
+            Some(Err(FunctionMismatch::ParametersNotStated))
+        }
+        _ => None,
+    }
 }
 
 /// Renders a function type in NX spelling, with `render` spelling each part.
@@ -522,6 +594,7 @@ impl Type {
                 .iter()
                 .find_map(|param| param.ty.find_parameter(matches))
                 .or_else(|| ret.find_parameter(matches)),
+            Type::AnyFunction { ret } => ret.find_parameter(matches),
             _ => None,
         }
     }
@@ -556,6 +629,7 @@ impl Type {
                     .collect(),
                 ret.substitute_parameters(substitute),
             ),
+            Type::AnyFunction { ret } => Type::any_function(ret.substitute_parameters(substitute)),
             _ => self.clone(),
         }
     }
@@ -605,6 +679,9 @@ impl Type {
                     .collect(),
                 ret.substitute_parameters_by_variance(covariant, substitute),
             ),
+            Type::AnyFunction { ret } => {
+                Type::any_function(ret.substitute_parameters_by_variance(covariant, substitute))
+            }
             _ => self.clone(),
         }
     }
@@ -704,6 +781,27 @@ impl Type {
             params,
             ret: Box::new(ret),
         }
+    }
+
+    /// Creates a function reference type, `<function ... />: ret`.
+    pub fn any_function(ret: Type) -> Self {
+        Type::AnyFunction { ret: Box::new(ret) }
+    }
+
+    /// The type every function satisfies, `<function ... />: object*`: every result type
+    /// satisfies `object*`.
+    pub fn widest_function() -> Self {
+        Type::any_function(Type::zero_or_more(Type::named("object")))
+    }
+
+    /// True for a function type, with stated or unspecified parameters.
+    pub fn is_function_like(&self) -> bool {
+        matches!(self, Type::Function { .. } | Type::AnyFunction { .. })
+    }
+
+    /// True for a function reference type, `<function ... />: R`.
+    pub fn is_any_function(&self) -> bool {
+        matches!(self, Type::AnyFunction { .. })
     }
 
     /// Creates a named type that resolution reached no declaration for.
@@ -850,27 +948,12 @@ impl Type {
         }
 
         // Functions match by parameter name: every parameter the value declares must be one the
-        // expected type supplies, contravariantly; the result is covariant. See
-        // `check_function_satisfies`.
-        if let (
-            Type::Function {
-                params: actual_params,
-                ret: actual_ret,
-            },
-            Type::Function {
-                params: expected_params,
-                ret: expected_ret,
-            },
-        ) = (self, other)
-        {
-            return check_function_satisfies(
-                actual_params,
-                actual_ret,
-                expected_params,
-                expected_ret,
-                &mut |value, target| value.is_compatible_with(target),
-            )
-            .is_ok();
+        // expected type supplies, contravariantly; the result is covariant. A function reference
+        // type compares the result alone. See `check_function_types`.
+        if let Some(checked) = check_function_types(self, other, &mut |value, target| {
+            value.is_compatible_with(target)
+        }) {
+            return checked.is_ok();
         }
 
         false
@@ -889,6 +972,9 @@ impl fmt::Display for Type {
                     ty.to_string()
                 }))
             }
+            Type::AnyFunction { ret } => f.write_str(&nx_hir::ast::spell_function_reference_type(
+                &ret.to_string(),
+            )),
             Type::Named(named) if named.args().is_empty() => write!(f, "{}", named.name),
             Type::Named(named) => f.write_str(&format_applied_type(
                 &named.name,
@@ -959,6 +1045,7 @@ fn collect_nominal_parts<'ty>(
             }
             collect_nominal_parts(ret, parts);
         }
+        Type::AnyFunction { ret } => collect_nominal_parts(ret, parts),
         _ => {}
     }
 }
@@ -993,6 +1080,9 @@ fn qualified_display(ty: &Type) -> String {
         Type::Seq { .. } if ty.is_empty_type() => "{}".to_string(),
         Type::Seq { item, occ } => qualified_postfix_display(item, occ.suffix()),
         Type::Function { params, ret } => format_function_type(params, ret, &qualified_display),
+        Type::AnyFunction { ret } => {
+            nx_hir::ast::spell_function_reference_type(&qualified_display(ret))
+        }
         _ => ty.to_string(),
     }
 }
@@ -1001,14 +1091,16 @@ fn qualified_display(ty: &Type) -> String {
 /// suffix is parenthesized, as source spells it.
 fn qualified_postfix_display(inner: &Type, suffix: &str) -> String {
     match inner {
-        Type::Function { .. } => format!("({}){suffix}", qualified_display(inner)),
+        Type::Function { .. } | Type::AnyFunction { .. } => {
+            format!("({}){suffix}", qualified_display(inner))
+        }
         _ => format!("{}{suffix}", qualified_display(inner)),
     }
 }
 
 fn write_postfix_type(f: &mut fmt::Formatter<'_>, inner: &Type, suffix: &str) -> fmt::Result {
     match inner {
-        Type::Function { .. } => write!(f, "({inner}){suffix}"),
+        Type::Function { .. } | Type::AnyFunction { .. } => write!(f, "({inner}){suffix}"),
         _ => write!(f, "{inner}{suffix}"),
     }
 }

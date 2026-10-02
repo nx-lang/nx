@@ -2198,6 +2198,7 @@ fn is_unresolved_type(ty: &nx_types::Type) -> bool {
         nx_types::Type::Function { params, ret } => {
             params.iter().any(|param| is_unresolved_type(&param.ty)) || is_unresolved_type(ret)
         }
+        nx_types::Type::AnyFunction { ret } => is_unresolved_type(ret),
         nx_types::Type::Primitive(_)
         | nx_types::Type::Named(_)
         | nx_types::Type::Union(_)
@@ -2625,7 +2626,7 @@ fn base_type_name(ty: &TypeRef) -> String {
         // which the type arguments do not change.
         TypeRef::Name(name) | TypeRef::Applied { name, .. } => name.as_str().to_string(),
         TypeRef::Seq { inner, .. } => base_type_name(inner),
-        TypeRef::Function { .. } => String::new(),
+        TypeRef::Function { .. } | TypeRef::AnyFunction { .. } => String::new(),
     }
 }
 
@@ -4787,6 +4788,40 @@ component <SearchBox placeholder:string /> = {
             hover.contents,
             nx("let <ContactRow Item:Contact Index:int />: DrawnNode")
         );
+    }
+
+    /// Spec: "A hover shows the type as written", for a function reference type.
+    #[test]
+    fn hover_over_a_function_reference_field_shows_the_type_as_written() {
+        let hover = hover_at(concat!(
+            "type Args = { q:string }\n",
+            "type Tool = { bu⟨cursor⟩ild: <function ... />: Args }\n"
+        ))
+        .expect("hover content");
+        assert_eq!(
+            hover.contents,
+            nx("(property) Tool.build: <function ... />: Args")
+        );
+
+        let optional = hover_at("type Kit = { al⟨cursor⟩l?: (<function ... />: object*)+ }\n")
+            .expect("hover content");
+        assert_eq!(
+            optional.contents,
+            nx("(property) Kit.all?: (<function ... />: object*)+")
+        );
+    }
+
+    /// A function bound at a function reference site keeps its own type, so its name hovers as
+    /// its own declaration there too.
+    #[test]
+    fn hover_over_a_function_bound_at_a_function_reference_site_shows_its_declaration() {
+        let hover = hover_at(concat!(
+            "type Tool = { fn: <function ... />: object* }\n",
+            "let double(n:int): int = {n * 2}\n",
+            "let t = <Tool fn={dou⟨cursor⟩ble} />\n"
+        ))
+        .expect("hover content");
+        assert_eq!(hover.contents, nx("let double(n:int): int"));
     }
 
     /// Spec: "Hover over a function parameter declaration reports the parameter".

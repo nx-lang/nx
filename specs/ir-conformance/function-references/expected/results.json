@@ -1,0 +1,109 @@
+{
+  "main.nx::defaulted": {
+    "$type": "Tool",
+    "build": {
+      "$type": "Function",
+      "module": "main.nx",
+      "name": "makeArgs"
+    },
+    "fn": {
+      "$type": "Function",
+      "module": "main.nx",
+      "name": "double"
+    }
+  },
+  "main.nx::distinct": false,
+  "main.nx::full": {
+    "$type": "Tool",
+    "build": {
+      "$type": "Function",
+      "module": "main.nx",
+      "name": "otherArgs"
+    },
+    "fallback": {
+      "$type": "Function",
+      "module": "main.nx",
+      "name": "names"
+    },
+    "fn": {
+      "$type": "Function",
+      "module": "main.nx",
+      "name": "Row"
+    }
+  },
+  "main.nx::identical": true,
+  "main.nx::kit": {
+    "$type": "Kit",
+    "all": [
+      {
+        "$type": "Function",
+        "module": "main.nx",
+        "name": "double"
+      },
+      {
+        "$type": "Function",
+        "module": "main.nx",
+        "name": "greet"
+      },
+      {
+        "$type": "Function",
+        "module": "main.nx",
+        "name": "Row"
+      }
+    ]
+  },
+  "main.nx::kitExtra": {
+    "$type": "Kit",
+    "all": [
+      {
+        "$type": "Function",
+        "module": "main.nx",
+        "name": "double"
+      }
+    ],
+    "extra": [
+      {
+        "$type": "Function",
+        "module": "main.nx",
+        "name": "names"
+      },
+      {
+        "$type": "Function",
+        "module": "main.nx",
+        "name": "makeArgs"
+      }
+    ]
+  },
+  "main.nx::passed": {
+    "$type": "Function",
+    "module": "main.nx",
+    "name": "double"
+  },
+  "main.nx::root": {
+    "$type": "Tool",
+    "build": {
+      "$type": "Function",
+      "module": "main.nx",
+      "name": "makeArgs"
+    },
+    "fn": {
+      "$type": "Function",
+      "module": "main.nx",
+      "name": "greet"
+    }
+  },
+  "main.nx::typed": true,
+  "main.nx::wrapped": {
+    "$type": "Tool",
+    "build": {
+      "$type": "Function",
+      "module": "main.nx",
+      "name": "makeArgs"
+    },
+    "fn": {
+      "$type": "Function",
+      "module": "main.nx",
+      "name": "greet"
+    }
+  }
+}

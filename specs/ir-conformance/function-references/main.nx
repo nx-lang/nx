@@ -1,0 +1,38 @@
+// Function reference types: a field typed `<function ... />: object*`, an optional one, one under
+// `+`, a field with a stated result, functions of unlike signatures bound to them, a function
+// reference value passed through a parameter and a result, equality of two such values, and a
+// field default that names a function.
+type Args = { q:string }
+type AnyFn = <function ... />: object*
+
+type Tool = {
+  fn: <function ... />: object*
+  fallback?: AnyFn
+  build: <function ... />: Args = {makeArgs}
+}
+
+type Kit = { all:AnyFn+ extra?:AnyFn+ }
+
+let double(n:int): int = {n * 2}
+let greet(name:string, loud?:boolean): string = {name}
+let <Row Item:object Index:int />: string = "r"
+let names(): string* = {"a" "b"}
+let makeArgs(q:string): Args = <Args q={q} />
+let otherArgs(q:string, limit?:int): Args = <Args q={q} />
+
+let pass(f:AnyFn): AnyFn = {f}
+let wrap(f:AnyFn): Tool = <Tool fn={f} />
+let passTool(tool:Tool): Tool = {tool}
+let same(f:AnyFn, g:AnyFn): boolean = {f == g}
+let sameTyped(f:AnyFn, g: <function n:int />: int): boolean = {f == g}
+
+let defaulted() = <Tool fn={double} />
+let full() = <Tool fn={Row} fallback={names} build={otherArgs} />
+let wrapped() = {wrap(greet)}
+let passed() = {pass(double)}
+let kit() = <Kit all={double greet Row} />
+let kitExtra() = <Kit all={double} extra={names makeArgs} />
+let identical() = {same(double, double)}
+let distinct() = {same(double, greet)}
+let typed() = {sameTyped(double, double)}
+let root() = <Tool fn={pass(greet)} build={makeArgs} />

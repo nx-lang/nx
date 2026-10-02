@@ -9,20 +9,22 @@ use crate::error::{Diagnostic, NxIrRuntimeError, Result};
 use crate::value::Value;
 use nx_ir::{
     kinds, Cells, NxIrImage, NxIrImageBuf, NxIrImageError, Table, NONE,
-    NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1, NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1,
-    NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1, NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1,
-    NX_IR_REQUIRED_FEATURE_RANGES_V1, NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1,
-    NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1, NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
+    NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1, NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1,
+    NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1, NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1,
+    NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1, NX_IR_REQUIRED_FEATURE_RANGES_V1,
+    NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1, NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
+    NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
 };
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, OnceLock};
 
-const KNOWN_FEATURES: [&str; 7] = [
+const KNOWN_FEATURES: [&str; 8] = [
     NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
     NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1,
     NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1,
     NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1,
     NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1,
+    NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1,
     NX_IR_REQUIRED_FEATURE_RANGES_V1,
     NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1,
 ];
@@ -809,6 +811,14 @@ impl<'a> Decoder<'a> {
                 // The checker related a function value to its type by name, so the runtime keeps
                 // nothing of a function type's parameters or result.
                 kinds::ty::FUNCTION => (Type::Function, 0),
+                // A function reference type, `<function ... />: R`: its one operand is the
+                // result type, which has to name a type of the table. The boundary accepts any
+                // function of the linked program there, as it does at a function type, and
+                // compares no part of a signature, so the result is validated and not kept.
+                kinds::ty::ANY_FUNCTION => {
+                    earlier(reader.next()?)?;
+                    (Type::Function, 0)
+                }
                 other => return Err(format!("unknown type kind {other} at type {index}")),
             };
             if depth > MAX_TYPE_DEPTH {

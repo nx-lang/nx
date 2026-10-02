@@ -90,6 +90,7 @@ are non-decreasing, start at `0` and end at the pool's length.
 | 3 | nullable | — | Retired with schema 5, replaced by `seq`; as `array`. |
 | 4 | function | `[4, type, [[str, type, flags]...]]` | A function type, `<function Item:Contact Index:int />: DrawnNode`: the result type, then each parameter's name, type and flags (bit 0: the parameter takes body content; bit 1: the parameter is optional, `p?:T`), in declared order. A function satisfies it by parameter name, so a function may declare fewer parameters than the type. |
 | 5 | seq | `[5, type, occurrence]` | An item type under an occurrence, `string?`, `Person+`, `object*`: the item type, then an occurrence cell whose bit 0 says the type may be empty and bit 1 that it may hold many, so `?` is `1`, `+` is `2` and `*` is `3`. `0` is not written: a type that is exactly one has no wrapper. The item type is never itself a `seq`. |
+| 6 | anyFunction | `[6, type]` | A function reference type, `<function ... />: HttpArguments`: a function type whose parameters are not stated, with the result type as its one operand. A function of any parameters whose result satisfies the result type satisfies it; `<function ... />: object*` is the type every function satisfies. A module whose type table holds an entry of this kind lists `function-reference-type-v1`. |
 
 A type is written once: two fields of type `string?` share one `seq` entry, which itself refers to
 one `primitive` entry. A `seq` entry's item type precedes it in the table, so no type reaches
@@ -98,7 +99,10 @@ itself. Every occurrence in source is a `seq`, and a field, prop, state field or
 field to the empty value from the type alone, with no second flag. `nxlang ir explain` prints a
 `seq` by its NX spelling and parenthesizes a function type under a suffix,
 `(<function Item:object Index:int />: string)?`, because a suffix written after a function type's
-result would bind to the result.
+result would bind to the result. A function reference type is written once per result type like
+any other, prints as `<function ... />: R`, and is parenthesized the same way,
+`(<function ... />: object*)+`. The top type never stands in for it, and neither does a function
+type with no parameters, which only a function declaring none satisfies.
 
 Types appear on parameters, fields and props. Nodes do not carry types. Where evaluation depends on
 a type, the node kind or operator says so: integer division and modulo are their own operators.
@@ -466,7 +470,10 @@ A module that declares a derived update record lists `update-records-v1`; one th
 derived property union lists `property-unions-v1`; one that calls an update intrinsic lists
 `update-intrinsics-v1`; one that binds an action handler lists `action-handlers-v1`; one whose type
 table holds a function type, whose node table references a function anywhere but as a `call`'s
-callee, or which contains a `namedCall` lists `function-values-v1`; one that contains a `forRange`
+callee, or which contains a `namedCall` lists `function-values-v1`; one whose type table holds a
+function reference type (kind `6`) lists `function-reference-type-v1`, so that a runtime that
+predates the kind refuses the module by name rather than as malformed, and lists
+`function-values-v1` too only on that feature's own terms; one that contains a `forRange`
 lists `ranges-v1`; one that contains an `exists`, `optionalMember` or `coalesce` node, or an `ifIs`
 arm with the `{}` pattern, lists `occurrence-v1`. Constructing a range needs no feature: that is an
 ordinary record construction, and only iterating one is a node a runtime may not know. A `seq` type
@@ -506,6 +513,17 @@ the same record in both runtimes, and two function values are equal exactly when
 declaration. A host that supplies such a record where a function type is expected — a descriptor's
 prop, a component's initialization — has it resolved to the declaration it names, and one naming
 no function of the linked program is refused with a diagnostic naming it.
+
+A site typed by a function reference type, `<function ... />: R`, follows the same boundary rule.
+A runtime accepts a function value of the program there, and a host-supplied `Function` record
+that names a function declaration of the linked program, whatever that function's parameters. A
+record naming a module the program does not link, or a name that module does not declare as a
+function, is refused with `nx-ir-function-value`, and any other value with `nx-ir-boundary-type`.
+The result operand is not compared with the named function's result, as no part of a signature is
+compared at a function type with stated parameters: the compiler checked the value where the
+program bound it. A host that takes such records from elsewhere checks what the function returns.
+NX code never calls a value of the type, so no node kind is involved; a host calls the record by
+the function's own parameter names. The `function-references` corpus program covers the type.
 
 A function-typed value is called by name, never by position: `namedCall` carries each argument's
 name because the callee's declaration is known only at run time, and its parameters may be fewer,

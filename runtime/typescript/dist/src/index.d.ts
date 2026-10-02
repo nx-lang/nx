@@ -17,6 +17,8 @@ export declare const NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1 = "update-intri
 export declare const NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1 = "action-handlers-v1";
 /** Function types, function references as values, and calls of function-typed values by name. */
 export declare const NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1 = "function-values-v1";
+/** The function reference type, `<function ... />: R`: the `anyFunction` type kind. */
+export declare const NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1 = "function-reference-type-v1";
 /** Iteration over a range: the `forRange` node. Building a range needs no feature. */
 export declare const NX_IR_REQUIRED_FEATURE_RANGES_V1 = "ranges-v1";
 /**
@@ -129,6 +131,7 @@ export declare const typeKinds: {
     readonly nominal: 1;
     readonly function: 4;
     readonly seq: 5;
+    readonly anyFunction: 6;
 };
 /**
  * The bits of a `seq` type's occurrence cell: whether the type admits no value and whether it
@@ -208,6 +211,11 @@ export type PreparedType = {
 } | {
     readonly kind: "function";
     readonly params: readonly PreparedParam[];
+    readonly result: PreparedType;
+}
+/** A function type whose parameters are not stated, `<function ... />: R`. */
+ | {
+    readonly kind: "anyFunction";
     readonly result: PreparedType;
 };
 export interface NxIrReference {
@@ -507,6 +515,15 @@ export declare function normalizeComponentState(program: NxPreparedProgram | NxP
  * so the next state carries no key for it; for a field that is not optional it is rejected.
  */
 export declare function applyComponentStatePatch(program: NxPreparedProgram | NxPreparedModule, name: string, currentState: Record<string, NxCanonicalValue>, patch: Record<string, NxCanonicalValue>, options?: NxRuntimeOptions): Record<string, NxCanonicalValue>;
+/**
+ * The record a function value renders as, and the one a host supplies where a function value is
+ * expected. Read it from a member declared at a function type, and call it with `callFunction`.
+ */
+export type NxFunctionRecord = {
+    readonly $type: "Function";
+    readonly module: string;
+    readonly name: string;
+};
 /**
  * Calls the function a canonical `Function` record names with arguments keyed by parameter name,
  * and returns the canonical result. An argument the function does not declare is dropped, as the

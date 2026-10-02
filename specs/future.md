@@ -1628,3 +1628,178 @@ have each block rule include only itself, not `#comments`. Add parser and gramma
 - `**/` and `--->` closers;
 - `//` inside a block comment;
 - an unterminated nested comment.
+
+## A function-typed binding named after a record does not shadow it at a tag
+
+**Observed.** At an element tag, a parameter or prop of function type takes precedence over a
+same-named function or component declaration, but not over a same-named record. With a parameter
+named `Card` in scope and `<Card title="x" />` in the body:
+
+| same-named declaration | parameter's type | what `<Card title="x" />` does |
+| --- | --- | --- |
+| element function | function type | calls the parameter |
+| external component | function type | calls the parameter |
+| record | function type | constructs the record |
+| record | `string` | constructs the record |
+| element function | `string` | calls the declared function |
+
+```nx
+type Card = { title:string }
+let <Mk title:string />: string = {"called " + title}
+let b(Card: <function title:string />: string): object = <Card title="x" />
+let root() = {b(Mk)}
+// { "$type": "Card", "title": "x" }, not "called x"
+```
+
+So the rule in practice is that a tag names a callable value when one is in scope and otherwise
+names a declaration, and records are the one exception. Lowering turns a tag that names a record
+into a record construction before the checker sees a tag at all, so `function_typed_value` in
+`crates/nx-types/src/infer.rs`, which is where a binding wins over a function or a component, is
+never asked.
+
+The same gap reaches the function reference type. `function-reference-type` says a tag that names a
+binding of that type is rejected with `function-reference-not-callable` and does not fall through.
+That holds beside a function or a component, and beside a record the element silently constructs
+the record instead. Found as RF3 of the `add-function-reference-type` review and left there, because
+it is a rule for every binding rather than for that type.
+
+**Suggestion.** Make the record case match the other two: a binding of function type, with stated
+or unspecified parameters, wins at the tag, and any other binding does not affect it.
+
+Full lexical shadowing, where any binding of the name wins and a non-callable one is an error, is
+the cleaner rule on paper and is what JSX does. It fits NX badly, because component props are
+PascalCase and a data prop that shares an element's name is ordinary: `Text:string` beside
+`<Text>`, or `Icon:string` beside `<Icon name={Icon} />`. The last row of the table shows the
+language already declines to shadow there.
+
+The cost of the suggested rule is the one it already has for functions and components: what a tag
+means depends on the binding's type, so retyping a parameter can change `<Card />` from a call to a
+construction with no diagnostic.
+
+If this is revisited in the future:
+- Fix it in lowering. Lowering knows scopes and not types, so it would keep the tag an element
+  whenever a lexical binding of that name is in scope and leave the choice between a call, the
+  not-callable diagnostic and a record construction to the checker.
+- Check first whether the checker's element path can construct a record from an element, and how
+  much the interpreter, the IR emitter and generated JavaScript rely on receiving a record literal
+  there. That is the uncertain part of the cost.
+- Decide whether a top-level `let` of function type that shares a record's name is the same case
+  or a duplicate declaration.
+- Add the case to the `function-values` scenarios about a lexical binding shadowing a function,
+  and a scenario to `function-reference-type` for a prop that shares a record's name.
+- Hold all three engines to it with a conformance corpus program.
+
+## Generated TypeScript: an omitted optional field beside a defaulted one fails `tsc`
+
+**Observed.** `nxlang codegen --target typescript` emits a record construction that does not
+type-check when the record declares a field with a default and the construction leaves an optional
+field out:
+
+```nx
+type Tool = { name?:string label:string = "x" }
+let root() = <Tool />
+```
+
+```ts
+export type Tool = {
+  readonly $type: "Tool";
+  readonly name?: string;
+  readonly label?: string;
+};
+
+export function root(): Tool {
+  return (() => { const __nx_field_0 = nxEmpty; const __nx_field_1 = "x"; return { $type: "Tool" as const, ...nxOptional("name", __nx_field_0), label: __nx_field_1 }; })();
+}
+```
+
+```
+error TS2322: Type '{ label: string; name?: readonly never[] | undefined; $type: "Tool"; }' is not assignable to type 'Tool'.
+  Types of property 'name' are incompatible.
+    Type 'readonly never[]' is not assignable to type 'string'.
+```
+
+A default sends the construction down the path that binds every field to a local first, and an
+omitted optional field is bound to `nxEmpty`, whose type is `readonly never[]`. `nxOptional` then
+carries that type into the object, where the field is declared `string`. Supplying the optional
+field (`<Tool name="n" />`) type-checks, and so does the same record without a default, which is
+emitted as a plain object literal that leaves the field out. The JavaScript target is unaffected:
+only the types are wrong, and the value is right.
+
+Found while fixing RF1 of the `add-function-reference-type` review, whose test could not use the
+`function-references` corpus program because that program has a record of this shape. It
+reproduces on the tree before that change, with no function type involved.
+
+**Fix.** Type the omitted case so it cannot reach the field's type: have `nxOptional` return an
+empty object type when its value is `nxEmpty`, or do not emit the spread at all for a field the
+construction is known to leave out. The emitter is `crates/nx-codegen/src/emit.rs` and the helper
+is in `crates/nx-codegen/src/runtime.rs`.
+
+**What would settle it.** A `tests.rs` case that runs `tsc --strict` over this record, with the
+optional field omitted and supplied, beside the existing
+`assert_generated_typescript_artifact_type_checks` cases. Better, run `tsc --strict` over the
+generated TypeScript of every conformance corpus program that source codegen accepts, as the
+JavaScript target is already run over them: this bug sat behind a corpus program nothing compiled
+as TypeScript.
+
+## Generated TypeScript: a function bound at a function type with stated parameters fails `tsc`
+
+**Observed.** A function type with stated parameters is emitted as a function of one object of
+named arguments, and a function declaration is emitted with positional parameters, so no generated
+function is assignable to a function-typed site:
+
+```nx
+type Tool = { fn: <function n:int />: int }
+let double(n:int): int = {n * 2}
+let root() = <Tool fn={double} />
+```
+
+```ts
+export type Tool = {
+  readonly $type: "Tool";
+  readonly fn: (args: { n: number }) => number;
+};
+
+export function double(n: number): number {
+  return (n * 2);
+}
+```
+
+```
+error TS2322: Type '(n: number) => number' is not assignable to type '(args: { n: number; }) => number'.
+  Types of parameters 'n' and 'args' are incompatible.
+```
+
+An element-style function fails the same way, since it is emitted positionally too, and with two
+parameters the message becomes "Target signature provides too few arguments. Expected 2 or more,
+but got 1." The JavaScript target is unaffected.
+
+This is a mismatch between two decisions rather than a slip in one. The argument-object shape
+comes from `add-function-types` (its D6: NX arguments bind by name), and `typegen` emits the same
+shape for a host's contract types. A function declaration's positional shape is what a paren call
+compiles to. Executable source codegen also refuses a call of a function-typed value (`namedCall`),
+so generated code never calls through the type, and the two shapes have never had to meet at a
+call.
+
+The function reference type, `<function ... />: R`, does not have the problem: it is emitted as
+`(...args: never[]) => unknown`, which every function is assignable to.
+
+Found as part of RF1 of the `add-function-reference-type` review, and noted there as existing
+before that change.
+
+**Options.**
+- Emit the function type as what a generated function is: positional parameters in the type's
+  order. This is wrong for the subset rule. A function may declare fewer parameters than the type
+  and in another order, so a positional type describes the wrong function.
+- Emit a function value as an adapter, `(args) => double(args.n)`, wherever a function name is
+  used as a value. It matches the declared type and is what a call by name needs, but it gives
+  each use a new JavaScript function, so `==` on two function values, which NX defines by
+  declaration, would need the adapter cached per declaration.
+- Emit the type as something every function is assignable to, as the function reference type is,
+  and keep the precise shape for `typegen` only. Cheapest, and honest while generated code cannot
+  call the value anyway.
+
+**What would settle it.** Decide it together with whether executable source codegen should support
+`namedCall`: the adapter is the natural answer if it should, and the loose type if it should not.
+Either way, add a `tsc --strict` case for an element-style and a paren-style function bound at a
+function-typed field, with one and with two parameters, and for a function that declares fewer
+parameters than the type.

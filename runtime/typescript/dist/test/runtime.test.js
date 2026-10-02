@@ -4,7 +4,7 @@
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { NX_IR_NONE, NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1, NX_IR_REQUIRED_FEATURE_RANGES_V1, NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION, NX_PRELUDE_MODULE_IDENTITY, NX_PRELUDE_VERSION, NxIrRuntimeError, applyComponentStatePatch, applyUpdate, callFunction, changedFields, constructComponentDescriptor, declarationKinds, diffRecords, dispatchComponentActions, evaluateComponent, evaluateFunction, float32Text, initializeComponent, linkNxIrProgram, mergeUpdates, nodeKinds, normalizeComponentState, occurrenceFlags, prepareNxIrModule, prepareNxIrProgram, tryLinkNxIrProgram, tryPrepareNxIrModule, tryPrepareNxIrProgram, typeKinds, } from "../src/index.js";
+import { NX_IR_NONE, NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1, NX_IR_REQUIRED_FEATURE_RANGES_V1, NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION, NX_PRELUDE_MODULE_IDENTITY, NX_PRELUDE_VERSION, NxIrRuntimeError, applyComponentStatePatch, applyUpdate, callFunction, NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1, changedFields, constructComponentDescriptor, declarationKinds, diffRecords, dispatchComponentActions, evaluateComponent, evaluateFunction, float32Text, initializeComponent, linkNxIrProgram, mergeUpdates, nodeKinds, normalizeComponentState, occurrenceFlags, prepareNxIrModule, prepareNxIrProgram, tryLinkNxIrProgram, tryPrepareNxIrModule, tryPrepareNxIrProgram, typeKinds, } from "../src/index.js";
 const tests = [];
 function test(name, run) {
     tests.push([name, run]);
@@ -1153,6 +1153,133 @@ test("a Function record from the host reaches a component prop and its body call
     });
     assertThrows(() => initializeComponent(program, "Section", { Row: { $type: "Function", module: "main.nx", name: "Nope" } }), "'Nope'");
     assertThrows(() => initializeComponent(program, "Section", { Row: "Row" }), "Expected Section props.Row to be a function value");
+});
+// ------------------------------------------------------------------------------------------------
+// The function reference type
+// ------------------------------------------------------------------------------------------------
+const referenceFeatures = ["function-values-v1", NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1];
+/**
+ * `type Tool = { fn: <function ... />: object* }`, `type Args = { q:string }`,
+ * `type BuildTool = { build: <function ... />: Args }`,
+ * `type Kit = { all: (<function ... />: object*)+ one?: <function ... />: object* }`,
+ * `let double(n:int): int = {n + n}`, `let greet(name:string, loud?:boolean): string = {name}`,
+ * `let make(q:string): Args = <Args q={q} />`, `let root() = <Tool fn={double} />`,
+ * `let buildRoot() = <BuildTool build={make} />`, and a `pass` for each record.
+ */
+function referenceArtifact() {
+    const b = new ArtifactBuilder("main.nx");
+    const object = b.primitive("object");
+    const int = b.primitive("int");
+    const string = b.primitive("string");
+    const boolean = b.primitive("boolean");
+    const anyFn = b.type([typeKinds.anyFunction, b.zeroOrMore(object)]);
+    const args = b.nominal("Args");
+    const tool = b.nominal("Tool");
+    const buildTool = b.nominal("BuildTool");
+    const kit = b.nominal("Kit");
+    b.record("Args", [b.field("q", string, { required: true })]);
+    b.record("Tool", [b.field("fn", anyFn, { required: true })]);
+    b.record("BuildTool", [b.field("build", b.type([typeKinds.anyFunction, args]), { required: true })]);
+    b.record("Kit", [b.field("all", b.oneOrMore(anyFn), { required: true }), b.field("one", b.optional(anyFn))]);
+    const n = b.node([nodeKinds.slot, 0, b.str("n")]);
+    b.fn("double", b.node([nodeKinds.binary, 0, n, n]), [[b.str("n"), int, 0]], { result: int });
+    b.fn("greet", b.node([nodeKinds.slot, 0, b.str("name")]), [[b.str("name"), string, 0], [b.str("loud"), b.optional(boolean), 2]], { result: string });
+    const record = (name, property, value) => b.node([nodeKinds.record, ...b.ref(name), ...b.list([b.property(property, value)]), ...b.content([])]);
+    b.fn("make", record("Args", "q", b.node([nodeKinds.slot, 0, b.str("q")])), [[b.str("q"), string, 0]], { result: args });
+    b.fn("root", record("Tool", "fn", b.node([nodeKinds.reference, ...b.ref("double")])));
+    b.fn("buildRoot", record("BuildTool", "build", b.node([nodeKinds.reference, ...b.ref("make")])));
+    b.fn("pass", b.node([nodeKinds.slot, 0, b.str("tool")]), [[b.str("tool"), tool, 0]], { result: tool });
+    b.fn("passBuild", b.node([nodeKinds.slot, 0, b.str("tool")]), [[b.str("tool"), buildTool, 0]], { result: buildTool });
+    b.fn("passKit", b.node([nodeKinds.slot, 0, b.str("kit")]), [[b.str("kit"), kit, 0]], { result: kit });
+    return b.build({ requiredFeatures: referenceFeatures });
+}
+const functionRecord = (name, module = "main.nx") => ({ $type: "Function", module, name });
+test("prepares an image listing the function-reference-type feature and refuses a version of it it does not know", () => {
+    assertEqual(NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1, "function-reference-type-v1");
+    assertEqual(typeKinds.anyFunction, 6);
+    const program = prepareNxIrProgram(referenceArtifact());
+    assertEqual(program.entry.module.artifact.requiredFeatures, referenceFeatures);
+    // What a runtime that does not implement the feature does with its name: refuses it by name.
+    const b = new ArtifactBuilder("main.nx");
+    b.fn("root", b.int(1));
+    const refused = tryPrepareNxIrModule(b.build({ requiredFeatures: ["function-reference-type-v2"] }));
+    if (refused.ok || !refused.diagnostics.some((diagnostic) => diagnostic.code === "nx-ir-required-feature" && diagnostic.message.includes("function-reference-type-v2"))) {
+        throw new Error("expected the unknown feature to be refused by name");
+    }
+});
+test("the validator reads a function reference type and refuses a malformed entry of the kind", () => {
+    const program = prepareNxIrProgram(referenceArtifact());
+    const pass = program.functionEntrypoints.get("pass").kind;
+    if (pass.tag !== "function") {
+        throw new Error("pass is not a function");
+    }
+    assertEqual(pass.params[0].ty, { kind: "nominal", slot: 0, name: "Tool" });
+    for (const entry of [
+        (b) => [typeKinds.anyFunction],
+        (b) => [typeKinds.anyFunction, b.primitive("object"), b.primitive("object")],
+        (_) => [typeKinds.anyFunction, 99],
+    ]) {
+        const b = new ArtifactBuilder("main.nx");
+        b.type(entry(b));
+        b.fn("root", b.int(1));
+        const refused = tryPrepareNxIrModule(b.build({ requiredFeatures: referenceFeatures }));
+        if (refused.ok || !refused.diagnostics.some((diagnostic) => diagnostic.code === "nx-ir-malformed")) {
+            throw new Error("expected the malformed function reference type to be refused");
+        }
+    }
+});
+test("a function reference field renders the Function record, whatever its result type", () => {
+    const program = prepareNxIrProgram(referenceArtifact());
+    assertEqual(evaluateFunction(program, "root"), { $type: "Tool", fn: { $type: "Function", module: "main.nx", name: "double" } });
+    assertEqual(fields(evaluateFunction(program, "buildRoot")).build, { $type: "Function", module: "main.nx", name: "make" });
+});
+test("a host supplies a function of any signature at a function reference site", () => {
+    const program = prepareNxIrProgram(referenceArtifact());
+    for (const name of ["greet", "double", "make", "root"]) {
+        const tool = { $type: "Tool", fn: functionRecord(name) };
+        assertEqual(evaluateFunction(program, "pass", [tool]), tool);
+    }
+    // The result operand is not compared with the named function's result.
+    const build = { $type: "BuildTool", build: functionRecord("greet") };
+    assertEqual(evaluateFunction(program, "passBuild", [build]), build);
+});
+test("a function reference site refuses a record naming no function, and a value that is not one", () => {
+    const program = prepareNxIrProgram(referenceArtifact());
+    const pass = (fn) => () => evaluateFunction(program, "pass", [{ $type: "Tool", fn }]);
+    const code = (error) => error.diagnostics.map((diagnostic) => diagnostic.code);
+    assertEqual(code(assertThrows(pass(functionRecord("Nope")), "'Nope'")), ["nx-ir-function-value"]);
+    assertEqual(code(assertThrows(pass(functionRecord("double", "other.nx")), "'other.nx'")), ["nx-ir-function-value"]);
+    // `Tool` is a record of the module, not a function.
+    assertEqual(code(assertThrows(pass(functionRecord("Tool")), "'Tool'")), ["nx-ir-function-value"]);
+    for (const value of ["double", 1, true, { $type: "Tool" }, { $type: "Function", name: "double" }]) {
+        assertEqual(code(assertThrows(pass(value), "fn to be a function value")), ["nx-ir-boundary-type"]);
+    }
+});
+test("occurrences over a function reference type follow the ordinary rules", () => {
+    const program = prepareNxIrProgram(referenceArtifact());
+    const error = assertThrows(() => evaluateFunction(program, "passKit", [{ $type: "Kit", all: [] }]), "all");
+    assertEqual(error.diagnostics[0].code, "nx-ir-boundary-type");
+    assertEqual(evaluateFunction(program, "passKit", [{ $type: "Kit", all: [functionRecord("double")] }]), {
+        $type: "Kit",
+        all: [functionRecord("double")],
+    });
+    assertEqual(evaluateFunction(program, "passKit", [{ $type: "Kit", all: functionRecord("greet"), one: functionRecord("double") }]), {
+        $type: "Kit",
+        all: [functionRecord("greet")],
+        one: functionRecord("double"),
+    });
+});
+test("a record read from a function reference field is an NxFunctionRecord, callable by its own parameters", () => {
+    const program = prepareNxIrProgram(referenceArtifact());
+    // A host narrows the field by its `$type` and holds it as the exported record type.
+    const { $type, module, name } = fields(fields(evaluateFunction(program, "root")).fn);
+    if ($type !== "Function" || typeof module !== "string" || typeof name !== "string") {
+        throw new Error("expected a Function record");
+    }
+    const record = { $type, module, name };
+    assertEqual(callFunction(program, record, { n: 4 }), 8);
+    assertThrows(() => callFunction(program, record, { n: "four" }), "n");
+    assertThrows(() => callFunction(program, record, {}), "requires argument 'n'");
 });
 // ------------------------------------------------------------------------------------------------
 // The built-in prelude, and iterating a range

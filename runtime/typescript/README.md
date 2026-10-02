@@ -176,6 +176,7 @@ runtime never reads a source file.
 | `constructComponentDescriptor`, `initializeComponent`, `evaluateComponent` | Build a component's descriptor, initialize it into an instance, and evaluate it from explicit state. |
 | `dispatchComponentActions` | Run a batch of actions and handler invocations against an instance. |
 | `callFunction` | Call the function a `{ $type: "Function", module, name }` record names — a rendered template, say — with arguments keyed by parameter name; an argument the function does not declare is dropped, a parameter it declares and the arguments lack is a diagnostic naming it. |
+| `NxFunctionRecord` | The type of that record: `$type` the literal `"Function"`, `module` and `name`. It is what a member declared at a function type renders as, and what a host supplies there. |
 | `normalizeComponentState`, `applyComponentStatePatch` | Bring component state into its declared shape and apply a patch. |
 | `applyUpdate`, `mergeUpdates`, `diffRecords`, `changedFields` | Record update arithmetic over host-held values. |
 | `float32Text` | The canonical text of a `float32` carried as a `number`: the shortest digits that round-trip as a `float32`, which is what a `text` node naming `float32` prints. |
@@ -190,6 +191,31 @@ The opened image (`NxIrImage`), the prepared types (`NxPreparedModule`, `NxPrepa
 program it runs and type what it holds; the instance's fields are the runtime's, not an API. The image's layout is
 documented in `docs/nx-ir-format.md`; `nxlang ir explain`, or `explainNxIr` from either SDK,
 renders one as text.
+
+## Function records
+
+A member declared at a function type renders as `{ $type: "Function", module, name }`, and
+`callFunction` calls the function it names with arguments keyed by that function's own parameter
+names, each validated against the parameter's declared type:
+
+```ts
+import { callFunction, evaluateFunction, type NxFunctionRecord } from "@nx-lang/ir-runtime";
+
+// type Tool = { fn: <function ... />: object* }
+// let double(n:int): int = {n * 2}
+// let root() = <Tool fn={double} />
+const tool = evaluateFunction(program, "root") as { fn: NxFunctionRecord };
+callFunction(program, tool.fn, { n: 4 }); // 8
+```
+
+A member typed `<function ... />: R` takes a function of any parameters. Supplied by a host, the
+record must name a function declaration of the linked program; the runtime does not compare that
+function's result with `R`, so a host that accepts records it did not read from the program checks
+the value the function returns.
+
+Read function records only from members declared at a function type. An element named `Function`
+renders a record of the same shape, and at an `object`-typed member nothing tells the two apart or
+resolves the record against the program.
 
 ## Versions
 

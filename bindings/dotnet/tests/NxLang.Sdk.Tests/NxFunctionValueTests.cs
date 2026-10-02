@@ -20,6 +20,21 @@ public sealed class TemplatedListElement
 }
 
 /// <summary>
+/// A record with a member of a function reference type, as a generated contract declares it.
+/// </summary>
+[MessagePackObject]
+public sealed class ToolRecord
+{
+    [Key("fn")]
+    [JsonPropertyName("fn")]
+    public NxFunctionRef Fn { get; set; } = null!;
+
+    [Key("fallback")]
+    [JsonPropertyName("fallback")]
+    public NxFunctionRef? Fallback { get; set; }
+}
+
+/// <summary>
 /// Reading a function value from rendered output in .NET.
 /// </summary>
 /// <remarks>
@@ -76,6 +91,36 @@ public class NxFunctionValueTests
         TemplatedListElement fromJson = JsonSerializer.Deserialize<TemplatedListElement>(json)!;
         Assert.Equal("templates.nx", fromJson.ItemTemplate!.Module);
         Assert.Equal("Row", fromJson.ItemTemplate.Name);
+    }
+
+    [Fact]
+    public void FunctionRef_AtAFunctionReferenceMember_RoundTripsThroughBothOutputFormats()
+    {
+        // A member typed `<function ... />: R` takes a function of any parameters, and what a host reads there is
+        // the same record a function-typed member holds.
+        const string source = """
+            type Tool = { fn: <function ... />: object* fallback?: <function ... />: int }
+            let double(n:int): int = {n * 2}
+            let root() = <Tool fn={double} />
+            """;
+
+        ToolRecord rendered = NxRuntime.Evaluate<ToolRecord>(source, "main.nx");
+        Assert.Equal("main.nx", rendered.Fn.Module);
+        Assert.Equal("double", rendered.Fn.Name);
+        Assert.Null(rendered.Fallback);
+
+        byte[] messagePack = MessagePackSerializer.Serialize(
+            rendered,
+            cancellationToken: TestContext.Current.CancellationToken);
+        ToolRecord fromMessagePack = MessagePackSerializer.Deserialize<ToolRecord>(
+            messagePack,
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal("main.nx", fromMessagePack.Fn.Module);
+        Assert.Equal("double", fromMessagePack.Fn.Name);
+
+        ToolRecord fromJson = JsonSerializer.Deserialize<ToolRecord>(JsonSerializer.Serialize(rendered))!;
+        Assert.Equal("main.nx", fromJson.Fn.Module);
+        Assert.Equal("double", fromJson.Fn.Name);
     }
 
     [Fact]

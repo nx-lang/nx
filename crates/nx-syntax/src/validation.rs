@@ -978,6 +978,7 @@ fn enclosed_occurrence_suffix(parenthesized: &SyntaxNode) -> Option<TextRange> {
 /// parameters; the two rules it does not share with a signature are enforced here.
 fn validate_function_types(node: &SyntaxNode, file_name: &str, diagnostics: &mut Vec<Diagnostic>) {
     if node.kind() == SyntaxKind::FUNCTION_TYPE {
+        validate_function_type_ellipsis(node, file_name, diagnostics);
         let mut content_parameter: Option<TextRange> = None;
         for param in node
             .children()
@@ -1038,6 +1039,57 @@ fn validate_function_types(node: &SyntaxNode, file_name: &str, diagnostics: &mut
     for child in node.children() {
         validate_function_types(&child, file_name, diagnostics);
     }
+}
+
+/// `...` leaves a function type's parameters unspecified, so it is the whole parameter list: a
+/// parameter beside it would promise a name the type cannot supply. The grammar admits the mix so
+/// that it is reported here, by name, rather than as a parse error.
+fn validate_function_type_ellipsis(
+    node: &SyntaxNode,
+    file_name: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let ellipses: Vec<TextRange> = node
+        .children_with_tokens()
+        .filter(|child| child.kind() == SyntaxKind::DOT_DOT_DOT)
+        .map(|child| child.span())
+        .collect();
+    let Some(first) = ellipses.first().copied() else {
+        return;
+    };
+
+    let parameters: Vec<TextRange> = node
+        .children()
+        .filter(|child| child.kind() == SyntaxKind::PROPERTY_DEFINITION)
+        .map(|child| child.span())
+        .collect();
+    if parameters.is_empty() && ellipses.len() == 1 {
+        return;
+    }
+
+    let mut diagnostic = Diagnostic::error("function-type-ellipsis-with-parameters")
+        .with_message("`...` stands for the whole parameter list of a function type")
+        .with_label(
+            Label::primary(file_name, first)
+                .with_message("write `...` alone, or remove it and state every parameter"),
+        );
+    for parameter in parameters {
+        diagnostic = diagnostic.with_label(
+            Label::secondary(file_name, parameter).with_message("a parameter beside `...`"),
+        );
+    }
+    for repeated in ellipses.into_iter().skip(1) {
+        diagnostic = diagnostic
+            .with_label(Label::secondary(file_name, repeated).with_message("a second `...`"));
+    }
+    diagnostics.push(
+        diagnostic
+            .with_note(
+                "`<function ... />: R` is the type of a function of any parameters whose result \
+                 satisfies `R`; a function type that states a parameter states them all",
+            )
+            .build(),
+    );
 }
 
 /// A paren-style call binds arguments by position and may stop early, leaving the parameters it

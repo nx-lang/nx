@@ -4373,6 +4373,120 @@ fn test_function_is_an_identifier_outside_a_function_type() {
 }
 
 #[test]
+fn test_function_reference_type_fixture_parses() {
+    let path = fixture_path("valid/function-reference-type.nx");
+    let result = parse_file(&path).unwrap();
+    assert!(result.is_ok(), "{:?}", result.errors);
+    let root = result.root().expect("Should have root");
+    assert!(!root.has_error());
+    assert!(!contains_missing(&root));
+    assert_eq!(count_kind(&root, SyntaxKind::FUNCTION_TYPE), 12);
+    assert_eq!(count_token_kind(&root, SyntaxKind::DOT_DOT_DOT), 11);
+}
+
+fn count_token_kind(node: &nx_syntax::SyntaxNode, kind: SyntaxKind) -> usize {
+    node.children_with_tokens()
+        .map(|child| usize::from(child.kind() == kind) + count_token_kind(&child, kind))
+        .sum()
+}
+
+#[test]
+fn test_function_reference_type_parses_in_each_position() {
+    for source in [
+        "type T = <function ... />: R",
+        "type T = <function ... />: string?",
+        "type T = (<function ... />: string)+",
+        "type T = <function .../>: string",
+    ] {
+        let result = parse_str(source, "test.nx");
+        assert!(result.is_ok(), "{source}: {:?}", result.errors);
+        let root = result.root().unwrap();
+        assert!(!root.has_error(), "{source}");
+        let function_type = find_first_kind(&root, SyntaxKind::FUNCTION_TYPE).unwrap();
+        assert!(
+            function_type.child_by_field("ellipsis").is_some(),
+            "{source}"
+        );
+        assert!(
+            function_type.child_by_field("parameters").is_none(),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn test_function_reference_type_suffix_binds_to_the_result() {
+    let result = parse_str("type Maybe = <function ... />: string?", "test.nx");
+    let root = result.root().unwrap();
+    let function_type = find_first_kind(&root, SyntaxKind::FUNCTION_TYPE).unwrap();
+    let result_tokens: Vec<_> = function_type
+        .child_by_field("result")
+        .unwrap()
+        .children_with_tokens()
+        .map(|child| child.kind())
+        .collect();
+    assert_eq!(
+        result_tokens,
+        vec![SyntaxKind::PRIMITIVE_TYPE, SyntaxKind::QUESTION]
+    );
+}
+
+#[test]
+fn test_ellipsis_leaves_ranges_and_the_function_identifier_alone() {
+    let source = "let function = 1\nlet a(n:int) = { for i in 0..n { i } }\nlet b(n:int) = { for i in 0..=n { i } }";
+    let result = parse_str(source, "test.nx");
+    assert!(result.is_ok(), "{:?}", result.errors);
+    let root = result.root().unwrap();
+    assert_eq!(count_token_kind(&root, SyntaxKind::DOT_DOT_DOT), 0);
+    assert_eq!(count_token_kind(&root, SyntaxKind::DOT_DOT), 1);
+    assert_eq!(count_token_kind(&root, SyntaxKind::DOT_DOT_EQ), 1);
+    assert_eq!(count_kind(&root, SyntaxKind::FUNCTION_TYPE), 0);
+}
+
+#[test]
+fn test_ellipsis_beside_parameters_is_rejected() {
+    for source in [
+        "type T = <function Item:string ... />: string",
+        "type U = <function ... Item:string />: string",
+        "type V = <function ... ... />: string",
+    ] {
+        let result = parse_str(source, "test.nx");
+        let codes: Vec<_> = result.errors.iter().filter_map(|d| d.code()).collect();
+        assert_eq!(
+            codes,
+            vec!["function-type-ellipsis-with-parameters"],
+            "{source}: {:?}",
+            result.errors
+        );
+        assert!(
+            result.errors[0]
+                .message()
+                .contains("`...` stands for the whole parameter list"),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn test_ellipsis_is_a_parse_error_outside_a_function_type() {
+    for source in [
+        "let <Row ... />: string = \"r\"",
+        "type T = { item:... }",
+        "type T = <function ... />",
+        "let t = <Row ... />",
+        "type T = <Range ... />",
+    ] {
+        let result = parse_str(source, "test.nx");
+        assert!(!result.is_ok(), "{source} should be rejected");
+        let codes: Vec<_> = result.errors.iter().filter_map(|d| d.code()).collect();
+        assert!(
+            !codes.contains(&"function-type-ellipsis-with-parameters"),
+            "{source}: {codes:?}"
+        );
+    }
+}
+
+#[test]
 fn test_function_type_default_is_rejected() {
     let (result, rendered) = invalid_fixture_diagnostics("invalid/function-type-default.nx");
     assert!(!result.is_ok());

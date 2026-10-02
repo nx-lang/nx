@@ -145,6 +145,141 @@ fn an_unsupported_schema_abi_or_feature_is_refused_by_name() {
     assert_eq!(codes(&error), ["nx-ir-format"]);
 }
 
+/// A module whose type table holds a function reference type lists
+/// `function-reference-type-v1`, and prepares; the type's entry is read with its one operand.
+#[test]
+fn a_module_that_lists_the_function_reference_type_feature_prepares() {
+    let program = corpus_program("function-references");
+    let bytes = image(&program, "main.nx");
+    let features = artifact(&bytes).required_features;
+    assert!(
+        features.contains(&"function-reference-type-v1".to_string()),
+        "{features:?}"
+    );
+    PreparedModule::prepare(bytes.clone()).expect("the module prepares");
+
+    // The feature is a name the runtime knows, not one it lets through: another is refused.
+    let error = error_of(PreparedModule::prepare(rewritten(&bytes, |artifact| {
+        artifact
+            .required_features
+            .push("function-reference-type-v9".to_string());
+    })));
+    assert_eq!(codes(&error), ["nx-ir-required-feature"]);
+    assert!(
+        error.to_string().contains("function-reference-type-v9"),
+        "{error}"
+    );
+}
+
+fn function_record(name: &str) -> serde_json::Value {
+    serde_json::json!({ "$type": "Function", "module": "main.nx", "name": name })
+}
+
+/// A site of a function reference type takes a function of the linked program, of any signature,
+/// and nothing else, with the codes the TypeScript runtime reports.
+#[test]
+fn a_function_reference_site_takes_any_function_of_the_program() {
+    let program = corpus_program("function-references");
+    let modules = prepare_all(&program.stripped_images);
+    let linked = common::link(&modules, "main.nx");
+    let options = RuntimeOptions::default();
+    let wrap =
+        |f: serde_json::Value| linked.evaluate_function("wrap", &[common::value(&f)], &options);
+
+    // A rendered field is the `Function` record, and the default fills `build`.
+    let rendered = linked
+        .evaluate_function("defaulted", &[], &options)
+        .expect("defaulted evaluates");
+    assert!(canonical_eq(
+        &rendered,
+        &common::value(&serde_json::json!({
+            "$type": "Tool",
+            "fn": function_record("double"),
+            "build": function_record("makeArgs"),
+        }))
+    ));
+
+    // A host record naming a function of any signature is accepted, and so is one whose result
+    // is not the site's: no part of a signature is re-checked at the boundary.
+    for name in ["double", "greet", "Row", "names", "makeArgs"] {
+        let tool = wrap(function_record(name)).unwrap_or_else(|error| panic!("{name}: {error}"));
+        assert!(
+            canonical_eq(
+                &tool,
+                &common::value(&serde_json::json!({
+                    "$type": "Tool",
+                    "fn": function_record(name),
+                    "build": function_record("makeArgs"),
+                }))
+            ),
+            "{name}"
+        );
+    }
+
+    let error = error_of(wrap(function_record("Nope")));
+    assert_eq!(codes(&error), ["nx-ir-function-value"]);
+    assert!(error.to_string().contains("Nope"), "{error}");
+
+    let error = error_of(wrap(serde_json::json!({
+        "$type": "Function", "module": "other.nx", "name": "double"
+    })));
+    assert_eq!(codes(&error), ["nx-ir-function-value"]);
+    assert!(error.to_string().contains("other.nx"), "{error}");
+
+    // `Tool` is a record of the module, not a function.
+    let error = error_of(wrap(function_record("Tool")));
+    assert_eq!(codes(&error), ["nx-ir-function-value"]);
+
+    for not_a_function in [
+        serde_json::json!("double"),
+        serde_json::json!(1),
+        serde_json::json!({ "$type": "Tool" }),
+        serde_json::json!({ "$type": "Function", "name": "double" }),
+    ] {
+        let error = error_of(wrap(not_a_function.clone()));
+        assert_eq!(codes(&error), ["nx-ir-boundary-type"], "{not_a_function}");
+        assert!(
+            error.to_string().contains("to be a function value"),
+            "{error}"
+        );
+    }
+}
+
+/// The `rust-ir-runtime` scenario "A host-supplied record is validated against the program": a
+/// host supplies a whole `Tool`, and the refusal names the field `fn`.
+#[test]
+fn a_host_supplied_record_with_a_function_reference_field_is_validated() {
+    let program = corpus_program("function-references");
+    let modules = prepare_all(&program.stripped_images);
+    let linked = common::link(&modules, "main.nx");
+    let options = RuntimeOptions::default();
+    let pass = |function: serde_json::Value| {
+        let tool = serde_json::json!({ "$type": "Tool", "fn": function });
+        linked.evaluate_function("passTool", &[common::value(&tool)], &options)
+    };
+
+    let accepted = pass(function_record("double")).expect("a record naming double is accepted");
+    assert!(canonical_eq(
+        &accepted,
+        &common::value(&serde_json::json!({
+            "$type": "Tool",
+            "fn": function_record("double"),
+            "build": function_record("makeArgs"),
+        }))
+    ));
+
+    let error = error_of(pass(function_record("Nope")));
+    assert_eq!(codes(&error), ["nx-ir-function-value"]);
+    assert!(error.to_string().contains("Nope"), "{error}");
+
+    let error = error_of(pass(serde_json::json!("double")));
+    assert_eq!(codes(&error), ["nx-ir-boundary-type"]);
+    assert!(
+        error.to_string().contains("fn to be a function value"),
+        "{error}"
+    );
+}
+
 #[test]
 fn a_presence_operator_without_its_feature_is_malformed() {
     let program = corpus_program("occurrences");

@@ -14,10 +14,10 @@ use nx_api::{
 use nx_ir::{
     explain_nx_ir, explain_nx_ir_image, kinds, write_nx_ir_image, ExplainError, NxIrArtifact,
     NxIrImage, NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1,
-    NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1, NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1,
-    NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1, NX_IR_REQUIRED_FEATURE_RANGES_V1,
-    NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1, NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
-    NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
+    NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1, NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1,
+    NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1, NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1,
+    NX_IR_REQUIRED_FEATURE_RANGES_V1, NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1,
+    NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1, NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
 };
 use std::collections::BTreeMap;
 use std::fs;
@@ -2081,6 +2081,123 @@ fn a_function_typed_prop_is_a_function_type_in_nx_spelling() {
         nx_types::Type::string(),
     ));
     assert_contains(&text, &format!("ItemTemplate: {checked}"));
+}
+
+// ------------------------------------------------------------------------------------------------
+// The function reference type
+// ------------------------------------------------------------------------------------------------
+
+fn type_entries_of_kind(model: &NxIrArtifact, kind: i64) -> Vec<Vec<i64>> {
+    model
+        .types
+        .iter()
+        .filter_map(|entry| entry.as_list())
+        .filter(|entry| entry.first().and_then(|k| k.as_int()) == Some(kind))
+        .map(|entry| entry.iter().filter_map(|cell| cell.as_int()).collect())
+        .collect()
+}
+
+#[test]
+fn a_function_reference_field_is_typed_by_the_function_reference_kind() {
+    assert_eq!(kinds::ty::ANY_FUNCTION, 6);
+    assert_eq!(
+        kinds::name(kinds::ty::NAMES, kinds::ty::ANY_FUNCTION),
+        Some("anyFunction")
+    );
+    let artifact = artifact_from_source(
+        "type AnyFn = <function ... />: object*\ntype Tool = { fn:AnyFn extra?:AnyFn+ }\n\
+         let root() = { 1 }",
+    );
+    let model = entry_artifact(&artifact);
+    let text = explain(&model);
+    assert_contains(&text, "fn: <function ... />: object*");
+    assert_contains(&text, "extra: (<function ... />: object*)*");
+
+    // One entry, whose operand is `object*`, and no function type with no parameters.
+    let entries = type_entries_of_kind(&model, kinds::ty::ANY_FUNCTION);
+    assert_eq!(entries.len(), 1, "{:?}", model.types);
+    let result = model.types[entries[0][1] as usize]
+        .as_list()
+        .expect("result type entry");
+    assert_eq!(result[0].as_int(), Some(kinds::ty::SEQ));
+    assert_eq!(
+        result[2].as_int(),
+        Some(kinds::ty::OCCURRENCE_EMPTY | kinds::ty::OCCURRENCE_MANY)
+    );
+    assert!(type_entries_of_kind(&model, kinds::ty::FUNCTION).is_empty());
+    assert_eq!(read_back(&image_bytes(&artifact)), model);
+}
+
+#[test]
+fn a_stated_result_is_the_function_reference_entrys_operand() {
+    let model = entry_artifact(&artifact_from_source(
+        "type Args = { q:string }\n\
+         type Tool = { build: <function ... />: Args any: <function ... />: object* }\n\
+         let root() = { 1 }",
+    ));
+    let text = explain(&model);
+    assert_contains(&text, "build: <function ... />: Args");
+    assert_contains(&text, "any: <function ... />: object*");
+    let entries = type_entries_of_kind(&model, kinds::ty::ANY_FUNCTION);
+    assert_eq!(entries.len(), 2, "{:?}", model.types);
+    let result_kinds: Vec<_> = entries
+        .iter()
+        .map(|entry| {
+            model.types[entry[1] as usize].as_list().expect("entry")[0]
+                .as_int()
+                .expect("kind")
+        })
+        .collect();
+    assert!(
+        result_kinds.contains(&kinds::ty::NOMINAL),
+        "{result_kinds:?}"
+    );
+    assert!(result_kinds.contains(&kinds::ty::SEQ), "{result_kinds:?}");
+}
+
+#[test]
+fn a_module_that_uses_the_function_reference_type_lists_its_feature() {
+    let model = entry_artifact(&artifact_from_source(
+        "type Tool = { fn: <function ... />: object* }\nlet double(n:int): int = {n * 2}\n\
+         let root() = <Tool fn={double} />",
+    ));
+    let text = explain(&model);
+    assert_contains(&text, "<Tool fn=double />");
+    for feature in [
+        NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1,
+        NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1,
+    ] {
+        assert!(
+            model.required_features.contains(&feature.to_string()),
+            "{:?}",
+            model.required_features
+        );
+    }
+
+    // A module that only declares a field of the type binds no function value.
+    let declared = entry_artifact(&artifact_from_source(
+        "type Tool = { fn: <function ... />: object* }\nlet root() = { 1 }",
+    ));
+    assert_eq!(
+        declared.required_features,
+        vec![NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1.to_string()]
+    );
+}
+
+#[test]
+fn a_module_without_the_function_reference_type_does_not_list_its_feature() {
+    let model = entry_artifact(&artifact_from_source(&format!(
+        "{TEMPLATE_LIST}let <Row Item:object Index:int />: string = \"r\"\n\
+         let root() = <List ItemTemplate={{Row}} />"
+    )));
+    assert!(
+        !model
+            .required_features
+            .contains(&NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1.to_string()),
+        "{:?}",
+        model.required_features
+    );
+    assert!(type_entries_of_kind(&model, kinds::ty::ANY_FUNCTION).is_empty());
 }
 
 #[test]

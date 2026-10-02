@@ -3975,7 +3975,7 @@ impl Interpreter {
         // the subset rule — and carries no fields to rebuild, so it passes as it is. `object`
         // takes it like any value.
         if let Value::Function { .. } = &value {
-            if matches!(expected, Type::Function { .. }) || is_object_type(expected) {
+            if expected.is_function_like() || is_object_type(expected) {
                 return Ok(value);
             }
             return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {

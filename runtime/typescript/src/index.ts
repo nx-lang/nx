@@ -20,6 +20,8 @@ export const NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1 = "update-intrinsics-v1
 export const NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1 = "action-handlers-v1";
 /** Function types, function references as values, and calls of function-typed values by name. */
 export const NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1 = "function-values-v1";
+/** The function reference type, `<function ... />: R`: the `anyFunction` type kind. */
+export const NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1 = "function-reference-type-v1";
 /** Iteration over a range: the `forRange` node. Building a range needs no feature. */
 export const NX_IR_REQUIRED_FEATURE_RANGES_V1 = "ranges-v1";
 /**
@@ -34,6 +36,7 @@ const knownFeatures = new Set([
   NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1,
   NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1,
   NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1,
+  NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1,
   NX_IR_REQUIRED_FEATURE_RANGES_V1,
   NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1,
 ]);
@@ -621,7 +624,7 @@ type TextType = (typeof textTypes)[number];
  * The type kinds. `2` (`array`) and `3` (`nullable`) were retired with schema 5, replaced by
  * `seq`, and stay assigned so no later kind reuses them; a reader reports either as malformed.
  */
-export const typeKinds = { primitive: 0, nominal: 1, function: 4, seq: 5 } as const;
+export const typeKinds = { primitive: 0, nominal: 1, function: 4, seq: 5, anyFunction: 6 } as const;
 /**
  * The bits of a `seq` type's occurrence cell: whether the type admits no value and whether it
  * admits more than one. `?` is `1`, `+` is `2` and `*` is `3`; exactly one is never a `seq`.
@@ -735,7 +738,9 @@ export type PreparedType =
   | { readonly kind: "primitive"; readonly name: string }
   | { readonly kind: "nominal"; readonly slot: number; readonly name: string }
   | { readonly kind: "seq"; readonly item: PreparedType; readonly mayBeEmpty: boolean; readonly mayBeMany: boolean }
-  | { readonly kind: "function"; readonly params: readonly PreparedParam[]; readonly result: PreparedType };
+  | { readonly kind: "function"; readonly params: readonly PreparedParam[]; readonly result: PreparedType }
+  /** A function type whose parameters are not stated, `<function ... />: R`. */
+  | { readonly kind: "anyFunction"; readonly result: PreparedType };
 
 /** Whether a site of this type admits the empty value: a `?` or `*` occurrence. */
 function admitsEmpty(ty: PreparedType): boolean {
@@ -1230,7 +1235,7 @@ const EMIT: readonly Op[] = ["str", "ref"];
  * entry of that kind is reported as malformed rather than laid out.
  */
 const layouts: Record<NxIrTable, readonly (readonly Op[] | undefined)[]> = {
-  types: [["str"], ["ref"], undefined, undefined, ["type", { list: PARAM }], ["itemType", "occurrence"]],
+  types: [["str"], ["ref"], undefined, undefined, ["type", { list: PARAM }], ["itemType", "occurrence"], ["type"]],
   constants: [["i64"], ["str"], ["f64"]],
   nodes: [
     undefined,
@@ -1568,6 +1573,9 @@ class TableReader {
         prepared = { kind: "function", params, result };
         break;
       }
+      case typeKinds.anyFunction:
+        prepared = { kind: "anyFunction", result: this.type(entry[1]!) };
+        break;
       default:
         // Every kind the validator admits is handled above.
         fail("nx-ir-malformed", `Unknown type kind ${String(entry[0])} at type ${index}.`);
@@ -2247,6 +2255,16 @@ class FunctionReferenceValue {
 function functionRecord(reference: FunctionReferenceValue): NxCanonicalValue {
   return { $type: functionTypeName, module: reference.linked.module.identity, name: reference.declaration.name };
 }
+
+/**
+ * The record a function value renders as, and the one a host supplies where a function value is
+ * expected. Read it from a member declared at a function type, and call it with `callFunction`.
+ */
+export type NxFunctionRecord = {
+  readonly $type: "Function";
+  readonly module: string;
+  readonly name: string;
+};
 
 /** The `Function` record a host supplies where a function value is expected, if `value` is one. */
 function asFunctionRecord(value: unknown): { module: string; name: string } | undefined {
@@ -3536,10 +3554,13 @@ function normalizeValue(context: EvalContext, ty: PreparedType, value: NxCanonic
       return normalizePrimitiveValue(ty.name, value, path);
     case "nominal":
       return normalizeNominalValue(context, ty, value, path);
-    case "function": {
+    case "function":
+    case "anyFunction": {
       // A function value from the program is already a reference; one from a host is the
       // canonical record, resolved to the declaration it names. The checker related the value's
-      // declaration to the type by name, so no parameter is re-checked here.
+      // declaration to the type by name, so no parameter is re-checked here, and at a function
+      // reference type, `<function ... />: R`, neither is the result: any function of the linked
+      // program is accepted.
       if (isFunctionReference(value)) {
         return value;
       }

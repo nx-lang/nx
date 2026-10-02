@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.6.0
+
+### Language
+- A function type may leave its parameters unspecified with `...`: `<function ... />: R` is the
+  type of a function of any parameters whose result satisfies `R`, and `<function ... />: object*`
+  takes any function. `...` is highlighted in that position, hover shows the type as written, and
+  calling a value of such a type reports `function-reference-not-callable`.
+
 ## 0.5.0
 The extension now ships with the NX packages, from one tag and at one version, so extension 0.5.0
 understands the same NX as `@nx-lang/sdk-wasm` and `NxLang.Sdk` 0.5.0. This is why the version

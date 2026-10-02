@@ -8,7 +8,9 @@ refuse every truncation and cell overwrite of them; another runtime starts here.
 constant and declaration kind of the schema, every binary operator and intrinsic, a program
 spanning two images, derived declarations, a snippet compiled against an implicitly imported
 catalog, a document that is a single trailing element, components that bind action handlers, and
-a program that declares a function type, passes functions as values and calls them by name, and
+a program that declares a function type, passes functions as values and calls them by name, one
+that declares function reference types (`<function ... />: R`), binds functions of unlike
+signatures to them and passes, returns and compares such values, and
 one whose calls leave parameters out for the function to fill, including a default that reads a
 value private to the called function's module.
 
@@ -40,7 +42,9 @@ Generated JavaScript is the third engine held to `results.json`: the emitter's t
 program as JavaScript and run every entrypoint of its entry module, whose value must equal the
 recorded one. A program executable source codegen refuses (a match expression, a call of a
 function-typed value, an action handler) is skipped, and so is an entrypoint that reaches such a
-construct at run time. `occurrences` and `occurrence-lifting` avoid all of them so that the
+construct at run time. A function value in generated JavaScript is the JavaScript function, which
+knows its name and not its module, so a recorded `Function` record is compared with it by name.
+`occurrences` and `occurrence-lifting` avoid all of them so that the
 occurrence rules are checked in all three engines, which is why the `{}` pattern has a program of
 its own, `occurrence-patterns`.
 

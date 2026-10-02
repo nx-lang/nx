@@ -1779,7 +1779,7 @@ fn csharp_type_inner(
         // serializes (MessagePack has no formatter for it, which breaks the whole containing type,
         // and `System.Text.Json` refuses it outright) nor carries the declaration. `NxFunctionRef`
         // is the `Function` record the runtime renders, as `NxActionHandlerRef` is for a handler.
-        TypeRef::Function { .. } => CSharpType {
+        TypeRef::Function { .. } | TypeRef::AnyFunction { .. } => CSharpType {
             text: "global::NxLang.Nx.NxFunctionRef".to_string(),
             is_reference: true,
             is_nullable: false,
@@ -2007,7 +2007,7 @@ fn csharp_imported_alias_target_type(
                 is_nullable: false,
             }
         }
-        TypeRef::Function { .. } => CSharpType {
+        TypeRef::Function { .. } | TypeRef::AnyFunction { .. } => CSharpType {
             text: "global::NxLang.Nx.NxFunctionRef".to_string(),
             is_reference: true,
             is_nullable: false,
@@ -2195,7 +2195,7 @@ fn imported_type_uses_dependency_namespace(imported_type: &ImportedType) -> bool
 fn imported_alias_target_uses_dependency_namespace(ty: &TypeRef) -> bool {
     match ty {
         TypeRef::Seq { inner, .. } => imported_alias_target_uses_dependency_namespace(inner),
-        TypeRef::Function { .. } => false,
+        TypeRef::Function { .. } | TypeRef::AnyFunction { .. } => false,
         TypeRef::Applied { name, .. } | TypeRef::Name(name) => !matches!(
             name.as_str(),
             "string"

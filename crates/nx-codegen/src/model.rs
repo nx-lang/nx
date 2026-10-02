@@ -192,6 +192,10 @@ pub enum CodegenTypeRef {
         params: Vec<CodegenFunctionParam>,
         return_type: Box<CodegenTypeRef>,
     },
+    /// A function type whose parameters are not stated, `<function ... />: R`.
+    AnyFunction {
+        return_type: Box<CodegenTypeRef>,
+    },
 }
 
 /// One parameter of a resolved function type.

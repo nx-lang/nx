@@ -110,6 +110,15 @@ fn highlights_capture_the_parts_of_a_function_type() {
 }
 
 #[test]
+fn highlights_capture_the_ellipsis_of_a_function_reference_type() {
+    let captures = highlight_captures("type T = (<function ... />: Args)+");
+    let has = |name: &str, text: &str| captures.iter().any(|(n, t)| n == name && t == text);
+    assert!(has("keyword", "function"), "{captures:?}");
+    assert!(has("punctuation.special", "..."), "{captures:?}");
+    assert!(has("type", "Args"), "{captures:?}");
+}
+
+#[test]
 fn highlights_do_not_treat_the_identifier_function_as_a_keyword() {
     let captures = highlight_captures("let function = 1\nlet v = {function}");
     assert!(

@@ -1,0 +1,36 @@
+// Function reference types: a function type whose parameter list is `...`.
+type Args = { q:string }
+
+// On a field, with the widest result and with a stated one.
+type Tool = {
+  fn: <function ... />: object*
+  build: <function ... />: Args
+}
+
+// Aliased, and the alias under the optional mark and each occurrence.
+type AnyFn = <function ... />: object*
+type Kit = { one?:AnyFn maybe:AnyFn? all:AnyFn+ extra:AnyFn* }
+
+// Written out, an occurrence over the type takes parentheses; a suffix after the result binds
+// to the result.
+type Maybe = <function ... />: string?
+type Optional = (<function ... />: string)?
+type Many = (<function ... />: string)+
+type Any = (<function ... />: string)*
+
+// As a parameter and as the result of a function type.
+type Higher = <function Fn:<function ... />: object* />: <function ... />: string
+
+// A default names a function.
+let identity(value:string): string = {value}
+type Defaulted = { fn: <function ... />: object* = {identity} }
+
+// An alias of one as a type argument.
+type Holder = { T:type item:T }
+let h:<Holder T=AnyFn/> = <Holder T=AnyFn item={identity} />
+
+// A multi-line function reference type.
+type Multi =
+  <function
+    ...
+  />: Args

@@ -1,0 +1,80 @@
+module main.nx fingerprint 14639652977665353874
+requires function-values-v1 function-reference-type-v1
+entrypoints functions [double greet Row names makeArgs otherArgs pass wrap passTool same sameTyped defaulted full wrapped passed kit kitExtra identical distinct typed root] components []
+
+record Args @5:1-5:25
+  q: string required
+
+alias AnyFn @6:1-6:39
+
+record Tool @8:1-12:2
+  fn: <function ... />: object* required
+  fallback: (<function ... />: object*)?
+  build: <function ... />: Args = makeArgs
+
+record Kit @14:1-14:40
+  all: (<function ... />: object*)+ required
+  extra: (<function ... />: object*)*
+
+function double(n: int): int @16:1-16:33 =
+  (n mul 2)
+
+function greet(name: string, loud?: boolean): string @17:1-17:55 =
+  name
+
+function Row(Item: object, Index: int): string @18:1-18:48 =
+  "r"
+
+function names(): string* @19:1-19:33 =
+  ["a", "b"]
+
+function makeArgs(q: string): Args @20:1-20:46 =
+  <Args q=q />
+
+function otherArgs(q: string, limit?: int): Args @21:1-21:59 =
+  <Args q=q />
+
+function pass(f: <function ... />: object*): <function ... />: object* @23:1-23:31 =
+  f
+
+function wrap(f: <function ... />: object*): Tool @24:1-24:42 =
+  <Tool fn=f />
+
+function passTool(tool: Tool): Tool @25:1-25:39 =
+  tool
+
+function same(f: <function ... />: object*, g: <function ... />: object*): boolean @26:1-26:47 =
+  (f eq g)
+
+function sameTyped(f: <function ... />: object*, g: <function n:int />: int): boolean @27:1-27:71 =
+  (f eq g)
+
+function defaulted() @29:1-29:39 =
+  <Tool fn=double />
+
+function full() @30:1-30:66 =
+  <Tool build=otherArgs fallback=names fn=Row />
+
+function wrapped() @31:1-31:30 =
+  wrap(greet)
+
+function passed() @32:1-32:30 =
+  pass(double)
+
+function kit() @33:1-33:43 =
+  <Kit all=[double, greet, Row] />
+
+function kitExtra() @34:1-34:61 =
+  <Kit all=double extra=[names, makeArgs] />
+
+function identical() @35:1-35:41 =
+  same(double, double)
+
+function distinct() @36:1-36:39 =
+  same(double, greet)
+
+function typed() @37:1-37:42 =
+  sameTyped(double, double)
+
+function root() @38:1-38:56 =
+  <Tool build=makeArgs fn=pass(greet) />

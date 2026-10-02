@@ -788,6 +788,63 @@ that never reads `Index`, while a function needing a parameter the type lacks is
 not matter. See [Functions](/reference/syntax/functions#functions-as-values) for passing and
 calling function values.
 
+### Any parameters
+By that rule a type that supplies more parameters accepts more functions, and `<function />: R`,
+which supplies none, accepts only a function that declares none. To accept a function whatever its
+parameters, write the token `...` in place of the parameter list. The three dots are part of the
+language here, not an abbreviation of an example:
+
+```nx
+type HttpArguments = { url:string }
+
+type FunctionTool = { function: <function ... />: object* }
+type HttpTool = { arguments: <function ... />: HttpArguments }
+
+let findPlans(region:string, limit?:int): string* = {region}
+let planRequest(plan:string): HttpArguments = <HttpArguments url={plan} />
+
+let find = <FunctionTool function={findPlans} />
+let request = <HttpTool arguments={planRequest} />
+```
+
+`<function ... />: R` is the *function reference type*. A function of any parameters satisfies it
+when its result satisfies `R`, so `planRequest` is accepted at `HttpTool.arguments` and `findPlans`
+is not: it does not return `HttpArguments`. Nothing but a function satisfies it — not a string
+that happens to name one, and not a record.
+
+`<function ... />: object*` is the type every function satisfies, because every result type
+satisfies `object*`. `<function ... />: object` is narrower than it looks: `object` is exactly one
+value, so that type rejects a function whose result is `string?` or `string*`. There is no shorter
+name for either; a library that repeats the type declares an alias.
+
+`...` stands for the whole parameter list. It cannot sit beside a parameter
+(`<function Item:Contact ... />: R` is rejected) and is written nowhere else.
+
+A value of the type is a reference to a function: you can bind it to a field, a prop, a parameter
+or a result, put it in a sequence and compare it with `==`, but you cannot call it, because nothing
+states what arguments it takes. The host calls it, with arguments it checks against the function's
+own parameters. For the same reason it never satisfies a function type that states parameters; it
+satisfies a function reference type with a wider result, and `object`. To call a function, declare
+the binding at a function type with its parameters.
+
+The type is exactly one value, so occurrences and the optional mark apply as they do to any
+function type: `(<function ... />: R)+` written out, or `AnyFn+` through an alias.
+
+```nx
+type AnyFn = <function ... />: object*
+type Kit = { tools:AnyFn+ fallback?:AnyFn }
+
+let double(n:int): int = {n * 2}
+let greet(name:string): string = {name}
+
+// Two functions with nothing in common still join to a function type, not to `object`.
+let both = {double greet}
+let kit = <Kit tools={both} />
+```
+
+Where a sequence or a conditional joins two function types and neither satisfies the other, the
+result is `<function ... />: object*`.
+
 ## See also
 - Language Tour: [Types](/language-tour/types)
 - Reference: [Sequences & Object Duality](/reference/concepts/sequences-and-objects)

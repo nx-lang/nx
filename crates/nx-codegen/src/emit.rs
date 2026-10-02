@@ -1774,7 +1774,9 @@ fn emit_generic_prop_type(
                 emit_generic_prop_type(module, inner, component, context)
             })
         }
-        TypeRef::Function { .. } => emit_type_ref(module.id, ty, module, context),
+        TypeRef::Function { .. } | TypeRef::AnyFunction { .. } => {
+            emit_type_ref(module.id, ty, module, context)
+        }
     }
 }
 
@@ -1807,7 +1809,9 @@ fn emit_erased_field_type(
                 emit_erased_field_type(module, inner, component, context)
             })
         }
-        TypeRef::Function { .. } => emit_type_ref(module.id, ty, module, context),
+        TypeRef::Function { .. } | TypeRef::AnyFunction { .. } => {
+            emit_type_ref(module.id, ty, module, context)
+        }
     }
 }
 
@@ -2776,7 +2780,9 @@ fn emit_type_schema_inner(
             occurrence_schema_helper(*occ),
             emit_type_schema_inner(current_module_id, item, context, seen)
         ),
-        CodegenTypeRef::Function { .. } => "nxAnySchema".to_string(),
+        CodegenTypeRef::Function { .. } | CodegenTypeRef::AnyFunction { .. } => {
+            "nxAnySchema".to_string()
+        }
     }
 }
 
@@ -3206,6 +3212,7 @@ fn emit_type_ref(
             }),
             emit_type_ref(current_module_id, return_type, module, context),
         ),
+        TypeRef::AnyFunction { .. } => emit_any_function_type(),
     }
 }
 
@@ -3229,6 +3236,7 @@ fn emit_type(
             }),
             emit_type(current_module_id, ret, module, context),
         ),
+        Type::AnyFunction { .. } => emit_any_function_type(),
         Type::Named(named) => {
             emit_named_type(current_module_id, named.name.as_str(), module, context)
         }
@@ -4102,7 +4110,11 @@ fn type_can_hold_a_sequence(ty: &Type) -> bool {
         // is empty, and only flattening removes the empty array it is then.
         Type::Seq { .. } => true,
         Type::Named(named) => named.name.as_str() == "object",
-        Type::Primitive(_) | Type::Union(_) | Type::UnionCase(_) | Type::Function { .. } => false,
+        Type::Primitive(_)
+        | Type::Union(_)
+        | Type::UnionCase(_)
+        | Type::Function { .. }
+        | Type::AnyFunction { .. } => false,
         // A type parameter, an error, an unresolved variable: nothing here says it cannot.
         _ => true,
     }
@@ -4460,6 +4472,9 @@ fn collect_type_ref_schema_value_references(
             }
             collect_type_ref_schema_value_references(module, return_type, output);
         }
+        TypeRef::AnyFunction { return_type } => {
+            collect_type_ref_schema_value_references(module, return_type, output);
+        }
     }
 }
 
@@ -4488,6 +4503,9 @@ fn collect_type_ref_references(
             }
             collect_type_ref_references(module, return_type, output);
         }
+        TypeRef::AnyFunction { return_type } => {
+            collect_type_ref_references(module, return_type, output);
+        }
     }
 }
 
@@ -4507,6 +4525,18 @@ fn emit_function_type<'a>(
     }
 }
 
+/// Emits a function reference type, `<function ... />: R`, as the TypeScript type every function
+/// is assignable to and none can be called through, which is what the NX type says: a generated
+/// function takes its parameters by position or as one object, in any number.
+///
+/// <para>The result is `unknown` whatever `R` is. NX admits a result that TypeScript's spelling of
+/// `R` does not: `int` satisfies `object*`, and `string` satisfies `string*` by the one-level
+/// lift, while `number` is not assignable to `readonly object[]`. The checker has already
+/// related the result to `R`, and nothing in generated code calls the value.</para>
+fn emit_any_function_type() -> String {
+    "(...args: never[]) => unknown".to_string()
+}
+
 fn collect_type_references(module: &CodegenModule, ty: &Type, output: &mut Vec<CodegenReference>) {
     match ty {
         Type::Seq { item, .. } => {
@@ -4518,6 +4548,7 @@ fn collect_type_references(module: &CodegenModule, ty: &Type, output: &mut Vec<C
             }
             collect_type_references(module, ret, output);
         }
+        Type::AnyFunction { ret } => collect_type_references(module, ret, output),
         Type::Named(named) => collect_named_type_reference(module, named.name.as_str(), output),
         Type::Union(union_ty) => {
             collect_named_type_reference(module, union_ty.name.as_str(), output)
@@ -4938,6 +4969,7 @@ fn type_ref_has_optional(ty: &TypeRef) -> bool {
                 .any(|param| type_ref_has_optional(&param.ty.read_type(param.optional)))
                 || type_ref_has_optional(return_type)
         }
+        TypeRef::AnyFunction { return_type } => type_ref_has_optional(return_type),
     }
 }
 
@@ -4951,6 +4983,7 @@ fn type_has_optional(ty: &Type) -> bool {
                 .any(|param| type_has_optional(&param.read_type()))
                 || type_has_optional(ret)
         }
+        Type::AnyFunction { ret } => type_has_optional(ret),
         _ => false,
     }
 }
@@ -5001,7 +5034,7 @@ fn collect_type_ref_schema_runtime_helpers(ty: &TypeRef, output: &mut FxHashSet<
             output.insert(occurrence_schema_helper(*occ));
             collect_type_ref_schema_runtime_helpers(inner, output);
         }
-        TypeRef::Function { .. } => {
+        TypeRef::Function { .. } | TypeRef::AnyFunction { .. } => {
             output.insert("nxAnySchema");
         }
     }

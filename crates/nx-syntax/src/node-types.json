@@ -955,6 +955,16 @@
     "type": "function_type",
     "named": true,
     "fields": {
+      "ellipsis": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "...",
+            "named": false
+          }
+        ]
+      },
       "parameters": {
         "multiple": true,
         "required": false,
@@ -2550,6 +2560,10 @@
   },
   {
     "type": "..",
+    "named": false
+  },
+  {
+    "type": "...",
     "named": false
   },
   {

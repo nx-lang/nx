@@ -251,10 +251,17 @@ module.exports = grammar({
     // a keyword only here: tree-sitter offers it to the lexer in this state alone, so the word
     // stays an identifier everywhere else. Parameters reuse `property_definition`; validation
     // rejects a default, a `type` parameter and a second `content` parameter.
+    //
+    // `...` in place of the parameters leaves them unspecified: `<function ... />: R` is the type
+    // of a function of any parameters whose result satisfies `R`. It stands for the whole list.
+    // The grammar admits it beside parameters so that validation can say so by name.
     function_type: $ => seq(
       '<',
       'function',
-      repeat(field('parameters', $.property_definition)),
+      repeat(choice(
+        field('parameters', $.property_definition),
+        field('ellipsis', '...'),
+      )),
       '/',
       '>',
       ':',

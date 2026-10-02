@@ -258,6 +258,10 @@ impl<'a> Explainer<'a> {
                 text.push_str(&result);
                 text
             }
+            kinds::ty::ANY_FUNCTION => format!(
+                "<function ... />: {}",
+                self.ty(self.int_operand(entry, 1, "function reference result")?)?
+            ),
             other => return Err(self.malformed(format!("unknown type kind {other}"))),
         })
     }
@@ -266,13 +270,13 @@ impl<'a> Explainer<'a> {
     /// suffix written after a function type's result binds to the result.
     fn ty_under_suffix(&self, index: i64) -> Result<String, ExplainError> {
         let text = self.ty(index)?;
-        let is_function = usize::try_from(index)
+        let kind = usize::try_from(index)
             .ok()
             .and_then(|index| self.artifact.types.get(index))
             .and_then(|entry| entry.as_list())
             .and_then(|entry| entry.first())
-            .and_then(IrItem::as_int)
-            == Some(kinds::ty::FUNCTION);
+            .and_then(IrItem::as_int);
+        let is_function = matches!(kind, Some(kinds::ty::FUNCTION | kinds::ty::ANY_FUNCTION));
         Ok(if is_function {
             format!("({text})")
         } else {

@@ -829,12 +829,25 @@
         {
           "type": "REPEAT",
           "content": {
-            "type": "FIELD",
-            "name": "parameters",
-            "content": {
-              "type": "SYMBOL",
-              "name": "property_definition"
-            }
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "FIELD",
+                "name": "parameters",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "property_definition"
+                }
+              },
+              {
+                "type": "FIELD",
+                "name": "ellipsis",
+                "content": {
+                  "type": "STRING",
+                  "value": "..."
+                }
+              }
+            ]
           }
         },
         {

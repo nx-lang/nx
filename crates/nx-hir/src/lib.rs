@@ -631,6 +631,7 @@ pub fn type_ref_names(ty: &ast::TypeRef) -> Vec<&Name> {
                 }
                 collect(return_type, names);
             }
+            ast::TypeRef::AnyFunction { return_type } => collect(return_type, names),
         }
     }
     let mut names = Vec::new();

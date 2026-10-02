@@ -297,7 +297,15 @@ OccurrenceSuffix
 
 FunctionType (AST: FunctionTypeSyntax)
 - FunctionType → LT FUNCTION PropertyDefinition* SLASH GT COLON Type
-  - fields: params: FunctionTypeParamSyntax[] (name, type, isContent), result: TypeSyntax
+- FunctionType → LT FUNCTION ELLIPSIS SLASH GT COLON Type
+  - fields: params: FunctionTypeParamSyntax[] (name, type, isContent), anyParams: boolean,
+    result: TypeSyntax
+  - `ELLIPSIS` is the token `...`. It leaves the parameters unspecified (`anyParams` is true and
+    `params` is empty): `<function ... />: R` is the type of a function of any parameters whose
+    result satisfies `R`. It stands for the whole parameter list and is accepted nowhere else in
+    the grammar. The parser admits it beside `PropertyDefinition`s so that post-parse validation
+    can reject the mix by name ("`...` stands for the whole parameter list") rather than as a
+    parse error.
   - `FUNCTION` is the contextual keyword `function`, a keyword only after `LT` in type position; the
     identifier `function` keeps its meaning everywhere else.
   - The trailing `Type` takes suffixes greedily: a suffix after the result binds to the result.
@@ -793,7 +801,7 @@ This section lists the AST node types with fields for implementers.
 - TypeSyntax: kind: "primitive"|"user"|"function"|"applied", name?: string (qualified), params?: FunctionTypeParamSyntax[], result?: TypeSyntax, args?: TypeArgumentSyntax[], occurrence: "one"|"optional"|"oneOrMore"|"zeroOrMore"
 - PrimitiveTypeSyntax: name: string
 - UserTypeSyntax: name: QualifiedNameSyntax
-- FunctionTypeSyntax: params: FunctionTypeParamSyntax[], result: TypeSyntax
+- FunctionTypeSyntax: params: FunctionTypeParamSyntax[], anyParams: boolean, result: TypeSyntax
 - FunctionTypeParamSyntax: name: string, type: TypeSyntax, isContent: boolean
 - FunctionDefinitionSyntax: ElementFunctionDefinitionSyntax | ParenFunctionDefinitionSyntax
 - ElementFunctionDefinitionSyntax: visibility?: "private"|"export", elementName: QualifiedMarkupNameSyntax, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax

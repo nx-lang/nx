@@ -3542,6 +3542,7 @@ fn type_to_type_ref(ty: &Type) -> Option<TypeRef> {
                 .collect::<Option<Vec<_>>>()?,
             type_to_type_ref(ret)?,
         )),
+        Type::AnyFunction { ret } => Some(TypeRef::any_function(type_to_type_ref(ret)?)),
         Type::Named(named) if named.args().is_empty() => Some(TypeRef::name(named.name.clone())),
         // One instantiation of a generic record publishes as the applied type an importing module
         // would write, so the consumer's checker resolves it to the same instantiation.

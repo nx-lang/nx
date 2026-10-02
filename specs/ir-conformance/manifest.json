@@ -30,6 +30,7 @@
       "eq": [
         "conversions",
         "expressions",
+        "function-references",
         "function-values",
         "occurrence-lifting",
         "ranges"
@@ -71,6 +72,7 @@
       ],
       "mul": [
         "expressions",
+        "function-references",
         "function-values",
         "parameter-defaults",
         "ranges"
@@ -101,6 +103,7 @@
         "components",
         "conversions",
         "expressions",
+        "function-references",
         "function-values",
         "generic-records",
         "handlers",
@@ -128,6 +131,7 @@
         "components",
         "conversions",
         "expressions",
+        "function-references",
         "function-values",
         "generic-records",
         "handlers",
@@ -143,6 +147,7 @@
       ],
       "record": [
         "conversions",
+        "function-references",
         "function-values",
         "generic-records",
         "handlers",
@@ -153,6 +158,7 @@
         "two-module"
       ],
       "typeAlias": [
+        "function-references",
         "function-values",
         "occurrence-lifting",
         "records"
@@ -199,6 +205,7 @@
         "components",
         "conversions",
         "expressions",
+        "function-references",
         "function-values",
         "handlers",
         "occurrence-lifting",
@@ -210,6 +217,7 @@
         "components",
         "conversions",
         "expressions",
+        "function-references",
         "function-values",
         "generic-records",
         "handlers",
@@ -230,6 +238,7 @@
       "call": [
         "conversions",
         "expressions",
+        "function-references",
         "function-values",
         "generic-records",
         "occurrence-lifting",
@@ -304,6 +313,7 @@
         "components",
         "conversions",
         "expressions",
+        "function-references",
         "function-values",
         "generic-records",
         "handlers",
@@ -321,6 +331,7 @@
       ],
       "record": [
         "conversions",
+        "function-references",
         "function-values",
         "generic-records",
         "handlers",
@@ -335,6 +346,7 @@
         "components",
         "conversions",
         "expressions",
+        "function-references",
         "function-values",
         "generic-records",
         "handlers",
@@ -351,6 +363,7 @@
         "components",
         "conversions",
         "expressions",
+        "function-references",
         "function-values",
         "generic-records",
         "handlers",
@@ -366,6 +379,7 @@
         "components",
         "conversions",
         "expressions",
+        "function-references",
         "function-values",
         "generic-records",
         "handlers",
@@ -394,12 +408,17 @@
       ]
     },
     "types": {
+      "anyFunction": [
+        "function-references"
+      ],
       "function": [
+        "function-references",
         "function-values"
       ],
       "nominal": [
         "components",
         "expressions",
+        "function-references",
         "function-values",
         "generic-records",
         "handlers",
@@ -416,6 +435,7 @@
         "components",
         "conversions",
         "expressions",
+        "function-references",
         "function-values",
         "generic-records",
         "handlers",
@@ -432,6 +452,7 @@
       "seq": [
         "components",
         "conversions",
+        "function-references",
         "function-values",
         "generic-records",
         "handlers",
@@ -457,6 +478,7 @@
     "components",
     "conversions",
     "expressions",
+    "function-references",
     "function-values",
     "generic-records",
     "handlers",

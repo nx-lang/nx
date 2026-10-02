@@ -613,8 +613,19 @@ fn is_unsupported_by_source_codegen(message: &str) -> bool {
 }
 
 /// Two canonical values, with numbers compared by value: generated JavaScript prints `2.0` as `2`.
+///
+/// <para>A function value in generated JavaScript is the JavaScript function itself, which knows
+/// its name and not its module, so the harness prints it as a `Function` record without `module`
+/// and it agrees with the recorded record of that name.</para>
 fn canonical_values_agree(left: &Value, right: &Value) -> bool {
     match (left, right) {
+        (Value::Object(left), Value::Object(right))
+            if left.get("$type").and_then(Value::as_str) == Some("Function")
+                && !left.contains_key("module") =>
+        {
+            right.get("$type").and_then(Value::as_str) == Some("Function")
+                && left.get("name") == right.get("name")
+        }
         (Value::Number(left), Value::Number(right)) => left.as_f64() == right.as_f64(),
         (Value::Array(left), Value::Array(right)) => {
             left.len() == right.len()
@@ -704,7 +715,9 @@ fn generated_javascript_agrees_with_the_recorded_results() {
                try {{ out[name] = {{ ok: m[name]() }}; }}\n\
                catch (error) {{ out[name] = {{ error: String(error && error.message || error) }}; }}\n\
              }}\n\
-             console.log(JSON.stringify(out));",
+             const fn = (key, value) => typeof value === 'function'\n\
+               ? {{ $type: 'Function', name: value.name }} : value;\n\
+             console.log(JSON.stringify(out, fn));",
             format!("file://{}", dir.path().join("index.js").display())
         );
         let run = std::process::Command::new("node")
