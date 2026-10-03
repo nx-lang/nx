@@ -2318,6 +2318,96 @@ test("a parameter left out takes the default its function declares, which reads 
   assertThrows(() => evaluateFunction(program, "add", []), "requires argument 'a'");
 });
 
+// The agent library: a standard library's image is supplied by the host like any library
+// module's. The images are the corpus's `agent-library` program, the worked example of the library.
+
+const AGENT_MODULE = "@nx/agent/agent.nx";
+
+function agentLibraryImage(identity: string, program = "agent-library"): Uint8Array {
+  const file = `${identity.replaceAll("/", "__")}.stripped.nxir`;
+  const path = fileURLToPath(new URL(`../../../../specs/ir-conformance/${program}/expected/${file}`, import.meta.url));
+  return new Uint8Array(readFileSync(path));
+}
+
+test("a tool function takes the host context by its subtype or its base", () => {
+  const prepared = new Map(
+    ["main.nx", "context.nx", AGENT_MODULE].map((identity) => [
+      identity,
+      prepareNxIrModule(agentLibraryImage(identity, "agent-tool-context"))
+    ])
+  );
+  const program = linkNxIrProgram(prepared.get("main.nx")!, { resolve: (identity) => prepared.get(identity) });
+  const agent = fields(evaluateFunction(program, "root"));
+  assertEqual(agent.model, "any-model-name-at-all");
+
+  const tools = (agent.tools as NxCanonicalValue[]).map(fields);
+  // The host builds the context record with the `$type` of its concrete subtype, declared in a
+  // module other than the abstract base.
+  const context = { $type: "ChatToolContext", callId: "call-1", conversationId: "conv-7" };
+  assertEqual(callFunction(program, tools[0]!.function!, { context }), "conv-7");
+  // A parameter typed by the abstract base accepts the host's subtype.
+  assertEqual(callFunction(program, tools[1]!.function!, { context }), "call-1");
+  // A function tool of another signature, with its optional parameter left out.
+  assertEqual(callFunction(program, tools[2]!.function!, { teamSize: 4 }), 4);
+});
+
+test("the agent example links its library image and its tools are callable", () => {
+  const library = prepareNxIrModule(agentLibraryImage(AGENT_MODULE));
+  const program = linkNxIrProgram(prepareNxIrModule(agentLibraryImage("main.nx")), {
+    resolve: (identity) => (identity === AGENT_MODULE ? library : undefined),
+  });
+
+  const agent = fields(evaluateFunction(program, "root"));
+  assertEqual(agent.$type, "Agent");
+  assertEqual(agent.documents, [
+    { $type: "Document", title: "Refund policy", text: "Refunds are available within 30 days of purchase." },
+  ]);
+  assertEqual(String(agent.instructions).startsWith("You are the support assistant for Example.\n"), true);
+
+  const tools = (agent.tools as NxCanonicalValue[]).map(fields);
+  assertEqual(tools.map((tool) => tool.$type), ["WebSearchTool", "FunctionTool", "HttpTool", "HttpTool"]);
+  assertEqual(tools[1]!.function, { $type: "Function", module: "main.nx", name: "findPlans" });
+
+  assertEqual(callFunction(program, tools[1]!.function!, { teamSize: 4 }), [
+    { $type: "Plan", name: "Team", seats: 4, monthlyPrice: 20 },
+  ]);
+  assertEqual(callFunction(program, tools[2]!.arguments!, { orderId: "A-1" }), {
+    $type: "HttpArguments",
+    pathParams: [{ $type: "HttpParam", name: "orderId", value: "A-1" }],
+  });
+  assertEqual(callFunction(program, tools[3]!.arguments!, { subject: "Late order" }), {
+    $type: "HttpArguments",
+    body: { $type: "NewTicket", subject: "Late order", priority: 2 },
+  });
+});
+
+test("a missing agent library image is a link error naming it, not a fallback", () => {
+  const linked = tryLinkNxIrProgram(prepareNxIrModule(agentLibraryImage("main.nx")), { resolve: () => undefined });
+  assertEqual(linked.ok, false);
+  if (!linked.ok) {
+    assertEqual(linked.diagnostics[0]!.code, "nx-ir-link-missing-module");
+    assertEqual(linked.diagnostics[0]!.message.includes(AGENT_MODULE), true);
+  }
+});
+
+test("an agent library image of another version fails linking unless the host allows it", () => {
+  const library = prepareNxIrModule(agentLibraryImage(AGENT_MODULE));
+  const b = new ArtifactBuilder("main.nx", [{ identity: AGENT_MODULE, version: "0000000000000000", fingerprint: "1" }]);
+  b.fn("root", b.int(1));
+  const entry = prepareNxIrModule(b.build());
+
+  const linked = tryLinkNxIrProgram(entry, { resolve: () => library });
+  assertEqual(linked.ok, false);
+  if (!linked.ok) {
+    assertEqual(linked.diagnostics[0]!.code, "nx-ir-link-version");
+    assertEqual(linked.diagnostics[0]!.message.includes(AGENT_MODULE), true);
+    assertEqual(linked.diagnostics[0]!.message.includes("'0000000000000000'"), true);
+  }
+
+  const program = linkNxIrProgram(entry, { resolve: () => library, allowVersionMismatch: true });
+  assertEqual(evaluateFunction(program, "root"), 1);
+});
+
 let failures = 0;
 for (const [name, run] of tests) {
   try {

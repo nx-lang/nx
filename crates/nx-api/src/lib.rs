@@ -38,12 +38,16 @@ mod workspace;
 
 #[cfg(test)]
 mod library_source_tests;
+#[cfg(test)]
+mod standard_library_tests;
 
 pub use artifacts::{
     analyze_workspace_modules, build_library_artifact_from_directory,
     build_program_artifact_from_source, build_workspace_program_artifact, prelude_library,
-    validate_workspace, LibraryArtifact, LibraryExport, LibraryRegistry, NxLibraryModule,
-    NxLibrarySource, ProgramArtifact, ProgramBuildContext, ProgramSourceEntry,
+    standard_libraries, standard_library, standard_library_entry, standard_library_for_module,
+    unknown_standard_library_message, validate_workspace, LibraryArtifact, LibraryExport,
+    LibraryRegistry, NxLibraryModule, NxLibrarySource, ProgramArtifact, ProgramBuildContext,
+    ProgramSourceEntry, StandardLibrary, StandardLibraryModule, StandardLibraryStability,
 };
 pub use component::{
     dispatch_component_actions_program_artifact, dispatch_component_actions_source,

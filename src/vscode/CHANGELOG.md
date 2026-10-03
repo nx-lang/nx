@@ -10,6 +10,30 @@ All notable changes to this project will be documented in this file.
   takes any function. `...` is highlighted in that position, hover shows the type as written, and
   calling a value of such a type reports `function-reference-not-callable`.
 
+### Standard libraries
+- NX now has libraries of its own: source the compiler carries, imported by a reserved name with
+  nothing to install or load. `import "@nx/agent"` works in a single file, a workspace, a library
+  and the editor, in every import form. A path under `@nx/` that names no standard library is
+  reported as `unknown-standard-library`, listing the ones that exist.
+- **Breaking:** the whole `@nx/` root is now reserved, where only `@nx/prelude.nx` was before. A
+  workspace module whose identity lies under `@nx/` is refused, a host library whose root lies
+  under it is refused with `library-root-reserved`, and an import path beginning `@nx/` is no
+  longer resolved relative to the importing file. A directory named `@nx` beside a module has to
+  be renamed.
+- Hover on a standard library declaration, or on one of its fields, shows its signature and
+  documentation under a `(standard library @nx/<name>)` label, and completions offer its names only
+  in a file that imports it.
+- Completions inside the opening tag of a record written as an element now offer its fields, as
+  they already did for a component's properties.
+
+### `@nx/agent` (unstable)
+- New. Thirteen product-neutral types for declaring an AI agent, its reference documents and its
+  tools: `Agent`, `Document`, `AgentLimits`, `Tool`, `FunctionTool`, `WebSearchTool`, `ToolContext`,
+  `Connection`, `HttpConnection`, `HttpMethod`, `HttpParam`, `HttpArguments` and `HttpTool`. The
+  library holds types only; a host decides how an agent runs. It is unstable: its declarations may
+  change incompatibly in any release, including a patch release. See
+  [the agent library](https://nxlang.org/reference/libraries/agent).
+
 ## 0.5.0
 The extension now ships with the NX packages, from one tag and at one version, so extension 0.5.0
 understands the same NX as `@nx-lang/sdk-wasm` and `NxLang.Sdk` 0.5.0. This is why the version

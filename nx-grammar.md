@@ -49,6 +49,11 @@ trailing root `Element` for rendered markup. Imports target libraries rather tha
 files. A local library is a directory containing `.nx` files, and every `.nx` file under that
 directory contributes declarations to the imported library recursively.
 
+A library path whose first segment is `@nx` names a standard library, NX source the compiler
+carries: `import "@nx/agent"`. Such a path is never resolved relative to the importing module, so it
+is written the same way from a module at any depth, and only the two-segment form `@nx/<name>` names
+a library. The whole `@nx/` root is reserved for the prelude and the standard libraries.
+
 Imports introduce unqualified names by default. `import "<library>" as Prefix` keeps imported names
 under `Prefix.Name`, while `import { Name as Prefix.Name } from "<library>"` adds a qualified
 prefix for just that imported declaration. The qualified selective alias must contain exactly one

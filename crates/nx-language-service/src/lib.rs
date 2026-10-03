@@ -520,12 +520,16 @@ impl WorkspaceSnapshot {
                     .properties
                     .iter()
                     .find(|declared| declared.name == property)?;
+                let origin = &scope.element(tag)?.origin.0;
                 Some(hover::with_doc(
-                    hover::fenced(hover::property(
-                        Some(tag),
-                        &declared.name,
-                        declared.optional,
-                        &declared.display_type,
+                    hover::fenced(hover::with_origin_label(
+                        origin,
+                        hover::property(
+                            Some(tag),
+                            &declared.name,
+                            declared.optional,
+                            &declared.display_type,
+                        ),
                     )),
                     declared.doc.as_deref(),
                 ))
@@ -612,7 +616,9 @@ impl WorkspaceSnapshot {
                 hover::builtin_type_label("built-in type")
             ))
         } else {
-            hover::fenced(signature)
+            // A standard library's declaration says which library it is from, since the author
+            // has no file of it to open.
+            hover::fenced(hover::with_origin_label(&declaration.origin.0, signature))
         };
         content = hover::with_doc(content, declaration.doc.as_deref());
         // What the declaration accepts beyond what it wrote: the chain it extends, and each
@@ -863,11 +869,9 @@ impl WorkspaceSnapshot {
                 }
             }
             positions::PositionContext::PropertyName { tag, supplied, .. } => {
-                match scope
-                    .visible
-                    .get(tag)
-                    .filter(|declaration| declaration.kind == DocumentSymbolKind::Component)
-                {
+                // A record written as an element takes its fields as properties, exactly as a
+                // component takes its own.
+                match scope.element(tag) {
                     Some(declaration) => property_completion_items(PropertyCompletionContext {
                         properties: declaration.properties.clone(),
                         supplied: supplied.clone(),
@@ -1099,6 +1103,28 @@ impl WorkspaceSnapshot {
         };
         let modules = analyze_workspace_modules(&workspace, &self.build_context);
 
+        // A standard library is indexed only when something reaches it: a document's import of
+        // it, written or implicit (a synthesized implicit import is among the module's imports),
+        // or a visible library that depends on it. No build context is needed for either.
+        let visible_libraries = self.build_context.visible_libraries();
+        let standard_libraries = nx_api::standard_libraries()
+            .iter()
+            .filter(|standard| {
+                modules.iter().any(|module| {
+                    module
+                        .imports
+                        .iter()
+                        .any(|import| import.library_path.trim() == standard.root)
+                }) || visible_libraries.iter().any(|library| {
+                    library
+                        .dependency_roots
+                        .iter()
+                        .any(|root| root.to_str() == Some(standard.root))
+                })
+            })
+            .map(|standard| Arc::clone(standard.artifact()))
+            .collect::<Vec<_>>();
+
         let mut declarations = WorkspaceDeclarations::default();
         for module in modules {
             declarations.index_module(module);
@@ -1111,7 +1137,8 @@ impl WorkspaceSnapshot {
         // The prelude is one of the program's libraries, so its declarations are indexed like a
         // library's: the bindings above already name them, and this is what those origins point at.
         for library in std::iter::once(Arc::clone(nx_api::prelude_library()))
-            .chain(self.build_context.visible_libraries())
+            .chain(standard_libraries)
+            .chain(visible_libraries)
         {
             for module in &library.modules {
                 if declarations.artifacts.contains_key(&module.file_name) {
@@ -5897,5 +5924,169 @@ component <SearchBox placeholder:string /> = {
             serde_json::to_string(&item).unwrap(),
             r#"{"label":"add","kind":"Declaration","detail":null}"#
         );
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // Standard libraries
+    // --------------------------------------------------------------------------------------------
+
+    const AGENT_URI: &str = "nx://tenant/agent.nx";
+    const AGENT_IMPORT: &str = "import \"@nx/agent\"\n";
+
+    fn agent_snapshot(marked: &str, implicit: bool) -> (WorkspaceSnapshot, TextPosition) {
+        let (source, position) = position_for(marked, CURSOR);
+        let snapshot = snapshot_for(AGENT_URI, &source, 1);
+        let snapshot = if implicit {
+            snapshot.with_build_context(
+                ProgramBuildContext::empty().with_implicit_imports(["@nx/agent"]),
+            )
+        } else {
+            snapshot
+        };
+        assert_fixture_parses(&snapshot, &source);
+        (snapshot, position)
+    }
+
+    fn agent_hover(marked: &str, implicit: bool) -> String {
+        let (snapshot, position) = agent_snapshot(marked, implicit);
+        snapshot
+            .hover(&DocumentUri::from(AGENT_URI), position)
+            .expect("hover")
+            .expect("a hover answer")
+            .contents
+    }
+
+    fn agent_completions(marked: &str) -> Vec<CompletionItem> {
+        let (snapshot, position) = agent_snapshot(marked, false);
+        snapshot
+            .completions(&DocumentUri::from(AGENT_URI), position)
+            .expect("completions")
+            .items
+    }
+
+    #[test]
+    fn hover_describes_an_imported_standard_library_type_with_no_build_context() {
+        let contents = agent_hover(
+            &format!("{AGENT_IMPORT}let a = <Age⟨cursor⟩nt name=\"support\">Be brief.</Agent>\n"),
+            false,
+        );
+        assert!(
+            contents.contains("(standard library @nx/agent)"),
+            "got: {contents}"
+        );
+        assert!(contents.contains("type Agent"), "got: {contents}");
+        assert!(
+            contents.contains("A reusable definition of an agent"),
+            "got: {contents}"
+        );
+    }
+
+    #[test]
+    fn hover_describes_a_field_of_a_standard_library_type() {
+        let contents = agent_hover(
+            &format!(
+                "{AGENT_IMPORT}let a = <Agent name=\"support\" mo⟨cursor⟩del=\"fast\">Be brief.</Agent>\n"
+            ),
+            false,
+        );
+        assert!(
+            contents.contains("(standard library @nx/agent)"),
+            "got: {contents}"
+        );
+        assert!(
+            contents.contains("(property) Agent.model?: string"),
+            "got: {contents}"
+        );
+        assert!(contents.contains("The model to run."), "got: {contents}");
+    }
+
+    #[test]
+    fn completions_offer_a_standard_library_elements_properties_with_their_documentation() {
+        let items = agent_completions(&format!(
+            "{AGENT_IMPORT}<Agent name=\"support\" ⟨cursor⟩/>\n"
+        ));
+        for name in [
+            "description",
+            "model",
+            "documents",
+            "tools",
+            "limits",
+            "instructions",
+        ] {
+            let item = items
+                .iter()
+                .find(|item| item.label == name)
+                .unwrap_or_else(|| panic!("'{name}' is offered: {items:?}"));
+            assert!(item.documentation.is_some(), "'{name}' is documented");
+        }
+
+        // A subtype's inherited properties are offered with its own.
+        let labels = agent_completions(&format!("{AGENT_IMPORT}<FunctionTool ⟨cursor⟩/>\n"))
+            .into_iter()
+            .map(|item| item.label)
+            .collect::<Vec<_>>();
+        for name in ["function", "name", "description"] {
+            assert!(labels.contains(&name.to_string()), "got: {labels:?}");
+        }
+    }
+
+    #[test]
+    fn a_standard_library_is_offered_only_where_it_is_in_scope() {
+        let labels = |marked: &str| {
+            agent_completions(marked)
+                .into_iter()
+                .map(|item| item.label)
+                .collect::<Vec<_>>()
+        };
+        let without = labels("let a = <⟨cursor⟩Card />\nlet <Card /> = <div />\n");
+        for name in ["Agent", "Tool", "Document"] {
+            assert!(!without.contains(&name.to_string()), "got: {without:?}");
+        }
+        let with = labels(&format!(
+            "{AGENT_IMPORT}let a = <⟨cursor⟩Card />\nlet <Card /> = <div />\n"
+        ));
+        for name in ["Agent", "Document"] {
+            assert!(with.contains(&name.to_string()), "got: {with:?}");
+        }
+    }
+
+    #[test]
+    fn an_implicit_import_puts_a_standard_library_in_scope() {
+        let marked = "let a = <Age⟨cursor⟩nt name=\"support\">Be brief.</Agent>\n";
+        let (snapshot, _) = agent_snapshot(marked, true);
+        let diagnostics = snapshot.diagnostics().expect("diagnostics");
+        assert!(
+            diagnostics
+                .iter()
+                .all(|document| document.diagnostics.is_empty()),
+            "{diagnostics:?}"
+        );
+        let contents = agent_hover(marked, true);
+        assert!(
+            contents.contains("(standard library @nx/agent)") && contents.contains("type Agent"),
+            "got: {contents}"
+        );
+    }
+
+    #[test]
+    fn an_unknown_standard_library_is_reported_at_the_import() {
+        let snapshot = snapshot_for(
+            AGENT_URI,
+            "import \"@nx/automation\"\nlet root() = { 1 }\n",
+            1,
+        );
+        let diagnostics = snapshot.diagnostics().expect("diagnostics");
+        let reported = diagnostics
+            .iter()
+            .flat_map(|document| &document.diagnostics)
+            .collect::<Vec<_>>();
+        assert_eq!(reported.len(), 1, "{reported:?}");
+        assert_eq!(
+            reported[0].code.as_deref(),
+            Some("unknown-standard-library")
+        );
+        assert!(reported[0].message.contains("@nx/automation"));
+        assert!(reported[0].message.contains("@nx/agent"));
+        assert_eq!(reported[0].range.start.line, 0);
     }
 }

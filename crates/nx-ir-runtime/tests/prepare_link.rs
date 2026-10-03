@@ -558,3 +558,189 @@ fn expression_nesting_ends_in_a_diagnostic_not_a_stack_overflow() {
         Some("main.nx::root")
     );
 }
+
+// ------------------------------------------------------------------------------------------------
+// The agent library: a standard library's image is supplied by the host like any library module's
+// ------------------------------------------------------------------------------------------------
+
+const AGENT_MODULE: &str = "@nx/agent/agent.nx";
+
+fn json(text: &str) -> NxValue {
+    NxValue::from_json_str(text).unwrap_or_else(|error| panic!("{text}: {error}"))
+}
+
+fn arguments(text: &str) -> BTreeMap<String, NxValue> {
+    match json(text) {
+        NxValue::Record { properties, .. } => properties,
+        other => panic!("expected an object, got {other:?}"),
+    }
+}
+
+fn at<'a>(value: &'a NxValue, path: &[&str]) -> &'a NxValue {
+    path.iter().fold(value, |value, step| match value {
+        NxValue::Record { properties, .. } => properties
+            .get(*step)
+            .unwrap_or_else(|| panic!("no '{step}' in {value:?}")),
+        NxValue::Array(items) => &items[step.parse::<usize>().expect("an index")],
+        other => panic!("cannot read '{step}' of {other:?}"),
+    })
+}
+
+#[test]
+fn the_agent_example_links_its_library_image_and_its_tools_are_callable() {
+    let corpus = corpus_program("agent-library");
+    let entry = PreparedModule::prepare(image(&corpus, "main.nx")).expect("prepares");
+    let library = PreparedModule::prepare(image(&corpus, AGENT_MODULE)).expect("prepares");
+    assert!(artifact(&image(&corpus, AGENT_MODULE))
+        .required_features
+        .iter()
+        .any(|feature| feature == "function-reference-type-v1"));
+
+    let program = Program::link(
+        &entry,
+        |identity| (identity == AGENT_MODULE).then(|| library.clone()),
+        &LinkOptions::default(),
+    )
+    .expect("links");
+    let options = RuntimeOptions::default();
+    let agent = program
+        .evaluate_function("root", &[], &options)
+        .expect("root evaluates");
+
+    assert!(canonical_eq(
+        at(&agent, &["documents", "0"]),
+        &json(
+            r#"{ "$type": "Document", "title": "Refund policy",
+                 "text": "Refunds are available within 30 days of purchase." }"#
+        )
+    ));
+    assert!(matches!(
+        at(&agent, &["instructions"]),
+        NxValue::String(text) if text.starts_with("You are the support assistant for Example.\n")
+    ));
+
+    let find_plans = at(&agent, &["tools", "1", "function"]);
+    assert!(canonical_eq(
+        find_plans,
+        &json(r#"{ "$type": "Function", "module": "main.nx", "name": "findPlans" }"#)
+    ));
+    let plans = program
+        .call_function(find_plans, &arguments(r#"{ "teamSize": 4 }"#), &options)
+        .expect("findPlans runs");
+    assert!(canonical_eq(
+        &plans,
+        &json(r#"[{ "$type": "Plan", "name": "Team", "seats": 4, "monthlyPrice": 20 }]"#)
+    ));
+
+    let lookup = program
+        .call_function(
+            at(&agent, &["tools", "2", "arguments"]),
+            &arguments(r#"{ "orderId": "A-1" }"#),
+            &options,
+        )
+        .expect("lookupOrder runs");
+    assert!(canonical_eq(
+        &lookup,
+        &json(
+            r#"{ "$type": "HttpArguments",
+                 "pathParams": [{ "$type": "HttpParam", "name": "orderId", "value": "A-1" }] }"#
+        )
+    ));
+
+    let ticket = program
+        .call_function(
+            at(&agent, &["tools", "3", "arguments"]),
+            &arguments(r#"{ "subject": "Late order" }"#),
+            &options,
+        )
+        .expect("openTicket runs");
+    assert!(canonical_eq(
+        &ticket,
+        &json(
+            r#"{ "$type": "HttpArguments",
+                 "body": { "$type": "NewTicket", "subject": "Late order", "priority": 2 } }"#
+        )
+    ));
+}
+
+#[test]
+fn a_missing_or_mismatched_agent_library_image_fails_the_link() {
+    let corpus = corpus_program("agent-library");
+    let entry = PreparedModule::prepare(image(&corpus, "main.nx")).expect("prepares");
+
+    // No runtime carries a standard library's image: nothing stands in for the one the host did
+    // not supply.
+    let error = error_of(Program::link(&entry, no_modules, &LinkOptions::default()));
+    assert_eq!(codes(&error), ["nx-ir-link-missing-module"]);
+    assert!(error.to_string().contains(AGENT_MODULE), "{error}");
+
+    let other = PreparedModule::prepare(rewritten(&image(&corpus, AGENT_MODULE), |artifact| {
+        artifact.modules[0].version = "0000000000000000".to_string();
+    }))
+    .expect("prepares");
+    let error = error_of(Program::link(
+        &entry,
+        |_| Some(other.clone()),
+        &LinkOptions::default(),
+    ));
+    assert_eq!(codes(&error), ["nx-ir-link-version"]);
+    assert!(error.to_string().contains(AGENT_MODULE), "{error}");
+
+    Program::link(
+        &entry,
+        |_| Some(other.clone()),
+        &LinkOptions {
+            allow_version_mismatch: true,
+        },
+    )
+    .expect("links across versions when the host allows it")
+    .evaluate_function("root", &[], &RuntimeOptions::default())
+    .expect("root evaluates");
+}
+
+#[test]
+fn a_tool_function_takes_the_host_context_by_its_subtype_or_its_base() {
+    let corpus = corpus_program("agent-tool-context");
+    let modules = prepare_all(&corpus.stripped_images);
+    let program = common::link(&modules, "main.nx");
+    let options = RuntimeOptions::default();
+    let agent = program
+        .evaluate_function("root", &[], &options)
+        .expect("root evaluates");
+    assert_eq!(
+        at(&agent, &["model"]),
+        &NxValue::String("any-model-name-at-all".into())
+    );
+
+    // The host builds the context record with the `$type` of its concrete subtype, declared in a
+    // module other than the abstract base.
+    let context = r#"{ "context": { "$type": "ChatToolContext", "callId": "call-1",
+                                    "conversationId": "conv-7" } }"#;
+    let who = at(&agent, &["tools", "0", "function"]);
+    assert_eq!(
+        program.call_function(who, &arguments(context), &options),
+        Ok(NxValue::String("conv-7".into()))
+    );
+    // A parameter typed by the abstract base accepts the host's subtype.
+    let call_id = at(&agent, &["tools", "1", "function"]);
+    assert_eq!(
+        program.call_function(call_id, &arguments(context), &options),
+        Ok(NxValue::String("call-1".into()))
+    );
+    // A function tool of another signature, with its optional parameter left out.
+    let seats = at(&agent, &["tools", "2", "function"]);
+    assert!(canonical_eq(
+        &program
+            .call_function(seats, &arguments(r#"{ "teamSize": 4 }"#), &options)
+            .expect("seatCount runs"),
+        &NxValue::Int(4)
+    ));
+}
+
+#[test]
+fn the_agent_library_image_is_the_same_from_either_corpus_program() {
+    assert_eq!(
+        image(&corpus_program("agent-library"), AGENT_MODULE),
+        image(&corpus_program("agent-tool-context"), AGENT_MODULE)
+    );
+}

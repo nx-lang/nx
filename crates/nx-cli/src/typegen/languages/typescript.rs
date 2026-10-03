@@ -147,6 +147,10 @@ pub(crate) fn collect_warnings(
         let emitted_imports = collect_module_imports(module, &import_context);
 
         for imported_type in &module.imported_types {
+            // A standard library's package is fixed, not assumed.
+            if nx_api::standard_library_entry(&imported_type.library_name).is_some() {
+                continue;
+            }
             let package_target =
                 assumed_dependency_package_for_library(package_prefix, &imported_type.library_name);
             if !emitted_imports.contains_key(&package_target) {
@@ -1147,6 +1151,11 @@ fn assumed_dependency_package_for_library(
     package_prefix: Option<&str>,
     library_name: &str,
 ) -> String {
+    // A standard library's types are published in one package, whatever prefix the host's own
+    // libraries are published under.
+    if let Some(library) = nx_api::standard_library_entry(library_name) {
+        return library.typescript_package.to_string();
+    }
     format!(
         "{}{}",
         package_prefix.unwrap_or_default(),

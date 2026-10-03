@@ -225,6 +225,44 @@ const program = linkNxIrProgram(prepareNxIrModule(entry.bytes), {
 });
 ```
 
+## Standard libraries
+
+A standard library is NX source the module itself carries, imported by a reserved name:
+`import "@nx/agent"`. Nothing is loaded for it. Every entry point that analyzes or builds NX resolves
+it with no registry, build context or option, and a `loadLibrary` whose root lies under `@nx/` is
+refused with `library-root-reserved`. A path under `@nx/` that names no standard library is
+reported as `unknown-standard-library`, listing those that exist.
+
+`@nx/agent` is the first: product-neutral types for declaring an AI agent, its documents and its
+tools. It is **unstable**, so its declarations may change incompatibly in any release, including a
+patch release; a host gets a change only by moving its pin of the NX packages.
+
+```ts
+const registry = host.createLibraryRegistry();
+// A host library that names an agent type writes the import itself: a module of an implicitly
+// imported library receives no implicit imports.
+registry.loadLibrary({
+  root: "libraries/chat-link",
+  modules: [{ identity: "ChatLink.nx", source: 'import "@nx/agent"\nexport type AssistantConfig = { agent?:Agent }' }]
+});
+// Naming the standard library's root as an implicit import puts it in scope for tenant source, so
+// an authored config needs no import line.
+const context = registry.createBuildContext({ implicitImports: ["libraries/chat-link", "@nx/agent"] });
+const artifact = host.buildWorkspaceArtifact({ modules: tenantModules, entry: "main.nx", buildContext: context });
+
+// The library's image is emitted like any library module's and stored with the program's others;
+// no runtime carries it.
+const images = artifact.generateNxIr({ modules: [] });
+const library = prepareNxIrModule(images.find((image) => image.identity === "@nx/agent/agent.nx")!.bytes);
+const version = library.version; // 16 hex digits derived from the library's source
+```
+
+A program links `@nx/agent/agent.nx` only if something it uses imports the library, and the image
+is the same bytes whichever program emitted it. Its version is read from that image; a host that
+needs it before any tenant compiles builds the one-line source `import "@nx/agent"` and emits the
+library image from it. The library image lists the required feature `function-reference-type-v1`,
+so the runtime that links it must be a release that supports that feature.
+
 ## Evaluating root to NX text
 
 `artifact.evaluateNx()` runs the entry module's `root` and returns `{ text, nodes }`. `text` is the

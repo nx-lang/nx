@@ -7,7 +7,9 @@ the TypeScript runtime's tests and the Rust runtime's tests each evaluate them, 
 refuse every truncation and cell overwrite of them; another runtime starts here. Together the programs cover every node, type,
 constant and declaration kind of the schema, every binary operator and intrinsic, a program
 spanning two images, derived declarations, a snippet compiled against an implicitly imported
-catalog, a document that is a single trailing element, components that bind action handlers, and
+catalog, a document that is a single trailing element, components that bind action handlers, two
+programs that import the standard library `@nx/agent` and emit its image beside their own (the
+library's worked example, and tool functions that take a host context by its subtype or its base),
 a program that declares a function type, passes functions as values and calls them by name, one
 that declares function reference types (`<function ... />: R`), binds functions of unlike
 signatures to them and passes, returns and compares such values, and

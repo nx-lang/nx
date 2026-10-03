@@ -347,10 +347,12 @@ deterministic.
   identity's UTF-8 bytes, a zero byte, and the source's UTF-8 bytes, so the same module fingerprints
   the same whatever emitted it. A JavaScript reader holds it as a `BigInt`, or as its decimal string.
 
-One identity is reserved: `@nx/prelude.nx`, the NX prelude. It is a module the compiler carries
-rather than one a workspace supplies — a workspace that supplies a module under that identity is
-refused — and it holds the declarations every NX module sees without an import, starting with
-`Range`. It is otherwise an ordinary module: an image that constructs a `Range`, names it as a type,
+The whole root `@nx/` is reserved for modules the compiler carries: a workspace that supplies a
+module under it is refused, and so is a host library whose root lies under it. Two kinds of module
+live there, the prelude and the standard libraries.
+
+`@nx/prelude.nx` is the NX prelude. It holds the declarations every NX module sees without an
+import, starting with `Range`. It is otherwise an ordinary module: an image that constructs a `Range`, names it as a type,
 or derives from it lists the prelude in its table and reaches the declaration through that slot, and
 no prelude declaration is ever copied into another module's image. Unlike a library module, whose
 table entry carries the version its host gave it, the prelude's entry carries the compiler's prelude version —
@@ -367,6 +369,25 @@ every module includes it exactly when some module of the program references it �
 uses no prelude declaration emits what it emitted before the prelude existed, byte for byte. The
 image is written under a file name derived from the identity like any module's, which is a legal path
 on every supported platform.
+
+A standard library is NX source the compiler carries and a module imports by name, as
+`import "@nx/agent"`. Its modules are named by the library's root and the module's identity within
+the library, `@nx/agent/agent.nx`, and each is an ordinary linked module: an image that references
+one of its declarations lists the module in its table and reaches the declaration through that
+slot, and nothing of the library is copied into another module's image. An emit request produces a
+standard library module's image when it names the module's identity, and a request for every module
+includes it exactly when the program links the library, so a program that imports no standard
+library emits what it emitted before they existed. The image is the same whichever program it was
+emitted from.
+
+A standard library module's version is derived from the library's source rather than given by a
+host or bumped by hand: the 16 lowercase hexadecimal digits of a 64-bit FNV-1a hash over, for each
+module of the library in identity order, the module's identity within the library, a zero byte, its
+source text and a zero byte. Any edit to the library, a comment included, changes it. That is the
+opposite of the prelude's rule, and for a reason: no runtime carries a standard library's image, so
+there is no built-in copy for a contract number to be compared against. The entry image and the
+library image of one build come from the same compiler and always agree; an image from another
+build is caught by the ordinary version check.
 
 A host asking for a function or component by name looks it up through the entrypoint lists; the
 declaration's own entry gives the name.
@@ -596,6 +617,11 @@ is a different contract from the one the image was compiled against is reported 
 is checked the same way. A host that wants its own prelude returns a prepared module for that
 identity, and linking uses it instead. Another runtime gets the image by naming the prelude's
 identity in an emit request.
+
+A standard library module is not supplied this way. No runtime carries its image: the host emits it
+with the program's other images and its resolver returns it, as for any library module, and a
+resolver that returns nothing for `@nx/agent/agent.nx` fails the link with
+`nx-ir-link-missing-module`.
 
 ## Worked example
 

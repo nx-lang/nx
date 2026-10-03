@@ -2466,6 +2466,137 @@ fn the_prelude_identity_is_a_valid_file_name_everywhere() {
 }
 
 // ------------------------------------------------------------------------------------------------
+// A standard library as a linked module
+// ------------------------------------------------------------------------------------------------
+
+const AGENT_MODULE: &str = "@nx/agent/agent.nx";
+
+const AGENT_PROGRAM: &str =
+    "import \"@nx/agent\"\nlet root() = { <Agent name=\"support\">Be brief.</Agent> }";
+
+fn agent_library_image(artifact: &ProgramArtifact) -> Vec<u8> {
+    let mut images = emit_nx_ir(
+        artifact,
+        &NxIrEmitOptions {
+            modules: Some(vec![AGENT_MODULE.to_string()]),
+            debug: true,
+        },
+    )
+    .expect("nx ir");
+    assert_eq!(images.len(), 1);
+    let image = images.remove(0);
+    assert_eq!(image.identity, AGENT_MODULE);
+    assert_eq!(image.metadata.identity, AGENT_MODULE);
+    image.bytes
+}
+
+#[test]
+fn a_program_that_uses_the_agent_library_links_it_and_copies_nothing() {
+    let entry = entry_artifact(&artifact_from_source(AGENT_PROGRAM));
+    let library = entry
+        .modules
+        .iter()
+        .skip(1)
+        .find(|entry| entry.identity == AGENT_MODULE)
+        .expect("the module table lists the agent library");
+    let version = nx_api::standard_library_entry("@nx/agent")
+        .expect("the agent library")
+        .version();
+    assert_eq!(library.version, version);
+    assert_eq!(version.len(), 16);
+    assert!(version
+        .chars()
+        .all(|digit| digit.is_ascii_digit() || ('a'..='f').contains(&digit)));
+
+    let text = explain(&entry);
+    assert_contains(&text, "@nx/agent/agent.nx:Agent");
+    assert!(
+        !text.contains("record Agent"),
+        "the entry holds none of the library's declarations:\n{text}"
+    );
+}
+
+#[test]
+fn the_library_image_is_emitted_when_named_and_with_every_module() {
+    let artifact = artifact_from_source(AGENT_PROGRAM);
+    let every = all_artifacts(&artifact);
+    assert_eq!(
+        every.keys().map(String::as_str).collect::<Vec<_>>(),
+        [AGENT_MODULE, "main.nx"]
+    );
+    let library = &every[AGENT_MODULE];
+    assert_eq!(
+        library.modules[0].version,
+        nx_api::standard_library_entry("@nx/agent")
+            .expect("the agent library")
+            .version(),
+        "the library image records its own version"
+    );
+    let text = explain(library);
+    assert_line(&text, "record Agent");
+    assert_line(&text, "record Tool abstract");
+
+    // The image does not depend on the program it was emitted from.
+    let other = artifact_from_workspace(
+        &[
+            (
+                "app/main.nx",
+                "import \"@nx/agent\"\nimport \"./tools.nx\"\nlet root(): Tool+ = { tools() }",
+            ),
+            (
+                "app/tools.nx",
+                "import { Tool, WebSearchTool } from \"@nx/agent\"\nexport let tools(): Tool+ = { <WebSearchTool /> }",
+            ),
+        ],
+        "app/main.nx",
+    );
+    assert_eq!(agent_library_image(&artifact), agent_library_image(&other));
+}
+
+#[test]
+fn the_library_image_requires_the_function_reference_type_and_an_entry_does_not() {
+    let artifact = artifact_from_source(AGENT_PROGRAM);
+    let every = all_artifacts(&artifact);
+    let requires = |identity: &str| {
+        every[identity]
+            .required_features
+            .iter()
+            .any(|feature| feature == NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1)
+    };
+    assert!(requires(AGENT_MODULE));
+    assert!(
+        !requires("main.nx"),
+        "an entry whose own type table holds no function reference type does not list the feature"
+    );
+    assert_contains(
+        &explain(&every[AGENT_MODULE]),
+        NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1,
+    );
+}
+
+/// A program that imports no standard library emits what it emitted before they existed. The
+/// conformance corpus holds that byte for byte; here the check is that no library module is linked
+/// or emitted, even for a module that declares one of the library's names itself.
+#[test]
+fn a_program_that_imports_no_standard_library_emits_none() {
+    let artifact =
+        artifact_from_source("type Tool = { label:string }\nlet root() = { <Tool label=\"x\" /> }");
+    let every = all_artifacts(&artifact);
+    assert_eq!(
+        every.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["main.nx"]
+    );
+    assert_eq!(
+        every["main.nx"]
+            .modules
+            .iter()
+            .map(|entry| entry.identity.as_str())
+            .collect::<Vec<_>>(),
+        ["main.nx"]
+    );
+}
+
+// ------------------------------------------------------------------------------------------------
 // Iterating a range
 // ------------------------------------------------------------------------------------------------
 

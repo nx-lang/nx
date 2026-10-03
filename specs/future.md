@@ -807,22 +807,21 @@ reason that has nothing to do with the position.
 
 ## Editor Completion: Record Tags And Tags Still Being Typed
 
-Property-name completion answers only a closed tag that names a component. Measured against the
-language service with `type Contact = { name:string email?:string }` and
+Property-name completion answers only a closed tag that names a component or a record. Measured
+against the language service with `type Contact = { name:string email?:string }` and
 `component <Card title:string />`:
 
 | At the cursor | Offered |
 | --- | --- |
 | `<Card ⟨here⟩/>` | `title`, with its documentation |
-| `<Contact ⟨here⟩/>` | keywords and names only |
+| `<Contact ⟨here⟩/>` | `name` and `email`, with their documentation |
 | `{ <Card ⟨here⟩ }` | keywords and names only |
 | `let foo = <Contact ⟨here⟩` | keywords and names only |
 
-- **Record and action tags.** `completions` in `crates/nx-language-service/src/lib.rs` offers
-  properties only when `scope.visible[tag]` is a `Component`, while hover goes through
-  `DocumentScope::element`, which also accepts a record. So hovering `name` in `<Contact name="a" />`
-  answers and completing it does not. Neither path accepts an action, though `<Saved id=1 />`
-  constructs one. Completion should use `element`, and `element` should accept actions. The
+- **Action tags.** `completions` in `crates/nx-language-service/src/lib.rs` offers properties through
+  `DocumentScope::element`, as hover does, which accepts a component or a record; record tags were
+  added by `add-agent-library`, whose agent types are all records. Neither path accepts an action,
+  though `<Saved id=1 />` constructs one, so `element` should accept actions. The
   editor-language-service spec promises property completions only "for a known component", so the
   spec widens with it.
 - **A tag still being typed.** Until a tag is closed it does not parse as an `element`, and the
@@ -1803,3 +1802,38 @@ before that change.
 Either way, add a `tsc --strict` case for an element-style and a paren-style function bound at a
 function-typed field, with one and with two parameters, and for a function that declares fewer
 parameters than the type.
+
+## Generated TypeScript: single-file `typegen` imports nothing from a library
+
+**Observed.** `nxlang typegen <file> --language typescript` writes the types a file references from
+an imported library by name, with no `import type` for them and no warning, so the output does not
+compile on its own:
+
+```nx
+import "@nx/agent"
+import "./ui"
+export type Config = { agent?:Agent theme?:Theme }
+```
+
+```ts
+export interface Config extends NxRecord<"Config"> {
+  agent?: Agent;
+  theme?: Theme;
+}
+```
+
+This holds for any library, a directory library (`./ui`) as much as a standard library
+(`@nx/agent`), so it predates standard libraries. Library generation (`typegen <directory>`) does
+write the imports, from `@nx-lang/agent` for a standard library's types and from a package named
+after the directory otherwise. Single-file C# is already right: it qualifies `Agent` as
+`global::NxLang.Agent.Agent` and `Theme` with an assumed namespace, warning about the assumption.
+
+Found as a question in the `add-agent-library` review (`openspec/changes/add-agent-library/review.md`).
+It was left out of that change because fixing it for standard libraries alone would make
+single-file output import some libraries and not others.
+
+**What would settle it.** Give single-file TypeScript output the cross-library imports library
+generation already writes, through the same `ImportedTypeCollector`, with the fixed
+`@nx-lang/agent` target for a standard library and the assumed-package warning for any other. Add a
+`tsc` check of single-file output that references a directory library's type and an `@nx/agent`
+type.

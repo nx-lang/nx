@@ -38,6 +38,8 @@ export let accentName = "hello"
 - Importing the same library path twice in one file is a compile error.
 - If two libraries export the same unqualified name, NX reports an error only when that ambiguous
   name is used.
+- `import "@nx/<name>"` imports a [standard library](#standard-libraries) in any of the forms above.
+  The path is not relative to the importing file, so it is written the same way everywhere.
 - Local directory libraries are supported today. Git directory URLs and HTTP zip URLs parse, but
   currently resolve with a "not yet supported" diagnostic.
 
@@ -52,8 +54,9 @@ NX's built-in types are declared in the **NX prelude**, a module every file impo
 Nothing names it and nothing enables it: its exported declarations are simply in scope in every
 module, in every build — a single file, a workspace, a library, an editor session.
 
-- The prelude lives under the reserved `@nx/` root, as the module `@nx/prelude.nx`. A workspace may
-  not supply a module under that identity.
+- The prelude lives under the reserved `@nx/` root, as the module `@nx/prelude.nx`. The whole root
+  is reserved: a workspace may not supply a module under it, and a host may not load a library
+  there.
 - **Its names are shadowable.** A declaration of your own, or a name from any import you wrote, takes
   the name silently, exactly as it would over a wildcard import. There is no diagnostic and no
   ambiguity: a prelude name is bound last, and only where nothing else claimed it.
@@ -75,6 +78,36 @@ export type Range = {
 
 See [Ranges](/reference/syntax/types#ranges) for what `Range` means and
 [`for`](/reference/syntax/for#counting-with-a-range) for counting over one.
+
+## Standard libraries
+A **standard library** is NX source the compiler carries, like the prelude, but in scope only where
+it is imported. It is named by the reserved root `@nx/<name>`:
+
+```nx
+import "@nx/agent"
+
+let assistant = <Agent name="support">Be brief.</Agent>
+```
+
+- Nothing has to be installed, loaded or enabled. The import resolves in every build and tool: a
+  single file, a workspace, a library, an editor session, `nxlang`.
+- Every import form works: `import "@nx/agent"`, `import "@nx/agent" as Ai`, and
+  `import { Agent, Tool } from "@nx/agent"`.
+- Without the import the library's names are not in scope, so a file that declares its own `Tool`
+  is unaffected. Once imported it behaves as any library does: a name it shares with another import
+  is an error only where the name is used, and importing it twice is a compile error.
+- A path under `@nx/` that names no standard library is an error that lists the ones that exist. A
+  library's modules are not importable on their own, so `import "@nx/agent/agent.nx"` is the same
+  error.
+- A host can put a standard library in scope for the source it compiles, so authored files need no
+  import line.
+
+| Library | Stability | What it holds |
+| --- | --- | --- |
+| [`@nx/agent`](/reference/libraries/agent) | unstable | Types for declaring an AI agent, its documents and its tools |
+
+An **unstable** library may change incompatibly in any NX release, including a patch release. A
+**stable** one changes incompatibly only in a release whose version marks a breaking change.
 
 ## Root Elements
 - A root element at the end of the file behaves like `main`. Tooling can render it immediately or expose it as the module default.

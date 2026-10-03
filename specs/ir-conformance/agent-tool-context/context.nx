@@ -1,0 +1,7 @@
+import "@nx/agent"
+
+/// What a chat host supplies to a tool's function.
+export type ChatToolContext extends ToolContext = {
+  conversationId: string
+  contactEmail?: string
+}

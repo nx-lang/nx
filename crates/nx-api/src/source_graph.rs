@@ -22,9 +22,11 @@ impl LogicalModuleGraph {
         let mut seen = FxHashSet::default();
 
         for (index, module) in modules.iter().enumerate() {
-            if module.identity == nx_hir::PRELUDE_MODULE_IDENTITY {
+            if module.identity.starts_with(nx_hir::NX_RESERVED_ROOT_PREFIX) {
                 return Err(SourceProviderError::Identity(
-                    WorkspaceIdentityError::ReservedPrelude,
+                    WorkspaceIdentityError::ReservedRoot {
+                        identity: module.identity.clone(),
+                    },
                 ));
             }
             if !seen.insert(module.identity.clone()) {
@@ -216,12 +218,36 @@ mod tests {
 
         assert_eq!(
             error,
-            SourceProviderError::Identity(WorkspaceIdentityError::ReservedPrelude)
+            SourceProviderError::Identity(WorkspaceIdentityError::ReservedRoot {
+                identity: nx_hir::PRELUDE_MODULE_IDENTITY.to_string(),
+            })
+        );
+        assert!(
+            error.to_string().contains(nx_hir::NX_RESERVED_ROOT_PREFIX),
+            "the diagnostic names the reserved root: {error}"
         );
         assert!(
             error.to_string().contains(nx_hir::PRELUDE_MODULE_IDENTITY),
             "the diagnostic names the reserved identity: {error}"
         );
+    }
+
+    #[test]
+    fn graph_rejects_every_workspace_module_under_the_reserved_root() {
+        for identity in ["@nx/agent/agent.nx", "@nx/other.nx"] {
+            let error = LogicalModuleGraph::from_modules(vec![LogicalSourceModule {
+                identity: identity.to_string(),
+                source: Arc::<str>::from("export type Tool = { label:string }"),
+                version: None,
+            }])
+            .expect_err("the `@nx/` root is reserved");
+
+            let message = error.to_string();
+            assert!(
+                message.contains(identity) && message.contains("reserved"),
+                "the diagnostic names the identity and says the root is reserved: {message}"
+            );
+        }
     }
 
     #[test]

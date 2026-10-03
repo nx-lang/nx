@@ -244,7 +244,7 @@ pub(crate) enum WorkspaceIdentityError {
     EmptySegment,
     EscapesRoot,
     Duplicate { identity: String },
-    ReservedPrelude,
+    ReservedRoot { identity: String },
 }
 
 impl fmt::Display for WorkspaceIdentityError {
@@ -268,11 +268,12 @@ impl fmt::Display for WorkspaceIdentityError {
                     identity
                 )
             }
-            Self::ReservedPrelude => {
+            Self::ReservedRoot { identity } => {
                 write!(
                     formatter,
-                    "Workspace identity '{}' is reserved for the NX prelude",
-                    nx_hir::PRELUDE_MODULE_IDENTITY
+                    "Workspace identity '{}' lies under '{}', which is reserved for the NX prelude and standard libraries",
+                    identity,
+                    nx_hir::NX_RESERVED_ROOT_PREFIX
                 )
             }
         }

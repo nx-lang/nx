@@ -1,0 +1,19 @@
+module main.nx fingerprint 2760252283875616553
+links context.nx version "" fingerprint 15703603823325835117
+links @nx/agent/agent.nx version "b06c00c30be50ada" fingerprint 11527925250760699671
+requires function-values-v1
+entrypoints functions [whoAmI callIdOf seatCount root] components []
+
+function whoAmI(context: context.nx:ChatToolContext): string =
+  context.conversationId
+
+function callIdOf(context: @nx/agent/agent.nx:ToolContext): string =
+  context.callId
+
+function seatCount(teamSize: int, cap?: int): int =
+  teamSize
+
+function root(): @nx/agent/agent.nx:Agent =
+  <@nx/agent/agent.nx:Agent model="any-model-name-at-all" name="support" tools=[<@nx/agent/agent.nx:FunctionTool function=whoAmI />, <@nx/agent/agent.nx:FunctionTool function=callIdOf />, <@nx/agent/agent.nx:FunctionTool function=seatCount />]>
+    "Be brief."
+  </@nx/agent/agent.nx:Agent>

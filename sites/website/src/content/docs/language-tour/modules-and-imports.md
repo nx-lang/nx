@@ -62,6 +62,21 @@ The prelude sits under the reserved `@nx/` root. Its names are shadowable: decla
 and yours wins, silently, with no ambiguity — though `..` and `..=` then stop working in that file,
 because they construct the built-in one.
 
+## Standard libraries
+
+Some libraries ship with NX itself. They live under the same reserved `@nx/` root, but unlike the
+prelude they are in scope only where you import them:
+
+```nx
+import "@nx/agent"
+
+let assistant = <Agent name="support">Be brief.</Agent>
+```
+
+The path is a name, not a relative path, so it is written the same way in every file. The first
+standard library is [`@nx/agent`](/reference/libraries/agent), which declares the types for an AI
+agent and its tools.
+
 ## Root element
 
 ```nx
@@ -75,6 +90,7 @@ If present, the final element is the module’s rendered output or default expor
 
 ## See also (Reference/Grammar)
 - Reference: [Modules](/reference/syntax/modules)
+- Reference: [The agent library](/reference/libraries/agent)
 - Reference: [Ranges](/reference/syntax/types#ranges)
 - Reference: [Functions & Components](/reference/syntax/functions)
 - Grammar: [nx-grammar.md – Module Definition](https://github.com/nx-lang/nx/blob/main/nx-grammar.md#module-definition)

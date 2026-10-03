@@ -231,6 +231,47 @@ Only `root()` evaluation is exposed initially. Named entrypoint requests throw a
 `NxEvaluationError` with an `unsupported-entrypoint` diagnostic rather than performing
 JavaScript-side declaration lookup.
 
+## Standard Libraries
+
+A standard library is NX source the SDK itself carries, imported by a reserved name:
+`import "@nx/agent"`. Nothing is loaded for it. Every build, validation and language snapshot
+resolves it with no registry or build context, and a library load whose root lies under `@nx/` is
+refused with `library-root-reserved`. A path under `@nx/` that names no standard library is
+reported as `unknown-standard-library`, listing those that exist.
+
+`@nx/agent` is the first: product-neutral types for declaring an AI agent, its documents and its
+tools. It is **unstable**, so its declarations may change incompatibly in any release, including a
+patch release; a host gets a change only by moving its pin of the NX packages.
+
+```ts
+const registry = new NxLibraryRegistry();
+// A host library that names an agent type writes the import itself: a module of an implicitly
+// imported library receives no implicit imports.
+registry.loadLibraries([
+  {
+    root: "libraries/chat-link",
+    modules: [{ identity: "ChatLink.nx", source: 'import "@nx/agent"\nexport type AssistantConfig = { agent?:Agent }' }]
+  }
+]);
+const buildContext = registry.createBuildContext();
+// Naming the standard library's root as an implicit import puts it in scope for tenant source.
+const artifact = NxProgramArtifact.buildWorkspace(workspace, {
+  buildContext,
+  entryIdentity: "main.nx",
+  implicitImports: ["libraries/chat-link", "@nx/agent"]
+});
+
+// The library's image is emitted like any library module's; no runtime carries it.
+const images = artifact.generateNxIr({ modules: [] });
+const library = images.find((image) => image.identity === "@nx/agent/agent.nx");
+```
+
+A program links `@nx/agent/agent.nx` only if something it uses imports the library, and the image
+is the same bytes whichever program emitted it. The version recorded in the image, 16 hex digits
+derived from the library's source, is what `@nx-lang/ir-runtime` compares at link time; read it
+from the prepared module (`prepareNxIrModule(library.bytes).version`). The library image lists the
+required feature `function-reference-type-v1`.
+
 ## Diagnostics and Errors
 
 Validation returns `NxDiagnostic[]` as data. Build, IR generation, and evaluation failures throw

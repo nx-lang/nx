@@ -1,0 +1,29 @@
+import "@nx/agent"
+
+// An agent is data: who answers, with what reference text and which tools.
+// A host reads this value and runs the agent. NX runs nothing here.
+
+type Plan = { name:string seats:int monthlyPrice:int }
+
+/// Finds the plans that fit a team.
+let findPlans(
+  /// Number of people who need a seat.
+  teamSize: int
+): Plan* = { <Plan name="Team" seats={teamSize} monthlyPrice=20 /> }
+
+let refundPolicy =
+  <Document:markdown title="Refund policy">
+    Refunds are available within 30 days of purchase.
+  </Document>
+
+let root(): Agent = {
+  <Agent:markdown name="support" model="balanced"
+      documents={ refundPolicy }
+      tools={
+        <WebSearchTool allowedDomains={ "docs.example.com" } />
+        <FunctionTool function={findPlans} />
+      }
+      limits={ <AgentLimits maxSteps=6 /> }>
+    You are the support assistant. Answer from the documents.
+  </Agent>
+}

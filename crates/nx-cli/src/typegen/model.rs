@@ -1319,9 +1319,14 @@ impl ImportedTypeCollector {
             return cached.clone();
         }
 
-        let loaded = self
-            .registry
-            .load_library_artifact(dependency_root)
+        // A standard library is the compiler's own snapshot; there is no directory to load.
+        let standard = dependency_root
+            .to_str()
+            .and_then(nx_api::standard_library)
+            .cloned();
+        let loaded = standard
+            .map(Ok)
+            .unwrap_or_else(|| self.registry.load_library_artifact(dependency_root))
             .map_err(|error| {
                 format!(
                     "failed to build library artifact for '{}': {}",
@@ -1566,6 +1571,10 @@ impl ImportedTypeCollector {
 }
 
 fn resolve_dependency_root(source_path: &Path, library_path: &str) -> std::io::Result<PathBuf> {
+    // A standard library is named by its root from any module, never by a path beside the importer.
+    if let Some(library) = nx_api::standard_library_entry(library_path.trim()) {
+        return Ok(PathBuf::from(library.root));
+    }
     let candidate = if Path::new(library_path).is_absolute() {
         PathBuf::from(library_path)
     } else {
@@ -1767,16 +1776,24 @@ fn build_cached_imported_library(
     dependency: &LibraryArtifact,
     dependency_root: &Path,
 ) -> Result<CachedImportedLibrary, String> {
-    let library_name = dependency_root
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| {
-            format!(
-                "dependency root '{}' does not have a valid UTF-8 directory name",
-                dependency_root.display()
-            )
-        })?
-        .to_string();
+    // A standard library keeps its whole root as its name, which is what the writers recognize to
+    // emit its fixed package and namespace instead of ones assumed from a directory name.
+    let standard = dependency_root
+        .to_str()
+        .and_then(nx_api::standard_library_entry);
+    let library_name = match standard {
+        Some(library) => library.root.to_string(),
+        None => dependency_root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| {
+                format!(
+                    "dependency root '{}' does not have a valid UTF-8 directory name",
+                    dependency_root.display()
+                )
+            })?
+            .to_string(),
+    };
     let mut export_kinds = FxHashMap::default();
     let mut derived_exports = FxHashSet::default();
     let mut constant_unions = FxHashSet::default();

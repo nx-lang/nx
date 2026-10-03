@@ -1,0 +1,66 @@
+{
+  "main.nx::root": {
+    "$type": "Agent",
+    "documents": [
+      {
+        "$type": "Document",
+        "text": "Refunds are available within 30 days of purchase.",
+        "title": "Refund policy"
+      }
+    ],
+    "instructions": "You are the support assistant for Example.\nAnswer from the documents and the documentation site. Offer a call when you cannot help.",
+    "limits": {
+      "$type": "AgentLimits",
+      "maxSteps": 6
+    },
+    "model": "balanced",
+    "name": "support",
+    "tools": [
+      {
+        "$type": "WebSearchTool",
+        "allowedDomains": [
+          "docs.example.com"
+        ]
+      },
+      {
+        "$type": "FunctionTool",
+        "function": {
+          "$type": "Function",
+          "module": "main.nx",
+          "name": "findPlans"
+        }
+      },
+      {
+        "$type": "HttpTool",
+        "arguments": {
+          "$type": "Function",
+          "module": "main.nx",
+          "name": "lookupOrder"
+        },
+        "connection": {
+          "$type": "HttpConnection",
+          "baseUrl": "https://api.example.com",
+          "name": "shop"
+        },
+        "method": "get",
+        "path": "/orders/{orderId}"
+      },
+      {
+        "$type": "HttpTool",
+        "arguments": {
+          "$type": "Function",
+          "module": "main.nx",
+          "name": "openTicket"
+        },
+        "connection": {
+          "$type": "HttpConnection",
+          "baseUrl": "https://api.example.com",
+          "name": "shop"
+        },
+        "maxCallsPerConversation": 1,
+        "method": "post",
+        "path": "/tickets"
+      }
+    ]
+  }
+}

@@ -10,7 +10,8 @@ use nx_api::{
     dispatch_component_actions_program_artifact, eval_program_artifact_function,
     evaluate_component_program_artifact, initialize_component_program_artifact,
     ComponentDispatchEvalResult, ComponentEvaluateEvalResult, ComponentInitEvalResult, EvalResult,
-    NxWorkspace, NxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
+    LibraryRegistry, NxLibraryModule, NxLibrarySource, NxWorkspace, NxWorkspaceModule,
+    ProgramArtifact, ProgramBuildContext,
 };
 use nx_ir_runtime::{
     apply, diff, merge, ComponentInit, LinkOptions, NxIrRuntimeError, PreparedModule, Program,
@@ -351,6 +352,107 @@ fn a_function_record_is_called_by_parameter_name() {
         program.call_function(&NxValue::Int(1), &BTreeMap::new(), &options()),
         "nx-ir-function-value",
         &[],
+    );
+}
+
+// ------------------------------------------------------------------------------------------------
+// The agent library and a host library that extends it
+// ------------------------------------------------------------------------------------------------
+
+/// Builds `source` as `main.nx` against a host library that imports `@nx/agent`, with both
+/// implicitly imported, and links every emitted module.
+fn agent_host_program(host_modules: &[(&str, &str)], source: &str) -> Program {
+    let registry = LibraryRegistry::new();
+    registry
+        .load_library_from_sources(&NxLibrarySource::new(
+            "libraries/chat-link",
+            host_modules
+                .iter()
+                .map(|(identity, source)| NxLibraryModule::new(*identity, *source))
+                .collect(),
+        ))
+        .unwrap_or_else(|diagnostics| panic!("host library: {diagnostics:?}"));
+    let workspace = NxWorkspace::new(vec![
+        NxWorkspaceModule::from_source("main.nx", source).expect("module")
+    ])
+    .expect("workspace");
+    let context = registry
+        .build_context()
+        .with_implicit_imports(["libraries/chat-link", "@nx/agent"]);
+    let artifact = build_workspace_program_artifact(&workspace, "main.nx", &context)
+        .unwrap_or_else(|diagnostics| panic!("{diagnostics:?}"));
+    link(&artifact, false)
+}
+
+/// A `Tool+` field holding a subtype a host library declares. The HIR interpreter rejects this
+/// ("expected Tool, got RecordSearchTool") when the subtype and its abstract base are declared in
+/// different modules, so the case is held on the IR runtime.
+#[test]
+fn a_tool_list_holds_a_subtype_declared_in_a_host_library() {
+    let program = agent_host_program(
+        &[(
+            "Tools.nx",
+            "import \"@nx/agent\"\n\
+             export type RecordSearchTool extends Tool = { recordKind:string maxResults:int = 5 }",
+        )],
+        "let findPlans(teamSize:int): string* = { \"Team\" }
+         let root() = {
+           <Agent name=\"support\" tools={
+             <WebSearchTool />
+             <RecordSearchTool recordKind=\"company\" />
+             <FunctionTool function={findPlans} />
+           }>Be brief.</Agent>
+         }",
+    );
+    assert_eq!(
+        program.modules().collect::<Vec<_>>(),
+        [
+            "main.nx",
+            "@nx/agent/agent.nx",
+            "libraries/chat-link/Tools.nx"
+        ]
+    );
+    let agent = program.evaluate_function("root", &[], &options()).unwrap();
+    assert_same(
+        at(&agent, &["tools"]),
+        r#"[
+            { "$type": "WebSearchTool" },
+            { "$type": "RecordSearchTool", "recordKind": "company", "maxResults": 5 },
+            { "$type": "FunctionTool",
+              "function": { "$type": "Function", "module": "main.nx", "name": "findPlans" } }
+        ]"#,
+    );
+}
+
+/// A library default that names a value of another module of the library: ReachMe's
+/// `agent: Agent = {surveyAgent}`. The HIR interpreter resolves the default in the wrong module's
+/// scope ("Undefined variable: surveyAgent"), so the case is held on the IR runtime.
+#[test]
+fn an_omitted_property_takes_a_library_default_that_names_a_library_agent() {
+    let program = agent_host_program(
+        &[
+            (
+                "Agents.nx",
+                "import \"@nx/agent\"\n\
+                 export let surveyAgent: Agent = <Agent:markdown name=\"survey\">Ask one question at a time.</Agent>",
+            ),
+            (
+                "Steps.nx",
+                "import \"@nx/agent\"\n\
+                 export abstract external component <FlowStep id:string />\n\
+                 export external component <AgentStep extends FlowStep agent: Agent = {surveyAgent} content prompt: string />",
+            ),
+        ],
+        "let root() = { <AgentStep id=\"a\">Ask for the order number.</AgentStep> }",
+    );
+    let step = program.evaluate_function("root", &[], &options()).unwrap();
+    assert_same(
+        at(&step, &["agent"]),
+        r#"{ "$type": "Agent", "name": "survey", "instructions": "Ask one question at a time." }"#,
+    );
+    assert_eq!(
+        at(&step, &["prompt"]),
+        &NxValue::String("Ask for the order number.".into())
     );
 }
 

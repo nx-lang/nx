@@ -312,29 +312,19 @@ fn module_version(program: &CodegenProgram, module: &CodegenModule) -> String {
 /// The fingerprint of a module: a hash of its identity and source text, so a regenerated module
 /// with the same text keeps its fingerprint and one with different text does not.
 ///
-/// <para>The hash is FNV-1a over the identity, a zero byte, and the source. It is spelled out here
-/// rather than taken from `DefaultHasher`, whose algorithm the standard library explicitly does not
-/// promise across releases: the fingerprint travels in the artifact, so the same source must hash
-/// the same whatever toolchain emitted it. `docs/nx-ir-format.md` says so as part of the format.
-/// </para>
+/// <para>The hash is FNV-1a over the identity, a zero byte, and the source, so the same source
+/// hashes the same whatever toolchain emitted it. `docs/nx-ir-format.md` says so as part of the
+/// format.</para>
 fn module_fingerprint(program: &CodegenProgram, module: &CodegenModule) -> u64 {
-    const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
-    const PRIME: u64 = 0x0000_0100_0000_01b3;
-    let mut hash = OFFSET_BASIS;
-    let mut write = |bytes: &[u8]| {
-        for byte in bytes {
-            hash ^= u64::from(*byte);
-            hash = hash.wrapping_mul(PRIME);
-        }
-    };
-    write(module_identity(module).as_bytes());
-    write(&[0]);
-    write(
+    let mut hasher = nx_hir::Fnv1a64::new();
+    hasher.write(module_identity(module).as_bytes());
+    hasher.write(&[0]);
+    hasher.write(
         module_source(program, module)
             .unwrap_or_default()
             .as_bytes(),
     );
-    hash
+    hasher.finish()
 }
 
 /// The features a runtime must support to run `module`.

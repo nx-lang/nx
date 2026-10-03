@@ -585,7 +585,15 @@ fn corpus_artifacts_fit_the_size_budget() {
         for artifact in emit(&program, false) {
             let identity = artifact.modules[0].identity.clone();
             let image = write_nx_ir_image(&artifact).expect("image");
-            let source_len = program.sources[&identity].len();
+            // A standard library module is not one of the workspace's files; its source is the
+            // text the compiler carries, which the program artifact holds.
+            let source_len = program
+                .sources
+                .get(&identity)
+                .map(String::as_str)
+                .or_else(|| program.artifact.source_text(&identity))
+                .unwrap_or_else(|| panic!("{}/{identity}: no source", program.name))
+                .len();
             let ratio = image.len() as f64 / source_len as f64;
             println!(
                 "{}/{}: {} bytes of IR for {} bytes of source, {ratio:.2}x",

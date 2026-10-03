@@ -44,7 +44,7 @@ pub struct GeneratedOutput<T> {
     pub warnings: Vec<String>,
 }
 
-const DEFAULT_CSHARP_NAMESPACE: &str = "Nx.Generated";
+pub(crate) const DEFAULT_CSHARP_NAMESPACE: &str = "Nx.Generated";
 
 pub fn format_options_from_editorconfig(
     language: TargetLanguage,

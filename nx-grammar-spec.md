@@ -216,6 +216,10 @@ SelectiveImport (AST: SelectiveImportSyntax)
 LibraryPath (AST: LibraryPathSyntax)
 - LibraryPath → STRING_LITERAL
   - fields: value: string
+  - A value whose first segment is `@nx` names a standard library, NX source the compiler carries
+    (`"@nx/agent"`). It is not resolved relative to the importing module, and only the two-segment
+    form `@nx/<name>` names a library. The whole `@nx/` root is reserved for the prelude and the
+    standard libraries.
 
 VisibilityModifier
 - VisibilityModifier → PRIVATE

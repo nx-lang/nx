@@ -645,6 +645,56 @@ let root(compact:boolean) = { <Notice if compact { density="tight" } else { dens
     }
   });
 
+  it("reaches a standard library with nothing loaded, as the README's example does", async () => {
+    // A single source needs no registry or build context.
+    expect(
+      evaluateJsonFromSource('import "@nx/agent"\nlet root() = { <Agent name="support">Be brief.</Agent> }')
+    ).toEqual({ $type: "Agent", name: "support", instructions: "Be brief." });
+
+    const registry = new NxLibraryRegistry();
+    registry.loadLibraries([
+      {
+        root: "libraries/chat-link",
+        modules: [{ identity: "ChatLink.nx", source: 'import "@nx/agent"\nexport type AssistantConfig = { agent?:Agent }' }]
+      }
+    ]);
+    expect(() =>
+      registry.loadLibraries([{ root: "@nx/mine", modules: [{ identity: "Mine.nx", source: "export type Mine = { id:string }" }] }])
+    ).toThrowError(NxEvaluationError);
+
+    const buildContext = registry.createBuildContext();
+    const workspace = new NxWorkspace([
+      {
+        identity: "main.nx",
+        source: 'let root() = { <AssistantConfig agent={ <Agent name="support">Be brief.</Agent> } /> }'
+      }
+    ]);
+    const artifact = NxProgramArtifact.buildWorkspace(workspace, {
+      buildContext,
+      entryIdentity: "main.nx",
+      implicitImports: ["libraries/chat-link", "@nx/agent"]
+    });
+    try {
+      const images = artifact.generateNxIr({ modules: [] });
+      expect(images.map((image) => image.identity)).toEqual([
+        "main.nx",
+        "@nx/agent/agent.nx",
+        "libraries/chat-link/ChatLink.nx"
+      ]);
+      const library = images.find((image) => image.identity === "@nx/agent/agent.nx")!;
+      expect(library.metadata.requiredFeatures).toContain("function-reference-type-v1");
+
+      const { prepareNxIrModule } = await import("@nx-lang/ir-runtime");
+      // Pinned to the value the native build computes (`the_shipped_agent_library_version_is_pinned`).
+      expect(prepareNxIrModule(library.bytes).version).toBe("b06c00c30be50ada");
+    } finally {
+      artifact.dispose();
+      workspace.dispose();
+      buildContext.dispose();
+      registry.dispose();
+    }
+  });
+
   it("rejects disposed artifact use predictably", () => {
     const artifact = NxProgramArtifact.buildSource("let root() = { 42 }");
     artifact.dispose();
