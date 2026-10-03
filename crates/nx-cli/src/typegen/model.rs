@@ -1895,7 +1895,7 @@ fn build_cached_imported_library(
 /// NX documentation as the typegen model holds it: Markdown with each doc link replaced by its
 /// label in a code span, so neither writer needs to know what a doc link is.
 fn typegen_doc(doc: Option<&nx_hir::Doc>) -> Option<String> {
-    doc.map(|doc| doc.replace_links(|link| Some(link.code_span())))
+    doc.map(nx_hir::Doc::markdown)
 }
 
 fn export_alias(def: &TypeAlias) -> ExportedAlias {
@@ -3171,8 +3171,7 @@ export type Size = int
 
 /// A contact. See [Theme].
 export type Contact = {
-  /// The display name.
-  name:string
+  name:string   /// The display name.
   email?:string
 }
 

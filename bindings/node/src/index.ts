@@ -18,21 +18,29 @@ import {
 } from "./native.js";
 import type {
   NxByteEvaluationOptions,
+  NxDeclarationName,
+  NxDeclarationRef,
   NxDiagnostic,
   NxDiagnosticLabel,
   NxEvaluationOptions,
+  NxFunctionSchema,
+  NxFunctionSchemaOptions,
   NxGeneratedNxIr,
   NxJsonRecord,
+  NxJsonSchema,
   NxJsonValue,
   NxOutputFormat,
   NxSourceByteEvaluationOptions,
   NxIrEmitOptions,
   NxIrMetadata,
   NxLibraryInput,
+  NxParameterSchema,
   NxSourceBuildOptions,
   NxSourceEvaluationOptions,
   NxSourceInput,
   NxTextSpan,
+  NxTypeSchema,
+  NxTypeSchemaOptions,
   NxWorkspaceBuildOptions,
   NxWorkspaceOptions,
   NxWorkspaceModuleInput
@@ -62,23 +70,33 @@ export type {
 } from "@nx-lang/language-protocol";
 export type {
   NxByteEvaluationOptions,
+  NxDeclarationName,
+  NxDeclarationRef,
   NxDiagnostic,
   NxDiagnosticLabel,
   NxEvaluationOptions,
+  NxFunctionSchema,
+  NxFunctionSchemaOptions,
   NxGeneratedNxIr,
   NxIrEmitOptions,
   NxIrMetadata,
   NxJsonRecord,
+  NxJsonSchema,
+  NxJsonSchemaValue,
   NxJsonValue,
   NxLibraryInput,
   NxLibraryModuleInput,
   NxOutputFormat,
+  NxParameterSchema,
+  NxSchemaDirection,
   NxSeverity,
   NxSourceByteEvaluationOptions,
   NxSourceBuildOptions,
   NxSourceEvaluationOptions,
   NxSourceInput,
   NxTextSpan,
+  NxTypeSchema,
+  NxTypeSchemaOptions,
   NxWorkspaceBuildOptions,
   NxWorkspaceOptions,
   NxWorkspaceModuleInput
@@ -422,6 +440,54 @@ export class NxProgramArtifact {
   public evaluateBytes(options: NxByteEvaluationOptions = {}): Buffer {
     assertSupportedRootEntrypoint(options);
     return invokeNative(() => getArtifactNative(this).evaluateBytes(options.outputFormat ?? "messagePack"));
+  }
+
+  /**
+   * JSON Schema for the arguments and the result of the function `reference` names, with its
+   * `///` documentation as descriptions and one entry per parameter.
+   *
+   * The function may be any the program declares, exported or not, in the entry module (the
+   * default), another workspace module, or a library module named `<root>/<module>`: the pair a
+   * `Function` record carries. A type with no JSON form is part of the answer: the affected schema
+   * is absent and a diagnostic says why. The program is not evaluated, and the artifact stays
+   * usable. The answer equals `@nx-lang/sdk-wasm`'s for the same program.
+   *
+   * @throws NxEvaluationError with a `schema-unknown-declaration` diagnostic when the program
+   * declares no such function.
+   * @throws NxDisposedResourceError when this artifact has already been disposed.
+   * @throws NxNativeError when the native binding returns an invalid or unexpected payload.
+   */
+  public functionSchema(reference: NxDeclarationRef, options: NxFunctionSchemaOptions = {}): NxFunctionSchema {
+    const request = JSON.stringify({
+      reference: declarationRef(reference),
+      options:
+        options.hostSuppliedTypes === undefined
+          ? {}
+          : { hostSuppliedTypes: Array.from(options.hostSuppliedTypes, declarationRef) }
+    });
+    return normalizeFunctionSchema(
+      parseJson<unknown>(invokeNative(() => getArtifactNative(this).functionSchema(request)))
+    );
+  }
+
+  /**
+   * JSON Schema for the declared type `reference` names: a record, action, union, type alias,
+   * `<Target>.Update` record or `<Target>.Property` union, written for `options.direction`
+   * (`output` by default).
+   *
+   * @throws NxEvaluationError with a `schema-unknown-declaration` diagnostic when the program
+   * declares no such type.
+   * @throws NxDisposedResourceError when this artifact has already been disposed.
+   * @throws NxNativeError when the native binding returns an invalid or unexpected payload.
+   */
+  public typeSchema(reference: NxDeclarationRef, options: NxTypeSchemaOptions = {}): NxTypeSchema {
+    const request = JSON.stringify({
+      reference: declarationRef(reference),
+      options: options.direction === undefined ? {} : { direction: options.direction }
+    });
+    return normalizeTypeSchema(
+      parseJson<unknown>(invokeNative(() => getArtifactNative(this).typeSchema(request)))
+    );
   }
 
   /**
@@ -913,6 +979,94 @@ function normalizeTextSpan(raw: unknown): NxTextSpan {
     endLine: numericField(value, "end_line", "endLine"),
     endColumn: numericField(value, "end_column", "endColumn")
   };
+}
+
+/** A reference as the native binding reads it, with only the fields it knows. */
+function declarationRef(reference: NxDeclarationRef): NxDeclarationRef {
+  return reference.module === undefined
+    ? { name: reference.name }
+    : { module: reference.module, name: reference.name };
+}
+
+/**
+ * Reads a function's schema from the native binding: the schema documents pass through as the
+ * binding wrote them, and diagnostics and the declaration's span take the SDK's shape.
+ */
+function normalizeFunctionSchema(raw: unknown): NxFunctionSchema {
+  const value = asRecord(raw, "function schema");
+  if (
+    typeof value.module !== "string" ||
+    typeof value.name !== "string" ||
+    typeof value.resultType !== "string" ||
+    !Array.isArray(value.parameters)
+  ) {
+    throw new NxNativeError("NX native binding returned a function schema in an unexpected shape.");
+  }
+  return {
+    module: value.module,
+    name: value.name,
+    ...documentation(value),
+    parameters: value.parameters.map(normalizeParameterSchema),
+    ...(isSchema(value.inputSchema) ? { inputSchema: value.inputSchema } : {}),
+    ...(isSchema(value.outputSchema) ? { outputSchema: value.outputSchema } : {}),
+    resultType: value.resultType,
+    ...(value.declaration === undefined || value.declaration === null
+      ? {}
+      : { declaration: normalizeTextSpan(value.declaration) }),
+    diagnostics: Array.isArray(value.diagnostics) ? value.diagnostics.map(normalizeDiagnostic) : []
+  };
+}
+
+function normalizeParameterSchema(raw: unknown): NxParameterSchema {
+  const value = asRecord(raw, "parameter schema");
+  if (typeof value.name !== "string" || typeof value.type !== "string") {
+    throw new NxNativeError("NX native binding returned a parameter in an unexpected shape.");
+  }
+  const typeRef = declarationName(value.typeRef);
+  const hostSupplied = declarationName(value.hostSupplied);
+  return {
+    name: value.name,
+    type: value.type,
+    required: value.required === true,
+    ...(typeof value.description === "string" ? { description: value.description } : {}),
+    ...(typeRef === undefined ? {} : { typeRef }),
+    ...(hostSupplied === undefined ? {} : { hostSupplied })
+  };
+}
+
+function normalizeTypeSchema(raw: unknown): NxTypeSchema {
+  const value = asRecord(raw, "type schema");
+  if (typeof value.module !== "string" || typeof value.name !== "string") {
+    throw new NxNativeError("NX native binding returned a type schema in an unexpected shape.");
+  }
+  return {
+    module: value.module,
+    name: value.name,
+    ...documentation(value),
+    ...(isSchema(value.schema) ? { schema: value.schema } : {}),
+    diagnostics: Array.isArray(value.diagnostics) ? value.diagnostics.map(normalizeDiagnostic) : []
+  };
+}
+
+function documentation(value: Record<string, unknown>): { description?: string; summary?: string } {
+  return {
+    ...(typeof value.description === "string" ? { description: value.description } : {}),
+    ...(typeof value.summary === "string" ? { summary: value.summary } : {})
+  };
+}
+
+function declarationName(raw: unknown): NxDeclarationName | undefined {
+  if (typeof raw !== "object" || raw === null) {
+    return undefined;
+  }
+  const value = raw as Record<string, unknown>;
+  return typeof value.module === "string" && typeof value.name === "string"
+    ? { module: value.module, name: value.name }
+    : undefined;
+}
+
+function isSchema(raw: unknown): raw is NxJsonSchema {
+  return typeof raw === "object" && raw !== null && !Array.isArray(raw);
 }
 
 function normalizeSeverity(value: unknown): "error" | "warning" | "info" | "hint" {

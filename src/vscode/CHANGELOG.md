@@ -4,6 +4,42 @@ All notable changes to this project will be documented in this file.
 
 ## 0.6.0
 
+### Doc comments
+- New. A `///` line comment documents the declaration or member it is attached to: written on the
+  lines above an item, or after an item that starts and ends on its line. Every declaration and
+  member can be documented: types, records, actions, unions and their cases and payload fields,
+  values, functions and their parameters, components and their properties, `emits` entries and
+  `state` fields. A doc comment that documents nothing, a misaligned continuation and an item
+  documented twice are errors.
+- Documentation is CommonMark; its first paragraph is the summary. `[Name]` and `[Type.member]` are
+  doc links, resolved like any name in the module, with an `unresolved-doc-link` warning when one
+  names nothing.
+- Hover and completion items show documentation, hover on a doc link reports what it names, and
+  typing a link suggests the names it can resolve to. Doc comments and their Markdown are
+  highlighted.
+- `nxlang typegen` writes documentation into the generated C# (XML documentation comments) and
+  TypeScript (`/** */` comments).
+- `@nx-lang/sdk-wasm`: `NxProgramArtifact.diagnostics()` returns the warnings of a program that
+  builds, such as an unresolved doc link.
+
+### Declaration schemas
+- New in `@nx-lang/sdk-wasm` and `@nx-lang/sdk-node`: `NxProgramArtifact.functionSchema` answers
+  with JSON Schema (draft 2020-12) for a function's arguments and result, with its `///`
+  documentation as descriptions and an entry per parameter, and `typeSchema` answers for a declared
+  type, written for input or output. Any function of the program can be described, named by its
+  module and name as a `Function` record names it, so a host can describe a function to a language
+  model or an MCP client as a tool. A schema describes the canonical JSON encoding, and agrees with
+  what the runtime accepts and returns.
+- A type with no JSON form, such as a function type or an abstract record nothing extends, is
+  reported as `schema-inexpressible-type` in the answer rather than approximated. A host can name
+  types it supplies itself, such as `@nx/agent`'s `ToolContext`, to leave their parameters out.
+  See [declaration schemas](https://nxlang.org/reference/concepts/declaration-schemas).
+- `@nx-lang/sdk-wasm`'s module ABI version is now 6; the loader refuses a module of another version.
+- The entry module's NX IR image now also lists every module that declares a subtype of an abstract
+  record a function takes or returns, so a runtime linked from the entry accepts a host value naming
+  any of them, including one declared in a module nothing else uses. Before, such a value was
+  refused with `nx-ir-boundary-type`.
+
 ### Language
 - A function type may leave its parameters unspecified with `...`: `<function ... />: R` is the
   type of a function of any parameters whose result satisfies `R`, and `<function ... />: object*`

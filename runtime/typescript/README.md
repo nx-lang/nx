@@ -192,6 +192,15 @@ program it runs and type what it holds; the instance's fields are the runtime's,
 documented in `docs/nx-ir-format.md`; `nxlang ir explain`, or `explainNxIr` from either SDK,
 renders one as text.
 
+A host that needs a function's types or documentation, to describe it to a language model or an MCP
+client say, does not read them from the prepared declarations: the image erases generic type
+arguments, records no alias targets, carries a function's result type only when the source declares
+one, and holds no doc comments. It derives JSON Schema with a compiler SDK when it compiles, through
+`functionSchema` and `typeSchema` on a program artifact from `@nx-lang/sdk-wasm` or
+`@nx-lang/sdk-node`, and stores the schemas with the image. A schema derived from the same artifact
+as the image agrees with this runtime's boundary validation: arguments valid against it are
+accepted, and what the function returns is valid against its result schema.
+
 ## Function records
 
 A member declared at a function type renders as `{ $type: "Function", module, name }`, and

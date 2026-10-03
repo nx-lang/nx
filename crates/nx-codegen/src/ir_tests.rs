@@ -172,8 +172,7 @@ let root() = { <User name="Ada" /> }
 type Theme = light | dark
 /// A user.
 type User = {
-  /// The name.
-  name:string
+  name:string      /// The name.
   score:int = 42   /// The score.
 }
 /// The root.
@@ -325,6 +324,75 @@ fn a_module_nothing_references_is_not_in_the_table() {
     let entry = entry_artifact(&artifact);
     assert_eq!(entry.modules.len(), 1);
     assert_eq!(entry.modules[0].identity, "main.nx");
+}
+
+#[test]
+fn the_entry_lists_the_modules_that_declare_its_boundary_subtypes() {
+    // `f` takes the abstract `Base`. `X` is declared in a module the entry imports and never
+    // references, and `Y` in a module nothing imports; a host may name either by `$type`.
+    let artifact = artifact_from_workspace(
+        &[
+            (
+                "main.nx",
+                "import \"./base.nx\"\nimport \"./x.nx\"\nlet f(s:Base): string = { \"ok\" }",
+            ),
+            (
+                "base.nx",
+                "export abstract type Base = { id:int }\nexport type A extends Base = { a:string }",
+            ),
+            (
+                "x.nx",
+                "import \"./base.nx\"\nexport type X extends Base = { x:string }",
+            ),
+            (
+                "y.nx",
+                "import \"./base.nx\"\nexport type Y extends Base = { y:string }",
+            ),
+        ],
+        "main.nx",
+    );
+    let artifacts = all_artifacts(&artifact);
+    let table = |identity: &str| {
+        artifacts[identity]
+            .modules
+            .iter()
+            .map(|entry| entry.identity.as_str())
+            .collect::<Vec<_>>()
+    };
+    // The referenced module first, then the declaring modules in the program's module order.
+    assert_eq!(table("main.nx"), vec!["main.nx", "base.nx", "x.nx", "y.nx"]);
+    // Only the entry lists them; every other image still names only what it references.
+    assert_eq!(table("x.nx"), vec!["x.nx", "base.nx"]);
+    assert_eq!(table("base.nx"), vec!["base.nx"]);
+}
+
+#[test]
+fn a_record_applied_to_itself_without_end_emits() {
+    let artifact = artifact_from_source(
+        "type Box = { T:type v:T inner?:<Box T=<Box T=T /> /> }\nlet f(b:<Box T=int />): int = { 1 }",
+    );
+    let entry = entry_artifact(&artifact);
+    assert_eq!(entry.modules.len(), 1);
+}
+
+#[test]
+fn a_function_nothing_imports_adds_nothing_to_the_entry() {
+    let artifact = artifact_from_workspace(
+        &[
+            ("main.nx", "let root() = { 1 }"),
+            (
+                "tools.nx",
+                "import \"./base.nx\"\nlet use(s:Base): int = { 1 }",
+            ),
+            (
+                "base.nx",
+                "export abstract type Base = { id:int }\nexport type A extends Base = { a:string }",
+            ),
+        ],
+        "main.nx",
+    );
+    let entry = entry_artifact(&artifact);
+    assert_eq!(entry.modules.len(), 1);
 }
 
 #[test]

@@ -355,6 +355,52 @@ fn a_function_record_is_called_by_parameter_name() {
     );
 }
 
+#[test]
+fn a_subtype_declared_in_a_module_nothing_references_is_accepted_from_a_host() {
+    let modules = [
+        (
+            "main.nx",
+            "import \"./base.nx\"\nimport \"./x.nx\"\nlet f(s:Base): string = { \"ok\" }",
+        ),
+        (
+            "base.nx",
+            "export abstract type Base = { id:int }\nexport type A extends Base = { a:string }",
+        ),
+        (
+            "x.nx",
+            "import \"./base.nx\"\nexport type X extends Base = { x:string }",
+        ),
+        (
+            "y.nx",
+            "import \"./base.nx\"\nexport type Y extends Base = { y:string }",
+        ),
+    ];
+    let workspace = NxWorkspace::new(
+        modules
+            .iter()
+            .map(|(identity, source)| {
+                NxWorkspaceModule::from_source(*identity, *source).expect("module")
+            })
+            .collect(),
+    )
+    .expect("workspace");
+    let artifact =
+        build_workspace_program_artifact(&workspace, "main.nx", &ProgramBuildContext::empty())
+            .expect("program artifact");
+    let program = link(&artifact, false);
+    let f = json(r#"{ "$type": "Function", "module": "main.nx", "name": "f" }"#);
+    for argument in [
+        r#"{ "s": { "$type": "X", "id": 1, "x": "q" } }"#,
+        r#"{ "s": { "$type": "Y", "id": 1, "y": "q" } }"#,
+    ] {
+        assert_eq!(
+            program.call_function(&f, &fields(argument), &options()),
+            Ok(NxValue::String("ok".into())),
+            "{argument}"
+        );
+    }
+}
+
 // ------------------------------------------------------------------------------------------------
 // The agent library and a host library that extends it
 // ------------------------------------------------------------------------------------------------

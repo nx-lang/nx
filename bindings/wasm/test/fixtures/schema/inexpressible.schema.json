@@ -1,0 +1,49 @@
+{
+  "render": {
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string"
+    },
+    "diagnostics": [
+      "schema-inexpressible-type"
+    ]
+  },
+  "shout": {
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "Item": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "Item"
+      ],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string"
+    },
+    "diagnostics": []
+  },
+  "rows": {
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "count": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "count"
+      ],
+      "additionalProperties": false
+    },
+    "diagnostics": [
+      "schema-inexpressible-type"
+    ]
+  }
+}

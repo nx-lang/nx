@@ -47,10 +47,11 @@
     "@nx-lang/language-protocol": "workspace:*"
   },
   "devDependencies": {
-    "@nx-lang/language-http": "workspace:*",
     "@nx-lang/ir-runtime": "workspace:*",
+    "@nx-lang/language-http": "workspace:*",
     "@nx-lang/sdk-node": "workspace:*",
     "@types/node": "^22.20.0",
+    "ajv": "^8.20.0",
     "typescript": "^6.0.3",
     "vite": "^7.2.4",
     "vitest": "^4.1.9"

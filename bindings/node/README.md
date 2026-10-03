@@ -272,6 +272,39 @@ derived from the library's source, is what `@nx-lang/ir-runtime` compares at lin
 from the prepared module (`prepareNxIrModule(library.bytes).version`). The library image lists the
 required feature `function-reference-type-v1`.
 
+## Declaration Schemas
+
+`functionSchema` and `typeSchema` answer with JSON Schema (draft 2020-12) for a function's
+arguments and result, or for a declared type, with the author's `///` documentation as
+descriptions. They are the methods `@nx-lang/sdk-wasm` documents in its *Declaration schemas*
+section, with the same names, options (`hostSuppliedTypes`, `direction`), answer types
+(`NxFunctionSchema`, `NxParameterSchema`, `NxTypeSchema`) and errors, and for the same program they
+answer with the same JSON text; the parity tests compare the two on every run.
+
+```ts
+const artifact = NxProgramArtifact.buildWorkspace(workspace, {
+  buildContext,
+  entryIdentity: "app/main.nx"
+});
+const tool = artifact.functionSchema(
+  { module: "app/tools.nx", name: "findPlans" },
+  { hostSuppliedTypes: [{ module: "@nx/agent/agent.nx", name: "ToolContext" }] }
+);
+tool.inputSchema; // the arguments a model may supply, keyed by parameter name
+tool.outputSchema; // the result
+tool.parameters; // name, NX type, required, description, typeRef and hostSupplied per parameter
+
+const booking = artifact.typeSchema({ module: "app/tools.nx", name: "Booking" }, { direction: "input" });
+```
+
+A function or type of a library loaded from a directory is named by its module's identity in the
+program, which for a directory library is the module file's canonical path. A type with no JSON
+form is answered as data: the schema it would appear in is absent and a `schema-inexpressible-type`
+or `schema-ambiguous-discriminator` diagnostic says why. A reference that names nothing throws
+`NxEvaluationError` with `schema-unknown-declaration`. Neither query evaluates the program, and the
+artifact stays usable. Doc comments and these queries first ship together in release 0.6.0, the
+minimum version for both.
+
 ## Diagnostics and Errors
 
 Validation returns `NxDiagnostic[]` as data. Build, IR generation, and evaluation failures throw

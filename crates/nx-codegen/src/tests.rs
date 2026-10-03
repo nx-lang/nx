@@ -864,6 +864,7 @@ fn materialized_record_iife_uses_collision_free_field_temps() {
     let program = CodegenProgram {
         fingerprint: 1,
         entry_identity: "main.nx".to_string(),
+        boundary_subtype_modules: Vec::new(),
         modules: vec![CodegenModule {
             id: module_id,
             provenance: CodegenModuleProvenance::SourceProvider {

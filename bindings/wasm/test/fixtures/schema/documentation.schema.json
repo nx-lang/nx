@@ -1,0 +1,67 @@
+{
+  "findPlans": {
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "teamSize": {
+          "type": "integer",
+          "description": "Number of people who need a seat."
+        },
+        "billing": {
+          "$ref": "#/$defs/Billing",
+          "description": "Ignored when `maxMonthlyPrice` is set."
+        },
+        "maxMonthlyPrice": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "teamSize"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "Billing": {
+          "type": "string",
+          "enum": [
+            "monthly",
+            "yearly"
+          ],
+          "description": "How a plan is billed.\n\n- `yearly`: Billed once a year, at a discount."
+        }
+      }
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Plan"
+      },
+      "$defs": {
+        "Plan": {
+          "type": "object",
+          "properties": {
+            "$type": {
+              "const": "Plan"
+            },
+            "name": {
+              "type": "string",
+              "description": "The plan's display name."
+            },
+            "seats": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "$type",
+            "name",
+            "seats"
+          ],
+          "additionalProperties": false,
+          "description": "A plan a team can buy.\n\nPrices are monthly."
+        }
+      }
+    },
+    "diagnostics": []
+  }
+}

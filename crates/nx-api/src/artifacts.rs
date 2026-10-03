@@ -4512,8 +4512,7 @@ mod tests {
             people_dir.join("User.nx"),
             r#"/// Something with a name.
 export abstract type Named = {
-  /// The display name.
-  name:string
+  name:string   /// The display name.
 }
 
 /// A person.
@@ -4523,8 +4522,7 @@ export type User extends Named = {
 
 /// Greets someone.
 export let greet(
-  /// Who to greet.
-  who:string
+  who:string   /// Who to greet.
 ): string = {who}
 
 export type Mode =

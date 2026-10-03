@@ -808,6 +808,21 @@ impl<'a> ModuleEmitter<'a> {
         if !self.diagnostics.is_empty() {
             return Err(CodegenError::new(self.diagnostics));
         }
+        // The entry links the modules that declare a subtype a host may name at a function's
+        // boundary, after the modules its code references, so a program linked from the entry
+        // resolves every subtype the program declares there.
+        if module_identity(self.module) == self.program.entry_identity {
+            for identity in &self.program.boundary_subtype_modules {
+                if let Some(module) = self
+                    .program
+                    .modules
+                    .iter()
+                    .find(|module| module_identity(module) == *identity)
+                {
+                    self.module_slot(module.id);
+                }
+            }
+        }
 
         let modules = self
             .module_slots

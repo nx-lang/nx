@@ -1,0 +1,9 @@
+// Applied generic records are described per instantiation.
+
+type Plan = { name:string }
+
+type Page = { T:type items:T+ total:int }
+
+let first(): <Page T=Plan /> = { <Page T=Plan items=<Plan name="a" /> total=1 /> }
+
+let total(plans:<Page T=Plan />, names:<Page T=string />): int = { plans.total + names.total }

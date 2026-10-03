@@ -101,6 +101,7 @@ pub fn build_codegen_program(artifact: &ProgramArtifact) -> Result<CodegenProgra
         entrypoints,
         component_entrypoints,
         source_entries,
+        boundary_subtype_modules: nx_api::program_artifact_boundary_subtype_modules(artifact),
     })
 }
 

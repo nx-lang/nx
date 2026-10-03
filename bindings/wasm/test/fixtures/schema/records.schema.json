@@ -1,0 +1,279 @@
+{
+  "book": {
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "request": {
+          "$ref": "#/$defs/Booking"
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "Booking": {
+          "type": "object",
+          "properties": {
+            "host": {
+              "type": "string"
+            },
+            "notes": {
+              "type": "string"
+            },
+            "durationMinutes": {
+              "type": "integer",
+              "default": 30
+            }
+          },
+          "required": [
+            "host"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$ref": "#/$defs/Booking",
+      "$defs": {
+        "Booking": {
+          "type": "object",
+          "properties": {
+            "$type": {
+              "const": "Booking"
+            },
+            "host": {
+              "type": "string"
+            },
+            "notes": {
+              "type": "string"
+            },
+            "durationMinutes": {
+              "type": "integer",
+              "default": 30
+            }
+          },
+          "required": [
+            "$type",
+            "host",
+            "durationMinutes"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "diagnostics": []
+  },
+  "newBooking": {
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "host"
+      ],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$ref": "#/$defs/Booking",
+      "$defs": {
+        "Booking": {
+          "type": "object",
+          "properties": {
+            "$type": {
+              "const": "Booking"
+            },
+            "host": {
+              "type": "string"
+            },
+            "notes": {
+              "type": "string"
+            },
+            "durationMinutes": {
+              "type": "integer",
+              "default": 30
+            }
+          },
+          "required": [
+            "$type",
+            "host",
+            "durationMinutes"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "diagnostics": []
+  },
+  "user": {
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$ref": "#/$defs/User",
+      "$defs": {
+        "User": {
+          "type": "object",
+          "properties": {
+            "$type": {
+              "const": "User"
+            },
+            "id": {
+              "type": "integer"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "$type",
+            "id",
+            "name"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "diagnostics": []
+  },
+  "saved": {
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$ref": "#/$defs/Saved",
+      "$defs": {
+        "Saved": {
+          "type": "object",
+          "properties": {
+            "$type": {
+              "const": "Saved"
+            },
+            "id": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "$type",
+            "id"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "diagnostics": []
+  },
+  "label": {
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "value": {
+          "$ref": "#/$defs/Label"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "Label": {
+          "type": "object",
+          "properties": {
+            "aria-label": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "text"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$ref": "#/$defs/Label",
+      "$defs": {
+        "Label": {
+          "type": "object",
+          "properties": {
+            "$type": {
+              "const": "Label"
+            },
+            "aria-label": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "$type",
+            "text"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "diagnostics": []
+  },
+  "page": {
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "size": {
+          "type": "integer",
+          "default": 20
+        },
+        "label": {
+          "type": "string",
+          "default": "items"
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "integer"
+    },
+    "diagnostics": []
+  }
+}

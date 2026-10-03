@@ -1,0 +1,83 @@
+{
+  "lookupOrder": {
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "orderId": {
+          "type": "string",
+          "description": "The order's identifier."
+        }
+      },
+      "required": [
+        "orderId"
+      ],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$ref": "#/$defs/HttpArguments",
+      "$defs": {
+        "HttpArguments": {
+          "type": "object",
+          "properties": {
+            "$type": {
+              "const": "HttpArguments"
+            },
+            "pathParams": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/HttpParam"
+              },
+              "minItems": 1,
+              "description": "Values for the `{name}` placeholders in the tool's path."
+            },
+            "query": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/HttpParam"
+              },
+              "minItems": 1,
+              "description": "Query string parameters, in order."
+            },
+            "body": {
+              "not": {
+                "type": "null"
+              },
+              "description": "The request body, which the host sends as JSON. Usually a record the program declares."
+            }
+          },
+          "required": [
+            "$type"
+          ],
+          "additionalProperties": false,
+          "description": "The variable parts of one HTTP call, returned by an `HttpTool`'s `arguments` function."
+        },
+        "HttpParam": {
+          "type": "object",
+          "properties": {
+            "$type": {
+              "const": "HttpParam"
+            },
+            "name": {
+              "type": "string",
+              "description": "The parameter's name."
+            },
+            "value": {
+              "type": "string",
+              "description": "The parameter's value, not encoded."
+            }
+          },
+          "required": [
+            "$type",
+            "name",
+            "value"
+          ],
+          "additionalProperties": false,
+          "description": "One named value of an HTTP request. The host encodes the value."
+        }
+      }
+    },
+    "diagnostics": []
+  }
+}

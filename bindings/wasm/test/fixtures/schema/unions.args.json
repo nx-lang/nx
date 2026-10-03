@@ -1,0 +1,19 @@
+{
+  "method": [{ "args": { "m": "post" }, "result": "post" }, { "args": {}, "result": "get" }],
+  "fail": [
+    {
+      "args": { "message": "Offline" },
+      "result": { "$type": "LoadState.failed", "message": "Offline" }
+    }
+  ],
+  "idle": [{ "args": {}, "result": "idle" }],
+  "state": [
+    { "args": { "s": "idle" }, "result": "idle" },
+    { "args": { "s": { "$type": "LoadState.failed", "message": "x" } } }
+  ],
+  "closed": [{ "args": {}, "result": { "$type": "UiEvent.closed", "source": "ui" } }],
+  "event": [
+    { "args": { "e": { "$type": "UiEvent.clicked", "x": 3 } } },
+    { "args": { "e": { "$type": "UiEvent.closed", "source": "keyboard" } } }
+  ]
+}

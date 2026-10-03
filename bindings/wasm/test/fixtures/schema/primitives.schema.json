@@ -1,0 +1,141 @@
+{
+  "echo": {
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "s": {
+          "type": "string"
+        },
+        "f": {
+          "type": "boolean"
+        },
+        "n": {
+          "type": "integer"
+        },
+        "a": {
+          "type": "integer",
+          "minimum": -2147483648,
+          "maximum": 2147483647
+        },
+        "b": {
+          "type": "integer"
+        },
+        "c": {
+          "type": "number"
+        },
+        "d": {
+          "type": "number"
+        },
+        "o": {
+          "not": {
+            "type": "null"
+          }
+        }
+      },
+      "required": [
+        "s",
+        "f",
+        "n",
+        "a",
+        "b",
+        "c",
+        "d",
+        "o"
+      ],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string"
+    },
+    "diagnostics": []
+  },
+  "sizes": {
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$ref": "#/$defs/Sizes",
+      "$defs": {
+        "Sizes": {
+          "type": "object",
+          "properties": {
+            "$type": {
+              "const": "Sizes"
+            },
+            "s": {
+              "type": "string"
+            },
+            "f": {
+              "type": "boolean"
+            },
+            "n": {
+              "type": "integer"
+            },
+            "a": {
+              "type": "integer",
+              "minimum": -2147483648,
+              "maximum": 2147483647
+            },
+            "b": {
+              "type": "integer"
+            },
+            "c": {
+              "type": "number"
+            },
+            "d": {
+              "type": "number"
+            },
+            "o": {
+              "not": {
+                "type": "null"
+              }
+            }
+          },
+          "required": [
+            "$type",
+            "s",
+            "f",
+            "n",
+            "a",
+            "b",
+            "c",
+            "d",
+            "o"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "diagnostics": []
+  },
+  "anything": {
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "value": {
+          "not": {
+            "type": "null"
+          }
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "not": {
+        "type": "null"
+      }
+    },
+    "diagnostics": []
+  }
+}

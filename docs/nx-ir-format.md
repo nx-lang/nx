@@ -334,6 +334,14 @@ reachable only transitively is not listed; it appears in the table of the module
 Referenced modules are listed in the order the emitter first meets them, so the order is
 deterministic.
 
+The entry module's image also lists, after the modules it references and in the program's module
+order, every module that declares a concrete record or union extending an abstract record that a
+function takes or returns, at any depth, counting the functions of the modules the entry reaches
+through its imports. A host may name such a shape by `$type` in a
+value it passes to the function, and a runtime resolves a shape only from a module it linked, so the
+entry links them even when nothing references them. No other image lists a module it does not
+reference, which keeps a library module's image the same whichever program emitted it.
+
 - The identity is the module's logical workspace identity, for example `input.nx` or `app/main.nx`.
   A module of a library a host loaded from memory is named by the library's logical root and its
   identity within the library, for example `libraries/question-flow/QuestionFlow.nx`; a module of a

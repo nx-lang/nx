@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -700,5 +700,128 @@ let root(compact:boolean) = { <Notice if compact { density="tight" } else { dens
     artifact.dispose();
 
     expect(() => artifact.evaluateJson()).toThrowError(NxDisposedResourceError);
+  });
+});
+
+describe("declaration schemas", () => {
+  const tools = [
+    "/// A plan a team can buy.",
+    "type Plan = { name:string }",
+    "/// Finds the plans that fit a team.",
+    "let findPlans(",
+    "  teamSize:int   /// Number of people who need a seat.",
+    "): Plan* = { <Plan name=\"Team\" /> }",
+    "let render(template:<function Item:string />: string): string = { \"\" }"
+  ].join("\n");
+
+  it("describes a function of a source artifact", () => {
+    const artifact = buildProgramArtifactFromSource(tools, { fileName: "tools.nx" });
+    try {
+      const schema = artifact.functionSchema({ name: "findPlans" });
+      expect(schema.module).toBe("tools.nx");
+      expect(schema.description).toBe("Finds the plans that fit a team.");
+      expect(schema.parameters).toEqual([
+        { name: "teamSize", type: "int", required: true, description: "Number of people who need a seat." }
+      ]);
+      expect(schema.inputSchema).toMatchObject({ required: ["teamSize"], additionalProperties: false });
+      expect(schema.outputSchema).toMatchObject({ items: { $ref: "#/$defs/Plan" } });
+      expect(schema.declaration).toMatchObject({ startLine: 4, endLine: 6 });
+
+      const render = artifact.functionSchema({ name: "render" });
+      expect(render.inputSchema).toBeUndefined();
+      expect(render.diagnostics[0]).toMatchObject({
+        code: "schema-inexpressible-type",
+        labels: [{ file: "tools.nx", primary: true }]
+      });
+      expect(artifact.typeSchema({ name: "Plan" }, { direction: "input" }).schema).toMatchObject({
+        $defs: { Plan: { required: ["name"] } }
+      });
+    } finally {
+      artifact.dispose();
+    }
+  });
+
+  it("describes a function of a workspace artifact by module identity", () => {
+    const workspace = new NxWorkspace([
+      { identity: "app/main.nx", source: 'import "./tools.nx"\nlet root() = 1' },
+      { identity: "app/tools.nx", source: tools }
+    ]);
+    const { registry, buildContext } = createContext();
+    const artifact = NxProgramArtifact.buildWorkspace(workspace, {
+      buildContext,
+      entryIdentity: "app/main.nx"
+    });
+    try {
+      const schema = artifact.functionSchema({ module: "app/tools.nx", name: "findPlans" });
+      expect(schema.module).toBe("app/tools.nx");
+      expect(() => artifact.functionSchema({ name: "findPlans" })).toThrowError(NxEvaluationError);
+      expect(() => artifact.typeSchema({ name: "Missing" })).toThrowError(
+        expect.objectContaining({
+          diagnostics: [expect.objectContaining({ code: "schema-unknown-declaration" })]
+        })
+      );
+    } finally {
+      artifact.dispose();
+      workspace.dispose();
+      buildContext.dispose();
+      registry.dispose();
+    }
+  });
+
+  it("describes a function of a library loaded from a directory", () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), "nx-sdk-node-"));
+    const appDir = join(tempRoot, "app");
+    const catalogDir = join(tempRoot, "catalog");
+    mkdirSync(appDir, { recursive: true });
+    mkdirSync(catalogDir, { recursive: true });
+    writeFileSync(join(catalogDir, "Plans.nx"), "export let findPlans(teamSize:int): string* = { \"Team\" }");
+
+    const registry = new NxLibraryRegistry();
+    registry.loadFromDirectory(catalogDir);
+    const buildContext = registry.createBuildContext();
+    const artifact = buildProgramArtifactFromSource('import "../catalog"\nlet root() = { findPlans(2) }', {
+      buildContext,
+      fileName: join(appDir, "main.nx")
+    });
+    try {
+      const schema = artifact.functionSchema({
+        module: realpathSync(join(catalogDir, "Plans.nx")),
+        name: "findPlans"
+      });
+      expect(schema.outputSchema).toEqual({
+        $schema: "https://json-schema.org/draft/2020-12/schema",
+        type: "array",
+        items: { type: "string" }
+      });
+    } finally {
+      artifact.dispose();
+      buildContext.dispose();
+      registry.dispose();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("leaves a host-supplied parameter out of the input schema", () => {
+    const toolContext = { module: "@nx/agent/agent.nx", name: "ToolContext" };
+    const artifact = buildProgramArtifactFromSource(
+      'import "@nx/agent"\nlet lookupOrder(orderId:string, context:ToolContext): HttpArguments = { <HttpArguments /> }',
+      { fileName: "tools.nx" }
+    );
+    try {
+      const schema = artifact.functionSchema({ name: "lookupOrder" }, { hostSuppliedTypes: [toolContext] });
+      expect(Object.keys(schema.inputSchema!.properties as object)).toEqual(["orderId"]);
+      expect(schema.parameters[1]).toMatchObject({ name: "context", typeRef: toolContext, hostSupplied: toolContext });
+      expect(schema.diagnostics).toEqual([]);
+      expect(artifact.functionSchema({ name: "lookupOrder" }).inputSchema).toBeUndefined();
+    } finally {
+      artifact.dispose();
+    }
+  });
+
+  it("refuses a disposed artifact", () => {
+    const artifact = buildProgramArtifactFromSource(tools, { fileName: "tools.nx" });
+    artifact.dispose();
+    expect(() => artifact.functionSchema({ name: "findPlans" })).toThrowError(NxDisposedResourceError);
+    expect(() => artifact.typeSchema({ name: "Plan" })).toThrowError(NxDisposedResourceError);
   });
 });

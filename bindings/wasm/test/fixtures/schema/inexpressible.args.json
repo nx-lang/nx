@@ -1,0 +1,13 @@
+{
+  "render": [
+    {
+      "args": {
+        "template": { "$type": "Function", "module": "inexpressible.nx", "name": "shout" },
+        "title": "Plans"
+      },
+      "result": "Plans"
+    }
+  ],
+  "shout": [{ "args": { "Item": "hi" }, "result": "hi!" }],
+  "rows": [{ "args": { "count": 2 }, "result": [] }]
+}

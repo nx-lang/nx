@@ -1,0 +1,11 @@
+{
+  "lookupOrder": [
+    {
+      "args": { "orderId": "A-1" },
+      "result": {
+        "$type": "HttpArguments",
+        "pathParams": [{ "$type": "HttpParam", "name": "id", "value": "A-1" }]
+      }
+    }
+  ]
+}

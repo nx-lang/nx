@@ -2,9 +2,10 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use nx_api::{
     build_workspace_program_artifact, diagnostics_to_api_with_source_entries,
-    eval_program_artifact, load_program_artifact_from_source, validate_workspace, EvalResult,
-    LibraryRegistry, NxDiagnostic, NxLibraryModule, NxLibrarySource, NxSeverity, NxWorkspace,
-    NxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
+    eval_program_artifact, load_program_artifact_from_source,
+    program_artifact_function_schema_json, program_artifact_type_schema_json, validate_workspace,
+    EvalResult, LibraryRegistry, NxDiagnostic, NxLibraryModule, NxLibrarySource, NxSeverity,
+    NxWorkspace, NxWorkspaceModule, ProgramArtifact, ProgramBuildContext, SchemaQueryError,
 };
 use nx_codegen::{emit_nx_ir, NxIrEmitOptions};
 use nx_ir::explain_nx_ir_image;
@@ -459,6 +460,20 @@ impl NativeNxProgramArtifact {
         }
     }
 
+    /// Answers with the schema of a function, from `{ reference: { module?, name }, options?: {
+    /// hostSuppliedTypes } }` JSON, as JSON text: the same text the wasm module answers with.
+    #[napi]
+    pub fn function_schema(&self, request: String) -> Result<String> {
+        program_artifact_function_schema_json(self.program()?, &request).map_err(schema_query_error)
+    }
+
+    /// Answers with the schema of a declared type, from `{ reference: { module?, name }, options?:
+    /// { direction } }` JSON, as JSON text.
+    #[napi]
+    pub fn type_schema(&self, request: String) -> Result<String> {
+        program_artifact_type_schema_json(self.program()?, &request).map_err(schema_query_error)
+    }
+
     #[napi]
     pub fn dispose(&mut self) {
         self.program = None;
@@ -468,6 +483,13 @@ impl NativeNxProgramArtifact {
         self.program
             .as_ref()
             .ok_or_else(|| disposed_error("NxProgramArtifact"))
+    }
+}
+
+fn schema_query_error(error: SchemaQueryError) -> Error {
+    match error {
+        SchemaQueryError::Request(message) => native_error(message),
+        SchemaQueryError::Declaration(diagnostics) => evaluation_error(diagnostics),
     }
 }
 

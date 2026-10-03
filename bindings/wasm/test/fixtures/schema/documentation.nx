@@ -1,0 +1,22 @@
+/// A plan a team can buy.
+///
+/// Prices are monthly.
+type Plan = {
+  name:string   /// The plan's display name.
+  seats:int
+}
+
+/// How a plan is billed.
+type Billing =
+  | monthly
+  /// Billed once a year, at a discount.
+  | yearly
+
+/// Finds the plans that fit a team.
+///
+/// Plans are sorted by price.
+let findPlans(
+  teamSize:int,         /// Number of people who need a seat.
+  billing?:Billing,     /// Ignored when [maxMonthlyPrice] is set.
+  maxMonthlyPrice?:int
+): Plan* = { <Plan name="Team" seats={teamSize} /> }

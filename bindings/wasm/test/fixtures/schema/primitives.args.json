@@ -1,0 +1,9 @@
+{
+  "echo": [
+    {
+      "args": { "s": "s", "f": true, "n": 1, "a": 2, "b": 3, "c": 1.5, "d": 2.5, "o": { "any": [1] } },
+      "result": "s"
+    }
+  ],
+  "anything": [{ "args": { "value": 1 }, "result": 1 }, { "args": { "value": "x" } }]
+}

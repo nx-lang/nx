@@ -1,0 +1,135 @@
+{
+  "first": {
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$ref": "#/$defs/Page_Plan",
+      "$defs": {
+        "Page_Plan": {
+          "type": "object",
+          "properties": {
+            "$type": {
+              "const": "Page"
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Plan"
+              },
+              "minItems": 1
+            },
+            "total": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "$type",
+            "items",
+            "total"
+          ],
+          "additionalProperties": false
+        },
+        "Plan": {
+          "type": "object",
+          "properties": {
+            "$type": {
+              "const": "Plan"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "$type",
+            "name"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "diagnostics": []
+  },
+  "total": {
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "plans": {
+          "$ref": "#/$defs/Page_Plan"
+        },
+        "names": {
+          "$ref": "#/$defs/Page_string"
+        }
+      },
+      "required": [
+        "plans",
+        "names"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "Page_Plan": {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Plan"
+              },
+              "minItems": 1
+            },
+            "total": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "items",
+            "total"
+          ],
+          "additionalProperties": false
+        },
+        "Plan": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        "Page_string": {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            },
+            "total": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "items",
+            "total"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "integer"
+    },
+    "diagnostics": []
+  }
+}

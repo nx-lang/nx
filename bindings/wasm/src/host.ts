@@ -25,16 +25,24 @@ import {
 } from "./errors.js";
 import type {
   NxBuildContextOptions,
+  NxDeclarationName,
+  NxDeclarationRef,
   NxDiagnostic,
   NxDiagnosticLabel,
+  NxFunctionSchema,
+  NxFunctionSchemaOptions,
   NxGeneratedNxIr,
   NxIrEmitOptions,
   NxIrMetadata,
+  NxJsonSchema,
   NxLanguageDocumentInput,
   NxLanguageSnapshotOptions,
   NxLibraryInput,
+  NxParameterSchema,
   NxSourceBuildOptions,
   NxTextSpan,
+  NxTypeSchema,
+  NxTypeSchemaOptions,
   NxValueNode,
   NxValueRole,
   NxValueText,
@@ -240,6 +248,35 @@ export interface NxProgramArtifact {
    * @throws NxHostCrashedError when the module traps, or has already trapped.
    */
   diagnostics(): readonly NxDiagnostic[];
+
+  /**
+   * JSON Schema for the arguments and the result of the function `reference` names, with its
+   * `///` documentation as descriptions and one entry per parameter.
+   *
+   * <para>The function may be any the program declares, exported or not, in the entry module (the
+   * default), another workspace module, or a library module named `<root>/<module>`: the pair a
+   * `Function` record carries. A type with no JSON form is part of the answer: the affected schema
+   * is absent and a diagnostic says why. The program is not evaluated, and the artifact stays
+   * usable.</para>
+   *
+   * @throws NxEvaluationError with a `schema-unknown-declaration` diagnostic when the program
+   * declares no such function.
+   * @throws NxDisposedResourceError when this artifact has already been disposed.
+   * @throws NxHostCrashedError when the module traps, or has already trapped.
+   */
+  functionSchema(reference: NxDeclarationRef, options?: NxFunctionSchemaOptions): NxFunctionSchema;
+
+  /**
+   * JSON Schema for the declared type `reference` names: a record, action, union, type alias,
+   * `<Target>.Update` record or `<Target>.Property` union, written for `options.direction`
+   * (`output` by default).
+   *
+   * @throws NxEvaluationError with a `schema-unknown-declaration` diagnostic when the program
+   * declares no such type.
+   * @throws NxDisposedResourceError when this artifact has already been disposed.
+   * @throws NxHostCrashedError when the module traps, or has already trapped.
+   */
+  typeSchema(reference: NxDeclarationRef, options?: NxTypeSchemaOptions): NxTypeSchema;
 
   /**
    * Releases the artifact inside the module. Calling `dispose` more than once is allowed.
@@ -636,6 +673,33 @@ class WasmProgramArtifact implements NxProgramArtifact {
     return normalizeDiagnostics(raw);
   }
 
+  functionSchema(
+    reference: NxDeclarationRef,
+    options: NxFunctionSchemaOptions = {}
+  ): NxFunctionSchema {
+    const handle = this.#live();
+    const raw = this.#host.callWithArgument<unknown>(
+      "nx_wasm_program_function_schema",
+      (exports, pointer, length) =>
+        exports.nx_wasm_program_function_schema(handle, pointer, length),
+      { reference: declarationRef(reference), options: functionSchemaOptions(options) }
+    );
+    return normalizeFunctionSchema(raw);
+  }
+
+  typeSchema(reference: NxDeclarationRef, options: NxTypeSchemaOptions = {}): NxTypeSchema {
+    const handle = this.#live();
+    const raw = this.#host.callWithArgument<unknown>(
+      "nx_wasm_program_type_schema",
+      (exports, pointer, length) => exports.nx_wasm_program_type_schema(handle, pointer, length),
+      {
+        reference: declarationRef(reference),
+        options: options.direction === undefined ? {} : { direction: options.direction }
+      }
+    );
+    return normalizeTypeSchema(raw);
+  }
+
   dispose(): void {
     const handle = this.#handle;
     if (handle === undefined) {
@@ -965,6 +1029,103 @@ function normalizeTextSpan(raw: unknown): NxTextSpan {
     endLine: numericField(value, "end_line", "endLine"),
     endColumn: numericField(value, "end_column", "endColumn")
   };
+}
+
+/** A reference as the module reads it, with only the fields it knows. */
+function declarationRef(reference: NxDeclarationRef): NxDeclarationRef {
+  return reference.module === undefined
+    ? { name: reference.name }
+    : { module: reference.module, name: reference.name };
+}
+
+function functionSchemaOptions(options: NxFunctionSchemaOptions): object {
+  return options.hostSuppliedTypes === undefined
+    ? {}
+    : { hostSuppliedTypes: Array.from(options.hostSuppliedTypes, declarationRef) };
+}
+
+/**
+ * Reads a function's schema from the module: the schema documents pass through as the module
+ * wrote them, and diagnostics and the declaration's span take the SDK's shape.
+ */
+function normalizeFunctionSchema(raw: unknown): NxFunctionSchema {
+  const value = asRecord(raw, "function schema");
+  if (
+    typeof value["module"] !== "string" ||
+    typeof value["name"] !== "string" ||
+    typeof value["resultType"] !== "string" ||
+    !Array.isArray(value["parameters"])
+  ) {
+    throw new NxWasmError("The NX wasm module returned a function schema in an unexpected shape.");
+  }
+  return {
+    module: value["module"],
+    name: value["name"],
+    ...documentation(value),
+    parameters: value["parameters"].map(normalizeParameterSchema),
+    ...(isSchema(value["inputSchema"]) ? { inputSchema: value["inputSchema"] } : {}),
+    ...(isSchema(value["outputSchema"]) ? { outputSchema: value["outputSchema"] } : {}),
+    resultType: value["resultType"],
+    ...(value["declaration"] === undefined || value["declaration"] === null
+      ? {}
+      : { declaration: normalizeTextSpan(value["declaration"]) }),
+    diagnostics: normalizeDiagnostics(value["diagnostics"] ?? [])
+  };
+}
+
+function normalizeParameterSchema(raw: unknown): NxParameterSchema {
+  const value = asRecord(raw, "parameter schema");
+  if (typeof value["name"] !== "string" || typeof value["type"] !== "string") {
+    throw new NxWasmError("The NX wasm module returned a parameter in an unexpected shape.");
+  }
+  const typeRef = declarationName(value["typeRef"]);
+  const hostSupplied = declarationName(value["hostSupplied"]);
+  return {
+    name: value["name"],
+    type: value["type"],
+    required: value["required"] === true,
+    ...(typeof value["description"] === "string" ? { description: value["description"] } : {}),
+    ...(typeRef === undefined ? {} : { typeRef }),
+    ...(hostSupplied === undefined ? {} : { hostSupplied })
+  };
+}
+
+function normalizeTypeSchema(raw: unknown): NxTypeSchema {
+  const value = asRecord(raw, "type schema");
+  if (typeof value["module"] !== "string" || typeof value["name"] !== "string") {
+    throw new NxWasmError("The NX wasm module returned a type schema in an unexpected shape.");
+  }
+  return {
+    module: value["module"],
+    name: value["name"],
+    ...documentation(value),
+    ...(isSchema(value["schema"]) ? { schema: value["schema"] } : {}),
+    diagnostics: normalizeDiagnostics(value["diagnostics"] ?? [])
+  };
+}
+
+function documentation(value: Record<string, unknown>): {
+  description?: string;
+  summary?: string;
+} {
+  return {
+    ...(typeof value["description"] === "string" ? { description: value["description"] } : {}),
+    ...(typeof value["summary"] === "string" ? { summary: value["summary"] } : {})
+  };
+}
+
+function declarationName(raw: unknown): NxDeclarationName | undefined {
+  if (typeof raw !== "object" || raw === null) {
+    return undefined;
+  }
+  const value = raw as Record<string, unknown>;
+  return typeof value["module"] === "string" && typeof value["name"] === "string"
+    ? { module: value["module"], name: value["name"] }
+    : undefined;
+}
+
+function isSchema(raw: unknown): raw is NxJsonSchema {
+  return typeof raw === "object" && raw !== null && !Array.isArray(raw);
 }
 
 const valueRoles: ReadonlySet<string> = new Set<NxValueRole>([

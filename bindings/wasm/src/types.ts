@@ -423,3 +423,175 @@ export interface NxLanguageDocumentInput {
    */
   readonly version?: number;
 }
+
+/**
+ * A JSON value inside a schema document.
+ */
+export type NxJsonSchemaValue =
+  | null
+  | boolean
+  | number
+  | string
+  | readonly NxJsonSchemaValue[]
+  | NxJsonSchema;
+
+/**
+ * A JSON Schema draft 2020-12 document or subschema: plain JSON a caller can store, serialize or
+ * hand to a validator as it is.
+ */
+export interface NxJsonSchema {
+  readonly [key: string]: NxJsonSchemaValue;
+}
+
+/**
+ * A declaration named by the identity of the module that declares it and its declared name: the
+ * pair a canonical `Function` record carries.
+ */
+export interface NxDeclarationRef {
+  /**
+   * Identity of the declaring module in the program, `<root>/<module>` for a library module.
+   * Defaults to the entry module.
+   */
+  readonly module?: string;
+
+  /**
+   * Declared name, such as `findPlans` or `User.Update`.
+   */
+  readonly name: string;
+}
+
+/**
+ * A declaration the program holds, by module identity and name.
+ */
+export interface NxDeclarationName {
+  readonly module: string;
+  readonly name: string;
+}
+
+/**
+ * Options for {@link NxProgramArtifact.functionSchema}.
+ */
+export interface NxFunctionSchemaOptions {
+  /**
+   * Types whose parameters the host fills in itself. A parameter declared with one of them, or
+   * with a record that extends one, is left out of the input schema and marked `hostSupplied`. A
+   * listed type the program does not declare matches nothing.
+   */
+  readonly hostSuppliedTypes?: readonly NxDeclarationRef[];
+}
+
+/**
+ * The schema of one function: JSON Schema for its arguments and its result, its documentation and
+ * its parameters.
+ */
+export interface NxFunctionSchema {
+  readonly module: string;
+  readonly name: string;
+
+  /**
+   * The function's `///` documentation as Markdown, with doc links written as code.
+   */
+  readonly description?: string;
+
+  /**
+   * The first Markdown block of `description`.
+   */
+  readonly summary?: string;
+
+  /**
+   * One entry per declared parameter, in declaration order.
+   */
+  readonly parameters: readonly NxParameterSchema[];
+
+  /**
+   * An object schema with one property per argument, keyed by parameter name. Absent, with an
+   * error diagnostic, when a parameter's type has no JSON form.
+   */
+  readonly inputSchema?: NxJsonSchema;
+
+  /**
+   * The schema of the result. Absent, with an error diagnostic, when the result type has no JSON
+   * form.
+   */
+  readonly outputSchema?: NxJsonSchema;
+
+  /**
+   * The result type in NX spelling, declared or inferred.
+   */
+  readonly resultType: string;
+
+  /**
+   * The whole declaration's span in `module`'s source. Absent when the artifact holds no source
+   * for the module.
+   */
+  readonly declaration?: NxTextSpan;
+
+  /**
+   * Why a schema is absent: `schema-inexpressible-type` or `schema-ambiguous-discriminator`.
+   */
+  readonly diagnostics: readonly NxDiagnostic[];
+}
+
+/**
+ * One declared parameter of a function.
+ */
+export interface NxParameterSchema {
+  readonly name: string;
+
+  /**
+   * The declared type in NX spelling.
+   */
+  readonly type: string;
+
+  /**
+   * Whether a caller must supply it: it has neither the `?` mark nor a default.
+   */
+  readonly required: boolean;
+
+  readonly description?: string;
+
+  /**
+   * The record or union the parameter is declared with, ignoring its `?` mark.
+   */
+  readonly typeRef?: NxDeclarationName;
+
+  /**
+   * The listed host-supplied type this parameter matched. Such a parameter is not in the input
+   * schema.
+   */
+  readonly hostSupplied?: NxDeclarationName;
+}
+
+/**
+ * Which way a value crosses the host boundary. `input` is a value a host supplies, which asks for
+ * `$type` only where a runtime needs it to choose a shape; `output` is a value a runtime returns,
+ * which always carries it.
+ */
+export type NxSchemaDirection = "input" | "output";
+
+/**
+ * Options for {@link NxProgramArtifact.typeSchema}.
+ */
+export interface NxTypeSchemaOptions {
+  /**
+   * The direction to write the schema for. Defaults to `output`.
+   */
+  readonly direction?: NxSchemaDirection;
+}
+
+/**
+ * The schema of one declared type.
+ */
+export interface NxTypeSchema {
+  readonly module: string;
+  readonly name: string;
+  readonly description?: string;
+  readonly summary?: string;
+
+  /**
+   * Absent, with an error diagnostic, when the type has no JSON form.
+   */
+  readonly schema?: NxJsonSchema;
+
+  readonly diagnostics: readonly NxDiagnostic[];
+}

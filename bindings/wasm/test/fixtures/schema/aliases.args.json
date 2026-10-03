@@ -1,0 +1,9 @@
+{
+  "greet": [{ "args": { "names": ["Ada"] } }],
+  "patch": [
+    { "args": { "update": { "name": "Ada" } } },
+    { "args": { "update": { "email": null } } },
+    { "args": { "update": {} } }
+  ],
+  "rename": [{ "args": { "name": "Ada" }, "result": { "$type": "User.Update", "name": "Ada" } }]
+}
