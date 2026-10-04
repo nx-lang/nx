@@ -1,0 +1,168 @@
+module main.nx fingerprint 3319043930966403103
+links @nx/prelude.nx version "1" fingerprint 3805895034114390176
+requires update-records-v1 update-intrinsics-v1 action-handlers-v1 function-values-v1 ranges-v1
+entrypoints functions [corners one triple through twice greet button sum both Count repeated patterns directCall valueCall spliced forItems forRange content concat defaults valueReference checked compared comparedLists comparedHandlers comparedText written bound updated misaligned patched] components [Button Tally]
+
+union Shape
+  case dot constant
+  case ring
+    radius: int required
+  case box
+    side: int required
+
+record Point
+  x: int required
+  y: int required
+
+record Opt
+  a: int = 1
+  b: int?
+  c: string?
+
+component Button external
+  emits
+    Tapped = Button.Tapped
+
+record Button.Tapped
+
+record Ping
+  n: int required
+
+value numbers =
+  [1, 2, 3]
+
+value others =
+  [9, 2, 3]
+
+value answer =
+  (6 mul 7)
+
+value accents =
+  "éééééééééééééééééééééééééééééééééééééééé𝄞"
+
+function corners(shape: Shape) =
+  if shape is
+    Shape.dot | Shape.ring =>
+      0
+    Shape.box =>
+      4
+
+function one() =
+  1
+
+function triple(n: int): int =
+  (n mul 3)
+
+function through(f: <function n:int />: int): int =
+  <f n=2 />
+
+function twice(xs: int+) =
+  [xs, xs]
+
+function greet(name: string = "world") =
+  ("Hello, " concat name)
+
+function button(a: int, b: int) =
+  <Button
+    onTapped=handler Button.Tapped action@2:Button.Tapped =>
+      <Ping n=(a add b) />
+  >
+  </Button>
+
+function sum(p: Point): int =
+  (p.x add p.y)
+
+function both(p: Point) =
+  [p, p]
+
+function Count(content items: int+): int =
+  3
+
+function repeated(o: object, n: int) =
+  for i in <@nx/prelude.nx:Range end=n endInclusive=false start=0 /> yield
+    o
+
+function patterns() =
+  corners(<Shape.box side=2 />)
+
+function directCall() =
+  one()
+
+function valueCall() =
+  through(triple)
+
+function spliced() =
+  twice([1, 2, 3])
+
+function forItems() =
+  for n in numbers yield
+    (n add 1)
+
+function forRange() =
+  for i in <@nx/prelude.nx:Range end=5 endInclusive=false start=0 /> yield
+    (i mul i)
+
+function content() =
+  <list>
+    <item />
+    <item />
+    for i in <@nx/prelude.nx:Range end=3 endInclusive=false start=0 /> yield
+      <item index=i />
+  </list>
+
+function concat() =
+  (accents concat accents)
+
+function defaults() =
+  greet()
+
+function valueReference() =
+  (answer add answer)
+
+function checked() =
+  sum(<Point x=1 y=2 />)
+
+function compared() =
+  (<Point x=1 y=2 /> eq <Point x=3 y=2 />)
+
+function comparedLists() =
+  (numbers eq others)
+
+function comparedHandlers() =
+  (button(9, 9) eq button(1, 2))
+
+function comparedText() =
+  ((accents concat accents) eq (accents concat accents))
+
+function written() =
+  both(<Point x=1 y=2 />)
+
+function bound() =
+  Count(numbers)
+
+function updated() =
+  (apply(<Opt c="q" />, <Opt.Update b=5 />) eq <Opt b=5 c="q" />)
+
+function misaligned() =
+  (<pair a=1 b=2 /> eq <pair a=1 c=2 />)
+
+function patched() =
+  <Opt.Update b=5 />
+
+component Tally
+  state
+    count: int = (1 add 1)
+  body =
+    <Button
+      onTapped=handler Button.Tapped action@1:Button.Tapped owner Tally =>
+        <Tally.Update count=(count add 1) />
+    >
+    </Button>
+
+record Opt.Update update of Opt
+  a: int
+  b: int?
+  c: string?
+
+record Tally.Update update of Tally
+  count: int

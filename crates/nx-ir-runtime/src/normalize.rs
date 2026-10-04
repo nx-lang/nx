@@ -4,8 +4,8 @@
 //! schema the image carries: occurrences, records and their discriminators, abstract records,
 //! unions, update records and function values.</para>
 
-use crate::error::{fail, Result};
-use crate::eval::{bind, Cx, Frame, Machine};
+use crate::error::{fail, fail_limit, Result};
+use crate::eval::{bind, Cx, Frame, Machine, STACK_LIMIT};
 use crate::module::{DeclarationKind, Field, Primitive, Ref, Shape, Type};
 use crate::value::{get_field, CaseValue, Fields, FunctionRef, Record, Value, FUNCTION_TYPE};
 use std::fmt;
@@ -116,8 +116,8 @@ impl<'p> Machine<'p> {
         path: &Path<'_>,
     ) -> Result<Value> {
         if !self.within_stack() {
-            return fail(
-                "nx-ir-resource-limit",
+            return fail_limit(
+                STACK_LIMIT,
                 "A value nests too deeply to check within the stack an evaluation may use.",
             );
         }
@@ -193,6 +193,10 @@ impl<'p> Machine<'p> {
                 }
             };
         }
+        // Checking one value against the type it is to have costs one operation, charged before
+        // the check: a record's fields are values of their own, and so are a sequence's items,
+        // which is why a sequence type costs nothing above.
+        self.charge(cx, None, 1)?;
         match ty {
             Type::Primitive(primitive) => normalize_primitive(*primitive, value, path),
             Type::UnknownPrimitive(name) => {

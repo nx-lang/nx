@@ -168,29 +168,77 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Limits
 
-| Limit | Default | Set by |
-| --- | --- | --- |
-| Call depth | 100 | `RuntimeOptions::max_call_depth` |
-| Integers one range may hold when a loop iterates it | 1,000,000 | `RuntimeOptions::max_range_length` |
-| Nested expressions, across every call of one evaluation | 1,000 | fixed |
-| Native stack one evaluation may use | 1 MiB | fixed |
-| Nesting of a value crossing the host boundary, and of component state after each patch | 256 | fixed |
-| Nesting of the values of a serialized instance | 1,024 | fixed |
-| Values one value of a serialized instance holds, written out | 16,777,216 | fixed |
+| Limit | Default | Set by | Name in a diagnostic |
+| --- | --- | --- | --- |
+| Operations one call may cost | Unlimited | `RuntimeOptions::max_operations` | `maxOperations` |
+| Call depth | 100 | `RuntimeOptions::max_call_depth` | `maxCallDepth` |
+| Integers one range may hold when a loop iterates it | 1,000,000 | `RuntimeOptions::max_range_length` | `maxRangeLength` |
+| Nested expressions, across every call of one evaluation | 1,000 | fixed | `maxExpressionNesting` |
+| Native stack one evaluation may use | 1 MiB | fixed | `maxStackBytes` |
+| Nesting of a value crossing the host boundary, and of component state after each patch | 256 | fixed | `maxValueNesting` |
+| Nesting of the values of a serialized instance | 1,024 | fixed | |
+| Values one value of a serialized instance holds, written out | 16,777,216 | fixed | |
 
 Exceeding any of them fails with `nx-ir-resource-limit`, or with `nx-ir-component` for a
 serialized instance. The fixed limits are what keep an image, a host value or a raised call depth
 from exhausting the native stack, so the thread that calls the runtime needs 1 MiB of stack free.
 Checking a value against a declared type is under the stack budget as well, so an unoptimized
-build, whose frames are larger, refuses a deeply nested typed value sooner than 256 levels.
+build, whose frames are larger, refuses a deeply nested typed value sooner than 256 levels, and
+can meet the stack budget before a thousand expressions nest.
+
+**Set `max_operations` for any code you did not write.** It is the only limit that bounds work and
+allocation: three nested loops over ranges of a thousand run a billion bodies inside the others,
+and a function that doubles a list on each of its 100 permitted calls asks for 2^100 items, an
+allocation failure that aborts the process. An operation is a unit of work on a value: a node
+evaluated, an item placed in a sequence a node builds or bound to a content parameter, 64 UTF-16
+code units of a string a concatenation produces, a value checked against a declared type, a pair
+of values an equality compares, or a value written for the host, with text read or written
+charged by its length, as `docs/nx-ir-format.md` defines them under
+*Evaluation cost*; the TypeScript runtime counts the same number and stops at the same place. One
+budget covers one call of a method, for `dispatch_component_actions` the whole batch and the render
+after it, and each call starts with the whole budget. `restore_component_instance` evaluates no
+node and takes no options.
+
+```rust
+use nx_ir_runtime::{Program, Result, RuntimeOptions};
+use nx_value::NxValue;
+
+fn run_tool(program: &Program, input: NxValue) -> Result<NxValue> {
+    let options = RuntimeOptions {
+        max_operations: Some(100_000),
+        ..RuntimeOptions::default()
+    };
+    program.evaluate_function("tool", &[input], &options)
+}
+```
+
+The rules are written so that every step that touches a value in proportion to its size is charged
+in proportion, and the time and the memory of a call are proportional to its count. That holds for
+everything this crate's tests and the conformance corpus cover, but it is a claim about every step
+of the runtime, and review has several times found a step that broke it, each time through a large
+or unusual value a host passed at `object`. Treat the budget as the first limit on code you did
+not write, and keep one of your own on time and memory as well. The same holds for a
+value held in many places too: a record that names one value twice, forty levels deep, costs a few
+hundred operations to build and is 2^40 values to anything that walks it, so the type check, the
+equality and the conversion for the host that walk it are what pay. The one walk the runtime makes
+for itself, the check that state nests no deeper than 256, looks only at the fields a patch
+supplies and remembers, for the call, what it found under each shared value. Typed data is
+checked each time it meets a type: a list of `n` items returned through `k` calls that declare
+their result costs about `k × n`. Two lists are compared item by item up to the first pair that
+differs, so two long lists that differ early are cheap to compare; two records are compared field
+by field to the end under a budget, so that the cost does not depend on the order fields are held
+in. The result is the same either way. A budget failure made for a type check, or for the result
+written, names its declaration and has no span, since it belongs to no node.
 
 ## Diagnostics
 
 Every API returns `Result<_, NxIrRuntimeError>`. The error holds one or more diagnostics, each
 with a `code`, a `message`, the declaration the failing expression belongs to as `identity::name`
 when evaluation had reached one, and the expression's span when the image carries its debug
-section. The runtime never reads a source file and never panics on an image, a host value or an
-instance.
+section. An `nx-ir-resource-limit` diagnostic also carries `limit`, a `Limit` holding the name the
+table under *Limits* gives and the limit's value, so a host tells an exhausted budget from runaway
+recursion without reading the message; no other diagnostic carries one. The runtime never reads a
+source file and never panics on an image, a host value or an instance.
 
 | Code | Reported when |
 | --- | --- |
@@ -212,6 +260,8 @@ instance.
 
 `cargo test -p nx-ir-runtime` runs the conformance corpus in `specs/ir-conformance` (every
 entrypoint and lifecycle, with and without debug sections), the damage runs (every truncation of
-every corpus image, and every cell of one image overwritten), and the preparation and linking
-tests. The tests that compile NX source, including the differential run against the interpreter,
-need the compiler and live in `nx-codegen` (`cargo test -p nx-codegen ir_runtime`).
+every corpus image, and every cell of one image overwritten), the preparation and linking
+tests, and `tests/allocation.rs`, which counts the bytes a refused concatenation allocates to show
+that the budget is charged before a string is built. The tests that compile NX source, including
+the differential run against the interpreter, need the compiler and live in `nx-codegen`
+(`cargo test -p nx-codegen ir_runtime`).

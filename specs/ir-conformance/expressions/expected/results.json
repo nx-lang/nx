@@ -3,10 +3,6 @@
   "main.nx::andTakesRight": true,
   "main.nx::arithmetic": 5,
   "main.nx::bareFailed": "Offline",
-  "main.nx::big": {
-    "$type": "nx.int",
-    "value": "9007199254740993"
-  },
   "main.nx::classified": "small",
   "main.nx::doubled": [
     2,

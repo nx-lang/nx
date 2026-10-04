@@ -23,6 +23,21 @@ pub struct Diagnostic {
     pub declaration: Option<String>,
     /// The expression's span, when the image carries its debug section.
     pub source: Option<SourceSpan>,
+    /// The limit that was reached. Every `nx-ir-resource-limit` diagnostic carries one, and no
+    /// other does.
+    pub limit: Option<Limit>,
+}
+
+/// A limit an evaluation reached, as data a host can act on without reading the message.
+///
+/// <para>A limit the TypeScript runtime also has carries the name of its option there:
+/// `maxOperations`, `maxCallDepth`, `maxRangeLength` and `maxExpressionNesting`. The two only this
+/// runtime has are `maxStackBytes`, the native stack an evaluation may use, and `maxValueNesting`,
+/// how deeply a value may nest at the host boundary or in component state.</para>
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Limit {
+    pub name: &'static str,
+    pub value: Option<u64>,
 }
 
 impl Diagnostic {
@@ -33,6 +48,7 @@ impl Diagnostic {
             message: message.into(),
             declaration: None,
             source: None,
+            limit: None,
         }
     }
 }
@@ -79,3 +95,15 @@ pub type Result<T> = std::result::Result<T, NxIrRuntimeError>;
 pub(crate) fn fail<T>(code: &'static str, message: impl Into<String>) -> Result<T> {
     Err(NxIrRuntimeError::new(code, message))
 }
+
+/// Fails with one `nx-ir-resource-limit` diagnostic that names no declaration and carries `limit`.
+pub(crate) fn fail_limit<T>(limit: Limit, message: impl Into<String>) -> Result<T> {
+    let mut diagnostic = Diagnostic::new(RESOURCE_LIMIT, message);
+    diagnostic.limit = Some(limit);
+    Err(NxIrRuntimeError {
+        diagnostics: vec![diagnostic],
+    })
+}
+
+/// The code of every diagnostic that reports a limit.
+pub(crate) const RESOURCE_LIMIT: &str = "nx-ir-resource-limit";

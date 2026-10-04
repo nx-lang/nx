@@ -1,0 +1,13 @@
+{
+  "counts": {
+    "app/main.nx::equal": 35,
+    "app/main.nx::imported": 35,
+    "app/main.nx::none": 9,
+    "app/main.nx::pages": 18,
+    "app/main.nx::passedAlong": 17,
+    "app/main.nx::root": 39,
+    "app/main.nx::squares": 37,
+    "shared/bounds.nx::closed": 15,
+    "shared/bounds.nx::half": 15
+  }
+}

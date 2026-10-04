@@ -1,0 +1,12 @@
+{
+  "counts": {
+    "main.nx::first": 15,
+    "main.nx::ints": 8,
+    "main.nx::moved": 16,
+    "main.nx::names": 8,
+    "main.nx::patch": 5,
+    "main.nx::plan": 19,
+    "main.nx::root": 10,
+    "main.nx::span": 46
+  }
+}

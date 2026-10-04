@@ -3,7 +3,8 @@
  * prepared, linked where its module table requires, and evaluated, and each named entrypoint's
  * canonical value must equal the result the interpreter recorded. Each lifecycle is initialized
  * and its batches dispatched in order, and every rendered output, tokens included, and every
- * effect list must equal what the interpreter recorded.
+ * effect list must equal what the interpreter recorded. Every evaluation must cost exactly the
+ * operations recorded for it, and stop where the recorded failures say a smaller budget stops it.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -37,7 +38,8 @@ function loadCorpus() {
         strippedArtifacts.set(identity, new Uint8Array(readFileSync(join(dir, "expected", `${file}.stripped.nxir`))));
       }
       const results = JSON.parse(readFileSync(join(dir, "expected", "results.json"), "utf8"));
-      return { name, manifest, artifacts, strippedArtifacts, results };
+      const operations = JSON.parse(readFileSync(join(dir, "expected", "operations.json"), "utf8"));
+      return { name, manifest, artifacts, strippedArtifacts, results, operations };
     });
 }
 
@@ -52,6 +54,33 @@ function stableJson(value) {
     return `{${entries.join(",")}}`;
   }
   return JSON.stringify(value);
+}
+
+/**
+ * Checks that an evaluation costs exactly `recorded` operations: under that budget it succeeds,
+ * and under one less it fails on the budget.
+ */
+function checkCount(what, recorded, run) {
+  if (!Number.isSafeInteger(recorded)) {
+    throw new Error(`${what}: no operation count is recorded (found ${JSON.stringify(recorded)})`);
+  }
+  try {
+    run({ maxOperations: recorded });
+  } catch (error) {
+    throw new Error(`${what} fails under its recorded count of ${recorded} operations: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (recorded === 0) {
+    return;
+  }
+  try {
+    run({ maxOperations: recorded - 1 });
+  } catch (error) {
+    if (error instanceof NxIrRuntimeError && error.diagnostics[0]?.limit?.name === "maxOperations") {
+      return;
+    }
+    throw new Error(`${what} under ${recorded - 1} operations, one less than recorded, fails otherwise than on the budget: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  throw new Error(`${what} succeeds under ${recorded - 1} operations, one less than recorded`);
 }
 
 let failures = 0;
@@ -78,8 +107,10 @@ for (const program of loadCorpus()) {
           throw new Error(`the corpus emits no artifact for ${entrypoint.module}`);
         }
         const linked = linkNxIrProgram(module, { resolve });
+        const key = `${entrypoint.module}::${entrypoint.function}`;
+        checkCount("the evaluation", program.operations.counts[key], (options) => evaluateFunction(linked, entrypoint.function, [], options));
         const actual = evaluateFunction(linked, entrypoint.function);
-        const expected = program.results[`${entrypoint.module}::${entrypoint.function}`];
+        const expected = program.results[key];
         if (stableJson(actual) !== stableJson(expected)) {
           throw new Error(`expected ${stableJson(expected)}, got ${stableJson(actual)}`);
         }
@@ -97,16 +128,20 @@ for (const program of loadCorpus()) {
           throw new Error(`the corpus emits no artifact for ${lifecycle.module}`);
         }
         const linked = linkNxIrProgram(module, { resolve });
-        const expected = program.results[`${lifecycle.module}::${lifecycle.component}`];
+        const key = `${lifecycle.module}::${lifecycle.component}`;
+        const expected = program.results[key];
+        const counts = program.operations.counts[key] ?? {};
         const expect = (what, actual, wanted) => {
           if (stableJson(actual) !== stableJson(wanted)) {
             throw new Error(`${what}: expected ${stableJson(wanted)}, got ${stableJson(actual)}`);
           }
         };
+        checkCount("initialization", counts.initial, (options) => initializeComponent(linked, lifecycle.component, lifecycle.props ?? {}, options));
         const initialized = initializeComponent(linked, lifecycle.component, lifecycle.props ?? {});
         expect("initial rendered output", initialized.rendered, expected.initial);
         let instance = initialized.instance;
         lifecycle.batches.forEach((batch, index) => {
+          checkCount(`batch ${index}`, counts.batches?.[index], (options) => dispatchComponentActions(linked, instance, batch, options));
           const dispatched = dispatchComponentActions(linked, instance, batch);
           expect(`batch ${index} rendered output`, dispatched.rendered, expected.batches[index].rendered);
           expect(`batch ${index} effects`, dispatched.effects, expected.batches[index].effects);
@@ -119,6 +154,42 @@ for (const program of loadCorpus()) {
       }
     }
   }
+}
+
+// A budget below an evaluation's count stops it at the node the corpus records: the same
+// declaration and, from the image with its debug section, the same span. Equal counts alone do not
+// show that two runtimes charge in the same order; these do.
+let recordedFailures = 0;
+for (const program of loadCorpus()) {
+  const modules = new Map([...program.artifacts].map(([identity, image]) => [identity, prepareNxIrModule(image)]));
+  const resolve = (identity) => modules.get(identity);
+  for (const [key, records] of Object.entries(program.operations.failures ?? {})) {
+    const [module, name] = key.split("::");
+    const linked = linkNxIrProgram(modules.get(module), { resolve });
+    for (const record of records) {
+      recordedFailures += 1;
+      const label = `${program.name} ${key} under ${record.budget} operations`;
+      try {
+        evaluateFunction(linked, name, [], { maxOperations: record.budget });
+        failures += 1;
+        console.log(`not ok - ${label}: succeeds`);
+      } catch (error) {
+        const diagnostic = error instanceof NxIrRuntimeError ? error.diagnostics[0] : undefined;
+        const actual = stableJson({ declaration: diagnostic?.declaration, limit: diagnostic?.limit, source: diagnostic?.source });
+        const wanted = stableJson({ declaration: record.declaration, limit: { name: "maxOperations", value: record.budget }, source: record.source });
+        if (actual === wanted) {
+          console.log(`ok - ${label} stops at its recorded node`);
+        } else {
+          failures += 1;
+          console.log(`not ok - ${label}: expected ${wanted}, got ${error instanceof NxIrRuntimeError ? actual : String(error)}`);
+        }
+      }
+    }
+  }
+}
+if (recordedFailures === 0) {
+  failures += 1;
+  console.log("not ok - the corpus records no failures");
 }
 
 // Damage: every corpus image cut at every four-byte boundary, and every cell of the smallest one

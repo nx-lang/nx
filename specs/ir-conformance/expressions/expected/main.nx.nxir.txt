@@ -1,4 +1,4 @@
-module main.nx fingerprint 12997715528169375669
+module main.nx fingerprint 5933433373916885200
 entrypoints functions [add arithmetic integerDivision realDivision integerRemainder realRemainder comparisons moreComparisons ordered andSkipsRight orSkipsRight andTakesRight orTakesRight negation logicalNot greeting chooseBig small classify classified stageLabel reviewStage loadLabel idleLoad failedLoad bareLabel bareFailed doubled squares big maybe element root] components []
 
 value answer @2:1-2:16 =
@@ -138,19 +138,19 @@ function squares() @48:1-48:54 =
   for item in items yield
     (item mul item)
 
-function big() @49:1-49:33 =
+function big() @52:1-52:33 =
   9007199254740993
 
-function maybe() @50:1-50:53 =
+function maybe() @53:1-53:53 =
   if flag then
     name
   else
     "nobody"
 
-function element() @51:1-51:63 =
+function element() @54:1-54:63 =
   <div class="box" count=answer>
     <span />
   </div>
 
-function root() @52:1-52:30 =
+function root() @55:1-55:30 =
   arithmetic()

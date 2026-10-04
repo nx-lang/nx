@@ -1,0 +1,14 @@
+{
+  "counts": {
+    "app/main.nx::allArguments": 15,
+    "app/main.nx::elementDefaults": 20,
+    "app/main.nx::elementSkip": 21,
+    "app/main.nx::emptyOptional": 8,
+    "app/main.nx::importedAll": 18,
+    "app/main.nx::importedDefault": 18,
+    "app/main.nx::liftedDefault": 7,
+    "app/main.nx::oneArgument": 16,
+    "app/main.nx::skipMiddle": 17,
+    "app/main.nx::twoArguments": 14
+  }
+}

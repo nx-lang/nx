@@ -33,8 +33,15 @@ fn every_truncated_corpus_image_is_refused() {
 /// Runs everything the corpus runs against `program`: each function entrypoint, and each
 /// lifecycle with its batches and a round trip of its instance through the serialized form.
 /// Returns how many operations succeeded and how many failed with a diagnostic.
+///
+/// <para>A damaged cell can turn a loop's bound or a call's target into anything, so every run
+/// has a budget: ample for the corpus, whose evaluations cost hundreds of operations, and small
+/// enough that a damaged image which loops ends quickly, in a diagnostic.</para>
 fn drive(linked: &Program, program: &CorpusProgram, identity: &str) -> (usize, usize) {
-    let options = RuntimeOptions::default();
+    let options = RuntimeOptions {
+        max_operations: Some(10_000),
+        ..RuntimeOptions::default()
+    };
     let (mut succeeded, mut failed) = (0, 0);
     let mut count = |error: Option<NxIrRuntimeError>| match error {
         None => succeeded += 1,

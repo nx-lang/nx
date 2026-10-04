@@ -1,0 +1,14 @@
+{
+  "counts": {
+    "main.nx::defaulted": 8,
+    "main.nx::distinct": 12,
+    "main.nx::full": 11,
+    "main.nx::identical": 12,
+    "main.nx::kit": 16,
+    "main.nx::kitExtra": 16,
+    "main.nx::passed": 7,
+    "main.nx::root": 13,
+    "main.nx::typed": 12,
+    "main.nx::wrapped": 15
+  }
+}

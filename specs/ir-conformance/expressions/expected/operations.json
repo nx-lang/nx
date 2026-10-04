@@ -1,0 +1,28 @@
+{
+  "counts": {
+    "main.nx::andSkipsRight": 6,
+    "main.nx::andTakesRight": 10,
+    "main.nx::arithmetic": 14,
+    "main.nx::bareFailed": 15,
+    "main.nx::classified": 14,
+    "main.nx::doubled": 31,
+    "main.nx::element": 10,
+    "main.nx::failedLoad": 15,
+    "main.nx::greeting": 5,
+    "main.nx::idleLoad": 10,
+    "main.nx::integerDivision": 4,
+    "main.nx::integerRemainder": 4,
+    "main.nx::logicalNot": 4,
+    "main.nx::maybe": 6,
+    "main.nx::negation": 4,
+    "main.nx::orSkipsRight": 6,
+    "main.nx::orTakesRight": 11,
+    "main.nx::ordered": 30,
+    "main.nx::realDivision": 4,
+    "main.nx::realRemainder": 4,
+    "main.nx::reviewStage": 12,
+    "main.nx::root": 16,
+    "main.nx::small": 10,
+    "main.nx::squares": 25
+  }
+}

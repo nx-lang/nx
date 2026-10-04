@@ -439,15 +439,18 @@ test("a float64 prints in the ECMAScript form: no fraction when integral, expone
     assertEqual(evaluateFunction(program, "f", [1e-7]), "1e-7");
     assertEqual(evaluateFunction(program, "f", [-0]), "0");
 });
-test("a boolean prints as true or false, and a wide integer as its digits", () => {
+test("a boolean prints as true or false, and an integer outside the safe range is refused", () => {
     const program = textOfParameter("boolean");
     assertEqual(evaluateFunction(program, "f", [true]), "true");
     assertEqual(evaluateFunction(program, "f", [false]), "false");
-    // An integer outside the safe range is a `bigint` constant, carried as its digits.
+    // An integer outside the safe range is a `bigint` constant, which a JavaScript number cannot
+    // hold: the image prepares, and reading the constant is the failure.
     const wide = new ArtifactBuilder("main.nx");
     wide.constants.push([1, wide.str("9007199254740993")]);
     wide.fn("root", wide.text(wide.node([nodeKinds.number, wide.constants.length - 1]), "int64"));
-    assertEqual(evaluateFunction(prepareNxIrProgram(wide.build()), "root"), "9007199254740993");
+    const prepared = prepareNxIrProgram(wide.build());
+    const error = assertThrows(() => evaluateFunction(prepared, "root"), "outside JavaScript's safe range");
+    assertEqual(error.diagnostics[0].code, "nx-ir-number");
 });
 test("a text node refuses an operand that is not the primitive it names", () => {
     const b = new ArtifactBuilder("main.nx");
@@ -2025,6 +2028,28 @@ test("an agent library image of another version fails linking unless the host al
     }
     const program = linkNxIrProgram(entry, { resolve: () => library, allowVersionMismatch: true });
     assertEqual(evaluateFunction(program, "root"), 1);
+});
+/** `root` is `depth - 1` negations around a literal: `depth` nodes, each nested in the one before. */
+function nestedNegations(depth) {
+    const b = new ArtifactBuilder("main.nx");
+    let node = b.int(1);
+    for (let level = 1; level < depth; level += 1) {
+        node = b.node([nodeKinds.unary, 0, node]);
+    }
+    b.fn("root", node);
+    return prepareNxIrProgram(b.build());
+}
+test("expressions nest exactly 1,000 deep, whatever the call depth allows", () => {
+    // 1,000 nested nodes evaluate: 999 negations of 1.
+    assertEqual(evaluateFunction(nestedNegations(1000), "root"), -1);
+    // One more is refused by the fixed bound, far inside the engine's own stack, and raising the
+    // call depth does not raise it.
+    for (const options of [{}, { maxCallDepth: 1_000_000 }]) {
+        const error = assertThrows(() => evaluateFunction(nestedNegations(1001), "root", [], options), "nest more than 1000 deep");
+        assertEqual(error.diagnostics[0].code, "nx-ir-resource-limit");
+        assertEqual(error.diagnostics[0].limit, { name: "maxExpressionNesting", value: 1000 });
+        assertEqual(error.diagnostics[0].declaration, "main.nx::root");
+    }
 });
 let failures = 0;
 for (const [name, run] of tests) {

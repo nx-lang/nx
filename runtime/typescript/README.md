@@ -145,18 +145,86 @@ Every evaluation API takes runtime options:
 
 | Option | Default | What it does |
 | --- | --- | --- |
-| `maxCallDepth` | The runtime's own | The deepest chain of calls one evaluation may make. |
+| `maxOperations` | Unlimited | The most operations one call may cost. |
+| `maxCallDepth` | `100` | The deepest chain of calls one evaluation may make. |
 | `maxRangeLength` | `1_000_000` | The most integers one range may hold when a `for` iterates it. |
+
+**Set `maxOperations` for any code you did not write.** It is the only option that bounds work and
+allocation; the other two do not. Three nested loops over ranges of a thousand run a billion
+bodies inside both, and a function that doubles a list or a string on each of its 100 permitted
+calls asks for 2^100 items. Unset, a call is unlimited, so a host that runs only its own programs
+sees no change.
+
+An operation is a unit of work on a value:
+
+- a node evaluated;
+- an item placed in a sequence a node builds (a list, a loop's result, an element's content), or
+  in the list a call binds to a content parameter;
+- 64 UTF-16 code units of a string a concatenation produces;
+- a value checked against a declared type, where a record is one and then each of its fields;
+- a pair of values an equality compares, and 64 code units of text it reads to compare them;
+- a value written for the host, and 64 code units of text written.
+
+Text is a string, and also a record's type name and field names, which a host can make as long as
+it likes in a value it passes at `object`; declared names are short and cost nothing.
+
+The rules are in `docs/nx-ir-format.md`, under *Evaluation cost*. The count depends on the images
+and the input alone, so the Rust runtime, `nx-ir-runtime`, counts the same number and stops at the
+same place. One budget covers one call and everything it does: the arguments and props it checks,
+parameter and field defaults, value initializers, a component's state defaults and body, for
+`dispatchComponentActions` every handler of the batch and the render after it, and the result it
+writes. Each call starts with the whole budget, so options can be shared. A charge that would
+exceed the budget fails the call before the operation runs, with `nx-ir-resource-limit` naming the
+declaration and, for a charge made for a node of an image with a debug section, the span:
+
+```ts
+evaluateFunction(program, "tool", [input], { maxOperations: 100_000 });
+```
+
+A program costs what it evaluates, what it is given and what it returns: a loop over a thousand
+items with a small body is a few thousand operations, and so are a thousand rows passed in or
+returned. As a rough guide to what a budget buys, `for i in 0..1000000 { i * i }` is five million
+operations, four million to run and one million to write its result, and takes about 130 ms in
+Node 24 on a current laptop, some 40,000 operations a millisecond.
+
+The rules are written so that every step that touches a value in proportion to its size is charged
+in proportion, and the time and the memory of a call are proportional to its count. That holds for
+everything this package's tests and the conformance corpus cover, but it is a claim about every
+step of the runtime, and review has several times found a step that broke it, each time through a
+large or unusual value a host passed at `object`. Treat the budget as the first limit on code you
+did not write, and keep one of your own on time and memory as well where you have one: a CPU limit,
+or a separate isolate. The same holds for a
+value held in many places too: a record that names one value twice, forty levels deep, costs a few
+hundred operations to build and is 2^40 values to anything that walks it, so the type check, the
+equality and the result that walk it are what pay. Two things follow that are worth knowing when
+choosing a budget:
+
+- Typed data is checked each time it meets a type. A list of `n` items returned through `k` calls
+  that declare their result costs about `k × n`, and nested records are checked again by each
+  record built around them.
+- Two lists are compared item by item up to the first pair that differs, so two long lists that
+  differ early are cheap to compare. Two records are compared field by field to the end under a
+  budget, even after one field differs, so that the cost does not depend on the order fields are
+  held in. The result is the same either way.
+
+A value that is not a non-negative safe integer, `NaN` included, is refused with `nx-ir-options`
+before anything is evaluated, never read as unlimited.
 
 A range makes an enormous loop one token long — `for i in 0..2000000` is four tokens — so the count
 is checked before the body runs at all, and a range above the limit fails with
-`nx-ir-resource-limit` naming the limit. The default matches the NX interpreter's operation budget, so
-a program that runs under `nxlang` runs here. A host with a legitimately larger loop raises the
-limit:
+`nx-ir-resource-limit` naming the limit. The default admits any loop a program is likely to write on
+purpose. A host with a legitimately larger loop raises the limit:
 
 ```ts
 evaluateFunction(program, "rows", [], { maxRangeLength: 5_000_000 });
 ```
+
+Two limits are not options. Expressions may nest at most 1,000 deep across every call of one
+evaluation, the bound the Rust runtime holds, so raising `maxCallDepth` does not let recursion reach
+the engine's stack. And a `RangeError` the JavaScript engine raises during evaluation — a call
+stack, a string or an array past what the engine holds — is reported as `nx-ir-resource-limit`
+rather than thrown as itself. That failure depends on where the runtime runs, which its limit's
+name, `engine`, says.
 
 ## Diagnostics
 
@@ -164,6 +232,20 @@ A runtime diagnostic names the declaration the failing expression belongs to, as
 `identity::name`. When the artifact carries its debug section, which the CLI writes and the SDKs
 emit on request, the diagnostic also carries the expression's span in the module's source. The
 runtime never reads a source file.
+
+Every `nx-ir-resource-limit` diagnostic carries `limit`, the limit that was reached, so a host tells
+an exhausted budget from runaway recursion without reading the message:
+
+| `limit.name` | `limit.value` | Reached when |
+| --- | --- | --- |
+| `maxOperations` | The budget | The call cost more operations than its budget. The diagnostic has no `source` when the charge was for a type check or for the result written, which belong to no node. |
+| `maxCallDepth` | The depth | Calls nested deeper than the option allows. |
+| `maxRangeLength` | The length | A loop's range holds more integers than the option allows. |
+| `maxExpressionNesting` | `1000` | Expressions nested deeper than the fixed bound. |
+| `engine` | none | The JavaScript engine refused: its stack, or a string or an array too long for it. |
+
+No other diagnostic carries `limit`. Runtime options the runtime cannot use are refused with
+`nx-ir-options` before anything is evaluated.
 
 ## Exports
 
@@ -182,9 +264,10 @@ runtime never reads a source file.
 | `float32Text` | The canonical text of a `float32` carried as a `number`: the shortest digits that round-trip as a `float32`, which is what a `text` node naming `float32` prints. |
 | `NX_IR_SCHEMA_VERSION`, `NX_IR_RUNTIME_ABI` | The schema and ABI this runtime accepts. |
 | `NX_IR_REQUIRED_FEATURE_*` | The required features this runtime knows, including `ranges-v1` for iteration over a range. An image listing a feature this runtime does not know is refused by name. |
-| `NX_PRELUDE_MODULE_IDENTITY`, `NX_DEFAULT_MAX_RANGE_LENGTH` | The prelude's reserved identity, and the default range-length limit. |
+| `NX_PRELUDE_MODULE_IDENTITY`, `NX_DEFAULT_MAX_CALL_DEPTH`, `NX_DEFAULT_MAX_RANGE_LENGTH` | The prelude's reserved identity, and the defaults of the call-depth and range-length limits. |
 | `nodeKinds`, `typeKinds`, `constantKinds`, `declarationKinds` | The kind numbers of the schema. |
 | `NxIrRuntimeError` | Thrown for an artifact the runtime cannot run, with its diagnostics. |
+| `NxIrLimit` | The type of a resource-limit diagnostic's `limit`: a `name` and, for a numeric limit, its `value`. |
 
 The opened image (`NxIrImage`), the prepared types (`NxPreparedModule`, `NxPreparedProgram`,
 `PreparedDeclaration`) and the instance (`NxComponentInstance`) are exported so a host can read the
@@ -200,6 +283,21 @@ one, and holds no doc comments. It derives JSON Schema with a compiler SDK when 
 `@nx-lang/sdk-node`, and stores the schemas with the image. A schema derived from the same artifact
 as the image agrees with this runtime's boundary validation: arguments valid against it are
 accepted, and what the function returns is valid against its result schema.
+
+## Integers outside the safe range
+
+A JavaScript number holds integers exactly only up to 2^53, and this runtime carries every number as
+one. So it cannot hold a larger integer exactly, and a program that reaches a literal outside the
+safe range fails there with `nx-ir-number`, naming the function and the literal. Only literals are
+refused: arithmetic whose result passes 2^53 gives the nearest number a double holds, as JavaScript
+does, and a number a host passes at a parameter typed `int` is taken as the number it is. The image
+still prepares, and every path that does not reach the literal runs. The Rust runtime, which has
+64-bit integers, runs the same program.
+
+Canonical JSON spells such an integer as `{ "$type": "nx.int", "value": "<digits>" }`. A host that
+passes that record at a parameter typed `object` passes a record like any other: it is returned
+unchanged and what it holds is paid for like any record's fields. At a parameter typed `int` it is
+refused, as any value that is not a number is.
 
 ## Function records
 

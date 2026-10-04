@@ -1,0 +1,318 @@
+{
+  "counts": {
+    "main.nx::Tally": {
+      "batches": [
+        11,
+        17
+      ],
+      "initial": 9
+    },
+    "main.nx::bound": 19,
+    "main.nx::checked": 17,
+    "main.nx::compared": 15,
+    "main.nx::comparedHandlers": 21,
+    "main.nx::comparedLists": 20,
+    "main.nx::comparedText": 16,
+    "main.nx::concat": 8,
+    "main.nx::content": 35,
+    "main.nx::defaults": 8,
+    "main.nx::directCall": 4,
+    "main.nx::forItems": 25,
+    "main.nx::forRange": 34,
+    "main.nx::misaligned": 12,
+    "main.nx::patched": 5,
+    "main.nx::patterns": 15,
+    "main.nx::spliced": 28,
+    "main.nx::updated": 22,
+    "main.nx::valueCall": 14,
+    "main.nx::valueReference": 10,
+    "main.nx::written": 22
+  },
+  "failures": {
+    "main.nx::bound": [
+      {
+        "budget": 9,
+        "declaration": "main.nx::numbers",
+        "source": {
+          "end": 425,
+          "identity": "main.nx",
+          "start": 416
+        }
+      },
+      {
+        "budget": 18,
+        "declaration": "main.nx::bound"
+      }
+    ],
+    "main.nx::checked": [
+      {
+        "budget": 8,
+        "declaration": "main.nx::Point"
+      },
+      {
+        "budget": 16,
+        "declaration": "main.nx::checked"
+      }
+    ],
+    "main.nx::compared": [
+      {
+        "budget": 7,
+        "declaration": "main.nx::compared",
+        "source": {
+          "end": 2843,
+          "identity": "main.nx",
+          "start": 2842
+        }
+      },
+      {
+        "budget": 14,
+        "declaration": "main.nx::compared"
+      }
+    ],
+    "main.nx::comparedHandlers": [
+      {
+        "budget": 10,
+        "declaration": "main.nx::comparedHandlers",
+        "source": {
+          "end": 3262,
+          "identity": "main.nx",
+          "start": 3256
+        }
+      },
+      {
+        "budget": 20,
+        "declaration": "main.nx::comparedHandlers"
+      }
+    ],
+    "main.nx::comparedLists": [
+      {
+        "budget": 10,
+        "declaration": "main.nx::others",
+        "source": {
+          "end": 448,
+          "identity": "main.nx",
+          "start": 439
+        }
+      },
+      {
+        "budget": 19,
+        "declaration": "main.nx::comparedLists"
+      }
+    ],
+    "main.nx::comparedText": [
+      {
+        "budget": 8,
+        "declaration": "main.nx::comparedText",
+        "source": {
+          "end": 3419,
+          "identity": "main.nx",
+          "start": 3412
+        }
+      },
+      {
+        "budget": 15,
+        "declaration": "main.nx::comparedText"
+      }
+    ],
+    "main.nx::concat": [
+      {
+        "budget": 4,
+        "declaration": "main.nx::accents",
+        "source": {
+          "end": 748,
+          "identity": "main.nx",
+          "start": 662
+        }
+      },
+      {
+        "budget": 7,
+        "declaration": "main.nx::concat"
+      }
+    ],
+    "main.nx::content": [
+      {
+        "budget": 17,
+        "declaration": "main.nx::content",
+        "source": {
+          "end": 2089,
+          "identity": "main.nx",
+          "start": 2088
+        }
+      },
+      {
+        "budget": 34,
+        "declaration": "main.nx::content"
+      }
+    ],
+    "main.nx::defaults": [
+      {
+        "budget": 4,
+        "declaration": "main.nx::greet",
+        "source": {
+          "end": 1018,
+          "identity": "main.nx",
+          "start": 1002
+        }
+      },
+      {
+        "budget": 7,
+        "declaration": "main.nx::defaults"
+      }
+    ],
+    "main.nx::directCall": [
+      {
+        "budget": 2,
+        "declaration": "main.nx::one",
+        "source": {
+          "end": 837,
+          "identity": "main.nx",
+          "start": 836
+        }
+      },
+      {
+        "budget": 3,
+        "declaration": "main.nx::directCall"
+      }
+    ],
+    "main.nx::forItems": [
+      {
+        "budget": 12,
+        "declaration": "main.nx::forItems",
+        "source": {
+          "end": 1879,
+          "identity": "main.nx",
+          "start": 1853
+        }
+      },
+      {
+        "budget": 24,
+        "declaration": "main.nx::forItems"
+      }
+    ],
+    "main.nx::forRange": [
+      {
+        "budget": 17,
+        "declaration": "main.nx::forRange",
+        "source": {
+          "end": 1918,
+          "identity": "main.nx",
+          "start": 1917
+        }
+      },
+      {
+        "budget": 33,
+        "declaration": "main.nx::forRange"
+      }
+    ],
+    "main.nx::misaligned": [
+      {
+        "budget": 6,
+        "declaration": "main.nx::misaligned",
+        "source": {
+          "end": 4336,
+          "identity": "main.nx",
+          "start": 4335
+        }
+      },
+      {
+        "budget": 11,
+        "declaration": "main.nx::misaligned"
+      }
+    ],
+    "main.nx::patched": [
+      {
+        "budget": 2,
+        "declaration": "main.nx::Opt.Update"
+      },
+      {
+        "budget": 4,
+        "declaration": "main.nx::patched"
+      }
+    ],
+    "main.nx::patterns": [
+      {
+        "budget": 7,
+        "declaration": "main.nx::corners",
+        "source": {
+          "end": 819,
+          "identity": "main.nx",
+          "start": 779
+        }
+      },
+      {
+        "budget": 14,
+        "declaration": "main.nx::patterns"
+      }
+    ],
+    "main.nx::spliced": [
+      {
+        "budget": 14,
+        "declaration": "main.nx::twice",
+        "source": {
+          "end": 964,
+          "identity": "main.nx",
+          "start": 955
+        }
+      },
+      {
+        "budget": 27,
+        "declaration": "main.nx::spliced"
+      }
+    ],
+    "main.nx::updated": [
+      {
+        "budget": 11,
+        "declaration": "main.nx::updated",
+        "source": {
+          "end": 4110,
+          "identity": "main.nx",
+          "start": 4109
+        }
+      },
+      {
+        "budget": 21,
+        "declaration": "main.nx::updated"
+      }
+    ],
+    "main.nx::valueCall": [
+      {
+        "budget": 7,
+        "declaration": "main.nx::triple"
+      },
+      {
+        "budget": 13,
+        "declaration": "main.nx::valueCall"
+      }
+    ],
+    "main.nx::valueReference": [
+      {
+        "budget": 5,
+        "declaration": "main.nx::valueReference",
+        "source": {
+          "end": 2452,
+          "identity": "main.nx",
+          "start": 2446
+        }
+      },
+      {
+        "budget": 9,
+        "declaration": "main.nx::valueReference"
+      }
+    ],
+    "main.nx::written": [
+      {
+        "budget": 11,
+        "declaration": "main.nx::both",
+        "source": {
+          "end": 1148,
+          "identity": "main.nx",
+          "start": 1147
+        }
+      },
+      {
+        "budget": 21,
+        "declaration": "main.nx::written"
+      }
+    ]
+  }
+}

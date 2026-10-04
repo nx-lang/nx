@@ -1,14 +1,14 @@
 //! Components: descriptors, instances, handlers and dispatch.
 
 use crate::error::{fail, Result};
-use crate::eval::{bind, bind_content, Cx, Frame, Machine, RuntimeOptions};
+use crate::eval::{bind, bind_content, Cx, Frame, Machine, Meter, RuntimeOptions};
 use crate::module::{ComponentDecl, DeclarationKind, Node};
 use crate::normalize::{require_record, Labeled, Path};
 use crate::program::{Program, ProgramData};
 use crate::stored::{refuse, Stored};
 use crate::value::{
-    check_depth, fields_from_host, fields_to_host, from_host, get_field, handlers_equal, to_host,
-    too_deep, Fields, Handler, Record, Tokens, Value, ACTION_HANDLER_TYPE, HANDLER_INVOCATION_TYPE,
+    fields_from_host, fields_to_host, from_host, get_field, handlers_equal, to_host, too_deep,
+    Depths, Fields, Handler, Record, Tokens, Value, ACTION_HANDLER_TYPE, HANDLER_INVOCATION_TYPE,
     MAX_VALUE_DEPTH,
 };
 use nx_value::NxValue;
@@ -63,7 +63,7 @@ impl ComponentInstance {
     /// `other_token`: the same handler node with the same capture.
     pub fn same_handler(&self, token: &str, other: &ComponentInstance, other_token: &str) -> bool {
         match (self.data.handler(token), other.data.handler(other_token)) {
-            (Some(left), Some(right)) => handlers_equal(left, right),
+            (Some(left), Some(right)) => same_handler(left, right),
             _ => false,
         }
     }
@@ -82,10 +82,19 @@ impl ComponentInstance {
             .iter()
             .find(|(name, _)| &**name == property);
         match (bound, parent.data.handler(token)) {
-            (Some((_, left)), Some(right)) => handlers_equal(left, right),
+            (Some((_, left)), Some(right)) => same_handler(left, right),
             _ => false,
         }
     }
+}
+
+/// Whether two handlers a host holds are one handler. No evaluation pays for the comparison.
+///
+/// <para>A handler a host was handed and hands back is the same allocation, which is the case
+/// this exists for, so that is asked first: it is not what the language's `==` asks, where a
+/// capture that holds a NaN makes a handler unequal to itself.</para>
+fn same_handler(left: &Arc<Handler>, right: &Arc<Handler>) -> bool {
+    Arc::ptr_eq(left, right) || handlers_equal(left, right, &Meter::free()).unwrap_or(false)
 }
 
 impl Serialize for ComponentInstance {
@@ -464,6 +473,7 @@ impl<'p> Machine<'p> {
         component: &ComponentDecl,
         current: &[(Arc<str>, Value)],
         patch: &Record,
+        depths: &mut Depths,
     ) -> Result<Fields> {
         let expected = format!("{name}.Update");
         if let Some(discriminator) = patch
@@ -496,8 +506,14 @@ impl<'p> Machine<'p> {
             true,
         )?;
         // A batch can nest the state one level per entry, and nothing else looks at the state
-        // until the batch is over.
-        check_depth(&next)?;
+        // until the batch is over. Only a field the patch supplies can have changed, so only
+        // those are walked, and `depths` remembers what earlier patches of the call found: a
+        // patch that touches a counter does not pay for the rest of the state, nor one that
+        // supplies a large value again for walking it again.
+        depths.check(
+            next.iter()
+                .filter(|(name, _)| get_field(&patch.fields, name).is_some()),
+        )?;
         Ok(next)
     }
 }
@@ -627,7 +643,11 @@ impl Program {
         for (name, handler) in handlers {
             crate::value::set_field(&mut fields, name, Value::Handler(handler));
         }
-        to_host(&Value::record(Some(Arc::clone(declared)), fields), None)
+        to_host(
+            &Value::record(Some(Arc::clone(declared)), fields),
+            None,
+            &machine.meter(entry_cx(index), None),
+        )
     }
 
     /// Initializes a component from props: renders its body against its initial state and
@@ -688,10 +708,15 @@ impl Program {
             )?,
         };
         let mut tokens = Tokens::new(1);
-        let rendered = to_host(&machine.eval(cx, &mut frame, body)?, Some(&mut tokens))?;
+        let output = machine.meter(cx, None);
+        let rendered = to_host(
+            &machine.eval(cx, &mut frame, body)?,
+            Some(&mut tokens),
+            &output,
+        )?;
         Ok(ComponentInitResult {
             rendered,
-            state: fields_to_host(&state)?,
+            state: fields_to_host(&state, &output)?,
             instance: ComponentInstance {
                 data: Arc::new(InstanceData {
                     program: Arc::clone(&self.data.images),
@@ -736,7 +761,11 @@ impl Program {
             &Labeled(name, " state"),
             true,
         )?;
-        to_host(&machine.eval(cx, &mut frame, body)?, None)
+        to_host(
+            &machine.eval(cx, &mut frame, body)?,
+            None,
+            &machine.meter(cx, None),
+        )
     }
 
     /// Dispatches a batch against an instance and returns the next one, without touching the
@@ -769,6 +798,7 @@ impl Program {
         let owner_key = format!("{}::{name}", self.data.entry.identity);
         let mut working = instance.state.clone();
         let mut effects = Vec::new();
+        let mut depths = Depths::default();
 
         for (position, entry) in batch.iter().enumerate() {
             let path = Position("dispatch entry ", position, "");
@@ -801,8 +831,14 @@ impl Program {
                         Some(patch)
                             if owned && machine.is_update_record_for(&result, &owner_key) =>
                         {
-                            working =
-                                machine.patch_state(index, name, component, &working, patch)?;
+                            working = machine.patch_state(
+                                index,
+                                name,
+                                component,
+                                &working,
+                                patch,
+                                &mut depths,
+                            )?;
                         }
                         _ => effects.push(result),
                     }
@@ -865,17 +901,19 @@ impl Program {
         }
         let generation = instance.generation.saturating_add(1);
         let mut tokens = Tokens::new(generation);
+        let output = machine.meter(entry_cx(index), None);
         let rendered = to_host(
             &machine.eval(entry_cx(index), &mut frame, body)?,
             Some(&mut tokens),
+            &output,
         )?;
         Ok(ComponentDispatchResult {
             rendered,
             effects: effects
                 .iter()
-                .map(|effect| to_host(effect, None))
+                .map(|effect| to_host(effect, None, &output))
                 .collect::<Result<_>>()?,
-            state: fields_to_host(&working)?,
+            state: fields_to_host(&working, &output)?,
             instance: ComponentInstance {
                 data: Arc::new(InstanceData {
                     program: Arc::clone(&instance.program),
@@ -907,7 +945,7 @@ impl Program {
             &Labeled(name, " state"),
             true,
         )?;
-        fields_to_host(&state)
+        fields_to_host(&state, &machine.meter(entry_cx(index), None))
     }
 
     /// Applies a patch to host-owned component state and returns the validated next state.
@@ -927,9 +965,15 @@ impl Program {
         let (index, name, component) = machine.component(name)?;
         let patch = from_host(patch)?;
         let patch = require_record(&patch, &"the state patch")?;
-        let state =
-            machine.patch_state(index, name, component, &fields_from_host(current)?, patch)?;
-        fields_to_host(&state)
+        let state = machine.patch_state(
+            index,
+            name,
+            component,
+            &fields_from_host(current)?,
+            patch,
+            &mut Depths::default(),
+        )?;
+        fields_to_host(&state, &machine.meter(entry_cx(index), None))
     }
 
     /// Restores an instance from its serialized form, for this program.
@@ -1010,7 +1054,12 @@ fn entry_result(machine: &Machine<'_>, module: u32, index: u32, value: Value) ->
     if is_optional && value.is_empty() {
         return Ok(NxValue::Null);
     }
-    to_host(&value, None)
+    let cx = Cx {
+        module,
+        declaration: index,
+        depth: 0,
+    };
+    to_host(&value, None, &machine.meter(cx, None))
 }
 
 struct Position(&'static str, usize, &'static str);

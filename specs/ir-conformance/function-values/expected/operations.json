@@ -1,0 +1,11 @@
+{
+  "counts": {
+    "main.nx::called": 16,
+    "main.nx::distinct": 7,
+    "main.nx::exact": 28,
+    "main.nx::identical": 7,
+    "main.nx::root": 22,
+    "main.nx::subset": 22,
+    "main.nx::template": 2
+  }
+}

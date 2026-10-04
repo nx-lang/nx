@@ -42,7 +42,7 @@ mod value;
 pub use component::{
     ComponentDispatchResult, ComponentInit, ComponentInitResult, ComponentInstance,
 };
-pub use error::{Diagnostic, NxIrRuntimeError, Result, SourceSpan};
+pub use error::{Diagnostic, Limit, NxIrRuntimeError, Result, SourceSpan};
 pub use eval::{RuntimeOptions, NX_DEFAULT_MAX_CALL_DEPTH, NX_DEFAULT_MAX_RANGE_LENGTH};
 pub use helpers::{apply, diff, merge};
 pub use module::PreparedModule;

@@ -4,11 +4,15 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+  NxIrRuntimeError,
+  applyComponentStatePatch,
   callFunction,
+  constructComponentDescriptor,
   dispatchComponentActions,
   evaluateComponent,
   evaluateFunction,
   initializeComponent,
+  normalizeComponentState,
   prepareNxIrProgram,
 } from "../dist/src/index.js";
 
@@ -851,5 +855,511 @@ console.log(JSON.stringify(root()));
     assertEqual(evaluateFunction(prepared, "root"), native);
     assertEqual(generated, native);
     console.log("ok - a lone child at an optional plus content property binds a one-item array in all three engines");
+  },
+);
+
+// ------------------------------------------------------------------------------------------------
+// The operation budget and the limits a diagnostic names
+// ------------------------------------------------------------------------------------------------
+
+/** The error `run` throws, which must be the runtime's own. */
+function runtimeFailure(run) {
+  try {
+    run();
+  } catch (error) {
+    if (!(error instanceof NxIrRuntimeError)) {
+      throw new Error(`Expected an NxIrRuntimeError, got ${error?.constructor?.name}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return error;
+  }
+  throw new Error("Expected the evaluation to fail");
+}
+
+/** The limit a resource-limit failure names. */
+function limitOf(run) {
+  const diagnostic = runtimeFailure(run).diagnostics[0];
+  if (diagnostic.code !== "nx-ir-resource-limit") {
+    throw new Error(`Expected nx-ir-resource-limit, got ${diagnostic.code}: ${diagnostic.message}`);
+  }
+  return diagnostic.limit;
+}
+
+/** What an evaluation costs: the least budget it succeeds under, found by doubling and bisecting. */
+function cost(run) {
+  const succeeds = (maxOperations) => {
+    try {
+      run({ maxOperations });
+      return true;
+    } catch (error) {
+      if (error instanceof NxIrRuntimeError && error.diagnostics[0].limit?.name === "maxOperations") {
+        return false;
+      }
+      throw error;
+    }
+  };
+  let high = 1;
+  while (!succeeds(high)) {
+    high *= 2;
+  }
+  let low = 0;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (succeeds(middle)) {
+      high = middle;
+    } else {
+      low = middle + 1;
+    }
+  }
+  return high;
+}
+
+/** Asserts that an evaluation costs exactly `operations`: it succeeds under that budget and fails on the budget under one less. */
+function assertCosts(operations, run) {
+  run({ maxOperations: operations });
+  assertEqual(limitOf(() => run({ maxOperations: operations - 1 })), { name: "maxOperations", value: operations - 1 });
+}
+
+withSource(
+  `
+external component <Button emits { Tapped { } } />
+action Ping = { n:int }
+type Shape = | dot | ring { radius:int } | box { side:int }
+type Bag = { items?:int+ }
+
+let add(a:int, b:int) = { a + b }
+let squares() = { for i in 0..4 { i * i } }
+let pick(flag:boolean) = { if flag { 1 } else { for i in 0..1000 { i } } }
+let one() = { 1 }
+let callOne() = { one() }
+let twice(xs:int+) = { xs xs }
+let same(xs:int+) = { xs }
+let join(a:string, b:string) = { a + b }
+let sameText(a:string, b:string) = { a == b }
+let corners(shape:Shape) = { if shape is { dot, ring => 0  box => 4 } }
+let triple(n:int) = { n * 3 }
+let through(f: <function n:int />: int) = <f n={2} />
+let nested() = { for a in 0..1000 { for b in 0..1000 { for c in 0..1000 { a + b + c } } } }
+let wide() = { for i in 0..1000000 { i } }
+let tooWide() = { for i in 0..2000000 { i } }
+let growList(n:int, xs:int+): int+ = { if n == 0 { xs } else { growList(n - 1, { xs xs }) } }
+let growText(n:int, s:string): string = { if n == 0 { s } else { growText(n - 1, s + s) } }
+let spin(n:int): int = { spin(n + 1) }
+let ratio(n:int): int = { n / 0 }
+let longContent() = <list>{for i in 0..200000 { i }}</list>
+
+component <Busy /> = {
+  state { items?:int+ }
+  <Button onTapped=<Update items={for i in 0..300 { i }} /> />
+}
+component <Eager /> = {
+  state { bag:Bag = <Bag items={for i in 0..100000 { i }} /> }
+  <Button />
+}
+type Heavy = { bag:Bag = <Bag items={for i in 0..100000 { i }} /> }
+component <Costly heavy:Heavy = <Heavy /> /> = {
+  state { held?:Heavy }
+  <Button />
+}
+type F = { v:float64 }
+type Opt = { a:int = 1 b?:int c?:string }
+let selfEq(f:F): boolean = { f == f }
+let sameObject(o:object): boolean = { o == o }
+let selfEqElement(v:float64): boolean = { sameObject(<box v={v} />) }
+let ignore(content c:object): int = { 1 }
+let many(xs:object, count:int) = { for i in 0..count { ignore(xs) } }
+let repeated(o:object, n:int) = { for i in 0..n { o } }
+let passObject(o:object): object = { o }
+let patchOnly() = { <Opt.Update b={5} /> }
+let cmpMany(a:object, b:object, count:int) = { for i in 0..count { a == b } }
+let bindObject(xs:object): int = { ignore(xs) }
+let wideOther(): object = { 1152921504606846977 }
+let wideSame(): object = { 1152921504606846976 }
+let patWide(): int = { if wideOther() is { 1152921504606846976 => 1  else => 0 } }
+let patWideSame(): int = { if wideSame() is { 1152921504606846976 => 1  else => 0 } }
+let eqWide(o:object): boolean = { o == wideSame() }
+let patHost(o:object): int = { if o is { 1152921504606846976 => 1  else => 0 } }
+let button(a:int, b:int) = <Button onTapped=<Ping n={a + b} /> />
+let sameButton(a:int, b:int, c:int, d:int): boolean = { button(a, b) == button(c, d) }
+type Tree = { kids?:Tree+ }
+let growTree(n:int, t:Tree): Tree = { if n == 0 { t } else { growTree(n - 1, <Tree kids={ t t } />) } }
+let held(n:int): int = { if growTree(n, <Tree />) == <Tree /> { 1 } else { 0 } }
+let build(n:int): Tree = { growTree(n, <Tree />) }
+let growPair(n:int, t:object): object = { if n == 0 { t } else { growPair(n - 1, <pair a={t} b={t} />) } }
+let samePair(n:int): boolean = { growPair(n, <leaf />) == growPair(n, <leaf />) }
+let buildPair(n:int): object = { growPair(n, <leaf />) }
+let keepPair(n:int): int = { if growPair(n, <leaf />) is { {} => 0  else => 1 } }
+let repeat(s:string, count:int) = { for i in 0..count { s } }
+let fan(n:int, count:int) = { repeat(growText(n, "x"), count) }
+component <Holder /> = {
+  state { view?:object }
+  <Button onTapped=<Update view={growPair(40, <leaf />)} /> />
+}
+let pings(): Ping+ = { <Ping n={0} /> for i in 1..200000 { <Ping n={i} /> } }
+component <Burst emits { Fired { } } /> = { <Button /> }
+component <Relay emits { Ping } /> = {
+  <Burst onFired={pings()} />
+}
+`,
+  (dir, sourcePath) => {
+    const program = prepareNxIrProgram(emitIr(dir, sourcePath));
+    const source = readFileSync(sourcePath, "utf8");
+    /** The source text a diagnostic's span covers. The source is ASCII, so offsets are indices. */
+    const spanned = (diagnostic) => source.slice(diagnostic.source.start, diagnostic.source.end);
+    const evaluate = (name, args = []) => (options) => evaluateFunction(program, name, args, options);
+    const ints = (count) => Array.from({ length: count }, (_, index) => index);
+
+    // The worked counts of docs/nx-ir-format.md, which the Rust runtime is held to as well: what is
+    // evaluated, what is checked against a type on the way in, what is placed, and what is written
+    // for the host on the way out.
+    assertCosts(6, evaluate("add", [1, 2])); // two arguments checked, three nodes, one number written
+    assertCosts(29, evaluate("squares")); // the loop's 21, three `Range` fields checked, the list and four numbers written
+    assertCosts(8, evaluate("pick", [true])); // its result is the one-item list `{ 1 }`: the list and the number
+    assertCosts(4, evaluate("callOne"));
+    assertCosts(2504, evaluate("twice", [ints(500)])); // 500 checked, 1,003 to build, the list and 1,000 items written
+    assertCosts(20002, evaluate("same", [ints(10000)])); // a host's list is checked and written item by item
+    // A concatenation pays for the UTF-16 code units of its result when it is built and again when
+    // it is written: `é` is one unit and two bytes.
+    assertCosts(68, evaluate("join", ["a".repeat(1000), "b".repeat(1000)]));
+    assertCosts(68, evaluate("join", ["é".repeat(1000), "é".repeat(1000)]));
+    assertCosts(6, evaluate("join", ["a".repeat(31), "b".repeat(32)]));
+    assertCosts(8, evaluate("join", ["a".repeat(32), "b".repeat(32)]));
+    // An equality of two strings reads them, so it pays for the code units of the shorter.
+    assertCosts(22, evaluate("sameText", ["a".repeat(1000), "a".repeat(1000)]));
+    assertCosts(22, evaluate("sameText", ["a".repeat(1000), "b".repeat(5000)]));
+    assertCosts(7, evaluate("sameText", ["a".repeat(1000), "a".repeat(63)]));
+    // A pattern costs one whether it is evaluated (the constant `dot`, which is then compared with
+    // the scrutinee for one more) or read in place and matched by type (`ring`, `box`).
+    assertCosts(7, evaluate("corners", ["dot"]));
+    assertCosts(9, evaluate("corners", [{ $type: "Shape.ring", radius: 1 }]));
+    assertCosts(10, evaluate("corners", [{ $type: "Shape.box", side: 1 }]));
+    const identity = program.entry.module.identity;
+    const triple = { $type: "Function", module: identity, name: "triple" };
+    assertCosts(9, evaluate("through", [triple]));
+    assertCosts(29, (options) => callFunction(program, { $type: "Function", module: identity, name: "squares" }, {}, options));
+    console.log("ok - an evaluation costs what it evaluates, checks, places and writes, as the Rust runtime counts them");
+
+    const nested = runtimeFailure(() => evaluateFunction(program, "nested", [], { maxOperations: 100000 })).diagnostics[0];
+    assertEqual(nested.limit, { name: "maxOperations", value: 100000 });
+    assertEqual(nested.declaration, `${identity}::nested`);
+    assertEqual(evaluateFunction(program, "wide").length, 1000000);
+    console.log("ok - nested loops end at the budget, and an absent budget is unlimited");
+
+    // A list is paid for where it is checked as well as where it is built: `growList` checks its
+    // argument on the way in and its declared result on the way out of every call, so twelve
+    // doublings fit in 100,000 and thirteen do not, and the budget runs out in `growList` at a
+    // check of the list or at the placing of its items. A string of 2^j code units costs 2^j / 64
+    // to build, and writing the result costs as much again, so the twenty-second doubling is the
+    // one that does not fit, refused at the `concat` that would build it.
+    //
+    // What this cannot show is that a charge comes before the value is built: a charge made after
+    // would fail at the same node with the same count, and nothing here observes what was
+    // allocated. In this runtime that order is two adjacent lines, in `evalItemInto` and in the
+    // `concat` case of `evalBinary`; the Rust runtime's tests measure it.
+    const limited = { maxOperations: 100000 };
+    assertEqual(evaluateFunction(program, "growList", [12, [1]], limited).length, 2 ** 12);
+    assertEqual(evaluateFunction(program, "growText", [21, "x"], limited).length, 2 ** 21);
+    for (const [name, seed, doublings, node] of [
+      ["growList", [1], 13, undefined],
+      ["growList", [1], 60, undefined],
+      ["growText", "x", 22, "s + s"],
+      ["growText", "x", 60, "s + s"],
+    ]) {
+      const diagnostic = runtimeFailure(() => evaluateFunction(program, name, [doublings, seed], limited)).diagnostics[0];
+      assertEqual(diagnostic.limit, { name: "maxOperations", value: 100000 });
+      assertEqual(diagnostic.declaration, `${identity}::${name}`);
+      if (node !== undefined) {
+        assertEqual(spanned(diagnostic), node);
+      }
+    }
+    // And the count is exact: one operation fewer than ten doublings cost stops them.
+    assertCosts(cost(evaluate("growList", [10, [1]])), evaluate("growList", [10, [1]]));
+    assertCosts(cost(evaluate("growText", [10, "x"])), evaluate("growText", [10, "x"]));
+    console.log("ok - a list or a string that doubles on each call stops at the doubling the budget cannot pay for");
+
+    // A count per call: a batch, a state default, and two calls with one options object.
+    const busy = initializeComponent(program, "Busy").instance;
+    const tap = { $type: "ActionHandlerInvocation", token: "h1-1", action: { $type: "Button.Tapped" } };
+    const single = cost((options) => dispatchComponentActions(program, busy, [tap], options));
+    assertEqual(limitOf(() => dispatchComponentActions(program, busy, [tap, tap, tap], { maxOperations: single * 2 })), { name: "maxOperations", value: single * 2 });
+    dispatchComponentActions(program, busy, [tap], { maxOperations: single * 2 });
+    assertEqual(limitOf(() => initializeComponent(program, "Eager", {}, { maxOperations: 1000 })), { name: "maxOperations", value: 1000 });
+    const shared = { maxOperations: Math.floor(29 * 1.5) };
+    evaluateFunction(program, "squares", [], shared);
+    evaluateFunction(program, "squares", [], shared);
+    console.log("ok - one budget covers one call: a whole batch, a state default, and each of two calls afresh");
+
+    // `Heavy` has a field whose default is a loop of 100,000. It runs when a `Heavy` is
+    // constructed, whether as the default of the `heavy` prop or from a host's `{}`, and each API
+    // that constructs one is stopped by a budget of 1,000 and succeeds without one.
+    for (const [name, run] of [
+      ["constructComponentDescriptor", (options) => constructComponentDescriptor(program, "Costly", {}, [], options)],
+      ["evaluateComponent", (options) => evaluateComponent(program, "Costly", {}, {}, options)],
+      ["normalizeComponentState", (options) => normalizeComponentState(program, "Costly", { held: {} }, options)],
+      ["applyComponentStatePatch", (options) => applyComponentStatePatch(program, "Costly", {}, { held: {} }, options)],
+    ]) {
+      try {
+        assertEqual(limitOf(() => run({ maxOperations: 1000 })), { name: "maxOperations", value: 1000 });
+        run({});
+      } catch (error) {
+        throw new Error(`${name}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    console.log("ok - the descriptor, evaluation, state and patch APIs are each under the budget");
+
+    // A value that holds another value twice is one object reached by two paths: forty levels of
+    // that are 2^40 values to anything that walks them as a tree, built for a few hundred
+    // operations. Every walk the runtime makes is paid for by the budget, so each of these ends
+    // in a diagnostic at once; without the charges none of them ends at all.
+    const exhausted = { name: "maxOperations", value: 100000 };
+    // Checked against a type at each call, compared pair by pair, and written for the host.
+    for (const name of ["held", "build", "samePair"]) {
+      assertEqual(limitOf(() => evaluateFunction(program, name, [40], limited)), exhausted);
+    }
+    const unwritten = runtimeFailure(() => evaluateFunction(program, "buildPair", [40], limited)).diagnostics[0];
+    assertEqual(unwritten.limit, exhausted);
+    assertEqual(unwritten.declaration, `${identity}::buildPair`);
+    assertEqual(unwritten.source, undefined);
+    // Held and never walked, it costs what building it costs and nothing more.
+    if (cost(evaluate("keepPair", [40])) >= 1000) {
+      throw new Error("A value nobody walks should not be paid for by its size");
+    }
+    // Stored in state, it is refused when the state is written for the host.
+    const holder = initializeComponent(program, "Holder").instance;
+    assertEqual(limitOf(() => dispatchComponentActions(program, holder, [tap], limited)), exhausted);
+    // One string of 2^14 code units held 100 times is 100 strings to the host: each costs one and
+    // 256 for its length, where building it once cost 255.
+    if (cost(evaluate("fan", [14, 100])) <= 100 * 257) {
+      throw new Error("A string held many times over should be paid for each time it is written");
+    }
+    assertEqual(limitOf(() => evaluateFunction(program, "fan", [14, 100], { maxOperations: 1000 })), { name: "maxOperations", value: 1000 });
+    console.log("ok - a value shared many times over is paid for wherever it is walked");
+
+    // A value that holds a NaN is not equal to itself, under any budget and under none.
+    for (const options of [{}, limited]) {
+      assertEqual(evaluateFunction(program, "selfEq", [{ v: Number.NaN }], options), false);
+      assertEqual(evaluateFunction(program, "selfEqElement", [Number.NaN], options), false);
+      assertEqual(evaluateFunction(program, "selfEqElement", [1.5], options), true);
+    }
+    console.log("ok - an equality gives one result with and without a budget");
+
+    // A list bound to a content parameter is built anew for each call, so each call places its
+    // items: two arguments checked, eight for the loop and its `Range`, and for each of ten calls
+    // the call, its callee and its argument, 100 items bound, the list and the result checked, the
+    // body and the item the loop places, then the list and its ten numbers written.
+    assertCosts(2 + 8 + 10 * (3 + 100 + 2 + 1 + 1) + 11, evaluate("many", [ints(100), 10]));
+    const unbound = runtimeFailure(() => evaluateFunction(program, "many", [ints(20000), 16000], limited)).diagnostics[0];
+    assertEqual(unbound.limit, exhausted);
+    assertEqual(unbound.declaration, `${identity}::ignore`);
+    assertEqual(unbound.source, undefined);
+    console.log("ok - a list bound to a content parameter is paid for at every call");
+
+    // A name a host supplied is text like any other: a megabyte key, or a megabyte `$type`, costs
+    // 16,384 each time the object is written, and when it is compared, the key for each of the two
+    // records that hold it and the type name once.
+    const long = "k".repeat(2 ** 20);
+    for (const [object, names] of [[{ [long]: 1 }, 2 * 2 ** 14], [{ $type: long, k: 1 }, 2 ** 14]]) {
+      if (cost(evaluate("repeated", [object, 20])) <= 20 * 2 ** 14) {
+        throw new Error("A long name should be paid for each time it is written");
+      }
+      assertEqual(limitOf(() => evaluateFunction(program, "repeated", [object, 20], limited)), exhausted);
+      const compared = cost(evaluate("sameObject", [object]));
+      if (compared < names || compared >= names + 100) {
+        throw new Error(`A long name should be paid for once when it is compared, got ${compared}`);
+      }
+    }
+    // A host can spell the forms the runtime gives a meaning to, and what it puts in them is text
+    // like any other: the digits of a wide integer, and whatever an object holds that carries the
+    // tag or the type name of a handler or a function. None is written or compared for the price
+    // of one value.
+    const spelled = [
+      { $type: "nx.int", value: long },
+      { $type: "nx.int", value: "1", extra: long },
+      { $nxKind: "actionHandler", text: long },
+      { $nxKind: "functionReference", text: long },
+      { $type: "ActionHandler", action: long },
+      { $type: "Function", module: long },
+    ];
+    for (const object of spelled) {
+      if (cost(evaluate("repeated", [object, 20])) <= 20 * 2 ** 14) {
+        throw new Error(`Text in ${JSON.stringify(object).slice(0, 40)} should be paid for each time it is written`);
+      }
+      assertEqual(limitOf(() => evaluateFunction(program, "repeated", [object, 20], limited)), exhausted);
+      if (cost(evaluate("sameObject", [object])) < 2 ** 14) {
+        throw new Error(`Text in ${JSON.stringify(object).slice(0, 40)} should be paid for when it is compared`);
+      }
+    }
+    console.log("ok - text in a form the runtime gives a meaning to is paid for by its length");
+
+
+    // A `null` in an opaque host value is the empty value, and every value written is one: the
+    // record, the empty value under `a`, the list under `b` and its two, and the list under `c`.
+    assertCosts(3 + 6, evaluate("passObject", [{ a: null, b: [null, null], c: [] }]));
+    // A field of an update record is checked for the update record, which the third charge names.
+    assertCosts(5, evaluate("patchOnly"));
+    const patch = runtimeFailure(() => evaluateFunction(program, "patchOnly", [], { maxOperations: 2 })).diagnostics[0];
+    assertEqual(patch.declaration, `${identity}::Opt.Update`);
+    assertEqual(patch.source, undefined);
+    console.log("ok - names, nulls and update records cost the same as in the Rust runtime");
+
+    // Lining two records up reads the names of both, so a comparison that fails on the names is
+    // paid for by the names. Around each comparison: three arguments checked, eight for the loop
+    // and its `Range`, the `binary` and its two slots, the item placed, and the list and its
+    // boolean written.
+    assertCosts(17 + 4, evaluate("cmpMany", [{ a: 1, b: 2 }, { a: 1, c: 2 }, 1])); // the pair, `a`, and `b` and `c` that one holds
+    assertCosts(17 + 3, evaluate("cmpMany", [{ a: 1 }, { a: 1, b: 2 }, 1]));
+    assertCosts(17 + 3, evaluate("cmpMany", [{ a: 1, b: 2 }, { a: 1 }, 1]));
+    assertCosts(17 + 1, evaluate("cmpMany", [{ $type: "A", a: 1, b: 2 }, { $type: "B", a: 1 }, 1])); // unlike types: the pair alone
+    const wide = Object.fromEntries(Array.from({ length: 8000 }, (_, key) => [`k${key}`, key]));
+    for (const [left, right] of [[wide, { x: 1 }], [{ x: 1 }, wide]]) {
+      if (cost(evaluate("cmpMany", [left, right, 1])) <= 8000) {
+        throw new Error("A comparison with a wide record should be paid for by its names");
+      }
+      assertEqual(limitOf(() => evaluateFunction(program, "cmpMany", [left, right, 16000], limited)), exhausted);
+    }
+    // A wide object that has a wide integer's type name is told from a record of another type by
+    // the names alone, for the pair: its keys are not listed to see whether it is an integer, so
+    // comparing it many times lists them no more often than comparing it once. Compared with a
+    // record of its own type name it is lined up, and paid for by its names.
+    let listed = 0;
+    const spelledWide = new Proxy({ $type: "nx.int", value: "1", ...wide }, {
+      ownKeys(target) {
+        listed += 1;
+        return Reflect.ownKeys(target);
+      },
+    });
+    const listedBy = (comparisons, other) => {
+      listed = 0;
+      evaluateFunction(program, "cmpMany", [spelledWide, other, comparisons], limited);
+      return listed;
+    };
+    for (const other of [{ $type: "other" }, { x: 1 }, 7, "text"]) {
+      assertCosts(17 + 1, evaluate("cmpMany", [spelledWide, other, 1]));
+      assertEqual(listedBy(2000, other), listedBy(1, other));
+    }
+    if (cost(evaluate("cmpMany", [spelledWide, { $type: "nx.int", value: "1" }, 1])) <= 8000) {
+      throw new Error("A wide record with a wide integer's type name should be paid for by its names when it is lined up");
+    }
+    console.log("ok - a record with a wide integer's type name is not listed to be told from another type");
+
+    // A JavaScript number cannot hold an integer outside the safe range, so this runtime refuses
+    // one where it reads it from the image, naming the function and the literal: whatever would
+    // have used it never runs. The Rust runtime, which has 64-bit integers, computes with it.
+    for (const [name, args] of [["wideSame", []], ["patWide", []], ["patWideSame", []], ["eqWide", [1]], ["patHost", [1]]]) {
+      const refused = runtimeFailure(() => evaluateFunction(program, name, args)).diagnostics[0];
+      assertEqual(refused.code, "nx-ir-number");
+      if (!refused.declaration?.startsWith(`${identity}::`) || refused.source === undefined) {
+        throw new Error(`A refused integer should name its declaration and its span, got ${JSON.stringify(refused)}`);
+      }
+    }
+    // Refusing it costs what reaching it costs: the node is charged, and nothing after it.
+    assertEqual(limitOf(() => evaluateFunction(program, "wideSame", [], { maxOperations: 0 })), { name: "maxOperations", value: 0 });
+    assertEqual(runtimeFailure(() => evaluateFunction(program, "wideSame", [], { maxOperations: 100 })).diagnostics[0].code, "nx-ir-number");
+    // The record canonical JSON spells such an integer with is, at `object`, a record like any
+    // other, as it is in the Rust runtime: returned unchanged, equal to itself, and paid for as
+    // a record and its string, where a number is one value. At a parameter typed `int` it is
+    // refused, as it always was.
+    const spelledInteger = { $type: "nx.int", value: "1152921504606846976" };
+    assertEqual(evaluateFunction(program, "passObject", [spelledInteger]), spelledInteger);
+    assertCosts(5, evaluate("passObject", [spelledInteger]));
+    assertCosts(cost(evaluate("passObject", [{ a: "b" }])), evaluate("passObject", [spelledInteger]));
+    assertEqual(evaluateFunction(program, "sameObject", [spelledInteger], { maxOperations: 100000 }), true);
+    assertEqual(runtimeFailure(() => evaluateFunction(program, "twice", [[spelledInteger]])).diagnostics[0].code, "nx-ir-boundary-type");
+    console.log("ok - an integer outside the safe range is refused where it is read, and its JSON form at object is a record");
+    // Every item bound to a content parameter costs one, empty or not, and a list among them one
+    // for each item it contributes or one when it contributes none; nine is the call around it.
+    for (const [list, items] of [[[null], 1], [[1, null], 2], [[null, [null], 1], 3], [[[null, null], 1], 3], [[[], [], [1, 2, 3]], 5]]) {
+      assertCosts(9 + items, evaluate("bindObject", [list]));
+    }
+    console.log("ok - records are lined up by name at a cost, and every item bound costs one");
+
+    // Two lists are compared in order up to the first pair that differs: the pair of lists and
+    // each pair of items compared. Two records inside them are compared to the end.
+    assertCosts(17 + 4, evaluate("cmpMany", [[1, 2, 3], [1, 2, 3], 1]));
+    assertCosts(17 + 4, evaluate("cmpMany", [[1, 2, 3], [1, 2, 9], 1]));
+    assertCosts(17 + 2, evaluate("cmpMany", [[0, 1, 2], [9, 1, 2], 1]));
+    assertCosts(17 + 1, evaluate("cmpMany", [[1, 2], [1, 2, 3], 1])); // unlike lengths compare no items
+    assertCosts(17 + 4, evaluate("cmpMany", [[[1, 2], [3, 4]], [[1, 9], [3, 4]], 1]));
+    assertCosts(17 + 4, evaluate("cmpMany", [[{ a: 1, b: 2 }, { a: 5 }], [{ a: 9, b: 9 }, { a: 5 }], 1]));
+    const longList = (first) => [first, ...Array.from({ length: 99999 }, (_, index) => index + 1)];
+    if (cost(evaluate("cmpMany", [longList(0), longList(-1), 200])) >= 2000) {
+      throw new Error("Two long lists that differ in their first item should cost two operations to compare");
+    }
+    console.log("ok - two lists are compared in order up to the first pair that differs");
+
+    // Each button holds a handler made by one node, which captured the two parameters of
+    // `button`. Twenty-three surrounds the comparison in `sameButton`; the comparison is the pair
+    // of buttons, the pair of handlers, and each pair of captured values up to the first that
+    // differs: a walk to the end would cost one more where both differ.
+    assertCosts(23 + 4, evaluate("sameButton", [1, 2, 1, 2]));
+    assertCosts(23 + 3, evaluate("sameButton", [9, 2, 1, 2]));
+    assertCosts(23 + 4, evaluate("sameButton", [1, 9, 1, 2]));
+    assertCosts(23 + 3, evaluate("sameButton", [9, 9, 1, 2]));
+    for (const [args, equal] of [[[1, 2, 1, 2], true], [[9, 9, 1, 2], false], [[1, 9, 1, 2], false]]) {
+      assertEqual(evaluateFunction(program, "sameButton", args), equal);
+      assertEqual(evaluateFunction(program, "sameButton", args, { maxOperations: 100000 }), equal);
+    }
+    console.log("ok - two handlers are compared up to the first captured value that differs");
+
+    // An empty value takes a place in a list like any other, so a value made of them costs its
+    // length to write and to bind: 20,000 in a list, as `null` or as `[]`, or under 8,000 keys.
+    const made = (item) => ({ a: Array.from({ length: 20000 }, () => item) });
+    const keys = Object.fromEntries(Array.from({ length: 8000 }, (_, key) => [`k${key}`, null]));
+    for (const [object, values] of [[made(null), 20000], [made([]), 20000], [keys, 8000]]) {
+      if (cost(evaluate("repeated", [object, 2])) <= 2 * values) {
+        throw new Error("A value made of empty values should cost its length each time it is written");
+      }
+      assertEqual(limitOf(() => evaluateFunction(program, "repeated", [object, 500], limited)), exhausted);
+    }
+    const emptyBound = runtimeFailure(() => evaluateFunction(program, "many", [Array.from({ length: 20000 }, () => null), 10000], limited)).diagnostics[0];
+    assertEqual(emptyBound.limit, exhausted);
+    assertEqual(emptyBound.declaration, `${identity}::ignore`);
+    console.log("ok - a value made of empty values costs its length to write and to bind");
+
+    for (const maxOperations of [Number.NaN, -1, 1.5, 2 ** 60]) {
+      const diagnostic = runtimeFailure(() => evaluateFunction(program, "ratio", [1], { maxOperations })).diagnostics[0];
+      // A division by zero would mean the function ran; the option is refused before anything does.
+      assertEqual(diagnostic.code, "nx-ir-options");
+      if (!diagnostic.message.includes("maxOperations") || diagnostic.limit !== undefined) {
+        throw new Error(`Unexpected diagnostic for maxOperations ${maxOperations}: ${JSON.stringify(diagnostic)}`);
+      }
+    }
+    console.log("ok - a budget that is not a count is refused before anything is evaluated");
+
+    assertEqual(limitOf(() => evaluateFunction(program, "spin", [0])), { name: "maxCallDepth", value: 100 });
+    assertEqual(limitOf(() => evaluateFunction(program, "tooWide")), { name: "maxRangeLength", value: 1000000 });
+    const deep = limitOf(() => evaluateFunction(program, "spin", [0], { maxCallDepth: 1000000 }));
+    if (!(deep.name === "maxExpressionNesting" && deep.value === 1000) && deep.name !== "engine") {
+      throw new Error(`Unexpected limit for runaway recursion: ${JSON.stringify(deep)}`);
+    }
+    assertEqual(runtimeFailure(() => evaluateFunction(program, "ratio", [1])).diagnostics[0].limit, undefined);
+    console.log("ok - every resource-limit diagnostic names its limit, and no other diagnostic names one");
+
+    // Past the engine's own limits: a string longer than it holds is a diagnostic, not a RangeError,
+    // and long lists are spliced without the engine's limit on the arguments of a spread.
+    assertEqual(limitOf(() => evaluateFunction(program, "growText", [40, "x"])), { name: "engine" });
+    assertEqual(evaluateFunction(program, "longContent").content.length, 200000);
+    const relay = initializeComponent(program, "Relay");
+    const { $type: _burst, ...burstProps } = relay.rendered;
+    const burst = initializeComponent(program, "Burst", burstProps, { parent: relay.instance });
+    assertEqual(dispatchComponentActions(program, burst.instance, [{ $type: "Burst.Fired" }]).effects.length, 200000);
+    console.log("ok - engine limits are diagnostics, and long lists splice and dispatch");
+
+    // Only a RangeError is converted: any other exception raised during evaluation is a fault, not
+    // a limit, and reaches the host as itself.
+    const throwing = {
+      get n() {
+        throw new TypeError("deliberate");
+      },
+    };
+    let propagated = false;
+    try {
+      callFunction(program, triple, throwing);
+    } catch (error) {
+      propagated = error instanceof TypeError && error.message === "deliberate";
+    }
+    if (!propagated) {
+      throw new Error("Expected a TypeError raised during evaluation to propagate unchanged");
+    }
+    console.log("ok - an exception other than a RangeError propagates unchanged");
   },
 );

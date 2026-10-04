@@ -28,6 +28,8 @@ pub struct CorpusProgram {
     pub entrypoints: Vec<Entrypoint>,
     pub lifecycles: Vec<Lifecycle>,
     pub results: serde_json::Value,
+    /// What each evaluation costs, and where recorded budgets below that stop it.
+    pub operations: serde_json::Value,
 }
 
 pub fn corpus_root() -> PathBuf {
@@ -130,6 +132,7 @@ pub fn load_corpus() -> Vec<CorpusProgram> {
                     })
                     .unwrap_or_default(),
                 results: read_json(dir.join("expected").join("results.json")),
+                operations: read_json(dir.join("expected").join("operations.json")),
                 name,
             }
         })

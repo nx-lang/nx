@@ -1,0 +1,44 @@
+{
+  "entry": "main.nx",
+  "emit": [
+    "main.nx"
+  ],
+  "recordFailures": true,
+  "entrypoints": [
+    { "module": "main.nx", "function": "patterns" },
+    { "module": "main.nx", "function": "directCall" },
+    { "module": "main.nx", "function": "valueCall" },
+    { "module": "main.nx", "function": "spliced" },
+    { "module": "main.nx", "function": "forItems" },
+    { "module": "main.nx", "function": "forRange" },
+    { "module": "main.nx", "function": "content" },
+    { "module": "main.nx", "function": "concat" },
+    { "module": "main.nx", "function": "defaults" },
+    { "module": "main.nx", "function": "valueReference" },
+    { "module": "main.nx", "function": "checked" },
+    { "module": "main.nx", "function": "compared" },
+    { "module": "main.nx", "function": "comparedLists" },
+    { "module": "main.nx", "function": "comparedHandlers" },
+    { "module": "main.nx", "function": "comparedText" },
+    { "module": "main.nx", "function": "written" },
+    { "module": "main.nx", "function": "bound" },
+    { "module": "main.nx", "function": "updated" },
+    { "module": "main.nx", "function": "misaligned" },
+    { "module": "main.nx", "function": "patched" }
+  ],
+  "lifecycles": [
+    {
+      "module": "main.nx",
+      "component": "Tally",
+      "batches": [
+        [
+          { "$type": "ActionHandlerInvocation", "token": "h1-1", "action": { "$type": "Button.Tapped" } }
+        ],
+        [
+          { "$type": "ActionHandlerInvocation", "token": "h2-1", "action": { "$type": "Button.Tapped" } },
+          { "$type": "ActionHandlerInvocation", "token": "h2-1", "action": { "$type": "Button.Tapped" } }
+        ]
+      ]
+    }
+  ]
+}

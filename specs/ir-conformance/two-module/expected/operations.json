@@ -1,0 +1,16 @@
+{
+  "counts": {
+    "app/main.nx::Panel": {
+      "batches": [
+        14
+      ],
+      "initial": 10
+    },
+    "app/main.nx::card": 8,
+    "app/main.nx::local": 8,
+    "app/main.nx::root": 33,
+    "app/main.nx::total": 7,
+    "app/main.nx::user": 20,
+    "shared/model.nx::answer": 3
+  }
+}

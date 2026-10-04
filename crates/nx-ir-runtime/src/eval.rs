@@ -1,6 +1,6 @@
 //! Evaluation over the node table.
 
-use crate::error::{Diagnostic, NxIrRuntimeError, Result, SourceSpan};
+use crate::error::{Diagnostic, Limit, NxIrRuntimeError, Result, SourceSpan, RESOURCE_LIMIT};
 use crate::module::{
     BinaryOp, CaseConstruct, Construct, DeclarationKind, ElementNode, Field, ForNode, FunctionDecl,
     HandlerNode, Intrinsic, Node, Properties, Ref, TextType, UnaryOp,
@@ -12,6 +12,7 @@ use crate::update;
 use crate::value::{
     get_field, set_field, values_equal, CaseValue, Fields, FunctionRef, Handler, Value,
 };
+pub(crate) use meter::Meter;
 use std::cell::Cell;
 use std::fmt;
 use std::sync::Arc;
@@ -26,6 +27,14 @@ pub struct RuntimeOptions {
     /// <para>A range makes an enormous loop one token long, so the count is checked before the
     /// body runs at all rather than discovered part-way through.</para>
     pub max_range_length: u64,
+    /// The most operations one call may cost, counted as `docs/nx-ir-format.md` defines an
+    /// operation. `None`, the default, is unlimited.
+    ///
+    /// <para>One budget covers one call of an evaluation method and everything it evaluates: for
+    /// [`Program::dispatch_component_actions`](crate::Program::dispatch_component_actions), every
+    /// handler of the batch and the render after it. A host that evaluates code it did not write
+    /// should set it: the call depth and the range length bound neither work nor allocation.</para>
+    pub max_operations: Option<u64>,
 }
 
 /// The default of [`RuntimeOptions::max_call_depth`].
@@ -38,6 +47,7 @@ impl Default for RuntimeOptions {
         Self {
             max_call_depth: NX_DEFAULT_MAX_CALL_DEPTH,
             max_range_length: NX_DEFAULT_MAX_RANGE_LENGTH,
+            max_operations: None,
         }
     }
 }
@@ -57,6 +67,18 @@ pub(crate) const MAX_NESTING: u32 = 1000;
 /// used is checked too, and whichever limit is met first ends the evaluation with a diagnostic.
 /// A thread that runs the evaluator needs this much stack free.</para>
 const MAX_STACK_BYTES: usize = 1 << 20;
+
+/// The limit a diagnostic names when an evaluation ran out of native stack.
+pub(crate) const STACK_LIMIT: Limit = Limit {
+    name: "maxStackBytes",
+    value: Some(MAX_STACK_BYTES as u64),
+};
+
+/// The limit a diagnostic names when expressions nested too deeply.
+const NESTING_LIMIT: Limit = Limit {
+    name: "maxExpressionNesting",
+    value: Some(MAX_NESTING as u64),
+};
 
 /// Roughly where the native stack is now: the address of a local of the caller's frame.
 #[inline(never)]
@@ -103,6 +125,8 @@ pub(crate) struct Machine<'p> {
     pub program: &'p ProgramData,
     pub options: RuntimeOptions,
     nesting: Cell<u32>,
+    /// The operations the budget has left: `u64::MAX` when the host set none.
+    remaining: Cell<u64>,
     /// Where the native stack stood when the evaluation began.
     stack_base: usize,
 }
@@ -113,6 +137,7 @@ impl<'p> Machine<'p> {
             program,
             options: *options,
             nesting: Cell::new(0),
+            remaining: Cell::new(options.max_operations.unwrap_or(u64::MAX)),
             stack_base: stack_position(),
         }
     }
@@ -192,15 +217,55 @@ impl<'p> Machine<'p> {
     /// <para>This and `eval_node` are the frames every level of nesting pays for, so they hold
     /// nothing but the dispatch: each kind's work, and every diagnostic's formatting, is in a
     /// function of its own.</para>
+    ///
+    /// <para>The node costs one operation, charged before anything else, and nests one level
+    /// deeper. Every limit is tested in one branch, so the evaluation that meets none pays for
+    /// one; which limit was met is the cold path's to work out.</para>
     pub(crate) fn eval(&self, cx: Cx, frame: &mut Frame, index: u32) -> Result<Value> {
+        let remaining = self.remaining.get();
         let nesting = self.nesting.get();
-        if nesting >= MAX_NESTING || stack_position().abs_diff(self.stack_base) > MAX_STACK_BYTES {
-            return self.nesting_exceeded(cx, index);
+        if remaining == 0
+            || nesting >= MAX_NESTING
+            || stack_position().abs_diff(self.stack_base) > MAX_STACK_BYTES
+        {
+            return self.limit_reached(cx, index);
         }
-        self.nesting.set(nesting.saturating_add(1));
+        self.remaining.set(remaining.wrapping_sub(1));
+        self.nesting.set(nesting.wrapping_add(1));
         let result = self.eval_node(cx, frame, index);
         self.nesting.set(nesting);
         result
+    }
+
+    /// The failure of an evaluation that met a limit before its node: the budget, which is
+    /// charged first, then the nesting count, then the stack.
+    #[cold]
+    #[inline(never)]
+    fn limit_reached(&self, cx: Cx, index: u32) -> Result<Value> {
+        if self.remaining.get() == 0 {
+            self.budget_exhausted(cx, Some(index))?;
+        }
+        if self.nesting.get() >= MAX_NESTING {
+            return self.nesting_exceeded(cx, index);
+        }
+        self.stack_exceeded(cx, index)
+    }
+
+    /// Whether the host set a budget. A charge whose amount takes work to find is not measured
+    /// when it did not: the charge cannot fail and nothing reads the count.
+    pub(crate) fn is_limited(&self) -> bool {
+        self.options.max_operations.is_some()
+    }
+
+    /// Who pays for a walk over a value made on behalf of node `node` of the declaration of `cx`,
+    /// or of that declaration alone when the walk belongs to no node. With no budget nobody
+    /// does: the charges could not fail and nothing reads the count, so the walk skips them.
+    pub(crate) fn meter(&self, cx: Cx, node: Option<u32>) -> Meter<'_, 'p> {
+        if self.is_limited() {
+            Meter::charged(self, cx, node)
+        } else {
+            Meter::free()
+        }
     }
 
     /// Whether the evaluation is still within its share of the native stack. The walks that
@@ -209,15 +274,70 @@ impl<'p> Machine<'p> {
         stack_position().abs_diff(self.stack_base) <= MAX_STACK_BYTES
     }
 
+    /// Charges `amount` operations, failing before the operation is performed when the budget
+    /// does not cover it. The failure names the declaration `cx` is in and, when the charge is
+    /// for a node, that node's span.
+    #[inline]
+    pub(crate) fn charge(&self, cx: Cx, node: Option<u32>, amount: u64) -> Result<()> {
+        let remaining = self.remaining.get();
+        if remaining < amount {
+            return self.budget_exhausted(cx, node);
+        }
+        self.remaining.set(remaining.wrapping_sub(amount));
+        Ok(())
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn budget_exhausted(&self, cx: Cx, node: Option<u32>) -> Result<()> {
+        let budget = self.options.max_operations.unwrap_or(u64::MAX);
+        self.fail_limit(
+            cx,
+            node,
+            Limit {
+                name: "maxOperations",
+                value: Some(budget),
+            },
+            format!("The evaluation exceeded its budget of {budget} operations."),
+        )
+    }
+
     #[cold]
     #[inline(never)]
     fn nesting_exceeded(&self, cx: Cx, index: u32) -> Result<Value> {
-        self.fail(
+        self.fail_limit(
             cx,
-            index,
-            "nx-ir-resource-limit",
-            format!("Maximum NX IR expression nesting was exceeded: expressions nest more than {MAX_NESTING} deep or use more than {MAX_STACK_BYTES} bytes of stack."),
+            Some(index),
+            NESTING_LIMIT,
+            format!("Maximum NX IR expression nesting was exceeded: expressions nest more than {MAX_NESTING} deep."),
         )
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn stack_exceeded(&self, cx: Cx, index: u32) -> Result<Value> {
+        self.fail_limit(
+            cx,
+            Some(index),
+            STACK_LIMIT,
+            format!("Maximum NX IR expression nesting was exceeded: evaluation used more than {MAX_STACK_BYTES} bytes of stack."),
+        )
+    }
+
+    /// Fails with an `nx-ir-resource-limit` diagnostic in the declaration of `cx`, at node `node`
+    /// when the limit was met at one, that carries `limit`.
+    fn fail_limit<T>(
+        &self,
+        cx: Cx,
+        node: Option<u32>,
+        limit: Limit,
+        message: String,
+    ) -> Result<T> {
+        let mut error = self.error(Some(cx), node, RESOURCE_LIMIT, message);
+        if let Some(diagnostic) = error.diagnostics.first_mut() {
+            diagnostic.limit = Some(limit);
+        }
+        Err(error)
     }
 
     fn eval_node(&self, cx: Cx, frame: &mut Frame, index: u32) -> Result<Value> {
@@ -252,7 +372,7 @@ impl<'p> Machine<'p> {
                 arms,
                 otherwise,
             } => self.eval_if_is(cx, frame, *scrutinee, arms, *otherwise),
-            Node::Array(items) => self.eval_array(cx, frame, items),
+            Node::Array(items) => self.eval_array(cx, frame, index, items),
             Node::For(node) => self.eval_for(cx, frame, index, node),
             Node::Member {
                 optional,
@@ -263,7 +383,7 @@ impl<'p> Machine<'p> {
             Node::Coalesce(left, right) => self.eval_coalesce(cx, frame, *left, *right),
             Node::Record(construct) => self.eval_record(cx, frame, index, construct),
             Node::UnionCase(construct) => self.eval_union_case(cx, frame, index, construct),
-            Node::Element(element) => self.eval_element(cx, frame, element),
+            Node::Element(element) => self.eval_element(cx, frame, index, element),
             Node::Component(construct) => self.eval_component(cx, frame, index, construct),
             Node::ActionHandler(handler) => self.eval_handler(cx, frame, index, handler),
         }
@@ -355,8 +475,9 @@ impl<'p> Machine<'p> {
         let scrutinee = self.eval(cx, frame, scrutinee)?;
         for arm in arms {
             for pattern in arm.patterns.iter() {
-                let pattern = self.eval_pattern(cx, frame, *pattern)?;
-                if pattern_matches(&scrutinee, &pattern) {
+                let node = *pattern;
+                let pattern = self.eval_pattern(cx, frame, node)?;
+                if pattern_matches(&scrutinee, &pattern, &self.meter(cx, Some(node)))? {
                     return Ok(Some(arm.body));
                 }
             }
@@ -380,8 +501,8 @@ impl<'p> Machine<'p> {
     }
 
     #[inline(never)]
-    fn eval_array(&self, cx: Cx, frame: &mut Frame, items: &[u32]) -> Result<Value> {
-        Ok(Value::seq(self.items(cx, frame, items)?))
+    fn eval_array(&self, cx: Cx, frame: &mut Frame, node: u32, items: &[u32]) -> Result<Value> {
+        Ok(Value::seq(self.items(cx, frame, node, items)?))
     }
 
     #[inline(never)]
@@ -426,12 +547,32 @@ impl<'p> Machine<'p> {
     /// <para>A list value contributes its elements and every other value contributes itself.
     /// That is the whole rule: a conditional that takes no branch evaluates to the empty value,
     /// which is the empty sequence, so it splices away like any other list-valued item.</para>
-    fn items(&self, cx: Cx, frame: &mut Frame, nodes: &[u32]) -> Result<Vec<Value>> {
+    ///
+    /// <para>`node` is the node building the sequence, which pays for every item placed.</para>
+    fn items(&self, cx: Cx, frame: &mut Frame, node: u32, nodes: &[u32]) -> Result<Vec<Value>> {
         let mut items = Vec::with_capacity(nodes.len());
-        for node in nodes {
-            push_item(&mut items, self.eval(cx, frame, *node)?);
+        for item in nodes {
+            let value = self.eval(cx, frame, *item)?;
+            self.place(cx, node, &mut items, value)?;
         }
         Ok(items)
+    }
+
+    /// Appends what one item contributes to the sequence node `node` builds, charging one
+    /// operation per item placed before placing any.
+    #[inline]
+    fn place(&self, cx: Cx, node: u32, items: &mut Vec<Value>, value: Value) -> Result<()> {
+        match value {
+            Value::Seq(elements) => {
+                self.charge(cx, Some(node), elements.len() as u64)?;
+                items.extend(elements.iter().cloned());
+            }
+            other => {
+                self.charge(cx, Some(node), 1)?;
+                items.push(other);
+            }
+        }
+        Ok(())
     }
 
     /// Evaluates written properties into fields, in the order they were written.
@@ -516,6 +657,14 @@ impl<'p> Machine<'p> {
         }
         let left = self.eval(cx, frame, lhs)?;
         let right = self.eval(cx, frame, rhs)?;
+        if op == BinaryOp::Concat {
+            self.charge_concat(cx, node, &left, &right)?;
+        }
+        // Equality walks its operands, and pays for each pair of values it compares.
+        if matches!(op, BinaryOp::Eq | BinaryOp::Ne) {
+            let equal = values_equal(&left, &right, &self.meter(cx, Some(node)))?;
+            return Ok(Value::Bool(equal == (op == BinaryOp::Eq)));
+        }
         match binary(op, &left, &right) {
             Ok(value) => Ok(value),
             Err(BinaryError::NotNumeric) => self.fail(
@@ -543,6 +692,26 @@ impl<'p> Machine<'p> {
                 "Operator 'concat' requires string operands.",
             ),
         }
+    }
+
+    /// Charges a `concat` one operation per 64 UTF-16 code units of the string it produces,
+    /// before the string is allocated. Operands that are not both strings produce no string.
+    ///
+    /// <para>With no budget the charge cannot fail and nothing reads the count, so the operands
+    /// are not measured at all: a host that sets none pays nothing here.</para>
+    fn charge_concat(&self, cx: Cx, node: u32, left: &Value, right: &Value) -> Result<()> {
+        if !self.is_limited() {
+            return Ok(());
+        }
+        let (Some(left), Some(right)) = (left.as_text(), right.as_text()) else {
+            return Ok(());
+        };
+        // A string has no more UTF-16 code units than UTF-8 bytes, so a short one is not counted.
+        if left.len().saturating_add(right.len()) < TEXT_UNITS {
+            return Ok(());
+        }
+        let units = utf16_len(left).saturating_add(utf16_len(right));
+        self.charge(cx, Some(node), (units / TEXT_UNITS) as u64)
     }
 
     /// A `text` node: the canonical text form of a primitive value, by the static type the node
@@ -585,10 +754,12 @@ impl<'p> Machine<'p> {
         callee: u32,
         what: &str,
     ) -> Result<(u32, u32)> {
-        // A callee written as a reference is resolved where it stands, without building a value.
+        // A callee written as a reference is resolved where it stands, without building a value,
+        // and costs what evaluating it would have: one operation.
         if let Node::Reference(reference) = self.node(cx, callee)? {
             let (module, index, declaration) = self.resolve(cx, callee, reference)?;
             if matches!(declaration.kind, DeclarationKind::Function(_)) {
+                self.charge(cx, Some(callee), 1)?;
                 return Ok((module, index));
             }
         }
@@ -690,8 +861,11 @@ impl<'p> Machine<'p> {
         depth: u32,
     ) -> Result<Value> {
         if depth > self.options.max_call_depth {
-            return crate::error::fail(
-                "nx-ir-resource-limit",
+            return crate::error::fail_limit(
+                Limit {
+                    name: "maxCallDepth",
+                    value: Some(u64::from(self.options.max_call_depth)),
+                },
                 format!(
                     "Maximum NX IR call depth {} was exceeded.",
                     self.options.max_call_depth
@@ -720,11 +894,24 @@ impl<'p> Machine<'p> {
             let value = match (args.next().flatten(), param.default) {
                 // Body content reaches the content parameter as the list of children gathered,
                 // and a child that is itself a list is spliced, as for a component's content.
+                // The list is built anew for the call, so each item of the argument is paid for
+                // by the function it is bound in: one, or one for each item it contributes when
+                // it is itself a sequence of several. An empty item contributes nothing and still
+                // costs one, since the list is as long to go through whatever it holds.
                 (Some(Value::Seq(items)), _) if param.is_content => {
                     let mut spliced = Vec::with_capacity(items.len());
-                    items
-                        .iter()
-                        .for_each(|item| push_item(&mut spliced, item.clone()));
+                    for item in items.iter() {
+                        match item {
+                            Value::Seq(elements) => {
+                                self.charge(cx, None, elements.len().max(1) as u64)?;
+                                spliced.extend(elements.iter().cloned());
+                            }
+                            other => {
+                                self.charge(cx, None, 1)?;
+                                spliced.push(other.clone());
+                            }
+                        }
+                    }
                     Value::seq(spliced)
                 }
                 (Some(value), _) => value,
@@ -770,10 +957,13 @@ impl<'p> Machine<'p> {
             // The count is computed once and checked before the body runs at all.
             let limit = self.options.max_range_length;
             if count > u128::from(limit) {
-                return self.fail(
+                return self.fail_limit(
                     cx,
-                    node,
-                    "nx-ir-resource-limit",
+                    Some(node),
+                    Limit {
+                        name: "maxRangeLength",
+                        value: Some(limit),
+                    },
                     format!(
                         "Iterating this range would run the loop body {count} times, above the maxRangeLength limit of {limit}."
                     ),
@@ -784,7 +974,8 @@ impl<'p> Machine<'p> {
                 if let Some(index_slot) = index_slot {
                     bind(frame, index_slot, Value::Int(position))?;
                 }
-                push_item(&mut results, self.eval(cx, frame, for_node.body)?);
+                let value = self.eval(cx, frame, for_node.body)?;
+                self.place(cx, node, &mut results, value)?;
             }
             return Ok(Value::seq(results));
         }
@@ -809,7 +1000,8 @@ impl<'p> Machine<'p> {
             if let Some(index_slot) = index_slot {
                 bind(frame, index_slot, Value::Int(position as i64))?;
             }
-            push_item(&mut results, self.eval(cx, frame, for_node.body)?);
+            let value = self.eval(cx, frame, for_node.body)?;
+            self.place(cx, node, &mut results, value)?;
         }
         Ok(Value::seq(results))
     }
@@ -844,6 +1036,8 @@ impl<'p> Machine<'p> {
     /// A match arm's pattern as a value. A pattern naming a union case with fields stands for
     /// every record of that case, so it is the case's `$type` alone: building the record would
     /// ask for fields a pattern never supplies. Every other pattern is the expression it is.
+    ///
+    /// <para>The shortcut costs what evaluating the node would have: one operation.</para>
     fn eval_pattern(&self, cx: Cx, frame: &mut Frame, index: u32) -> Result<Value> {
         if let Node::UnionCase(construct) = self.node(cx, index)? {
             let (_, _, declaration) = self.resolve(cx, index, &construct.union)?;
@@ -853,6 +1047,7 @@ impl<'p> Machine<'p> {
                     .iter()
                     .any(|case| case.name == construct.case && !case.is_constant)
                 {
+                    self.charge(cx, Some(index), 1)?;
                     return Ok(Value::record(
                         Some(Arc::from(format!(
                             "{}.{}",
@@ -867,18 +1062,20 @@ impl<'p> Machine<'p> {
     }
 
     /// The properties and the content of a construction, with the body bound to the content
-    /// field.
+    /// field. `node` is the construction, which pays for each item of the content.
+    #[allow(clippy::too_many_arguments)]
     fn written(
         &self,
         cx: Cx,
         frame: &mut Frame,
+        node: u32,
         properties: &Properties,
         content: &[u32],
         fields: &[Field],
         path: &dyn fmt::Display,
     ) -> Result<Fields> {
         let mut input = self.properties(cx, frame, properties)?;
-        let content_values = self.items(cx, frame, content)?;
+        let content_values = self.items(cx, frame, node, content)?;
         bind_content(
             &mut input,
             fields,
@@ -910,6 +1107,7 @@ impl<'p> Machine<'p> {
         let input = self.written(
             cx,
             frame,
+            node,
             &construct.properties,
             &construct.content,
             &record.fields,
@@ -972,6 +1170,7 @@ impl<'p> Machine<'p> {
         let input = self.written(
             cx,
             frame,
+            node,
             &construct.properties,
             &construct.content,
             &case.fields,
@@ -994,9 +1193,15 @@ impl<'p> Machine<'p> {
     }
 
     #[inline(never)]
-    fn eval_element(&self, cx: Cx, frame: &mut Frame, element: &ElementNode) -> Result<Value> {
+    fn eval_element(
+        &self,
+        cx: Cx,
+        frame: &mut Frame,
+        node: u32,
+        element: &ElementNode,
+    ) -> Result<Value> {
         let mut fields = self.properties(cx, frame, &element.properties)?;
-        let mut content = self.items(cx, frame, &element.content)?;
+        let mut content = self.items(cx, frame, node, &element.content)?;
         // An element with no declared content field: one child is bound as itself, several as a
         // list.
         if content.len() == 1 {
@@ -1028,7 +1233,7 @@ impl<'p> Machine<'p> {
             );
         };
         let properties = self.properties(cx, frame, &construct.properties)?;
-        let content = self.items(cx, frame, &construct.content)?;
+        let content = self.items(cx, frame, node, &construct.content)?;
         let path = Labeled(name, " props");
         let (mut props, handlers) =
             self.split_handler_properties(module, index, properties, &path)?;
@@ -1153,8 +1358,27 @@ impl<'p> Machine<'p> {
             }
             Intrinsic::Apply => update::apply(first, update::record_argument(values.get(1), name)?),
             Intrinsic::Merge => update::merge(first, update::record_argument(values.get(1), name)?),
-            Intrinsic::Diff => update::diff(first, update::record_argument(values.get(1), name)?),
+            Intrinsic::Diff => update::diff(
+                first,
+                update::record_argument(values.get(1), name)?,
+                &self.meter(cx, Some(node)),
+            ),
         }
+    }
+}
+
+/// The UTF-16 code units of a string per operation it costs, where its length is charged: when a
+/// `concat` produces it and when it is written for the host.
+pub(crate) const TEXT_UNITS: usize = 64;
+
+/// The length of `text` in UTF-16 code units, which is the unit the cost of a string is counted
+/// in, so that it is the same number the TypeScript runtime reads from `length`. ASCII text has
+/// one code unit per byte, which is checked without decoding it.
+pub(crate) fn utf16_len(text: &str) -> usize {
+    if text.is_ascii() {
+        text.len()
+    } else {
+        text.chars().map(char::len_utf16).sum()
     }
 }
 
@@ -1164,14 +1388,6 @@ pub(crate) struct Quoted<'a>(pub &'static str, pub &'a str, pub &'static str);
 impl fmt::Display for Quoted<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "{}{}{}", self.0, self.1, self.2)
-    }
-}
-
-/// Appends what one item contributes to the sequence it sits in.
-pub(crate) fn push_item(items: &mut Vec<Value>, value: Value) {
-    match value {
-        Value::Seq(elements) => items.extend(elements.iter().cloned()),
-        other => items.push(other),
     }
 }
 
@@ -1190,17 +1406,18 @@ fn optional_item(value: &Value) -> Option<&Value> {
 }
 
 /// Whether a match arm's pattern matches the scrutinee. The `{}` pattern matches exactly the
-/// empty value; a record pattern matches by `$type`; anything else by the language's equality.
-fn pattern_matches(value: &Value, pattern: &Value) -> bool {
+/// empty value; a record pattern matches by `$type`; anything else by the language's equality,
+/// which is the one of the three that walks the values and so the one `meter` pays for.
+fn pattern_matches(value: &Value, pattern: &Value, meter: &Meter<'_, '_>) -> Result<bool> {
     if pattern.is_empty() || value.is_empty() {
-        return pattern.is_empty() && value.is_empty();
+        return Ok(pattern.is_empty() && value.is_empty());
     }
     if let (Value::Record(value), Value::Record(pattern)) = (value, pattern) {
         if pattern.type_name.is_some() {
-            return value.type_name == pattern.type_name;
+            return Ok(value.type_name == pattern.type_name);
         }
     }
-    values_equal(value, pattern)
+    values_equal(value, pattern, meter)
 }
 
 /// Binds an element's body to its content field.
@@ -1321,7 +1538,8 @@ fn unsigned_zero(value: f64) -> f64 {
     }
 }
 
-/// Every operator but `and` and `or`, which are evaluated without evaluating both operands.
+/// Every operator but `and` and `or`, which are evaluated without evaluating both operands, and
+/// `eq` and `ne`, which are charged for what they compare.
 ///
 /// <para>Integer arithmetic is 64-bit and wraps; a width narrower than that is checked where a
 /// value meets a typed site, not here. A `float32` operation computed on `float64` operands and
@@ -1397,8 +1615,6 @@ fn binary(op: BinaryOp, left: &Value, right: &Value) -> std::result::Result<Valu
             }
             _ => return Err(BinaryError::NotStrings),
         },
-        BinaryOp::Eq => Value::Bool(values_equal(left, right)),
-        BinaryOp::Ne => Value::Bool(!values_equal(left, right)),
         BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
             let ordering = match numbers(left, right)? {
                 Numbers::Ints(left, right) => Some(left.cmp(&right)),
@@ -1411,6 +1627,132 @@ fn binary(op: BinaryOp, left: &Value, right: &Value) -> std::result::Result<Valu
                 _ => ordering.is_ge(),
             }))
         }
-        BinaryOp::And | BinaryOp::Or => return Err(BinaryError::NotNumeric),
+        // `eval_binary` applies these itself: `and` and `or` without evaluating both operands,
+        // and the equalities under the budget.
+        BinaryOp::And | BinaryOp::Or | BinaryOp::Eq | BinaryOp::Ne => {
+            return Err(BinaryError::NotNumeric)
+        }
     })
+}
+
+mod meter {
+    use super::{Cx, Machine};
+    use crate::error::Result;
+
+    /// Who pays for a walk over a value: an evaluation with a budget, which each value visited
+    /// is charged to, or nobody, for an evaluation with none and for the helpers a host calls on
+    /// values it holds.
+    #[derive(Clone, Copy)]
+    pub(crate) struct Meter<'m, 'p>(Option<(&'m Machine<'p>, Cx, Option<u32>)>);
+
+    impl<'m, 'p> Meter<'m, 'p> {
+        pub(super) fn charged(machine: &'m Machine<'p>, cx: Cx, node: Option<u32>) -> Self {
+            Self(Some((machine, cx, node)))
+        }
+
+        /// The meter of a walk nobody pays for.
+        pub(crate) fn free() -> Meter<'m, 'p> {
+            Meter(None)
+        }
+
+        /// Whether a budget pays for the walk. A walk nobody pays for skips whatever only a count
+        /// needs: it does not measure a string, and it stops comparing two records at the first field
+        /// that differs.
+        /// It never does anything that could change the walk's result.
+        pub(crate) fn is_charged(&self) -> bool {
+            self.0.is_some()
+        }
+
+        /// Charges `amount` operations for values the walk is about to visit.
+        #[inline]
+        pub(crate) fn charge(&self, amount: u64) -> Result<()> {
+            match self.0 {
+                Some((machine, cx, node)) => machine.charge(cx, node, amount),
+                None => Ok(()),
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{LinkOptions, PreparedModule, Program};
+
+    /// The nesting bound, checked where an unoptimized build can reach it. Such a build's frames
+    /// use the stack budget up before a thousand nodes nest, so a test that nests them for real
+    /// meets `maxStackBytes` first; this one starts the count near the bound instead.
+    #[test]
+    fn expressions_nest_exactly_a_thousand_deep() {
+        let image = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../specs/ir-conformance/evaluation-cost/expected/main.nx.nxir");
+        let module = PreparedModule::prepare(std::fs::read(image).unwrap()).unwrap();
+        let program = Program::link(&module, |_| None, &LinkOptions::default()).unwrap();
+        let entry = &program.data.entry;
+        // `directCall` is `one()`: its `call` node, and nested in that the literal body of `one`.
+        let (index, _) = entry
+            .entrypoint(&entry.function_entrypoints, "directCall")
+            .unwrap();
+        let run = |nested: u32| {
+            let machine = Machine::new(&program.data, &RuntimeOptions::default());
+            machine.nesting.set(nested);
+            machine.invoke(0, index, Vec::new(), 0)
+        };
+
+        assert!(matches!(run(MAX_NESTING - 2), Ok(Value::Int(1))));
+        let error = run(MAX_NESTING - 1).unwrap_err();
+        let diagnostic = &error.diagnostics[0];
+        assert_eq!(diagnostic.code, "nx-ir-resource-limit");
+        assert_eq!(
+            diagnostic.limit,
+            Some(Limit {
+                name: "maxExpressionNesting",
+                value: Some(1000),
+            })
+        );
+        assert_eq!(diagnostic.declaration.as_deref(), Some("main.nx::one"));
+    }
+
+    /// An item is charged before it is placed: a placement the budget does not cover fails with
+    /// the sequence as it was. A charge made after appending would fail at the same node with
+    /// the same count, so this is the one place the order shows.
+    #[test]
+    fn a_refused_placement_leaves_the_sequence_untouched() {
+        let image = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../specs/ir-conformance/evaluation-cost/expected/main.nx.nxir");
+        let module = PreparedModule::prepare(std::fs::read(image).unwrap()).unwrap();
+        let program = Program::link(&module, |_| None, &LinkOptions::default()).unwrap();
+        let options = RuntimeOptions {
+            max_operations: Some(3),
+            ..RuntimeOptions::default()
+        };
+        let machine = Machine::new(&program.data, &options);
+        let cx = Cx {
+            module: 0,
+            declaration: 0,
+            depth: 0,
+        };
+        let list = |length: i64| Value::seq((0..length).map(Value::Int).collect());
+        let exhausted = |result: Result<()>| {
+            result.unwrap_err().diagnostics[0]
+                .limit
+                .map(|limit| limit.name)
+        };
+        let mut items = Vec::new();
+
+        // Five items against a budget of three: refused, and none of them placed.
+        assert_eq!(
+            exhausted(machine.place(cx, 0, &mut items, list(5))),
+            Some("maxOperations")
+        );
+        assert!(items.is_empty());
+        // Three are covered exactly, and then not one more.
+        assert!(machine.place(cx, 0, &mut items, list(3)).is_ok());
+        assert_eq!(items.len(), 3);
+        assert_eq!(
+            exhausted(machine.place(cx, 0, &mut items, Value::Int(7))),
+            Some("maxOperations")
+        );
+        assert_eq!(items.len(), 3);
+    }
 }

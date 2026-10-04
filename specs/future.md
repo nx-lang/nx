@@ -1837,3 +1837,62 @@ generation already writes, through the same `ImportedTypeCollector`, with the fi
 `@nx-lang/agent` target for a standard library and the assumed-package warning for any other. Add a
 `tsc` check of single-file output that references a directory library's type and an `@nx/agent`
 type.
+
+## IR Runtime Evaluation Budget: What `add-ir-runtime-evaluation-budget` Left For Later
+
+### TODO: set the agent package's default operation budget from measured tools
+
+**Observed.** `add-agent-host-package` gives every tool call a default budget of 100,000
+operations (`NX_AGENT_DEFAULT_MAX_OPERATIONS`) when the host sets none. The number was chosen by
+reasoning, not measured: "a realistic tool costs hundreds to a few thousand operations". Since it
+was chosen the cost model grew to charge every walk over a value (type checks, equality, values
+written for the host), so the same tool costs more operations than it did when the estimate was
+made, and no real tool has been counted. ReachMe passes 200,000 of its own.
+
+**Why it might matter.** A default that is too low fails tools that are doing nothing wrong; one
+that is too high is a weaker bound on code the host did not write. Raising a default later is
+easy, since a tool that outgrows it fails with a `limit` that says so, and lowering one that tools
+have come to rely on breaks them, so the first number should be near right.
+
+**What would settle it.** Once `add-ir-runtime-input-limit-and-cost-tests` has landed, a call
+reports the operations it used (`usage` in the runtime options, and on a tool's result in the
+agent package). Run ReachMe's function tools and HTTP arguments functions, and the tools of the
+`agent-library` and `agent-tool-context` corpus programs, with typical and with large arguments,
+record the operations each uses, and set the default to a round number several times the largest.
+Write the measurement beside the number in the agent package's design.
+
+### The Rust runtime's splice path is slower with no budget, and it is not known why
+
+**Observed.** With no budget set, a loop of 200,000 iterations that each splice a five-item list
+runs 6 to 12 percent slower in the Rust IR runtime than before the budget was added. Every other
+case measured with no budget is within the 5 percent the change allowed itself. It is not the cost of counting: a
+build with every charge compiled out is still 4 to 5 percent slower on that case. Restoring the
+old `push_item`, a flag that skips the counter, forced inlining and moving the failure paths out
+of line were each tried and did not explain it (`add-ir-runtime-evaluation-budget`, `design.md`,
+decision 10). It was accepted as measured, for now.
+
+**What would settle it.** Profile the splice case in an optimized build before and after the
+change (`perf`, or `cargo asm` on `Machine::place` and its callers) and look at code layout and at
+what the optimizer no longer inlines or vectorizes. `add-ir-runtime-performance-harness` would
+make the case repeatable.
+
+### An `int` literal outside ±(2^53−1) compiles, and the two IR runtimes then disagree
+
+**Observed.** `int` is specified as exact over ±(2^53−1) on every backend, but the compiler
+accepts `let big() = { 9007199254740993 }` with no annotation, where the literal is an `int`
+outside that range. The emitter writes it as a `bigint` constant. The Rust IR runtime evaluates
+it as a 64-bit integer and computes with it; the TypeScript IR runtime, since
+`add-ir-runtime-evaluation-budget`, refuses it where it reads it, with `nx-ir-number`, because a
+JavaScript number cannot hold it and carrying it as anything else cost more than it was worth
+(that change's review, RF24 to RF31). So the same program runs in one runtime and fails in the
+other, and the `expressions` corpus program keeps `big` as a declaration and not as an entrypoint.
+
+**Why it might matter.** It is the one place a valid program's result depends on the runtime for a
+reason the source does not show. It is rare: the literal has to exceed nine quadrillion.
+
+**What would settle it.** For `int`, a compile-time diagnostic on a literal outside ±(2^53−1), so
+the program never reaches a runtime; that is a small part of "Bounds checks are specified but not
+enforced" above and could land before the rest. For `int64`, where such a value is legitimate,
+"`int64` is still a JavaScript `number`" above: carrying it as a `bigint` in the TypeScript
+runtime would let that runtime hold it properly, and the refusal would go.
+

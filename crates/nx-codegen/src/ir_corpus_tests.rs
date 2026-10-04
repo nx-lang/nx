@@ -2,9 +2,10 @@
 //!
 //! <para>`specs/ir-conformance` holds NX programs with the images the emitter produces for them,
 //! the explained text of each image, the values the interpreter evaluates their entrypoints to,
-//! and what it renders and emits when a host drives their component lifecycles. These tests pin
-//! the images byte for byte, keep the explained text and the expected results in step, check that
-//! the corpus covers every kind the schema defines, and hold the size budget. Set
+//! what it renders and emits when a host drives their component lifecycles, and what each
+//! evaluation costs in operations. These tests pin the images byte for byte, keep the explained
+//! text, the expected results and the operation counts in step, check that the corpus covers every
+//! kind the schema defines, and hold the size budget. Set
 //! `NX_UPDATE_CORPUS=1` to rewrite the expected files after an intended change, then review the
 //! diff of the explained text.</para>
 
@@ -18,6 +19,9 @@ use nx_api::{
 };
 use nx_ir::{explain_nx_ir, explain_nx_ir_image};
 use nx_ir::{kinds, write_nx_ir_image, NxIrArtifact, NxIrImage};
+use nx_ir_runtime::{
+    ComponentInit, LinkOptions, NxIrRuntimeError, PreparedModule, Program, RuntimeOptions,
+};
 use nx_value::NxValue;
 use serde::Deserialize;
 use serde_json::Value;
@@ -39,6 +43,10 @@ struct ProgramManifest {
     entrypoints: Vec<Entrypoint>,
     #[serde(default)]
     lifecycles: Vec<Lifecycle>,
+    /// Whether `operations.json` also records, for each entrypoint, where budgets below its count
+    /// stop it.
+    #[serde(default)]
+    record_failures: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -453,6 +461,217 @@ fn corpus_results_match_the_interpreter() {
     assert!(
         failures.is_empty(),
         "corpus results changed:\n{}",
+        failures.join("\n")
+    );
+}
+
+/// A program's images as the Rust runtime prepares them, by identity.
+fn prepared_modules(program: &CorpusProgram, debug: bool) -> BTreeMap<String, PreparedModule> {
+    emit(program, debug)
+        .into_iter()
+        .map(|artifact| {
+            let identity = artifact.modules[0].identity.clone();
+            let bytes = write_nx_ir_image(&artifact).expect("image");
+            let module = PreparedModule::prepare(bytes)
+                .unwrap_or_else(|error| panic!("{}/{identity}: {error}", program.name));
+            (identity, module)
+        })
+        .collect()
+}
+
+/// Links the program whose entry is `entry`. Only the program's own modules are supplied; an image
+/// that names the prelude links the runtime's built-in one.
+fn linked_program(modules: &BTreeMap<String, PreparedModule>, entry: &str) -> Program {
+    Program::link(
+        &modules[entry],
+        |identity| modules.get(identity).cloned(),
+        &LinkOptions::default(),
+    )
+    .unwrap_or_else(|error| panic!("{entry}: {error}"))
+}
+
+fn budget(operations: u64) -> RuntimeOptions {
+    RuntimeOptions {
+        max_operations: Some(operations),
+        ..RuntimeOptions::default()
+    }
+}
+
+/// What an evaluation costs: the least budget it succeeds under, found by doubling the budget and
+/// then bisecting. An evaluation that fails for any other reason fails the test.
+fn count_operations<T>(
+    label: &str,
+    run: impl Fn(&RuntimeOptions) -> Result<T, NxIrRuntimeError>,
+) -> u64 {
+    if let Err(error) = run(&RuntimeOptions::default()) {
+        panic!("{label} fails in the Rust runtime: {error}");
+    }
+    let succeeds = |operations: u64| run(&budget(operations)).is_ok();
+    let mut high = 1;
+    while !succeeds(high) {
+        high *= 2;
+    }
+    let mut low = 0;
+    while low < high {
+        let middle = low + (high - low) / 2;
+        if succeeds(middle) {
+            high = middle;
+        } else {
+            low = middle + 1;
+        }
+    }
+    high
+}
+
+/// Where a budget below an evaluation's count stops it: the declaration and the span of the node
+/// whose charge exhausted it.
+fn failure_record<T>(
+    label: &str,
+    operations: u64,
+    run: impl Fn(&RuntimeOptions) -> Result<T, NxIrRuntimeError>,
+) -> Value {
+    let Err(error) = run(&budget(operations)) else {
+        panic!("{label} succeeds under a budget of {operations}, below its count");
+    };
+    let diagnostic = &error.diagnostics[0];
+    assert_eq!(
+        diagnostic.limit.map(|limit| limit.name),
+        Some("maxOperations"),
+        "{label}: {error}"
+    );
+    let mut record = serde_json::json!({
+        "budget": operations,
+        "declaration": diagnostic.declaration,
+    });
+    if let Some(source) = &diagnostic.source {
+        record["source"] = serde_json::json!({
+            "identity": source.identity,
+            "start": source.start,
+            "end": source.end,
+        });
+    }
+    record
+}
+
+/// What every evaluation of a program costs in the Rust runtime: each entrypoint's count, keyed as
+/// `results.json` keys it, and for each lifecycle the count of initialization and of each batch.
+/// A program that records failures also gets, per entrypoint, where half its count and one less
+/// than its count stop it.
+fn measure_operations(program: &CorpusProgram) -> Value {
+    let modules = prepared_modules(program, true);
+    let mut counts = serde_json::Map::new();
+    let mut failures = serde_json::Map::new();
+    for entrypoint in &program.manifest.entrypoints {
+        let key = format!("{}::{}", entrypoint.module, entrypoint.function);
+        let label = format!("corpus program '{}' entrypoint {key}", program.name);
+        let linked = linked_program(&modules, &entrypoint.module);
+        let run = |options: &RuntimeOptions| linked.evaluate_function(&entrypoint.function, &[], options);
+        let operations = count_operations(&label, run);
+        counts.insert(key.clone(), operations.into());
+        if program.manifest.record_failures && operations > 0 {
+            let budgets = BTreeSet::from([operations / 2, operations - 1]);
+            failures.insert(
+                key,
+                budgets
+                    .into_iter()
+                    .map(|budget| failure_record(&label, budget, run))
+                    .collect(),
+            );
+        }
+    }
+    for lifecycle in &program.manifest.lifecycles {
+        let key = format!("{}::{}", lifecycle.module, lifecycle.component);
+        let label = format!("corpus program '{}' lifecycle {key}", program.name);
+        let linked = linked_program(&modules, &lifecycle.module);
+        let props = lifecycle
+            .props
+            .iter()
+            .map(|(name, value)| (name.clone(), nx_value(value)))
+            .collect::<BTreeMap<_, _>>();
+        let initialize = |options: &RuntimeOptions| {
+            linked.initialize_component(&lifecycle.component, &props, &ComponentInit::default(), options)
+        };
+        let initial = count_operations(&label, initialize);
+        let mut instance = initialize(&RuntimeOptions::default())
+            .expect("initializes")
+            .instance;
+        let mut batches = Vec::with_capacity(lifecycle.batches.len());
+        for (index, batch) in lifecycle.batches.iter().enumerate() {
+            let entries = batch.iter().map(nx_value).collect::<Vec<_>>();
+            let dispatch =
+                |options: &RuntimeOptions| linked.dispatch_component_actions(&instance, &entries, options);
+            batches.push(count_operations(&format!("{label} batch {index}"), dispatch));
+            instance = dispatch(&RuntimeOptions::default())
+                .expect("dispatches")
+                .instance;
+        }
+        counts.insert(
+            key,
+            serde_json::json!({ "initial": initial, "batches": batches }),
+        );
+    }
+    let mut operations = serde_json::json!({ "counts": counts });
+    if !failures.is_empty() {
+        operations["failures"] = Value::Object(failures);
+    }
+    operations
+}
+
+/// The numbers of two `operations.json` files that differ, each named by its program and key, so a
+/// failure says which evaluation's count moved.
+fn operation_differences(program: &str, expected: &Value, actual: &Value) -> Vec<String> {
+    let mut differences = Vec::new();
+    let mut walk = |path: String, expected: Option<&Value>, actual: Option<&Value>| {
+        if expected != actual {
+            differences.push(format!(
+                "{program}: {path}: recorded {}, the Rust runtime gives {}",
+                expected.map_or("nothing".to_string(), Value::to_string),
+                actual.map_or("nothing".to_string(), Value::to_string)
+            ));
+        }
+    };
+    for section in ["counts", "failures"] {
+        let keys = [expected, actual]
+            .iter()
+            .filter_map(|file| file.get(section).and_then(Value::as_object))
+            .flat_map(|entries| entries.keys().cloned())
+            .collect::<BTreeSet<_>>();
+        for key in keys {
+            walk(
+                format!("{section} {key}"),
+                expected.get(section).and_then(|entries| entries.get(&key)),
+                actual.get(section).and_then(|entries| entries.get(&key)),
+            );
+        }
+    }
+    differences
+}
+
+/// Every corpus evaluation's operation count, and the recorded failures, are what the Rust runtime
+/// computes; regeneration writes them.
+#[test]
+fn corpus_operation_counts_match_the_rust_runtime() {
+    let mut failures = Vec::new();
+    for program in load_programs() {
+        let actual = measure_operations(&program);
+        let path = program.dir.join("expected").join("operations.json");
+        if updating() {
+            let text = format!(
+                "{}\n",
+                serde_json::to_string_pretty(&actual).expect("operations")
+            );
+            write_expected(&path, text.as_bytes());
+            continue;
+        }
+        let expected = fs::read_to_string(&path)
+            .ok()
+            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+            .unwrap_or(Value::Null);
+        failures.extend(operation_differences(&program.name, &expected, &actual));
+    }
+    assert!(
+        failures.is_empty(),
+        "corpus operation counts changed (run with NX_UPDATE_CORPUS=1 after an intended change):\n{}",
         failures.join("\n")
     );
 }

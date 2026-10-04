@@ -1,0 +1,84 @@
+// One entrypoint per rule of the evaluation cost model, so that a runtime's operation counts are
+// checked rule by rule, and a lifecycle whose state default and handler are charged too.
+type Shape =
+  | dot
+  | ring { radius:int }
+  | box { side:int }
+type Point = { x:int y:int }
+type Opt = { a:int = 1 b?:int c?:string }
+
+external component <Button emits { Tapped { } } />
+action Ping = { n:int }
+
+let numbers = { 1 2 3 }
+let others = { 9 2 3 }
+let answer = { 6 * 7 }
+// 40 code units that are 80 UTF-8 bytes, and one character outside the BMP that is two code
+// units and four bytes: the cost of a string is counted in code units, not bytes.
+let accents = "éééééééééééééééééééééééééééééééééééééééé𝄞"
+
+let corners(shape:Shape) = { if shape is { dot, ring => 0  box => 4 } }
+let one() = { 1 }
+let triple(n:int): int = { n * 3 }
+let through(f: <function n:int />: int): int = <f n={2} />
+let twice(xs:int+) = { xs xs }
+let greet(name:string = "world") = { "Hello, " + name }
+let button(a:int, b:int) = <Button onTapped=<Ping n={a + b} /> />
+let sum(p:Point): int = { p.x + p.y }
+let both(p:Point) = { p p }
+let <Count content items:int+ />: int = { 3 }
+// Used by the Rust runtime's allocation test: a value held `n` times, to be written `n` times.
+let repeated(o:object, n:int) = { for i in 0..n { o } }
+
+// An `ifIs` arm with several patterns: a constant case, then cases with fields, read in place.
+let patterns() = { corners(<Shape.box side={2} />) }
+// A callee that is a function reference, resolved in place, and one that is a function value.
+let directCall() = { one() }
+let valueCall() = { through(triple) }
+// A list spliced into a list places each of its items.
+let spliced() = { twice({ 1 2 3 }) }
+// A `for` over a value list, and a `forRange`, place one item per iteration.
+let forItems() = { for n in numbers { n + 1 } }
+let forRange() = { for i in 0..5 { i * i } }
+// The content list of an element places each child, a spliced `for` child's items included.
+let content() = <list><item /><item />{for i in 0..3 { <item index={i} /> }}</list>
+// A `concat` pays for the code units of its result: 84, one operation's worth.
+let concat() = { accents + accents }
+// A parameter default is evaluated, and charged, each time a call leaves it out.
+let defaults() = { greet() }
+// A value's initializer is evaluated, and charged, each time it is referenced.
+let valueReference() = { answer + answer }
+// A value is checked against a type where it meets one: the two fields of the record as it is
+// built, the record and its fields again as the argument of `sum`, and the declared result.
+let checked() = { sum(<Point x={1} y={2} />) }
+// An equality compares every pair it lines up, the second field here although the first differs.
+let compared() = { <Point x={1} y={2} /> == <Point x={3} y={2} /> }
+// Two lists are compared item by item, in order, up to the first pair that differs: the first
+// here, so the second and third pairs cost nothing.
+let comparedLists() = { numbers == others }
+// Two handlers made by one node compare what they captured, slot by slot, up to the first slot
+// that differs: `a` here, so `b`, which differs too, costs nothing.
+let comparedHandlers() = { button(9, 9) == button(1, 2) }
+// Comparing two strings pays for the code units of the shorter: 84 here, one operation's worth.
+let comparedText() = { accents + accents == accents + accents }
+// A value is written for the host once for each place it is reached from: `both` holds one
+// record twice, and two are written.
+let written() = { both(<Point x={1} y={2} />) }
+// A list bound to a content parameter is built anew for the call, so its items are placed again,
+// and then checked against the parameter's type.
+let bound() = { <Count>{numbers}</Count> }
+// The fields of an update record are checked as it is built, for the update record's declaration,
+// and the record `apply` returns holds its fields in another order than one built in place does:
+// the equality lines them up by name.
+let updated() = { apply(<Opt c="q" />, <Opt.Update b={5} />) == <Opt b={5} c="q" /> }
+// Two records of one type are lined up by field name: the pair under `a` is compared, and `b`
+// and `c`, which only one of them holds, cost one each.
+let misaligned() = { <pair a={1} b={2} /> == <pair a={1} c={2} /> }
+// The check of an update record's field belongs to the update record: half this entrypoint's
+// count stops there, at a charge no node made.
+let patched() = { <Opt.Update b={5} /> }
+
+component <Tally /> = {
+  state { count:int = {1 + 1} }
+  <Button onTapped=<Update count={count + 1} /> />
+}

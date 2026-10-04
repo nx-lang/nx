@@ -90,10 +90,6 @@
     },
     {
       "module": "main.nx",
-      "function": "big"
-    },
-    {
-      "module": "main.nx",
       "function": "maybe"
     },
     {

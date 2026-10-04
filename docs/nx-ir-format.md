@@ -525,8 +525,10 @@ supplying `null` or `[]` under a key of an update record clears that field. A un
 `{ "$type": "Union.case", ... }`, or the bare case name when the case is constant. A component
 descriptor is an object whose `$type` is the component name. An intrinsic element is an object
 whose `$type` is the tag, with its children under `content`: one child as itself, several as a
-list. An integer outside JavaScript's safe range is `{ "$type": "nx.int", "value": "<decimal>" }`,
-and arithmetic on one is a runtime diagnostic in JavaScript. An action handler is
+list. An integer outside JavaScript's safe range is `{ "$type": "nx.int", "value": "<decimal>" }`
+in canonical JSON. The TypeScript runtime cannot hold such an integer and refuses one where it
+reads it from an image, with `nx-ir-number`; the Rust runtime holds it as a 64-bit integer. A host
+that passes that record at `object` passes a record, in every runtime (see *Rust runtime*). An action handler is
 `{ "$type": "ActionHandler", "action": "<name>" }`, the name being the declaration name of the
 action record it accepts (`Button.Tapped` for an inline emit, `SearchSubmitted` for a shared one),
 plus a `token` when the output came from a lifecycle render; the record names the handler and is
@@ -592,6 +594,111 @@ substituted is the parent's handler value itself, so a host holding both instanc
 in the child's table. Initialization may also be given a complete state to use in place of the
 initial one, which is how a host re-renders an instance with new props and the state it holds;
 the runtime has no other "update props" operation and needs none.
+
+## Evaluation cost
+
+The cost of an evaluation is counted in *operations*, and the count is a property of the images and
+the input alone: two runtimes that evaluate the same images with the same values and compute the
+same result count the same operations, in the same order. That is what lets a host give one
+evaluation a budget of operations and mean the same thing in every runtime. Six things cost
+operations:
+
+| Charge | Cost | When |
+| --- | --- | --- |
+| A node is evaluated | 1 | Before any of its children. Every evaluation counts: a loop body once per iteration, a parameter's default each time a call leaves the parameter out, a field's or a state field's default each time it is evaluated, a value's initializer each time a `reference` evaluates it, and a handler's body each time a dispatch runs it. |
+| An item is placed in a sequence a node builds | 1 per item | As the item is placed, after the child that produced it. The sequences are the value of an `array`, `for` or `forRange` node and the content list of a `record`, `unionCase`, `element` or `component` node. A child whose value is a sequence places each of its items; an empty one places none. A `for` over one item rather than a sequence yields its body's value and places nothing. A call that binds a sequence to a content parameter builds the list anew: each item of the argument costs 1, empty or not, or 1 for each item it contributes when it is itself a sequence of several. |
+| A `concat` produces a string | 1 per 64 UTF-16 code units, rounded down | After both operands, before the string exists. |
+| A value is checked against a declared type | 1 per value that is not a sequence | Before the value is checked. A sequence type costs nothing itself: each item is checked, and a one-item sequence at a type that is not a sequence type is read as its item. A record, or a union case with fields, is one and then each of its field values, defaults included; a field left out with no default is not checked. A value at the type `object` is one value whatever it holds. |
+| Two values are compared | 1 per pair, and 1 more per 64 UTF-16 code units of text read | Before the pair is compared. Two sequences of one length compare their items in order, and two handlers of one node their captured values slot by slot, each up to and including the first pair that differs. Two records of one type are lined up by field name: a name both hold compares the pair of its values, and a name only one holds costs 1, all of them compared and counted whether or not an earlier one differed. The text read is the shorter of two strings, the shorter of two records' type names, and every field name of two records of one type, for each record that holds it. |
+| A value is written for the host | 1 per value, and 1 more per 64 UTF-16 code units of text written | Before the value is written. Every value is one, because every value takes a place in what is written: a sequence, the empty value included, and then its items; a record and then its field values. The text written is a string, a record's type name, and each of its field names. A function value and an action handler are one each, and only a value the runtime made is one of them: a record a host passes with the type name or the internal marking of one is a record, entered and paid for like any other, and so is the `nx.int` record canonical JSON spells a large integer with. |
+
+The first three are what a program does. The last three are the walks a runtime makes over a value,
+and they are charged because a value is held by reference: a record that names one value in two
+fields unfolds, for anything that walks it as a tree, to twice the value. Forty levels of that cost
+a few hundred operations to build and are 2^40 values to a walk, so each walk pays for every value
+it visits. A value nobody walks costs only what building it cost.
+
+A value is checked against a type wherever evaluation gives it one: an argument or a default
+against its parameter, a function's result against its declared result type, a value declaration's
+value against its declared type, each field of a `record`, `unionCase` or `component` construction,
+and every value the host supplies to a typed site. Two values are compared by `eq` and `ne`, by a
+pattern of an `ifIs` arm that matches by equality, and by `diff` for each field, a field one record
+does not hold comparing as the empty value. A pattern matches by equality unless the pattern or the
+scrutinee is the empty value, or both are records and the pattern names a type: those are decided
+by emptiness or by the type name and compare nothing. A record holds a field when it stores a
+value for it, so an optional field that was left out or is empty is not compared, and a field an
+update record clears is. A handler captures the slots of its frame as they stood when it was made.
+A value is written when a call returns it: a function's result, a descriptor, rendered output, each
+effect, and component state. A value reached from several places is written once for each, and a
+`null` inside a value the host passed at `object` is the empty value: one value where it is
+written, and one item where a list that holds it is bound to a content parameter.
+
+Names are text too. A declared type or field name is short and costs nothing, but a host may pass
+an object at `object` whose key is as long as it likes, so a name is charged by its length where it
+is compared and where it is written, like any string. A comparison of two lists stops at the first
+pair of items that differs, since a list's items are in one order in every runtime and the count
+is the same wherever it stops; a comparison of two records goes on to the end, since the order of
+a record's fields is not, and a count that stopped at the first differing field would depend on
+it. The result of a comparison never depends on whether a budget is set or on how the two values
+are held: a record that holds a NaN is not equal to itself.
+
+Two nodes cost one operation whether or not a runtime evaluates them. A pattern of an `ifIs` arm
+costs one when it is tested, including a pattern naming a union case with fields, which a runtime
+reads without building the record; a pattern after the one that matched is not tested. The callee
+of a `call` or `namedCall` costs one, including a `reference` to a function a runtime resolves in
+place.
+
+Everything else is free. A node that is not evaluated costs nothing: the branch a conditional does
+not take, and the right operand of `and`, `or` or `coalesce` when the left decides. So does the
+rest of what a runtime does: preparing and linking, reading the host's input before it is checked,
+an update intrinsic's own work apart from the comparisons of `diff`, collecting a dispatch's
+effects, and assigning handler tokens. None of that may grow with the size of a value, as it is
+held or as it unfolds when walked as a tree: a runtime that walks a value for a purpose of its own
+visits a value reached from several places once, and does not walk again what an evaluation did
+not change.
+
+A runtime that offers a budget fails an evaluation at the first charge that would take the count
+above it, before the operation charged is performed: a node is not evaluated, an item is not placed,
+a string is not built, a value is not checked, compared or written. The failure is
+`nx-ir-resource-limit` and names a declaration. For a node, an item placed, a `concat` or a
+comparison it is the declaration the node belongs to, with the node's span when the image carries
+its debug section: the node evaluated, the node building the sequence, the `binary` node, the
+pattern, or the `intrinsic` node. For a check against a type it is the declaration whose parameter,
+result, field or value is being checked for, which for a field of an update record is the update
+record; for an item bound to a content parameter it is the function called; and for a value written
+for the host it is the function or component the call evaluated. None of the three has a span. A
+budget equal to an evaluation's cost succeeds.
+
+The rules are written so that every step that touches a value in proportion to its size is charged
+in proportion, and the time and the memory of an evaluation are proportional to its count: what is
+left uncharged in a step is meant to be bounded by the program's declarations, the fields of a
+record or the slots of a frame, and not by its data. That holds for everything the runtimes' tests
+and the conformance corpus cover. It is a claim about every step of two runtimes, though, and review
+has several times found a step that broke it, each time through a large or unusual value a host
+passed at `object`: a wide object, a long key, a list of empty values. A host that runs code it did
+not write should treat the budget as its first limit and keep one of its own on time and memory as
+well, a CPU limit or a separate isolate, where it has one. Typed data is checked each time it meets
+a type, so a list of `n` items returned through `k` calls with a declared result costs about `k ×
+n`. A count belongs to an image, not to source; an emitter change that adds or removes nodes changes
+what a program costs, and the corpus's recorded counts show every such change.
+
+Worked counts, which both runtimes' tests and the corpus pin:
+
+| Source | Evaluated with | Operations |
+| --- | --- | --- |
+| `let add(a:int, b:int) = { a + b }` | `1`, `2` | 6: two arguments checked, the `binary` node and its two `slot` operands, and the number written |
+| `let root() = { for i in 0..4 { i * i } }` | | 29: the `forRange` node, 7 for its iterable (the `Range` record, its three literals and its three fields checked), 3 for each of the 4 evaluations of the body, 4 for the items placed, and 5 for the list and its numbers written |
+| `let pick(flag:boolean) = { if flag { 1 } else { for i in 0..1000 { i } } }` | `true` | 8: the argument checked, the `if`, its `slot`, the `array` the branch `{ 1 }` is emitted as, its literal, the item placed, and the one-item list and its number written; the loop costs nothing |
+| `let one() = { 1 }` and `let root() = { one() }` | | 4: the `call`, its `reference` callee, the literal body of `one`, and the number written |
+| `let twice(xs:int+) = { xs xs }` | 500 integers | 2,504: 500 items checked, the `array`, two `slot` nodes and 1,000 items placed, and the list and its 1,000 items written |
+| `let join(a:string, b:string) = { a + b }` | two strings of 1,000 code units | 68: two arguments checked, the `binary` and its two `slot` nodes, 31 for the 2,000 code units built, and 32 to write the string |
+| `let same(xs:int+) = { xs }` | 10,000 integers | 20,002: 10,000 items checked, the `slot`, and the list and its 10,000 items written |
+| `let sameText(a:string, b:string) = { a == b }` | two strings of 1,000 code units | 22: two arguments checked, the `binary` and its two `slot` nodes, 16 for the comparison (the pair and 15 for its 1,000 code units), and the boolean written |
+| `<Point x={1} y={2} /> == <Point x={3} y={2} />` | | 3 for the comparison, besides the nodes: the two records and each pair of fields, the second although the first differs |
+| `a == b` for two host lists at `object` | two lists of 100,000 integers that differ in their first item | 2 for the comparison: the two lists and the first pair of items |
+| `let ignore(content c:object): int = { 1 }` | a list of 100 integers, held as `xs:object` and passed as `ignore(xs)` | 106 for the call: the `call`, its callee and its `slot` argument, 100 items bound, the list checked as one value, the literal, and the result checked |
+| `let passObject(o:object): object = { o }` | `{ "a": null, "b": [null, null], "c": [] }` | 9: the argument and the result checked, the `slot`, and six values written, the record, the empty value under `a`, the list under `b` and its two empty items, and the empty list under `c` |
+| `a == b` for two host objects at `object` | `{ "a": 1, "b": 2 }` and `{ "a": 1, "c": 2 }` | 4 for the comparison: the two records, the pair under `a`, and one for each of `b` and `c`, which only one holds |
 
 ## Determinism
 
@@ -819,6 +926,14 @@ the entrypoint tables. A module that names another module in its table must be l
 evaluated. An instance is an immutable value the host holds between calls; the runtime keeps no
 state of its own, and a dispatch that fails leaves the instance it was given usable.
 
+Every evaluation function takes options: `maxCallDepth` (100 by default), `maxRangeLength` (one
+million) and `maxOperations`, the budget of *Evaluation cost*, which is unlimited unless set. One
+budget covers one call, a dispatch's whole batch and the render after it included. Expressions nest
+at most 1,000 deep, and a `RangeError` the JavaScript engine raises during evaluation is reported
+as a diagnostic. Every `nx-ir-resource-limit` diagnostic carries `limit`, the name and value of the
+limit reached: `maxOperations`, `maxCallDepth`, `maxRangeLength`, `maxExpressionNesting`, or
+`engine`, which has no value. The package's `README.md` has the details.
+
 ## Rust runtime
 
 The Rust runtime is the crate `crates/nx-ir-runtime`. It depends on the format crate `nx-ir` and
@@ -832,33 +947,48 @@ carries diagnostics with the TypeScript runtime's codes.
 
 It differs from the TypeScript runtime in what Rust makes possible or necessary:
 
-- Integers are 64-bit. An integer outside JavaScript's safe range is an `NxValue::Int` rather than
-  the `nx.int` wrapper, which it also accepts as input, and it computes: `9007199254740992 + 1` is
-  `9007199254740993`, where the TypeScript runtime refuses a wide operand with `nx-ir-number`.
-  Integer `add`, `sub`, `mul` and `mod` wrap at 64 bits, where a JavaScript number loses precision
-  past 2^53 instead. Inside the safe range the two runtimes agree.
+- Integers are 64-bit. An integer outside JavaScript's safe range is an `NxValue::Int`, and it
+  computes: `9007199254740992 + 1` is `9007199254740993`. The TypeScript runtime cannot hold such
+  an integer: it refuses one where it reads it from an image, with `nx-ir-number` naming the
+  function and the literal, so a program that reaches one runs here and fails there. Integer
+  `add`, `sub`, `mul` and `mod` wrap at 64 bits, where a JavaScript number loses precision past
+  2^53 instead. Inside the safe range the two runtimes agree.
+- The `nx.int` wrapper, canonical JSON's spelling of such an integer, is that integer to the Rust
+  runtime at a typed integer site, where the TypeScript runtime refuses it. At `object`, where no
+  type says what it is, the wrapper is a record with one field in both runtimes, as a host that
+  read it from JSON holds it: written back it is the same JSON, and it costs what a record with
+  one string field costs. A Rust host that means the integer passes `NxValue::Int`, which is
+  written to JSON as a number and read back as one.
 - The host's `null` is the empty value before any type is known. At an `object` site, which holds
   any value, a `null` is therefore the empty list, at the top level and inside an untyped value,
-  where the TypeScript runtime rejects the first and keeps the second.
+  where the TypeScript runtime rejects the first and keeps the second. Either way it is one value
+  where it is written or bound, so the two count such a value alike.
 - An instance serializes, and `Program::restore_component_instance` validates a stored one against
   the program once, when it is restored. An instance belongs to the exact images that rendered it,
   compared by a hash of each image's bytes, since a handler names its node and its captured slots
   by index.
 
 And because a native stack overflow cannot be caught, evaluation is bounded by a fixed
-expression-nesting limit and a stack budget as well as by the host's call-depth limit. The crate's
-`README.md` has the API, the limits and the diagnostic codes.
+expression-nesting limit and a stack budget as well as by the host's call-depth limit.
+`RuntimeOptions::max_operations` is the operation budget, counted exactly as the TypeScript runtime
+counts it: the same images, input and budget stop at the same node. A resource-limit diagnostic's
+`limit` uses the TypeScript runtime's names for the limits the two share, and adds
+`maxStackBytes` and `maxValueNesting` for the two only this runtime has. The crate's `README.md`
+has the API, the limits and the diagnostic codes.
 
 ## Conformance corpus
 
 `specs/ir-conformance/` holds NX programs with their expected images, with and without the debug
 section, the explained text of each image beside it, the expected canonical value of every named
 entrypoint, and, for every lifecycle a program names, the rendered output of initialization and
-the rendered output and effects of each dispatched batch, tokens included. The emitter's tests pin
+the rendered output and effects of each dispatched batch, tokens included. Each program's
+`operations.json` records what every entrypoint, initialization and batch costs in operations, and
+`evaluation-cost`, which has one entrypoint per charging rule, also records where budgets below
+those counts stop each entrypoint: a declaration, and a span when the charge was for a node. The emitter's tests pin
 the images byte for byte and check that each committed text is the explanation of its committed
 image; the TypeScript runtime's tests and the Rust runtime's tests each evaluate the images, drive
-the lifecycles, and refuse every truncation and cell overwrite of them; and the corpus is where
-another runtime starts. It covers
+the lifecycles, check every count by evaluating under it and under one less, and refuse every
+truncation and cell overwrite of them; and the corpus is where another runtime starts. It covers
 every node, type and declaration kind, a program spanning two images, derived declarations, a
 document that is a single trailing element, and components that bind action handlers. It also holds
 the size budget: an image emitted without its debug section is at most six times the UTF-8 length

@@ -169,6 +169,21 @@ export interface NxIrDiagnostic {
     readonly source?: NxIrSourceSpan;
     /** The declaration the expression belongs to, as `identity::name`, when it is known. */
     readonly declaration?: string;
+    /**
+     * The limit that was reached. Every `nx-ir-resource-limit` diagnostic carries one, and no other
+     * does, so a host tells an exhausted budget from runaway recursion without reading the message.
+     */
+    readonly limit?: NxIrLimit;
+}
+/**
+ * A limit an evaluation reached. `name` is `maxOperations`, `maxCallDepth` or `maxRangeLength` for
+ * the limits a host sets, `maxExpressionNesting` for the fixed bound on nesting, or `engine` for a
+ * limit of the JavaScript engine, which has no value and depends on where the runtime runs. The
+ * Rust runtime reports the same names for the limits the two share.
+ */
+export interface NxIrLimit {
+    readonly name: string;
+    readonly value?: number;
 }
 export type NxResult<T> = {
     readonly ok: true;
@@ -388,16 +403,30 @@ export interface NxLinkOptions {
     readonly allowVersionMismatch?: boolean;
 }
 export interface NxRuntimeOptions {
+    /** How deeply function calls may nest. 100 by default. */
     readonly maxCallDepth?: number;
     /**
-     * The most integers one range may hold when a `forRange` iterates it. One million by default,
-     * which is the interpreter's operation budget.
+     * The most integers one range may hold when a `forRange` iterates it. One million by default.
      *
      * <para>A range makes an enormous loop one token long, so the count is checked before the body
      * runs at all rather than discovered part-way through.</para>
      */
     readonly maxRangeLength?: number;
+    /**
+     * The most operations one call may cost, counted as `docs/nx-ir-format.md` defines an operation:
+     * one per node evaluated, one per item placed in a sequence, and one per 64 UTF-16 code units of
+     * a string a concatenation produces. Absent, the call is unlimited.
+     *
+     * <para>One budget covers one call of an evaluation function and everything it evaluates; for
+     * `dispatchComponentActions`, every handler of the batch and the render after it. A host that
+     * evaluates code it did not write should set it: the call depth and the range length bound
+     * neither work nor allocation. A value that is not a non-negative safe integer is refused with
+     * `nx-ir-options`.</para>
+     */
+    readonly maxOperations?: number;
 }
+/** The default of {@link NxRuntimeOptions.maxCallDepth}. */
+export declare const NX_DEFAULT_MAX_CALL_DEPTH = 100;
 /** The default of {@link NxRuntimeOptions.maxRangeLength}. */
 export declare const NX_DEFAULT_MAX_RANGE_LENGTH = 1000000;
 /**
@@ -502,7 +531,8 @@ export declare function evaluateComponent(program: NxPreparedProgram | NxPrepare
  * order. A handler the component's own body bound reads the state live and patches it with the
  * component's update records; any other handler sees only what it captured, and everything it
  * returns is an effect. The body is rendered once against the state the batch produced. A failure
- * throws before anything is returned, so the instance given stays the state of record.
+ * throws before anything is returned, so the instance given stays the state of record. One
+ * operation budget covers the whole batch and the render after it.
  */
 export declare function dispatchComponentActions(program: NxPreparedProgram | NxPreparedModule, instance: NxComponentInstance, batch: readonly NxCanonicalValue[], options?: NxRuntimeOptions): ComponentDispatchResult;
 export declare function normalizeComponentState(program: NxPreparedProgram | NxPreparedModule, name: string, state: Record<string, NxCanonicalValue>, options?: NxRuntimeOptions): Record<string, NxCanonicalValue>;
