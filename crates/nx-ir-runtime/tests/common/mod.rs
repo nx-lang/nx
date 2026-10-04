@@ -8,9 +8,24 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
+/// A function to evaluate. With arguments it is a *case*, and its case name is part of its key.
 pub struct Entrypoint {
     pub module: String,
     pub function: String,
+    pub case: Option<String>,
+    /// The canonical values to pass by position: none for an entrypoint that is not a case.
+    pub arguments: Vec<NxValue>,
+}
+
+impl Entrypoint {
+    /// The key results, counts, failures and input sizes are kept under: `identity::function`,
+    /// and `identity::function#case` for a case.
+    pub fn key(&self) -> String {
+        match &self.case {
+            Some(case) => format!("{}::{}#{case}", self.module, self.function),
+            None => format!("{}::{}", self.module, self.function),
+        }
+    }
 }
 
 pub struct Lifecycle {
@@ -28,7 +43,8 @@ pub struct CorpusProgram {
     pub entrypoints: Vec<Entrypoint>,
     pub lifecycles: Vec<Lifecycle>,
     pub results: serde_json::Value,
-    /// What each evaluation costs, and where recorded budgets below that stop it.
+    /// What each evaluation costs, where recorded budgets below that stop it, and, for a program
+    /// that records them, the input size of each case and lifecycle step.
     pub operations: serde_json::Value,
 }
 
@@ -98,9 +114,31 @@ pub fn load_corpus() -> Vec<CorpusProgram> {
                     .map(|entrypoints| {
                         entrypoints
                             .iter()
-                            .map(|entrypoint| Entrypoint {
-                                module: text(entrypoint, "module"),
-                                function: text(entrypoint, "function"),
+                            .map(|entrypoint| {
+                                let module = text(entrypoint, "module");
+                                let function = text(entrypoint, "function");
+                                let case = entrypoint
+                                    .get("case")
+                                    .map(|case| case.as_str().expect("a case name").to_string());
+                                let arguments = entrypoint.get("arguments").map(|arguments| {
+                                    arguments
+                                        .as_array()
+                                        .expect("a list of arguments")
+                                        .iter()
+                                        .map(value)
+                                        .collect::<Vec<_>>()
+                                });
+                                assert_eq!(
+                                    arguments.is_some(),
+                                    case.is_some(),
+                                    "{name} {module}::{function}: `arguments` and `case` go together"
+                                );
+                                Entrypoint {
+                                    module,
+                                    function,
+                                    case,
+                                    arguments: arguments.unwrap_or_default(),
+                                }
                             })
                             .collect()
                     })

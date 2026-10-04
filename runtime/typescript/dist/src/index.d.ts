@@ -176,10 +176,10 @@ export interface NxIrDiagnostic {
     readonly limit?: NxIrLimit;
 }
 /**
- * A limit an evaluation reached. `name` is `maxOperations`, `maxCallDepth` or `maxRangeLength` for
- * the limits a host sets, `maxExpressionNesting` for the fixed bound on nesting, or `engine` for a
- * limit of the JavaScript engine, which has no value and depends on where the runtime runs. The
- * Rust runtime reports the same names for the limits the two share.
+ * A limit an evaluation reached. `name` is `maxOperations`, `maxInputSize`, `maxCallDepth` or
+ * `maxRangeLength` for the limits a host sets, `maxExpressionNesting` for the fixed bound on
+ * nesting, or `engine` for a limit of the JavaScript engine, which has no value and depends on
+ * where the runtime runs. The Rust runtime reports the same names for the limits the two share.
  */
 export interface NxIrLimit {
     readonly name: string;
@@ -424,6 +424,44 @@ export interface NxRuntimeOptions {
      * `nx-ir-options`.</para>
      */
     readonly maxOperations?: number;
+    /**
+     * The largest input one call may be given, measured as `docs/nx-ir-format.md` defines the input
+     * size of a call and as {@link measureInputSize} measures one value: one for each value, and one
+     * more for every 64 UTF-16 code units of a string, a type name and a field name. Absent, the
+     * input is unlimited and nothing is measured.
+     *
+     * <para>It covers every value the host passes to one call: arguments, props, content, a state,
+     * the entries of a batch and a state patch. An instance is not input. A call whose input is
+     * larger fails with `nx-ir-resource-limit` whose `limit.name` is `maxInputSize`, before the
+     * program is looked at, and measuring stops as soon as the size passes the limit. The limit is
+     * separate from `maxOperations`: measuring charges no operation. A value that is not a
+     * non-negative safe integer is refused with `nx-ir-options`.</para>
+     */
+    readonly maxInputSize?: number;
+    /**
+     * An object of the host's that the runtime reports what the call used to. The runtime removes
+     * both members when the call begins and sets them when it ends, whether it returns or throws.
+     * An object the runtime cannot write to is refused with `nx-ir-options` before anything runs.
+     *
+     * <para>Calls that overlap and share one object leave the numbers of whichever ended last, so
+     * give each call its own.</para>
+     */
+    readonly usage?: NxRuntimeUsage;
+}
+/** What one call of an evaluation function used, as {@link NxRuntimeOptions.usage} reports it. */
+export interface NxRuntimeUsage {
+    /**
+     * The operations the call used, when `maxOperations` was set; absent otherwise, since with no
+     * budget the runtime counts nothing. For a call that returned this is its operation count, the
+     * least budget it succeeds under. For one that threw it is what was charged before the failure:
+     * a charge the budget refused is not among them, so the number is never more than the budget.
+     */
+    operations?: number;
+    /**
+     * The input size of the call, when `maxInputSize` was set and the input was within it; absent
+     * otherwise, since input that is refused is not measured to its end.
+     */
+    inputSize?: number;
 }
 /** The default of {@link NxRuntimeOptions.maxCallDepth}. */
 export declare const NX_DEFAULT_MAX_CALL_DEPTH = 100;
@@ -545,6 +583,24 @@ export declare function normalizeComponentState(program: NxPreparedProgram | NxP
  * so the next state carries no key for it; for a field that is not optional it is rejected.
  */
 export declare function applyComponentStatePatch(program: NxPreparedProgram | NxPreparedModule, name: string, currentState: Record<string, NxCanonicalValue>, patch: Record<string, NxCanonicalValue>, options?: NxRuntimeOptions): Record<string, NxCanonicalValue>;
+/**
+ * The size of one value as `docs/nx-ir-format.md` defines the input size of a call and as
+ * {@link NxRuntimeOptions.maxInputSize} measures it. It evaluates nothing and needs no program.
+ *
+ * <para>With a `limit`, measuring stops as soon as the size passes it and the result is some
+ * number greater than the limit: the value is too large, and how large is not found out. A host
+ * uses this to hold one part of what it passes to a number of its own before it calls.</para>
+ *
+ * <para>Pass a limit for any value that did not come from JSON. The walk takes every reference
+ * as a new value, so a value that holds itself has no finite size, and measuring one with no
+ * limit does not return: it ends when the engine runs out of memory.</para>
+ *
+ * <para>An object is measured as one record, which is how the props, the state, the patch and the
+ * arguments by name of a call are measured. An array is measured as the list it is, which is one
+ * more than its items add to a call that takes them as its positional arguments, its content or
+ * its batch, since a call counts the entries and not the list.</para>
+ */
+export declare function measureInputSize(value: unknown, limit?: number): number;
 /**
  * The record a function value renders as, and the one a host supplies where a function value is
  * expected. Read it from a member declared at a function type, and call it with `callFunction`.

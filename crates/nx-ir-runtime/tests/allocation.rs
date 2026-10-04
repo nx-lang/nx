@@ -1,5 +1,6 @@
 //! What the budget refuses is not allocated: a string a `concat` would build, and the names of a
-//! record written for the host.
+//! record written for the host. And input the input limit refuses is not copied: it is measured
+//! before anything is converted.
 //!
 //! <para>A charge made after the string was built would fail at the same node with the same
 //! count, so no diagnostic tells the two orders apart; what differs is what was allocated. This
@@ -57,6 +58,7 @@ fn what_the_budget_does_not_cover_is_not_allocated() {
     a_refused_concat_allocates_no_string(&program);
     names_written_for_the_host_are_paid_for_before_they_are_copied(&program);
     empty_values_written_for_the_host_are_paid_for_before_they_are_copied(&program);
+    input_over_the_limit_is_refused_before_it_is_copied(&program);
 }
 
 fn a_refused_concat_allocates_no_string(program: &nx_ir_runtime::Program) {
@@ -94,11 +96,9 @@ fn a_refused_concat_allocates_no_string(program: &nx_ir_runtime::Program) {
     // The baseline is the same call refused at its first node, under a budget of nothing: it
     // reads its argument and builds a diagnostic. The call refused at the `concat` allocates no
     // more than that and a little, where a string built and then refused would add a megabyte.
-    let (result, baseline) =
-        allocated_by(|| program.evaluate_function("greet", &name, &budget(0)));
+    let (result, baseline) = allocated_by(|| program.evaluate_function("greet", &name, &budget(0)));
     exhausted(result);
-    let (result, limited) =
-        allocated_by(|| program.evaluate_function("greet", &name, &budget(10)));
+    let (result, limited) = allocated_by(|| program.evaluate_function("greet", &name, &budget(10)));
     exhausted(result);
     assert!(
         limited <= baseline + (64 << 10),
@@ -111,7 +111,9 @@ fn a_refused_concat_allocates_no_string(program: &nx_ir_runtime::Program) {
 /// key is a megabyte, and a program may hold that object 400 times in a list for 400 operations:
 /// written, it would be 400 megabytes of keys. The names are paid for by length before they are
 /// copied, so a budget that does not cover them allocates none of them.
-fn names_written_for_the_host_are_paid_for_before_they_are_copied(program: &nx_ir_runtime::Program) {
+fn names_written_for_the_host_are_paid_for_before_they_are_copied(
+    program: &nx_ir_runtime::Program,
+) {
     let object = NxValue::Record {
         type_name: None,
         properties: std::collections::BTreeMap::from([("k".repeat(LENGTH), NxValue::Int(1))]),
@@ -147,7 +149,9 @@ fn names_written_for_the_host_are_paid_for_before_they_are_copied(program: &nx_i
 /// operations: written, it would be ten million entries. Each value written costs one, the empty
 /// ones too, before it is written, so a budget that does not cover them allocates only as many
 /// copies as it does cover.
-fn empty_values_written_for_the_host_are_paid_for_before_they_are_copied(program: &nx_ir_runtime::Program) {
+fn empty_values_written_for_the_host_are_paid_for_before_they_are_copied(
+    program: &nx_ir_runtime::Program,
+) {
     const ITEMS: usize = 20_000;
     let object = NxValue::Record {
         type_name: None,
@@ -181,3 +185,50 @@ fn empty_values_written_for_the_host_are_paid_for_before_they_are_copied(program
     );
 }
 
+/// A host value is converted on the way in, which copies it: every string, every name and every
+/// list. The input limit is applied by a pass of its own that runs before the conversion and
+/// builds nothing, so input it refuses costs a diagnostic and the walk's own stack, whatever its
+/// size: a megabyte key, a string of 64 megabytes and a list of a million items are each refused
+/// for what refusing two numbers allocates and a little.
+fn input_over_the_limit_is_refused_before_it_is_copied(program: &nx_ir_runtime::Program) {
+    let run = |value: NxValue, limit: u64| {
+        let args = [value, NxValue::Int(1)];
+        let options = RuntimeOptions {
+            max_input_size: Some(limit),
+            ..RuntimeOptions::default()
+        };
+        let (result, allocated) =
+            allocated_by(|| program.evaluate_function("repeated", &args, &options));
+        let error = result.expect_err("the limit does not cover the input");
+        assert_eq!(
+            error.diagnostics[0].limit.map(|limit| limit.name),
+            Some("maxInputSize")
+        );
+        allocated
+    };
+
+    // Two numbers under a limit of one: the diagnostic and nothing else.
+    let baseline = run(NxValue::Int(1), 1);
+    let key = NxValue::Record {
+        type_name: None,
+        properties: std::collections::BTreeMap::from([("k".repeat(LENGTH), NxValue::Int(1))]),
+    };
+    let large = [
+        ("a megabyte key", key),
+        (
+            "a 64-megabyte string",
+            NxValue::String("x".repeat(64 * LENGTH)),
+        ),
+        (
+            "a list of a million items",
+            NxValue::Array(vec![NxValue::Int(1); 1_000_000]),
+        ),
+    ];
+    for (what, value) in large {
+        let refused = run(value, 100);
+        assert!(
+            refused <= baseline + 1024,
+            "refusing {what} allocated {refused} bytes, against {baseline} for refusing two numbers"
+        );
+    }
+}

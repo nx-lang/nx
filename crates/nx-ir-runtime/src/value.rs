@@ -397,9 +397,7 @@ impl Depths {
                 Arc::strong_count(items),
             ),
             Value::Record(record) => (Arc::as_ptr(record) as usize, Arc::strong_count(record)),
-            Value::Handler(handler) => {
-                (Arc::as_ptr(handler) as usize, Arc::strong_count(handler))
-            }
+            Value::Handler(handler) => (Arc::as_ptr(handler) as usize, Arc::strong_count(handler)),
             _ => return Ok(1),
         };
         // An allocation one thing holds is reached once for each time its holder is, and needs
@@ -721,4 +719,3 @@ mod tests {
         }
     }
 }
-

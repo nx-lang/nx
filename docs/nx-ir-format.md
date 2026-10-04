@@ -672,12 +672,20 @@ budget equal to an evaluation's cost succeeds.
 The rules are written so that every step that touches a value in proportion to its size is charged
 in proportion, and the time and the memory of an evaluation are proportional to its count: what is
 left uncharged in a step is meant to be bounded by the program's declarations, the fields of a
-record or the slots of a frame, and not by its data. That holds for everything the runtimes' tests
-and the conformance corpus cover. It is a claim about every step of two runtimes, though, and review
-has several times found a step that broke it, each time through a large or unusual value a host
-passed at `object`: a wide object, a long key, a list of empty values. A host that runs code it did
-not write should treat the budget as its first limit and keep one of its own on time and memory as
-well, a CPU limit or a separate isolate, where it has one. Typed data is checked each time it meets
+record or the slots of a frame, and not by its data. It is a claim about every step of two
+runtimes, and review has several times found a step that broke it, each time through a large or
+unusual value a host passed at `object`: a wide object, a long key, a list of empty values. Four
+things back the claim now. The input limit of [*Input size*](#input-size) bounds what a step
+nobody has found can cost. A differential test runs generated host values through both runtimes
+and requires the same count, input size and failures of each. The Rust runtime's allocations are
+held to a multiple of the count for every generated case. And a time report, which does not block
+a merge, names a case whose time grows faster than its count. They are described under
+[*Validation against generated host values*](#validation-against-generated-host-values). What is
+still open is what those tests have found and not yet had fixed, the known findings listed in
+`crates/nx-codegen/tests/cost/mod.rs`, and whatever they cannot see: a step driven by a value a
+program builds, which only the fixed probes exercise. So a host that runs code it did not write
+should treat the budget as its first limit, set the input limit beside it, and keep a limit of its
+own on time and memory as well, a CPU limit or a separate isolate, where it has one. Typed data is checked each time it meets
 a type, so a list of `n` items returned through `k` calls with a declared result costs about `k ×
 n`. A count belongs to an image, not to source; an emitter change that adds or removes nodes changes
 what a program costs, and the corpus's recorded counts show every such change.
@@ -699,6 +707,277 @@ Worked counts, which both runtimes' tests and the corpus pin:
 | `let ignore(content c:object): int = { 1 }` | a list of 100 integers, held as `xs:object` and passed as `ignore(xs)` | 106 for the call: the `call`, its callee and its `slot` argument, 100 items bound, the list checked as one value, the literal, and the result checked |
 | `let passObject(o:object): object = { o }` | `{ "a": null, "b": [null, null], "c": [] }` | 9: the argument and the result checked, the `slot`, and six values written, the record, the empty value under `a`, the list under `b` and its two empty items, and the empty list under `c` |
 | `a == b` for two host objects at `object` | `{ "a": 1, "b": 2 }` and `{ "a": 1, "c": 2 }` | 4 for the comparison: the two records, the pair under `a`, and one for each of `b` and `c`, which only one holds |
+
+### Input size
+
+The *input* of one call of an evaluation API is what the host passes to it, and it has a size that
+depends on those values alone, so every runtime measures the same input alike. The size is the sum
+of the sizes of the values the host supplies, each measured as a value written for the host is
+charged: one for each value, a sequence, the empty value and a `null` included, and one more for
+every 64 UTF-16 code units, rounded down, of a string, of a record's type name and of each field
+name. A value costs the same to hand in as to get back.
+
+The values a host supplies are:
+
+| What the host passes | Measured as |
+| --- | --- |
+| The positional arguments of a function | Each argument. The list of them is not a value and is not counted. |
+| The arguments of a call by name | One record |
+| The function record such a call names | One value |
+| The props of a component | One record |
+| Content | Each item |
+| A state the host passes in | One record |
+| A dispatched batch | Each entry |
+| A state patch | One record |
+
+A map measured as one record costs one for the record and then, for each entry, the length of its
+name and the size of its value, so the names a host chooses count like any field names. A component
+instance is not input, and neither is the parent instance a host names when it initializes a child:
+a runtime produced them under earlier calls, where what they hold was charged as it was written.
+The helpers that take no runtime options and evaluate no program code, the update helpers and the
+restoring of a stored instance, have no input in this sense. The size is measured before any value
+is checked against a type and does not depend on the types the values reach.
+
+Hosts do not all spell one input the same way, and the two runtimes are not given the same forms
+of it. Where they differ, the size is fixed so that it does not:
+
+- An integer is one value, a 64-bit integer the Rust runtime is given as `NxValue::Int` included.
+  The record canonical JSON spells an integer outside the safe range with,
+  `{ "$type": "nx.int", "value": "<digits>" }`, is a record wherever a host passes it and is
+  measured as one: the record, its string, and the string's length. No measure recognizes it.
+- Props, and the arguments of a call by name, that the host leaves out are an empty record, whose
+  size is one. A state the host does not pass is not input.
+- A member named `$type` that holds a string is the type name of the record or the map it is in,
+  and counts its length alone. Holding anything else, it is a field like any other.
+- An element of the positional arguments that is undefined, or a hole in them, is the empty value,
+  whose size is one. A parameter the arguments do not reach is not input, so the size does not
+  depend on the declaration.
+- A value that is not a canonical value is one value and is not read further. In JavaScript that
+  is anything but `null`, a boolean, a number, a string, an array or a plain object: a function, a
+  big integer, a `Date`, a `Map`, an instance of a class, and the handler and function objects a
+  runtime keeps for its own use, which a measure must not follow into the linked program. A
+  runtime knows its own by having made them, not by a marking: an object read from JSON that
+  carries the marking of one is a plain object and is measured as one. What a runtime then does
+  with a value that is not canonical, which is mostly to refuse it, is unchanged.
+
+A runtime may offer a limit on the input size: `maxInputSize` in the TypeScript runtime and
+`RuntimeOptions::max_input_size` in the Rust runtime, each unset by default, which is unlimited. A
+call whose input is larger than the limit fails with `nx-ir-resource-limit` whose limit is named
+`maxInputSize`, before the program is looked at, before any value is checked against a type and
+before any node is evaluated; the failure names no declaration and has no span. So input over the
+limit is reported before any other fault of the call: an entrypoint the program lacks, props of the
+wrong type, an exhausted budget. A batch is measured whole before its first entry runs. Measuring
+stops as soon as the size passes the limit, and it does not recurse, so input that is too large,
+that nests deeply or, in JavaScript, that holds itself is refused by the limit and by nothing else.
+Text far longer than the limit allows is refused from its length without being read: the Rust
+runtime, whose strings are UTF-8, refuses a string from its byte length when that alone passes what
+is left of the limit, and scans at most 192 bytes for each unit of the limit otherwise.
+
+The limit is separate from the operation budget. Measuring charges no operation, an evaluation
+costs the same number of operations under any limit its input fits, and a host that sets no limit
+has nothing measured. One difference between the runtimes remains. The Rust runtime bounds the
+nesting of a host value at 256, and it applies the input limit first: input over the limit is
+reported for its size, and input within the limit that nests more deeply is refused for its
+nesting, naming `maxValueNesting`, which the TypeScript runtime does not bound.
+
+Worked sizes, which both runtimes' tests pin, with these declarations:
+
+```nx
+let add(a:int, b:int): int = { a + b }
+component <Card title:string = "none" count:int = 0 content body?:object+ /> = { <Text value={title} /> }
+component <Counter /> = {
+  state { count:int = 0 note?:string data?:object }
+  <Button onTapped=<Update count={count + 1} /> />
+}
+```
+
+| Call | Input | Size |
+| --- | --- | --- |
+| A function of one argument | A list of 1,000 integers | 1,001: the list and its items |
+| A function of one argument | A string of 6,400 UTF-16 code units | 101: the value and 100 for its length |
+| A function of one argument | An object whose one field name is 1,048,576 code units long and holds a number | 16,386: the object, 16,384 for the name, and the number |
+| A function of one argument | `{ "$type": "nx.int", "value": "9007199254740993" }` | 2: the record and its string. A list of two of them is 5 |
+| A function of one argument, in the Rust runtime | `NxValue::Int(9007199254740993)` | 1 |
+| A function of one argument | `{ "$type": "nx.int", "value": <a string of 1,048,576 code units> }` | 16,386 |
+| A function of one argument, in JavaScript | An object read from JSON, `{ "$nxKind": "actionHandler", "text": <a string of 1,048,576 code units> }` | 16,387: the object, the marking's string, and the text with its 16,384. It is a plain object |
+| `add` called by name | The function record `{ "$type": "Function", "module": "main.nx", "name": "add" }` and the arguments `{ "a": 1, "b": 2 }` | 6: the function record and its two strings, and the arguments as one record with its two numbers |
+| A descriptor of `Card` | The props `{ "title": "Home", "count": 3 }` and the content `1`, `2`, `3` | 6: the props as one record with its two values, and three items |
+| `Card` initialized | The props `{ "title": "Home", "count": 3 }` | 3: the record and its two values |
+| `Card` initialized | No props, or the props `{}` | 1 |
+| `Card` initialized | The props `{ "$type": "Card", "title": "Home" }` | 2: the record and the title. The call within the limit is then refused for a field `Card` does not declare |
+| `Counter` initialized or evaluated | No props and the state `{ "count": 3, "note": "x" }` | 4: the empty props, and the state as one record with its two values |
+| A dispatch against a `Counter` | Two entries, each `{ "$type": "ActionHandlerInvocation", "token": "h1-1", "action": { "$type": "Button.Tapped" } }` | 6: for each, the entry, its token and its action. The instance is not input, whatever its state holds |
+| The state of `Counter` normalized | `{ "count": 3, "note": "x" }` | 3 |
+| A patch applied to the state of `Counter` | The state `{ "count": 3, "note": "x" }` and the patch `{ "count": 4 }` | 5: the state, and the patch as one record with its number |
+
+#### What the limit bounds
+
+The budget bounds what a program does by its count, and the count is proportional to the work only
+if every step is charged. The input limit is there for a step that is not: one nobody has found
+yet that does work in proportion to a host value for a fixed charge. Every break of the cost model
+that review found after the first needed a shape only a host can supply, a megabyte name, an
+untyped object tens of thousands of fields wide, a list of empty values, since a program declares
+its names and the widths of its records and its sequences flatten empty values away. With a budget
+`B` and an input limit `C`:
+
+- A step that is linear in a host value and is not charged costs at most about `B × C` units of
+  work in one call, where a unit is a value or 64 code units of text. At a budget of 100,000 and a
+  limit of 1,000 that is about 10^8: seconds at the worst, and a ceiling where there was none. It
+  is the cost of a step nobody has found, not of an ordinary call, which costs its count.
+- A step driven by a value the program builds itself is not bounded by the limit. Building a value
+  costs its size, so such a step is bounded by the square of the budget, whatever the limit is.
+- A step that is worse than linear in a host value is bounded only as a function of the limit: it
+  no longer depends on what arrived, and that is all.
+- What an instance holds is not input. Its state was written under the budget of the call that
+  wrote it, so it is bounded by that budget when every earlier call had one, and by nothing when a
+  host ran one without. A host that limits input and not operations has not bounded state.
+- Refusing one very wide JavaScript object lists all its names once, since an engine lists an
+  object's names before any is read. That is at most once in a call, for the one object the limit
+  is passed in, and is not multiplied by the budget: about half a second for two million names.
+
+So the limit is not a guarantee of proportionality, and a host that runs code it did not write
+still limits time and memory as well.
+
+### What a call used
+
+A runtime may report to the host what one call used: `usage` in the TypeScript runtime's options,
+an object the runtime writes `operations` and `inputSize` to, and `RuntimeOptions::usage` in the
+Rust runtime, a `Usage` the host shares with it. The numbers are the cost model's and no others.
+The operations reported for a call that succeeds are its operation count, the least budget under
+which it succeeds: charging is the same under every budget, so what was charged under a large one
+is what a tight one must hold. For a call that fails they are the operations charged before the
+failure. A charge the budget refused is not among them, so the number is no more than the budget
+and is the same in every runtime: a call under a budget of 10 that has been charged 5 and is then
+refused a charge of 31 for a concatenation reports 5. The input size reported is the input size of
+the call as defined above.
+
+Operations are reported only for a call that ran under an operation budget, and an input size only
+for a call that ran under an input limit and whose input was within it, since input that is refused
+is not measured to its end. A call refused for its input under a budget used no operations and
+reports none used. With no budget a walk over a value skips its charges altogether, which is what
+keeps the budget free for a host that does not use it, and a report does not bring that cost back:
+a host that wants the count and no limit sets a budget it cannot reach. The report is cleared when
+a call begins and filled when it ends, on success and on failure, and asking for one changes
+neither what a call costs nor what it returns.
+
+A runtime that offers the input limit also exports the measure, `measureInputSize(value, limit?)`
+and `input_size(&NxValue, Option<u64>)` with `record_input_size` for a map of named values, so
+that a host can hold one part of what it passes to a number of its own before it calls. Given a
+limit it stops as soon as the size passes it and answers some number greater than the limit; a
+JavaScript value that holds itself has no finite size and has to be measured with one. A
+value measured alone has the size it adds to a call that is given it as one of the values a host
+supplies. A list of positional arguments, of content or of batch entries measured as one value is
+one more than its entries add to a call, since a call counts the entries and not the list.
+
+### Validation against generated host values
+
+The cost model's claim, that work which is not charged does not grow with the size of a value, is
+checked mechanically as well as by review. `crates/nx-codegen/tests/cost/` holds a fixed library
+of small NX functions and components, the *probes* (`probes.nx`), and a seeded generator of host
+values (`mod.rs`). The probes perform on a host value every operation a runtime has for one:
+holding it, passing it through a typed and an untyped parameter, binding it to a content
+parameter, comparing it by `eq`, by a pattern and by `diff`, placing it in a sequence,
+concatenating it and converting it to text, constructing a record that holds it as a property and
+as content, capturing it in an action handler and comparing two such handlers, applying and
+merging an update record that holds it, testing its presence, reading a member of it and iterating
+over it, receiving it as a prop, as an action's payload and as an argument by name, storing it in
+component state and patching that state, and returning it; and, where a host hands a call more
+than it declares, receiving it as the content of a descriptor, as arguments by name the function
+does not declare, and as members an invocation record does not define. `probes.nx` lists the
+operations that have no probe, with the reason for each.
+
+The generator draws a shape (a scalar, a string, a list, an object, a nesting of those, or one of
+the names a runtime gives a meaning to) and then sizes weighted toward the boundaries the cost
+model has: 0, 1, 63, 64 and 65 code units, a few hundred, a few thousand. Strings are drawn from
+ASCII, two-byte and astral characters, so that code units and bytes differ. Objects have short and
+long names, with and without a type name, shared or not shared between the two values of a case,
+and lists and objects hold `null`s and empty lists. The reserved names are the type names
+`nx.int`, `Function`, `ActionHandler`, `ActionHandlerInvocation` and one ending `.Update`, and the
+key `$nxKind` with the TypeScript runtime's values, each with small and with large contents, in
+the member the form defines and in one it does not. A case is a probe and its values at two
+scales: a base, with a step repeated 16 times, and a larger one with the value eight times the
+size and the step repeated 128 times. A shape reaches a probe only when both runtimes accept it
+there: no `null` as a whole value at `object`, no `nx.int` record at a typed integer, a typed
+probe only for a value that fits its type, and no nesting scaled past the 256 levels the Rust
+runtime accepts. The same seed gives the same cases on every run, and the cases are generated
+once and given to both runtimes as JSON.
+
+Three things are checked of every case:
+
+- **The runtimes agree** (`cost_differential.rs`, a blocking test). Both give the same operation
+  count and input size at both scales, read from the usage report, and at the base scale the same
+  result and, under budgets below the count, the same failure: its declaration, its span and the
+  operations reported for the failed call, under every budget when the count is at most 200 and
+  otherwise under a quarter, a half and one less. In each runtime the result under a budget equal
+  to the count is the result under none. A case both refuse with no budget is compared by its
+  diagnostic's code. Results are compared as the corpus compares them, and a case with a `null`
+  inside a value at `object`, which the two runtimes return differently, is compared on its count
+  and its failures alone.
+- **The Rust runtime allocates in proportion** (`cost_allocation.rs`, a blocking test). The bytes
+  a call requests are within a fixed multiple of its operation count plus its input size, and the
+  bytes for each unit of that sum at most double between the scales. The second bound is what
+  finds a copy that is not charged: such a step allocates sixty-four times as much at the larger
+  scale for eight times the units.
+- **Time follows the count** (the ignored test `time_report` of `cost_differential.rs`, which a
+  job that does not block runs). A case is reported when a runtime's time, the least of five runs
+  and of fifteen for a case that looks reportable, grows between the scales by more than twice
+  the growth of its count plus its input size, and its time at the larger scale is past a floor
+  set for that runtime from measured noise: 2 ms in the Rust runtime and 3 ms in the TypeScript
+  runtime. The report repeats each step eight times as often as the blocking tests do, 128 and
+  1,024 times, since a walk or a copy that is not charged takes a nanosecond or two for each
+  value and shows beside the honest work of a call only when it is repeated several hundred
+  times. At those scales a step of each kind review found, re-introduced in a runtime, is
+  reported there: a copy made on every call, a walk of the whole state on every patch, and the
+  lining-up of two wide records.
+
+```bash
+cargo test -p nx-codegen --test cost_differential   # the differential test
+cargo test -p nx-codegen --test cost_allocation     # the allocation bounds
+cargo test --release -p nx-codegen --test cost_differential -- --ignored --nocapture time_report
+```
+
+A failure names its seed and its case, after shrinking the case by size, and prints the command
+that runs it again:
+
+```bash
+NX_COST_SEED=0x6e782d636f737431 NX_COST_CASES=45 cargo test -p nx-codegen --test cost_differential the_runtimes_agree
+```
+
+`NX_COST_SEED` and `NX_COST_CASES` also make a longer search by hand, best in an optimized build:
+
+```bash
+NX_COST_SEED=7 NX_COST_CASES=40000 cargo test --release -p nx-codegen --test cost_differential the_runtimes_agree
+```
+
+The Node runner, `runtime/typescript/test/cost-runner.mjs`, is the TypeScript runtime's side. The
+harness starts it; with `NX_COST_DIR` naming a directory, the differential test keeps the images,
+the cases and the answers there (and the time report under `time` in it), and the runner can be
+run on them by hand:
+
+```bash
+NX_COST_DIR=/tmp/nx-cost cargo test -p nx-codegen --test cost_differential the_runtimes_agree
+node runtime/typescript/test/cost-runner.mjs /tmp/nx-cost/cases.json /tmp/nx-cost/answers.json
+```
+
+A step these tests show to be uncharged is fixed in a change to the cost model, not in the tests.
+Until then it is a *known finding*, an entry of `KNOWN_FINDINGS` in `tests/cost/mod.rs`: one
+concrete case that shows the step, written out in full; a predicate saying which generated cases
+it covers; what was found; and where it is tracked. The blocking tests skip the generated cases a
+finding covers, run the finding's own case, and fail when that case passes its check, with a
+message saying to remove the entry, so the list holds only what is still true and the change that
+fixes a finding is the one that deletes it. A finding that only the time report shows is marked
+in the report and is exempt from that rule, since time cannot be required to reproduce.
+
+The differential test and the allocation bounds have found nothing: 120,000 generated cases under
+three further seeds agree in both runtimes. The findings listed are the time report's, and none
+is a step that is not charged. In the TypeScript runtime the time for each field of a wide object
+rises about two and a half times between a few hundred fields and a few thousand, wherever one is
+compared by name or written, whose names are sorted. In both runtimes the time for each value
+written rises when a probe that writes its value on every repeat grows its result from thousands
+of values to half a million and more: two to four times in the Rust runtime, and about twofold in
+the TypeScript runtime, which the report names in some runs and not in others. Each is known to
+the report for the runtime it was seen in only. All are
+tracked in `openspec/changes/investigate-cost-time-report-findings`.
 
 ## Determinism
 
@@ -927,12 +1206,14 @@ evaluated. An instance is an immutable value the host holds between calls; the r
 state of its own, and a dispatch that fails leaves the instance it was given usable.
 
 Every evaluation function takes options: `maxCallDepth` (100 by default), `maxRangeLength` (one
-million) and `maxOperations`, the budget of *Evaluation cost*, which is unlimited unless set. One
-budget covers one call, a dispatch's whole batch and the render after it included. Expressions nest
-at most 1,000 deep, and a `RangeError` the JavaScript engine raises during evaluation is reported
-as a diagnostic. Every `nx-ir-resource-limit` diagnostic carries `limit`, the name and value of the
-limit reached: `maxOperations`, `maxCallDepth`, `maxRangeLength`, `maxExpressionNesting`, or
-`engine`, which has no value. The package's `README.md` has the details.
+million), `maxOperations`, the budget of *Evaluation cost*, and `maxInputSize`, the limit of
+*Input size*, each of the last two unlimited unless set, and `usage`, an object the runtime reports
+what the call used to. One budget covers one call, a dispatch's whole batch and the render after it
+included. Expressions nest at most 1,000 deep, and a `RangeError` the JavaScript engine raises
+during evaluation is reported as a diagnostic. Every `nx-ir-resource-limit` diagnostic carries
+`limit`, the name and value of the limit reached: `maxOperations`, `maxInputSize`, `maxCallDepth`,
+`maxRangeLength`, `maxExpressionNesting`, or `engine`, which has no value. `measureInputSize`
+measures one value as the input limit does. The package's `README.md` has the details.
 
 ## Rust runtime
 
@@ -971,10 +1252,14 @@ It differs from the TypeScript runtime in what Rust makes possible or necessary:
 And because a native stack overflow cannot be caught, evaluation is bounded by a fixed
 expression-nesting limit and a stack budget as well as by the host's call-depth limit.
 `RuntimeOptions::max_operations` is the operation budget, counted exactly as the TypeScript runtime
-counts it: the same images, input and budget stop at the same node. A resource-limit diagnostic's
-`limit` uses the TypeScript runtime's names for the limits the two share, and adds
-`maxStackBytes` and `maxValueNesting` for the two only this runtime has. The crate's `README.md`
-has the API, the limits and the diagnostic codes.
+counts it: the same images, input and budget stop at the same node.
+`RuntimeOptions::max_input_size` is the input limit of *Input size*, measured as the TypeScript
+runtime measures it, so the same input is refused under the same limit; `RuntimeOptions::usage`
+reports what a call used; and `input_size` and `record_input_size` measure a value and a map of
+named values as the limit does. A resource-limit diagnostic's `limit` uses the TypeScript
+runtime's names for the limits the two share, and adds `maxStackBytes` and `maxValueNesting` for
+the two only this runtime has. The crate's `README.md` has the API, the limits and the diagnostic
+codes.
 
 ## Conformance corpus
 
@@ -984,7 +1269,12 @@ entrypoint, and, for every lifecycle a program names, the rendered output of ini
 the rendered output and effects of each dispatched batch, tokens included. Each program's
 `operations.json` records what every entrypoint, initialization and batch costs in operations, and
 `evaluation-cost`, which has one entrypoint per charging rule, also records where budgets below
-those counts stop each entrypoint: a declaration, and a span when the charge was for a node. The emitter's tests pin
+those counts stop each entrypoint: a declaration, and a span when the charge was for a node. An
+entrypoint may name the arguments to evaluate it with, as a *case*, and `host-values` holds the
+cases an entrypoint without arguments cannot supply (a list at a sequence parameter, a value at
+`object`, long text and a long name, two objects compared, a list bound to a content parameter and
+the JSON form of a wide integer) with the input size of each, which every runtime checks as it
+checks a count, at the size and at one less. The emitter's tests pin
 the images byte for byte and check that each committed text is the explanation of its committed
 image; the TypeScript runtime's tests and the Rust runtime's tests each evaluate the images, drive
 the lifecycles, check every count by evaluating under it and under one less, and refuse every

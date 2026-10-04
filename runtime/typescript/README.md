@@ -146,8 +146,10 @@ Every evaluation API takes runtime options:
 | Option | Default | What it does |
 | --- | --- | --- |
 | `maxOperations` | Unlimited | The most operations one call may cost. |
+| `maxInputSize` | Unlimited | The largest input one call may be given: its arguments, props, content, state, batch and patch. |
 | `maxCallDepth` | `100` | The deepest chain of calls one evaluation may make. |
 | `maxRangeLength` | `1_000_000` | The most integers one range may hold when a `for` iterates it. |
+| `usage` | None | An object the runtime reports what the call used to: `operations` and `inputSize`. |
 
 **Set `maxOperations` for any code you did not write.** It is the only option that bounds work and
 allocation; the other two do not. Three nested loops over ranges of a thousand run a billion
@@ -188,12 +190,19 @@ operations, four million to run and one million to write its result, and takes a
 Node 24 on a current laptop, some 40,000 operations a millisecond.
 
 The rules are written so that every step that touches a value in proportion to its size is charged
-in proportion, and the time and the memory of a call are proportional to its count. That holds for
-everything this package's tests and the conformance corpus cover, but it is a claim about every
-step of the runtime, and review has several times found a step that broke it, each time through a
-large or unusual value a host passed at `object`. Treat the budget as the first limit on code you
-did not write, and keep one of your own on time and memory as well where you have one: a CPU limit,
-or a separate isolate. The same holds for a
+in proportion, and the time and the memory of a call are proportional to its count. It is a claim
+about every step of the runtime, and review has several times found a step that broke it, each
+time through a large or unusual value a host passed at `object`. Four things back it now: the
+input limit, which bounds what a step nobody has found can cost; a differential test that runs
+generated host values through this runtime and the Rust one and requires the same count, input
+size and failures; bounds on the Rust runtime's allocations for every generated case; and a time
+report, which does not block a merge, of cases whose time grows faster than their count. What is
+still open is the list of known findings in `crates/nx-codegen/tests/cost/mod.rs`, and steps
+driven by a value a program builds, which only fixed probes exercise; `docs/nx-ir-format.md` has
+the details under *Validation against generated host values*. So treat the budget as the first
+limit on code you did not write, set `maxInputSize` beside it to bound what you hand that code
+(see *The input limit* below), and keep a limit of your own on time and memory as well where you
+have one: a CPU limit, or a separate isolate. The same holds for a
 value held in many places too: a record that names one value twice, forty levels deep, costs a few
 hundred operations to build and is 2^40 values to anything that walks it, so the type check, the
 equality and the result that walk it are what pay. Two things follow that are worth knowing when
@@ -209,6 +218,98 @@ choosing a budget:
 
 A value that is not a non-negative safe integer, `NaN` included, is refused with `nx-ir-options`
 before anything is evaluated, never read as unlimited.
+
+### The input limit
+
+`maxInputSize` bounds what the host hands one call. The *input size* is defined in
+`docs/nx-ir-format.md`, under *Input size*, and is measured the way a value written for the host
+is charged: one for each value, a list, an empty one and a `null` included, and one more for every
+64 UTF-16 code units of a string, of a `$type` and of each field name. It covers the arguments of
+`evaluateFunction`; the function record and the arguments of `callFunction`; the props and the
+content of `constructComponentDescriptor`; the props of `initializeComponent` and the `state` its
+options carry; the props and the state of `evaluateComponent`; the batch of
+`dispatchComponentActions`; the state of `normalizeComponentState`; and the state and the patch of
+`applyComponentStatePatch`. Props, a state, a patch and arguments by name are each measured as one
+record, and props left out are an empty record, which is one. An instance, and the `parent` of
+`initializeComponent`, are not input: the runtime made them.
+
+```ts
+evaluateFunction(program, "tool", [input], { maxOperations: 100_000, maxInputSize: 1_000 });
+```
+
+A call whose input is larger fails with `nx-ir-resource-limit` whose `limit` is
+`{ name: "maxInputSize", value }`, before the program is looked at and before any value is checked
+against a type, so it is reported ahead of any other fault of the call, and a batch is measured
+whole before its first entry runs. The diagnostic names no declaration. Measuring stops as soon as
+the size passes the limit and does not recurse, so a value that is too large, that nests deeply or
+that holds itself is refused by the limit and not by the engine. A value that is no canonical
+value, a `Date`, a `Map`, a function, an instance of a class, counts as one and is not entered.
+Unset, nothing is measured. The limit charges nothing to `maxOperations`, and a value that is not a
+non-negative safe integer is refused with `nx-ir-options`.
+
+Choose it together with the budget. Every step the runtime takes is meant to be charged in
+proportion to the values it touches, and the limit is there for one that is not and that nobody
+has found: with a budget `B` and a limit `C`, a step that does work in proportion to a host value
+for a fixed charge costs at most about `B × C` in one call. At `maxOperations: 100_000` and
+`maxInputSize: 1_000` that is about 10^8 values or 64-code-unit pieces of text, seconds at the
+worst, where without a limit it had no ceiling. A tool's arguments are tens to hundreds of values,
+so a limit in the low thousands refuses nothing ordinary. What the limit does not bound: a step
+driven by a value the program builds itself, which is bounded by the budget squared; the state an
+instance holds, which is bounded only when every call that wrote it had a budget; and the one
+listing of an object's names that refusing a very wide object costs, about half a second for two
+million names. So keep the limit on time and memory as well.
+
+`measureInputSize(value, limit?)` measures one value as the limit does, without a call, so a host
+can hold one part of what it passes, a model's arguments say, to a number of its own. With a limit
+it stops as soon as the size passes it and returns some number greater than the limit. An object
+is measured as the one record props, a state, a patch and arguments by name are; an array measured
+as one value is one more than its items add to a call that takes them as arguments, content or a
+batch. Pass a limit for any value that did not come from JSON: a value that holds itself has no
+finite size, and measuring one with no limit does not return.
+
+```ts
+if (measureInputSize(modelArguments, 1_000) > 1_000) {
+  return { error: "invalid-input", message: "The arguments are too large." };
+}
+```
+
+### What a call used
+
+Give a call a `usage` object and the runtime reports what it used: `operations` when
+`maxOperations` is set, and `inputSize` when `maxInputSize` is set and the input was within it.
+The runtime removes both members when the call begins and sets them when it ends, whether it
+returns or throws, so the object never carries an earlier call's numbers. For a call that returns,
+`operations` is its count, the least budget it succeeds under; for one that throws it is what was
+charged before the failure, never more than the budget.
+
+```ts
+const usage: NxRuntimeUsage = {};
+try {
+  return evaluateFunction(program, "tool", [input], { maxOperations: 100_000, maxInputSize: 1_000, usage });
+} finally {
+  console.log(`tool used ${usage.operations} operations on an input of ${usage.inputSize ?? "more than 1000"}`);
+}
+```
+
+Nothing is counted for the report alone: with no budget `operations` stays absent, so a host that
+wants the count and no limit sets a budget it cannot reach. That is how to choose a budget from
+measurement, by running the programs you mean to allow and reading what they cost:
+
+```ts
+const usage: NxRuntimeUsage = {};
+let most = 0;
+for (const input of representativeInputs) {
+  evaluateFunction(program, "tool", [input], { maxOperations: Number.MAX_SAFE_INTEGER, usage });
+  most = Math.max(most, usage.operations!);
+}
+const maxOperations = most * 4; // headroom over the largest count measured
+```
+
+The object must be one the runtime can write to: a frozen or non-extensible object, or a value
+that is no object, is refused with `nx-ir-options` before anything runs. A write that fails when
+the call ends is dropped, so it never replaces what the call returned or threw. Calls that overlap
+and share one object, tool calls started together and awaited later, leave the numbers of
+whichever ended last; give each call its own.
 
 A range makes an enormous loop one token long — `for i in 0..2000000` is four tokens — so the count
 is checked before the body runs at all, and a range above the limit fails with
@@ -239,6 +340,7 @@ an exhausted budget from runaway recursion without reading the message:
 | `limit.name` | `limit.value` | Reached when |
 | --- | --- | --- |
 | `maxOperations` | The budget | The call cost more operations than its budget. The diagnostic has no `source` when the charge was for a type check or for the result written, which belong to no node. |
+| `maxInputSize` | The limit | The host passed the call more input than the limit allows. Nothing was evaluated, so the diagnostic has no `declaration` and no `source`. |
 | `maxCallDepth` | The depth | Calls nested deeper than the option allows. |
 | `maxRangeLength` | The length | A loop's range holds more integers than the option allows. |
 | `maxExpressionNesting` | `1000` | Expressions nested deeper than the fixed bound. |
@@ -260,6 +362,8 @@ No other diagnostic carries `limit`. Runtime options the runtime cannot use are 
 | `callFunction` | Call the function a `{ $type: "Function", module, name }` record names — a rendered template, say — with arguments keyed by parameter name; an argument the function does not declare is dropped, a parameter it declares and the arguments lack is a diagnostic naming it. |
 | `NxFunctionRecord` | The type of that record: `$type` the literal `"Function"`, `module` and `name`. It is what a member declared at a function type renders as, and what a host supplies there. |
 | `normalizeComponentState`, `applyComponentStatePatch` | Bring component state into its declared shape and apply a patch. |
+| `measureInputSize` | The size of one value as `maxInputSize` measures it, without a call; given a limit, it stops as soon as the size passes it. |
+| `NxRuntimeOptions`, `NxRuntimeUsage` | The options every evaluation function takes, and the type of the `usage` object among them that the runtime reports a call's `operations` and `inputSize` to. |
 | `applyUpdate`, `mergeUpdates`, `diffRecords`, `changedFields` | Record update arithmetic over host-held values. |
 | `float32Text` | The canonical text of a `float32` carried as a `number`: the shortest digits that round-trip as a `float32`, which is what a `text` node naming `float32` prints. |
 | `NX_IR_SCHEMA_VERSION`, `NX_IR_RUNTIME_ABI` | The schema and ABI this runtime accepts. |
@@ -339,3 +443,4 @@ conformance corpus through this runtime on every build.
 | `test/runtime.test.ts` | Preparation, linking and boundary tests over images written by the test |
 | `test/corpus.test.mjs` | Evaluates every image of `specs/ir-conformance` against the interpreter's results, drives every lifecycle it names, and refuses every truncation and cell overwrite of them |
 | `test/emitted-ir.test.mjs` | Compiles NX through the CLI and runs the emitted IR, comparing with the native evaluator |
+| `test/cost-runner.mjs` | This runtime's side of the cost validation: run by the harness in `crates/nx-codegen/tests/cost_differential.rs` over generated cases, not by `pnpm test` |

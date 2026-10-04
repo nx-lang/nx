@@ -3,8 +3,10 @@
 //! <para>`specs/ir-conformance` holds NX programs with the images the emitter produces for them,
 //! the explained text of each image, the values the interpreter evaluates their entrypoints to,
 //! what it renders and emits when a host drives their component lifecycles, and what each
-//! evaluation costs in operations. These tests pin the images byte for byte, keep the explained
-//! text, the expected results and the operation counts in step, check that the corpus covers every
+//! evaluation costs in operations. An entrypoint may name arguments to be evaluated with, as a
+//! *case*; the interpreter's source evaluation takes none, so a case's result is the Rust IR
+//! runtime's. These tests pin the images byte for byte, keep the explained text, the expected
+//! results, the operation counts and the input sizes in step, check that the corpus covers every
 //! kind the schema defines, and hold the size budget. Set
 //! `NX_UPDATE_CORPUS=1` to rewrite the expected files after an intended change, then review the
 //! diff of the explained text.</para>
@@ -20,7 +22,7 @@ use nx_api::{
 use nx_ir::{explain_nx_ir, explain_nx_ir_image};
 use nx_ir::{kinds, write_nx_ir_image, NxIrArtifact, NxIrImage};
 use nx_ir_runtime::{
-    ComponentInit, LinkOptions, NxIrRuntimeError, PreparedModule, Program, RuntimeOptions,
+    ComponentInit, LinkOptions, NxIrRuntimeError, PreparedModule, Program, RuntimeOptions, Usage,
 };
 use nx_value::NxValue;
 use serde::Deserialize;
@@ -28,6 +30,7 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 const SIZE_BUDGET: f64 = 6.0;
 
@@ -47,12 +50,38 @@ struct ProgramManifest {
     /// stop it.
     #[serde(default)]
     record_failures: bool,
+    /// Whether `operations.json` also records the input size of each case and of each lifecycle's
+    /// initialization and batches.
+    #[serde(default)]
+    record_input_sizes: bool,
 }
 
+/// A function to evaluate. With `arguments` it is a *case*: the canonical values to pass by
+/// position, under a name that keeps two cases of one function apart. The two go together.
 #[derive(Debug, Deserialize)]
 struct Entrypoint {
     module: String,
     function: String,
+    #[serde(default)]
+    arguments: Option<Vec<Value>>,
+    #[serde(default)]
+    case: Option<String>,
+}
+
+impl Entrypoint {
+    /// The key results, counts and failures are kept under: `identity::function`, and
+    /// `identity::function#case` for a case.
+    fn key(&self) -> String {
+        match &self.case {
+            Some(case) => format!("{}::{}#{case}", self.module, self.function),
+            None => format!("{}::{}", self.module, self.function),
+        }
+    }
+
+    /// The arguments of a case as the Rust runtime takes them; none for an entrypoint without.
+    fn arguments(&self) -> Vec<NxValue> {
+        self.arguments.iter().flatten().map(nx_value).collect()
+    }
 }
 
 /// A component to initialize and the batches to dispatch against it, in order, written as a host
@@ -124,6 +153,15 @@ pub(crate) fn load_programs() -> Vec<CorpusProgram> {
                     .unwrap_or_else(|error| panic!("{name}/program.json: {error}")),
             )
             .unwrap_or_else(|error| panic!("{name}/program.json: {error}"));
+            for entrypoint in &manifest.entrypoints {
+                assert_eq!(
+                    entrypoint.arguments.is_some(),
+                    entrypoint.case.is_some(),
+                    "corpus program '{name}' entrypoint {}::{}: `arguments` and `case` go together: an entrypoint with arguments needs a case name, and one without has none",
+                    entrypoint.module,
+                    entrypoint.function
+                );
+            }
             let mut sources = BTreeMap::new();
             collect_sources(&dir, "", &mut sources);
             let modules = sources
@@ -408,12 +446,40 @@ fn run_lifecycle(program: &CorpusProgram, lifecycle: &Lifecycle) -> Value {
     })
 }
 
+/// The recorded results are the interpreter's for every entrypoint and lifecycle. A case, an
+/// entrypoint with arguments, is the exception: the interpreter's source evaluation takes no
+/// arguments, so a case is not compared with it, and its result is recorded from the Rust IR
+/// runtime, as the operation counts are.
 #[test]
 fn corpus_results_match_the_interpreter() {
     let mut failures = Vec::new();
     for program in load_programs() {
         let mut results = BTreeMap::new();
+        let mut modules = None;
         for entrypoint in &program.manifest.entrypoints {
+            let key = entrypoint.key();
+            assert!(
+                !results.contains_key(&key),
+                "corpus program '{}' records {key} twice",
+                program.name
+            );
+            if entrypoint.arguments.is_some() {
+                let modules = modules.get_or_insert_with(|| prepared_modules(&program, true));
+                let value = linked_program(modules, &entrypoint.module)
+                    .evaluate_function(
+                        &entrypoint.function,
+                        &entrypoint.arguments(),
+                        &RuntimeOptions::default(),
+                    )
+                    .unwrap_or_else(|error| {
+                        panic!(
+                            "corpus program '{}' case {key} fails in the Rust runtime: {error}",
+                            program.name
+                        )
+                    });
+                results.insert(key, canonical_nx_value(&value));
+                continue;
+            }
             let value = match eval_program_artifact_function(
                 &program.artifact,
                 &entrypoint.module,
@@ -425,10 +491,7 @@ fn corpus_results_match_the_interpreter() {
                     program.name, entrypoint.module, entrypoint.function
                 ),
             };
-            results.insert(
-                format!("{}::{}", entrypoint.module, entrypoint.function),
-                canonical_nx_value(&value),
-            );
+            results.insert(key, canonical_nx_value(&value));
         }
         for lifecycle in &program.manifest.lifecycles {
             let key = format!("{}::{}", lifecycle.module, lifecycle.component);
@@ -497,30 +560,32 @@ fn budget(operations: u64) -> RuntimeOptions {
     }
 }
 
-/// What an evaluation costs: the least budget it succeeds under, found by doubling the budget and
-/// then bisecting. An evaluation that fails for any other reason fails the test.
-fn count_operations<T>(
+/// A budget and an input limit no corpus evaluation reaches: what a host sets to read what a call
+/// used and limit nothing.
+const AMPLE: u64 = 1 << 40;
+
+/// What an evaluation costs and how large its input is, read from the runtime's usage report in
+/// one evaluation: its operation count, which is the least budget it succeeds under, and its
+/// input size. An evaluation that fails fails the test. The runtimes' corpus tests then check each
+/// recorded number from both sides, at the number and at one less.
+fn measure<T>(
     label: &str,
     run: impl Fn(&RuntimeOptions) -> Result<T, NxIrRuntimeError>,
-) -> u64 {
-    if let Err(error) = run(&RuntimeOptions::default()) {
+) -> (u64, u64) {
+    let usage = Arc::new(Usage::new());
+    let options = RuntimeOptions {
+        max_operations: Some(AMPLE),
+        max_input_size: Some(AMPLE),
+        usage: Some(Arc::clone(&usage)),
+        ..RuntimeOptions::default()
+    };
+    if let Err(error) = run(&options) {
         panic!("{label} fails in the Rust runtime: {error}");
     }
-    let succeeds = |operations: u64| run(&budget(operations)).is_ok();
-    let mut high = 1;
-    while !succeeds(high) {
-        high *= 2;
+    match (usage.operations(), usage.input_size()) {
+        (Some(operations), Some(input_size)) => (operations, input_size),
+        other => panic!("{label}: the usage report holds {other:?}"),
     }
-    let mut low = 0;
-    while low < high {
-        let middle = low + (high - low) / 2;
-        if succeeds(middle) {
-            high = middle;
-        } else {
-            low = middle + 1;
-        }
-    }
-    high
 }
 
 /// Where a budget below an evaluation's count stops it: the declaration and the span of the node
@@ -556,18 +621,26 @@ fn failure_record<T>(
 /// What every evaluation of a program costs in the Rust runtime: each entrypoint's count, keyed as
 /// `results.json` keys it, and for each lifecycle the count of initialization and of each batch.
 /// A program that records failures also gets, per entrypoint, where half its count and one less
-/// than its count stop it.
+/// than its count stop it; one that records input sizes, the input size of each case and of each
+/// lifecycle's initialization and batches.
 fn measure_operations(program: &CorpusProgram) -> Value {
     let modules = prepared_modules(program, true);
     let mut counts = serde_json::Map::new();
     let mut failures = serde_json::Map::new();
+    let mut input_sizes = serde_json::Map::new();
     for entrypoint in &program.manifest.entrypoints {
-        let key = format!("{}::{}", entrypoint.module, entrypoint.function);
+        let key = entrypoint.key();
         let label = format!("corpus program '{}' entrypoint {key}", program.name);
         let linked = linked_program(&modules, &entrypoint.module);
-        let run = |options: &RuntimeOptions| linked.evaluate_function(&entrypoint.function, &[], options);
-        let operations = count_operations(&label, run);
+        let arguments = entrypoint.arguments();
+        let run = |options: &RuntimeOptions| {
+            linked.evaluate_function(&entrypoint.function, &arguments, options)
+        };
+        let (operations, input_size) = measure(&label, run);
         counts.insert(key.clone(), operations.into());
+        if entrypoint.arguments.is_some() {
+            input_sizes.insert(key.clone(), input_size.into());
+        }
         if program.manifest.record_failures && operations > 0 {
             let budgets = BTreeSet::from([operations / 2, operations - 1]);
             failures.insert(
@@ -589,22 +662,35 @@ fn measure_operations(program: &CorpusProgram) -> Value {
             .map(|(name, value)| (name.clone(), nx_value(value)))
             .collect::<BTreeMap<_, _>>();
         let initialize = |options: &RuntimeOptions| {
-            linked.initialize_component(&lifecycle.component, &props, &ComponentInit::default(), options)
+            linked.initialize_component(
+                &lifecycle.component,
+                &props,
+                &ComponentInit::default(),
+                options,
+            )
         };
-        let initial = count_operations(&label, initialize);
+        let (initial, initial_size) = measure(&label, initialize);
         let mut instance = initialize(&RuntimeOptions::default())
             .expect("initializes")
             .instance;
         let mut batches = Vec::with_capacity(lifecycle.batches.len());
+        let mut batch_sizes = Vec::with_capacity(lifecycle.batches.len());
         for (index, batch) in lifecycle.batches.iter().enumerate() {
             let entries = batch.iter().map(nx_value).collect::<Vec<_>>();
-            let dispatch =
-                |options: &RuntimeOptions| linked.dispatch_component_actions(&instance, &entries, options);
-            batches.push(count_operations(&format!("{label} batch {index}"), dispatch));
+            let dispatch = |options: &RuntimeOptions| {
+                linked.dispatch_component_actions(&instance, &entries, options)
+            };
+            let (operations, input_size) = measure(&format!("{label} batch {index}"), dispatch);
+            batches.push(operations);
+            batch_sizes.push(input_size);
             instance = dispatch(&RuntimeOptions::default())
                 .expect("dispatches")
                 .instance;
         }
+        input_sizes.insert(
+            key.clone(),
+            serde_json::json!({ "initial": initial_size, "batches": batch_sizes }),
+        );
         counts.insert(
             key,
             serde_json::json!({ "initial": initial, "batches": batches }),
@@ -613,6 +699,9 @@ fn measure_operations(program: &CorpusProgram) -> Value {
     let mut operations = serde_json::json!({ "counts": counts });
     if !failures.is_empty() {
         operations["failures"] = Value::Object(failures);
+    }
+    if program.manifest.record_input_sizes {
+        operations["inputSizes"] = Value::Object(input_sizes);
     }
     operations
 }
@@ -630,7 +719,7 @@ fn operation_differences(program: &str, expected: &Value, actual: &Value) -> Vec
             ));
         }
     };
-    for section in ["counts", "failures"] {
+    for section in ["counts", "failures", "inputSizes"] {
         let keys = [expected, actual]
             .iter()
             .filter_map(|file| file.get(section).and_then(Value::as_object))
@@ -647,8 +736,8 @@ fn operation_differences(program: &str, expected: &Value, actual: &Value) -> Vec
     differences
 }
 
-/// Every corpus evaluation's operation count, and the recorded failures, are what the Rust runtime
-/// computes; regeneration writes them.
+/// Every corpus evaluation's operation count, the recorded failures and the recorded input sizes
+/// are what the Rust runtime computes; regeneration writes them.
 #[test]
 fn corpus_operation_counts_match_the_rust_runtime() {
     let mut failures = Vec::new();
@@ -671,7 +760,7 @@ fn corpus_operation_counts_match_the_rust_runtime() {
     }
     assert!(
         failures.is_empty(),
-        "corpus operation counts changed (run with NX_UPDATE_CORPUS=1 after an intended change):\n{}",
+        "corpus operation counts or input sizes changed (run with NX_UPDATE_CORPUS=1 after an intended change):\n{}",
         failures.join("\n")
     );
 }
@@ -889,7 +978,9 @@ fn entry_results_agree(generated: &Value, recorded: &Value) -> bool {
 /// <para>Executable source codegen refuses some constructs outright — match expressions, calls of
 /// function-typed values, action handlers — so a program it refuses, and an entrypoint that
 /// reaches an unsupported construct at run time, are skipped, and only then. Every refusal must be
-/// one of those; any other failure to generate or to run fails the test.</para>
+/// one of those; any other failure to generate or to run fails the test. A case, an entrypoint
+/// with arguments, is not run here: its result is recorded from one IR runtime and checked in the
+/// other, which is the comparison a case is for.</para>
 #[test]
 fn generated_javascript_agrees_with_the_recorded_results() {
     let mut failures = Vec::new();
@@ -923,6 +1014,7 @@ fn generated_javascript_agrees_with_the_recorded_results() {
             .entrypoints
             .iter()
             .filter(|entrypoint| entrypoint.module == program.manifest.entry)
+            .filter(|entrypoint| entrypoint.arguments.is_none())
             .collect::<Vec<_>>();
         let dir = tempfile::TempDir::new().expect("temp dir");
         fs::write(dir.path().join("package.json"), r#"{ "type": "module" }"#)

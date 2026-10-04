@@ -1,0 +1,36 @@
+{
+  "entry": "main.nx",
+  "emit": [
+    "main.nx"
+  ],
+  "recordFailures": true,
+  "recordInputSizes": true,
+  "entrypoints": [
+    { "module": "main.nx", "function": "listed", "case": "three", "arguments": [[1, 2, 3]] },
+    { "module": "main.nx", "function": "listed", "case": "one", "arguments": [[7]] },
+    { "module": "main.nx", "function": "held", "case": "record", "arguments": [{"$type": "Point", "x": 1, "tags": ["a", "b"]}] },
+    { "module": "main.nx", "function": "held", "case": "text", "arguments": ["éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"] },
+    { "module": "main.nx", "function": "held", "case": "longName", "arguments": [{"aFieldNameOfSeventyUtf16CodeUnitsWhichIsLongEnoughToCostOneOperation00": 1}] },
+    { "module": "main.nx", "function": "held", "case": "wideInteger", "arguments": [{"$type": "nx.int", "value": "9007199254740993"}] },
+    { "module": "main.nx", "function": "greeting", "case": "long", "arguments": ["xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"] },
+    { "module": "main.nx", "function": "same", "case": "unlikeNames", "arguments": [{"$type": "T", "a": 1, "b": 2}, {"$type": "T", "a": 1, "c": 2}] },
+    { "module": "main.nx", "function": "same", "case": "firstItem", "arguments": [[0, 1, 2], [9, 1, 2]] },
+    { "module": "main.nx", "function": "bound", "case": "list", "arguments": [[1, 2, 3, 4]] }
+  ],
+  "lifecycles": [
+    {
+      "module": "main.nx",
+      "component": "Counter",
+      "props": {"title": "A counter whose title is long enough to cost one operation when written", "step": 2},
+      "batches": [
+        [
+          {"$type": "ActionHandlerInvocation", "token": "h1-1", "action": {"$type": "Button.Tapped"}}
+        ],
+        [
+          {"$type": "ActionHandlerInvocation", "token": "h2-1", "action": {"$type": "Button.Tapped"}},
+          {"$type": "ActionHandlerInvocation", "token": "h2-1", "action": {"$type": "Button.Tapped"}}
+        ]
+      ]
+    }
+  ]
+}

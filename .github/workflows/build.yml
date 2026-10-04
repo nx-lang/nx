@@ -241,6 +241,19 @@ jobs:
     # so a divergence between the two bindings fails here rather than reaching a site.
     - name: 🕸 Build the workspace, including the WebAssembly module
       run: pnpm -r build
+    # The TypeScript runtime's `dist` is committed, and the Rust tests above run the cost
+    # validation's cases through it as it is committed. So a `dist` that is not what its source
+    # builds to is a failure here, where it is made: a built file that differs, or one that was
+    # never committed. The directory is listed in the package's `.gitignore` and its files are
+    # added by force, so `--ignored` is what makes a new file show.
+    - name: 🔎 Verify the committed TypeScript runtime build is current
+      run: |
+        changed=$(git status --porcelain --ignored runtime/typescript/dist)
+        if [ -n "$changed" ]; then
+          echo "runtime/typescript/dist is not what runtime/typescript/src builds to. Run 'pnpm --filter @nx-lang/ir-runtime build' and commit the result:"
+          echo "$changed"
+          exit 1
+        fi
     - name: 🧪 Test the pnpm workspace
       run: pnpm -r test
     # The workspace's npm packages are packed at this build's version and verified the way a
@@ -267,3 +280,20 @@ jobs:
         name: npm-packages
         path: ${{ runner.temp }}/npm-packages/*.tgz
         if-no-files-found: error
+
+  # The time report of the cost validation: every generated case timed at two scales in both IR
+  # runtimes, and a case reported when its time grows more than twice as fast as its operation
+  # count plus input size. Timing is noisy on a shared runner, so the job reports and never fails
+  # the workflow; the blocking checks of the same cases, the differential test and the allocation
+  # bounds, run in the Rust job with the other tests.
+  cost-time-report:
+    name: ⏱ Cost time report
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+    - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+    - name: Set up Rust and the pnpm workspace
+      uses: ./.github/actions/setup-rust-node
+    - name: ⏱ Report cases whose time outgrows their count
+      run: cargo test --release --locked -p nx-codegen --test cost_differential -- --ignored --nocapture time_report

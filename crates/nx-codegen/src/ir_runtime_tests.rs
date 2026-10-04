@@ -14,11 +14,12 @@ use nx_api::{
     ProgramArtifact, ProgramBuildContext,
 };
 use nx_ir_runtime::{
-    apply, diff, merge, ComponentInit, Limit, LinkOptions, NxIrRuntimeError, PreparedModule,
-    Program, RuntimeOptions,
+    apply, diff, input_size, merge, record_input_size, ComponentInit, Limit, LinkOptions,
+    NxIrRuntimeError, PreparedModule, Program, RuntimeOptions, Usage,
 };
 use nx_value::NxValue;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 fn artifact(source: &str) -> ProgramArtifact {
     build_program_artifact_from_source(source, "main.nx", &ProgramBuildContext::empty())
@@ -545,7 +546,8 @@ fn unbounded_recursion_ends_in_a_diagnostic() {
     // up before a thousand nodes nest.
     let reached = limit_of(program.evaluate_function("root", &[], &unlimited));
     assert!(
-        reached == limit("maxExpressionNesting", 1000) || reached == limit("maxStackBytes", 1 << 20),
+        reached == limit("maxExpressionNesting", 1000)
+            || reached == limit("maxStackBytes", 1 << 20),
         "{reached:?}"
     );
 }
@@ -566,7 +568,8 @@ fn expressions_nested_past_the_bound_name_the_nesting_limit() {
                 ")".repeat(1001)
             );
             let program = program(&source);
-            let reached = limit_of(program.evaluate_function("root", &[NxValue::Int(1)], &options()));
+            let reached =
+                limit_of(program.evaluate_function("root", &[NxValue::Int(1)], &options()));
             assert!(
                 reached == limit("maxExpressionNesting", 1000)
                     || (cfg!(debug_assertions) && reached == limit("maxStackBytes", 1 << 20)),
@@ -656,8 +659,26 @@ fn budget(operations: u64) -> RuntimeOptions {
     }
 }
 
+/// A budget no evaluation of these tests reaches: what a host sets to read a count and limit
+/// nothing.
+const AMPLE: u64 = 1 << 40;
+
+/// What a call reports it used: its operations under an ample budget, and its outcome.
+fn reported<T>(
+    run: impl Fn(&RuntimeOptions) -> Result<T, NxIrRuntimeError>,
+) -> (Option<u64>, Result<T, NxIrRuntimeError>) {
+    let usage = Arc::new(Usage::new());
+    let result = run(&RuntimeOptions {
+        usage: Some(Arc::clone(&usage)),
+        ..budget(AMPLE)
+    });
+    (usage.operations(), result)
+}
+
 /// What an evaluation costs: the least budget it succeeds under, found by doubling the budget and
-/// then bisecting.
+/// then bisecting. The usage report gives the same number in one evaluation, which is checked for
+/// every count found here.
+#[track_caller]
 fn cost<T>(run: impl Fn(&RuntimeOptions) -> Result<T, NxIrRuntimeError>) -> u64 {
     let succeeds = |operations: u64| run(&budget(operations)).is_ok();
     let mut high = 1;
@@ -673,6 +694,7 @@ fn cost<T>(run: impl Fn(&RuntimeOptions) -> Result<T, NxIrRuntimeError>) -> u64 
             low = middle + 1;
         }
     }
+    assert_eq!(reported(&run).0, Some(high), "the usage report");
     high
 }
 
@@ -690,6 +712,7 @@ fn assert_costs<T: std::fmt::Debug>(
         limit_of(run(&budget(operations - 1))),
         limit("maxOperations", operations - 1)
     );
+    assert_eq!(reported(&run).0, Some(operations), "the usage report");
 }
 
 const COST_SOURCE: &str = "
@@ -930,7 +953,12 @@ fn a_value_shared_many_times_over_is_paid_for_wherever_it_is_walked() {
     // Stored in state: the runtime's own depth check follows the sharing, so the batch gets as
     // far as writing the state for the host, which is where the budget refuses it.
     let instance = program
-        .initialize_component("Holder", &BTreeMap::new(), &ComponentInit::default(), &options())
+        .initialize_component(
+            "Holder",
+            &BTreeMap::new(),
+            &ComponentInit::default(),
+            &options(),
+        )
         .unwrap()
         .instance;
     assert_eq!(
@@ -1008,7 +1036,11 @@ fn two_handlers_are_compared_up_to_the_first_captured_value_that_differs() {
     assert_costs(23 + 3, run([9, 2, 1, 2]));
     assert_costs(23 + 4, run([1, 9, 1, 2]));
     assert_costs(23 + 3, run([9, 9, 1, 2]));
-    for (args, equal) in [([1, 2, 1, 2], true), ([9, 9, 1, 2], false), ([1, 9, 1, 2], false)] {
+    for (args, equal) in [
+        ([1, 2, 1, 2], true),
+        ([9, 9, 1, 2], false),
+        ([1, 9, 1, 2], false),
+    ] {
         for options in [options(), budget(100_000)] {
             assert_eq!(run(args)(&options), Ok(NxValue::Bool(equal)));
         }
@@ -1087,7 +1119,9 @@ fn names_a_host_supplied_are_paid_for_by_length_where_they_are_written_and_compa
             limit_of(program.evaluate_function("repeated", &args, &budget(100_000))),
             limit("maxOperations", 100_000)
         );
-        let compared = cost(|options| program.evaluate_function("same", std::slice::from_ref(&object), options));
+        let compared = cost(|options| {
+            program.evaluate_function("same", std::slice::from_ref(&object), options)
+        });
         assert!((names..names + 100).contains(&compared), "{compared}");
     }
 }
@@ -1116,13 +1150,15 @@ fn text_in_a_form_the_runtime_gives_a_meaning_to_is_paid_for_by_its_length() {
             ("extra".to_string(), NxValue::String(long.clone())),
         ]),
     }])
-    .chain(["actionHandler", "functionReference"].map(|tag| NxValue::Record {
-        type_name: None,
-        properties: BTreeMap::from([
-            ("$nxKind".to_string(), NxValue::String(tag.to_string())),
-            ("text".to_string(), NxValue::String(long.clone())),
-        ]),
-    }));
+    .chain(
+        ["actionHandler", "functionReference"].map(|tag| NxValue::Record {
+            type_name: None,
+            properties: BTreeMap::from([
+                ("$nxKind".to_string(), NxValue::String(tag.to_string())),
+                ("text".to_string(), NxValue::String(long.clone())),
+            ]),
+        }),
+    );
     for object in spelled {
         let args = [object.clone(), NxValue::Int(20)];
         let written = cost(|options| program.evaluate_function("repeated", &args, options));
@@ -1131,7 +1167,9 @@ fn text_in_a_form_the_runtime_gives_a_meaning_to_is_paid_for_by_its_length() {
             limit_of(program.evaluate_function("repeated", &args, &budget(100_000))),
             limit("maxOperations", 100_000)
         );
-        let compared = cost(|options| program.evaluate_function("same", std::slice::from_ref(&object), options));
+        let compared = cost(|options| {
+            program.evaluate_function("same", std::slice::from_ref(&object), options)
+        });
         assert!(compared >= 1 << 14, "{compared}");
     }
 }
@@ -1162,7 +1200,10 @@ fn the_json_form_of_a_wide_integer_is_a_record_at_object() {
         type_name: Some("nx.int".to_string()),
         properties: (0..8000)
             .map(|key| (format!("k{key}"), NxValue::Int(key)))
-            .chain([("value".to_string(), NxValue::String("1152921504606846976".to_string()))])
+            .chain([(
+                "value".to_string(),
+                NxValue::String("1152921504606846976".to_string()),
+            )])
             .collect(),
     };
     let integer = NxValue::Int(1152921504606846976);
@@ -1172,7 +1213,9 @@ fn the_json_form_of_a_wide_integer_is_a_record_at_object() {
         move |options: &RuntimeOptions| program.evaluate_function(function, &args, options)
     };
     // The program's own: the node, the result checked, and one value written.
-    assert_costs(3, |options| program.evaluate_function("wideSame", &[], options));
+    assert_costs(3, |options| {
+        program.evaluate_function("wideSame", &[], options)
+    });
     // Written as a record and its string, where a number is four.
     assert_costs(5, run("passObject", &spelled));
     // One pair: a record is no integer, however wide it is.
@@ -1180,9 +1223,15 @@ fn the_json_form_of_a_wide_integer_is_a_record_at_object() {
     assert_costs(10, run("eqWide", &wide));
     assert_costs(8, run("patHost", &spelled));
     assert_eq!(run("passObject", &spelled)(&options()), Ok(spelled.clone()));
-    assert_eq!(run("eqWide", &spelled)(&options()), Ok(NxValue::Bool(false)));
+    assert_eq!(
+        run("eqWide", &spelled)(&options()),
+        Ok(NxValue::Bool(false))
+    );
     assert_eq!(run("patHost", &spelled)(&options()), Ok(NxValue::Int(0)));
-    assert_eq!(run("same", &spelled)(&budget(100_000)), Ok(NxValue::Bool(true)));
+    assert_eq!(
+        run("same", &spelled)(&budget(100_000)),
+        Ok(NxValue::Bool(true))
+    );
     assert_eq!(run("eqWide", &integer)(&options()), Ok(NxValue::Bool(true)));
     assert_eq!(run("patHost", &integer)(&options()), Ok(NxValue::Int(1)));
 
@@ -1276,7 +1325,11 @@ fn two_lists_are_compared_in_order_up_to_the_first_pair_that_differs() {
     // cost the pair and both pairs of fields; the list then stops there.
     assert_costs(
         17 + 4,
-        run(r#"[{"a":1,"b":2},{"a":5}]"#, r#"[{"a":9,"b":9},{"a":5}]"#, 1),
+        run(
+            r#"[{"a":1,"b":2},{"a":5}]"#,
+            r#"[{"a":9,"b":9},{"a":5}]"#,
+            1,
+        ),
     );
 
     // Two lists of 100,000 that differ in their first item cost two operations to compare, under
@@ -1313,10 +1366,15 @@ fn a_value_made_of_empty_values_costs_its_length_to_write_and_to_bind() {
         let args = [json(&object), NxValue::Int(500)];
         let run = |options: &RuntimeOptions| program.evaluate_function("repeated", &args, options);
         // Written 500 times, it costs its values 500 times.
-        assert!(cost(|options| {
-            program.evaluate_function("repeated", &[args[0].clone(), NxValue::Int(2)], options)
-        }) > 2 * values);
-        assert_eq!(limit_of(run(&budget(100_000))), limit("maxOperations", 100_000));
+        assert!(
+            cost(|options| {
+                program.evaluate_function("repeated", &[args[0].clone(), NxValue::Int(2)], options)
+            }) > 2 * values
+        );
+        assert_eq!(
+            limit_of(run(&budget(100_000))),
+            limit("maxOperations", 100_000)
+        );
     }
     // Bound to a content parameter 10,000 times, a list of 20,000 empty values costs its length
     // each time, as a list of numbers does.
@@ -1325,8 +1383,14 @@ fn a_value_made_of_empty_values_costs_its_length_to_write_and_to_bind() {
         NxValue::Int(10_000),
     ];
     let error = failure(program.evaluate_function("many", &args, &budget(100_000)));
-    assert_eq!(error.diagnostics[0].limit, Some(limit("maxOperations", 100_000)));
-    assert_eq!(error.diagnostics[0].declaration.as_deref(), Some("main.nx::ignore"));
+    assert_eq!(
+        error.diagnostics[0].limit,
+        Some(limit("maxOperations", 100_000))
+    );
+    assert_eq!(
+        error.diagnostics[0].declaration.as_deref(),
+        Some("main.nx::ignore")
+    );
 }
 
 #[test]
@@ -1357,7 +1421,12 @@ fn a_patch_that_supplies_a_large_value_again_does_not_walk_it_again() {
     // elements back, or wrap them once more, do not walk them 4,000 times.
     let program = program(WALK_SOURCE);
     let instance = program
-        .initialize_component("Keeper", &BTreeMap::new(), &ComponentInit::default(), &options())
+        .initialize_component(
+            "Keeper",
+            &BTreeMap::new(),
+            &ComponentInit::default(),
+            &options(),
+        )
         .unwrap()
         .instance;
     let batch = |token: &str, count: usize| -> Vec<NxValue> {
@@ -1440,10 +1509,16 @@ component <Costly heavy:Heavy = <Heavy /> /> = {
 fn a_batch_shares_one_budget_and_leaves_the_instance_usable() {
     let program = program(BUSY_SOURCE);
     let instance = program
-        .initialize_component("Busy", &BTreeMap::new(), &ComponentInit::default(), &options())
+        .initialize_component(
+            "Busy",
+            &BTreeMap::new(),
+            &ComponentInit::default(),
+            &options(),
+        )
         .unwrap()
         .instance;
-    let one = cost(|options| program.dispatch_component_actions(&instance, &[tap("h1-1")], options));
+    let one =
+        cost(|options| program.dispatch_component_actions(&instance, &[tap("h1-1")], options));
     // Each handler costs well over a third of the budget, so three of them exceed it together.
     let limited = budget(one * 2);
     assert_eq!(
@@ -1537,6 +1612,616 @@ fn call_function_is_under_the_budget() {
     assert_costs(29, |options: &RuntimeOptions| {
         program.call_function(&squares, &BTreeMap::new(), options)
     });
+}
+
+// ------------------------------------------------------------------------------------------------
+// The input limit
+// ------------------------------------------------------------------------------------------------
+
+const INPUT_SOURCE: &str = "
+let pass(o:object): object = { o }
+let ints(xs:int+) = { xs }
+let add(a:int, b:int): int = { a + b }
+external component <Button label?:string emits { Tapped { } } />
+external component <Text value:string />
+component <Card title:string = \"none\" count:int = 0 content body?:object+ /> = {
+  <Text value={title} />
+}
+component <Counter /> = {
+  state { count:int = 0 note?:string data?:object }
+  <Button onTapped=<Update count={count + 1} /> />
+}";
+
+fn input_limit(size: u64) -> RuntimeOptions {
+    RuntimeOptions {
+        max_input_size: Some(size),
+        ..options()
+    }
+}
+
+/// A list nested `levels` deep around one number: its size is `levels + 1`.
+fn nested(levels: usize) -> NxValue {
+    (0..levels).fold(NxValue::Int(1), |value, _| NxValue::Array(vec![value]))
+}
+
+fn object(fields: &[(&str, NxValue)]) -> NxValue {
+    NxValue::Record {
+        type_name: None,
+        properties: fields
+            .iter()
+            .map(|(name, value)| (name.to_string(), value.clone()))
+            .collect(),
+    }
+}
+
+/// Asserts that a failure is the input limit's, set to `size`, and that it names no declaration
+/// and no span: nothing had been evaluated.
+#[track_caller]
+fn assert_input_refused<T>(result: Result<T, NxIrRuntimeError>, size: u64) {
+    let error = failure(result);
+    let diagnostic = &error.diagnostics[0];
+    assert_eq!(error.code(), "nx-ir-resource-limit", "{error}");
+    assert_eq!(
+        diagnostic.limit,
+        Some(limit("maxInputSize", size)),
+        "{error}"
+    );
+    assert_eq!(
+        (&diagnostic.declaration, &diagnostic.source),
+        (&None, &None)
+    );
+}
+
+/// Asserts that the input of a call has exactly the size `size`: the call proceeds under that
+/// limit and reports that size, and is refused under one less.
+#[track_caller]
+fn assert_input_size<T: std::fmt::Debug>(
+    size: u64,
+    run: impl Fn(&RuntimeOptions) -> Result<T, NxIrRuntimeError>,
+) {
+    let usage = Arc::new(Usage::new());
+    let result = run(&RuntimeOptions {
+        usage: Some(Arc::clone(&usage)),
+        ..input_limit(size)
+    });
+    if let Err(error) = result {
+        panic!("fails under an input limit of {size}: {error}");
+    }
+    assert_eq!(usage.input_size(), Some(size));
+    assert_eq!(usage.operations(), None);
+    assert_input_refused(
+        run(&RuntimeOptions {
+            usage: Some(Arc::clone(&usage)),
+            ..input_limit(size - 1)
+        }),
+        size - 1,
+    );
+    assert_eq!((usage.operations(), usage.input_size()), (None, None));
+}
+
+fn counter(program: &Program) -> nx_ir_runtime::ComponentInstance {
+    program
+        .initialize_component(
+            "Counter",
+            &BTreeMap::new(),
+            &ComponentInit::default(),
+            &options(),
+        )
+        .unwrap()
+        .instance
+}
+
+#[test]
+fn the_default_options_set_no_input_limit_and_ask_for_no_report() {
+    let options = RuntimeOptions::default();
+    assert_eq!(options.max_input_size, None);
+    assert!(options.usage.is_none());
+    // With no limit a list of a million integers is input like any other.
+    let program = program(INPUT_SOURCE);
+    match program.evaluate_function("ints", &[ints(1_000_000)], &options) {
+        Ok(NxValue::Array(items)) => assert_eq!(items.len(), 1_000_000),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn input_over_the_limit_is_refused_before_anything_runs() {
+    let program = program(INPUT_SOURCE);
+    let usage = Arc::new(Usage::new());
+    // A budget of nothing beside the limit: the first node would exhaust it, and it is the input
+    // that is reported, with no operation used.
+    let limited = RuntimeOptions {
+        max_operations: Some(0),
+        usage: Some(Arc::clone(&usage)),
+        ..input_limit(1000)
+    };
+    assert_input_refused(
+        program.evaluate_function("ints", &[ints(20_000)], &limited),
+        1000,
+    );
+    assert_eq!((usage.operations(), usage.input_size()), (Some(0), None));
+}
+
+#[test]
+fn every_method_measures_what_the_host_passes_it() {
+    // The worked sizes of `docs/nx-ir-format.md`, the same numbers the TypeScript runtime's tests
+    // assert, and one call of each method over its limit.
+    let program = program(INPUT_SOURCE);
+    let none = BTreeMap::new();
+
+    // `evaluate_function`: each positional argument. A list is its items and itself.
+    assert_input_size(1001, |options| {
+        program.evaluate_function("ints", &[ints(1000)], options)
+    });
+    assert_input_size(2, |options| {
+        program.evaluate_function("add", &[NxValue::Int(1), NxValue::Int(2)], options)
+    });
+    // Text costs its length, and a name its own.
+    let pass = |value: NxValue| {
+        let program = &program;
+        move |options: &RuntimeOptions| {
+            program.evaluate_function("pass", std::slice::from_ref(&value), options)
+        }
+    };
+    assert_input_size(101, pass(NxValue::String("a".repeat(6400))));
+    assert_input_size(101, pass(NxValue::String("é".repeat(6400))));
+    assert_input_size(
+        16_386,
+        pass(object(&[(&"k".repeat(1 << 20), NxValue::Int(1))])),
+    );
+    // The JSON form of a wide integer is the record it is; the integer itself is one value.
+    let wide = json(r#"{ "$type": "nx.int", "value": "9007199254740993" }"#);
+    assert_input_size(2, pass(wide.clone()));
+    assert_input_size(5, pass(NxValue::Array(vec![wide.clone(), wide])));
+    assert_input_size(1, pass(NxValue::Int(9_007_199_254_740_993)));
+    let text = NxValue::String("9".repeat(1 << 20));
+    assert_input_size(
+        16_386,
+        pass(NxValue::Record {
+            type_name: Some("nx.int".to_string()),
+            properties: BTreeMap::from([("value".to_string(), text.clone())]),
+        }),
+    );
+    // An object that carries the TypeScript runtime's marking is a plain object here too: the
+    // object, its tag, and the string with its 16,384.
+    assert_input_size(
+        16_387,
+        pass(object(&[
+            ("$nxKind", NxValue::String("actionHandler".into())),
+            ("text", text),
+        ])),
+    );
+
+    // `call_function`: the function record, and the arguments by name as one record.
+    let add = json(r#"{ "$type": "Function", "module": "main.nx", "name": "add" }"#);
+    assert_input_size(6, |options| {
+        program.call_function(&add, &fields(r#"{ "a": 1, "b": 2 }"#), options)
+    });
+
+    // `construct_component_descriptor`: the props as one record, and each content item.
+    let props = fields(r#"{ "title": "Home", "count": 3 }"#);
+    let content = [NxValue::Int(1), NxValue::Int(2), NxValue::Int(3)];
+    assert_input_size(6, |options| {
+        program.construct_component_descriptor("Card", &props, &content, options)
+    });
+
+    // `initialize_component`: the props, and a state when one is passed. Props left empty are an
+    // empty record; a state not passed is not input.
+    let init = ComponentInit::default();
+    assert_input_size(3, |options| {
+        program.initialize_component("Card", &props, &init, options)
+    });
+    assert_input_size(1, |options| {
+        program.initialize_component("Card", &none, &init, options)
+    });
+    let state = fields(r#"{ "count": 3, "note": "x" }"#);
+    let with_state = ComponentInit {
+        state: Some(&state),
+        ..ComponentInit::default()
+    };
+    assert_input_size(4, |options| {
+        program.initialize_component("Counter", &none, &with_state, options)
+    });
+
+    // `evaluate_component`: the props and the state.
+    assert_input_size(4, |options| {
+        program.evaluate_component("Counter", &none, &state, options)
+    });
+
+    // `dispatch_component_actions`: each entry of the batch. An invocation is its record, its
+    // token and its action.
+    let instance = counter(&program);
+    assert_input_size(6, |options| {
+        program.dispatch_component_actions(&instance, &[tap("h1-1"), tap("h1-1")], options)
+    });
+
+    // `normalize_component_state`: the state.
+    assert_input_size(3, |options| {
+        program.normalize_component_state("Counter", &state, options)
+    });
+
+    // `apply_component_state_patch`: the state and the patch.
+    let patch = json(r#"{ "count": 4 }"#);
+    assert_input_size(5, |options| {
+        program.apply_component_state_patch("Counter", &state, &patch, options)
+    });
+}
+
+#[test]
+fn a_type_name_among_props_is_a_type_name() {
+    // The record and the title: a `$type` member that holds a string counts its length alone.
+    // The component does not declare it, so the call within the limit is refused for the field,
+    // and the one over the limit for its input.
+    let program = program(INPUT_SOURCE);
+    let props = BTreeMap::from([
+        ("$type".to_string(), NxValue::String("Card".into())),
+        ("title".to_string(), NxValue::String("Home".into())),
+    ]);
+    assert_eq!(record_input_size(&props, None), 2);
+    let init = ComponentInit::default();
+    assert_code(
+        program.initialize_component("Card", &props, &init, &input_limit(2)),
+        "nx-ir-boundary-field",
+        &["$type"],
+    );
+    assert_input_refused(
+        program.initialize_component("Card", &props, &init, &input_limit(1)),
+        1,
+    );
+}
+
+#[test]
+fn oversized_input_is_reported_before_any_other_fault_of_the_call() {
+    let program = program(INPUT_SOURCE);
+    let large = ints(20_000);
+    let limited = input_limit(1000);
+
+    // An entrypoint the program lacks, a function record that names nothing, and a component it
+    // does not declare.
+    assert_input_refused(
+        program.evaluate_function("noSuchFunction", std::slice::from_ref(&large), &limited),
+        1000,
+    );
+    assert_code(
+        program.evaluate_function("noSuchFunction", &[ints(10)], &limited),
+        "nx-ir-missing-entrypoint",
+        &[],
+    );
+    let args = BTreeMap::from([("a".to_string(), large.clone())]);
+    assert_input_refused(
+        program.call_function(&NxValue::Int(1), &args, &limited),
+        1000,
+    );
+    assert_input_refused(
+        program.normalize_component_state("NoSuchComponent", &args, &limited),
+        1000,
+    );
+
+    // Props of the wrong type beside a state larger than the limit.
+    let wrong = fields(r#"{ "title": 5 }"#);
+    let state = BTreeMap::from([("data".to_string(), large.clone())]);
+    assert_input_refused(
+        program.evaluate_component("Card", &wrong, &state, &limited),
+        1000,
+    );
+    assert_code(
+        program.evaluate_component("Card", &wrong, &BTreeMap::new(), &limited),
+        "nx-ir-boundary-type",
+        &["title"],
+    );
+    let init = ComponentInit {
+        state: Some(&state),
+        ..ComponentInit::default()
+    };
+    assert_input_refused(
+        program.initialize_component("Card", &wrong, &init, &limited),
+        1000,
+    );
+
+    // Content, and a patch.
+    assert_input_refused(
+        program.construct_component_descriptor(
+            "Card",
+            &BTreeMap::new(),
+            std::slice::from_ref(&large),
+            &limited,
+        ),
+        1000,
+    );
+    let patch = object(&[("data", large)]);
+    assert_input_refused(
+        program.apply_component_state_patch("Counter", &BTreeMap::new(), &patch, &limited),
+        1000,
+    );
+}
+
+#[test]
+fn a_batch_is_measured_whole_before_any_of_it_runs() {
+    let program = program(INPUT_SOURCE);
+    let instance = counter(&program);
+    let usage = Arc::new(Usage::new());
+    // A first entry that would run, and exhaust a budget of nothing at its first node, and a
+    // second that is too large. The dispatch is refused for its input and no handler has run.
+    let large = object(&[("data", ints(20_000))]);
+    let limited = RuntimeOptions {
+        max_operations: Some(0),
+        usage: Some(Arc::clone(&usage)),
+        ..input_limit(100)
+    };
+    assert_input_refused(
+        program.dispatch_component_actions(&instance, &[tap("h1-1"), large], &limited),
+        100,
+    );
+    assert_eq!(usage.operations(), Some(0));
+
+    // The instance given is untouched, and dispatches a batch the limit covers.
+    let dispatched = program
+        .dispatch_component_actions(&instance, &[tap("h1-1")], &input_limit(100))
+        .unwrap();
+    assert_eq!(dispatched.state.get("count"), Some(&NxValue::Int(1)));
+}
+
+#[test]
+fn size_is_reported_before_nesting_and_nesting_is_still_refused() {
+    let program = program(INPUT_SOURCE);
+    let limited = input_limit(1000);
+    // Deeper than a host value may nest and larger than the limit: reported for its size. No
+    // deeper than this, since dropping a much deeper `NxValue` overflows the stack by itself.
+    assert_input_refused(
+        program.evaluate_function("pass", &[nested(2000)], &limited),
+        1000,
+    );
+    // Within the limit, at a size of 301, and still too deep: refused for its nesting, which the
+    // TypeScript runtime does not bound.
+    assert_eq!(input_size(&nested(300), None), 301);
+    assert_eq!(
+        limit_of(program.evaluate_function("pass", &[nested(300)], &limited)),
+        limit("maxValueNesting", 256)
+    );
+}
+
+#[test]
+fn an_input_limit_costs_no_operations() {
+    let program = program(INPUT_SOURCE);
+    let args = [ints(1000)];
+    let unlimited = cost(|options| program.evaluate_function("ints", &args, options));
+    let limited = cost(|options| {
+        program.evaluate_function(
+            "ints",
+            &args,
+            &RuntimeOptions {
+                max_input_size: Some(1001),
+                ..options.clone()
+            },
+        )
+    });
+    assert_eq!(unlimited, limited);
+    // And a budget of nothing does not keep the input from being measured: the call is refused
+    // for the budget, having been measured in full.
+    let usage = Arc::new(Usage::new());
+    let both = RuntimeOptions {
+        max_operations: Some(0),
+        usage: Some(Arc::clone(&usage)),
+        ..input_limit(1001)
+    };
+    assert_eq!(
+        limit_of(program.evaluate_function("ints", &args, &both)),
+        limit("maxOperations", 0)
+    );
+    assert_eq!(
+        (usage.operations(), usage.input_size()),
+        (Some(0), Some(1001))
+    );
+}
+
+#[test]
+fn an_instance_is_not_input() {
+    // The first button of `Keeper` stores 50,000 values in its state. A batch of one small entry
+    // against that instance is three, whatever the instance holds.
+    let program = program(WALK_SOURCE);
+    let instance = program
+        .initialize_component(
+            "Keeper",
+            &BTreeMap::new(),
+            &ComponentInit::default(),
+            &options(),
+        )
+        .unwrap()
+        .instance;
+    let full = program
+        .dispatch_component_actions(&instance, &[tap("h1-1")], &options())
+        .unwrap();
+    match full.state.get("data") {
+        Some(NxValue::Record { properties, .. }) => match properties.get("content") {
+            Some(NxValue::Array(items)) => assert_eq!(items.len(), 50_000),
+            other => panic!("{other:?}"),
+        },
+        other => panic!("{other:?}"),
+    }
+    assert_input_size(3, |options| {
+        program.dispatch_component_actions(&full.instance, &[tap("h2-2")], options)
+    });
+    assert!(program
+        .dispatch_component_actions(&full.instance, &[tap("h2-2")], &input_limit(100))
+        .is_ok());
+}
+
+// ------------------------------------------------------------------------------------------------
+// The usage report and the exported measure
+// ------------------------------------------------------------------------------------------------
+
+fn with_usage(options: RuntimeOptions) -> (RuntimeOptions, Arc<Usage>) {
+    let usage = Arc::new(Usage::new());
+    (
+        RuntimeOptions {
+            usage: Some(Arc::clone(&usage)),
+            ..options
+        },
+        usage,
+    )
+}
+
+#[test]
+fn a_call_reports_the_operations_it_used() {
+    let program = program(COST_SOURCE);
+    // A call that succeeds reports its count, the least budget it succeeds under.
+    let (options, usage) = with_usage(budget(100_000));
+    assert!(program.evaluate_function("squares", &[], &options).is_ok());
+    assert_eq!((usage.operations(), usage.input_size()), (Some(29), None));
+
+    // A call that fails for its budget reports what it used, which is no more than the budget.
+    let (options, usage) = with_usage(budget(10));
+    assert_eq!(
+        limit_of(program.evaluate_function("squares", &[], &options)),
+        limit("maxOperations", 10)
+    );
+    assert!(
+        usage.operations().is_some_and(|used| used <= 10),
+        "{usage:?}"
+    );
+
+    // A charge the budget refused is not among them. `join` of 2,000 code units checks its two
+    // arguments and evaluates its node and two slots, which is five; its sixth charge is 31 for
+    // the length the `concat` would build, and a budget of ten does not cover it.
+    let text = |unit: &str| NxValue::String(unit.repeat(1000));
+    assert_eq!(
+        limit_of(program.evaluate_function("join", &[text("a"), text("b")], &options)),
+        limit("maxOperations", 10)
+    );
+    assert_eq!(usage.operations(), Some(5));
+
+    // A failure that is no limit's reports what ran before it.
+    let failing = link(&artifact("let ratio(n:int): int = { n / 0 }"), true);
+    assert_code(
+        failing.evaluate_function("ratio", &[NxValue::Int(1)], &options),
+        "nx-ir-division-by-zero",
+        &[],
+    );
+    assert_eq!(usage.operations(), Some(4));
+}
+
+#[test]
+fn nothing_is_counted_for_the_report_alone_and_a_report_does_not_carry_over() {
+    let program = program(COST_SOURCE);
+    let (limited, usage) = with_usage(RuntimeOptions {
+        max_input_size: Some(5000),
+        ..budget(100_000)
+    });
+    let args = [ints(1000)];
+    assert!(program.evaluate_function("same", &args, &limited).is_ok());
+    assert_eq!(
+        (usage.operations(), usage.input_size()),
+        (Some(2002), Some(1001))
+    );
+
+    // The same report given to a call with no budget and no limit: both numbers are gone.
+    let unlimited = RuntimeOptions {
+        usage: Some(Arc::clone(&usage)),
+        ..options()
+    };
+    assert!(program.evaluate_function("same", &args, &unlimited).is_ok());
+    assert_eq!((usage.operations(), usage.input_size()), (None, None));
+
+    // Each number is reported for its own option.
+    let (only_input, usage) = with_usage(input_limit(5000));
+    assert!(program
+        .evaluate_function("same", &args, &only_input)
+        .is_ok());
+    assert_eq!((usage.operations(), usage.input_size()), (None, Some(1001)));
+}
+
+#[test]
+fn a_dispatch_reports_one_number_for_the_batch() {
+    let program = program(COUNTER_SOURCE);
+    let instance = program
+        .initialize_component(
+            "Counter",
+            &BTreeMap::new(),
+            &ComponentInit::default(),
+            &options(),
+        )
+        .unwrap()
+        .instance;
+    let dispatch = |entries: usize| {
+        let batch = vec![tap("h1-1"); entries];
+        let program = &program;
+        let instance = &instance;
+        move |options: &RuntimeOptions| {
+            program.dispatch_component_actions(instance, &batch, options)
+        }
+    };
+    // The render and the state written are paid once, and each handler once for each entry.
+    let (none, one, three) = (cost(dispatch(0)), cost(dispatch(1)), cost(dispatch(3)));
+    assert!(one > none);
+    assert_eq!(three - none, 3 * (one - none));
+    let (options, usage) = with_usage(RuntimeOptions {
+        max_input_size: Some(100),
+        ..budget(100_000)
+    });
+    assert!(dispatch(3)(&options).is_ok());
+    assert_eq!(
+        (usage.operations(), usage.input_size()),
+        (Some(three), Some(9))
+    );
+}
+
+#[test]
+fn a_value_measured_alone_has_the_size_it_has_in_a_call() {
+    let program = program(INPUT_SOURCE);
+    let measured = |run: &dyn Fn(&RuntimeOptions)| {
+        let (options, usage) = with_usage(input_limit(1 << 30));
+        run(&options);
+        usage.input_size().expect("an input size")
+    };
+    let values = [
+        NxValue::Null,
+        ints(1000),
+        NxValue::String("é".repeat(6400)),
+        object(&[(&"k".repeat(1 << 20), NxValue::Int(1))]),
+        json(r#"{ "$type": "nx.int", "value": "9007199254740993" }"#),
+        json(r#"{ "a": [null, [], {}], "b": { "$type": "T", "c": "d" } }"#),
+    ];
+    for value in &values {
+        let alone = input_size(value, None);
+        let in_a_call = measured(&|options| {
+            program
+                .evaluate_function("pass", std::slice::from_ref(value), options)
+                .unwrap();
+        });
+        assert_eq!(alone, in_a_call, "{value:?}");
+        // With a limit under the size the measure stops and answers past the limit.
+        if alone > 1 {
+            assert!(input_size(value, Some(alone - 1)) > alone - 1);
+        }
+        assert_eq!(input_size(value, Some(alone)), alone);
+    }
+    // A list of arguments measured as one value is one more than its entries add to a call.
+    let together = measured(&|options| {
+        let _ = program.evaluate_function("pass", &values, options);
+    });
+    assert_eq!(
+        input_size(&NxValue::Array(values.to_vec()), None),
+        together + 1
+    );
+
+    // A map is measured as the record it is passed as: props, a state, arguments by name.
+    let props = fields(r#"{ "title": "Home", "count": 3 }"#);
+    assert_eq!(record_input_size(&props, None), 3);
+    assert_eq!(
+        measured(&|options| {
+            program
+                .initialize_component("Card", &props, &ComponentInit::default(), options)
+                .unwrap();
+        }),
+        3
+    );
+    assert_eq!(record_input_size(&BTreeMap::new(), None), 1);
+    // Stopping at the limit: a million integers under a limit of 1,000 are not read to the end.
+    assert_eq!(input_size(&ints(1_000_000), Some(1000)), 1001);
+    let wide: BTreeMap<String, NxValue> = (0..100_000)
+        .map(|key| (format!("k{key}"), NxValue::Int(key)))
+        .collect();
+    assert_eq!(record_input_size(&wide, Some(1000)), 1001);
 }
 
 // ------------------------------------------------------------------------------------------------

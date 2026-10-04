@@ -1,0 +1,67 @@
+{
+  "main.nx::Counter": {
+    "batches": [
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Button",
+          "label": "A counter whose title is long enough to cost one operation when written",
+          "onTapped": {
+            "$type": "ActionHandler",
+            "action": "Button.Tapped",
+            "token": "h2-1"
+          }
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Button",
+          "label": "A counter whose title is long enough to cost one operation when written",
+          "onTapped": {
+            "$type": "ActionHandler",
+            "action": "Button.Tapped",
+            "token": "h3-1"
+          }
+        }
+      }
+    ],
+    "initial": {
+      "$type": "Button",
+      "label": "A counter whose title is long enough to cost one operation when written",
+      "onTapped": {
+        "$type": "ActionHandler",
+        "action": "Button.Tapped",
+        "token": "h1-1"
+      }
+    }
+  },
+  "main.nx::bound#list": 1,
+  "main.nx::greeting#long": "Hello, xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "main.nx::held#longName": {
+    "aFieldNameOfSeventyUtf16CodeUnitsWhichIsLongEnoughToCostOneOperation00": 1
+  },
+  "main.nx::held#record": {
+    "$type": "Point",
+    "tags": [
+      "a",
+      "b"
+    ],
+    "x": 1
+  },
+  "main.nx::held#text": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+  "main.nx::held#wideInteger": {
+    "$type": "nx.int",
+    "value": "9007199254740993"
+  },
+  "main.nx::listed#one": [
+    7
+  ],
+  "main.nx::listed#three": [
+    1,
+    2,
+    3
+  ],
+  "main.nx::same#firstItem": false,
+  "main.nx::same#unlikeNames": false
+}

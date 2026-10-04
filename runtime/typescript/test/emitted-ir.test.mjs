@@ -12,6 +12,7 @@ import {
   evaluateComponent,
   evaluateFunction,
   initializeComponent,
+  measureInputSize,
   normalizeComponentState,
   prepareNxIrProgram,
 } from "../dist/src/index.js";
@@ -884,7 +885,27 @@ function limitOf(run) {
   return diagnostic.limit;
 }
 
-/** What an evaluation costs: the least budget it succeeds under, found by doubling and bisecting. */
+/** A budget no evaluation of these tests reaches: what a host sets to read a count and limit nothing. */
+const ample = 2 ** 40;
+
+/** The operations a call reports it used under an ample budget, whether it returns or throws. */
+function reportedOperations(run) {
+  const usage = {};
+  try {
+    run({ maxOperations: ample, usage });
+  } catch (error) {
+    if (!(error instanceof NxIrRuntimeError)) {
+      throw error;
+    }
+  }
+  return usage.operations;
+}
+
+/**
+ * What an evaluation costs: the least budget it succeeds under, found by doubling and bisecting.
+ * The usage report gives the same number in one evaluation, which is checked for every count
+ * found here.
+ */
 function cost(run) {
   const succeeds = (maxOperations) => {
     try {
@@ -910,6 +931,7 @@ function cost(run) {
       low = middle + 1;
     }
   }
+  assertEqual(reportedOperations(run), high);
   return high;
 }
 
@@ -917,6 +939,7 @@ function cost(run) {
 function assertCosts(operations, run) {
   run({ maxOperations: operations });
   assertEqual(limitOf(() => run({ maxOperations: operations - 1 })), { name: "maxOperations", value: operations - 1 });
+  assertEqual(reportedOperations(run), operations);
 }
 
 withSource(
@@ -1361,5 +1384,485 @@ component <Relay emits { Ping } /> = {
       throw new Error("Expected a TypeError raised during evaluation to propagate unchanged");
     }
     console.log("ok - an exception other than a RangeError propagates unchanged");
+  },
+);
+
+// ------------------------------------------------------------------------------------------------
+// The input limit, the usage report and the exported measure
+// ------------------------------------------------------------------------------------------------
+
+/** Asserts that a failure is the input limit's, set to `size`, and names no declaration and no span. */
+function assertInputRefused(run, size) {
+  const diagnostic = runtimeFailure(run).diagnostics[0];
+  assertEqual(diagnostic.code, "nx-ir-resource-limit");
+  assertEqual(diagnostic.limit, { name: "maxInputSize", value: size });
+  assertEqual([diagnostic.declaration, diagnostic.source], [undefined, undefined]);
+}
+
+/**
+ * Asserts that the input of a call has exactly the size `size`: the call proceeds under that limit
+ * and reports that size, and is refused under one less.
+ */
+function assertInputSize(size, run) {
+  const usage = {};
+  run({ maxInputSize: size, usage });
+  assertEqual(usage, { inputSize: size });
+  assertInputRefused(() => run({ maxInputSize: size - 1, usage }), size - 1);
+  assertEqual(usage, {});
+}
+
+/** The input size a call reports, whether it then returns or throws. */
+function inputSizeOf(run) {
+  const usage = {};
+  try {
+    run({ maxInputSize: ample, usage });
+  } catch (error) {
+    if (!(error instanceof NxIrRuntimeError)) {
+      throw error;
+    }
+  }
+  return usage.inputSize;
+}
+
+withSource(
+  `
+external component <Button label?:string emits { Tapped { } } />
+external component <Text value:string />
+let pass(o:object): object = { o }
+let ints(xs:int+) = { xs }
+let add(a:int, b:int): int = { a + b }
+let join(a:string, b:string) = { a + b }
+let squares() = { for i in 0..4 { i * i } }
+let ratio(n:int): int = { n / 0 }
+component <Card title:string = "none" count:int = 0 content body?:object+ /> = {
+  <Text value={title} />
+}
+component <Counter /> = {
+  state { count:int = 0 note?:string data?:object }
+  <Button onTapped=<Update count={count + 1} /> />
+}
+component <Keeper /> = {
+  state { data?:object n:int = {0} }
+  <panel>
+    <Button onTapped=<Update data=<bag>{for i in 0..50000 { <leaf /> }}</bag> /> />
+    <Button onTapped=<Update data={data} n={n + 1} /> />
+  </panel>
+}
+`,
+  (dir, sourcePath) => {
+    const program = prepareNxIrProgram(emitIr(dir, sourcePath));
+    const identity = program.entry.module.identity;
+    const ints = (count) => Array.from({ length: count }, (_, index) => index);
+    const pass = (value) => (options) => evaluateFunction(program, "pass", [value], options);
+    const tap = (token) => ({ $type: "ActionHandlerInvocation", token, action: { $type: "Button.Tapped" } });
+    const megabyte = 2 ** 20;
+
+    // Input over the limit is refused before anything runs: a budget of nothing beside the limit
+    // would be exhausted by the first node, and it is the input that is reported, with no
+    // operation used. With no limit a list of a million integers is input like any other.
+    {
+      const usage = {};
+      assertInputRefused(() => evaluateFunction(program, "ints", [ints(20000)], { maxInputSize: 1000, maxOperations: 0, usage }), 1000);
+      assertEqual(usage, { operations: 0 });
+      assertEqual(evaluateFunction(program, "ints", [ints(1000000)]).length, 1000000);
+      // The limit and the budget have one code and are told apart by the limit's name.
+      const forBudget = runtimeFailure(() => evaluateFunction(program, "ints", [ints(20000)], { maxOperations: 1000 })).diagnostics[0];
+      assertEqual([forBudget.code, forBudget.limit.name], ["nx-ir-resource-limit", "maxOperations"]);
+    }
+    console.log("ok - input over the limit is refused before anything runs, and an absent limit is unlimited");
+
+    for (const maxInputSize of [Number.NaN, -1, 1.5, 2 ** 60]) {
+      // A division by zero would mean the function ran; the option is refused before anything does.
+      const diagnostic = runtimeFailure(() => evaluateFunction(program, "ratio", [1], { maxInputSize })).diagnostics[0];
+      assertEqual(diagnostic.code, "nx-ir-options");
+      if (!diagnostic.message.includes("maxInputSize") || diagnostic.limit !== undefined) {
+        throw new Error(`Unexpected diagnostic for maxInputSize ${maxInputSize}: ${JSON.stringify(diagnostic)}`);
+      }
+    }
+    console.log("ok - an input limit that is not a size is refused before anything is measured");
+
+    // The worked sizes of docs/nx-ir-format.md, the same numbers the Rust runtime's tests assert,
+    // and one call of each function over its limit.
+    //
+    // `evaluateFunction`: each positional argument. A list is its items and itself.
+    assertInputSize(1001, (options) => evaluateFunction(program, "ints", [ints(1000)], options));
+    assertInputSize(2, (options) => evaluateFunction(program, "add", [1, 2], options));
+    // Text costs its length in UTF-16 code units, and a name its own.
+    assertInputSize(101, pass("a".repeat(6400)));
+    assertInputSize(101, pass("é".repeat(6400)));
+    assertInputSize(16386, pass({ ["k".repeat(megabyte)]: 1 }));
+    // The JSON form of a wide integer is the record it is, whatever its string holds.
+    const wide = { $type: "nx.int", value: "9007199254740993" };
+    assertInputSize(2, pass(wide));
+    assertInputSize(5, pass([wide, wide]));
+    assertInputSize(16386, pass({ $type: "nx.int", value: "9".repeat(megabyte) }));
+    // An object read from JSON that carries the marking the runtime gives a handler is a plain
+    // object: the object, its tag, and the string with its 16,384.
+    const marked = JSON.parse(JSON.stringify({ $nxKind: "actionHandler", text: "t".repeat(megabyte) }));
+    assertInputSize(16387, pass(marked));
+    assertInputRefused(() => pass(marked)({ maxInputSize: 1000 }), 1000);
+    // `callFunction`: the function record, and the arguments by name as one record.
+    const add = { $type: "Function", module: identity, name: "add" };
+    assertInputSize(6, (options) => callFunction(program, add, { a: 1, b: 2 }, options));
+    // `constructComponentDescriptor`: the props as one record, and each content item.
+    const props = { title: "Home", count: 3 };
+    assertInputSize(6, (options) => constructComponentDescriptor(program, "Card", props, [1, 2, 3], options));
+    // `initializeComponent`: the props, and a state when one is passed. Props left out are an
+    // empty record, as `{}` is; a state not passed is not input.
+    assertInputSize(3, (options) => initializeComponent(program, "Card", props, options));
+    assertInputSize(1, (options) => initializeComponent(program, "Card", undefined, options));
+    assertInputSize(1, (options) => initializeComponent(program, "Card", {}, options));
+    const state = { count: 3, note: "x" };
+    assertInputSize(4, (options) => initializeComponent(program, "Counter", {}, { ...options, state }));
+    // `evaluateComponent`: the props and the state.
+    assertInputSize(4, (options) => evaluateComponent(program, "Counter", {}, state, options));
+    // `dispatchComponentActions`: each entry of the batch. An invocation is its record, its token
+    // and its action.
+    const counter = initializeComponent(program, "Counter").instance;
+    assertInputSize(6, (options) => dispatchComponentActions(program, counter, [tap("h1-1"), tap("h1-1")], options));
+    // `normalizeComponentState`: the state. `applyComponentStatePatch`: the state and the patch.
+    assertInputSize(3, (options) => normalizeComponentState(program, "Counter", state, options));
+    assertInputSize(5, (options) => applyComponentStatePatch(program, "Counter", state, { count: 4 }, options));
+    // Arguments by name left out are an empty record beside the function record.
+    assertEqual(inputSizeOf((options) => callFunction(program, add, undefined, options)), 4);
+    // A type name among props is a type name: the record and the title.
+    assertEqual(measureInputSize({ $type: "Card", title: "Home" }), 2);
+    assertEqual(inputSizeOf((options) => initializeComponent(program, "Card", { $type: "Card", title: "Home" }, options)), 2);
+    assertInputRefused(() => initializeComponent(program, "Card", { $type: "Card", title: "Home" }, { maxInputSize: 1 }), 1);
+    // An element of the positional arguments that is undefined, or a hole, is the empty value.
+    assertEqual(inputSizeOf((options) => evaluateFunction(program, "add", [undefined, 2], options)), 2);
+    // eslint-disable-next-line no-sparse-arrays
+    assertEqual(inputSizeOf((options) => evaluateFunction(program, "add", [, 2], options)), 2);
+    assertEqual(inputSizeOf((options) => evaluateFunction(program, "add", [1], options)), 1);
+    console.log("ok - every function measures what the host passes it, at the sizes the Rust runtime measures");
+
+    // Oversized input is reported before any other fault of the call.
+    {
+      const large = ints(20000);
+      const limited = { maxInputSize: 1000 };
+      assertInputRefused(() => evaluateFunction(program, "noSuchFunction", [large], limited), 1000);
+      assertEqual(runtimeFailure(() => evaluateFunction(program, "noSuchFunction", [ints(10)], limited)).diagnostics[0].code, "nx-ir-missing-entrypoint");
+      assertInputRefused(() => callFunction(program, 1, { a: large }, limited), 1000);
+      assertInputRefused(() => normalizeComponentState(program, "NoSuchComponent", { a: large }, limited), 1000);
+      // Props of the wrong type beside a state larger than the limit.
+      assertInputRefused(() => evaluateComponent(program, "Card", { title: 5 }, { data: large }, limited), 1000);
+      assertEqual(runtimeFailure(() => evaluateComponent(program, "Card", { title: 5 }, {}, limited)).diagnostics[0].code, "nx-ir-boundary-type");
+      assertInputRefused(() => initializeComponent(program, "Card", { title: 5 }, { ...limited, state: { data: large } }), 1000);
+      // Props, content, and a patch.
+      assertInputRefused(() => initializeComponent(program, "Card", { title: "t", body: large }, limited), 1000);
+      assertInputRefused(() => constructComponentDescriptor(program, "Card", {}, [large], limited), 1000);
+      assertInputRefused(() => applyComponentStatePatch(program, "Counter", {}, { data: large }, limited), 1000);
+      // An unlinked module, which no evaluation runs, is still told about its input first.
+      assertInputRefused(() => evaluateFunction(program.entry.module, "ints", [large], limited), 1000);
+    }
+    console.log("ok - oversized input is reported before any other fault of the call");
+
+    // A batch is measured whole before any of it runs: a first entry that would run, and exhaust
+    // a budget of nothing at its first node, and a second that is too large.
+    {
+      const usage = {};
+      assertInputRefused(
+        () => dispatchComponentActions(program, counter, [tap("h1-1"), { data: ints(20000) }], { maxInputSize: 100, maxOperations: 0, usage }),
+        100,
+      );
+      assertEqual(usage, { operations: 0 });
+      // The instance given is untouched, and dispatches a batch the limit covers.
+      assertEqual(dispatchComponentActions(program, counter, [tap("h1-1")], { maxInputSize: 100 }).state.count, 1);
+    }
+    console.log("ok - a batch is measured whole before any of it runs, and a refused dispatch leaves the instance usable");
+
+    // An instance is not input: the first button of `Keeper` stores 50,000 values in its state,
+    // and a batch of one small entry against that instance is three, whatever the instance holds.
+    // Nor is the parent instance a child is initialized against.
+    {
+      const keeper = initializeComponent(program, "Keeper").instance;
+      const full = dispatchComponentActions(program, keeper, [tap("h1-1")]);
+      assertEqual(full.state.data.content.length, 50000);
+      assertInputSize(3, (options) => dispatchComponentActions(program, full.instance, [tap("h2-2")], options));
+      dispatchComponentActions(program, full.instance, [tap("h2-2")], { maxInputSize: 100 });
+      assertInputSize(1, (options) => initializeComponent(program, "Card", {}, { ...options, parent: full.instance }));
+    }
+    console.log("ok - an instance is not measured");
+
+    // The walk keeps its own stack and takes every reference as a new value, so a value that
+    // holds itself and one that nests deeply are refused by the limit and not by the engine.
+    {
+      const itself = { name: "loop" };
+      itself.self = itself;
+      assertInputRefused(() => pass(itself)({ maxInputSize: 1000 }), 1000);
+      let deep = 1;
+      for (let level = 0; level < 100000; level += 1) {
+        deep = [deep];
+      }
+      assertInputRefused(() => pass(deep)({ maxInputSize: 1000 }), 1000);
+      assertEqual(measureInputSize(deep), 100001);
+
+      // It stops at the limit: of a million items under a limit of ten, eleven are read.
+      let read = 0;
+      const counted = new Proxy(ints(1000000), {
+        get(target, key, receiver) {
+          if (typeof key === "string" && /^\d+$/.test(key)) {
+            read += 1;
+          }
+          return Reflect.get(target, key, receiver);
+        },
+      });
+      assertInputRefused(() => pass(counted)({ maxInputSize: 10 }), 10);
+      if (read > 12) {
+        throw new Error(`Refusing a million items under a limit of ten read ${read} of them`);
+      }
+
+      // A value that is no canonical value is one value and is not entered: a `Date`, a `Map`, a
+      // function, a big integer, an instance of a class, and a handler the runtime made, which
+      // holds the linked program.
+      class Held {
+        constructor() {
+          this.text = "t".repeat(megabyte);
+        }
+      }
+      const handler = counter.handlers.get("h1-1");
+      assertEqual(handler.$nxKind, "actionHandler");
+      for (const value of [new Date(), new Map([[1, "t".repeat(megabyte)]]), () => 1, 10n, new Held(), handler, undefined, Symbol("s")]) {
+        assertEqual(measureInputSize(value), 1);
+        assertEqual(measureInputSize([value, value]), 3);
+      }
+      // One object of two million names is refused for its size after its names are listed once,
+      // which is the one cost the limit does not bound: 440 to 670 ms in Node 24 on the laptop
+      // this was written on, against under a millisecond for a list as long.
+      const wideObject = {};
+      for (let key = 0; key < 2000000; key += 1) {
+        wideObject[`k${key}`] = key;
+      }
+      let listed = 0;
+      const listing = new Proxy(wideObject, {
+        ownKeys(target) {
+          listed += 1;
+          return Reflect.ownKeys(target);
+        },
+      });
+      assertInputRefused(() => pass(listing)({ maxInputSize: 1000 }), 1000);
+      assertEqual(listed, 1);
+
+      // That listing is once in a call, however objects are nested: an object's members are
+      // counted against the limit when its names are listed, so a wide object that holds itself,
+      // or a chain of wide objects, is refused at the listing that cannot fit and is not listed
+      // once for every value the limit allows. `names` counts every name the walk was given.
+      let names = 0;
+      const counting = (target) =>
+        new Proxy(target, {
+          ownKeys(inner) {
+            const keys = Reflect.ownKeys(inner);
+            listed += 1;
+            names += keys.length;
+            return keys;
+          },
+        });
+      const wideAndItself = (width, typed) => {
+        const target = typed ? { $type: "T", self: undefined } : { self: undefined };
+        for (let key = 0; key < width; key += 1) {
+          target[`k${key}`] = key;
+        }
+        const object = counting(target);
+        target.self = object;
+        return object;
+      };
+      for (const [width, typed, listings] of [[100000, false, 1], [400, false, 3], [1, false, 1000], [1, true, 500]]) {
+        listed = 0;
+        names = 0;
+        const object = wideAndItself(width, typed);
+        assertInputRefused(() => pass(object)({ maxInputSize: 1000 }), 1000);
+        if (!(measureInputSize(object, 1000) > 1000)) {
+          throw new Error("A value that holds itself is larger than any limit");
+        }
+        // Two walks, each within the bound: twice the limit, and the one listing that is refused.
+        // An object of 100,000 names is refused at its first listing; one of 400 is entered twice
+        // and refused at the third; one of a single name beside itself is entered once for each
+        // unit of the limit, two names at a time; and the same with a type name, which nothing
+        // is reserved for, half as often and three names at a time.
+        assertEqual(listed, 2 * listings);
+        if (names > 2 * (2 * 1000 + width + 2)) {
+          throw new Error(`Refusing an object of ${width} names that holds itself listed ${names} names`);
+        }
+      }
+      // A chain of 300 objects, each 20,000 names wide and holding the next under its first name.
+      listed = 0;
+      names = 0;
+      let chain = 1;
+      for (let link = 0; link < 300; link += 1) {
+        const target = { next: chain };
+        for (let key = 0; key < 20000; key += 1) {
+          target[`k${key}`] = key;
+        }
+        chain = counting(target);
+      }
+      assertInputRefused(() => pass(chain)({ maxInputSize: 100 }), 100);
+      assertEqual([listed, names], [1, 20001]);
+      // And objects the limit has room for are measured to the end, at the size they have.
+      listed = 0;
+      const nested = counting({ a: counting({ b: counting({ c: 1, d: [counting({ e: "x" })] }) }) });
+      assertEqual(measureInputSize(nested, 7), 7);
+      assertEqual(measureInputSize(nested), 7);
+      assertEqual(measureInputSize(nested, 6) > 6, true);
+      assertInputSize(7, pass(nested));
+    }
+    console.log("ok - a value that holds itself, nests deeply or is very long is refused by the limit, and what is no canonical value is one");
+
+    // With no limit nothing is measured: a value is read exactly as often as the evaluation reads
+    // it, and once more when the input is measured. And a limit the input fits costs no operations.
+    {
+      let reads = 0;
+      const counting = {
+        get n() {
+          reads += 1;
+          return 1;
+        },
+      };
+      const readsUnder = (options) => {
+        reads = 0;
+        evaluateFunction(program, "pass", [counting], options);
+        return reads;
+      };
+      const unmeasured = readsUnder({});
+      assertEqual(readsUnder({ usage: {} }), unmeasured);
+      assertEqual(readsUnder({ maxInputSize: 100 }), unmeasured + 1);
+      const args = [ints(1000)];
+      const unlimited = cost((options) => evaluateFunction(program, "ints", args, options));
+      assertEqual(cost((options) => evaluateFunction(program, "ints", args, { ...options, maxInputSize: 1001 })), unlimited);
+      // A budget of nothing does not keep the input from being measured in full.
+      const usage = {};
+      assertEqual(limitOf(() => evaluateFunction(program, "ints", args, { maxInputSize: 1001, maxOperations: 0, usage })), { name: "maxOperations", value: 0 });
+      assertEqual(usage, { operations: 0, inputSize: 1001 });
+    }
+    console.log("ok - an absent limit measures nothing, and a limit costs no operations");
+
+    // The usage report.
+    {
+      // A call that succeeds reports its count, the least budget it succeeds under.
+      const usage = {};
+      evaluateFunction(program, "squares", [], { maxOperations: 100000, usage });
+      assertEqual(usage, { operations: 29 });
+      // One that fails for its budget reports what it used, which is no more than the budget.
+      assertEqual(limitOf(() => evaluateFunction(program, "squares", [], { maxOperations: 10, usage })), { name: "maxOperations", value: 10 });
+      if (!(usage.operations <= 10)) {
+        throw new Error(`A failed call should report no more than its budget, got ${usage.operations}`);
+      }
+      // A charge the budget refused is not among them: `join` of 2,000 code units checks its two
+      // arguments and evaluates its node and two slots, which is five, and its sixth charge is 31
+      // for the length the concatenation would build.
+      assertEqual(limitOf(() => evaluateFunction(program, "join", ["a".repeat(1000), "b".repeat(1000)], { maxOperations: 10, usage })), { name: "maxOperations", value: 10 });
+      assertEqual(usage, { operations: 5 });
+      // A failure that is no limit's reports what ran before it.
+      assertEqual(runtimeFailure(() => evaluateFunction(program, "ratio", [1], { maxOperations: 10, usage })).diagnostics[0].code, "nx-ir-division-by-zero");
+      assertEqual(usage, { operations: 4 });
+
+      // The input size is reported when it is measured, and a report does not carry over.
+      const args = [ints(1000)];
+      evaluateFunction(program, "ints", args, { maxInputSize: 5000, maxOperations: 100000, usage });
+      assertEqual(usage, { operations: 2002, inputSize: 1001 });
+      evaluateFunction(program, "ints", args, { maxInputSize: 5000, usage });
+      assertEqual(usage, { inputSize: 1001 });
+      evaluateFunction(program, "ints", args, { usage });
+      assertEqual(usage, {});
+      if ("operations" in usage || "inputSize" in usage) {
+        throw new Error("A report should not carry over to a call with no budget and no limit");
+      }
+      // Nor to a call that is refused for another of its options before anything runs.
+      for (const refused of [{ maxOperations: Number.NaN }, { maxInputSize: -1 }]) {
+        evaluateFunction(program, "ints", args, { maxInputSize: 5000, maxOperations: 100000, usage });
+        assertEqual(usage, { operations: 2002, inputSize: 1001 });
+        assertEqual(runtimeFailure(() => evaluateFunction(program, "ints", args, { ...refused, usage })).diagnostics[0].code, "nx-ir-options");
+        assertEqual(usage, {});
+      }
+
+      // A dispatch reports one number for the batch: the render and the state written are paid
+      // once, and each handler once for each entry.
+      const dispatch = (entries) => (options) => dispatchComponentActions(program, counter, Array.from({ length: entries }, () => tap("h1-1")), options);
+      const [none, one, three] = [cost(dispatch(0)), cost(dispatch(1)), cost(dispatch(3))];
+      assertEqual(three - none, 3 * (one - none));
+      dispatch(3)({ maxOperations: 100000, maxInputSize: 100, usage });
+      assertEqual(usage, { operations: three, inputSize: 9 });
+
+      // A sink the runtime cannot write to is refused before anything runs: a division by zero
+      // would mean the function ran.
+      const throwing = new Proxy({}, {
+        set() {
+          throw new Error("deliberate");
+        },
+      });
+      for (const sink of [Object.freeze({}), Object.preventExtensions({}), Object.seal({}), 5, "usage", null, throwing]) {
+        const diagnostic = runtimeFailure(() => evaluateFunction(program, "ratio", [1], { usage: sink })).diagnostics[0];
+        assertEqual(diagnostic.code, "nx-ir-options");
+        if (!diagnostic.message.includes("usage")) {
+          throw new Error(`Unexpected diagnostic for an unwritable usage: ${JSON.stringify(diagnostic)}`);
+        }
+      }
+      // The object is not measured as input, whatever it holds.
+      const heavy = { extra: ints(100000) };
+      evaluateFunction(program, "add", [1, 2], { maxInputSize: 2, usage: heavy });
+      assertEqual(heavy.inputSize, 2);
+
+      // Writing the report never replaces the outcome: a sink whose writes begin to throw once the
+      // call has started leaves a failing call its diagnostic and a returning call its value.
+      const failingLater = () => {
+        let writes = 0;
+        return new Proxy({}, {
+          set(target, key, value) {
+            writes += 1;
+            if (writes > 2) {
+              throw new Error("deliberate");
+            }
+            target[key] = value;
+            return true;
+          },
+        });
+      };
+      assertEqual(
+        runtimeFailure(() => evaluateFunction(program, "ratio", [1], { maxOperations: 100, usage: failingLater() })).diagnostics[0].code,
+        "nx-ir-division-by-zero",
+      );
+      assertEqual(evaluateFunction(program, "add", [1, 2], { maxOperations: 100, usage: failingLater() }), 3);
+    }
+    console.log("ok - a call reports what it used, to a sink that is validated first and can never replace the outcome");
+
+    // The exported measure: a value measured alone has the size it has in a call.
+    {
+      const values = [
+        null,
+        ints(1000),
+        "é".repeat(6400),
+        { ["k".repeat(megabyte)]: 1 },
+        wide,
+        { a: [null, [], {}], b: { $type: "T", c: "d" } },
+      ];
+      for (const value of values) {
+        const alone = measureInputSize(value);
+        assertEqual(alone, inputSizeOf(pass(value)));
+        if (alone > 1 && !(measureInputSize(value, alone - 1) > alone - 1)) {
+          throw new Error("A limit under the size should be passed");
+        }
+        assertEqual(measureInputSize(value, alone), alone);
+      }
+      // A list of arguments measured as one value is one more than its entries add to a call.
+      assertEqual(measureInputSize(values), inputSizeOf((options) => evaluateFunction(program, "pass", values, options)) + 1);
+      // An object is measured as the one record props, a state and arguments by name are.
+      assertEqual(measureInputSize(props), 3);
+      assertEqual(measureInputSize({}), 1);
+      // Measuring stops at the limit: of a million integers under a limit of 1,000, 1,001 are read.
+      let read = 0;
+      const counted = new Proxy(ints(1000000), {
+        get(target, key, receiver) {
+          if (typeof key === "string" && /^\d+$/.test(key)) {
+            read += 1;
+          }
+          return Reflect.get(target, key, receiver);
+        },
+      });
+      assertEqual(measureInputSize(counted, 1000), 1001);
+      assertEqual(read, 1000);
+      for (const limit of [Number.NaN, -1, 1.5]) {
+        assertEqual(runtimeFailure(() => measureInputSize(1, limit)).diagnostics[0].code, "nx-ir-options");
+      }
+    }
+    console.log("ok - a value measured alone has the size it has in a call, and measuring stops at the limit");
   },
 );

@@ -702,10 +702,10 @@ export interface NxIrDiagnostic {
 }
 
 /**
- * A limit an evaluation reached. `name` is `maxOperations`, `maxCallDepth` or `maxRangeLength` for
- * the limits a host sets, `maxExpressionNesting` for the fixed bound on nesting, or `engine` for a
- * limit of the JavaScript engine, which has no value and depends on where the runtime runs. The
- * Rust runtime reports the same names for the limits the two share.
+ * A limit an evaluation reached. `name` is `maxOperations`, `maxInputSize`, `maxCallDepth` or
+ * `maxRangeLength` for the limits a host sets, `maxExpressionNesting` for the fixed bound on
+ * nesting, or `engine` for a limit of the JavaScript engine, which has no value and depends on
+ * where the runtime runs. The Rust runtime reports the same names for the limits the two share.
  */
 export interface NxIrLimit {
   readonly name: string;
@@ -982,6 +982,45 @@ export interface NxRuntimeOptions {
    * `nx-ir-options`.</para>
    */
   readonly maxOperations?: number;
+  /**
+   * The largest input one call may be given, measured as `docs/nx-ir-format.md` defines the input
+   * size of a call and as {@link measureInputSize} measures one value: one for each value, and one
+   * more for every 64 UTF-16 code units of a string, a type name and a field name. Absent, the
+   * input is unlimited and nothing is measured.
+   *
+   * <para>It covers every value the host passes to one call: arguments, props, content, a state,
+   * the entries of a batch and a state patch. An instance is not input. A call whose input is
+   * larger fails with `nx-ir-resource-limit` whose `limit.name` is `maxInputSize`, before the
+   * program is looked at, and measuring stops as soon as the size passes the limit. The limit is
+   * separate from `maxOperations`: measuring charges no operation. A value that is not a
+   * non-negative safe integer is refused with `nx-ir-options`.</para>
+   */
+  readonly maxInputSize?: number;
+  /**
+   * An object of the host's that the runtime reports what the call used to. The runtime removes
+   * both members when the call begins and sets them when it ends, whether it returns or throws.
+   * An object the runtime cannot write to is refused with `nx-ir-options` before anything runs.
+   *
+   * <para>Calls that overlap and share one object leave the numbers of whichever ended last, so
+   * give each call its own.</para>
+   */
+  readonly usage?: NxRuntimeUsage;
+}
+
+/** What one call of an evaluation function used, as {@link NxRuntimeOptions.usage} reports it. */
+export interface NxRuntimeUsage {
+  /**
+   * The operations the call used, when `maxOperations` was set; absent otherwise, since with no
+   * budget the runtime counts nothing. For a call that returned this is its operation count, the
+   * least budget it succeeds under. For one that threw it is what was charged before the failure:
+   * a charge the budget refused is not among them, so the number is never more than the budget.
+   */
+  operations?: number;
+  /**
+   * The input size of the call, when `maxInputSize` was set and the input was within it; absent
+   * otherwise, since input that is refused is not measured to its end.
+   */
+  inputSize?: number;
 }
 
 /** The default of {@link NxRuntimeOptions.maxCallDepth}. */
@@ -1966,7 +2005,7 @@ export function evaluateFunction(
   args: readonly NxCanonicalValue[] = [],
   options: NxRuntimeOptions = {},
 ): NxCanonicalValue {
-  return evaluate(options, (evaluation) => {
+  return evaluate(options, (input) => measureValues(input, args), (evaluation) => {
     const linkedProgram = programOf(program);
     const declaration = linkedProgram.functionEntrypoints.get(name);
     if (declaration === undefined || declaration.kind.tag !== "function") {
@@ -1984,7 +2023,11 @@ export function constructComponentDescriptor(
   content: readonly NxCanonicalValue[] = [],
   options: NxRuntimeOptions = {},
 ): NxCanonicalValue {
-  return evaluate(options, (evaluation) => {
+  const measured = (input: InputMeasure): void => {
+    measureRecord(input, props);
+    measureValues(input, content);
+  };
+  return evaluate(options, measured, (evaluation) => {
     const linkedProgram = programOf(program);
     const { declaration, component } = componentDeclaration(linkedProgram, name);
     const { fields: input, handlers } = splitHandlerProperties(linkedProgram.entry, declaration, props, `${name} props`);
@@ -2018,7 +2061,14 @@ export function initializeComponent(
   props: Record<string, NxCanonicalValue> = {},
   options: ComponentInitOptions = {},
 ): ComponentInitResult {
-  return evaluate(options, (evaluation) => {
+  // The props, and the state when the host passes one. The parent instance is not input.
+  const measured = (input: InputMeasure): void => {
+    measureRecord(input, props);
+    if (options.state !== undefined) {
+      measureRecord(input, options.state);
+    }
+  };
+  return evaluate(options, measured, (evaluation) => {
     const linkedProgram = programOf(program);
     const { declaration, component } = componentDeclaration(linkedProgram, name);
     if (component.isAbstract || component.body < 0) {
@@ -2067,7 +2117,11 @@ export function evaluateComponent(
   state: Record<string, NxCanonicalValue>,
   options: NxRuntimeOptions = {},
 ): ComponentEvaluateResult {
-  return evaluate(options, (evaluation) => {
+  const measured = (input: InputMeasure): void => {
+    measureRecord(input, props);
+    measureRecord(input, state);
+  };
+  return evaluate(options, measured, (evaluation) => {
     const linkedProgram = programOf(program);
     const { declaration, component } = componentDeclaration(linkedProgram, name);
     if (component.isAbstract || component.body < 0) {
@@ -2112,7 +2166,12 @@ export function dispatchComponentActions(
   batch: readonly NxCanonicalValue[],
   options: NxRuntimeOptions = {},
 ): ComponentDispatchResult {
-  return evaluate(options, (evaluation) => dispatchBatch(programOf(program), instance, batch, evaluation));
+  // The entries of the batch, all of them before any runs. The instance is not input.
+  return evaluate(
+    options,
+    (input) => measureValues(input, batch),
+    (evaluation) => dispatchBatch(programOf(program), instance, batch, evaluation),
+  );
 }
 
 function dispatchBatch(
@@ -2223,7 +2282,7 @@ export function normalizeComponentState(
   state: Record<string, NxCanonicalValue>,
   options: NxRuntimeOptions = {},
 ): Record<string, NxCanonicalValue> {
-  return evaluate(options, (evaluation) => {
+  return evaluate(options, (input) => measureRecord(input, state), (evaluation) => {
     const linkedProgram = programOf(program);
     const { declaration, component } = componentDeclaration(linkedProgram, name);
     const normalized = normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.state, state, propsFrame(component), `${name} state`, true, evaluation);
@@ -2256,7 +2315,11 @@ export function applyComponentStatePatch(
   patch: Record<string, NxCanonicalValue>,
   options: NxRuntimeOptions = {},
 ): Record<string, NxCanonicalValue> {
-  return evaluate(options, (evaluation) => {
+  const measured = (input: InputMeasure): void => {
+    measureRecord(input, currentState);
+    measureRecord(input, patch);
+  };
+  return evaluate(options, measured, (evaluation) => {
     const linkedProgram = programOf(program);
     const { declaration, component } = componentDeclaration(linkedProgram, name);
     const patched = patchComponentState(linkedProgram, linkedProgram.entry, declaration, component, currentState, patch, evaluation);
@@ -2341,15 +2404,25 @@ interface Evaluation {
 
 /**
  * Runs one call of an exported evaluation function under the limits `options` sets, with the whole
- * budget. A budget that is not a count is refused before anything runs, and a `RangeError` the
- * engine raises along the way — a call stack, a string or an array past what the engine holds — is
- * reported as `nx-ir-resource-limit` naming the `engine` limit. Every other exception propagates:
- * it is a fault of the runtime, not of the program.
+ * budget. An option that is not what it must be is refused before anything runs. Then the host's
+ * input is measured, when it set a limit on it: `input` adds each value the call was passed to the
+ * measure it is given, and a call whose input is over the limit is refused before `run` looks at
+ * the program. A `RangeError` the engine raises along the way — a call stack, a string or an array
+ * past what the engine holds — is reported as `nx-ir-resource-limit` naming the `engine` limit.
+ * Every other exception propagates: it is a fault of the runtime, not of the program. However the
+ * call ends, what it used is written to the `usage` object the host gave, if it gave one.
  */
-function evaluate<T>(options: NxRuntimeOptions, run: (evaluation: Evaluation) => T): T {
+function evaluate<T>(options: NxRuntimeOptions, input: (measure: InputMeasure) => void, run: (evaluation: Evaluation) => T): T {
+  // The report is cleared before anything else can refuse the call, so that an object the host
+  // gave to an earlier call never shows that call's numbers for this one.
+  const usage = clearedUsage(options.usage);
   const maxOperations = options.maxOperations;
   if (maxOperations !== undefined && !(Number.isSafeInteger(maxOperations) && maxOperations >= 0)) {
     fail("nx-ir-options", `The maxOperations option must be a non-negative safe integer, got ${String(maxOperations)}.`);
+  }
+  const maxInputSize = options.maxInputSize;
+  if (maxInputSize !== undefined && !(Number.isSafeInteger(maxInputSize) && maxInputSize >= 0)) {
+    fail("nx-ir-options", `The maxInputSize option must be a non-negative safe integer, got ${String(maxInputSize)}.`);
   }
   const evaluation: Evaluation = {
     maxCallDepth: options.maxCallDepth ?? NX_DEFAULT_MAX_CALL_DEPTH,
@@ -2358,7 +2431,16 @@ function evaluate<T>(options: NxRuntimeOptions, run: (evaluation: Evaluation) =>
     remaining: maxOperations ?? Infinity,
     nesting: 0,
   };
+  let inputSize: number | undefined;
   try {
+    if (maxInputSize !== undefined) {
+      const measure: InputMeasure = { size: 0, limit: maxInputSize };
+      input(measure);
+      if (measure.size > maxInputSize) {
+        failLimit({ name: "maxInputSize", value: maxInputSize }, `The call's input is larger than its limit of ${maxInputSize}.`);
+      }
+      inputSize = measure.size;
+    }
     return run(evaluation);
   } catch (error) {
     if (error instanceof RangeError) {
@@ -2372,7 +2454,217 @@ function evaluate<T>(options: NxRuntimeOptions, run: (evaluation: Evaluation) =>
       ]);
     }
     throw error;
+  } finally {
+    if (usage !== undefined) {
+      // The object is the host's, and a write to it can run the host's code. Whatever that does,
+      // the call's own outcome stands.
+      try {
+        if (maxOperations !== undefined) {
+          usage.operations = maxOperations - evaluation.remaining;
+        }
+        if (inputSize !== undefined) {
+          usage.inputSize = inputSize;
+        }
+      } catch {
+        // Dropped: see above.
+      }
+    }
   }
+}
+
+/**
+ * The `usage` object of a call's options with both of its members removed, ready for the call's
+ * report, or `undefined` when the host gave none. The object must be one the runtime can write to,
+ * and writing is the test: both members are set and then removed, and a value that is no object,
+ * or on which either step throws, is refused. Removing a member a frozen object does not have
+ * succeeds, so removing alone would not find one.
+ */
+function clearedUsage(usage: unknown): NxRuntimeUsage | undefined {
+  if (usage === undefined) {
+    return undefined;
+  }
+  if (typeof usage !== "object" || usage === null) {
+    fail("nx-ir-options", `The usage option must be an object the runtime can write to, got ${usage === null ? "null" : typeof usage}.`);
+  }
+  const sink = usage as NxRuntimeUsage;
+  try {
+    sink.operations = 0;
+    sink.inputSize = 0;
+    delete sink.operations;
+    delete sink.inputSize;
+  } catch {
+    fail("nx-ir-options", "The usage option must be an object the runtime can write to: its members could not be set and removed.");
+  }
+  return sink;
+}
+
+/** The running size of a call's input against the limit it must stay within. */
+interface InputMeasure {
+  size: number;
+  readonly limit: number;
+}
+
+/** A list or an object the measuring walk has entered, and how far it has read. */
+interface PendingInput {
+  readonly items: readonly unknown[] | undefined;
+  readonly object: Readonly<Record<string, unknown>> | undefined;
+  readonly keys: readonly string[] | undefined;
+  index: number;
+  /** How many of an object's members are still counted among the walk's reserved ones. */
+  reserved: number;
+}
+
+/**
+ * Whether `value` is an object the measure enters: one whose prototype is `Object.prototype`, of
+ * this realm or another, or nothing. A `Date`, a `Map`, an instance of a class and a function
+ * value are not, and neither is a handler the runtime made, which holds the linked program.
+ */
+function isPlainInput(value: unknown): value is Readonly<Record<string, unknown>> {
+  if (typeof value !== "object" || value === null || madeHandlers.has(value)) {
+    return false;
+  }
+  const prototype: unknown = Object.getPrototypeOf(value);
+  return prototype === null || Object.getPrototypeOf(prototype) === null;
+}
+
+/**
+ * Adds the size of one host value to `measure`, as `docs/nx-ir-format.md` defines the input size
+ * of a call: one for the value, a list, an empty one and a `null` included, one more for every 64
+ * UTF-16 code units of a string, of a type name and of each field name, and then what it holds.
+ * A `$type` member that holds a string is the type name and counts its length alone. A value that
+ * is no canonical value is one value and is not entered.
+ *
+ * <para>The walk keeps its own stack, so no nesting reaches the engine's, and it takes every
+ * reference it meets as a new value, so an object that holds itself is counted until the limit is
+ * passed. It stops as soon as the size passes the limit. A list is read by index, one item at a
+ * time. An object's names have to be listed when it is entered, all at once, so the walk counts
+ * them then: every member costs at least one, except a `$type` that holds a string, so an object
+ * with more members than the limit has room for is refused when its names are listed, and the
+ * members of an object that is entered are reserved against the limit until they are read. Each
+ * object entered is one of the size and its members but one are reserved, so the names listed in
+ * one call are no more than twice the limit, and those of the one object the limit is passed in:
+ * that one listing is the only cost the limit does not bound, however an object is nested in
+ * itself or in others.</para>
+ */
+function measureValue(measure: InputMeasure, value: unknown): void {
+  if (measure.size > measure.limit) {
+    return;
+  }
+  const pending: PendingInput[] = [];
+  // The members of the objects on the stack that are not read yet, less one for each object,
+  // whose `$type` may cost nothing: what the size will grow by at the least.
+  let reserved = 0;
+  let next = value;
+  for (;;) {
+    measure.size += 1;
+    if (typeof next === "string") {
+      measure.size += lengthCost(next);
+    } else if (Array.isArray(next)) {
+      pending.push({ items: next, object: undefined, keys: undefined, index: 0, reserved: 0 });
+    } else if (isPlainInput(next)) {
+      const keys = Object.keys(next);
+      const least = Math.max(keys.length - 1, 0);
+      if (least > measure.limit - measure.size - reserved) {
+        // The input is larger than the limit whatever the members hold, so none is read.
+        measure.size += reserved + least;
+        return;
+      }
+      reserved += least;
+      pending.push({ items: undefined, object: next, keys, index: 0, reserved: least });
+    }
+    if (measure.size > measure.limit) {
+      return;
+    }
+    // The next value to count: the next item or field of the innermost list or object that has one.
+    for (;;) {
+      const top = pending[pending.length - 1];
+      if (top === undefined) {
+        return;
+      }
+      if (top.items !== undefined) {
+        if (top.index < top.items.length) {
+          next = top.items[top.index++];
+          break;
+        }
+        pending.pop();
+        continue;
+      }
+      const keys = top.keys!;
+      if (top.index >= keys.length) {
+        pending.pop();
+        continue;
+      }
+      const key = keys[top.index++]!;
+      const held = top.object![key];
+      if (key === "$type" && typeof held === "string") {
+        // The type name is the one member nothing was reserved for.
+        measure.size += lengthCost(held);
+        if (measure.size > measure.limit) {
+          return;
+        }
+        continue;
+      }
+      if (top.reserved > 0) {
+        top.reserved -= 1;
+        reserved -= 1;
+      }
+      measure.size += lengthCost(key);
+      if (measure.size > measure.limit) {
+        return;
+      }
+      next = held;
+      break;
+    }
+  }
+}
+
+/**
+ * Adds each of `values` to `measure`: the positional arguments of a call, its content, or the
+ * entries of a batch. The list itself is not a value the host supplied and is not counted. An
+ * element that is `undefined`, or a hole, is the empty value and counts one.
+ */
+function measureValues(measure: InputMeasure, values: readonly unknown[]): void {
+  if (!Array.isArray(values)) {
+    measureValue(measure, values);
+    return;
+  }
+  for (let index = 0; index < values.length && measure.size <= measure.limit; index += 1) {
+    measureValue(measure, values[index]);
+  }
+}
+
+/**
+ * Adds a map of named values to `measure` as the one record it is passed as: props, a state, a
+ * patch or arguments by name. One the host left out is an empty record, which is one.
+ */
+function measureRecord(measure: InputMeasure, fields: unknown): void {
+  measureValue(measure, fields === undefined ? {} : fields);
+}
+
+/**
+ * The size of one value as `docs/nx-ir-format.md` defines the input size of a call and as
+ * {@link NxRuntimeOptions.maxInputSize} measures it. It evaluates nothing and needs no program.
+ *
+ * <para>With a `limit`, measuring stops as soon as the size passes it and the result is some
+ * number greater than the limit: the value is too large, and how large is not found out. A host
+ * uses this to hold one part of what it passes to a number of its own before it calls.</para>
+ *
+ * <para>Pass a limit for any value that did not come from JSON. The walk takes every reference
+ * as a new value, so a value that holds itself has no finite size, and measuring one with no
+ * limit does not return: it ends when the engine runs out of memory.</para>
+ *
+ * <para>An object is measured as one record, which is how the props, the state, the patch and the
+ * arguments by name of a call are measured. An array is measured as the list it is, which is one
+ * more than its items add to a call that takes them as its positional arguments, its content or
+ * its batch, since a call counts the entries and not the list.</para>
+ */
+export function measureInputSize(value: unknown, limit?: number): number {
+  if (limit !== undefined && !(Number.isSafeInteger(limit) && limit >= 0)) {
+    fail("nx-ir-options", `The limit of measureInputSize must be a non-negative safe integer, got ${String(limit)}.`);
+  }
+  const measure: InputMeasure = { size: 0, limit: limit ?? Infinity };
+  measureValue(measure, value);
+  return measure.size;
 }
 
 /**
@@ -2382,7 +2674,7 @@ function evaluate<T>(options: NxRuntimeOptions, run: (evaluation: Evaluation) =>
  */
 function charge(context: EvalContext, nodeIndex: number | undefined, amount: number): void {
   if ((context.evaluation.remaining -= amount) < 0) {
-    budgetExhausted(context, nodeIndex);
+    budgetExhausted(context, nodeIndex, amount);
   }
 }
 
@@ -2396,7 +2688,13 @@ function declarationContext(
   return { program, linked, declaration, frame: [], evaluation, depth: 0 };
 }
 
-function budgetExhausted(context: EvalContext, nodeIndex: number | undefined): never {
+/**
+ * Fails an evaluation whose budget did not cover a charge of `amount`. The charge was subtracted
+ * before it was tested and was not made, so it is put back: what is left is what the call had
+ * before the charge it was refused, which is what the usage report counts from.
+ */
+function budgetExhausted(context: EvalContext, nodeIndex: number | undefined, amount: number): never {
+  context.evaluation.remaining += amount;
   const budget = context.evaluation.maxOperations!;
   failLimit({ name: "maxOperations", value: budget }, `The evaluation exceeded its budget of ${budget} operations.`, context, nodeIndex);
 }
@@ -2702,7 +3000,7 @@ function propertiesAt(
 function evalNode(index: number, context: EvalContext): NxCanonicalValue {
   const evaluation = context.evaluation;
   if ((evaluation.remaining -= 1) < 0) {
-    budgetExhausted(context, index);
+    budgetExhausted(context, index, 1);
   }
   if (evaluation.nesting >= MAX_EXPRESSION_NESTING) {
     nestingExceeded(context, index);
@@ -3052,7 +3350,12 @@ export function callFunction(
   args: Record<string, NxCanonicalValue> = {},
   options: NxRuntimeOptions = {},
 ): NxCanonicalValue {
-  return evaluate(options, (evaluation) => {
+  // The function record, and the arguments by name as one record.
+  const measured = (input: InputMeasure): void => {
+    measureValue(input, value);
+    measureRecord(input, args);
+  };
+  return evaluate(options, measured, (evaluation) => {
     const linkedProgram = programOf(program);
     const record = asFunctionRecord(value);
     if (record === undefined) {

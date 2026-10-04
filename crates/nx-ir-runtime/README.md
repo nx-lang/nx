@@ -171,6 +171,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 | Limit | Default | Set by | Name in a diagnostic |
 | --- | --- | --- | --- |
 | Operations one call may cost | Unlimited | `RuntimeOptions::max_operations` | `maxOperations` |
+| Input one call may be given | Unlimited | `RuntimeOptions::max_input_size` | `maxInputSize` |
 | Call depth | 100 | `RuntimeOptions::max_call_depth` | `maxCallDepth` |
 | Integers one range may hold when a loop iterates it | 1,000,000 | `RuntimeOptions::max_range_length` | `maxRangeLength` |
 | Nested expressions, across every call of one evaluation | 1,000 | fixed | `maxExpressionNesting` |
@@ -213,11 +214,19 @@ fn run_tool(program: &Program, input: NxValue) -> Result<NxValue> {
 ```
 
 The rules are written so that every step that touches a value in proportion to its size is charged
-in proportion, and the time and the memory of a call are proportional to its count. That holds for
-everything this crate's tests and the conformance corpus cover, but it is a claim about every step
-of the runtime, and review has several times found a step that broke it, each time through a large
-or unusual value a host passed at `object`. Treat the budget as the first limit on code you did
-not write, and keep one of your own on time and memory as well. The same holds for a
+in proportion, and the time and the memory of a call are proportional to its count. It is a claim
+about every step of the runtime, and review has several times found a step that broke it, each
+time through a large or unusual value a host passed at `object`. Four things back it now: the
+input limit, which bounds what a step nobody has found can cost; a differential test that runs
+generated host values through this runtime and the TypeScript one and requires the same count,
+input size and failures; bounds on this runtime's allocations for every generated case; and a
+time report, which does not block a merge, of cases whose time grows faster than their count. What
+is still open is the list of known findings in `crates/nx-codegen/tests/cost/mod.rs`, and steps
+driven by a value a program builds, which only fixed probes exercise; `docs/nx-ir-format.md` has
+the details under *Validation against generated host values*. So treat the budget as the first
+limit on code you did not write, set `max_input_size` beside it to bound what you hand that code
+(see *The input limit* below), and keep a limit of your own on time and memory as well. The same
+holds for a
 value held in many places too: a record that names one value twice, forty levels deep, costs a few
 hundred operations to build and is 2^40 values to anything that walks it, so the type check, the
 equality and the conversion for the host that walk it are what pay. The one walk the runtime makes
@@ -229,6 +238,108 @@ differs, so two long lists that differ early are cheap to compare; two records a
 by field to the end under a budget, so that the cost does not depend on the order fields are held
 in. The result is the same either way. A budget failure made for a type check, or for the result
 written, names its declaration and has no span, since it belongs to no node.
+
+### The input limit
+
+`RuntimeOptions::max_input_size` bounds what the host hands one call. The *input size* is defined
+in `docs/nx-ir-format.md`, under *Input size*, and is measured the way a value written for the
+host is charged: one for each value, a list, an empty one and a `null` included, and one more for
+every 64 UTF-16 code units of a string, of a type name and of each field name. It covers every host
+value passed to a method that takes options: the arguments of `evaluate_function`; the function
+record and the arguments of `call_function`; the props and the content of
+`construct_component_descriptor`; the props of `initialize_component` and the state of its
+`ComponentInit`; the props and the state of `evaluate_component`; the batch of
+`dispatch_component_actions`; the state of `normalize_component_state`; and the state and the patch
+of `apply_component_state_patch`. A map of props, of state or of arguments by name is measured as
+one record. An instance is not input, and `restore_component_instance`, which takes no options,
+keeps the bounds it has.
+
+A call whose input is larger fails with `nx-ir-resource-limit` naming `maxInputSize`, before the
+program is looked at and before anything is converted, so it is reported ahead of any other fault
+of the call, a batch is measured whole before its first entry runs, and input that is refused is
+not copied. The diagnostic names no declaration. The measuring pass builds nothing, does not
+recurse and stops as soon as the size passes the limit; text far longer than the limit allows is
+refused from its byte length without being read. The input limit is applied before the nesting
+bound: input over the limit is reported for its size, and input within it that nests more than 256
+deep is still refused for its nesting. Unset, nothing is measured, and the limit charges nothing
+to the budget. The TypeScript runtime measures the same size, so the same input is refused under
+the same limit in both.
+
+Choose it together with the budget. Every step the runtime takes is meant to be charged in
+proportion to the values it touches, and the limit is there for one that is not and that nobody
+has found: with a budget `B` and a limit `C`, a step that does work in proportion to a host value
+for a fixed charge costs at most about `B × C` in one call. At a budget of 100,000 and a limit of
+1,000 that is about 10^8 values or 64-code-unit pieces of text, where without a limit it had no
+ceiling. What the limit does not bound is a step driven by a value the program builds itself,
+which is bounded by the budget squared, and the state an instance holds, which is bounded only
+when every call that wrote it had a budget. So keep the limit on time and memory as well.
+
+`input_size` measures one value as the limit does, without a call, and `record_input_size` a map
+of named values as the one record a call measures it as, so a host can hold one part of what it
+passes to a number of its own. With a limit each stops as soon as the size passes it and returns
+some number greater than the limit. A list measured as one value is one more than its entries add
+to a call that takes them as arguments, content or a batch.
+
+### What a call used
+
+Share a `Usage` with a call through `RuntimeOptions::usage` and the runtime reports what the call
+used: `operations()` when a budget is set, and `input_size()` when an input limit is set and the
+input was within it. The report is cleared when the call begins and filled when it ends, whether
+it succeeds or fails. For a call that succeeds the operations are its count, the least budget it
+succeeds under; for one that fails they are what was charged before the failure, never more than
+the budget.
+
+```rust
+use nx_ir_runtime::{Program, Result, RuntimeOptions, Usage};
+use nx_value::NxValue;
+use std::sync::Arc;
+
+fn run_tool(program: &Program, input: NxValue) -> Result<NxValue> {
+    let usage = Arc::new(Usage::new());
+    let options = RuntimeOptions {
+        max_operations: Some(100_000),
+        max_input_size: Some(1_000),
+        usage: Some(Arc::clone(&usage)),
+        ..RuntimeOptions::default()
+    };
+    let result = program.evaluate_function("tool", &[input], &options);
+    println!(
+        "tool used {:?} operations on an input of {:?}",
+        usage.operations(),
+        usage.input_size()
+    );
+    result
+}
+```
+
+Nothing is counted for the report alone: with no budget `operations()` is `None`, so a host that
+wants the count and no limit sets a budget it cannot reach. That is how to choose a budget from
+measurement, by running the programs you mean to allow and reading what they cost:
+
+```rust
+use nx_ir_runtime::{Program, Result, RuntimeOptions, Usage};
+use nx_value::NxValue;
+use std::sync::Arc;
+
+fn budget_for(program: &Program, representative_inputs: &[NxValue]) -> Result<u64> {
+    let usage = Arc::new(Usage::new());
+    let options = RuntimeOptions {
+        max_operations: Some(u64::MAX),
+        usage: Some(Arc::clone(&usage)),
+        ..RuntimeOptions::default()
+    };
+    let mut most = 0;
+    for input in representative_inputs {
+        program.evaluate_function("tool", std::slice::from_ref(input), &options)?;
+        most = most.max(usage.operations().unwrap_or(0));
+    }
+    // Headroom over the largest count measured.
+    Ok(most.saturating_mul(4))
+}
+```
+
+`RuntimeOptions` is `Clone` and no longer `Copy`, since it can hold the shared report. Calls that
+run at the same time and share one `Usage` overwrite each other; give each its own.
 
 ## Diagnostics
 
@@ -262,6 +373,9 @@ source file and never panics on an image, a host value or an instance.
 entrypoint and lifecycle, with and without debug sections), the damage runs (every truncation of
 every corpus image, and every cell of one image overwritten), the preparation and linking
 tests, and `tests/allocation.rs`, which counts the bytes a refused concatenation allocates to show
-that the budget is charged before a string is built. The tests that compile NX source, including
+that the budget is charged before a string is built, and the bytes refused input allocates to show
+that it is measured before it is copied. The tests that compile NX source, including
 the differential run against the interpreter, need the compiler and live in `nx-codegen`
-(`cargo test -p nx-codegen ir_runtime`).
+(`cargo test -p nx-codegen ir_runtime`). So do the cost tests, which run generated host values
+through this runtime and the TypeScript one and hold this runtime's allocations to its counts
+(`cargo test -p nx-codegen --test cost_differential` and `--test cost_allocation`).

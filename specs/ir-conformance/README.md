@@ -14,21 +14,34 @@ a program that declares a function type, passes functions as values and calls th
 that declares function reference types (`<function ... />: R`), binds functions of unlike
 signatures to them and passes, returns and compares such values, and
 one whose calls leave parameters out for the function to fill, including a default that reads a
-value private to the called function's module, and `evaluation-cost`, which has one entrypoint per
+value private to the called function's module, `evaluation-cost`, which has one entrypoint per
 rule of the evaluation cost model: what is evaluated, placed and concatenated, and what is checked
-against a type, compared and written for the host.
+against a type, compared and written for the host, and `host-values`, whose entrypoints are
+evaluated with arguments: the values a host passes, which no entrypoint without arguments can
+supply, with the input size of each.
 
 Each program is a directory:
 
 | Path | What it holds |
 | --- | --- |
 | `*.nx` | The workspace's modules; a module's identity is its path within the directory. |
-| `program.json` | The entry, the implicit imports, the version each module is built with, which modules to emit, the entrypoints to evaluate, and the lifecycles to drive. |
+| `program.json` | The entry, the implicit imports, the version each module is built with, which modules to emit, the entrypoints to evaluate, each with the arguments to pass it if it is a case, and the lifecycles to drive. |
 | `expected/<identity>.nxir` | The module's image with its debug section. `/` in an identity is written `__`. |
 | `expected/<identity>.stripped.nxir` | The same image without the debug section. |
 | `expected/<identity>.nxir.txt`, `.stripped.nxir.txt` | Each image as `nxlang ir explain` renders it, so a review reads text and a diff names what changed. The emitter's tests fail when a text is not the explanation of its image. |
-| `expected/results.json` | The canonical value of each entrypoint, keyed `identity::function`, as the interpreter evaluates it, and each lifecycle's record, keyed `identity::Component`. |
-| `expected/operations.json` | What each evaluation costs in operations, as `docs/nx-ir-format.md` (*Evaluation cost*) defines them, and, for a program that asks, where smaller budgets stop it. |
+| `expected/results.json` | The canonical value of each entrypoint, keyed `identity::function`, as the interpreter evaluates it; of each case, keyed `identity::function#case`, as the Rust IR runtime evaluates it; and each lifecycle's record, keyed `identity::Component`. |
+| `expected/operations.json` | What each evaluation costs in operations, as `docs/nx-ir-format.md` (*Evaluation cost*) defines them, and, for a program that asks, where smaller budgets stop it and how large the input of each case and lifecycle step is. |
+
+An entrypoint names a module and a function. It may also name `arguments`, a list of canonical
+values to pass by position, written as a host that read them from JSON holds them, together with
+`case`, a name: the two go together, and an entrypoint with one and not the other fails the tests.
+Such an entrypoint is a *case*. One function may have several cases, and a case's result, count,
+failures and input size are kept under `identity::function#case`; an entrypoint that is not a case
+keeps the key `identity::function`. The interpreter's source evaluation takes no arguments, so a
+case's expected result is recorded from the Rust IR runtime, as the operation counts are, and
+checked in the TypeScript runtime: that comparison is what a case is for. A case uses only
+arguments that every runtime accepts, spelled alike, and for which each gives one result, so a
+`null` inside a value at `object`, which the two runtimes return differently, is not in the corpus.
 
 A lifecycle names the module and component to initialize, optional `props`, and `batches`: an
 ordered list of dispatch batches, each a list of entries written as a host would send them, either
@@ -47,19 +60,31 @@ batch's count covering every handler it runs and the render after it. A program 
 count and one less than its count, each with the `declaration` and, from the image with its debug
 section, the `source` span of the diagnostic that budget produces. A failure with no `source` is a
 charge that belongs to no node: a check against a type, or a result written for the host. The counts come from the Rust
-runtime, found by doubling and bisecting the budget. A runtime that offers a budget checks every
-count `n` by evaluating under a budget of `n`, which must give the recorded result, and of `n - 1`,
-which must fail with `nx-ir-resource-limit` naming `maxOperations`; and it checks every failure by
-evaluating the debug image under its budget, which must stop at the recorded declaration and span.
-Equal counts show that two runtimes charge the same total; the failures show that they charge in
-the same order.
+runtime, read from its usage report in one evaluation each. A runtime that offers a budget checks
+every count `n` by evaluating under a budget of `n`, which must give the recorded result, and of
+`n - 1`, which must fail with `nx-ir-resource-limit` naming `maxOperations`, which is what says
+that the recorded number is the least that works; it checks that its own usage report gives `n`;
+and it checks every failure by evaluating the debug image under its budget, which must stop at the
+recorded declaration and span. Equal counts show that two runtimes charge the same total; the
+failures show that they charge in the same order.
+
+A program whose `program.json` sets `recordInputSizes` also gets `inputSizes`, keyed as `counts`
+is: the input size of each case, as `docs/nx-ir-format.md` (*Input size*) defines it, and a
+lifecycle's `{ "initial", "batches" }`, the input size of its initialization, which is its props,
+and of each batch. A runtime that offers an input limit checks every size `n` as it checks a
+count: under a limit of `n` the call must proceed and give the recorded result, and under `n - 1`
+it must fail with `nx-ir-resource-limit` naming `maxInputSize`; and its usage report must give
+`n`. Only `host-values` records them. The kinds of input the corpus cannot express, arguments by
+name, content, a state passed in and a state patch, are checked in each runtime's own tests against
+the sizes the format document works out.
 
 `manifest.json` at the root lists the programs and which kinds each covers; the emitter's tests
 fail when a kind is covered by none.
 
 Generated JavaScript is the third engine held to `results.json`: the emitter's tests generate each
 program as JavaScript and run every entrypoint of its entry module, whose value must equal the
-recorded one. A program executable source codegen refuses (a match expression, a call of a
+recorded one. A case is not run there: its result comes from one IR runtime and is checked in the
+other. A program executable source codegen refuses (a match expression, a call of a
 function-typed value, an action handler) is skipped, and so is an entrypoint that reaches such a
 construct at run time. A function value in generated JavaScript is the JavaScript function, which
 knows its name and not its module, so a recorded `Function` record is compared with it by name.
@@ -79,3 +104,27 @@ NX_UPDATE_CORPUS=1 cargo test -p nx-codegen --lib ir_corpus
 
 then review the diff of the `.txt` files before committing it. A count that changed shows in the
 diff of `operations.json` as a number beside its entrypoint.
+
+## Generated cases
+
+The corpus pins the host values it names. The cost model's claim, that a step which is not charged
+does not grow with the size of a value, is also checked against host values nobody chose:
+`crates/nx-codegen/tests/cost/` holds a library of probes, one small NX function or component for
+each operation a runtime performs on a host value, and a seeded generator of values biased toward
+the shapes that have broken the claim before (wide objects, long names, long and non-ASCII
+strings, nested and empty lists, `null`s, lengths just under and over 64 code units, and the names
+a runtime gives a meaning to). Every generated case is run in both runtimes at two scales, the
+second with its value eight times the size and its step repeated eight times as often, and:
+
+- both runtimes must give the same result, operation count, input size and failures under smaller
+  budgets (`cargo test -p nx-codegen --test cost_differential`);
+- the bytes the Rust runtime allocates must stay within a multiple of the count and at most double
+  for each unit between the scales (`cargo test -p nx-codegen --test cost_allocation`);
+- a case whose time grows more than twice as fast as its count is reported, in a run that does not
+  block (`cargo test --release -p nx-codegen --test cost_differential -- --ignored --nocapture time_report`).
+
+A failure names its seed and its case and prints the command that reproduces it, of the form
+`NX_COST_SEED=<seed> NX_COST_CASES=<count> cargo test -p nx-codegen --test cost_differential the_runtimes_agree`.
+A step the tests find is listed as a known finding in `tests/cost/mod.rs` with a concrete case
+until a change to the cost model fixes it, and an entry whose case stops reproducing fails the
+run. `docs/nx-ir-format.md`, under *Validation against generated host values*, has the details.

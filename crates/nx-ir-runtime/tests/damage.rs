@@ -30,16 +30,20 @@ fn every_truncated_corpus_image_is_refused() {
     assert!(refused > 0);
 }
 
-/// Runs everything the corpus runs against `program`: each function entrypoint, and each
-/// lifecycle with its batches and a round trip of its instance through the serialized form.
-/// Returns how many operations succeeded and how many failed with a diagnostic.
+/// Runs everything the corpus runs against `program`: each function entrypoint, with its
+/// arguments when it is a case, and each lifecycle with its batches and a round trip of its
+/// instance through the serialized form. Returns how many operations succeeded and how many
+/// failed with a diagnostic.
 ///
 /// <para>A damaged cell can turn a loop's bound or a call's target into anything, so every run
 /// has a budget: ample for the corpus, whose evaluations cost hundreds of operations, and small
-/// enough that a damaged image which loops ends quickly, in a diagnostic.</para>
+/// enough that a damaged image which loops ends quickly, in a diagnostic. An input limit is set
+/// beside it, ample for what the corpus passes, so the measuring pass runs against every damaged
+/// image too.</para>
 fn drive(linked: &Program, program: &CorpusProgram, identity: &str) -> (usize, usize) {
     let options = RuntimeOptions {
         max_operations: Some(10_000),
+        max_input_size: Some(10_000),
         ..RuntimeOptions::default()
     };
     let (mut succeeded, mut failed) = (0, 0);
@@ -54,7 +58,7 @@ fn drive(linked: &Program, program: &CorpusProgram, identity: &str) -> (usize, u
         if entrypoint.module == identity {
             count(
                 linked
-                    .evaluate_function(&entrypoint.function, &[], &options)
+                    .evaluate_function(&entrypoint.function, &entrypoint.arguments, &options)
                     .err(),
             );
         }

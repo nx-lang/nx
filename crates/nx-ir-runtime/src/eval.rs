@@ -9,6 +9,7 @@ use crate::normalize::{integral, require_record, Labeled, Path};
 use crate::program::ProgramData;
 use crate::text::{float32_text, float64_text};
 use crate::update;
+use crate::usage::Usage;
 use crate::value::{
     get_field, set_field, values_equal, CaseValue, Fields, FunctionRef, Handler, Value,
 };
@@ -17,8 +18,8 @@ use std::cell::Cell;
 use std::fmt;
 use std::sync::Arc;
 
-/// The limits an evaluation runs under.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The limits an evaluation runs under, and where it reports what it used.
+#[derive(Debug, Clone)]
 pub struct RuntimeOptions {
     /// How deeply function calls may nest. 100 by default.
     pub max_call_depth: u32,
@@ -35,6 +36,23 @@ pub struct RuntimeOptions {
     /// handler of the batch and the render after it. A host that evaluates code it did not write
     /// should set it: the call depth and the range length bound neither work nor allocation.</para>
     pub max_operations: Option<u64>,
+    /// The largest input one call may be given, measured as `docs/nx-ir-format.md` defines the
+    /// input size of a call and as [`input_size`](crate::input_size) measures one value. `None`,
+    /// the default, is unlimited, and then nothing is measured.
+    ///
+    /// <para>It covers every value the host passes to one call: arguments, props, content, a
+    /// state, the entries of a batch and a state patch. An instance is not input. A call whose
+    /// input is larger fails with `nx-ir-resource-limit` naming `maxInputSize` before the program
+    /// is looked at, and measuring stops as soon as the size passes the limit. The limit is
+    /// separate from the budget: measuring charges no operation.</para>
+    pub max_input_size: Option<u64>,
+    /// Where a call reports what it used, when the host wants to know. `None` by default.
+    ///
+    /// <para>The runtime clears the report when a call begins and fills it when the call ends,
+    /// whether it succeeds or fails: the operations when [`max_operations`](Self::max_operations)
+    /// is set, and the input size when [`max_input_size`](Self::max_input_size) is set and the
+    /// input was within it. Nothing is counted for the report alone.</para>
+    pub usage: Option<Arc<Usage>>,
 }
 
 /// The default of [`RuntimeOptions::max_call_depth`].
@@ -48,6 +66,8 @@ impl Default for RuntimeOptions {
             max_call_depth: NX_DEFAULT_MAX_CALL_DEPTH,
             max_range_length: NX_DEFAULT_MAX_RANGE_LENGTH,
             max_operations: None,
+            max_input_size: None,
+            usage: None,
         }
     }
 }
@@ -123,7 +143,7 @@ pub(crate) fn bind(frame: &mut Frame, slot: usize, value: Value) -> Result<()> {
 /// One evaluation against one program under one set of limits.
 pub(crate) struct Machine<'p> {
     pub program: &'p ProgramData,
-    pub options: RuntimeOptions,
+    pub options: &'p RuntimeOptions,
     nesting: Cell<u32>,
     /// The operations the budget has left: `u64::MAX` when the host set none.
     remaining: Cell<u64>,
@@ -132,10 +152,10 @@ pub(crate) struct Machine<'p> {
 }
 
 impl<'p> Machine<'p> {
-    pub(crate) fn new(program: &'p ProgramData, options: &RuntimeOptions) -> Self {
+    pub(crate) fn new(program: &'p ProgramData, options: &'p RuntimeOptions) -> Self {
         Self {
             program,
-            options: *options,
+            options,
             nesting: Cell::new(0),
             remaining: Cell::new(options.max_operations.unwrap_or(u64::MAX)),
             stack_base: stack_position(),
@@ -251,6 +271,14 @@ impl<'p> Machine<'p> {
         self.stack_exceeded(cx, index)
     }
 
+    /// The operations charged so far, when the host set a budget; with none, nothing is counted.
+    /// A charge the budget refused was not made, so it is not among them.
+    pub(crate) fn used(&self) -> Option<u64> {
+        self.options
+            .max_operations
+            .map(|budget| budget.saturating_sub(self.remaining.get()))
+    }
+
     /// Whether the host set a budget. A charge whose amount takes work to find is not measured
     /// when it did not: the charge cannot fail and nothing reads the count.
     pub(crate) fn is_limited(&self) -> bool {
@@ -326,13 +354,7 @@ impl<'p> Machine<'p> {
 
     /// Fails with an `nx-ir-resource-limit` diagnostic in the declaration of `cx`, at node `node`
     /// when the limit was met at one, that carries `limit`.
-    fn fail_limit<T>(
-        &self,
-        cx: Cx,
-        node: Option<u32>,
-        limit: Limit,
-        message: String,
-    ) -> Result<T> {
+    fn fail_limit<T>(&self, cx: Cx, node: Option<u32>, limit: Limit, message: String) -> Result<T> {
         let mut error = self.error(Some(cx), node, RESOURCE_LIMIT, message);
         if let Some(diagnostic) = error.diagnostics.first_mut() {
             diagnostic.limit = Some(limit);
@@ -1693,8 +1715,9 @@ mod tests {
         let (index, _) = entry
             .entrypoint(&entry.function_entrypoints, "directCall")
             .unwrap();
+        let options = RuntimeOptions::default();
         let run = |nested: u32| {
-            let machine = Machine::new(&program.data, &RuntimeOptions::default());
+            let machine = Machine::new(&program.data, &options);
             machine.nesting.set(nested);
             machine.invoke(0, index, Vec::new(), 0)
         };

@@ -2,6 +2,7 @@
 
 use crate::error::{fail, Result};
 use crate::eval::{bind, bind_content, Cx, Frame, Machine, Meter, RuntimeOptions};
+use crate::input::Measure;
 use crate::module::{ComponentDecl, DeclarationKind, Node};
 use crate::normalize::{require_record, Labeled, Path};
 use crate::program::{Program, ProgramData};
@@ -562,6 +563,48 @@ fn belongs(program: &ProgramData, images: &[(Arc<str>, u64)], component: &str) -
 }
 
 impl Program {
+    /// Runs one call of an evaluation method: measures what the host passed, when it set an
+    /// input limit, runs `body`, and reports what the call used, when it asked.
+    ///
+    /// <para>Every method that takes options and a host value runs through here, so the input is
+    /// refused before the program is looked at and before anything is converted, and the report
+    /// is written however `body` returns. `input` counts the call's host values on the measure
+    /// it is given; it is not called when there is no limit.</para>
+    fn call<T>(
+        &self,
+        options: &RuntimeOptions,
+        input: impl FnOnce(&mut Measure),
+        body: impl FnOnce(&Machine<'_>) -> Result<T>,
+    ) -> Result<T> {
+        let usage = options.usage.as_deref();
+        if let Some(usage) = usage {
+            usage.clear();
+        }
+        let input_size = match options.max_input_size {
+            None => None,
+            Some(limit) => {
+                let mut measure = Measure::new(Some(limit));
+                input(&mut measure);
+                match measure.finish() {
+                    Ok(size) => Some(size),
+                    Err(error) => {
+                        // Nothing ran, so under a budget the call used no operations.
+                        if let Some(usage) = usage {
+                            usage.record(options.max_operations.map(|_| 0), None);
+                        }
+                        return Err(error);
+                    }
+                }
+            }
+        };
+        let machine = Machine::new(&self.data, options);
+        let result = body(&machine);
+        if let Some(usage) = usage {
+            usage.record(machine.used(), input_size);
+        }
+        result
+    }
+
     /// Evaluates a function entrypoint of the entry module by name, with positional arguments.
     ///
     /// <para>An empty result of a function whose result type is a standalone `T?` is returned as
@@ -573,19 +616,26 @@ impl Program {
         args: &[NxValue],
         options: &RuntimeOptions,
     ) -> Result<NxValue> {
-        let machine = Machine::new(&self.data, options);
-        let entry = &self.data.entry;
-        let Some((index, _)) = entry.entrypoint(&entry.function_entrypoints, name) else {
-            return fail(
-                "nx-ir-missing-entrypoint",
-                format!("Function entrypoint '{name}' was not found."),
-            );
-        };
-        let args = args
-            .iter()
-            .map(|arg| from_host(arg).map(Some))
-            .collect::<Result<_>>()?;
-        entry_result(&machine, 0, index, machine.invoke(0, index, args, 0)?)
+        self.call(
+            options,
+            |input| {
+                input.values(args);
+            },
+            |machine| {
+                let entry = &self.data.entry;
+                let Some((index, _)) = entry.entrypoint(&entry.function_entrypoints, name) else {
+                    return fail(
+                        "nx-ir-missing-entrypoint",
+                        format!("Function entrypoint '{name}' was not found."),
+                    );
+                };
+                let args = args
+                    .iter()
+                    .map(|arg| from_host(arg).map(Some))
+                    .collect::<Result<_>>()?;
+                entry_result(machine, 0, index, machine.invoke(0, index, args, 0)?)
+            },
+        )
     }
 
     /// Calls the function a canonical `Function` record names with arguments keyed by parameter
@@ -597,20 +647,28 @@ impl Program {
         args: &BTreeMap<String, NxValue>,
         options: &RuntimeOptions,
     ) -> Result<NxValue> {
-        let machine = Machine::new(&self.data, options);
-        let Some(function) = crate::normalize::as_function_record(&from_host(function)?) else {
-            return fail(
-                "nx-ir-function-value",
-                "call_function expects a Function record: { $type: \"Function\", module, name }.",
-            );
-        };
-        let (module, index) = machine.resolve_function(&function, &"call_function")?;
-        let args = fields_from_host(args)?;
-        entry_result(
-            &machine,
-            module,
-            index,
-            machine.invoke_by_name(module, index, &args, 0)?,
+        self.call(
+            options,
+            |input| {
+                input.value(function).record(args);
+            },
+            |machine| {
+                let Some(function) = crate::normalize::as_function_record(&from_host(function)?)
+                else {
+                    return fail(
+                        "nx-ir-function-value",
+                        "call_function expects a Function record: { $type: \"Function\", module, name }.",
+                    );
+                };
+                let (module, index) = machine.resolve_function(&function, &"call_function")?;
+                let args = fields_from_host(args)?;
+                entry_result(
+                    machine,
+                    module,
+                    index,
+                    machine.invoke_by_name(module, index, &args, 0)?,
+                )
+            },
         )
     }
 
@@ -623,30 +681,37 @@ impl Program {
         content: &[NxValue],
         options: &RuntimeOptions,
     ) -> Result<NxValue> {
-        let machine = Machine::new(&self.data, options);
-        let (index, declared, component) = machine.component(name)?;
-        let path = Labeled(name, " props");
-        let (mut input, handlers) =
-            machine.split_handler_properties(0, index, fields_from_host(props)?, &path)?;
-        // A host supplies content as an argument, with no body to have been written or not, so
-        // no content passed means no content and the declared default stands.
-        let content = content.iter().map(from_host).collect::<Result<Vec<_>>>()?;
-        bind_content(&mut input, &component.props, content, &name, false)?;
-        let mut fields = machine.normalize_fields(
-            entry_cx(index),
-            &component.props,
-            &input,
-            &mut Vec::new(),
-            &path,
-            false,
-        )?;
-        for (name, handler) in handlers {
-            crate::value::set_field(&mut fields, name, Value::Handler(handler));
-        }
-        to_host(
-            &Value::record(Some(Arc::clone(declared)), fields),
-            None,
-            &machine.meter(entry_cx(index), None),
+        self.call(
+            options,
+            |input| {
+                input.record(props).values(content);
+            },
+            |machine| {
+                let (index, declared, component) = machine.component(name)?;
+                let path = Labeled(name, " props");
+                let (mut input, handlers) =
+                    machine.split_handler_properties(0, index, fields_from_host(props)?, &path)?;
+                // A host supplies content as an argument, with no body to have been written or
+                // not, so no content passed means no content and the declared default stands.
+                let content = content.iter().map(from_host).collect::<Result<Vec<_>>>()?;
+                bind_content(&mut input, &component.props, content, &name, false)?;
+                let mut fields = machine.normalize_fields(
+                    entry_cx(index),
+                    &component.props,
+                    &input,
+                    &mut Vec::new(),
+                    &path,
+                    false,
+                )?;
+                for (name, handler) in handlers {
+                    crate::value::set_field(&mut fields, name, Value::Handler(handler));
+                }
+                to_host(
+                    &Value::record(Some(Arc::clone(declared)), fields),
+                    None,
+                    &machine.meter(entry_cx(index), None),
+                )
+            },
         )
     }
 
@@ -659,76 +724,92 @@ impl Program {
         init: &ComponentInit<'_>,
         options: &RuntimeOptions,
     ) -> Result<ComponentInitResult> {
-        let machine = Machine::new(&self.data, options);
-        let (index, declared, component) = machine.component(name)?;
-        let Some(body) = component.body.filter(|_| !component.is_abstract) else {
-            return fail(
-                "nx-ir-component",
-                format!("Component '{name}' cannot be initialized because it has no body."),
-            );
-        };
-        if let Some(parent) = init.parent {
-            belongs(&self.data, &parent.data.program, &parent.data.component)?;
-        }
-        let path = Labeled(name, " props");
-        let supplied = Value::record(None, fields_from_host(props)?);
-        let resolved = resolve_parent_handlers(
-            &supplied,
-            init.parent.map(|parent| &*parent.data),
-            &Path::Root(&path),
-            0,
-        )?;
-        let resolved = match resolved {
-            Value::Record(record) => record.fields.clone(),
-            _ => Vec::new(),
-        };
-        let (fields, handler_props) =
-            machine.split_handler_properties(0, index, resolved, &path)?;
-        let cx = entry_cx(index);
-        let mut frame = Vec::new();
-        let props =
-            machine.normalize_fields(cx, &component.props, &fields, &mut frame, &path, false)?;
-        let state_path = Labeled(name, " state");
-        let state = match init.state {
-            None => machine.normalize_fields(
-                cx,
-                &component.state,
-                &[],
-                &mut frame,
-                &state_path,
-                false,
-            )?,
-            Some(state) => machine.normalize_fields(
-                cx,
-                &component.state,
-                &fields_from_host(state)?,
-                &mut frame,
-                &state_path,
-                true,
-            )?,
-        };
-        let mut tokens = Tokens::new(1);
-        let output = machine.meter(cx, None);
-        let rendered = to_host(
-            &machine.eval(cx, &mut frame, body)?,
-            Some(&mut tokens),
-            &output,
-        )?;
-        Ok(ComponentInitResult {
-            rendered,
-            state: fields_to_host(&state, &output)?,
-            instance: ComponentInstance {
-                data: Arc::new(InstanceData {
-                    program: Arc::clone(&self.data.images),
-                    component: Arc::clone(declared),
-                    props,
-                    handler_props,
-                    state,
-                    handlers: tokens.handlers,
-                    generation: 1,
-                }),
+        self.call(
+            options,
+            |input| {
+                input.record(props);
+                if let Some(state) = init.state {
+                    input.record(state);
+                }
             },
-        })
+            |machine| {
+                let (index, declared, component) = machine.component(name)?;
+                let Some(body) = component.body.filter(|_| !component.is_abstract) else {
+                    return fail(
+                        "nx-ir-component",
+                        format!("Component '{name}' cannot be initialized because it has no body."),
+                    );
+                };
+                if let Some(parent) = init.parent {
+                    belongs(&self.data, &parent.data.program, &parent.data.component)?;
+                }
+                let path = Labeled(name, " props");
+                let supplied = Value::record(None, fields_from_host(props)?);
+                let resolved = resolve_parent_handlers(
+                    &supplied,
+                    init.parent.map(|parent| &*parent.data),
+                    &Path::Root(&path),
+                    0,
+                )?;
+                let resolved = match resolved {
+                    Value::Record(record) => record.fields.clone(),
+                    _ => Vec::new(),
+                };
+                let (fields, handler_props) =
+                    machine.split_handler_properties(0, index, resolved, &path)?;
+                let cx = entry_cx(index);
+                let mut frame = Vec::new();
+                let props = machine.normalize_fields(
+                    cx,
+                    &component.props,
+                    &fields,
+                    &mut frame,
+                    &path,
+                    false,
+                )?;
+                let state_path = Labeled(name, " state");
+                let state = match init.state {
+                    None => machine.normalize_fields(
+                        cx,
+                        &component.state,
+                        &[],
+                        &mut frame,
+                        &state_path,
+                        false,
+                    )?,
+                    Some(state) => machine.normalize_fields(
+                        cx,
+                        &component.state,
+                        &fields_from_host(state)?,
+                        &mut frame,
+                        &state_path,
+                        true,
+                    )?,
+                };
+                let mut tokens = Tokens::new(1);
+                let output = machine.meter(cx, None);
+                let rendered = to_host(
+                    &machine.eval(cx, &mut frame, body)?,
+                    Some(&mut tokens),
+                    &output,
+                )?;
+                Ok(ComponentInitResult {
+                    rendered,
+                    state: fields_to_host(&state, &output)?,
+                    instance: ComponentInstance {
+                        data: Arc::new(InstanceData {
+                            program: Arc::clone(&self.data.images),
+                            component: Arc::clone(declared),
+                            props,
+                            handler_props,
+                            state,
+                            handlers: tokens.handlers,
+                            generation: 1,
+                        }),
+                    },
+                })
+            },
+        )
     }
 
     /// Evaluates a component's body from props and explicit state. The output carries no tokens.
@@ -739,32 +820,46 @@ impl Program {
         state: &BTreeMap<String, NxValue>,
         options: &RuntimeOptions,
     ) -> Result<NxValue> {
-        let machine = Machine::new(&self.data, options);
-        let (index, _, component) = machine.component(name)?;
-        let Some(body) = component.body.filter(|_| !component.is_abstract) else {
-            return fail(
-                "nx-ir-component",
-                format!("Component '{name}' cannot be evaluated because it has no body."),
-            );
-        };
-        let path = Labeled(name, " props");
-        let (fields, _) =
-            machine.split_handler_properties(0, index, fields_from_host(props)?, &path)?;
-        let cx = entry_cx(index);
-        let mut frame = Vec::new();
-        machine.normalize_fields(cx, &component.props, &fields, &mut frame, &path, false)?;
-        machine.normalize_fields(
-            cx,
-            &component.state,
-            &fields_from_host(state)?,
-            &mut frame,
-            &Labeled(name, " state"),
-            true,
-        )?;
-        to_host(
-            &machine.eval(cx, &mut frame, body)?,
-            None,
-            &machine.meter(cx, None),
+        self.call(
+            options,
+            |input| {
+                input.record(props).record(state);
+            },
+            |machine| {
+                let (index, _, component) = machine.component(name)?;
+                let Some(body) = component.body.filter(|_| !component.is_abstract) else {
+                    return fail(
+                        "nx-ir-component",
+                        format!("Component '{name}' cannot be evaluated because it has no body."),
+                    );
+                };
+                let path = Labeled(name, " props");
+                let (fields, _) =
+                    machine.split_handler_properties(0, index, fields_from_host(props)?, &path)?;
+                let cx = entry_cx(index);
+                let mut frame = Vec::new();
+                machine.normalize_fields(
+                    cx,
+                    &component.props,
+                    &fields,
+                    &mut frame,
+                    &path,
+                    false,
+                )?;
+                machine.normalize_fields(
+                    cx,
+                    &component.state,
+                    &fields_from_host(state)?,
+                    &mut frame,
+                    &Labeled(name, " state"),
+                    true,
+                )?;
+                to_host(
+                    &machine.eval(cx, &mut frame, body)?,
+                    None,
+                    &machine.meter(cx, None),
+                )
+            },
         )
     }
 
@@ -785,147 +880,159 @@ impl Program {
         batch: &[NxValue],
         options: &RuntimeOptions,
     ) -> Result<ComponentDispatchResult> {
-        let machine = Machine::new(&self.data, options);
-        let instance = &instance.data;
-        belongs(&self.data, &instance.program, &instance.component)?;
-        let (index, name, component) = machine.component(&instance.component)?;
-        let Some(body) = component.body else {
-            return fail(
-                "nx-ir-component",
-                format!("Component '{name}' has no body."),
-            );
-        };
-        let owner_key = format!("{}::{name}", self.data.entry.identity);
-        let mut working = instance.state.clone();
-        let mut effects = Vec::new();
-        let mut depths = Depths::default();
-
-        for (position, entry) in batch.iter().enumerate() {
-            let path = Position("dispatch entry ", position, "");
-            let entry = from_host(entry)?;
-            let object = require_record(&entry, &path)?;
-            if object.type_name() == Some(HANDLER_INVOCATION_TYPE) {
-                let Some(token) = object.get("token").and_then(Value::as_text) else {
+        self.call(
+            options,
+            |input| {
+                input.values(batch);
+            },
+            |machine| {
+                let instance = &instance.data;
+                belongs(&self.data, &instance.program, &instance.component)?;
+                let (index, name, component) = machine.component(&instance.component)?;
+                let Some(body) = component.body else {
                     return fail(
-                        "nx-ir-boundary-type",
-                        format!(
+                        "nx-ir-component",
+                        format!("Component '{name}' has no body."),
+                    );
+                };
+                let owner_key = format!("{}::{name}", self.data.entry.identity);
+                let mut working = instance.state.clone();
+                let mut effects = Vec::new();
+                let mut depths = Depths::default();
+
+                for (position, entry) in batch.iter().enumerate() {
+                    let path = Position("dispatch entry ", position, "");
+                    let entry = from_host(entry)?;
+                    let object = require_record(&entry, &path)?;
+                    if object.type_name() == Some(HANDLER_INVOCATION_TYPE) {
+                        let Some(token) = object.get("token").and_then(Value::as_text) else {
+                            return fail(
+                                "nx-ir-boundary-type",
+                                format!(
                             "Expected {path} to carry a string 'token' read from rendered output."
                         ),
-                    );
-                };
-                let Some(handler) = instance.handler(token) else {
-                    return fail(
-                        "nx-ir-handler-token",
-                        format!("Unknown handler token '{token}' for the '{name}' instance."),
-                    );
-                };
-                let empty = Value::empty();
-                let action = require_record(
-                    object.get("action").unwrap_or(&empty),
-                    &Position("dispatch entry ", position, ".action"),
-                )?;
-                let owned = handler.owner.as_deref() == Some(owner_key.as_str());
-                let live = owned.then_some((component, &working));
-                for result in machine.invoke_handler(handler, action, live)? {
-                    match result.as_record() {
-                        Some(patch)
-                            if owned && machine.is_update_record_for(&result, &owner_key) =>
-                        {
-                            working = machine.patch_state(
-                                index,
-                                name,
-                                component,
-                                &working,
-                                patch,
-                                &mut depths,
-                            )?;
+                            );
+                        };
+                        let Some(handler) = instance.handler(token) else {
+                            return fail(
+                                "nx-ir-handler-token",
+                                format!(
+                                    "Unknown handler token '{token}' for the '{name}' instance."
+                                ),
+                            );
+                        };
+                        let empty = Value::empty();
+                        let action = require_record(
+                            object.get("action").unwrap_or(&empty),
+                            &Position("dispatch entry ", position, ".action"),
+                        )?;
+                        let owned = handler.owner.as_deref() == Some(owner_key.as_str());
+                        let live = owned.then_some((component, &working));
+                        for result in machine.invoke_handler(handler, action, live)? {
+                            match result.as_record() {
+                                Some(patch)
+                                    if owned
+                                        && machine.is_update_record_for(&result, &owner_key) =>
+                                {
+                                    working = machine.patch_state(
+                                        index,
+                                        name,
+                                        component,
+                                        &working,
+                                        patch,
+                                        &mut depths,
+                                    )?;
+                                }
+                                _ => effects.push(result),
+                            }
                         }
-                        _ => effects.push(result),
+                        continue;
                     }
-                }
-                continue;
-            }
-            let Some(type_name) = object.type_name() else {
-                return fail(
+                    let Some(type_name) = object.type_name() else {
+                        return fail(
                     "nx-ir-boundary-type",
                     format!("Expected {path} to be an action record with a '$type' discriminator."),
                 );
-            };
-            let emitted = component.emits.iter().find_map(|emit| {
-                let (module, action, declaration) = self.data.resolve(0, &emit.action).ok()?;
-                (&*declaration.name == type_name).then_some((emit, module, action))
-            });
-            let Some((emit, action_module, action_index)) = emitted else {
-                return fail(
-                    "nx-ir-component-action",
-                    format!("Component '{name}' does not emit '{type_name}'."),
-                );
-            };
-            // The entry is host input, so it is constructed against the emitted action before
-            // the handler is looked up: a malformed payload fails whether or not the parent
-            // bound one.
-            let action = machine.normalize_action(
-                action_module,
-                action_index,
-                object,
-                &Labeled(type_name, " action"),
-            )?;
-            let property = handler_property(&emit.name);
-            let bound = instance
-                .handler_props
-                .iter()
-                .find(|(key, _)| **key == *property);
-            if let (Some((_, handler)), Some(action)) = (bound, action.as_record()) {
-                // The parent bound this handler, so everything it returns belongs to the parent.
-                effects.extend(machine.invoke_handler(handler, action, None)?);
-            }
-        }
+                    };
+                    let emitted = component.emits.iter().find_map(|emit| {
+                        let (module, action, declaration) =
+                            self.data.resolve(0, &emit.action).ok()?;
+                        (&*declaration.name == type_name).then_some((emit, module, action))
+                    });
+                    let Some((emit, action_module, action_index)) = emitted else {
+                        return fail(
+                            "nx-ir-component-action",
+                            format!("Component '{name}' does not emit '{type_name}'."),
+                        );
+                    };
+                    // The entry is host input, so it is constructed against the emitted action
+                    // before the handler is looked up: a malformed payload fails whether or not
+                    // the parent bound one.
+                    let action = machine.normalize_action(
+                        action_module,
+                        action_index,
+                        object,
+                        &Labeled(type_name, " action"),
+                    )?;
+                    let property = handler_property(&emit.name);
+                    let bound = instance
+                        .handler_props
+                        .iter()
+                        .find(|(key, _)| **key == *property);
+                    if let (Some((_, handler)), Some(action)) = (bound, action.as_record()) {
+                        // The parent bound this handler, so everything it returns belongs to the
+                        // parent.
+                        effects.extend(machine.invoke_handler(handler, action, None)?);
+                    }
+                }
 
-        // The body sees the declared props and the state, as it did at initialization. A field
-        // the instance carries no entry for is an empty optional.
-        let mut frame: Frame =
-            Vec::with_capacity(component.props.len().saturating_add(component.state.len()));
-        for field in component.props.iter() {
-            frame.push(Some(
-                get_field(&instance.props, &field.name)
-                    .cloned()
-                    .unwrap_or_else(Value::empty),
-            ));
-        }
-        for field in component.state.iter() {
-            frame.push(Some(
-                get_field(&working, &field.name)
-                    .cloned()
-                    .unwrap_or_else(Value::empty),
-            ));
-        }
-        let generation = instance.generation.saturating_add(1);
-        let mut tokens = Tokens::new(generation);
-        let output = machine.meter(entry_cx(index), None);
-        let rendered = to_host(
-            &machine.eval(entry_cx(index), &mut frame, body)?,
-            Some(&mut tokens),
-            &output,
-        )?;
-        Ok(ComponentDispatchResult {
-            rendered,
-            effects: effects
-                .iter()
-                .map(|effect| to_host(effect, None, &output))
-                .collect::<Result<_>>()?,
-            state: fields_to_host(&working, &output)?,
-            instance: ComponentInstance {
-                data: Arc::new(InstanceData {
-                    program: Arc::clone(&instance.program),
-                    component: Arc::clone(&instance.component),
-                    props: instance.props.clone(),
-                    handler_props: instance.handler_props.clone(),
-                    state: working,
-                    handlers: tokens.handlers,
-                    generation,
-                }),
+                // The body sees the declared props and the state, as it did at initialization. A
+                // field the instance carries no entry for is an empty optional.
+                let mut frame: Frame =
+                    Vec::with_capacity(component.props.len().saturating_add(component.state.len()));
+                for field in component.props.iter() {
+                    frame.push(Some(
+                        get_field(&instance.props, &field.name)
+                            .cloned()
+                            .unwrap_or_else(Value::empty),
+                    ));
+                }
+                for field in component.state.iter() {
+                    frame.push(Some(
+                        get_field(&working, &field.name)
+                            .cloned()
+                            .unwrap_or_else(Value::empty),
+                    ));
+                }
+                let generation = instance.generation.saturating_add(1);
+                let mut tokens = Tokens::new(generation);
+                let output = machine.meter(entry_cx(index), None);
+                let rendered = to_host(
+                    &machine.eval(entry_cx(index), &mut frame, body)?,
+                    Some(&mut tokens),
+                    &output,
+                )?;
+                Ok(ComponentDispatchResult {
+                    rendered,
+                    effects: effects
+                        .iter()
+                        .map(|effect| to_host(effect, None, &output))
+                        .collect::<Result<_>>()?,
+                    state: fields_to_host(&working, &output)?,
+                    instance: ComponentInstance {
+                        data: Arc::new(InstanceData {
+                            program: Arc::clone(&instance.program),
+                            component: Arc::clone(&instance.component),
+                            props: instance.props.clone(),
+                            handler_props: instance.handler_props.clone(),
+                            state: working,
+                            handlers: tokens.handlers,
+                            generation,
+                        }),
+                    },
+                })
             },
-        })
+        )
     }
 
     /// Validates a complete state for a component and returns it normalized.
@@ -935,17 +1042,24 @@ impl Program {
         state: &BTreeMap<String, NxValue>,
         options: &RuntimeOptions,
     ) -> Result<BTreeMap<String, NxValue>> {
-        let machine = Machine::new(&self.data, options);
-        let (index, _, component) = machine.component(name)?;
-        let state = machine.normalize_fields(
-            entry_cx(index),
-            &component.state,
-            &fields_from_host(state)?,
-            &mut props_frame(component),
-            &Labeled(name, " state"),
-            true,
-        )?;
-        fields_to_host(&state, &machine.meter(entry_cx(index), None))
+        self.call(
+            options,
+            |input| {
+                input.record(state);
+            },
+            |machine| {
+                let (index, _, component) = machine.component(name)?;
+                let state = machine.normalize_fields(
+                    entry_cx(index),
+                    &component.state,
+                    &fields_from_host(state)?,
+                    &mut props_frame(component),
+                    &Labeled(name, " state"),
+                    true,
+                )?;
+                fields_to_host(&state, &machine.meter(entry_cx(index), None))
+            },
+        )
     }
 
     /// Applies a patch to host-owned component state and returns the validated next state.
@@ -961,19 +1075,26 @@ impl Program {
         patch: &NxValue,
         options: &RuntimeOptions,
     ) -> Result<BTreeMap<String, NxValue>> {
-        let machine = Machine::new(&self.data, options);
-        let (index, name, component) = machine.component(name)?;
-        let patch = from_host(patch)?;
-        let patch = require_record(&patch, &"the state patch")?;
-        let state = machine.patch_state(
-            index,
-            name,
-            component,
-            &fields_from_host(current)?,
-            patch,
-            &mut Depths::default(),
-        )?;
-        fields_to_host(&state, &machine.meter(entry_cx(index), None))
+        self.call(
+            options,
+            |input| {
+                input.record(current).value(patch);
+            },
+            |machine| {
+                let (index, name, component) = machine.component(name)?;
+                let patch = from_host(patch)?;
+                let patch = require_record(&patch, &"the state patch")?;
+                let state = machine.patch_state(
+                    index,
+                    name,
+                    component,
+                    &fields_from_host(current)?,
+                    patch,
+                    &mut Depths::default(),
+                )?;
+                fields_to_host(&state, &machine.meter(entry_cx(index), None))
+            },
+        )
     }
 
     /// Restores an instance from its serialized form, for this program.
@@ -994,7 +1115,8 @@ impl Program {
             )
         })?;
         belongs(&self.data, &stored.program, &stored.component)?;
-        let machine = Machine::new(&self.data, &RuntimeOptions::default());
+        let options = RuntimeOptions::default();
+        let machine = Machine::new(&self.data, &options);
         let (index, name, component) = machine.component(&stored.component)?;
         let mut data = stored.restore(&machine)?;
 
