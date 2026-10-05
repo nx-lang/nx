@@ -5,7 +5,9 @@
 //! list must equal what was recorded. An entrypoint that names arguments, a *case*, is evaluated
 //! with them. Every evaluation must cost exactly the operations recorded for it, stop where the
 //! recorded failures say a smaller budget stops it, and have exactly the input size recorded for
-//! it, where one is; and the usage report must give the recorded numbers.
+//! it, where one is; and the usage report must give the recorded numbers. A case marked as one
+//! that fails must fail with the recorded code and name the recorded argument, or none; and a
+//! call a limit refuses names no argument.
 
 mod common;
 
@@ -20,6 +22,13 @@ fn budget(operations: u64) -> RuntimeOptions {
         max_operations: Some(operations),
         ..RuntimeOptions::default()
     }
+}
+
+/// Whether a call failed on the limit `name`, with a diagnostic that names no argument: a limit
+/// is not in a value the host passed, wherever it is reached.
+fn stopped_by(error: &NxIrRuntimeError, name: &str) -> bool {
+    let diagnostic = &error.diagnostics[0];
+    diagnostic.limit.map(|limit| limit.name) == Some(name) && diagnostic.argument.is_none()
 }
 
 /// Checks that an evaluation costs exactly the `recorded` count: under that budget it succeeds,
@@ -40,11 +49,9 @@ fn check_count<T: Debug>(
         return None;
     }
     match run(&budget(operations - 1)) {
-        Err(error) if error.diagnostics[0].limit.map(|limit| limit.name) == Some("maxOperations") => {
-            None
-        }
+        Err(error) if stopped_by(&error, "maxOperations") => None,
         Err(error) => Some(format!(
-            "under {} operations, one less than recorded, fails otherwise than on the budget: {error}",
+            "under {} operations, one less than recorded, fails otherwise than on the budget, or names an argument: {error}",
             operations - 1
         )),
         Ok(_) => Some(format!(
@@ -80,11 +87,9 @@ fn check_input_size<T: Debug>(
         ..RuntimeOptions::default()
     };
     match run(&limited) {
-        Err(error) if error.diagnostics[0].limit.map(|limit| limit.name) == Some("maxInputSize") => {
-            None
-        }
+        Err(error) if stopped_by(&error, "maxInputSize") => None,
         Err(error) => Some(format!(
-            "under an input limit of {}, one less than its recorded input size, fails otherwise than on the limit: {error}",
+            "under an input limit of {}, one less than its recorded input size, fails otherwise than on the limit, or names an argument: {error}",
             size - 1
         )),
         Ok(_) => Some(format!(
@@ -145,6 +150,29 @@ fn every_corpus_entrypoint_and_lifecycle_matches_its_recorded_result() {
                 let run = |options: &RuntimeOptions| {
                     linked.evaluate_function(&entrypoint.function, &entrypoint.arguments, options)
                 };
+                if entrypoint.fails {
+                    // The diagnostic is all a failing case records: no result, count or size.
+                    let recorded = &program.diagnostics[&key];
+                    match run(&RuntimeOptions::default()) {
+                        Ok(actual) => failures.push(format!(
+                            "{label}: is marked `fails` and gives {}",
+                            json(&actual)
+                        )),
+                        Err(error) => {
+                            let diagnostic = &error.diagnostics[0];
+                            let mut actual = serde_json::json!({ "code": diagnostic.code });
+                            if let Some(argument) = &diagnostic.argument {
+                                actual["argument"] = argument.as_str().into();
+                            }
+                            if error.diagnostics.len() != 1 || actual != *recorded {
+                                failures.push(format!(
+                                    "{label}: expected to fail with {recorded}, got {actual}: {error}"
+                                ));
+                            }
+                        }
+                    }
+                    continue;
+                }
                 let count = &program.operations["counts"][&key];
                 let input_size = &program.operations["inputSizes"][&key];
                 for problem in [
@@ -320,6 +348,7 @@ fn every_recorded_failure_stops_at_its_recorded_node() {
                     "budget": operations,
                     "declaration": diagnostic.declaration,
                     "limit": diagnostic.limit.map(|limit| limit.name),
+                    "argument": diagnostic.argument,
                     "source": diagnostic.source.as_ref().map(|source| serde_json::json!({
                         "identity": source.identity,
                         "start": source.start,
@@ -328,6 +357,8 @@ fn every_recorded_failure_stops_at_its_recorded_node() {
                 });
                 let mut expected = record.clone();
                 expected["limit"] = "maxOperations".into();
+                // A budget that runs out while an argument is checked is still not in the argument.
+                expected["argument"] = serde_json::Value::Null;
                 if expected.get("source").is_none() {
                     expected["source"] = serde_json::Value::Null;
                 }

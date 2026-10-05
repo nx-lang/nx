@@ -204,19 +204,28 @@ changed or remembered by the package.
 | Code | |
 | --- | --- |
 | `invalid-input` | The model sent arguments the function's parameters do not admit, or too many. It can correct them. |
-| `invalid-context` | The call has no `callId`, or a tool that needs the host's context record was given none. |
-| `evaluation-failed` | The function failed for a reason other than its arguments or a limit. |
+| `invalid-context` | The call has no `callId`, or a tool that needs the host's context record was given none, or one that does not fit the function's context type. The diagnostics say which. |
+| `evaluation-failed` | The function failed for a reason other than its arguments or a limit: in its body, in a default it fills in, or in its result. |
 | `resource-limit` | A limit was reached. `limit.name` says which: `maxOperations`, `maxContextSize`, or another of the runtime's. |
 | `invalid-request` | An `http` tool's request could not be built, or its function did not return `HttpArguments`. |
 | `request-failed` | The host's request function threw. |
 | `aborted` | The call's signal was already aborted. Nothing was evaluated. |
 | any other | The code of an `NxAgentToolError` a host's request function or executor threw. |
 
-A model's arguments are checked by the IR runtime against the function's parameter types, and
-the package has no validator of its own. A refusal there is `invalid-input` whatever its code, as
-long as the code is `nx-ir-arguments` or begins `nx-ir-boundary-`, so a check the runtime gains
-later is reported the same way. The schemas are stored and passed on exactly as the compiler wrote
-them, keywords the package has never seen included.
+A call's arguments are checked by the IR runtime against the function's parameter types, and
+the package has no validator of its own. A refusal there is a diagnostic whose code is
+`nx-ir-arguments` or begins `nx-ir-boundary-`, and whose `argument` names the parameter the
+refused value was passed for. The package reads that name and never the message:
+
+- an argument the model sent is `invalid-input`;
+- a context parameter, which the host filled in, is `invalid-context`, and so is a call that
+  fails in both, since the model cannot make it succeed while the host's record is wrong;
+- a refusal that names no argument is `evaluation-failed`. It was not found in what the call was
+  given: a record's field default whose value does not fit its field is one.
+
+The family of codes is matched and not a list of them, so a check the runtime gains later is
+reported the same way. The schemas are stored and passed on exactly as the compiler wrote them,
+keywords the package has never seen included.
 
 ## Budget
 
@@ -315,6 +324,12 @@ that is `undefined` is refused.
 A key of the model's input that names a context parameter is dropped. With no `toolContextType`,
 a function that declares a context parameter is an error, as is one declared with another subtype
 than the host's.
+
+A record that does not fit the function's context type (a required field missing, a field of the
+wrong type, a `$type` that names another type) fails the call with `invalid-context`, like a
+record that was not passed at all. The mistake is the host's, so the model is not asked to correct
+it; the failure's `diagnostics` name the field, and their `argument` is the context parameter. A
+context built from your generated type fits.
 
 Only a parameter declared with the context type itself is a context parameter. One declared as a
 list of it (`contexts: ChatToolContext+`), or with a record that holds one as a field at any
@@ -486,12 +501,9 @@ because the reason can hold what a model should not see: the text your request f
 or a connection's address. `onResult` is given every failure whole, and what it throws is what
 the model is told instead.
 
-Two things still reach the model as written. One is the message of an `NxAgentToolError` your
-own request function or executor throws with a code of its own, such as `unknown-outcome`
-above: you are writing to the model there, so do not build that message from an error you
-caught. The other is the runtime's message when the tool context record you passed does not fit
-the function's context type. That is reported as `invalid-input` for now, and its message names
-the field that is wrong; a context built from your generated type fits. A `provider` tool
-is mapped by `providerTool`, and one with no mapping is an error, not an omission. The schemas
+One thing still reaches the model as written: the message of an `NxAgentToolError` your own
+request function or executor throws with a code of its own, such as `unknown-outcome` above. You
+are writing to the model there, so do not build that message from an error you caught. A
+`provider` tool is mapped by `providerTool`, and one with no mapping is an error, not an omission. The schemas
 are draft 2020-12 and are passed to the provider as they are; a provider that refuses a construct
 such as `$ref` will say so.

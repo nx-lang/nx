@@ -26,6 +26,14 @@ pub struct Diagnostic {
     /// The limit that was reached. Every `nx-ir-resource-limit` diagnostic carries one, and no
     /// other does.
     pub limit: Option<Limit>,
+    /// The parameter whose argument the failure is in, by its declared name. It is present when
+    /// `call_function` or `evaluate_function` refuses a value the host passed for one parameter
+    /// (a value that does not fit the parameter's type, at any depth, or a `Function` record in
+    /// it that names no function) and when a required parameter was given nothing. Nothing else
+    /// carries it: not a failure a default raises, a resource limit, a failure in the function's
+    /// body or result, or a failure of another entry point. The TypeScript runtime names the
+    /// same argument for the same call.
+    pub argument: Option<String>,
 }
 
 /// A limit an evaluation reached, as data a host can act on without reading the message.
@@ -49,6 +57,7 @@ impl Diagnostic {
             declaration: None,
             source: None,
             limit: None,
+            argument: None,
         }
     }
 }

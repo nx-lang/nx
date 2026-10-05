@@ -86,6 +86,20 @@ All notable changes to this project will be documented in this file.
   AI SDK tool set. The package calls no model and makes no request itself. It is unstable, as the
   library is: its API and the stored definition format may change in any release. See
   [running an agent in a host](https://nxlang.org/reference/libraries/agent-hosts).
+- A failed call says whose mistake it was. `@nx-lang/agent` reports `invalid-context` for a context
+  record that does not fit the function's context type, as it does for one that was not passed,
+  and `invalid-input` only for a failure in an argument the model sent, which is the one failure
+  the model is told about in full. A boundary failure that is in no argument, such as a record
+  field default whose value does not fit its field, is `evaluation-failed`.
+
+### NX IR runtimes
+- A diagnostic names the argument a failure is in. When `callFunction` or `evaluateFunction`
+  refuses a value the host passed for a parameter, or a required parameter was given nothing, the
+  diagnostic carries `argument`, the parameter's name (`NxIrDiagnostic.argument` in
+  `@nx-lang/ir-runtime`, `Diagnostic::argument` in the `nx-ir-runtime` crate), so a host tells which
+  argument to correct without reading the message. A failure a default raises, a resource limit
+  and a failure inside the function name none. Both runtimes name the same argument for the same
+  call, and the conformance corpus holds them to it with cases that fail.
 
 ## 0.5.0
 The extension now ships with the NX packages, from one tag and at one version, so extension 0.5.0

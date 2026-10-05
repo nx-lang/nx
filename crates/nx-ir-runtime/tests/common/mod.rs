@@ -15,6 +15,9 @@ pub struct Entrypoint {
     pub case: Option<String>,
     /// The canonical values to pass by position: none for an entrypoint that is not a case.
     pub arguments: Vec<NxValue>,
+    /// Whether the case is one every runtime fails alike. Its diagnostic is recorded, and no
+    /// result, count or input size.
+    pub fails: bool,
 }
 
 impl Entrypoint {
@@ -43,6 +46,9 @@ pub struct CorpusProgram {
     pub entrypoints: Vec<Entrypoint>,
     pub lifecycles: Vec<Lifecycle>,
     pub results: serde_json::Value,
+    /// The code, and the argument when it names one, of the diagnostic each case marked as one
+    /// that fails fails with. Empty for a program with no such case.
+    pub diagnostics: serde_json::Value,
     /// What each evaluation costs, where recorded budgets below that stop it, and, for a program
     /// that records them, the input size of each case and lifecycle step.
     pub operations: serde_json::Value,
@@ -133,11 +139,19 @@ pub fn load_corpus() -> Vec<CorpusProgram> {
                                     case.is_some(),
                                     "{name} {module}::{function}: `arguments` and `case` go together"
                                 );
+                                let fails = entrypoint
+                                    .get("fails")
+                                    .is_some_and(|fails| fails.as_bool().expect("`fails`"));
+                                assert!(
+                                    !fails || arguments.is_some(),
+                                    "{name} {module}::{function}: only a case is marked `fails`"
+                                );
                                 Entrypoint {
                                     module,
                                     function,
                                     case,
                                     arguments: arguments.unwrap_or_default(),
+                                    fails,
                                 }
                             })
                             .collect()
@@ -170,6 +184,9 @@ pub fn load_corpus() -> Vec<CorpusProgram> {
                     })
                     .unwrap_or_default(),
                 results: read_json(dir.join("expected").join("results.json")),
+                diagnostics: Some(dir.join("expected").join("diagnostics.json"))
+                    .filter(|path| path.exists())
+                    .map_or(serde_json::json!({}), read_json),
                 operations: read_json(dir.join("expected").join("operations.json")),
                 name,
             }

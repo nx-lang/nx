@@ -134,6 +134,25 @@ test("the host supplies the tool context record for each call", async () => {
   assert.equal(error.code, "invalid-context");
 });
 
+test("a context record that does not fit is not told to the model, and the host is given the diagnostics", async () => {
+  const events: AiSdkToolResult[] = [];
+  // The host's record lacks the field the tool's function declares as required.
+  const toolSet = adapt({ context: () => ({ $type: "ChatToolContext" }), onResult: (event) => void events.push(event) });
+  const thrown = await rejection(call(toolSet, "who_am_i", {}));
+  assert.ok(thrown instanceof NxAgentToolError);
+  assert.equal(thrown.code, "invalid-context");
+  // The fixed sentence, with nothing of the record in it: not the field's name, not as a member.
+  assert.equal(thrown.message, "Tool 'who_am_i' is not available for this call.");
+  assert.deepEqual(Object.keys(thrown).sort(), ["code", "name"]);
+  assert.equal(JSON.stringify({ ...thrown, message: thrown.message, stack: thrown.stack }).includes("conversationId"), false);
+  // The host reads which field, and that the failure is in the argument it filled in.
+  assert.equal(events.length, 1);
+  const { error } = events[0]!.result as { error: { code: string; message: string; diagnostics: readonly { code: string; argument?: string }[] } };
+  assert.equal(error.code, "invalid-context");
+  assert.match(error.message, /conversationId/);
+  assert.deepEqual(error.diagnostics.map(({ code, argument }) => ({ code, argument })), [{ code: "nx-ir-boundary-field", argument: "context" }]);
+});
+
 test("a failure is thrown as the package's tool error, with the result's code", async () => {
   const budget = await rejection(call(adapt(), "spin", { n: 1000 }));
   assert.ok(budget instanceof NxAgentToolError);

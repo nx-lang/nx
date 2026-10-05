@@ -174,6 +174,15 @@ export interface NxIrDiagnostic {
      * does, so a host tells an exhausted budget from runaway recursion without reading the message.
      */
     readonly limit?: NxIrLimit;
+    /**
+     * The parameter whose argument the failure is in, by its declared name. It is present when
+     * `callFunction` or `evaluateFunction` refuses a value the host passed for one parameter (a
+     * value that does not fit the parameter's type, at any depth, or a `Function` record in it that
+     * names no function) and when a required parameter was given nothing. Nothing else carries it:
+     * not a failure a default raises, a resource limit, a failure in the function's body or result,
+     * or a failure of another entry point.
+     */
+    readonly argument?: string;
 }
 /**
  * A limit an evaluation reached. `name` is `maxOperations`, `maxInputSize`, `maxCallDepth` or

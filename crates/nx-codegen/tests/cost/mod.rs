@@ -1609,13 +1609,19 @@ pub fn budgets_below(operations: u64) -> Vec<u64> {
     }
 }
 
-/// The Rust runtime's answer for one scale of a case: the code it refuses the call with, or the
-/// operations and the input size the usage report gives.
+/// The code a call was refused with and the argument the diagnostic names, `null` when it names
+/// none, under the member `refused` names the code with.
+fn refusal(refused: &str, error: &NxIrRuntimeError) -> Value {
+    json!({ refused: error.code(), "argument": error.diagnostics[0].argument })
+}
+
+/// The Rust runtime's answer for one scale of a case: the code it refuses the call with and the
+/// argument that names, or the operations and the input size the usage report gives.
 fn measured(program: &Program, call: &Call) -> Value {
     let instance = call.prepare(program);
     let (options, usage) = measuring();
     match call.run(program, instance.as_ref(), &options) {
-        Err(error) => json!({ "refused": error.code() }),
+        Err(error) => refusal("refused", &error),
         Ok(_) => json!({ "operations": usage.operations(), "inputSize": usage.input_size() }),
     }
 }
@@ -1624,17 +1630,18 @@ fn measured(program: &Program, call: &Call) -> Value {
 /// runtime's: at the base scale its result with no budget, its count and input size, whether the
 /// result under a budget equal to the count is the result under none, and where budgets below
 /// the count stop it; at the larger scale its count and input size. A case the runtime refuses
-/// with no budget has only the diagnostic's code.
+/// with no budget has only the diagnostic's code and the argument it names, which is recorded
+/// wherever a diagnostic is.
 pub fn answer(program: &Program, case: &Case) -> Value {
     let base = Call::read(&case.call(1));
     let instance = base.prepare(program);
     let unlimited = match base.run(program, instance.as_ref(), &RuntimeOptions::default()) {
-        Err(error) => return json!({ "base": { "refused": error.code() } }),
+        Err(error) => return json!({ "base": refusal("refused", &error) }),
         Ok(returned) => returned.json(),
     };
     let (options, usage) = measuring();
     if let Err(error) = base.run(program, instance.as_ref(), &options) {
-        return json!({ "base": { "refusedUnderAmpleLimits": error.code() } });
+        return json!({ "base": refusal("refusedUnderAmpleLimits", &error) });
     }
     let (operations, input_size) = (usage.operations(), usage.input_size());
     let operations_used = operations.unwrap_or(0);
@@ -1657,6 +1664,7 @@ pub fn answer(program: &Program, case: &Case) -> Value {
                     json!({
                         "budget": budget,
                         "code": diagnostic.code,
+                        "argument": diagnostic.argument,
                         "limit": diagnostic.limit.map(|limit| limit.name),
                         "declaration": diagnostic.declaration,
                         "source": diagnostic.source.as_ref().map(|source| json!({

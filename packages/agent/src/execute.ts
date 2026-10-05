@@ -303,7 +303,7 @@ function prepareFunctionCalls(
         return thrownFailure(error, "evaluation-failed", usage());
       }
       const { diagnostics } = error;
-      const { code, limit } = classifyRuntimeFailure(diagnostics);
+      const { code, limit } = classifyRuntimeFailure(diagnostics, contextNames);
       return failure(code, error.message, { diagnostics, limit }, usage());
     }
   };

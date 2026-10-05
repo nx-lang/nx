@@ -1,0 +1,45 @@
+// Argument diagnostics: calls every runtime fails alike, and the argument each failure names.
+// A case of `program.json` marked `fails` has no result: `expected/diagnostics.json` holds the
+// code of its diagnostic and, when the failure is in a value the host passed, the name of the
+// parameter the value was passed for. A failure that is not in such a value names none, even
+// when a runtime finds it while it checks an argument.
+
+type Item = { quantity:int }
+type Order = { items:Item+ }
+type Request = { order:Order }
+// A default is the program's own. A `Req` whose `n` is 0 fits the type, and filling in `share`
+// divides by zero while the argument that holds the record is checked.
+type Req = { n:int share:int = { 100 / n } }
+
+// `wrongType` passes a string for `teamSize`: `nx-ir-boundary-type`, naming `teamSize`.
+// `missing` passes nothing: `nx-ir-arguments`, naming the first parameter that is required.
+let findPlans(teamSize:int, note?:string): string = { "plans" }
+// `deepField` passes a request whose order's third item has a string for its quantity, three
+// levels down: `nx-ir-boundary-type`, naming `request`, the parameter that holds it.
+let total(request:Request): int = { 1 }
+// `noFunction` passes a `Function` record that names a function the module does not declare:
+// `nx-ir-function-value`, naming `step`.
+let through(step: <function n:int />: int): int = <step n={1} />
+// `defaultDivides` passes a `Req` whose `n` is 0: `nx-ir-division-by-zero`, naming no argument.
+let share(req:Req): int = { req.share }
+// `bodyDivides` passes 0, which fits, and the body divides by it: the same code, and no argument.
+let ratio(n:int): int = { 100 / n }
+
+// A default can fail with a code that a failure in an argument has. A `Function` record is
+// accepted at a function type as any function of the program is, its parameters unchecked, so a
+// host can pass one that names `needsTwo` where a function of one parameter is declared, and the
+// call the default makes then lacks `m`: `nx-ir-arguments`, the code of a missing argument. The
+// failure is the default's, so it names no argument, and nothing but where it was raised says so.
+let needsTwo(n:int, m:int): int = { n + m }
+type Stepper = { step: <function n:int />: int value:int = { step(1) } }
+// `fieldDefault` passes a `Stepper` whose `step` names `needsTwo` and that has no `value`: the
+// record fits, and its field default fails while the argument that holds it is checked.
+let stepperValue(s:Stepper): int = { s.value }
+// `parameterDefault` passes `needsTwo` for `step` and nothing for `value`, which the function
+// fills with its default: the host gave no value for the parameter whose binding fails.
+let stepped(step: <function n:int />: int, value:int = { <step n={1} /> }): int = { value }
+// `fifty` succeeds, and is here for its recorded failures. Its fifty records are checked as 100
+// values, the record and its quantity each, so it costs 103: those, the literal, the result
+// checked and the number written. A budget of 51 runs out while the argument is checked, and that
+// failure is a limit: it names `maxOperations` and no argument.
+let count(items:Item+): int = { 1 }

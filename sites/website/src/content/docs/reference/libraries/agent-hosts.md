@@ -145,6 +145,7 @@ Each kind of tool runs its own way:
 
 A failed call says why with one of a few codes, so a host does not read IR diagnostics:
 `invalid-input` when the model sent arguments of the wrong shape and can correct them,
+`invalid-context` when the context record the host supplied is missing or does not fit,
 `resource-limit` when a limit was reached, `evaluation-failed` when the function itself failed.
 
 ## Limits
@@ -186,7 +187,9 @@ let root(): Agent = {
 
 The parameter is left out of the tool's input schema, so the model is never asked for it. The host
 names its type as `toolContextType` when it normalizes, and passes the record as `context` at each
-call. The package sets the record's `callId` to the call's.
+call. The package sets the record's `callId` to the call's. A record that is missing, or that does
+not fit the type, fails the call with `invalid-context`: the mistake is the host's, so the model is
+not asked to correct it.
 
 The context has to be a parameter of its own. A function that takes a list of contexts, or a
 record with a context among its fields, is refused when the agent is normalized, because the

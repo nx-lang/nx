@@ -16,20 +16,22 @@ signatures to them and passes, returns and compares such values, and
 one whose calls leave parameters out for the function to fill, including a default that reads a
 value private to the called function's module, `evaluation-cost`, which has one entrypoint per
 rule of the evaluation cost model: what is evaluated, placed and concatenated, and what is checked
-against a type, compared and written for the host, and `host-values`, whose entrypoints are
+against a type, compared and written for the host, `host-values`, whose entrypoints are
 evaluated with arguments: the values a host passes, which no entrypoint without arguments can
-supply, with the input size of each.
+supply, with the input size of each, and `argument-diagnostics`, whose cases are calls every
+runtime fails alike, each with the code of its diagnostic and the argument it names.
 
 Each program is a directory:
 
 | Path | What it holds |
 | --- | --- |
 | `*.nx` | The workspace's modules; a module's identity is its path within the directory. |
-| `program.json` | The entry, the implicit imports, the version each module is built with, which modules to emit, the entrypoints to evaluate, each with the arguments to pass it if it is a case, and the lifecycles to drive. |
+| `program.json` | The entry, the implicit imports, the version each module is built with, which modules to emit, the entrypoints to evaluate, each with the arguments to pass it if it is a case and whether the case is one that fails, and the lifecycles to drive. |
 | `expected/<identity>.nxir` | The module's image with its debug section. `/` in an identity is written `__`. |
 | `expected/<identity>.stripped.nxir` | The same image without the debug section. |
 | `expected/<identity>.nxir.txt`, `.stripped.nxir.txt` | Each image as `nxlang ir explain` renders it, so a review reads text and a diff names what changed. The emitter's tests fail when a text is not the explanation of its image. |
 | `expected/results.json` | The canonical value of each entrypoint, keyed `identity::function`, as the interpreter evaluates it; of each case, keyed `identity::function#case`, as the Rust IR runtime evaluates it; and each lifecycle's record, keyed `identity::Component`. |
+| `expected/diagnostics.json` | For each case marked as one that fails, keyed as `results.json` keys a case, the `code` of the diagnostic the call fails with and the `argument` it names, as the Rust IR runtime reports them; `argument` is left out when the diagnostic names none. A program with no such case has no such file. |
 | `expected/operations.json` | What each evaluation costs in operations, as `docs/nx-ir-format.md` (*Evaluation cost*) defines them, and, for a program that asks, where smaller budgets stop it and how large the input of each case and lifecycle step is. |
 
 An entrypoint names a module and a function. It may also name `arguments`, a list of canonical
@@ -40,8 +42,25 @@ failures and input size are kept under `identity::function#case`; an entrypoint 
 keeps the key `identity::function`. The interpreter's source evaluation takes no arguments, so a
 case's expected result is recorded from the Rust IR runtime, as the operation counts are, and
 checked in the TypeScript runtime: that comparison is what a case is for. A case uses only
-arguments that every runtime accepts, spelled alike, and for which each gives one result, so a
-`null` inside a value at `object`, which the two runtimes return differently, is not in the corpus.
+arguments that every runtime treats alike, spelled alike: each accepts them and gives one result,
+or, for a case marked as one that fails, each fails the call with one diagnostic. So a `null`
+inside a value at `object`, which the two runtimes return differently, is not in the corpus.
+
+A case with `"fails": true` is one every runtime fails; `fails` is a boolean, leaving it out is
+`false`, and only a case may set it to `true`. Such a case has no entry in `results.json` and none
+in `operations.json`, which say what a call that succeeds gives and costs; `diagnostics.json`
+holds the code of its diagnostic and the argument the diagnostic names, the parameter whose value
+the failure is in, or no `argument` when the failure is not in a value the host passed. Each
+runtime evaluates the case from both images and must fail with that code and name that argument,
+or none. A case fails only where its program says so: one that fails without the mark, and one
+with the mark that succeeds, fail the emitter's tests, regeneration included, so a result never
+turns into a recorded failure unasked. `argument-diagnostics` holds these cases: a value of the
+wrong type, a wrong field three levels down, a missing required argument and a `Function` record
+that names no function, each with its argument; and, each with none, a record whose field default
+divides by zero, a division by zero in the body, and two defaults that fail with
+`nx-ir-arguments`, a code a failure in an argument also has: a record's field default, and the
+default of a parameter the call leaves out. Those two are what hold a runtime to telling a
+default's failure from an argument's by where it was raised and not by its code.
 
 A lifecycle names the module and component to initialize, optional `props`, and `batches`: an
 ordered list of dispatch batches, each a list of entries written as a host would send them, either
@@ -66,15 +85,17 @@ every count `n` by evaluating under a budget of `n`, which must give the recorde
 that the recorded number is the least that works; it checks that its own usage report gives `n`;
 and it checks every failure by evaluating the debug image under its budget, which must stop at the
 recorded declaration and span. Equal counts show that two runtimes charge the same total; the
-failures show that they charge in the same order.
+failures show that they charge in the same order. A diagnostic for a limit names no argument,
+wherever the limit is reached, and each of these checks requires that too: the `fifty` case of
+`argument-diagnostics` has a recorded budget that runs out while its argument is checked.
 
 A program whose `program.json` sets `recordInputSizes` also gets `inputSizes`, keyed as `counts`
 is: the input size of each case, as `docs/nx-ir-format.md` (*Input size*) defines it, and a
 lifecycle's `{ "initial", "batches" }`, the input size of its initialization, which is its props,
 and of each batch. A runtime that offers an input limit checks every size `n` as it checks a
 count: under a limit of `n` the call must proceed and give the recorded result, and under `n - 1`
-it must fail with `nx-ir-resource-limit` naming `maxInputSize`; and its usage report must give
-`n`. Only `host-values` records them. The kinds of input the corpus cannot express, arguments by
+it must fail with `nx-ir-resource-limit` naming `maxInputSize` and no argument; and its usage
+report must give `n`. Only `host-values` records them. The kinds of input the corpus cannot express, arguments by
 name, content, a state passed in and a state patch, are checked in each runtime's own tests against
 the sizes the format document works out.
 
@@ -117,7 +138,8 @@ a runtime gives a meaning to). Every generated case is run in both runtimes at t
 second with its value eight times the size and its step repeated eight times as often, and:
 
 - both runtimes must give the same result, operation count, input size and failures under smaller
-  budgets (`cargo test -p nx-codegen --test cost_differential`);
+  budgets, and name the same argument, or none, in every diagnostic
+  (`cargo test -p nx-codegen --test cost_differential`);
 - the bytes the Rust runtime allocates must stay within a multiple of the count and at most double
   for each unit between the scales (`cargo test -p nx-codegen --test cost_allocation`);
 - a case whose time grows more than twice as fast as its count is reported, in a run that does not

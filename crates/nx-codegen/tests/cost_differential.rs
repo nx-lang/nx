@@ -176,9 +176,17 @@ fn brief(answer: &Value) -> String {
 
 /// How the two runtimes' answers for a case differ, if they do.
 fn difference(case: &Case, rust: &Value, typescript: &Value) -> Option<String> {
-    let refused = |answer: &Value| answer["base"].get("refused").cloned();
+    // The code of a refusal with the argument its diagnostic names, when it names one.
+    let refused = |answer: &Value| {
+        let base = &answer["base"];
+        base.get("refused").map(|code| match &base["argument"] {
+            Value::Null => code.to_string(),
+            argument => format!("{code} naming the argument {argument}"),
+        })
+    };
     match (refused(rust), refused(typescript)) {
-        // A case both refuse with no budget has no count: the codes are what is compared.
+        // A case both refuse with no budget has no count: the codes and the arguments the
+        // diagnostics name are what is compared.
         (Some(rust), Some(typescript)) => {
             return (rust != typescript)
                 .then(|| format!("refused with {rust} in Rust and {typescript} in TypeScript"));

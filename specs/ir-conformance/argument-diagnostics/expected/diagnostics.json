@@ -1,0 +1,30 @@
+{
+  "main.nx::findPlans#missing": {
+    "argument": "teamSize",
+    "code": "nx-ir-arguments"
+  },
+  "main.nx::findPlans#wrongType": {
+    "argument": "teamSize",
+    "code": "nx-ir-boundary-type"
+  },
+  "main.nx::ratio#bodyDivides": {
+    "code": "nx-ir-division-by-zero"
+  },
+  "main.nx::share#defaultDivides": {
+    "code": "nx-ir-division-by-zero"
+  },
+  "main.nx::stepped#parameterDefault": {
+    "code": "nx-ir-arguments"
+  },
+  "main.nx::stepperValue#fieldDefault": {
+    "code": "nx-ir-arguments"
+  },
+  "main.nx::through#noFunction": {
+    "argument": "step",
+    "code": "nx-ir-function-value"
+  },
+  "main.nx::total#deepField": {
+    "argument": "request",
+    "code": "nx-ir-boundary-type"
+  }
+}

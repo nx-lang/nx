@@ -349,6 +349,39 @@ an exhausted budget from runaway recursion without reading the message:
 No other diagnostic carries `limit`. Runtime options the runtime cannot use are refused with
 `nx-ir-options` before anything is evaluated.
 
+A diagnostic for a failure in an argument of the function a host called, through `callFunction`
+or `evaluateFunction`, carries `argument`: the declared name of the parameter the value was passed
+for, whether the arguments were passed by name or by position.
+
+```ts
+// `findPlans` is declared `let findPlans(teamSize:int, note?:string): string`.
+const findPlans = { $type: "Function", module: "main.nx", name: "findPlans" };
+try {
+  callFunction(program, findPlans, { teamSize: "five" });
+} catch (error) {
+  if (error instanceof NxIrRuntimeError) {
+    const [diagnostic] = error.diagnostics;
+    console.log(diagnostic.code, diagnostic.argument); // nx-ir-boundary-type teamSize
+  }
+}
+```
+
+It is set for a value that does not fit its parameter's type, at any depth inside the value
+(`nx-ir-boundary-type`, `nx-ir-boundary-field`), for a `Function` record in the value that names
+no function (`nx-ir-function-value`), and for a required parameter given nothing
+(`nx-ir-arguments`). It says the failure is in what the host passed, so nothing else carries it,
+even when the runtime finds the failure while it checks an argument:
+
+- a failure a default raises, a parameter's or a record field's, by its expression, by a function
+  it calls or by its value not fitting its type: a record's defaults are filled in while the
+  argument that holds the record is checked, and they are the program's own;
+- a resource limit, the budget spent while an argument is checked included;
+- a failure in the function's body or in its result, more positional arguments than the function
+  has parameters, and the `Function` record `callFunction` is given to say which function to call;
+- a failure of any other entry point.
+
+The Rust runtime names the same argument for the same call.
+
 ## Exports
 
 | Export | What it does |

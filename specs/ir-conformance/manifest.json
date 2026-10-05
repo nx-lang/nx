@@ -2,6 +2,7 @@
   "coverage": {
     "binaryOperators": {
       "add": [
+        "argument-diagnostics",
         "components",
         "conversions",
         "evaluation-cost",
@@ -29,6 +30,7 @@
         "parameter-defaults"
       ],
       "div": [
+        "argument-diagnostics",
         "conversions",
         "expressions"
       ],
@@ -61,6 +63,7 @@
         "expressions"
       ],
       "idiv": [
+        "argument-diagnostics",
         "conversions",
         "expressions"
       ],
@@ -109,6 +112,7 @@
       ],
       "int": [
         "agent-library",
+        "argument-diagnostics",
         "components",
         "conversions",
         "evaluation-cost",
@@ -143,6 +147,7 @@
       "function": [
         "agent-library",
         "agent-tool-context",
+        "argument-diagnostics",
         "components",
         "conversions",
         "evaluation-cost",
@@ -165,6 +170,7 @@
       "record": [
         "agent-library",
         "agent-tool-context",
+        "argument-diagnostics",
         "conversions",
         "evaluation-cost",
         "function-references",
@@ -247,6 +253,7 @@
       ],
       "binary": [
         "agent-library",
+        "argument-diagnostics",
         "components",
         "conversions",
         "evaluation-cost",
@@ -272,6 +279,7 @@
         "trailing-element"
       ],
       "call": [
+        "argument-diagnostics",
         "conversions",
         "evaluation-cost",
         "expressions",
@@ -341,6 +349,7 @@
       ],
       "member": [
         "agent-tool-context",
+        "argument-diagnostics",
         "conversions",
         "evaluation-cost",
         "expressions",
@@ -354,11 +363,13 @@
         "two-module"
       ],
       "namedCall": [
+        "argument-diagnostics",
         "evaluation-cost",
         "function-values"
       ],
       "number": [
         "agent-library",
+        "argument-diagnostics",
         "components",
         "conversions",
         "evaluation-cost",
@@ -421,6 +432,7 @@
       "slot": [
         "agent-library",
         "agent-tool-context",
+        "argument-diagnostics",
         "components",
         "conversions",
         "evaluation-cost",
@@ -441,6 +453,7 @@
       "string": [
         "agent-library",
         "agent-tool-context",
+        "argument-diagnostics",
         "components",
         "conversions",
         "evaluation-cost",
@@ -483,6 +496,7 @@
         "function-references"
       ],
       "function": [
+        "argument-diagnostics",
         "evaluation-cost",
         "function-references",
         "function-values"
@@ -490,6 +504,7 @@
       "nominal": [
         "agent-library",
         "agent-tool-context",
+        "argument-diagnostics",
         "components",
         "evaluation-cost",
         "expressions",
@@ -509,6 +524,7 @@
       "primitive": [
         "agent-library",
         "agent-tool-context",
+        "argument-diagnostics",
         "components",
         "conversions",
         "evaluation-cost",
@@ -531,6 +547,7 @@
       "seq": [
         "agent-library",
         "agent-tool-context",
+        "argument-diagnostics",
         "components",
         "conversions",
         "evaluation-cost",
@@ -560,6 +577,7 @@
   "programs": [
     "agent-library",
     "agent-tool-context",
+    "argument-diagnostics",
     "components",
     "conversions",
     "evaluation-cost",

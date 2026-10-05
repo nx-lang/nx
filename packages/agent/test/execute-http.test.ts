@@ -173,6 +173,29 @@ test("the arguments function is given the host's context, as a function tool's f
   assert.equal(calls.length, 1);
 });
 
+test("a context record that does not fit is the host's mistake, and no request is made", async () => {
+  const { calls, request } = recorder();
+  // A required field is missing, and a record of a type that is not the declared one.
+  for (const context of [{ $type: "ChatToolContext" }, { $type: "AuditToolContext", actor: "kai" }]) {
+    const result = failed(await run("lookup_mine", { orderId: "A1" }, request, { context }));
+    assert.equal(result.error.code, "invalid-context", JSON.stringify(context));
+    assert.equal(result.error.diagnostics![0]!.argument, "context");
+    // The arguments function was called, so the failure carries what that call used.
+    assert.equal(typeof result.usage!.operations, "number");
+    assert.equal(typeof result.usage!.inputSize, "number");
+    // `evaluateHttpArguments` classifies the same call the same way.
+    const evaluated = failed(evaluate("lookup_mine", { orderId: "A1" }, { context }));
+    assert.equal(evaluated.error.code, "invalid-context", JSON.stringify(context));
+    assert.deepEqual(evaluated.usage, result.usage);
+  }
+  // A wrong-typed argument beside a context that fits is the model's to correct.
+  const wrongType = failed(await run("lookup_mine", { orderId: 7 }, request, { context: chat }));
+  assert.equal(wrongType.error.code, "invalid-input");
+  assert.equal(wrongType.error.diagnostics![0]!.argument, "orderId");
+  assert.equal(failed(evaluate("lookup_mine", { orderId: 7 }, { context: chat })).error.code, "invalid-input");
+  assert.equal(calls.length, 0);
+});
+
 test("a non-2xx status is an output, not a failure", async () => {
   for (const response of [{ status: 404, body: "not found" }, { status: 500, body: null }, { status: 302, body: [] }]) {
     const { request } = recorder(() => response);

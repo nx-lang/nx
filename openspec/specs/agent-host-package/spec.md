@@ -576,14 +576,25 @@ hold for the call of an HTTP tool's arguments function, through `execute` and th
 `evaluateHttpArguments`.
 
 A success SHALL carry the function's canonical result as the runtime returns it. A failure of
-evaluation SHALL carry the runtime's diagnostics and one of these codes: `invalid-input` when every
-diagnostic is a boundary failure on the arguments, which is `nx-ir-arguments` or a code that begins
-`nx-ir-boundary-`, as `nx-ir-boundary-type` and `nx-ir-boundary-field` do; `resource-limit` when
-any diagnostic is `nx-ir-resource-limit`, with the diagnostic's `limit` carried on the error; and
-`evaluation-failed` otherwise. The package SHALL match the family of boundary codes and not a list
-of them, so that a check a runtime adds at the boundary later, of a value against a constrained
-type for one, is reported as input the model can correct with no change to the package. A host
-SHALL NOT need to read IR diagnostic codes to tell these apart.
+evaluation SHALL carry the runtime's diagnostics and one of these codes, chosen by what the
+diagnostics say and never by their message text:
+
+- `resource-limit` when any diagnostic is `nx-ir-resource-limit`, with the diagnostic's `limit`
+  carried on the error.
+- `invalid-context` when every diagnostic is a boundary failure, which is `nx-ir-arguments` or a
+  code that begins `nx-ir-boundary-`, that names an argument, and at least one names a context
+  parameter of the tool's function. The host filled that argument in, so the mistake is the
+  host's and the model has nothing to correct.
+- `invalid-input` when every diagnostic is a boundary failure that names an argument and none
+  names a context parameter. The model sent that argument and can send it again.
+- `evaluation-failed` otherwise. That includes a boundary failure that names no argument: it was
+  found inside the function, in a default or in the result, not in what the call was given.
+
+The package SHALL match the family of boundary codes and not a list of them, so that a check a
+runtime adds at the boundary later, of a value against a constrained type for one, is reported
+as input the model can correct with no change to the package, provided the runtime names the
+argument as it does for every other boundary failure. A host SHALL NOT need to read IR diagnostic
+codes to tell these apart.
 
 #### Scenario: An optional context field set to undefined is absent
 - **WHEN** the host passes the context record `{ $type: "ChatToolContext", conversationId: "conv_9", contactEmail: undefined }`
@@ -641,7 +652,7 @@ SHALL NOT need to read IR diagnostic codes to tell these apart.
 
 #### Scenario: A boundary failure of a kind added later is invalid input
 - **WHEN** the runtime fails a call with one diagnostic whose code is `nx-ir-boundary-constraint`,
-  a code this package has no knowledge of
+  a code this package has no knowledge of, naming the argument `teamSize`
 - **THEN** the failure SHALL have code `invalid-input` and SHALL carry that diagnostic
 - **AND** a failure whose diagnostics are that one and `nx-ir-division-by-zero` SHALL have code
   `evaluation-failed`
@@ -696,6 +707,25 @@ SHALL NOT need to read IR diagnostic codes to tell these apart.
 #### Scenario: A failure inside the function is an evaluation failure
 - **WHEN** a tool's function fails at run time for a reason other than its arguments or a limit
 - **THEN** `execute` SHALL resolve to a failure with code `evaluation-failed`
+
+#### Scenario: A context record that does not fit is the host's mistake
+- **WHEN** a tool's function is `let lookupOrder(orderId:string, context:ChatToolContext): string`,
+  where `ChatToolContext` declares a required `conversationId:string`, and the host passes the
+  context record `{ "$type": "ChatToolContext" }` with the input `{ "orderId": "A1" }`
+- **THEN** `execute` SHALL resolve to a failure with code `invalid-context` carrying the runtime's
+  diagnostic, whose `argument` is `context`
+- **AND** a call of the same tool with the input `{ "orderId": 7 }` and a context record that fits
+  SHALL fail with code `invalid-input`, with a diagnostic whose `argument` is `orderId`
+
+#### Scenario: A context record of another type is the host's mistake
+- **WHEN** the host passes that tool a context record whose `$type` names a type that is not
+  `ChatToolContext` and does not extend it
+- **THEN** the failure SHALL have code `invalid-context`
+
+#### Scenario: A boundary failure that names no argument is not the model's
+- **WHEN** the runtime fails a call with one diagnostic whose code is `nx-ir-boundary-type` and
+  which names no argument
+- **THEN** the failure SHALL have code `evaluation-failed`
 
 ### Requirement: Context parameters are filled from the host's context record at each call
 `execute` SHALL accept, in its call context, the host's tool context: a record of the concrete

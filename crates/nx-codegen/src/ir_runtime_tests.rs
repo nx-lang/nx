@@ -649,6 +649,462 @@ fn a_runtime_failure_names_its_declaration_and_its_span_when_the_image_has_one()
 }
 
 // ------------------------------------------------------------------------------------------------
+// The argument a diagnostic names
+// ------------------------------------------------------------------------------------------------
+
+const ARGUMENT_SOURCE: &str = r#"
+external component <Button label?:string />
+
+type Item = { quantity:int }
+type Order = { items:Item+ }
+type Request = { order:Order }
+type Req = { n:int share:int = { 100 / n } }
+type Calling = { n:int share:int = { hundredth(n) } }
+type Unfit = { n:int label:string = { n } }
+type Endless = { n:int share:int = { spin(n) } }
+type Stepper = { step: <function n:int />: int value:int = { step(1) } }
+
+let hundredth(n:int): int = { 100 / n }
+let spin(n:int): int = { spin(n) }
+let needsTwo(n:int, m:int): int = { n + m }
+let named(n:int): string = { "one" }
+
+let findPlans(teamSize:int, note?:string): string = { "plans" }
+let total(request:Request): int = { 1 }
+let through(step: <function n:int />: int): int = <step n={1} />
+let share(req:Req): int = { req.share }
+let calling(req:Calling): int = { req.share }
+let unfit(req:Unfit): string = { req.label }
+let endless(req:Endless): int = { req.share }
+let defaulted(n:int, share:int = { 100 / n }): int = { share }
+let inner(n:int): int = { hundredth(n) }
+let count(items:Item+): int = { 1 }
+let held(o:object): object = { o }
+let stepperValue(s:Stepper): int = { s.value }
+let stepped(step: <function n:int />: int, value:int = { <step n={1} /> }): int = { value }
+
+component <Counter step:int /> = {
+  <Button label="count" />
+}
+"#;
+
+/// The code and the argument of the one diagnostic a call fails with.
+#[track_caller]
+fn code_and_argument<T>(result: Result<T, NxIrRuntimeError>) -> (&'static str, Option<String>) {
+    let error = failure(result);
+    assert_eq!(error.diagnostics.len(), 1, "{error}");
+    let diagnostic = &error.diagnostics[0];
+    assert_eq!(
+        diagnostic.limit.is_some(),
+        diagnostic.code == "nx-ir-resource-limit"
+    );
+    (diagnostic.code, diagnostic.argument.clone())
+}
+
+fn function(name: &str) -> NxValue {
+    json(&format!(
+        r#"{{ "$type": "Function", "module": "main.nx", "name": "{name}" }}"#
+    ))
+}
+
+/// What a call of `name` fails with when its arguments are passed by name, under `options`.
+#[track_caller]
+fn by_name(
+    program: &Program,
+    name: &str,
+    args: &str,
+    options: &RuntimeOptions,
+) -> (&'static str, Option<String>) {
+    code_and_argument(program.call_function(&function(name), &fields(args), options))
+}
+
+/// What a call of `name` fails with when its arguments are passed by position, under `options`.
+#[track_caller]
+fn by_position(
+    program: &Program,
+    name: &str,
+    args: &str,
+    options: &RuntimeOptions,
+) -> (&'static str, Option<String>) {
+    let NxValue::Array(args) = json(args) else {
+        panic!("expected a list of arguments");
+    };
+    code_and_argument(program.evaluate_function(name, &args, options))
+}
+
+fn named_argument(code: &'static str, argument: &str) -> (&'static str, Option<String>) {
+    (code, Some(argument.to_string()))
+}
+
+#[test]
+fn a_failure_in_a_value_the_host_passed_names_the_parameter_it_was_passed_for() {
+    let program = program(ARGUMENT_SOURCE);
+    let options = options();
+    let wrong_type = named_argument("nx-ir-boundary-type", "teamSize");
+    assert_eq!(
+        by_name(&program, "findPlans", r#"{ "teamSize": "five" }"#, &options),
+        wrong_type
+    );
+    assert_eq!(
+        by_position(&program, "findPlans", r#"["five"]"#, &options),
+        wrong_type
+    );
+    let second = named_argument("nx-ir-boundary-type", "note");
+    assert_eq!(
+        by_name(
+            &program,
+            "findPlans",
+            r#"{ "teamSize": 5, "note": 7 }"#,
+            &options
+        ),
+        second
+    );
+    assert_eq!(
+        by_position(&program, "findPlans", "[5, 7]", &options),
+        second
+    );
+
+    // Three levels down: the request, its order, the third of its items, that item's quantity.
+    let request = r#"{ "$type": "Request", "order": { "$type": "Order", "items": [
+        { "$type": "Item", "quantity": 1 },
+        { "$type": "Item", "quantity": 2 },
+        { "$type": "Item", "quantity": "three" }
+    ] } }"#;
+    let deep = named_argument("nx-ir-boundary-type", "request");
+    assert_eq!(
+        by_name(
+            &program,
+            "total",
+            &format!(r#"{{ "request": {request} }}"#),
+            &options
+        ),
+        deep
+    );
+    assert_eq!(
+        by_position(&program, "total", &format!("[{request}]"), &options),
+        deep
+    );
+    assert_eq!(
+        by_name(
+            &program,
+            "total",
+            r#"{ "request": { "$type": "Request", "order": { "$type": "Order", "items": [], "extra": 1 } } }"#,
+            &options
+        ),
+        named_argument("nx-ir-boundary-field", "request")
+    );
+
+    let missing = named_argument("nx-ir-arguments", "teamSize");
+    assert_eq!(by_name(&program, "findPlans", "{}", &options), missing);
+    assert_eq!(by_position(&program, "findPlans", "[]", &options), missing);
+
+    let no_function = named_argument("nx-ir-function-value", "step");
+    let record = r#"{ "$type": "Function", "module": "main.nx", "name": "missing" }"#;
+    assert_eq!(
+        by_name(
+            &program,
+            "through",
+            &format!(r#"{{ "step": {record} }}"#),
+            &options
+        ),
+        no_function
+    );
+    assert_eq!(
+        by_position(&program, "through", &format!("[{record}]"), &options),
+        no_function
+    );
+
+    // The message names the argument in words as it did.
+    let error = failure(program.call_function(
+        &function("findPlans"),
+        &fields(r#"{ "teamSize": "five" }"#),
+        &options,
+    ));
+    assert_eq!(
+        error.diagnostics[0].message,
+        "Expected teamSize to be a number."
+    );
+}
+
+#[test]
+fn a_failure_a_default_raises_names_no_argument() {
+    let program = program(ARGUMENT_SOURCE);
+    let options = options();
+    let division = ("nx-ir-division-by-zero", None);
+    // A record's defaults are filled in while its argument is checked: a default's expression, a
+    // function it calls, and its value not fitting its field.
+    assert_eq!(
+        by_name(
+            &program,
+            "share",
+            r#"{ "req": { "$type": "Req", "n": 0 } }"#,
+            &options
+        ),
+        division
+    );
+    assert_eq!(
+        by_position(
+            &program,
+            "share",
+            r#"[{ "$type": "Req", "n": 0 }]"#,
+            &options
+        ),
+        division
+    );
+    assert_eq!(
+        by_name(
+            &program,
+            "calling",
+            r#"{ "req": { "$type": "Calling", "n": 0 } }"#,
+            &options
+        ),
+        division
+    );
+    // The checker accepts this default because it reads another field (`specs/future.md`).
+    assert_eq!(
+        by_name(
+            &program,
+            "unfit",
+            r#"{ "req": { "$type": "Unfit", "n": 1 } }"#,
+            &options
+        ),
+        ("nx-ir-boundary-type", None)
+    );
+    assert_eq!(
+        by_position(
+            &program,
+            "unfit",
+            r#"[{ "$type": "Unfit", "n": 1 }]"#,
+            &options
+        ),
+        ("nx-ir-boundary-type", None)
+    );
+    assert_eq!(
+        by_name(&program, "defaulted", r#"{ "n": 0 }"#, &options),
+        division
+    );
+    assert_eq!(
+        by_position(&program, "defaulted", "[0]", &options),
+        division
+    );
+    // A field the host did write is still the host's, in a record whose other field has a default.
+    assert_eq!(
+        by_name(
+            &program,
+            "share",
+            r#"{ "req": { "$type": "Req", "n": 1, "share": "half" } }"#,
+            &options
+        ),
+        named_argument("nx-ir-boundary-type", "req")
+    );
+}
+
+/// A `Function` record of `main.nx`, as JSON text.
+fn function_json(name: &str) -> String {
+    format!(r#"{{ "$type": "Function", "module": "main.nx", "name": "{name}" }}"#)
+}
+
+#[test]
+fn a_default_that_fails_with_a_code_an_argument_failure_has_names_no_argument() {
+    let program = program(ARGUMENT_SOURCE);
+    let options = options();
+    // No gap in the checker is needed for these: the default calls a function value the host
+    // supplied, which is accepted at a function type as any function of the program is, and the
+    // call lacks an argument or its result does not fit. The codes alone would name the argument,
+    // so these hold the mark a field default's failure is given.
+    for (function, code) in [
+        ("needsTwo", "nx-ir-arguments"),
+        ("named", "nx-ir-boundary-type"),
+    ] {
+        let stepper = format!(
+            r#"{{ "$type": "Stepper", "step": {} }}"#,
+            function_json(function)
+        );
+        assert_eq!(
+            by_name(
+                &program,
+                "stepperValue",
+                &format!(r#"{{ "s": {stepper} }}"#),
+                &options
+            ),
+            (code, None)
+        );
+        assert_eq!(
+            by_position(&program, "stepperValue", &format!("[{stepper}]"), &options),
+            (code, None)
+        );
+        // A parameter the host gave nothing for is the function's to fill, and its default's
+        // failure is not in an argument whatever its code. Only that the binding is not the
+        // host's says so.
+        let step = function_json(function);
+        assert_eq!(
+            by_name(
+                &program,
+                "stepped",
+                &format!(r#"{{ "step": {step} }}"#),
+                &options
+            ),
+            (code, None)
+        );
+        assert_eq!(
+            by_position(&program, "stepped", &format!("[{step}]"), &options),
+            (code, None)
+        );
+    }
+    // The record's own function field that names no function is the host's value, and is named.
+    assert_eq!(
+        by_name(
+            &program,
+            "stepperValue",
+            &format!(
+                r#"{{ "s": {{ "$type": "Stepper", "step": {} }} }}"#,
+                function_json("missing")
+            ),
+            &options
+        ),
+        named_argument("nx-ir-function-value", "s")
+    );
+    // The defaulted parameter given a value is the host's again.
+    let step = function_json("hundredth");
+    assert_eq!(
+        by_name(
+            &program,
+            "stepped",
+            &format!(r#"{{ "step": {step}, "value": "one" }}"#),
+            &options
+        ),
+        named_argument("nx-ir-boundary-type", "value")
+    );
+    assert_eq!(
+        by_position(
+            &program,
+            "stepped",
+            &format!(r#"[{step}, "one"]"#),
+            &options
+        ),
+        named_argument("nx-ir-boundary-type", "value")
+    );
+}
+
+#[test]
+fn a_failure_inside_the_function_names_no_argument() {
+    let program = program(ARGUMENT_SOURCE);
+    let options = options();
+    // The body, the arguments of a function the body calls, and the result.
+    assert_eq!(
+        by_name(&program, "inner", r#"{ "n": 0 }"#, &options),
+        ("nx-ir-division-by-zero", None)
+    );
+    let step = |name: &str| {
+        format!(r#"{{ "step": {{ "$type": "Function", "module": "main.nx", "name": "{name}" }} }}"#)
+    };
+    assert_eq!(
+        by_name(&program, "through", &step("needsTwo"), &options),
+        ("nx-ir-arguments", None)
+    );
+    assert_eq!(
+        by_name(&program, "through", &step("named"), &options),
+        ("nx-ir-boundary-type", None)
+    );
+}
+
+#[test]
+fn a_limit_names_no_argument_wherever_it_is_reached() {
+    let program = program(ARGUMENT_SOURCE);
+    let limited = |result| {
+        let error = failure(result);
+        assert_eq!(error.code(), "nx-ir-resource-limit", "{error}");
+        let diagnostic = &error.diagnostics[0];
+        assert_eq!(diagnostic.argument, None, "{error}");
+        diagnostic.limit.expect("a limit").name
+    };
+    let find_plans = function("findPlans");
+    let five = fields(r#"{ "teamSize": 5 }"#);
+    assert_eq!(
+        limited(program.call_function(&find_plans, &five, &input_limit(1))),
+        "maxInputSize"
+    );
+
+    // The budget is spent while the argument is checked: fifty records under twenty operations.
+    let fifty = NxValue::Array(vec![json(r#"{ "$type": "Item", "quantity": 1 }"#); 50]);
+    let items = BTreeMap::from([("items".to_string(), fifty.clone())]);
+    assert_eq!(
+        limited(program.call_function(&function("count"), &items, &budget(20))),
+        "maxOperations"
+    );
+    assert_eq!(
+        limited(program.evaluate_function("count", &[fifty], &budget(20))),
+        "maxOperations"
+    );
+
+    // A default that never returns reaches the call depth, and with that limit raised, the bound
+    // on nesting or the stack, whichever an unoptimized build's frames meet first.
+    let endless = fields(r#"{ "req": { "$type": "Endless", "n": 1 } }"#);
+    assert_eq!(
+        limited(program.call_function(&function("endless"), &endless, &options())),
+        "maxCallDepth"
+    );
+    let unlimited = RuntimeOptions {
+        max_call_depth: u32::MAX,
+        ..options()
+    };
+    let reached = limited(program.call_function(&function("endless"), &endless, &unlimited));
+    assert!(
+        reached == "maxExpressionNesting" || reached == "maxStackBytes",
+        "{reached}"
+    );
+
+    // A value that nests too deeply to be read is refused before it reaches a parameter.
+    assert_eq!(
+        limited(program.evaluate_function("held", &[nested(300)], &options())),
+        "maxValueNesting"
+    );
+}
+
+#[test]
+fn what_is_not_an_argument_of_the_function_names_none() {
+    let program = program(ARGUMENT_SOURCE);
+    let options = options();
+    // One positional argument too many, the record that says which function to call, and what
+    // another entry point is given.
+    assert_eq!(
+        by_position(&program, "inner", "[1, 2]", &options),
+        ("nx-ir-arguments", None)
+    );
+    assert_eq!(
+        code_and_argument(program.call_function(&function("missing"), &BTreeMap::new(), &options)),
+        ("nx-ir-function-value", None)
+    );
+    assert_eq!(
+        code_and_argument(program.call_function(
+            &NxValue::String("findPlans".into()),
+            &BTreeMap::new(),
+            &options
+        )),
+        ("nx-ir-function-value", None)
+    );
+    let init = ComponentInit::default();
+    assert_eq!(
+        code_and_argument(program.initialize_component(
+            "Counter",
+            &fields(r#"{ "step": "two" }"#),
+            &init,
+            &options
+        )),
+        ("nx-ir-boundary-type", None)
+    );
+    assert_eq!(
+        code_and_argument(program.initialize_component(
+            "Counter",
+            &BTreeMap::new(),
+            &init,
+            &options
+        )),
+        ("nx-ir-boundary-field", None)
+    );
+}
+
+// ------------------------------------------------------------------------------------------------
 // The operation budget
 // ------------------------------------------------------------------------------------------------
 

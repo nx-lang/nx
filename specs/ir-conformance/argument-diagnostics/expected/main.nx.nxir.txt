@@ -1,0 +1,47 @@
+module main.nx fingerprint 11501405258501207636
+requires function-values-v1
+entrypoints functions [findPlans total through share ratio needsTwo stepperValue stepped count] components []
+
+record Item @7:1-7:29
+  quantity: int required
+
+record Order @8:1-8:29
+  items: Item+ required
+
+record Request @9:1-9:31
+  order: Order required
+
+record Req @12:1-12:45
+  n: int required
+  share: int = (100 div n)
+
+function findPlans(teamSize: int, note?: string): string @16:1-16:64 =
+  "plans"
+
+function total(request: Request): int @19:1-19:40 =
+  1
+
+function through(step: <function n:int />: int): int @22:1-22:65 =
+  <step n=1 />
+
+function share(req: Req): int @24:1-24:40 =
+  req.share
+
+function ratio(n: int): int @26:1-26:36 =
+  (100 idiv n)
+
+function needsTwo(n: int, m: int): int @33:1-33:44 =
+  (n add m)
+
+record Stepper @34:1-34:73
+  step: <function n:int />: int required
+  value: int = step(1)
+
+function stepperValue(s: Stepper): int @37:1-37:47 =
+  s.value
+
+function stepped(step: <function n:int />: int, value: int = <step n=1 />): int @40:1-40:92 =
+  value
+
+function count(items: Item+): int @45:1-45:36 =
+  1

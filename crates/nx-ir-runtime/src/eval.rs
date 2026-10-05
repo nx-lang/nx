@@ -3,7 +3,7 @@
 use crate::error::{Diagnostic, Limit, NxIrRuntimeError, Result, SourceSpan, RESOURCE_LIMIT};
 use crate::module::{
     BinaryOp, CaseConstruct, Construct, DeclarationKind, ElementNode, Field, ForNode, FunctionDecl,
-    HandlerNode, Intrinsic, Node, Properties, Ref, TextType, UnaryOp,
+    HandlerNode, Intrinsic, Node, Param, Properties, Ref, TextType, UnaryOp,
 };
 use crate::normalize::{integral, require_record, Labeled, Path};
 use crate::program::ProgramData;
@@ -140,6 +140,23 @@ pub(crate) fn bind(frame: &mut Frame, slot: usize, value: Value) -> Result<()> {
     Ok(())
 }
 
+/// Who made a call of a function: a host, through `evaluate_function` or `call_function`, or the
+/// program, from a body or a default. A failure in an argument of the host's call names the
+/// argument.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Caller {
+    Host,
+    Program,
+}
+
+/// Whether a diagnostic with this code is about a value passed for a parameter: a boundary
+/// failure, a missing required argument or a `Function` record that names no function.
+fn is_about_argument(code: &str) -> bool {
+    code == "nx-ir-arguments"
+        || code == "nx-ir-function-value"
+        || code.starts_with("nx-ir-boundary-")
+}
+
 /// One evaluation against one program under one set of limits.
 pub(crate) struct Machine<'p> {
     pub program: &'p ProgramData,
@@ -149,6 +166,10 @@ pub(crate) struct Machine<'p> {
     remaining: Cell<u64>,
     /// Where the native stack stood when the evaluation began.
     stack_base: usize,
+    /// Whether a default failed, by its expression or by its value not fitting its type. A
+    /// failure ends the evaluation, so once this is set the failure that leaves is that one, and
+    /// it is not in an argument even when the default was filled in while an argument was checked.
+    default_failed: Cell<bool>,
 }
 
 impl<'p> Machine<'p> {
@@ -159,7 +180,30 @@ impl<'p> Machine<'p> {
             nesting: Cell::new(0),
             remaining: Cell::new(options.max_operations.unwrap_or(u64::MAX)),
             stack_base: stack_position(),
+            default_failed: Cell::new(false),
         }
+    }
+
+    /// Records that a default failed, on the way out with its failure.
+    pub(crate) fn default_failed(&self, error: NxIrRuntimeError) -> NxIrRuntimeError {
+        self.default_failed.set(true);
+        error
+    }
+
+    /// The failure of the host's call in the binding of `argument`, with the argument named on
+    /// each diagnostic that is about the value the host passed. A default that failed while the
+    /// value was checked is not about that value whatever its code, and neither is a limit or a
+    /// failure of the image, which have other codes.
+    #[cold]
+    fn naming_argument(&self, mut error: NxIrRuntimeError, argument: &str) -> NxIrRuntimeError {
+        if !self.default_failed.get() {
+            for diagnostic in &mut error.diagnostics {
+                if is_about_argument(diagnostic.code) {
+                    diagnostic.argument = Some(argument.to_string());
+                }
+            }
+        }
+        error
     }
 
     /// A diagnostic that names the declaration evaluation is in and, when the image carries its
@@ -816,7 +860,13 @@ impl<'p> Machine<'p> {
                 None => None,
             });
         }
-        self.invoke(module, index, values, cx.depth.saturating_add(1))
+        self.invoke(
+            module,
+            index,
+            values,
+            cx.depth.saturating_add(1),
+            Caller::Program,
+        )
     }
 
     /// A call of a function-typed value by name: the arguments are bound to that function's
@@ -832,7 +882,13 @@ impl<'p> Machine<'p> {
     ) -> Result<Value> {
         let (module, index) = self.callee(cx, frame, node, callee, "named call")?;
         let args = self.properties(cx, frame, args)?;
-        self.invoke_by_name(module, index, &args, cx.depth.saturating_add(1))
+        self.invoke_by_name(
+            module,
+            index,
+            &args,
+            cx.depth.saturating_add(1),
+            Caller::Program,
+        )
     }
 
     fn function(&self, module: u32, index: u32) -> Result<(&'p Arc<str>, &'p FunctionDecl)> {
@@ -861,6 +917,7 @@ impl<'p> Machine<'p> {
         index: u32,
         args: &[(Arc<str>, Value)],
         depth: u32,
+        caller: Caller,
     ) -> Result<Value> {
         let (_, function) = self.function(module, index)?;
         let positional = function
@@ -868,7 +925,7 @@ impl<'p> Machine<'p> {
             .iter()
             .map(|param| get_field(args, &param.name).cloned())
             .collect();
-        self.invoke(module, index, positional, depth)
+        self.invoke(module, index, positional, depth, caller)
     }
 
     /// Calls a function with its arguments by position. An argument that is `None`, or past the
@@ -881,6 +938,7 @@ impl<'p> Machine<'p> {
         index: u32,
         args: Vec<Option<Value>>,
         depth: u32,
+        caller: Caller,
     ) -> Result<Value> {
         if depth > self.options.max_call_depth {
             return crate::error::fail_limit(
@@ -913,40 +971,14 @@ impl<'p> Machine<'p> {
         let mut frame: Frame = Vec::with_capacity(function.params.len());
         let mut args = args.into_iter();
         for param in &function.params {
-            let value = match (args.next().flatten(), param.default) {
-                // Body content reaches the content parameter as the list of children gathered,
-                // and a child that is itself a list is spliced, as for a component's content.
-                // The list is built anew for the call, so each item of the argument is paid for
-                // by the function it is bound in: one, or one for each item it contributes when
-                // it is itself a sequence of several. An empty item contributes nothing and still
-                // costs one, since the list is as long to go through whatever it holds.
-                (Some(Value::Seq(items)), _) if param.is_content => {
-                    let mut spliced = Vec::with_capacity(items.len());
-                    for item in items.iter() {
-                        match item {
-                            Value::Seq(elements) => {
-                                self.charge(cx, None, elements.len().max(1) as u64)?;
-                                spliced.extend(elements.iter().cloned());
-                            }
-                            other => {
-                                self.charge(cx, None, 1)?;
-                                spliced.push(other.clone());
-                            }
-                        }
-                    }
-                    Value::seq(spliced)
-                }
-                (Some(value), _) => value,
-                (None, Some(default)) => self.eval(cx, &mut frame, default)?,
-                (None, None) if param.is_optional => Value::empty(),
-                (None, None) => {
-                    return crate::error::fail(
-                        "nx-ir-arguments",
-                        format!("Function '{name}' requires argument '{}'.", param.name),
-                    )
-                }
+            let arg = args.next().flatten();
+            // A parameter the host gave nothing for and that has a default is the function's own
+            // to fill: what its default raises is not in anything the host passed.
+            let names = caller == Caller::Host && (arg.is_some() || param.default.is_none());
+            let value = match self.bind_parameter(cx, &mut frame, name, param, arg) {
+                Err(error) if names => return Err(self.naming_argument(error, &param.name)),
+                bound => bound?,
             };
-            let value = self.normalize(cx, &param.ty, value, &Path::Root(&&*param.name))?;
             frame.push(Some(value));
         }
         let result = self.eval(cx, &mut frame, function.body)?;
@@ -959,6 +991,54 @@ impl<'p> Machine<'p> {
                 &Path::Root(&Quoted("return value for '", name, "'")),
             ),
         }
+    }
+
+    /// The value a parameter of `function` is bound to: the argument, the default the parameter
+    /// declares, evaluated after the parameters before it, or empty for an optional parameter,
+    /// checked against the parameter's type.
+    #[inline]
+    fn bind_parameter(
+        &self,
+        cx: Cx,
+        frame: &mut Frame,
+        function: &str,
+        param: &Param,
+        arg: Option<Value>,
+    ) -> Result<Value> {
+        let value = match (arg, param.default) {
+            // Body content reaches the content parameter as the list of children gathered,
+            // and a child that is itself a list is spliced, as for a component's content.
+            // The list is built anew for the call, so each item of the argument is paid for
+            // by the function it is bound in: one, or one for each item it contributes when
+            // it is itself a sequence of several. An empty item contributes nothing and still
+            // costs one, since the list is as long to go through whatever it holds.
+            (Some(Value::Seq(items)), _) if param.is_content => {
+                let mut spliced = Vec::with_capacity(items.len());
+                for item in items.iter() {
+                    match item {
+                        Value::Seq(elements) => {
+                            self.charge(cx, None, elements.len().max(1) as u64)?;
+                            spliced.extend(elements.iter().cloned());
+                        }
+                        other => {
+                            self.charge(cx, None, 1)?;
+                            spliced.push(other.clone());
+                        }
+                    }
+                }
+                Value::seq(spliced)
+            }
+            (Some(value), _) => value,
+            (None, Some(default)) => self.eval(cx, frame, default)?,
+            (None, None) if param.is_optional => Value::empty(),
+            (None, None) => {
+                return crate::error::fail(
+                    "nx-ir-arguments",
+                    format!("Function '{function}' requires argument '{}'.", param.name),
+                )
+            }
+        };
+        self.normalize(cx, &param.ty, value, &Path::Root(&&*param.name))
     }
 
     #[inline(never)]
@@ -1719,7 +1799,7 @@ mod tests {
         let run = |nested: u32| {
             let machine = Machine::new(&program.data, &options);
             machine.nesting.set(nested);
-            machine.invoke(0, index, Vec::new(), 0)
+            machine.invoke(0, index, Vec::new(), 0, Caller::Program)
         };
 
         assert!(matches!(run(MAX_NESTING - 2), Ok(Value::Int(1))));

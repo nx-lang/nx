@@ -351,6 +351,40 @@ table under *Limits* gives and the limit's value, so a host tells an exhausted b
 recursion without reading the message; no other diagnostic carries one. The runtime never reads a
 source file and never panics on an image, a host value or an instance.
 
+A diagnostic for a failure in an argument of the function a host called, through `call_function`
+or `evaluate_function`, carries `argument`, the declared name of the parameter the value was
+passed for, whether the arguments were passed by name or by position:
+
+```rust
+use nx_ir_runtime::{Program, RuntimeOptions};
+use nx_value::NxValue;
+use std::collections::BTreeMap;
+
+/// The parameter a refused call's argument was passed for, if the failure is in an argument.
+fn refused_argument(
+    program: &Program,
+    function: &NxValue,
+    args: &BTreeMap<String, NxValue>,
+) -> Option<String> {
+    // `{ "teamSize": "five" }` for `findPlans(teamSize:int)` fails with `nx-ir-boundary-type`,
+    // and its diagnostic's `argument` is `teamSize`.
+    let error = program
+        .call_function(function, args, &RuntimeOptions::default())
+        .err()?;
+    error.diagnostics.first()?.argument.clone()
+}
+```
+
+It is `Some` for a value that does not fit its parameter's type, at any depth inside the value,
+for a `Function` record in the value that names no function, and for a required parameter given
+nothing. It says the failure is in what the host passed, so it is `None` for everything else,
+even when the runtime finds the failure while it checks an argument: a failure a default raises
+(a record's defaults are filled in while the argument that holds the record is checked), a
+resource limit whenever it is reached, a failure in the body or the result, more positional
+arguments than the function has parameters, the `Function` record `call_function` is given to say
+which function to call, and a failure of any other entry point. The TypeScript runtime names the
+same argument for the same call, and the conformance corpus holds the two to it.
+
 | Code | Reported when |
 | --- | --- |
 | `nx-ir-format`, `nx-ir-schema-version`, `nx-ir-malformed` | The bytes are not an image, are of another schema version, or break the format. |

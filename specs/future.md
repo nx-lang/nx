@@ -1447,10 +1447,21 @@ fields were not tried.
 
 It matters beyond the late error. The IR runtimes fill a record's defaults in while they check a
 host's argument that holds the record, so the failure carries a boundary code although the host's
-value fits. `@nx-lang/agent` reports a boundary failure to the model as its own mistake
-(`add-agent-host-package`, review finding RF16); `name-the-argument-in-boundary-diagnostics`
-stops that by not naming an argument for a failure raised by a default, and the program is wrong
-either way.
+value fits. `@nx-lang/agent` reported that to the model as its own mistake
+(`add-agent-host-package`, review finding RF16) until
+`name-the-argument-in-boundary-diagnostics`: a failure a default raises now names no argument,
+and the package reports it as `evaluation-failed`. The program is wrong either way.
+
+Three tests compile `type Unfit = { n:int label:string = { n } }` (or `Req`) to show it: the
+argument tests of `runtime/typescript/test/emitted-ir.test.mjs` and of
+`crates/nx-codegen/src/ir_runtime_tests.rs`, and one of `packages/agent/test/execute.test.ts`.
+They stop compiling when the checker rejects the default. Drop those assertions then. The
+runtimes do not depend on them: the `Stepper` cases of the same two test files and of the
+conformance program `argument-diagnostics` (`fieldDefault`, `parameterDefault`) have a default
+that fails with `nx-ir-arguments` by calling a function value the host supplied, which needs no
+gap, and they are what fail when a runtime stops telling a default's failure from an argument's.
+The package's test has no such replacement, since a tool's function cannot take a function from
+a model; its rule is held by `packages/agent/test/classify.test.ts`.
 
 The same review saw a second program of this kind fail differently and did not find out why: a
 field `total:int = { for i in 0..n { for j in 0..n { i * j } } n }` compiles and then fails in the
@@ -2039,9 +2050,17 @@ boundary and report it with a code beginning `nx-ir-boundary-`; a constrained fo
 type is still host-supplied). That design is archived with its change, so the list is kept
 reachable from here.
 
+`name-the-argument-in-boundary-diagnostics` added a fourth. `@nx-lang/agent` now reports a
+boundary failure as `invalid-input`, the one failure the model is told about and asked to correct,
+only when the diagnostic names the argument it is in (`argument`, in both runtimes), and as
+`invalid-context` when that argument is a context parameter. So a constraint checked on a value
+the host passed has to be reported with the argument named, like every other boundary failure.
+One reported with a boundary code and no argument is `evaluation-failed`, and the model is not
+told what to correct. A default computed from another field that misses its own field's
+constraint is the case that should name none: the host's value fits.
+
 **What would settle it.** Read that decision when the constrained-types change is designed, and
-check its design against the three conditions, plus any that
-`name-the-argument-in-boundary-diagnostics` adds.
+check its design against the three conditions and the fourth above.
 
 ## `packages/language-http`: The 413 Test Fails About One Run In Four
 

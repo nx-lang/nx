@@ -5,9 +5,11 @@
 //! what it renders and emits when a host drives their component lifecycles, and what each
 //! evaluation costs in operations. An entrypoint may name arguments to be evaluated with, as a
 //! *case*; the interpreter's source evaluation takes none, so a case's result is the Rust IR
-//! runtime's. These tests pin the images byte for byte, keep the explained text, the expected
-//! results, the operation counts and the input sizes in step, check that the corpus covers every
-//! kind the schema defines, and hold the size budget. Set
+//! runtime's. A case may be marked as one that fails, and then the code and the argument of the
+//! Rust IR runtime's diagnostic are recorded in place of a result. These tests pin the images
+//! byte for byte, keep the explained text, the expected results, the recorded diagnostics, the
+//! operation counts and the input sizes in step, check that the corpus covers every kind the
+//! schema defines, and hold the size budget. Set
 //! `NX_UPDATE_CORPUS=1` to rewrite the expected files after an intended change, then review the
 //! diff of the explained text.</para>
 
@@ -57,7 +59,9 @@ struct ProgramManifest {
 }
 
 /// A function to evaluate. With `arguments` it is a *case*: the canonical values to pass by
-/// position, under a name that keeps two cases of one function apart. The two go together.
+/// position, under a name that keeps two cases of one function apart. The two go together. A case
+/// with `fails` is one every runtime fails alike: its diagnostic is recorded, and no result, count
+/// or input size.
 #[derive(Debug, Deserialize)]
 struct Entrypoint {
     module: String,
@@ -66,6 +70,8 @@ struct Entrypoint {
     arguments: Option<Vec<Value>>,
     #[serde(default)]
     case: Option<String>,
+    #[serde(default)]
+    fails: bool,
 }
 
 impl Entrypoint {
@@ -158,6 +164,12 @@ pub(crate) fn load_programs() -> Vec<CorpusProgram> {
                     entrypoint.arguments.is_some(),
                     entrypoint.case.is_some(),
                     "corpus program '{name}' entrypoint {}::{}: `arguments` and `case` go together: an entrypoint with arguments needs a case name, and one without has none",
+                    entrypoint.module,
+                    entrypoint.function
+                );
+                assert!(
+                    !entrypoint.fails || entrypoint.arguments.is_some(),
+                    "corpus program '{name}' entrypoint {}::{}: only a case, an entrypoint with arguments, is marked `fails`",
                     entrypoint.module,
                     entrypoint.function
                 );
@@ -446,15 +458,31 @@ fn run_lifecycle(program: &CorpusProgram, lifecycle: &Lifecycle) -> Value {
     })
 }
 
+/// What a case marked as one that fails is recorded with: the code of the Rust IR runtime's
+/// diagnostic and the argument it names, the member left out when it names none.
+fn diagnostic_record(error: &NxIrRuntimeError) -> Value {
+    let [diagnostic] = error.diagnostics.as_slice() else {
+        panic!("a failed call has one diagnostic, got {error}");
+    };
+    let mut record = serde_json::json!({ "code": diagnostic.code });
+    if let Some(argument) = &diagnostic.argument {
+        record["argument"] = argument.as_str().into();
+    }
+    record
+}
+
 /// The recorded results are the interpreter's for every entrypoint and lifecycle. A case, an
 /// entrypoint with arguments, is the exception: the interpreter's source evaluation takes no
 /// arguments, so a case is not compared with it, and its result is recorded from the Rust IR
-/// runtime, as the operation counts are.
+/// runtime, as the operation counts are. A case marked as one that fails has a diagnostic in
+/// `diagnostics.json` and no result; a case fails only where its program says so, so that
+/// regenerating never turns a result into a recorded failure, or a failure into a result.
 #[test]
 fn corpus_results_match_the_interpreter() {
     let mut failures = Vec::new();
     for program in load_programs() {
         let mut results = BTreeMap::new();
+        let mut diagnostics = BTreeMap::new();
         let mut modules = None;
         for entrypoint in &program.manifest.entrypoints {
             let key = entrypoint.key();
@@ -465,19 +493,27 @@ fn corpus_results_match_the_interpreter() {
             );
             if entrypoint.arguments.is_some() {
                 let modules = modules.get_or_insert_with(|| prepared_modules(&program, true));
-                let value = linked_program(modules, &entrypoint.module)
-                    .evaluate_function(
-                        &entrypoint.function,
-                        &entrypoint.arguments(),
-                        &RuntimeOptions::default(),
-                    )
-                    .unwrap_or_else(|error| {
-                        panic!(
-                            "corpus program '{}' case {key} fails in the Rust runtime: {error}",
-                            program.name
-                        )
-                    });
-                results.insert(key, canonical_nx_value(&value));
+                let outcome = linked_program(modules, &entrypoint.module).evaluate_function(
+                    &entrypoint.function,
+                    &entrypoint.arguments(),
+                    &RuntimeOptions::default(),
+                );
+                match (outcome, entrypoint.fails) {
+                    (Ok(value), false) => {
+                        results.insert(key, canonical_nx_value(&value));
+                    }
+                    (Err(error), true) => {
+                        diagnostics.insert(key, diagnostic_record(&error));
+                    }
+                    (Err(error), false) => panic!(
+                        "corpus program '{}' case {key} fails in the Rust runtime and is not marked `fails`: {error}",
+                        program.name
+                    ),
+                    (Ok(_), true) => panic!(
+                        "corpus program '{}' case {key} is marked `fails` and succeeds in the Rust runtime",
+                        program.name
+                    ),
+                }
                 continue;
             }
             let value = match eval_program_artifact_function(
@@ -502,23 +538,40 @@ fn corpus_results_match_the_interpreter() {
             );
             results.insert(key, run_lifecycle(&program, lifecycle));
         }
-        let path = program.dir.join("expected").join("results.json");
-        let actual = format!(
-            "{}\n",
-            serde_json::to_string_pretty(&results).expect("results")
-        );
-        if updating() {
-            write_expected(&path, actual.as_bytes());
-            continue;
-        }
-        let expected = fs::read_to_string(&path).unwrap_or_default();
-        if expected != actual {
-            failures.push(format!(
-                "{}: the interpreter's results differ from {}:\n{}",
-                program.name,
-                path.display(),
-                explained_difference(&expected, &actual)
-            ));
+        // A program with no case that fails has no `diagnostics.json`.
+        let recorded = [
+            ("results.json", Some(&results)),
+            (
+                "diagnostics.json",
+                Some(&diagnostics).filter(|diagnostics| !diagnostics.is_empty()),
+            ),
+        ];
+        for (file, content) in recorded {
+            let path = program.dir.join("expected").join(file);
+            let actual = content.map_or(String::new(), |content| {
+                format!(
+                    "{}\n",
+                    serde_json::to_string_pretty(content).expect("results")
+                )
+            });
+            if updating() {
+                if content.is_some() {
+                    write_expected(&path, actual.as_bytes());
+                } else if path.exists() {
+                    fs::remove_file(&path)
+                        .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+                }
+                continue;
+            }
+            let expected = fs::read_to_string(&path).unwrap_or_default();
+            if expected != actual {
+                failures.push(format!(
+                    "{}: what the program evaluates to differs from {}:\n{}",
+                    program.name,
+                    path.display(),
+                    explained_difference(&expected, &actual)
+                ));
+            }
         }
     }
     assert!(
@@ -622,13 +675,19 @@ fn failure_record<T>(
 /// `results.json` keys it, and for each lifecycle the count of initialization and of each batch.
 /// A program that records failures also gets, per entrypoint, where half its count and one less
 /// than its count stop it; one that records input sizes, the input size of each case and of each
-/// lifecycle's initialization and batches.
+/// lifecycle's initialization and batches. A case marked as one that fails has none of these:
+/// they say what a call that succeeds costs.
 fn measure_operations(program: &CorpusProgram) -> Value {
     let modules = prepared_modules(program, true);
     let mut counts = serde_json::Map::new();
     let mut failures = serde_json::Map::new();
     let mut input_sizes = serde_json::Map::new();
-    for entrypoint in &program.manifest.entrypoints {
+    for entrypoint in program
+        .manifest
+        .entrypoints
+        .iter()
+        .filter(|entrypoint| !entrypoint.fails)
+    {
         let key = entrypoint.key();
         let label = format!("corpus program '{}' entrypoint {key}", program.name);
         let linked = linked_program(&modules, &entrypoint.module);

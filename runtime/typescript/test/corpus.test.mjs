@@ -7,9 +7,11 @@
  * case, is evaluated with them, and its recorded result is the Rust runtime's. Every evaluation
  * must cost exactly the operations recorded for it, stop where the recorded failures say a smaller
  * budget stops it, and have exactly the input size recorded for it, where one is; and the usage
- * report must give the recorded numbers.
+ * report must give the recorded numbers. A case marked as one that fails must fail with the code
+ * the Rust runtime's diagnostic had and name the argument it named, or none; and a call a limit
+ * refuses names no argument.
  */
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -42,7 +44,10 @@ function loadCorpus() {
       }
       const results = JSON.parse(readFileSync(join(dir, "expected", "results.json"), "utf8"));
       const operations = JSON.parse(readFileSync(join(dir, "expected", "operations.json"), "utf8"));
-      return { name, manifest, artifacts, strippedArtifacts, results, operations };
+      // Only a program with a case marked as one that fails has recorded diagnostics.
+      const diagnosticsPath = join(dir, "expected", "diagnostics.json");
+      const diagnostics = existsSync(diagnosticsPath) ? JSON.parse(readFileSync(diagnosticsPath, "utf8")) : {};
+      return { name, manifest, artifacts, strippedArtifacts, results, diagnostics, operations };
     });
 }
 
@@ -57,6 +62,15 @@ function stableJson(value) {
     return `{${entries.join(",")}}`;
   }
   return JSON.stringify(value);
+}
+
+/**
+ * Whether a call failed on the limit `name`, with a diagnostic that names no argument: a limit is
+ * not in a value the host passed, wherever it is reached.
+ */
+function stoppedBy(error, name) {
+  const diagnostic = error instanceof NxIrRuntimeError ? error.diagnostics[0] : undefined;
+  return diagnostic?.limit?.name === name && diagnostic.argument === undefined;
 }
 
 /**
@@ -78,10 +92,10 @@ function checkCount(what, recorded, run) {
   try {
     run({ maxOperations: recorded - 1 });
   } catch (error) {
-    if (error instanceof NxIrRuntimeError && error.diagnostics[0]?.limit?.name === "maxOperations") {
+    if (stoppedBy(error, "maxOperations")) {
       return;
     }
-    throw new Error(`${what} under ${recorded - 1} operations, one less than recorded, fails otherwise than on the budget: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`${what} under ${recorded - 1} operations, one less than recorded, fails otherwise than on the budget, or names an argument: ${error instanceof Error ? error.message : String(error)}`);
   }
   throw new Error(`${what} succeeds under ${recorded - 1} operations, one less than recorded`);
 }
@@ -94,6 +108,13 @@ function checkCount(what, recorded, run) {
 function entrypointKey(program, entrypoint) {
   if ((entrypoint.arguments === undefined) !== (entrypoint.case === undefined)) {
     throw new Error(`${program.name} ${entrypoint.module}::${entrypoint.function}: \`arguments\` and \`case\` go together`);
+  }
+  // `fails` is a boolean, and leaving it out is `false`, as the Rust readers of the corpus have it.
+  if (entrypoint.fails !== undefined && typeof entrypoint.fails !== "boolean") {
+    throw new Error(`${program.name} ${entrypoint.module}::${entrypoint.function}: \`fails\` is \`true\` or \`false\``);
+  }
+  if (entrypoint.fails && entrypoint.arguments === undefined) {
+    throw new Error(`${program.name} ${entrypoint.module}::${entrypoint.function}: only a case is marked \`fails\``);
   }
   const key = `${entrypoint.module}::${entrypoint.function}`;
   return entrypoint.case === undefined ? key : `${key}#${entrypoint.case}`;
@@ -120,12 +141,33 @@ function checkInputSize(what, recorded, run) {
   try {
     run({ maxInputSize: recorded - 1 });
   } catch (error) {
-    if (error instanceof NxIrRuntimeError && error.diagnostics[0]?.limit?.name === "maxInputSize") {
+    if (stoppedBy(error, "maxInputSize")) {
       return;
     }
-    throw new Error(`${what} under an input limit of ${recorded - 1}, one less than its recorded input size, fails otherwise than on the limit: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`${what} under an input limit of ${recorded - 1}, one less than its recorded input size, fails otherwise than on the limit, or names an argument: ${error instanceof Error ? error.message : String(error)}`);
   }
   throw new Error(`${what} proceeds under an input limit of ${recorded - 1}, one less than its recorded input size`);
+}
+
+/**
+ * Checks that a case marked as one that fails fails with the `recorded` diagnostic: its code, and
+ * the argument it names or none. Nothing else is recorded for such a case.
+ */
+function checkFails(recorded, run) {
+  let value;
+  try {
+    value = run({});
+  } catch (error) {
+    if (!(error instanceof NxIrRuntimeError)) {
+      throw error;
+    }
+    const actual = error.diagnostics.map(({ code, argument }) => ({ code, argument }));
+    if (stableJson(actual) !== stableJson([{ code: recorded?.code, argument: recorded?.argument }])) {
+      throw new Error(`expected to fail with ${stableJson(recorded)}, got ${stableJson(actual)}: ${error.message}`);
+    }
+    return;
+  }
+  throw new Error(`is marked \`fails\` and gives ${stableJson(value)}`);
 }
 
 /**
@@ -170,6 +212,11 @@ for (const program of loadCorpus()) {
         }
         const linked = linkNxIrProgram(module, { resolve });
         const run = (options) => evaluateFunction(linked, entrypoint.function, entrypoint.arguments ?? [], options);
+        if (entrypoint.fails) {
+          checkFails(program.diagnostics[key], run);
+          console.log(`ok - ${label} fails as recorded`);
+          continue;
+        }
         const count = program.operations.counts[key];
         const inputSize = program.operations.inputSizes?.[key];
         checkCount("the evaluation", count, run);
@@ -256,8 +303,9 @@ for (const program of loadCorpus()) {
         console.log(`not ok - ${label}: succeeds`);
       } catch (error) {
         const diagnostic = error instanceof NxIrRuntimeError ? error.diagnostics[0] : undefined;
-        const actual = stableJson({ declaration: diagnostic?.declaration, limit: diagnostic?.limit, source: diagnostic?.source });
-        const wanted = stableJson({ declaration: record.declaration, limit: { name: "maxOperations", value: record.budget }, source: record.source });
+        // A budget that runs out while an argument is checked is still not in the argument.
+        const actual = stableJson({ argument: diagnostic?.argument, declaration: diagnostic?.declaration, limit: diagnostic?.limit, source: diagnostic?.source });
+        const wanted = stableJson({ argument: undefined, declaration: record.declaration, limit: { name: "maxOperations", value: record.budget }, source: record.source });
         if (actual === wanted) {
           console.log(`ok - ${label} stops at its recorded node`);
         } else {

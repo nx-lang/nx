@@ -435,10 +435,10 @@ impl<'p> Machine<'p> {
             let at = Path::Field(&root, &field.name);
             let value = match (get_field(input, &field.name), field.default) {
                 (Some(value), _) => self.normalize(cx, &field.ty, value.clone(), &at)?,
-                (None, Some(default)) if !require_explicit => {
-                    let value = self.eval(cx, frame, default)?;
-                    self.normalize(cx, &field.ty, value, &at)?
-                }
+                (None, Some(default)) if !require_explicit => self
+                    .eval(cx, frame, default)
+                    .and_then(|value| self.normalize(cx, &field.ty, value, &at))
+                    .map_err(|error| self.default_failed(error))?,
                 _ if !field.is_required && field.ty.admits_empty() => Value::empty(),
                 _ => {
                     return Err(self.error(

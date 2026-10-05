@@ -1,7 +1,7 @@
 //! Components: descriptors, instances, handlers and dispatch.
 
 use crate::error::{fail, Result};
-use crate::eval::{bind, bind_content, Cx, Frame, Machine, Meter, RuntimeOptions};
+use crate::eval::{bind, bind_content, Caller, Cx, Frame, Machine, Meter, RuntimeOptions};
 use crate::input::Measure;
 use crate::module::{ComponentDecl, DeclarationKind, Node};
 use crate::normalize::{require_record, Labeled, Path};
@@ -633,7 +633,12 @@ impl Program {
                     .iter()
                     .map(|arg| from_host(arg).map(Some))
                     .collect::<Result<_>>()?;
-                entry_result(machine, 0, index, machine.invoke(0, index, args, 0)?)
+                entry_result(
+                    machine,
+                    0,
+                    index,
+                    machine.invoke(0, index, args, 0, Caller::Host)?,
+                )
             },
         )
     }
@@ -666,7 +671,7 @@ impl Program {
                     machine,
                     module,
                     index,
-                    machine.invoke_by_name(module, index, &args, 0)?,
+                    machine.invoke_by_name(module, index, &args, 0, Caller::Host)?,
                 )
             },
         )

@@ -1866,3 +1866,139 @@ component <Keeper /> = {
     console.log("ok - a value measured alone has the size it has in a call, and measuring stops at the limit");
   },
 );
+
+// ------------------------------------------------------------------------------------------------
+// The argument a diagnostic names
+// ------------------------------------------------------------------------------------------------
+
+withSource(
+  `
+external component <Button label?:string />
+
+type Item = { quantity:int }
+type Order = { items:Item+ }
+type Request = { order:Order }
+type Req = { n:int share:int = { 100 / n } }
+type Calling = { n:int share:int = { hundredth(n) } }
+type Unfit = { n:int label:string = { n } }
+type Endless = { n:int share:int = { spin(n) } }
+type Stepper = { step: <function n:int />: int value:int = { step(1) } }
+
+let hundredth(n:int): int = { 100 / n }
+let spin(n:int): int = { spin(n) }
+let needsTwo(n:int, m:int): int = { n + m }
+let named(n:int): string = { "one" }
+
+let findPlans(teamSize:int, note?:string): string = { "plans" }
+let total(request:Request): int = { 1 }
+let through(step: <function n:int />: int): int = <step n={1} />
+let share(req:Req): int = { req.share }
+let calling(req:Calling): int = { req.share }
+let unfit(req:Unfit): string = { req.label }
+let endless(req:Endless): int = { req.share }
+let defaulted(n:int, share:int = { 100 / n }): int = { share }
+let inner(n:int): int = { hundredth(n) }
+let count(items:Item+): int = { 1 }
+let stepperValue(s:Stepper): int = { s.value }
+let stepped(step: <function n:int />: int, value:int = { <step n={1} /> }): int = { value }
+
+component <Counter step:int /> = {
+  <Button label="count" />
+}
+`,
+  (dir, sourcePath) => {
+    const program = prepareNxIrProgram(emitIr(dir, sourcePath));
+    const identity = program.entry.module.identity;
+    const fn = (name) => ({ $type: "Function", module: identity, name });
+    /** The code and the argument of the one diagnostic `run` fails with, and its limit when it has one. */
+    const failure = (run) => {
+      const diagnostics = runtimeFailure(run).diagnostics;
+      assertEqual(diagnostics.length, 1);
+      const { code, argument, limit } = diagnostics[0];
+      return { code, argument: argument ?? null, ...(limit === undefined ? {} : { limit: limit.name }) };
+    };
+    const byName = (name, args, options) => failure(() => callFunction(program, fn(name), args, options));
+    const byPosition = (name, args, options) => failure(() => evaluateFunction(program, name, args, options));
+
+    // A value the host passed: the parameter is named, however deep the failure and however the
+    // arguments were passed.
+    assertEqual(byName("findPlans", { teamSize: "five" }), { code: "nx-ir-boundary-type", argument: "teamSize" });
+    assertEqual(byPosition("findPlans", ["five"]), { code: "nx-ir-boundary-type", argument: "teamSize" });
+    assertEqual(byName("findPlans", { teamSize: 5, note: 7 }), { code: "nx-ir-boundary-type", argument: "note" });
+    assertEqual(byPosition("findPlans", [5, 7]), { code: "nx-ir-boundary-type", argument: "note" });
+    const items = [{ $type: "Item", quantity: 1 }, { $type: "Item", quantity: 2 }, { $type: "Item", quantity: "three" }];
+    const request = { $type: "Request", order: { $type: "Order", items } };
+    assertEqual(byName("total", { request }), { code: "nx-ir-boundary-type", argument: "request" });
+    assertEqual(byPosition("total", [request]), { code: "nx-ir-boundary-type", argument: "request" });
+    assertEqual(byName("total", { request: { $type: "Request", order: { $type: "Order", items: [], extra: 1 } } }), {
+      code: "nx-ir-boundary-field",
+      argument: "request",
+    });
+    assertEqual(byName("findPlans", {}), { code: "nx-ir-arguments", argument: "teamSize" });
+    assertEqual(byPosition("findPlans", []), { code: "nx-ir-arguments", argument: "teamSize" });
+    assertEqual(byName("through", { step: fn("missing") }), { code: "nx-ir-function-value", argument: "step" });
+    assertEqual(byPosition("through", [fn("missing")]), { code: "nx-ir-function-value", argument: "step" });
+    // The message names the argument in words as it did, and the diagnostic has no other new member.
+    const diagnostic = runtimeFailure(() => callFunction(program, fn("findPlans"), { teamSize: "five" })).diagnostics[0];
+    assertEqual(diagnostic, { severity: "error", code: "nx-ir-boundary-type", message: "Expected teamSize to be a number.", argument: "teamSize" });
+    console.log("ok - a failure in a value the host passed names the parameter it was passed for");
+
+    // A default's failure is not in the argument, though a record's defaults are filled in while
+    // its argument is checked: its expression, a function it calls, and its value not fitting.
+    const req = { $type: "Req", n: 0 };
+    assertEqual(byName("share", { req }), { code: "nx-ir-division-by-zero", argument: null });
+    assertEqual(byPosition("share", [req]), { code: "nx-ir-division-by-zero", argument: null });
+    assertEqual(byName("calling", { req: { $type: "Calling", n: 0 } }), { code: "nx-ir-division-by-zero", argument: null });
+    // The checker accepts this default because it reads another field (`specs/future.md`).
+    assertEqual(byName("unfit", { req: { $type: "Unfit", n: 1 } }), { code: "nx-ir-boundary-type", argument: null });
+    assertEqual(byPosition("unfit", [{ $type: "Unfit", n: 1 }]), { code: "nx-ir-boundary-type", argument: null });
+    assertEqual(byName("defaulted", { n: 0 }), { code: "nx-ir-division-by-zero", argument: null });
+    assertEqual(byPosition("defaulted", [0]), { code: "nx-ir-division-by-zero", argument: null });
+    // A field the host did write is still the host's, in a record whose other field has a default.
+    assertEqual(byName("share", { req: { $type: "Req", n: 1, share: "half" } }), { code: "nx-ir-boundary-type", argument: "req" });
+    // A default can fail with a code a failure in an argument has, with no gap in the checker: it
+    // calls a function value the host supplied, which is accepted at a function type as any
+    // function of the program is, and the call lacks an argument or its result does not fit. The
+    // codes alone would name the argument here, so these hold the mark a default's failure is given.
+    const stepper = (name) => ({ $type: "Stepper", step: fn(name) });
+    assertEqual(byName("stepperValue", { s: stepper("needsTwo") }), { code: "nx-ir-arguments", argument: null });
+    assertEqual(byPosition("stepperValue", [stepper("needsTwo")]), { code: "nx-ir-arguments", argument: null });
+    assertEqual(byName("stepperValue", { s: stepper("named") }), { code: "nx-ir-boundary-type", argument: null });
+    assertEqual(byPosition("stepperValue", [stepper("named")]), { code: "nx-ir-boundary-type", argument: null });
+    // The record's own function field that names no function is the host's value, and is named.
+    assertEqual(byName("stepperValue", { s: stepper("missing") }), { code: "nx-ir-function-value", argument: "s" });
+    // A parameter the host gave nothing for is the function's to fill, and its default's failure
+    // is not in an argument whatever its code. Only that the binding is not the host's says so.
+    assertEqual(byName("stepped", { step: fn("needsTwo") }), { code: "nx-ir-arguments", argument: null });
+    assertEqual(byPosition("stepped", [fn("needsTwo")]), { code: "nx-ir-arguments", argument: null });
+    assertEqual(byName("stepped", { step: fn("named") }), { code: "nx-ir-boundary-type", argument: null });
+    assertEqual(byPosition("stepped", [fn("named")]), { code: "nx-ir-boundary-type", argument: null });
+    // The same parameter given a value is the host's again.
+    assertEqual(byName("stepped", { step: fn("hundredth"), value: "one" }), { code: "nx-ir-boundary-type", argument: "value" });
+    assertEqual(byPosition("stepped", [fn("hundredth"), "one"]), { code: "nx-ir-boundary-type", argument: "value" });
+    console.log("ok - a failure a default raises names no argument");
+
+    // Inside the function: its body, the arguments of a function the body calls, and its result.
+    assertEqual(byName("inner", { n: 0 }), { code: "nx-ir-division-by-zero", argument: null });
+    assertEqual(byName("through", { step: fn("needsTwo") }), { code: "nx-ir-arguments", argument: null });
+    assertEqual(byName("through", { step: fn("named") }), { code: "nx-ir-boundary-type", argument: null });
+    console.log("ok - a failure in the body, in a call the body makes and in the result names no argument");
+
+    // A limit, whichever it is and wherever it is reached.
+    assertEqual(byName("findPlans", { teamSize: 5 }, { maxInputSize: 1 }), { code: "nx-ir-resource-limit", argument: null, limit: "maxInputSize" });
+    const fifty = Array.from({ length: 50 }, () => ({ $type: "Item", quantity: 1 }));
+    assertEqual(byName("count", { items: fifty }, { maxOperations: 20 }), { code: "nx-ir-resource-limit", argument: null, limit: "maxOperations" });
+    assertEqual(byPosition("count", [fifty], { maxOperations: 20 }), { code: "nx-ir-resource-limit", argument: null, limit: "maxOperations" });
+    assertEqual(byName("endless", { req: { $type: "Endless", n: 1 } }), { code: "nx-ir-resource-limit", argument: null, limit: "maxCallDepth" });
+    console.log("ok - a limit names no argument, the budget spent while an argument is checked included");
+
+    // What is not an argument of the function: one positional argument too many, the record that
+    // says which function to call, and what another entry point is given.
+    assertEqual(byPosition("inner", [1, 2]), { code: "nx-ir-arguments", argument: null });
+    assertEqual(failure(() => callFunction(program, fn("missing"))), { code: "nx-ir-function-value", argument: null });
+    assertEqual(failure(() => callFunction(program, "findPlans")), { code: "nx-ir-function-value", argument: null });
+    assertEqual(failure(() => initializeComponent(program, "Counter", { step: "two" })), { code: "nx-ir-boundary-type", argument: null });
+    assertEqual(failure(() => initializeComponent(program, "Counter", {})), { code: "nx-ir-boundary-field", argument: null });
+    console.log("ok - the function record of the call, a count of arguments and another entry point name no argument");
+  },
+);

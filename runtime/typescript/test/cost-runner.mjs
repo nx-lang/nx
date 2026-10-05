@@ -12,7 +12,8 @@
  * base scale, its result with no budget, its operation count and input size as the usage report
  * gives them, whether the result under a budget equal to the count is the result under none, and
  * where budgets below the count stop it; and at the larger scale its count and input size. A
- * case the runtime refuses with no budget has only the diagnostic's code. In the mode `time`, the
+ * case the runtime refuses with no budget has only the diagnostic's code and the argument it
+ * names, which is recorded wherever a diagnostic is. In the mode `time`, the
  * answer is the least of five timings of each scale, with the count and the input size.
  *
  * It imports the committed `dist`, as a host would, and reads nothing else of the repository.
@@ -82,10 +83,13 @@ function run(call, instance, options) {
   }
 }
 
-/** The code a call was refused with, or what it threw that is not the runtime's own error. */
+/**
+ * The code a call was refused with and the argument the diagnostic names, `null` when it names
+ * none, or what the call threw that is not the runtime's own error.
+ */
 function refusal(error) {
   if (error instanceof NxIrRuntimeError) {
-    return { refused: error.diagnostics[0].code };
+    return { refused: error.diagnostics[0].code, argument: error.diagnostics[0].argument ?? null };
   }
   return { threw: `${error?.constructor?.name}: ${error instanceof Error ? error.message : String(error)}` };
 }
@@ -123,7 +127,7 @@ function answer(testCase) {
     run(call, instance, { maxOperations: ample, maxInputSize: ample, usage });
   } catch (error) {
     const refused = refusal(error);
-    return { base: { refusedUnderAmpleLimits: refused.refused ?? refused.threw } };
+    return { base: { refusedUnderAmpleLimits: refused.refused ?? refused.threw, argument: refused.argument ?? null } };
   }
   const operations = usage.operations ?? null;
   const inputSize = usage.inputSize ?? null;
@@ -144,6 +148,7 @@ function answer(testCase) {
       return {
         budget,
         code: diagnostic.code,
+        argument: diagnostic.argument ?? null,
         limit: diagnostic.limit?.name ?? null,
         declaration: diagnostic.declaration ?? null,
         source: diagnostic.source ?? null,

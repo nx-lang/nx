@@ -1365,7 +1365,7 @@ export function evaluateFunction(program, name, args = [], options = {}) {
         if (declaration === undefined || declaration.kind.tag !== "function") {
             fail("nx-ir-missing-entrypoint", `Function entrypoint '${name}' was not found.`);
         }
-        const result = invokeFunction(linkedProgram, linkedProgram.entry, declaration, args, evaluation, 0);
+        const result = invokeFunction(linkedProgram, linkedProgram.entry, declaration, args, evaluation, 0, true);
         return entryResult(declarationContext(linkedProgram, linkedProgram.entry, declaration, evaluation), result);
     });
 }
@@ -1648,6 +1648,7 @@ function evaluate(options, input, run) {
         maxOperations,
         remaining: maxOperations ?? Infinity,
         nesting: 0,
+        defaultFailed: false,
     };
     let inputSize;
     try {
@@ -1958,8 +1959,11 @@ function resolveReference(linked, slot, name) {
  * Calls a function with its arguments by position. An argument that is `undefined`, or past the
  * end of `args`, was left out: the function fills its parameter with the default it declares,
  * evaluated here after the parameters before it, or with empty when the parameter is optional.
+ *
+ * `fromHost` says the call is the one a host made through `evaluateFunction` or `callFunction`,
+ * and not one a body or a default makes: a failure in an argument of that call names the argument.
  */
-function invokeFunction(program, linked, declaration, args, evaluation, depth) {
+function invokeFunction(program, linked, declaration, args, evaluation, depth, fromHost) {
     const maxCallDepth = evaluation.maxCallDepth;
     if (depth > maxCallDepth) {
         failLimit({ name: "maxCallDepth", value: maxCallDepth }, `Maximum NX IR call depth ${maxCallDepth} was exceeded.`);
@@ -1973,8 +1977,7 @@ function invokeFunction(program, linked, declaration, args, evaluation, depth) {
     }
     const frame = [];
     const context = { program, linked, declaration, frame, evaluation, depth };
-    kind.params.forEach((param, index) => {
-        const arg = args[index];
+    const bind = (param, arg) => {
         let value;
         if (arg !== undefined) {
             // Body content reaches the content parameter as the list of children the emitter
@@ -1991,12 +1994,43 @@ function invokeFunction(program, linked, declaration, args, evaluation, depth) {
         else {
             fail("nx-ir-arguments", `Function '${declaration.name}' requires argument '${param.name}'.`);
         }
-        frame[index] = normalizeValue(context, param.ty, value, param.name);
+        return normalizeValue(context, param.ty, value, param.name);
+    };
+    kind.params.forEach((param, index) => {
+        const arg = args[index];
+        // A parameter the host gave nothing for and that has a default is the function's own to
+        // fill: what its default raises is not in anything the host passed.
+        if (!fromHost || (arg === undefined && param.default >= 0)) {
+            frame[index] = bind(param, arg);
+            return;
+        }
+        try {
+            frame[index] = bind(param, arg);
+        }
+        catch (error) {
+            throw error instanceof NxIrRuntimeError ? namingArgument(error, param.name, evaluation) : error;
+        }
     });
     const result = evalNode(kind.body, context);
     return kind.result === undefined
         ? result
         : normalizeValue(context, kind.result, result, `return value for '${declaration.name}'`);
+}
+/**
+ * The failure of the host's call in the binding of `argument`, with the argument named on each
+ * diagnostic that is about the value the host passed: a boundary failure, a missing required
+ * argument or a `Function` record that names no function. A default that failed while the value
+ * was checked is not about that value whatever its code, and neither is a limit or a failure of
+ * the image, which have other codes.
+ */
+function namingArgument(error, argument, evaluation) {
+    if (evaluation.defaultFailed || !error.diagnostics.some((diagnostic) => isAboutArgument(diagnostic.code))) {
+        return error;
+    }
+    return new NxIrRuntimeError(error.diagnostics.map((diagnostic) => (isAboutArgument(diagnostic.code) ? { ...diagnostic, argument } : diagnostic)));
+}
+function isAboutArgument(code) {
+    return code === "nx-ir-arguments" || code === "nx-ir-function-value" || code.startsWith("nx-ir-boundary-");
 }
 function entryAt(context, index) {
     return context.linked.module.artifact.entry("nodes", index);
@@ -2428,7 +2462,7 @@ function evalCall(context, nodeIndex, entry) {
         const node = entry[position];
         args.push(node === NX_IR_NONE ? undefined : evalNode(node, context));
     }
-    return invokeFunction(context.program, callee.linked, callee.declaration, args, context.evaluation, context.depth + 1);
+    return invokeFunction(context.program, callee.linked, callee.declaration, args, context.evaluation, context.depth + 1, false);
 }
 /**
  * A call of a function-typed value by name: the callee is a slot or reference holding a function
@@ -2440,7 +2474,7 @@ function evalNamedCall(context, nodeIndex, entry) {
         fail("nx-ir-call", "NX IR named call callee did not evaluate to a function value.", context, nodeIndex);
     }
     const { properties } = propertiesAt(context, entry, 2);
-    return invokeFunctionByName(context.program, callee, properties, context.evaluation, context.depth + 1);
+    return invokeFunctionByName(context.program, callee, properties, context.evaluation, context.depth + 1, false);
 }
 /**
  * Invokes a function value with arguments by name. The caller supplied every parameter of the
@@ -2448,13 +2482,13 @@ function evalNamedCall(context, nodeIndex, entry) {
  * parameter the declaration names must be present unless it has a default or is optional, in
  * which case the function fills it.
  */
-function invokeFunctionByName(program, callee, args, evaluation, depth) {
+function invokeFunctionByName(program, callee, args, evaluation, depth, fromHost) {
     const kind = callee.declaration.kind;
     if (kind.tag !== "function") {
         fail("nx-ir-call", `'${callee.declaration.name}' is not a function.`);
     }
     const positional = kind.params.map((param) => Object.prototype.hasOwnProperty.call(args, param.name) ? args[param.name] : undefined);
-    return invokeFunction(program, callee.linked, callee.declaration, positional, evaluation, depth);
+    return invokeFunction(program, callee.linked, callee.declaration, positional, evaluation, depth, fromHost);
 }
 /**
  * Calls the function a canonical `Function` record names with arguments keyed by parameter name,
@@ -2474,7 +2508,7 @@ export function callFunction(program, value, args = {}, options = {}) {
             fail("nx-ir-function-value", "callFunction expects a Function record: { $type: \"Function\", module, name }.");
         }
         const callee = resolveFunctionRecord(linkedProgram, record, "callFunction");
-        const result = invokeFunctionByName(linkedProgram, callee, args, evaluation, 0);
+        const result = invokeFunctionByName(linkedProgram, callee, args, evaluation, 0, true);
         return entryResult(declarationContext(linkedProgram, callee.linked, callee.declaration, evaluation), result);
     });
 }
@@ -3196,7 +3230,13 @@ function normalizeFields(program, linked, declaration, fields, input, frame, pat
             value = normalizeValue(context, field.ty, input[field.name], `${path}.${field.name}`);
         }
         else if (!requireExplicit && field.default >= 0) {
-            value = normalizeValue(context, field.ty, evalNode(field.default, context), `${path}.${field.name}`);
+            try {
+                value = normalizeValue(context, field.ty, evalNode(field.default, context), `${path}.${field.name}`);
+            }
+            catch (error) {
+                evaluation.defaultFailed = true;
+                throw error;
+            }
         }
         else if (!field.isRequired && admitsEmpty(field.ty)) {
             value = [];

@@ -473,7 +473,9 @@ let root(): Agent = { <Agent name="support" tools={ <FunctionTool function={read
   assert.equal(succeeded(await call({ $type: "Inner", a: "x", b: undefined })).output, "read");
   // An instance of a class there is not looked into, and the runtime refuses the member.
   const refused = failed(await call(new Inner("x")));
-  assert.equal(refused.error.code, "invalid-input");
+  // The member is in the record the host filled in, so the mistake is the host's.
+  assert.equal(refused.error.code, "invalid-context");
+  assert.equal(refused.error.diagnostics![0]!.argument, "context");
   assert.match(refused.error.message, /context\.inner.*\bb\b/);
   // With the member given a value, the same instance is accepted: it is the `undefined` that is refused.
   assert.equal(succeeded(await call(Object.assign(new Inner("x"), { b: "y" }))).output, "read");
@@ -507,11 +509,91 @@ test("a tool with no context parameter ignores the record", async () => {
   assert.deepEqual(result.output, [{ $type: "Plan", name: "Team", seats: 5, monthlyPrice: 20 }]);
 });
 
-test("a record that does not satisfy the declared type fails at the runtime's boundary", async () => {
+test("a context record that does not fit its declared type is the host's mistake", async () => {
+  // A required field is missing. The runtime names the argument, and the context filled it in.
   const result = failed(await run("order_for", { orderId: "A1" }, { context: { $type: "ChatToolContext" } }));
-  // The design's stated trade-off: the runtime cannot tell the host's mistake from the model's.
-  assert.equal(result.error.code, "invalid-input");
+  assert.equal(result.error.code, "invalid-context");
+  assert.deepEqual(result.error.diagnostics, [
+    {
+      severity: "error",
+      code: "nx-ir-boundary-field",
+      message: "Missing required context field 'conversationId'.",
+      declaration: "host/Chat.nx::ChatToolContext",
+      argument: "context",
+    },
+  ]);
   assert.match(result.error.message, /conversationId/);
+  // The call reached the runtime, so it reports what it used.
+  assert.equal(typeof result.usage!.operations, "number");
+  assert.equal(typeof result.usage!.inputSize, "number");
+
+  // A field of the wrong type, and one the type does not declare.
+  for (const context of [
+    { $type: "ChatToolContext", conversationId: 9 },
+    { $type: "ChatToolContext", conversationId: "conv_9", tenant: "acme" },
+  ]) {
+    const unfit = failed(await run("order_for", { orderId: "A1" }, { context: context as never }));
+    assert.equal(unfit.error.code, "invalid-context", JSON.stringify(context));
+    assert.equal(unfit.error.diagnostics![0]!.argument, "context");
+    assert.equal(typeof unfit.usage!.operations, "number");
+  }
+});
+
+test("a context record of another type is the host's mistake", async () => {
+  // A type that is not the declared one and does not extend it: another of the host's own, and one
+  // the program does not have.
+  for (const context of [
+    { $type: "AuditToolContext", actor: "kai" },
+    { $type: "NoSuchContext", conversationId: "conv_9" },
+  ]) {
+    const result = failed(await run("order_for", { orderId: "A1" }, { context }));
+    assert.equal(result.error.code, "invalid-context", JSON.stringify(context));
+    assert.equal(result.error.diagnostics![0]!.code, "nx-ir-boundary-type");
+    assert.equal(result.error.diagnostics![0]!.argument, "context");
+    assert.equal(typeof result.usage!.operations, "number");
+  }
+  // Whichever parameter of a function that takes the context twice refuses it.
+  const twice = failed(await run("twice", {}, { context: { $type: "ChatToolContext" } }));
+  assert.equal(twice.error.code, "invalid-context");
+  assert.equal(twice.error.diagnostics![0]!.argument, "first");
+});
+
+test("a wrong-typed argument beside a context that fits is the model's mistake", async () => {
+  const result = failed(await run("order_for", { orderId: 7 }, { context: chat }));
+  assert.equal(result.error.code, "invalid-input");
+  assert.equal(result.error.diagnostics![0]!.code, "nx-ir-boundary-type");
+  assert.equal(result.error.diagnostics![0]!.argument, "orderId");
+  // A missing one too, with nothing wrong in the context.
+  const missing = failed(await run("order_for", {}, { context: chat }));
+  assert.equal(missing.error.code, "invalid-input");
+  assert.equal(missing.error.diagnostics![0]!.argument, "orderId");
+});
+
+test("a field default that does not fit its field is an evaluation failure, though its code is a boundary code", async () => {
+  // The checker accepts this default because it reads another field (`specs/future.md`). The
+  // runtime fills it in while it checks `req`, and the failure is not in what the model sent.
+  const defaulted = compileProgram(`
+type Req = { n:int label:string = { n } }
+
+/// Reads the label of a request.
+let labelOf(req: Req): string = { req.label }
+
+let root(): Agent = { <Agent name="support" tools={ <FunctionTool function={labelOf} /> }>Be brief.</Agent> }
+`);
+  const normalizedDefaulted = normalizeAgent(defaulted.agent(), { schemas: defaulted.artifact });
+  assert.equal(normalizedDefaulted.ok, true, JSON.stringify(normalizedDefaulted.diagnostics, null, 2));
+  const [labelOf] = createAgentTools((normalizedDefaulted as { definition: NormalizedAgent }).definition, defaulted.program);
+  const call = (req: unknown): Promise<ToolResult> => labelOf!.execute!({ req }, { callId: "t1:0:0" });
+  // A `req` that fits: the default is what fails.
+  const result = failed(await call({ n: 1 }));
+  assert.equal(result.error.code, "evaluation-failed");
+  assert.equal(result.error.diagnostics![0]!.code, "nx-ir-boundary-type");
+  assert.equal("argument" in result.error.diagnostics![0]!, false);
+  // A `req` that does not fit is still the model's to correct, and one with the label written works.
+  const unfit = failed(await call({ n: "one" }));
+  assert.equal(unfit.error.code, "invalid-input");
+  assert.equal(unfit.error.diagnostics![0]!.argument, "req");
+  assert.equal(succeeded(await call({ n: 1, label: "one" })).output, "one");
 });
 
 // ---- function tools -----------------------------------------------------------------------------
@@ -536,7 +618,9 @@ test("a result carries what the call used", async () => {
 test("input of the wrong type is invalid input, with the runtime's diagnostic and usage", async () => {
   const result = failed(await run("find_plans", { teamSize: "five" }));
   assert.equal(result.error.code, "invalid-input");
-  assert.deepEqual(result.error.diagnostics, [{ severity: "error", code: "nx-ir-boundary-type", message: "Expected teamSize to be a number." }]);
+  assert.deepEqual(result.error.diagnostics, [
+    { severity: "error", code: "nx-ir-boundary-type", message: "Expected teamSize to be a number.", argument: "teamSize" },
+  ]);
   assert.equal(result.error.message, "Expected teamSize to be a number.");
   assert.equal("limit" in result.error, false);
   // The call reached the runtime, so it reports what it used.

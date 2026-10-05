@@ -1212,8 +1212,13 @@ what the call used to. One budget covers one call, a dispatch's whole batch and 
 included. Expressions nest at most 1,000 deep, and a `RangeError` the JavaScript engine raises
 during evaluation is reported as a diagnostic. Every `nx-ir-resource-limit` diagnostic carries
 `limit`, the name and value of the limit reached: `maxOperations`, `maxInputSize`, `maxCallDepth`,
-`maxRangeLength`, `maxExpressionNesting`, or `engine`, which has no value. `measureInputSize`
-measures one value as the input limit does. The package's `README.md` has the details.
+`maxRangeLength`, `maxExpressionNesting`, or `engine`, which has no value. A diagnostic for a
+failure in a value the host passed as an argument of the function it called, through
+`callFunction` or `evaluateFunction`, carries `argument`, the name of the parameter the value was
+passed for, and so does one for a required parameter given nothing; a failure a default raises, a
+resource limit and a failure in the function's body or result carry none, even when the runtime
+finds them while it checks an argument. `measureInputSize` measures one value as the input limit
+does. The package's `README.md` has the details.
 
 ## Rust runtime
 
@@ -1258,8 +1263,9 @@ runtime measures it, so the same input is refused under the same limit; `Runtime
 reports what a call used; and `input_size` and `record_input_size` measure a value and a map of
 named values as the limit does. A resource-limit diagnostic's `limit` uses the TypeScript
 runtime's names for the limits the two share, and adds `maxStackBytes` and `maxValueNesting` for
-the two only this runtime has. The crate's `README.md` has the API, the limits and the diagnostic
-codes.
+the two only this runtime has. A diagnostic's `argument` is the TypeScript runtime's: for the same
+image and the same arguments the two name the same parameter, or both name none. The crate's
+`README.md` has the API, the limits and the diagnostic codes.
 
 ## Conformance corpus
 
@@ -1274,7 +1280,12 @@ entrypoint may name the arguments to evaluate it with, as a *case*, and `host-va
 cases an entrypoint without arguments cannot supply (a list at a sequence parameter, a value at
 `object`, long text and a long name, two objects compared, a list bound to a content parameter and
 the JSON form of a wide integer) with the input size of each, which every runtime checks as it
-checks a count, at the size and at one less. The emitter's tests pin
+checks a count, at the size and at one less. A case may be marked as one that fails: the code of
+its diagnostic and the argument the diagnostic names, as the Rust runtime reports them, are then
+recorded in `diagnostics.json` in place of a result, and every runtime must fail the case with
+that code and name that argument, or none. `argument-diagnostics` holds those cases, and a case
+whose recorded budget runs out while its argument is checked, a failure that names none. The
+emitter's tests pin
 the images byte for byte and check that each committed text is the explanation of its committed
 image; the TypeScript runtime's tests and the Rust runtime's tests each evaluate the images, drive
 the lifecycles, check every count by evaluating under it and under one less, and refuse every
