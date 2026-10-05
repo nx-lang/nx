@@ -97,6 +97,34 @@ All notable changes to this project will be documented in this file.
   still be an instance of a class, and a member that is `undefined` is still left out.
 
 ### NX IR runtimes
+- New: `nx-ir-runtime`, a Rust crate that runs compiled NX IR images in a Rust host with no
+  compiler: prepare, link, evaluate, the component lifecycle and the update helpers, with values
+  exchanged as `NxValue`. It reports the `nx-ir-*` codes `@nx-lang/ir-runtime` does, and the
+  conformance corpus holds the two runtimes to the same results. The crate is in the repository;
+  this release does not publish it to a registry.
+- An operation budget for code a host did not write: `maxOperations` in `@nx-lang/ir-runtime` and
+  `RuntimeOptions::max_operations` in `nx-ir-runtime`, unset and unlimited by default. An operation
+  is a unit of work on a value, such as a node evaluated, an item placed in a list, a value checked
+  against a type or written for the host, so the budget bounds work and allocation, which
+  `maxCallDepth` and `maxRangeLength` do not. One budget covers one call and everything it does,
+  and a call that would exceed it fails with `nx-ir-resource-limit` before the work is done. Both
+  runtimes count the same number for the same call. `docs/nx-ir-format.md` (*Evaluation cost*) has
+  the rules, with worked counts.
+- An input limit: `maxInputSize` and `RuntimeOptions::max_input_size`, unset by default, bound what
+  a host hands one call: its arguments, props, content, state, batch and patch. A call given more
+  fails with `nx-ir-resource-limit` before the program is looked at. The measure is exported, as
+  `measureInputSize` and as `input_size` and `record_input_size`, and both runtimes measure the
+  same size for the same input.
+- A call reports what it used. Give it a `usage` object (`RuntimeOptions::usage` in Rust) and the
+  runtime writes the operations the call cost and its input size, whether it returns or fails, so
+  a host can choose a budget by measuring the programs it means to allow.
+- Every `nx-ir-resource-limit` diagnostic carries `limit`, which names the limit it met and gives
+  the limit's value where it has one. Expressions may nest at most 1,000 deep in one evaluation,
+  and `@nx-lang/ir-runtime` reports a `RangeError` the JavaScript engine raises during evaluation
+  as `nx-ir-resource-limit` whose limit is named `engine`.
+- **Breaking**: `@nx-lang/ir-runtime` refuses an integer literal outside JavaScript's safe range
+  where a program reaches it, with `nx-ir-number`. It used to carry the digits without being able
+  to compute with them. The Rust runtime, which has 64-bit integers, runs the same program.
 - A diagnostic names the argument a failure is in. When `callFunction` or `evaluateFunction`
   refuses a value the host passed for a parameter, or a required parameter was given nothing, the
   diagnostic carries `argument`, the parameter's name (`NxIrDiagnostic.argument` in
@@ -123,8 +151,9 @@ All notable changes to this project will be documented in this file.
   spread an instance of a class. Positional arguments, content and a batch have to be arrays, and
   props, a state, a patch and arguments by name plain objects. A refusal inside an argument of
   `callFunction` or `evaluateFunction` names the argument. An `undefined` item of a list at a
-  typed site, which was already refused, keeps its code and has the new message. Values the runtime returned are accepted back as they
-  were, and a value read from JSON or built as object literals and arrays is unaffected.
+  typed site, which was already refused, keeps its code and has the new message. Values the
+  runtime returned are accepted back as they were, and a value read from JSON or built as object
+  literals and arrays is unaffected.
 
 ## 0.5.0
 The extension now ships with the NX packages, from one tag and at one version, so extension 0.5.0
