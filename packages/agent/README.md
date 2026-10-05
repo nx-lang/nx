@@ -318,8 +318,9 @@ its `callId` or without it (`Omit<ChatToolContext, "callId">`), since the packag
 every call. A member that is `undefined` is left out, as an optional field with no value is, so
 `{ ...context, contactEmail: maybeEmail }` is safe to pass. That holds for the record itself,
 whatever built it, and for every plain object inside it. Write a nested part of the context as a
-plain object: an instance of a class below the top level is passed as it is, and a member of it
-that is `undefined` is refused.
+plain object: the record is read as the IR runtime reads any host value, so an instance of a class
+below the top level, a `Date` or anything else that is not plain data is refused, with code
+`invalid-context` and a diagnostic that names where it is.
 
 A key of the model's input that names a context parameter is dropped. With no `toolContextType`,
 a function that declares a context parameter is an error, as is one declared with another subtype

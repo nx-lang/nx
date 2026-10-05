@@ -91,6 +91,10 @@ All notable changes to this project will be documented in this file.
   and `invalid-input` only for a failure in an argument the model sent, which is the one failure
   the model is told about in full. A boundary failure that is in no argument, such as a record
   field default whose value does not fit its field, is `evaluation-failed`.
+- **Breaking**: the tool context record is read as the IR runtime reads any host value. An
+  instance of a class below the top level of the record, which was passed as it was, is refused
+  with `invalid-context`, as a `Date` or a typed array anywhere in it is. The record itself can
+  still be an instance of a class, and a member that is `undefined` is still left out.
 
 ### NX IR runtimes
 - A diagnostic names the argument a failure is in. When `callFunction` or `evaluateFunction`
@@ -100,6 +104,27 @@ All notable changes to this project will be documented in this file.
   argument to correct without reading the message. A failure a default raises, a resource limit
   and a failure inside the function name none. Both runtimes name the same argument for the same
   call, and the conformance corpus holds them to it with cases that fail.
+- What a host value is, is now one rule for every runtime: a canonical value, held in the host's
+  own data, with JSON as an encoding of it and not something a host has to produce. A value a
+  host computed is passed as one it read from JSON is, with nothing encoded on the way.
+  `docs/nx-ir-format.md` (*Host values*) has the forms: plain objects and arrays in JavaScript,
+  `NxValue` in Rust. The Rust runtime is unchanged.
+- `@nx-lang/ir-runtime` reads its input by that rule, once in a call, after the input limit and
+  before anything is checked. A member of a plain object set to `undefined` is now a member left
+  out, at any depth, where the call failed: a default applies, an optional field is empty, and
+  `maxInputSize` and `measureInputSize` do not count it. The evaluation functions take their input
+  as the new types `NxHostValue` and `NxHostRecord`, which admit such a member, and still return
+  `NxCanonicalValue`.
+- **Breaking**, for a host that passes anything but plain data to `@nx-lang/ir-runtime`: an
+  instance of a class, a `Date`, a `Map`, a `Set`, a typed array, a function, a symbol, a big
+  integer, an object that holds itself and an `undefined` item of an array are refused where they
+  are passed, with `nx-ir-boundary-type` and the path, inside a value typed `object` too, where
+  they were let through. Nothing is converted: pass the text or the number a `Date` means, and
+  spread an instance of a class. Positional arguments, content and a batch have to be arrays, and
+  props, a state, a patch and arguments by name plain objects. A refusal inside an argument of
+  `callFunction` or `evaluateFunction` names the argument. An `undefined` item of a list at a
+  typed site, which was already refused, keeps its code and has the new message. Values the runtime returned are accepted back as they
+  were, and a value read from JSON or built as object literals and arrays is unaffected.
 
 ## 0.5.0
 The extension now ships with the NX packages, from one tag and at one version, so extension 0.5.0

@@ -2001,45 +2001,6 @@ are found before it runs and have none (an arguments function that did not retur
 `HttpArguments`, and a tool that is not the shape the package wrote); they would carry no rule and
 stay general. A host that needs it sooner can throw its own error from `onResult`.
 
-### A host value that is not JSON is measured as one value, then walked
-
-**Observed.** The TypeScript IR runtime's input measure enters a list and a plain object and
-counts anything else as one value: a typed array, a `Buffer`, a `Date`, a `Map`, an instance of a
-class. Its boundary check and its result writer do enter such a value where the type allows
-(`runtime/typescript/src/index.ts`, `isPlainInput` against `requireObject`). Seen through
-`@nx-lang/agent` (`add-agent-host-package`, review, verification of RF19 and RF20):
-
-- A 5 MB `Uint8Array` in a context field typed `object` measures 8 and passes `maxContextSize`
-  and `maxInputSize`, whatever its size. What happens next depends on the function. One that does
-  not return the value succeeds in a handful of operations, since the check does not enter a
-  value at an `object` field. One that returns it, or the record that holds it, fails with
-  `nx-ir-resource-limit` naming `maxOperations`, because the result writer walks it. So the input
-  limit does not bound such a value, and the operation budget does only when it is written out.
-- A function, a symbol, a bigint or an instance of a class in a field typed `object` is passed
-  through, and comes back in the result if the function returns it, so a tool's output is not
-  always JSON.
-- An instance of a class in a field typed as a record is entered by the check, which refuses a
-  member that is `undefined`, though the measure did not enter it. `@nx-lang/agent` leaves out
-  `undefined` members only where the measure enters, so such a member is refused; its README
-  says to write a nested part of the context as a plain object.
-
-The Rust runtime takes an `NxValue`, which can hold none of these, so only a JavaScript host can
-pass one.
-
-**Why it might matter.** A host that builds a value from its own objects, as TypeScript lets it,
-gets a limit that does not mean what it says and a result that is not what the canonical encoding
-promises. None of it can be reached from a model's input, which arrives as parsed JSON.
-
-**What would settle it.** Decide what a value that is not JSON is at the TypeScript runtime's
-boundary: refused where it is found, with a boundary code, which is the simplest rule and makes
-the measure and the check agree; or entered by the measure as the check enters it. Either way the
-measure and the check should read the same set of values.
-
-**Proposed.** The change `treat-host-values-as-json` takes the first course: the runtime reads its
-input once at the entry, treats an `undefined` member of a plain object as absent, and refuses
-anything that is not JSON. It also removes the agent package's copy of the context record. This
-entry is removed when that change is applied.
-
 ### What a constrained-types change has to hold for the agent package
 
 **Observed.** `@nx-lang/agent` never interprets a type: schemas pass through, the runtime's
@@ -2061,6 +2022,120 @@ constraint is the case that should name none: the host's value fits.
 
 **What would settle it.** Read that decision when the constrained-types change is designed, and
 check its design against the three conditions and the fourth above.
+
+## Host Values: What `define-host-values` Left For Later
+
+### Reading a host value costs about 5% of a call that only takes input
+
+**Observed.** The TypeScript IR runtime reads every value a host passes, once in a call, before
+anything is checked (`readHostValue`, `runtime/typescript/src/index.ts`). Measured on a call that
+does nothing but take 10,000 records of three fields (`define-host-values`, task 2.2; Node 24, one
+laptop):
+
+- The reading as first written, one walk with its own stack, a set of the objects it is inside and
+  a list of names for every object, added about 1.6 ms to a 2.7 ms call: 60%.
+- The reading as it is now adds 0.13 to 0.2 ms: about 5%, between 4% and 7% over runs whose own
+  noise is of that size. The change's review measured the same call between 4% faster and 15%
+  slower than before. Timed alone, it is 13 ns a record of one shape and 19 to 23 ns over mixed
+  shapes.
+
+**The trade-off, and what it was based on.** The 60% is why the reading is in two parts. A check
+written for the usual case, `isReadAsPassed`, answers whether a value has nothing to refuse and
+nothing to leave out, with no stack, no set and no list, by a recursion that stops at 32 levels.
+Whatever it does not settle goes to the full walk, which is the first version unchanged and still
+costs what it cost. So:
+
+- A value with an `undefined` member, a value nested more than 32 deep, an object of another
+  realm and a value that is refused all pay the full walk. Only plain data with nothing to leave
+  out is cheap. A host that sets optional fields to `undefined` as a habit is on the slow path for
+  every call.
+- The change's design set a bound of 5% and named a fallback, folding the reading into the walk of
+  the input measure. The fallback was not taken: it helps only a call with `maxInputSize`, which
+  already pays about 0.5 ms (18%) for the measure, and leaves a call with no limit where it is.
+- The same 60% is why a value that shares one object in many places is not read once (the next
+  entry): remembering the objects seen is the set the fast check exists to avoid.
+
+Each of these was decided against one number from one machine and one shape of input. Nothing
+watches the cost, and no test fails if it doubles.
+
+**Why it might matter.** A component host passes its whole state on every call, so input the size
+of the state is the ordinary case and not a stress test. The check that follows the reading
+allocates a record for every record and the result writer copies everything it writes, so 5% of
+this call is small beside them; if they are made cheaper, as a same-language host could expect,
+the reading becomes a larger share of what is left.
+
+**What would settle it.** Put the call in the harness of `add-ir-runtime-performance-harness`,
+with three inputs: plain data, the same data with one `undefined` member at the bottom, and data
+nested past 32 levels. Then the bound is a number a run checks. If the slow path matters, the
+full walk can lose its set when the input was measured first (a value within the limit holds
+nothing that holds itself) and its list of names by reading members as the fast check does. If
+the fast path matters, the measure can report that it met nothing but plain data with no
+`undefined` member, which lets a call with a limit skip the reading altogether.
+
+### A value that shares one object in many places is read as the tree it spells
+
+**Observed.** The reading takes every reference as a new value, as the input measure does, so an
+object held in two places is read twice. Fifty-three objects that each hold the next one twice,
+passed to `let keep(extra:object): string` under `maxOperations: 1000` and no input limit, take
+1.5 s and are charged 4 operations; each two more levels take four times as long
+(`define-host-values`, review, RF2). Before that change the same call returned in under a
+millisecond, since nothing read a value at `object` that the function did not return. With
+`maxInputSize: 1000` the value is refused by the limit in 1 ms.
+
+This is documented: `runtime/typescript/README.md` (*Host values*) and `docs/nx-ir-format.md`
+(*Host values*, *What the limit bounds*) say a shared object is read and measured once for each
+place it is held and that `maxInputSize`, not `maxOperations`, bounds it. It is not bounded.
+
+**Why it might matter.** A host that sets an operation budget and no input limit has a call whose
+time the budget does not bound. A value read from JSON holds nothing twice, so nothing a model or
+a wire sends has this shape; a host's own code does, when it builds a value from parts it reuses,
+which is an ordinary thing to do in JavaScript and costs nothing until the parts nest.
+
+**What would settle it.** Either make the reading linear in distinct objects, or decide that the
+input limit is required for a call whose time has to be bounded and say so where the budget is
+described. The first was not done because of the cost in the entry above: the full walk can
+remember an object it read with nothing left out and pass over it when it meets it again, but the
+fast check would need the same set, or a count of values after which it gives the value to the
+full walk, and either is paid by every call. The input size would still count the value as a
+tree, by its definition in the `nx-ir-format` spec, so the limit and the reading would then
+disagree about how large such a value is; that has to be decided with it.
+
+### A value typed by a generated TypeScript interface cannot be passed without a spread
+
+**Observed.** `nxlang typegen` declares a record as an `interface` that extends `NxRecord`
+(`crates/nx-cli/src/typegen/languages/typescript.rs`). The evaluation functions of
+`@nx-lang/ir-runtime` take `NxHostValue` and `NxHostRecord`, whose object form is an index
+signature, and TypeScript gives an interface no implicit index signature. So a value of a
+generated type is refused by the compiler where a host value is expected:
+
+```ts
+interface NxRecord<TType extends string = string> { $type: TType }
+interface Person extends NxRecord<"Person"> { name: string; nickname?: string } // as typegen writes it
+declare const person: Person;
+evaluateFunction(program, "greet", [person]);
+// TS2322: Index signature for type 'string' is missing in type 'Person'.
+evaluateFunction(program, "greet", [{ ...person }]);    // compiles
+```
+
+The same value typed by a type alias (`type Person = { ... }`) or written as a literal compiles.
+This predates `define-host-values`: `NxCanonicalValue` had the same index signature. That change
+made it more visible, because it says a host passes the value it built as it holds it, and the
+value a host is led to build is one of the generated types. The runtime accepts the value either
+way; only the types disagree.
+
+**Why it might matter.** Every TypeScript host that uses the generated types meets it at its first
+call, and the fix it finds, a spread or a cast at each call, is the copy or the loss of checking
+the model says a host does not need. `@nx-lang/agent` does not have the problem for its tool
+context record, whose type accepts any object with a `$type`, which shows one way out.
+
+**What would settle it.** Decide where the two meet. `typegen` can declare records as type
+aliases, which are assignable to an index signature; that changes declaration merging and how the
+types read in an editor, and is a change to every generated file. Or the runtime's input types can
+stop using an index signature for the top of a value (a mapped or generic parameter that accepts
+any object whose members are host values), which keeps the generated files and loses nothing a
+host relies on. Either way, add a compiled sample that passes a generated type to each entry
+point, so the two cannot drift apart again; the runtime's README samples are not compiled by any
+test today.
 
 ## `packages/language-http`: The 413 Test Fails About One Run In Four
 

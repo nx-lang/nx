@@ -139,6 +139,58 @@ const kept = initializeComponent(program, "SearchBox", { placeholder: "Find" }, 
 The state is validated as a complete state for the component, as `evaluateComponent` validates
 its state argument, and the new instance's tokens start at generation 1 again.
 
+## Host values
+
+What a host passes to an evaluation API, and what it gets back, are plain JavaScript data: `null`,
+a boolean, a number, a string, an array, or a plain object, which is an object whose prototype is
+`Object.prototype` or that has none. That is the JavaScript form of an NX value, and
+`docs/nx-ir-format.md` (*Host values*) has the whole of it. JSON is one way to get such a value
+and not the only one: an object the host built a moment ago is passed exactly as one it read with
+`JSON.parse` is, with the same result and the same cost, and nothing is encoded on the way in.
+
+```ts
+// `greet` is declared `let greet(person:Person): string`, with
+// `type Person = { name:string nickname?:string title:string = "Dr" }`.
+evaluateFunction(program, "greet", [{ name: "Ada" }]);
+evaluateFunction(program, "greet", [JSON.parse('{ "name": "Ada" }')]); // the same call
+evaluateFunction(program, "greet", [{ name: "Ada", nickname: undefined }]); // and so is this
+```
+
+A member of a plain object that is `undefined` is a member left out, at any depth, which is what
+an optional property of a TypeScript type produces. A field with a default takes its default, an
+optional field is empty, and a required field is reported missing. The program is not given the
+member, and the host's object is not changed: when a member is left out, the objects on the way
+down to it are copied without it, and everything else is passed as it is.
+
+Anything else is refused where it is passed, with `nx-ir-boundary-type` and the path to it: an
+instance of a class, a `Date`, a `Map`, a `Set`, a typed array, a function, a symbol, a big
+integer, and an item of an array that is `undefined`, which cannot be left out. That holds at any
+depth, inside a value typed `object` too, and in every value the input limit covers. The runtime
+converts none of these: a host that has a `Date` passes the text or the number it means, and one
+that has an instance of a class spreads it.
+
+```ts
+class Person { name = "Ada"; }
+// TypeScript refuses an instance where a host value is expected. Past a cast, the runtime does:
+evaluateFunction(program, "greet", [new Person() as never]);
+// nx-ir-boundary-type: Expected person to be null, a boolean, a number, a string, an array or a
+// plain object, got an instance of Person, which is not a plain object.
+evaluateFunction(program, "greet", [{ ...new Person() }]); // a plain object
+```
+
+What holds the values is read by the same rule: positional arguments, content and a batch are
+each an array, and props, a state, a patch and arguments by name are each a plain object. The
+evaluation functions take their input as `NxHostValue` and `NxHostRecord`, which admit a member
+that is `undefined`, and return `NxCanonicalValue`, which has none, so what the runtime returns
+can always be passed back.
+
+The values the runtime returned are accepted back as they are, a state that holds a function value
+included. The input is read once in a call, after the input limit and before anything is checked
+or evaluated, and reading it charges nothing to `maxOperations`. An object that holds itself is
+refused the same way. The same object held twice, side by side, is two values, read and measured
+once for each place it is held: a value that shares one object in many places is as large as the
+tree it spells, and `maxInputSize` is what bounds the reading of it, not `maxOperations`.
+
 ## Limits
 
 Every evaluation API takes runtime options:
@@ -242,8 +294,10 @@ A call whose input is larger fails with `nx-ir-resource-limit` whose `limit` is
 against a type, so it is reported ahead of any other fault of the call, and a batch is measured
 whole before its first entry runs. The diagnostic names no declaration. Measuring stops as soon as
 the size passes the limit and does not recurse, so a value that is too large, that nests deeply or
-that holds itself is refused by the limit and not by the engine. A value that is no canonical
-value, a `Date`, a `Map`, a function, an instance of a class, counts as one and is not entered.
+that holds itself is refused by the limit and not by the engine. A member that is `undefined` is
+a member left out and counts nothing. A value that is no canonical value, a `Date`, a `Map`, a
+function, an instance of a class, counts as one and is not entered; a call within the limit then
+refuses it (see *Host values*).
 Unset, nothing is measured. The limit charges nothing to `maxOperations`, and a value that is not a
 non-negative safe integer is refused with `nx-ir-options`.
 
@@ -367,7 +421,8 @@ try {
 ```
 
 It is set for a value that does not fit its parameter's type, at any depth inside the value
-(`nx-ir-boundary-type`, `nx-ir-boundary-field`), for a `Function` record in the value that names
+(`nx-ir-boundary-type`, `nx-ir-boundary-field`), for a value inside it that is no host value at
+all, a `Date` say (`nx-ir-boundary-type`, see *Host values*), for a `Function` record in the value that names
 no function (`nx-ir-function-value`), and for a required parameter given nothing
 (`nx-ir-arguments`). It says the failure is in what the host passed, so nothing else carries it,
 even when the runtime finds the failure while it checks an argument:

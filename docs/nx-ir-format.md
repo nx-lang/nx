@@ -534,6 +534,57 @@ action record it accepts (`Button.Tapped` for an inline emit, `SearchSubmitted` 
 plus a `token` when the output came from a lifecycle render; the record names the handler and is
 not the handler, so a runtime accepts it as input only where *Action handlers* says.
 
+### Host values
+
+What a host passes to an evaluation API, and what it gets back, are *canonical values*: the empty
+value, a boolean, a number, a string, a sequence, a record, which may carry a type name, and the
+function values and action handlers a runtime makes. That is the whole model, and it is the same
+for every host.
+
+A host holds a canonical value in its own language's data, in the *form* its runtime defines, and
+passes it as it holds it. Nothing is encoded on the way in or on the way out, so a value a host
+computed a moment ago is passed exactly as one it read from JSON is. Canonical JSON, described
+above, is the encoding of the same values for a wire or a store. A host does not have to produce
+it, and what a host reads from it is already in the form:
+
+| A canonical value | Canonical JSON | JavaScript | Rust |
+| --- | --- | --- | --- |
+| The empty value | `[]`, or the key left out | `[]`, or the member left out or set to `undefined` | `NxValue::Array` of no items, or the property left out |
+| A boolean | `true`, `false` | A boolean | `NxValue::Bool` |
+| An integer | A number. Outside JavaScript's safe range, the `nx.int` record | A number. The runtime cannot hold one outside the safe range | `NxValue::Int`, or `NxValue::Int32` |
+| A float | A number | A number | `NxValue::Float`, or `NxValue::Float32` |
+| A string, a constant union case | A string | A string | `NxValue::String` |
+| A sequence | An array | An array | `NxValue::Array` |
+| A record | An object, with `$type` where the site needs it to tell the type | A plain object, with a `$type` member likewise | `NxValue::Record`, with its `type_name` likewise |
+| A function value, an action handler | The record that names it | That record, or, where a value is held, the value the runtime returned in a state | That record |
+
+A number takes the width its site declares, so no form says `int32` or `float32` apart from Rust's,
+which can. A host's `null`, `NxValue::Null` in Rust, is read as the empty value where a site
+admits none; *Rust runtime* says where the two runtimes differ on one at `object`.
+
+A form may spell a value in a way JSON cannot, where the language makes it natural. JavaScript has
+one: a member of a plain object set to `undefined` is a member left out, at any depth, which is
+what an optional property of a TypeScript type produces. Rust has one: `NxValue::Int` holds any
+64-bit integer, with no record around it. Each such spelling has one meaning and one size (see
+*Input size*).
+
+A plain object is the record of JavaScript: an object whose prototype is `Object.prototype`, of
+any realm, or that has none. JavaScript can hold much that is not a canonical value: an instance
+of a class, a `Date`, a `Map`, a `Set`, a typed array, a function, a symbol, a big integer, an
+item of an array that is `undefined`. The TypeScript runtime refuses each where the host passes
+it, at any depth, inside a value typed `object` included, with `nx-ir-boundary-type` and the path
+to it. It converts none of them: a `Date` could be read as text or as milliseconds and an instance
+with or without what its class keeps for itself, and whichever a runtime chose, the program would
+be given something the host did not write. A host converts what it has, which for an instance of a
+class is to spread it. A host's type joins a form when NX has the kind of value it would spell,
+and not before, so what is refused today can be accepted later without changing what any working
+host gets. Rust needs no such rule: an `NxValue` can hold nothing else.
+
+What holds the values a host passes is read by the same rule. Positional arguments, content and a
+batch are each an array, and props, a state, a patch and arguments by name are each a plain
+object; a `Set`, an object with a `length` or an instance of a class in their place is refused.
+The same object held in two places is two values, read and measured once for each place.
+
 ## Function values
 
 A function is a value: a `reference` node naming a function declaration evaluates to one wherever
@@ -752,13 +803,18 @@ of it. Where they differ, the size is fixed so that it does not:
 - An element of the positional arguments that is undefined, or a hole in them, is the empty value,
   whose size is one. A parameter the arguments do not reach is not input, so the size does not
   depend on the declaration.
+- A member of a JavaScript object that is `undefined` is a member left out (see *Host values*):
+  neither its name nor a value is counted, so `{ a: 1, b: undefined }` measures what `{ a: 1 }`
+  does.
 - A value that is not a canonical value is one value and is not read further. In JavaScript that
   is anything but `null`, a boolean, a number, a string, an array or a plain object: a function, a
   big integer, a `Date`, a `Map`, an instance of a class, and the handler and function objects a
   runtime keeps for its own use, which a measure must not follow into the linked program. A
   runtime knows its own by having made them, not by a marking: an object read from JSON that
-  carries the marking of one is a plain object and is measured as one. What a runtime then does
-  with a value that is not canonical, which is mostly to refuse it, is unchanged.
+  carries the marking of one is a plain object and is measured as one. The size is taken before
+  any value is read, so the measure counts one for such a value; a call then refuses it when it
+  reads its input, unless it is one of the runtime's own, so a value that counted one is never one
+  the runtime goes on to walk.
 
 A runtime may offer a limit on the input size: `maxInputSize` in the TypeScript runtime and
 `RuntimeOptions::max_input_size` in the Rust runtime, each unset by default, which is unlimited. A
@@ -769,6 +825,8 @@ limit is reported before any other fault of the call: an entrypoint the program 
 wrong type, an exhausted budget. A batch is measured whole before its first entry runs. Measuring
 stops as soon as the size passes the limit, and it does not recurse, so input that is too large,
 that nests deeply or, in JavaScript, that holds itself is refused by the limit and by nothing else.
+Input within the limit is then read as *Host values* describes, and a value that is not canonical
+is refused there: the limit comes first.
 Text far longer than the limit allows is refused from its length without being read: the Rust
 runtime, whose strings are UTF-8, refuses a string from its byte length when that alone passes what
 is left of the limit, and scans at most 192 bytes for each unit of the limit otherwise.
@@ -834,6 +892,14 @@ its names and the widths of its records and its sequences flatten empty values a
 - Refusing one very wide JavaScript object lists all its names once, since an engine lists an
   object's names before any is read. That is at most once in a call, for the one object the limit
   is passed in, and is not multiplied by the budget: about half a second for two million names.
+  The names of members that are `undefined` are listed too and count nothing, so they are work
+  the limit does not bound either; a value read from JSON has none, so only a host's own code can
+  make them.
+- A JavaScript value that holds one object in many places is as large as the tree it spells, and
+  is measured and read as that tree: fifty objects that each hold the next one twice are 2^50
+  values. The limit refuses such a value as soon as its size passes it. With no limit, reading it
+  takes time in proportion to that tree and charges no operation, so the budget alone does not
+  bound a call that is passed one. A value read from JSON holds nothing twice.
 
 So the limit is not a guarantee of proportionality, and a host that runs code it did not write
 still limits time and memory as well.
@@ -1217,8 +1283,10 @@ failure in a value the host passed as an argument of the function it called, thr
 `callFunction` or `evaluateFunction`, carries `argument`, the name of the parameter the value was
 passed for, and so does one for a required parameter given nothing; a failure a default raises, a
 resource limit and a failure in the function's body or result carry none, even when the runtime
-finds them while it checks an argument. `measureInputSize` measures one value as the input limit
-does. The package's `README.md` has the details.
+finds them while it checks an argument. A value the host passed is read as *Host values*
+describes before any of it is checked: one that is not canonical is refused, in the argument it is
+in when it is in one, and a member that is `undefined` is left out. `measureInputSize` measures
+one value as the input limit does. The package's `README.md` has the details.
 
 ## Rust runtime
 
@@ -1228,8 +1296,9 @@ linked `Program`: `PreparedModule::prepare`, `Program::link` and `Program::prepa
 `evaluate_function`, `call_function`, `construct_component_descriptor`, `initialize_component`,
 `evaluate_component`, `dispatch_component_actions`, `normalize_component_state` and
 `apply_component_state_patch`, with `apply`, `merge`, `diff` and `Program::changed` for the update
-intrinsics. Values cross the API as `NxValue`, and every operation returns a `Result` whose error
-carries diagnostics with the TypeScript runtime's codes.
+intrinsics. Values cross the API as `NxValue`, which is the Rust form of a canonical value (see
+*Host values*), and every operation returns a `Result` whose error carries diagnostics with the
+TypeScript runtime's codes.
 
 It differs from the TypeScript runtime in what Rust makes possible or necessary:
 

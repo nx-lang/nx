@@ -30,7 +30,7 @@ import {
 } from "./definition.js";
 import { NxAgentError, NxAgentToolError, type NxAgentDiagnostic, type ToolError, type ToolUsage } from "./diagnostics.js";
 import { buildHttpCall, type HttpArgumentsData, type HttpRequestDescription } from "./http.js";
-import { describeValue, isJsonObject, withoutUndefinedMembers, type JsonValue } from "./json.js";
+import { describeValue, isJsonObject, type JsonValue } from "./json.js";
 
 /**
  * The operations one tool call may cost when the host's runtime options set no `maxOperations`.
@@ -68,9 +68,10 @@ export interface ToolCallContext {
    * The host's tool context record, with its `$type`. It is passed, with `callId` set to this
    * call's, to every context parameter of the tool's function. A tool with none ignores it. A
    * member that is `undefined` is left out, as an optional field with no value is: of the record
-   * itself, whatever built it, and of every plain object below it. An instance of a class below
-   * the top level is passed as it is, so a nested part of the context is written as a plain
-   * object.
+   * itself, whatever built it, and of every plain object below it. Below the top level the record
+   * is read as the IR runtime reads any host value, so a nested part of the context is written as
+   * a plain object: an instance of a class there, or a `Date`, fails the call with
+   * `invalid-context`.
    */
   readonly context?: ToolContextRecord | undefined;
   /** Checked before anything is evaluated, and handed to a request function or a host executor. */
@@ -264,15 +265,13 @@ function prepareFunctionCalls(
           `Tool '${toolName}' needs the host's tool context record, with its '$type', for its parameter ${names}; the call supplied ${supplied === undefined ? "none" : "one with no '$type'"}.`,
         );
       }
-      // A record of more values than this is over the limit however it is measured: a value
-      // costs at least one, but for a `$type`, of which a record has one. Copying no further is
-      // what ends on a record that holds itself.
-      // The context record itself is read as a record whatever built it, an instance of a
-      // host's class included: its own members are what is passed. Below it, only what the
-      // runtime's measure enters is looked into.
-      const copied = withoutUndefinedMembers(supplied, 2 * limits.maxContextSize + 2, true);
-      const contextRecord = copied === undefined ? undefined : { ...(copied as typeof supplied), callId: context.callId };
-      if (contextRecord === undefined || measureInputSize(contextRecord, limits.maxContextSize) > limits.maxContextSize) {
+      // The context record is passed as the record its own members make, whatever built it, an
+      // instance of a host's class included: the spread is what makes it a plain object. What
+      // it holds is the runtime's to read. A member that is `undefined` is one left out, there
+      // and to the measure, and a value that is no canonical value is refused in the argument.
+      // Measuring stops at the limit, which is what ends on a record that holds itself.
+      const contextRecord = { ...supplied, callId: context.callId };
+      if (measureInputSize(contextRecord, limits.maxContextSize) > limits.maxContextSize) {
         return failure("resource-limit", `The tool context passed to tool '${toolName}' is larger than its limit of ${limits.maxContextSize}.`, {
           limit: { name: "maxContextSize", value: limits.maxContextSize },
         });

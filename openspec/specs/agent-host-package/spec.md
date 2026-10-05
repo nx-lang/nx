@@ -534,14 +534,15 @@ filled by the host. The input SHALL be a JSON object, and anything else SHALL fa
 `invalid-input`. The IR runtime's boundary validation SHALL be what checks the input against the
 parameter types; the package SHALL NOT need a JSON Schema validator. A key of the input that names
 a context parameter SHALL be discarded before the call, so the model cannot supply one.
-A member of the host's context record that is `undefined`, at any depth, SHALL be left out of the
-record the function is passed, as an optional field with no value is, and the host's own record
-SHALL NOT be changed. The context record itself SHALL be read as the record its own members
-make, whatever built it, an instance of a host's class included. Below it only a plain record is
-looked into for such members, as the IR runtime's input measure looks into one; a value that is
-neither a list nor a plain record, a typed array for one, SHALL be passed as it is. Leaving members out SHALL NOT change which records are refused or how: a
-record over `maxContextSize`, one that holds itself and one nested however deeply SHALL fail with
-code `resource-limit` naming `maxContextSize`, and SHALL NOT make `execute` reject.
+The package SHALL pass the host's context record as the record its own members make, whatever
+built it, an instance of a host's class included, with `callId` set, and SHALL NOT copy or look
+into what the record holds: reading a host value is the IR runtime's. A member that is
+`undefined`, of the record or of a plain object at any depth below it, is therefore absent, as
+the runtime reads one, and a value below the top level that is not a canonical value, an instance
+of a class or a typed array for one, is refused by the runtime where it is found, as a failure in
+the context argument. The host's own record SHALL NOT be changed. A record over `maxContextSize`,
+one that holds itself and one nested however deeply SHALL fail with code `resource-limit` naming
+`maxContextSize`, and SHALL NOT make `execute` reject.
 
 Every call SHALL run with a finite operation budget. The IR runtime applies none of its own when
 `maxOperations` is unset, so the package SHALL pass the host's runtime options when they set
@@ -726,6 +727,15 @@ codes to tell these apart.
 - **WHEN** the runtime fails a call with one diagnostic whose code is `nx-ir-boundary-type` and
   which names no argument
 - **THEN** the failure SHALL have code `evaluation-failed`
+
+#### Scenario: A value in the context that is not a canonical value is the host's mistake
+- **WHEN** a context type declares `inner?:Inner`, a record, and `extra?:object`, and the host
+  passes a context record whose `inner` is an instance of a class of its own, or whose `extra`
+  holds a `Date`
+- **THEN** `execute` SHALL resolve to a failure with code `invalid-context` that carries the
+  runtime's diagnostic, whose `argument` is `context` and whose message names `context.inner` or
+  the path to the `Date` and says what the value is not
+- **AND** the members of `inner` written as a plain object, one of them `undefined`, SHALL succeed
 
 ### Requirement: Context parameters are filled from the host's context record at each call
 `execute` SHALL accept, in its call context, the host's tool context: a record of the concrete

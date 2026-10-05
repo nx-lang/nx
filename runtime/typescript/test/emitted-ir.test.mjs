@@ -1708,7 +1708,9 @@ component <Keeper /> = {
     console.log("ok - a value that holds itself, nests deeply or is very long is refused by the limit, and what is no canonical value is one");
 
     // With no limit nothing is measured: a value is read exactly as often as the evaluation reads
-    // it, and once more when the input is measured. And a limit the input fits costs no operations.
+    // it, and twice more when the input is measured, once when the members of its object that are
+    // not undefined are counted and once when they are read. And a limit the input fits costs no
+    // operations.
     {
       let reads = 0;
       const counting = {
@@ -1724,7 +1726,7 @@ component <Keeper /> = {
       };
       const unmeasured = readsUnder({});
       assertEqual(readsUnder({ usage: {} }), unmeasured);
-      assertEqual(readsUnder({ maxInputSize: 100 }), unmeasured + 1);
+      assertEqual(readsUnder({ maxInputSize: 100 }), unmeasured + 2);
       const args = [ints(1000)];
       const unlimited = cost((options) => evaluateFunction(program, "ints", args, options));
       assertEqual(cost((options) => evaluateFunction(program, "ints", args, { ...options, maxInputSize: 1001 })), unlimited);
@@ -1995,10 +1997,370 @@ component <Counter step:int /> = {
     // What is not an argument of the function: one positional argument too many, the record that
     // says which function to call, and what another entry point is given.
     assertEqual(byPosition("inner", [1, 2]), { code: "nx-ir-arguments", argument: null });
+    // The count is taken before any argument is read: a value that is no host value among too
+    // many is not what is reported, and a list far longer than the function takes is not copied.
+    assertEqual(byPosition("inner", [new Date(0), 2]), { code: "nx-ir-arguments", argument: null });
+    {
+      const before = process.memoryUsage().heapUsed;
+      assertEqual(byPosition("inner", new Array(50_000_000)), { code: "nx-ir-arguments", argument: null });
+      if (process.memoryUsage().heapUsed - before > 50_000_000) {
+        throw new Error("Refusing fifty million arguments for their count copied them");
+      }
+    }
     assertEqual(failure(() => callFunction(program, fn("missing"))), { code: "nx-ir-function-value", argument: null });
     assertEqual(failure(() => callFunction(program, "findPlans")), { code: "nx-ir-function-value", argument: null });
+    // What is no record at all, a value that is no host value included, is no function record.
+    for (const notRecord of [undefined, null, 7, [fn("findPlans")], new Date(0), () => 1]) {
+      assertEqual(failure(() => callFunction(program, notRecord, { teamSize: 5 })), { code: "nx-ir-function-value", argument: null });
+    }
     assertEqual(failure(() => initializeComponent(program, "Counter", { step: "two" })), { code: "nx-ir-boundary-type", argument: null });
     assertEqual(failure(() => initializeComponent(program, "Counter", {})), { code: "nx-ir-boundary-field", argument: null });
     console.log("ok - the function record of the call, a count of arguments and another entry point name no argument");
+  },
+);
+
+// ------------------------------------------------------------------------------------------------
+// Host values: a canonical value in its JavaScript form
+// ------------------------------------------------------------------------------------------------
+
+withSource(
+  `
+external component <Button label?:string emits { Tapped { } } />
+external component <Text value:string />
+
+type Person = { name:string nickname?:string title:string = "Dr" }
+
+let same(person:Person): Person = { person }
+let keep(extra:object): string = { "kept" }
+let echo(extra:object): object = { extra }
+let numbers(xs:int+) = { xs }
+let ratio(x:float64) = { x }
+let withDefault(n:int = 7): int = { n }
+let optional(extra?:object): string = { "called" }
+
+component <Card title:string = "none" extra?:object content body?:object+ /> = {
+  <Text value={title} />
+}
+component <Counter /> = {
+  state { count:int = 0 note?:string data?:object }
+  <Button onTapped=<Update count={count + 1} /> />
+}
+component <Child emits { Fired { } } /> = { <Button /> }
+component <Parent /> = {
+  state { n:int = 0 }
+  <Child onFired=<Update n={n + 1} /> />
+}
+let double(n:int): int = { n * 2 }
+component <Stepper /> = {
+  state { step: <function n:int />: int = { double } count:int = 0 }
+  <Text value="steps" />
+}
+`,
+  (dir, sourcePath) => {
+    const program = prepareNxIrProgram(emitIr(dir, sourcePath));
+    const identity = program.entry.module.identity;
+    const fn = (name) => ({ $type: "Function", module: identity, name });
+    const tap = (action) => ({ $type: "ActionHandlerInvocation", token: "h1-1", action: { $type: "Button.Tapped", ...action } });
+    /** The one diagnostic `run` fails with. */
+    const refusal = (run) => {
+      const diagnostics = runtimeFailure(run).diagnostics;
+      assertEqual(diagnostics.length, 1);
+      return diagnostics[0];
+    };
+    /** Asserts `run` is refused as holding a value that is no host value, at `path`, in `argument` or in none. */
+    const assertRefused = (run, path, argument) => {
+      const diagnostic = refusal(run);
+      assertEqual([diagnostic.code, diagnostic.argument ?? null], ["nx-ir-boundary-type", argument ?? null]);
+      if (!diagnostic.message.startsWith(`Expected ${path} to be `)) {
+        throw new Error(`Expected a refusal at ${path}, got: ${diagnostic.message}`);
+      }
+      return diagnostic;
+    };
+    /** The result of a call with what it used, under limits it does not reach. */
+    const measured = (run) => {
+      const usage = {};
+      const result = run({ maxOperations: ample, maxInputSize: ample, usage });
+      return { result, ...usage };
+    };
+    class PersonClass {
+      constructor() {
+        this.name = "Ada";
+        this.nickname = "Countess";
+      }
+    }
+    const counter = initializeComponent(program, "Counter").instance;
+
+    // A value the host built is the value: literals and the same value read from JSON are one
+    // input, with one result, one cost and one size, and neither was written as JSON to be passed.
+    {
+      const built = { name: "Ada", nickname: "Countess" };
+      const parsed = JSON.parse(JSON.stringify(built));
+      const fromBuilt = measured((options) => evaluateFunction(program, "same", [built], options));
+      assertEqual(fromBuilt, measured((options) => evaluateFunction(program, "same", [parsed], options)));
+      assertEqual(fromBuilt.result, { $type: "Person", name: "Ada", nickname: "Countess", title: "Dr" });
+      const props = { title: "Home", extra: { tags: ["a", "b"] } };
+      assertEqual(
+        measured((options) => initializeComponent(program, "Card", props, options).rendered),
+        measured((options) => initializeComponent(program, "Card", JSON.parse(JSON.stringify(props)), options).rendered),
+      );
+      // Nothing is copied when nothing is left out: a value held at `object` is the host's own.
+      const data = { list: [1, { two: 2 }] };
+      if (initializeComponent(program, "Counter", {}, { state: { count: 1, data } }).state.data !== data) {
+        throw new Error("A value with nothing to leave out was copied on the way in");
+      }
+    }
+    console.log("ok - a value the host built is the value, as the same value read from JSON is");
+
+    // A member that is undefined is a member left out: a default applies, an optional field is
+    // empty, a required field is missing, and a name the type does not declare is not unknown.
+    {
+      const plain = measured((options) => evaluateFunction(program, "same", [{ name: "Ada" }], options));
+      const spelled = measured((options) => evaluateFunction(program, "same", [{ name: "Ada", nickname: undefined, title: undefined }], options));
+      assertEqual(spelled, plain);
+      assertEqual(spelled.result, { $type: "Person", name: "Ada", title: "Dr" });
+      const missing = refusal(() => evaluateFunction(program, "same", [{ name: undefined }]));
+      assertEqual([missing.code, missing.argument, missing.message], ["nx-ir-boundary-field", "person", "Missing required person field 'name'."]);
+      assertEqual(evaluateFunction(program, "same", [{ name: "Ada", extra: undefined }]), plain.result);
+      const unknown = refusal(() => evaluateFunction(program, "same", [{ name: "Ada", extra: 1 }]));
+      assertEqual([unknown.code, unknown.message], ["nx-ir-boundary-field", "Unknown person field 'extra'."]);
+      // Inside an open object the program is not given the member, and the host's object keeps it.
+      const host = { a: 1, b: undefined, c: { d: undefined }, e: [{ f: undefined, g: 2 }] };
+      assertEqual(evaluateFunction(program, "echo", [host]), { a: 1, c: {}, e: [{ g: 2 }] });
+      assertEqual([Object.keys(host), Object.keys(host.c), Object.keys(host.e[0])], [["a", "b", "c", "e"], ["d"], ["f", "g"]]);
+      // What was left out is all that is copied: a value beside it is the host's own.
+      const shared = { kept: true };
+      const state = initializeComponent(program, "Counter", {}, { state: { count: 1, data: { gone: undefined, shared } } }).state;
+      assertEqual(Object.keys(state.data), ["shared"]);
+      if (state.data.shared !== shared) {
+        throw new Error("A value beside a member that was left out was copied");
+      }
+      // A member named `__proto__`, as JSON can hold one, is a member of its own in the copy.
+      const named = JSON.parse('{ "__proto__": { "x": 1, "inner": { "y": 2 } }, "k": 1 }');
+      named["__proto__"].inner.gone = undefined;
+      const copy = initializeComponent(program, "Counter", {}, { state: { count: 1, data: named } }).state.data;
+      assertEqual([Object.keys(copy), Object.keys(copy["__proto__"]), Object.keys(copy["__proto__"].inner)], [["__proto__", "k"], ["x", "inner"], ["y"]]);
+      assertEqual([Object.getPrototypeOf(copy) === Object.prototype, Object.keys(named["__proto__"].inner)], [true, ["y", "gone"]]);
+    }
+    console.log("ok - a member that is undefined is a member left out, at any depth, and the host's object is not changed");
+
+    // An argument that is undefined keeps the meaning it had: by name it is not supplied, and by
+    // position it is left for the function to fill. A number JSON cannot spell is as it was too.
+    assertEqual(callFunction(program, fn("withDefault"), { n: undefined }), 7);
+    assertEqual(evaluateFunction(program, "withDefault", [undefined]), 7);
+    assertEqual(evaluateFunction(program, "optional", [undefined]), "called");
+    assertEqual(Number.isNaN(evaluateFunction(program, "ratio", [Number.NaN])), true);
+    console.log("ok - an argument that is undefined is not supplied, and a NaN is read as it was");
+
+    // An instance of a class is not a record, whatever its members hold, and an object with no
+    // prototype is.
+    {
+      const diagnostic = assertRefused(() => evaluateFunction(program, "same", [new PersonClass()]), "person", "person");
+      assertEqual(diagnostic.message, `Expected person to be null, a boolean, a number, a string, an array or a plain object, got an instance of PersonClass, which is not a plain object.`);
+      assertRefused(() => callFunction(program, fn("same"), { person: new PersonClass() }), "person", "person");
+      const bare = Object.assign(Object.create(null), { name: "Ada" });
+      assertEqual(evaluateFunction(program, "same", [bare]), { $type: "Person", name: "Ada", title: "Dr" });
+    }
+    console.log("ok - an instance of a class is refused where a record is expected, and an object with no prototype is one");
+
+    // What is no canonical value is refused wherever it is, a site typed `object` included, with
+    // the path to it and the argument it is in. It is not read: a typed array of twenty million
+    // bytes is refused as fast as one of eight.
+    {
+      const large = new Uint8Array(20_000_000);
+      const kinds = [large, new Uint8Array(8), new Date(0), new Map([["a", 1]]), new Set([1]), () => 1, Symbol("s"), 10n, new PersonClass()];
+      for (const value of kinds) {
+        const extra = { a: [{ b: value }] };
+        assertRefused(() => evaluateFunction(program, "keep", [extra]), "extra.a[0].b", "extra");
+        assertRefused(() => callFunction(program, fn("keep"), { extra }), "extra.a[0].b", "extra");
+        assertRefused(() => evaluateFunction(program, "keep", [value]), "extra", "extra");
+      }
+      const timed = (value) => {
+        const start = process.hrtime.bigint();
+        for (let round = 0; round < 1000; round += 1) {
+          assertRefused(() => evaluateFunction(program, "keep", [{ a: [{ b: value }] }]), "extra.a[0].b", "extra");
+        }
+        return Number(process.hrtime.bigint() - start) / 1e6;
+      };
+      timed(new Uint8Array(8));
+      const [small, big] = [timed(new Uint8Array(8)), timed(large)];
+      if (big > small * 5 + 50) {
+        throw new Error(`Refusing a typed array of twenty million bytes took ${big} ms for a thousand calls, against ${small} ms for one of eight bytes`);
+      }
+      // Nothing was converted: the `Date` did not become text or an empty record on the way.
+      assertEqual(refusal(() => evaluateFunction(program, "echo", [{ when: new Date(0) }])).message.endsWith("got an instance of Date, which is not a plain object."), true);
+    }
+    console.log("ok - a value that is no canonical value is refused by its path, inside an open object too, and is not read");
+
+    // The reading covers every kind of input the limit covers. A refusal outside the arguments of
+    // a function names no argument.
+    {
+      const date = new Date(0);
+      const deep = { a: { b: [date] } };
+      const cases = [
+        [() => evaluateFunction(program, "keep", [deep]), "extra.a.b[0]", "extra"],
+        [() => callFunction(program, fn("keep"), { extra: deep }), "extra.a.b[0]", "extra"],
+        // A name the function does not declare is dropped, and is still the host's value.
+        [() => callFunction(program, fn("keep"), { extra: 1, other: deep }), "other.a.b[0]", undefined],
+        [() => callFunction(program, { ...fn("keep"), note: deep }, { extra: 1 }), "the function callFunction is given.note.a.b[0]", undefined],
+        [() => constructComponentDescriptor(program, "Card", { extra: deep }), "Card props.extra.a.b[0]", undefined],
+        [() => constructComponentDescriptor(program, "Card", {}, [1, deep]), "Card content[1].a.b[0]", undefined],
+        [() => initializeComponent(program, "Card", { extra: deep }), "Card props.extra.a.b[0]", undefined],
+        [() => initializeComponent(program, "Counter", {}, { state: { count: 1, data: deep } }), "Counter state.data.a.b[0]", undefined],
+        [() => evaluateComponent(program, "Card", { extra: deep }, {}), "Card props.extra.a.b[0]", undefined],
+        [() => evaluateComponent(program, "Counter", {}, { count: 1, data: deep }), "Counter state.data.a.b[0]", undefined],
+        [() => normalizeComponentState(program, "Counter", { count: 1, data: deep }), "Counter state.data.a.b[0]", undefined],
+        [() => applyComponentStatePatch(program, "Counter", { count: 1, data: deep }, {}), "Counter state.data.a.b[0]", undefined],
+        [() => applyComponentStatePatch(program, "Counter", { count: 1 }, { data: deep }), "Counter state patch.data.a.b[0]", undefined],
+        [() => dispatchComponentActions(program, counter, [tap(), tap({ extra: deep })]), "dispatch entry 1.action.extra.a.b[0]", undefined],
+      ];
+      for (const [run, path, argument] of cases) {
+        assertRefused(run, path, argument);
+      }
+      // What holds the values is the host's too.
+      assertRefused(() => callFunction(program, fn("keep"), new PersonClass()), "the arguments callFunction is given", undefined);
+      assertRefused(() => initializeComponent(program, "Card", new PersonClass()), "Card props", undefined);
+      assertRefused(() => initializeComponent(program, "Card", [1]), "Card props", undefined);
+      assertRefused(() => evaluateComponent(program, "Counter", {}, new Map()), "Counter state", undefined);
+
+      // A list of values is an array. Anything else that holds values would be measured as one
+      // value and read as none, so it is refused, whatever it holds and under any limit.
+      const fifty = Array.from({ length: 50000 }, () => ({ when: new Date(0) }));
+      for (const options of [{}, { maxInputSize: 10 }]) {
+        assertRefused(() => evaluateFunction(program, "keep", { length: 1, 0: { a: 1 } }, options), "the arguments of 'keep'", undefined);
+        assertRefused(() => constructComponentDescriptor(program, "Card", {}, new Set(fifty), options), "Card content", undefined);
+        assertRefused(() => dispatchComponentActions(program, counter, new Set(fifty.map((extra) => tap({ extra }))), options), "the dispatched batch", undefined);
+      }
+      assertEqual(
+        refusal(() => constructComponentDescriptor(program, "Card", {}, new Set())).message,
+        "Expected Card content to be an array, got an instance of Set.",
+      );
+      assertEqual(refusal(() => evaluateFunction(program, "keep", "kept")).message, "Expected the arguments of 'keep' to be an array, got a string.");
+
+      // And in each a member that is undefined is a member left out.
+      assertEqual(callFunction(program, fn("echo"), { extra: { a: 1, b: undefined }, other: undefined }), { a: 1 });
+      assertEqual(callFunction(program, { ...fn("keep"), note: undefined }, { extra: 1 }), "kept");
+      assertEqual(constructComponentDescriptor(program, "Card", { title: undefined, extra: { a: undefined } }, [{ a: 1, b: undefined }]), {
+        $type: "Card",
+        title: "none",
+        extra: {},
+        body: [{ a: 1 }],
+      });
+      assertEqual(initializeComponent(program, "Card", { title: undefined }).rendered, { $type: "Text", value: "none" });
+      assertEqual(initializeComponent(program, "Counter", {}, { state: { count: 2, note: undefined } }).state, { count: 2 });
+      assertEqual(evaluateComponent(program, "Card", { title: undefined }, {}).rendered, { $type: "Text", value: "none" });
+      assertEqual(normalizeComponentState(program, "Counter", { count: 2, note: undefined, data: { a: undefined } }), { count: 2, data: {} });
+      // In a patch a member left out is a field that keeps its value.
+      assertEqual(applyComponentStatePatch(program, "Counter", { count: 1, note: "kept" }, { count: 2, note: undefined }), { count: 2, note: "kept" });
+      assertEqual(dispatchComponentActions(program, counter, [tap({ extra: undefined })]).state.count, 1);
+      assertEqual(refusal(() => dispatchComponentActions(program, counter, [tap({ extra: 1 })])).code, "nx-ir-boundary-field");
+    }
+    console.log("ok - arguments, a function record, props, content, a state, a patch and a batch are all read, and only an argument is named");
+
+    // An item of an array cannot be left out. One that is undefined, or a hole, is refused,
+    // anywhere but in the positional arguments of a call.
+    {
+      assertRefused(() => evaluateFunction(program, "numbers", [[1, undefined, 3]]), "xs[1]", "xs");
+      // eslint-disable-next-line no-sparse-arrays
+      assertRefused(() => evaluateFunction(program, "numbers", [[1, , 3]]), "xs[1]", "xs");
+      assertRefused(() => evaluateFunction(program, "keep", [{ a: [undefined] }]), "extra.a[0]", "extra");
+      assertRefused(() => constructComponentDescriptor(program, "Card", {}, [undefined]), "Card content[0]", undefined);
+      assertRefused(() => dispatchComponentActions(program, counter, [undefined]), "dispatch entry 0", undefined);
+    }
+    console.log("ok - an item of an array that is undefined is refused, except as a positional argument");
+
+    // A value that holds itself has no finite size. With no limit the reading refuses it; with one
+    // the limit does, first. The same object held twice, side by side, is two values.
+    {
+      const itself = { name: "loop", inner: [{}] };
+      itself.inner[0].back = itself;
+      assertRefused(() => evaluateFunction(program, "keep", [itself]), "extra.inner[0].back", "extra");
+      assertRefused(() => initializeComponent(program, "Card", { extra: itself }), "Card props.extra.inner[0].back", undefined);
+      const list = [1];
+      list.push(list);
+      assertRefused(() => evaluateFunction(program, "keep", [list]), "extra[1]", "extra");
+      assertInputRefused(() => evaluateFunction(program, "keep", [itself], { maxInputSize: 1000 }), 1000);
+      const shared = { held: "twice" };
+      assertEqual(evaluateFunction(program, "echo", [{ first: shared, second: shared, list: [shared, shared] }]), {
+        first: shared,
+        second: shared,
+        list: [shared, shared],
+      });
+      // Input over the limit is refused by the limit, whatever it holds, and names no argument.
+      const over = refusal(() => evaluateFunction(program, "keep", [{ when: new Date(0), list: Array.from({ length: 100 }, () => 0) }], { maxInputSize: 10 }));
+      assertEqual([over.code, over.limit, over.argument], ["nx-ir-resource-limit", { name: "maxInputSize", value: 10 }, undefined]);
+      // Within the limit it is measured, as one value, and then refused.
+      const usage = {};
+      assertRefused(() => evaluateFunction(program, "keep", [{ when: new Date(0) }], { maxInputSize: 10, usage }), "extra.when", "extra");
+      assertEqual(usage, { inputSize: 2 });
+    }
+    console.log("ok - a value that holds itself is refused, one held twice is accepted, and the input limit comes first");
+
+    // The walk keeps its own stack: a value nested 200,000 deep is read, with or without a member
+    // to leave out at the bottom of it, and one to refuse there is refused.
+    {
+      const nested = (bottom) => {
+        let value = bottom;
+        for (let level = 0; level < 200000; level += 1) {
+          value = level % 2 === 0 ? [value] : { in: value };
+        }
+        return value;
+      };
+      assertEqual(evaluateFunction(program, "keep", [nested(1)]), "kept");
+      const host = nested({ gone: undefined, kept: 1 });
+      const held = initializeComponent(program, "Counter", {}, { state: { count: 1, data: host } }).state.data;
+      let [bottom, hostBottom] = [held, host];
+      for (let level = 0; level < 200000; level += 1) {
+        [bottom, hostBottom] = level % 2 === 1 ? [bottom[0], hostBottom[0]] : [bottom.in, hostBottom.in];
+      }
+      assertEqual([Object.keys(bottom), Object.keys(hostBottom)], [["kept"], ["gone", "kept"]]);
+      const diagnostic = refusal(() => evaluateFunction(program, "keep", [nested(new Date(0))]));
+      assertEqual([diagnostic.code, diagnostic.argument, diagnostic.message.startsWith("Expected extra.in[0].in[0]")], ["nx-ir-boundary-type", "extra", true]);
+    }
+    console.log("ok - a value nested 200,000 deep is read without reaching the engine's stack");
+
+    // The handler and function values the runtime made are accepted where they were: a handler
+    // read from rendered output, the handler itself, and a state the runtime returned.
+    {
+      const parent = initializeComponent(program, "Parent");
+      const { $type: _child, ...childProps } = parent.rendered;
+      const child = initializeComponent(program, "Child", childProps, { parent: parent.instance });
+      assertEqual(dispatchComponentActions(program, child.instance, [{ $type: "Child.Fired" }]).effects.length, 1);
+      const handler = parent.instance.handlers.get("h1-1");
+      assertEqual(constructComponentDescriptor(program, "Child", { onFired: handler }).onFired, { $type: "ActionHandler", action: "Child.Fired" });
+      assertEqual(evaluateFunction(program, "keep", [{ held: [handler] }]), "kept");
+      const again = initializeComponent(program, "Counter", {}, { state: counter.state });
+      assertEqual(again.state, { count: 0 });
+      // A function value in a state the runtime returned is its own object, not a plain one, and
+      // is accepted back as it is, as the record it is written to JSON as is.
+      const stepper = initializeComponent(program, "Stepper");
+      assertEqual(Object.getPrototypeOf(stepper.state.step) === Object.prototype, false);
+      assertEqual(measureInputSize(stepper.state), 3);
+      const kept = initializeComponent(program, "Stepper", {}, { state: stepper.state }).state;
+      assertEqual(JSON.parse(JSON.stringify(kept)), { step: fn("double"), count: 0 });
+      assertEqual(evaluateComponent(program, "Stepper", {}, JSON.parse(JSON.stringify(stepper.state))).rendered, { $type: "Text", value: "steps" });
+    }
+    console.log("ok - a handler the runtime made, and a state it returned, are accepted as they were");
+
+    // The measure: a member that is undefined is not a member, so one input has one size however
+    // the host spelled it, alone and in a call.
+    {
+      assertEqual([measureInputSize({ a: 1, b: undefined }), measureInputSize({ a: 1 })], [2, 2]);
+      assertEqual(measureInputSize({ a: { b: undefined, c: [undefined] } }), measureInputSize({ a: { c: [null] } }));
+      assertEqual(
+        inputSizeOf((options) => evaluateFunction(program, "echo", [{ a: 1, b: undefined }], options)),
+        inputSizeOf((options) => evaluateFunction(program, "echo", [{ a: 1 }], options)),
+      );
+      assertEqual(inputSizeOf((options) => callFunction(program, fn("withDefault"), { n: undefined }, options)), 4);
+      const sparse = { one: 1 };
+      for (let index = 0; index < 1000; index += 1) {
+        sparse[`gone${index}`] = undefined;
+      }
+      assertEqual(measureInputSize(sparse, 10), 2);
+      assertEqual(evaluateFunction(program, "echo", [sparse], { maxInputSize: 10 }), { one: 1 });
+      assertInputRefused(() => evaluateFunction(program, "echo", [sparse], { maxInputSize: 1 }), 1);
+      // A value that is no canonical value still counts one where nothing refuses it.
+      assertEqual(measureInputSize({ when: new Date(0), bytes: new Uint8Array(1000) }), 3);
+    }
+    console.log("ok - a member that is undefined is not counted by the measure");
   },
 );

@@ -2051,6 +2051,30 @@ test("expressions nest exactly 1,000 deep, whatever the call depth allows", () =
         assertEqual(error.diagnostics[0].declaration, "main.nx::root");
     }
 });
+/**
+ * Checked by the compiler and never called: the types the evaluation functions take admit a member
+ * that is `undefined`, which is how a host spells a member it leaves out, with no cast; what they
+ * return has none; and what they return can be passed back.
+ */
+function hostValueTypes(program, instance, maybe) {
+    const person = { name: "Ada", nickname: undefined };
+    evaluateFunction(program, "greet", [person, undefined, { name: "Ada", nickname: maybe }]);
+    callFunction(program, { $type: "Function", module: "main.nx", name: "greet", note: maybe }, { person, other: maybe });
+    constructComponentDescriptor(program, "Card", { title: maybe }, [{ label: maybe }]);
+    const { state } = initializeComponent(program, "Card", { title: maybe }, { state: { note: maybe } });
+    evaluateComponent(program, "Card", { title: maybe }, { ...state, note: maybe });
+    normalizeComponentState(program, "Card", state);
+    applyComponentStatePatch(program, "Card", state, { note: maybe });
+    dispatchComponentActions(program, instance, [{ $type: "Card.Tapped", note: maybe }]);
+    const host = { list: [{ note: maybe }] };
+    const record = { title: maybe, nested: host };
+    // @ts-expect-error A value the runtime returns has no member that is `undefined`.
+    const returned = { title: maybe };
+    // @ts-expect-error A `Date` is not a host value.
+    const dated = { when: new Date(0) };
+    void [record, returned, dated];
+}
+void hostValueTypes;
 let failures = 0;
 for (const [name, run] of tests) {
     try {

@@ -15,6 +15,11 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// A JSON-like tree value used as the stable NX API value type.
 ///
+/// It is the Rust form of a canonical value, which `docs/nx-ir-format.md` (*Host values*) defines:
+/// a host builds one and passes it as it is, whether it read the value from JSON or computed it,
+/// and JSON and MessagePack are encodings of it for a wire or a store. It can hold nothing that is
+/// not a canonical value, so a runtime given one has nothing to refuse for its kind.
+///
 /// Constant union cases are represented as [`NxValue::String`] carrying the bare authored case
 /// name. The declaring union is recovered from the target schema (declared NX type, typed DTO
 /// property, or other type annotation) at the point where the value is consumed; the IR itself

@@ -406,7 +406,7 @@ test("a base-typed parameter receives the host's subtype", async () => {
   assert.equal(succeeded(await run("call_id_of", {}, { callId: "t1:0:0", context: chat })).output, "t1:0:0");
   assert.equal(succeeded(await run("who_am_i", {}, { context: chat })).output, "conv_9");
   // An optional field a host set to `undefined`, which its generated type allows, is one that is
-  // absent: the runtime reads JSON and would refuse the member.
+  // absent: the runtime reads the member as one left out.
   const withUndefined = { ...chat, contactEmail: undefined } as unknown as ToolCallContext["context"];
   const absent = succeeded(await run("who_am_i", {}, { context: withUndefined }));
   assert.equal(absent.output, "conv_9");
@@ -427,8 +427,8 @@ test("a base-typed parameter receives the host's subtype", async () => {
   const fromClass = succeeded(await run("who_am_i", {}, { context: built as never }));
   assert.equal(fromClass.output, "conv_9");
   assert.equal(fromClass.usage!.inputSize, absent.usage!.inputSize);
-  // A record that holds itself, and one nested very deeply, are refused as too large, as they
-  // were before members were looked at. Neither is copied without end, and neither rejects.
+  // A record that holds itself, and one nested very deeply, are refused as too large. Neither is
+  // read without end, and neither rejects.
   const cyclic: Record<string, unknown> = { ...chat };
   cyclic["self"] = cyclic;
   let deep: Record<string, unknown> = { ...chat };
@@ -447,12 +447,10 @@ test("a base-typed parameter receives the host's subtype", async () => {
   assert.equal(succeeded(await run("who_am_i_aliased", { context: "forged" }, { context: chat })).output, "conv_9");
 });
 
-test("below the top level only a plain object is looked into: an instance of a class there is passed as it is", async () => {
-  // Pinned as it is. The runtime's measure counts such an instance as one value, so the copy does
-  // not enter it; the runtime's check does, at a field typed as a record, and refuses the member.
+test("below the top level the runtime reads the record: an instance of a class or a Date there is the host's mistake", async () => {
   const nested = compileProgram(`
 type Inner = { a:string b?:string }
-type NestedContext extends ToolContext = { inner?:Inner }
+type NestedContext extends ToolContext = { inner?:Inner extra?:object }
 
 /// Reads the nested part of the context.
 let readInner(context: NestedContext): string = { "read" }
@@ -462,23 +460,33 @@ let root(): Agent = { <Agent name="support" tools={ <FunctionTool function={read
   const normalizedNested = normalizeAgent(nested.agent(), { schemas: nested.artifact, toolContextType: { module: "main.nx", name: "NestedContext" } });
   assert.equal(normalizedNested.ok, true, JSON.stringify(normalizedNested.diagnostics, null, 2));
   const [readInner] = createAgentTools((normalizedNested as { definition: NormalizedAgent }).definition, nested.program);
-  const call = (inner: unknown): Promise<ToolResult> => readInner!.execute!({}, { callId: "t1:0:0", context: { $type: "NestedContext", inner } as never });
+  const call = (members: Record<string, unknown>): Promise<ToolResult> =>
+    readInner!.execute!({}, { callId: "t1:0:0", context: { $type: "NestedContext", ...members } as never });
   class Inner {
     public readonly $type = "Inner";
     public b: string | undefined;
     public constructor(public readonly a: string) {}
   }
 
-  // A plain object below the top level has its `undefined` member left out.
-  assert.equal(succeeded(await call({ $type: "Inner", a: "x", b: undefined })).output, "read");
-  // An instance of a class there is not looked into, and the runtime refuses the member.
-  const refused = failed(await call(new Inner("x")));
-  // The member is in the record the host filled in, so the mistake is the host's.
-  assert.equal(refused.error.code, "invalid-context");
-  assert.equal(refused.error.diagnostics![0]!.argument, "context");
-  assert.match(refused.error.message, /context\.inner.*\bb\b/);
-  // With the member given a value, the same instance is accepted: it is the `undefined` that is refused.
-  assert.equal(succeeded(await call(Object.assign(new Inner("x"), { b: "y" }))).output, "read");
+  // A plain object below the top level has its `undefined` member left out, by the runtime.
+  assert.equal(succeeded(await call({ inner: { $type: "Inner", a: "x", b: undefined } })).output, "read");
+  assert.equal(succeeded(await call({ inner: undefined, extra: { deep: [{ gone: undefined }] } })).output, "read");
+  // An instance of a class there is not a record, whatever its members hold. It is in the record
+  // the host filled in, so the mistake is the host's, and the diagnostic says where it is.
+  for (const instance of [new Inner("x"), Object.assign(new Inner("x"), { b: "y" })]) {
+    const refused = failed(await call({ inner: instance }));
+    assert.equal(refused.error.code, "invalid-context");
+    assert.equal(refused.error.diagnostics![0]!.code, "nx-ir-boundary-type");
+    assert.equal(refused.error.diagnostics![0]!.argument, "context");
+    assert.match(refused.error.message, /Expected context\.inner to be .*got an instance of Inner, which is not a plain object/);
+  }
+  // The same members as a plain object are a record.
+  assert.equal(succeeded(await call({ inner: { ...new Inner("x") } })).output, "read");
+  // A value that is no value at all fails the same way, in a field typed `object` too.
+  const dated = failed(await call({ extra: { seen: [new Date(0)] } }));
+  assert.equal(dated.error.code, "invalid-context");
+  assert.equal(dated.error.diagnostics![0]!.argument, "context");
+  assert.match(dated.error.message, /Expected context\.extra\.seen\[0\] to be .*got an instance of Date/);
 });
 
 test("the model cannot supply the context", async () => {

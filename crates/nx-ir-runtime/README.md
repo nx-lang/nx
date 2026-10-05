@@ -62,7 +62,10 @@ declaration the entry references is absent.
 
 ## Values
 
-Values cross the API as `nx_value::NxValue`.
+Values cross the API as `nx_value::NxValue`, which is the Rust form of a canonical value
+(`docs/nx-ir-format.md`, *Host values*). A host passes one as it built it, whether it read it from
+JSON or computed it; nothing is encoded on the way in or out, and an `NxValue` can hold nothing
+that is not a value.
 
 | NX | Accepted from the host | Returned to the host |
 | --- | --- | --- |

@@ -202,14 +202,35 @@ export type NxResult<T> = {
     readonly diagnostics: readonly NxIrDiagnostic[];
 };
 /**
- * A value in the canonical JSON encoding. The empty value — an absent optional, an untaken
- * branch, an empty `for` — is the empty array, and the runtime never holds `null` as an NX value.
- * `null` is here for the host boundary only: a decoder reads it as the empty value wherever the
- * site admits zero, and the encoder writes it for a cleared field of an update record, which is
- * the one place the canonical encoding spells `null`.
+ * A canonical value in its JavaScript form, which `docs/nx-ir-format.md` (*Host values*) defines:
+ * what a host passes to an evaluation API and gets back, held in plain JavaScript data. A host
+ * that computed a value passes it as it is, as one that read it from JSON does; nothing is
+ * encoded on the way. A record is a plain object and a sequence is an array. Anything else
+ * JavaScript can hold, an instance of a class, a `Date`, a `Map`, a typed array, a function, is
+ * refused where it is passed. A host may also set a member to `undefined` to leave it out, which
+ * {@link NxHostValue}, the type the evaluation APIs take, admits; a value the runtime returns
+ * has no such member.
+ *
+ * <para>The empty value — an absent optional, an untaken branch, an empty `for` — is the empty
+ * array, and the runtime never holds `null` as an NX value. `null` is here for the host boundary
+ * only: it is read as the empty value wherever the site admits zero, and it is written for a
+ * cleared field of an update record, which is the one place canonical JSON spells `null`.</para>
  */
 export type NxCanonicalValue = null | boolean | number | string | readonly NxCanonicalValue[] | {
     readonly [key: string]: NxCanonicalValue;
+};
+/**
+ * A canonical value as a host passes one: an {@link NxCanonicalValue} in which a member of a plain
+ * object may be `undefined`, which is a member left out. Every evaluation API takes its input at
+ * this type and returns an `NxCanonicalValue`, which has no such member, so a value the runtime
+ * returned is one a host can pass back.
+ */
+export type NxHostValue = null | boolean | number | string | readonly NxHostValue[] | {
+    readonly [key: string]: NxHostValue | undefined;
+};
+/** Named host values as a host passes them: props, a state, a state patch or arguments by name. */
+export type NxHostRecord = {
+    readonly [key: string]: NxHostValue | undefined;
 };
 export declare class NxIrRuntimeError extends Error {
     readonly diagnostics: readonly NxIrDiagnostic[];
@@ -533,7 +554,7 @@ export interface ComponentInitOptions extends NxRuntimeOptions {
      * Initializing again with the state an instance holds and new props is how a host re-renders an
      * instance whose props changed without losing its state.
      */
-    readonly state?: Readonly<Record<string, NxCanonicalValue>>;
+    readonly state?: NxHostRecord;
 }
 export interface ComponentInitResult {
     readonly rendered: NxCanonicalValue;
@@ -566,10 +587,10 @@ export declare function prepareNxIrProgram(input: Uint8Array | ArrayBuffer): NxP
 export declare function tryPrepareNxIrProgram(input: Uint8Array | ArrayBuffer): NxResult<NxPreparedProgram>;
 /** The key that identifies one declaration across a program: its module's identity and its name. */
 export declare function declarationKey(linked: LinkedModule, reference: NxIrReference): string;
-export declare function evaluateFunction(program: NxPreparedProgram | NxPreparedModule, name: string, args?: readonly NxCanonicalValue[], options?: NxRuntimeOptions): NxCanonicalValue;
-export declare function constructComponentDescriptor(program: NxPreparedProgram | NxPreparedModule, name: string, props?: Record<string, NxCanonicalValue>, content?: readonly NxCanonicalValue[], options?: NxRuntimeOptions): NxCanonicalValue;
-export declare function initializeComponent(program: NxPreparedProgram | NxPreparedModule, name: string, props?: Record<string, NxCanonicalValue>, options?: ComponentInitOptions): ComponentInitResult;
-export declare function evaluateComponent(program: NxPreparedProgram | NxPreparedModule, name: string, props: Record<string, NxCanonicalValue>, state: Record<string, NxCanonicalValue>, options?: NxRuntimeOptions): ComponentEvaluateResult;
+export declare function evaluateFunction(program: NxPreparedProgram | NxPreparedModule, name: string, args?: readonly (NxHostValue | undefined)[], options?: NxRuntimeOptions): NxCanonicalValue;
+export declare function constructComponentDescriptor(program: NxPreparedProgram | NxPreparedModule, name: string, props?: NxHostRecord, content?: readonly NxHostValue[], options?: NxRuntimeOptions): NxCanonicalValue;
+export declare function initializeComponent(program: NxPreparedProgram | NxPreparedModule, name: string, props?: NxHostRecord, options?: ComponentInitOptions): ComponentInitResult;
+export declare function evaluateComponent(program: NxPreparedProgram | NxPreparedModule, name: string, props: NxHostRecord, state: NxHostRecord, options?: NxRuntimeOptions): ComponentEvaluateResult;
 /**
  * Dispatches a batch against an instance and returns the next one, without touching the instance
  * given. Each entry is either an action the component emits, which runs the handler the parent
@@ -581,8 +602,8 @@ export declare function evaluateComponent(program: NxPreparedProgram | NxPrepare
  * throws before anything is returned, so the instance given stays the state of record. One
  * operation budget covers the whole batch and the render after it.
  */
-export declare function dispatchComponentActions(program: NxPreparedProgram | NxPreparedModule, instance: NxComponentInstance, batch: readonly NxCanonicalValue[], options?: NxRuntimeOptions): ComponentDispatchResult;
-export declare function normalizeComponentState(program: NxPreparedProgram | NxPreparedModule, name: string, state: Record<string, NxCanonicalValue>, options?: NxRuntimeOptions): Record<string, NxCanonicalValue>;
+export declare function dispatchComponentActions(program: NxPreparedProgram | NxPreparedModule, instance: NxComponentInstance, batch: readonly NxHostValue[], options?: NxRuntimeOptions): ComponentDispatchResult;
+export declare function normalizeComponentState(program: NxPreparedProgram | NxPreparedModule, name: string, state: NxHostRecord, options?: NxRuntimeOptions): Record<string, NxCanonicalValue>;
 /**
  * Applies a patch to host-owned component state and returns the validated next state.
  *
@@ -591,7 +612,7 @@ export declare function normalizeComponentState(program: NxPreparedProgram | NxP
  * absent one keeps it, and a present empty value — `null` or `[]` — clears an optional state field,
  * so the next state carries no key for it; for a field that is not optional it is rejected.
  */
-export declare function applyComponentStatePatch(program: NxPreparedProgram | NxPreparedModule, name: string, currentState: Record<string, NxCanonicalValue>, patch: Record<string, NxCanonicalValue>, options?: NxRuntimeOptions): Record<string, NxCanonicalValue>;
+export declare function applyComponentStatePatch(program: NxPreparedProgram | NxPreparedModule, name: string, currentState: NxHostRecord, patch: NxHostRecord, options?: NxRuntimeOptions): Record<string, NxCanonicalValue>;
 /**
  * The size of one value as `docs/nx-ir-format.md` defines the input size of a call and as
  * {@link NxRuntimeOptions.maxInputSize} measures it. It evaluates nothing and needs no program.
@@ -624,7 +645,7 @@ export type NxFunctionRecord = {
  * and returns the canonical result. An argument the function does not declare is dropped, as the
  * subset rule allows; a parameter it declares and the arguments lack is a diagnostic naming it.
  */
-export declare function callFunction(program: NxPreparedProgram | NxPreparedModule, value: NxCanonicalValue, args?: Record<string, NxCanonicalValue>, options?: NxRuntimeOptions): NxCanonicalValue;
+export declare function callFunction(program: NxPreparedProgram | NxPreparedModule, value: NxHostValue, args?: NxHostRecord, options?: NxRuntimeOptions): NxCanonicalValue;
 /** A record or update record as the runtime holds it: a `$type` and its fields. */
 export type NxRecordObject = {
     readonly $type: string;
