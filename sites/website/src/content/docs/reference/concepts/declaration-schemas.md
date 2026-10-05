@@ -119,8 +119,20 @@ two modules, are reported as `schema-ambiguous-discriminator`, since a runtime r
 as ambiguous.
 
 A host can name types it supplies itself, such as the agent library's `ToolContext`, with the
-`hostSuppliedTypes` option. A parameter declared with one of them, or with a record that extends
-one, is left out of the input schema and marked as supplied by the host.
+`hostSuppliedTypes` option. A parameter declared with one of them, with a record that extends
+one, or with a type alias of either, is left out of the input schema and marked as supplied by the
+host.
+
+Every parameter's entry names the record or union it is declared with, as `typeRef`. Through a
+type alias it names what the alias denotes: with `type Context = ChatToolContext`, a parameter
+`context:Context` has the `type` `Context` and the `typeRef` `ChatToolContext`. An alias of
+anything else, such as `type Plans = Plan+`, has no `typeRef`.
+
+A parameter whose type only holds such a type, as `contexts:ChatToolContext+` does, or a record
+with a field of it, cannot be filled in by the host and stays in the input schema. Its entry names
+the listed types it holds, as `hostSuppliedWithin`, so a host can refuse a function that would ask
+a caller for values the host means to supply. A type derived from a listed type,
+`ChatToolContext.Update` or `ChatToolContext.Property`, is another type and holds none of it.
 
 ## Large integers
 

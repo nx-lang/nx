@@ -1,0 +1,47 @@
+// The agent the package's tests normalize and run: one tool of each of the library's kinds.
+import "@nx/agent"
+
+/// A plan a team can buy.
+type Plan = { name:string seats:int monthlyPrice:int }
+
+/// A new order, sent as a request body.
+type NewOrder = { sku:string quantity:int }
+
+/// Finds the plans that fit a team.
+let findPlans(
+  /// Number of people who need a seat.
+  teamSize: int,
+  maxMonthlyPrice?: int
+): Plan* = { <Plan name="Team" seats={teamSize} monthlyPrice=20 /> }
+
+/// Looks an order up by its identifier.
+let lookupOrder(orderId: string): HttpArguments = {
+  <HttpArguments pathParams=<HttpParam name="orderId" value={orderId} /> />
+}
+
+/// Places an order for a product.
+let placeOrder(sku: string, quantity: int = 1): HttpArguments = {
+  <HttpArguments
+    query=<HttpParam name="source" value="agent" />
+    body=<NewOrder sku={sku} quantity={quantity} /> />
+}
+
+let shop = <HttpConnection name="shop" baseUrl="https://api.example.com/v1/" />
+
+let refundPolicy =
+  <Document title="Refund policy">Refunds are available within 30 days of purchase.</Document>
+
+let root(): Agent = {
+  <Agent name="support" description="Answers customer questions." model="balanced"
+      documents={ refundPolicy }
+      tools={
+        <FunctionTool function={findPlans} />
+        <WebSearchTool allowedDomains={ "docs.example.com" } />
+        <HttpTool connection={shop} method={HttpMethod.get} path="/orders/{orderId}" arguments={lookupOrder} />
+        <HttpTool connection={shop} method={HttpMethod.post} path="/orders" arguments={placeOrder}
+            maxCallsPerConversation=3 />
+      }
+      limits={ <AgentLimits maxSteps=6 maxToolCalls=12 /> }>
+    You are the support assistant. Answer from the documents.
+  </Agent>
+}

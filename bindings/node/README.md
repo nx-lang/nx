@@ -292,7 +292,7 @@ const tool = artifact.functionSchema(
 );
 tool.inputSchema; // the arguments a model may supply, keyed by parameter name
 tool.outputSchema; // the result
-tool.parameters; // name, NX type, required, description, typeRef and hostSupplied per parameter
+tool.parameters; // name, NX type, required, description, typeRef, hostSupplied and hostSuppliedWithin per parameter
 
 const booking = artifact.typeSchema({ module: "app/tools.nx", name: "Booking" }, { direction: "input" });
 ```

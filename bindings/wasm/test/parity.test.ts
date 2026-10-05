@@ -281,7 +281,9 @@ describe("declaration schema parity with the Node SDK", () => {
     const source = [
       'import "@nx/agent"',
       "type ChatContext extends ToolContext = { conversationId:string }",
-      "let lookupOrder(orderId:string, context:ChatContext): HttpArguments = { <HttpArguments /> }"
+      "type Request = { context:ChatContext }",
+      "let lookupOrder(orderId:string, context:ChatContext): HttpArguments = { <HttpArguments /> }",
+      "let send(contexts:ChatContext+, request:Request): string = { \"\" }"
     ].join("\n");
     const options = { hostSuppliedTypes: [{ module: "@nx/agent/agent.nx", name: "ToolContext" }] };
     const wasmArtifact = host.buildProgramArtifact(source, { fileName: "tools.nx" });
@@ -294,6 +296,13 @@ describe("declaration schema parity with the Node SDK", () => {
       expect(JSON.stringify(fromWasm)).toBe(
         JSON.stringify(nodeArtifact.functionSchema({ name: "lookupOrder" }, options))
       );
+      // And for parameters that hold a listed type without being one.
+      const heldFromWasm = wasmArtifact.functionSchema({ name: "send" }, options);
+      expect(heldFromWasm.parameters.map((parameter) => parameter.hostSuppliedWithin)).toEqual([
+        options.hostSuppliedTypes,
+        options.hostSuppliedTypes
+      ]);
+      expect(JSON.stringify(heldFromWasm)).toBe(JSON.stringify(nodeArtifact.functionSchema({ name: "send" }, options)));
     } finally {
       wasmArtifact.dispose();
       nodeArtifact.dispose();

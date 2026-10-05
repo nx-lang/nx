@@ -202,6 +202,11 @@ The library says what an agent is, not how it runs. A host decides:
 - how tool calls are validated, executed, retried and limited;
 - how a `ToolContext` is filled in, and how an `HttpConnection` is authenticated.
 
+A JavaScript host does not have to write the common part of that itself. The npm package
+`@nx-lang/agent`, which is unstable as this library is, derives each tool's name, description and
+schemas, runs a tool's function under a budget and builds an HTTP tool's request. See
+[Running an agent in a host](/reference/libraries/agent-hosts).
+
 ## The library source
 
 ```nx

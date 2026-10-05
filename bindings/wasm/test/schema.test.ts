@@ -166,6 +166,37 @@ describe("declaration schemas", () => {
     }
   });
 
+  it("names the host-supplied types a parameter's type holds, and keeps the parameter", () => {
+    const source = [
+      'import "@nx/agent"',
+      "type ChatContext extends ToolContext = { conversationId:string }",
+      "type Request = { orderId:string context:ChatContext }",
+      "let send(contexts:ChatContext+, request:Request, orderId:string, context:ChatContext): string = { orderId }"
+    ].join("\n");
+    const artifact = host.buildProgramArtifact(source, { fileName: "tools.nx" });
+    try {
+      const schema = artifact.functionSchema({ name: "send" }, { hostSuppliedTypes: [toolContext] });
+      expect(schema.parameters.map((parameter) => [parameter.name, parameter.hostSuppliedWithin])).toEqual([
+        ["contexts", [toolContext]],
+        ["request", [toolContext]],
+        ["orderId", undefined],
+        ["context", undefined]
+      ]);
+      // A parameter that holds none, and one that is host-supplied, have no such member at all.
+      expect("hostSuppliedWithin" in schema.parameters[2]!).toBe(false);
+      expect("hostSuppliedWithin" in schema.parameters[3]!).toBe(false);
+      expect(schema.parameters[3]!.hostSupplied).toEqual(toolContext);
+      // Holding one changes nothing else: both parameters are still arguments.
+      expect(Object.keys(schema.inputSchema!["properties"] as object)).toEqual(["contexts", "request", "orderId"]);
+
+      // With no types listed there is nothing to hold.
+      const unlisted = artifact.functionSchema({ name: "send" });
+      expect(unlisted.parameters.every((parameter) => parameter.hostSuppliedWithin === undefined)).toBe(true);
+    } finally {
+      artifact.dispose();
+    }
+  });
+
   it("answers a type with no JSON form as data", () => {
     const artifact = host.buildProgramArtifact(documented, { fileName: "tools.nx" });
     try {

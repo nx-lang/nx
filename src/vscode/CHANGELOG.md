@@ -34,6 +34,12 @@ All notable changes to this project will be documented in this file.
   reported as `schema-inexpressible-type` in the answer rather than approximated. A host can name
   types it supplies itself, such as `@nx/agent`'s `ToolContext`, to leave their parameters out.
   See [declaration schemas](https://nxlang.org/reference/concepts/declaration-schemas).
+- A parameter declared with a host-supplied type, with a record that extends one or with a type
+  alias of either is left out, and its entry says so as `hostSupplied`. A parameter whose type only
+  holds one, under `+` or as a field of a record at any depth, stays in the input schema, and its
+  entry lists the types it holds as `hostSuppliedWithin`, so a host can refuse a function that
+  would ask a caller for values the host means to supply. An entry's `typeRef` names the record or
+  union the parameter is declared with, and through a type alias what the alias denotes.
 - `@nx-lang/sdk-wasm`'s module ABI version is now 6; the loader refuses a module of another version.
 - The entry module's NX IR image now also lists every module that declares a subtype of an abstract
   record a function takes or returns, so a runtime linked from the entry accepts a host value naming
@@ -69,6 +75,17 @@ All notable changes to this project will be documented in this file.
   library holds types only; a host decides how an agent runs. It is unstable: its declarations may
   change incompatibly in any release, including a patch release. See
   [the agent library](https://nxlang.org/reference/libraries/agent).
+
+### `@nx-lang/agent` (unstable)
+- New npm package for JavaScript hosts of `@nx/agent`. `normalizeAgent` turns an evaluated `Agent`
+  into a definition a host stores: plain JSON, with each tool's name, description and JSON Schemas
+  in the MCP tool shape. `createAgentTools` makes the stored tools executable over a linked NX IR
+  program, with no compiler: a function tool runs under an operation budget and two input limits,
+  and an HTTP tool's request is built so that nothing a model sends can move it off its
+  connection, and handed to the host to send. `@nx-lang/agent/ai-sdk` maps the tools to a Vercel
+  AI SDK tool set. The package calls no model and makes no request itself. It is unstable, as the
+  library is: its API and the stored definition format may change in any release. See
+  [running an agent in a host](https://nxlang.org/reference/libraries/agent-hosts).
 
 ## 0.5.0
 The extension now ships with the NX packages, from one tag and at one version, so extension 0.5.0

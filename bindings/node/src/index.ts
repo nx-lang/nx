@@ -1024,13 +1024,15 @@ function normalizeParameterSchema(raw: unknown): NxParameterSchema {
   }
   const typeRef = declarationName(value.typeRef);
   const hostSupplied = declarationName(value.hostSupplied);
+  const hostSuppliedWithin = declarationNames(value.hostSuppliedWithin);
   return {
     name: value.name,
     type: value.type,
     required: value.required === true,
     ...(typeof value.description === "string" ? { description: value.description } : {}),
     ...(typeRef === undefined ? {} : { typeRef }),
-    ...(hostSupplied === undefined ? {} : { hostSupplied })
+    ...(hostSupplied === undefined ? {} : { hostSupplied }),
+    ...(hostSuppliedWithin.length === 0 ? {} : { hostSuppliedWithin })
   };
 }
 
@@ -1063,6 +1065,13 @@ function declarationName(raw: unknown): NxDeclarationName | undefined {
   return typeof value.module === "string" && typeof value.name === "string"
     ? { module: value.module, name: value.name }
     : undefined;
+}
+
+/** The declaration names of a list, which is absent when it is empty. */
+function declarationNames(raw: unknown): NxDeclarationName[] {
+  return Array.isArray(raw)
+    ? raw.map(declarationName).filter((name): name is NxDeclarationName => name !== undefined)
+    : [];
 }
 
 function isSchema(raw: unknown): raw is NxJsonSchema {

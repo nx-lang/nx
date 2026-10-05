@@ -200,6 +200,11 @@ pub struct ParameterSchema {
     /// The listed host-supplied type this parameter matched.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub host_supplied: Option<DeclarationName>,
+    /// The listed host-supplied types this parameter's type holds without being one: under an
+    /// occurrence, as a field, in a union case, through an alias or as a type argument. In the
+    /// order the host listed them. Such a parameter is still in the input schema.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub host_supplied_within: Vec<DeclarationName>,
 }
 
 /// The schema of one declared type.
@@ -297,10 +302,13 @@ pub fn program_artifact_function_schema(
     let program = Program::new(artifact);
     let (module, function) = program.find_function(reference)?;
     let identity = program.modules[module].identity;
+    // A type the host lists twice is one listed type, at its first place.
+    let mut listed_once = FxHashSet::default();
     let host_supplied = options
         .host_supplied_types
         .iter()
         .filter_map(|reference| program.find_record(reference))
+        .filter(|addr| listed_once.insert(*addr))
         .collect::<Vec<_>>();
 
     let mut input = Document::new(&program, SchemaDirection::Input);
@@ -310,6 +318,11 @@ pub fn program_artifact_function_schema(
     for param in &function.params {
         let shape = program.resolve(module, &param.ty, &TypeArgs::NONE);
         let host = program.host_supplied_match(module, &param.ty, &host_supplied);
+        // A parameter the host fills in is not looked into: nothing of it is put to a caller.
+        let within = match host {
+            Some(_) => Vec::new(),
+            None => program.host_supplied_within(&shape, &host_supplied),
+        };
         parameters.push(ParameterSchema {
             name: param.name.to_string(),
             ty: ast::spell_type_ref(&param.ty),
@@ -317,6 +330,7 @@ pub fn program_artifact_function_schema(
             description: param.doc.as_ref().map(nx_hir::Doc::markdown),
             type_ref: program.declared_type_name(module, &param.ty),
             host_supplied: host.clone(),
+            host_supplied_within: within,
         });
         if host.is_some() {
             continue;
@@ -895,9 +909,10 @@ impl<'a> Program<'a> {
             .or_else(|| env.get_expr_type(function.body).cloned())
     }
 
-    /// The record or union a parameter is declared with, apart from its `?` mark.
+    /// The record or union a parameter is declared with, apart from its `?` mark: the one it
+    /// names, or the one an alias it names denotes.
     fn declared_type_name(&self, module: usize, ty: &TypeRef) -> Option<DeclarationName> {
-        let addr = self.declared_addr(module, ty)?;
+        let addr = self.denoted_addr(module, ty)?;
         match self.item(addr)? {
             item @ (Item::Record(_) | Item::Union(_)) => Some(DeclarationName {
                 module: self.modules[addr.module].identity.to_string(),
@@ -914,6 +929,21 @@ impl<'a> Program<'a> {
         }
     }
 
+    /// The declaration a type written in `module` denotes: the one it names, or, when that is a
+    /// type alias, the one the alias's target names, through any number of aliases. An alias of
+    /// anything but a name, an occurrence for one, denotes no declaration.
+    fn denoted_addr(&self, module: usize, ty: &TypeRef) -> Option<DeclAddr> {
+        let mut addr = self.declared_addr(module, ty)?;
+        for _ in 0..MAX_ALIAS_DEPTH {
+            let Some(Item::TypeAlias(alias)) = self.item(addr) else {
+                return Some(addr);
+            };
+            addr = self.declared_addr(addr.module, &alias.ty)?;
+        }
+        // Aliases that go round in a circle denote nothing.
+        None
+    }
+
     /// The listed host-supplied type a parameter declared `ty` in `module` is, or extends.
     fn host_supplied_match(
         &self,
@@ -924,28 +954,102 @@ impl<'a> Program<'a> {
         if listed.is_empty() {
             return None;
         }
-        let addr = self.declared_addr(module, ty)?;
+        let addr = self.denoted_addr(module, ty)?;
         let Item::Record(record) = self.item(addr)? else {
             return None;
         };
+        // A record that is two of the listed types is filled in as the first of them.
+        let place = *self.listed_record(addr, record, listed).first()?;
+        self.declaration_name(listed[place])
+    }
+
+    fn declaration_name(&self, addr: DeclAddr) -> Option<DeclarationName> {
+        Some(DeclarationName {
+            module: self.modules[addr.module].identity.to_string(),
+            name: self.item(addr)?.name().to_string(),
+        })
+    }
+
+    /// Which of the `listed` types the record at `addr` is, or extends: their places in the list.
+    /// A record is more than one of them when one listed type extends another.
+    fn listed_record(&self, addr: DeclAddr, record: &RecordDef, listed: &[DeclAddr]) -> Vec<usize> {
         let shape = self
             .prepared(addr.module)
             .and_then(|prepared| nx_hir::effective_record_shape(prepared, record).ok());
-        let matched = listed.iter().find(|candidate| {
-            **candidate == addr
-                || shape.as_ref().is_some_and(|shape| {
-                    let origin = self.origin(**candidate);
-                    let name = self
-                        .item(**candidate)
-                        .map(|item| item.name().clone())
-                        .unwrap_or_else(|| Name::new(""));
-                    shape.descends_from(&name, Some(&origin))
-                })
-        })?;
-        Some(DeclarationName {
-            module: self.modules[matched.module].identity.to_string(),
-            name: self.item(*matched)?.name().to_string(),
-        })
+        listed
+            .iter()
+            .enumerate()
+            .filter(|(_, candidate)| {
+                **candidate == addr
+                    || shape
+                        .as_ref()
+                        .is_some_and(|shape| self.descends_from_listed(shape, **candidate))
+            })
+            .map(|(place, _)| place)
+            .collect()
+    }
+
+    /// Which of the `listed` types the base of the union declared in `module` is, or extends:
+    /// their places in the list. A union's cases carry its base's fields, so a value of the union
+    /// is one of the base.
+    fn listed_union_base(
+        &self,
+        module: usize,
+        union: &UnionDef,
+        listed: &[DeclAddr],
+    ) -> Vec<usize> {
+        let shape = union.base.as_ref().and_then(|base| {
+            nx_hir::effective_record_shape_for_name(self.prepared(module)?, base)
+                .ok()
+                .flatten()
+        });
+        let Some(shape) = shape else {
+            return Vec::new();
+        };
+        listed
+            .iter()
+            .enumerate()
+            .filter(|(_, candidate)| self.descends_from_listed(&shape, **candidate))
+            .map(|(place, _)| place)
+            .collect()
+    }
+
+    fn descends_from_listed(
+        &self,
+        shape: &nx_hir::EffectiveRecordShape,
+        candidate: DeclAddr,
+    ) -> bool {
+        let Some(item) = self.item(candidate) else {
+            return false;
+        };
+        shape.descends_from(item.name(), Some(&self.origin(candidate)))
+    }
+
+    /// The `listed` host-supplied types that a value of `shape` holds, in the order they are
+    /// listed and each once: a listed type, or a record that extends one, reached at any depth
+    /// under an occurrence, as a field of a record or of a union case, through a type alias or as
+    /// a type argument.
+    ///
+    /// <para>This is a walk of its own and not a by-product of writing the schema. The schema
+    /// writer describes a declaration once and refers to it afterwards, so a second parameter of
+    /// one record would never be looked into.</para>
+    fn host_supplied_within(&self, shape: &Shape, listed: &[DeclAddr]) -> Vec<DeclarationName> {
+        if listed.is_empty() {
+            return Vec::new();
+        }
+        let mut walk = HeldWalk {
+            program: self,
+            listed,
+            held: vec![false; listed.len()],
+            entered: FxHashSet::default(),
+        };
+        walk.shape(shape);
+        listed
+            .iter()
+            .zip(walk.held)
+            .filter(|(_, held)| *held)
+            .filter_map(|(addr, _)| self.declaration_name(*addr))
+            .collect()
     }
 
     /// The effective fields of `record`, declared in `module`: inherited fields first.
@@ -1202,6 +1306,123 @@ enum NoJsonForm {
     Markup(String),
     /// A result type the checker could not infer.
     UnresolvedResult,
+}
+
+/// One walk over a type for the listed host-supplied types it holds.
+struct HeldWalk<'w, 'p, 'a> {
+    program: &'p Program<'a>,
+    listed: &'w [DeclAddr],
+    /// Which of `listed` were found, by place.
+    held: Vec<bool>,
+    /// The declarations and union cases already looked into, so a type that holds itself ends.
+    entered: FxHashSet<(DeclAddr, Option<Name>)>,
+}
+
+impl HeldWalk<'_, '_, '_> {
+    /// Looks into `shape`. Every form a type can take is named here, with no catch-all: a form
+    /// added to the language does not compile until this says whether it can hold another type.
+    /// One that wraps or narrows another type is looked through.
+    fn shape(&mut self, shape: &Shape) {
+        match shape {
+            // These hold no declared type: a primitive, the open `object`, an unbound type
+            // parameter, which a runtime reads as `object`, and a type with no JSON form, which
+            // no caller can supply.
+            Shape::Primitive(_) | Shape::Object | Shape::Parameter | Shape::NoJsonForm(_) => {}
+            Shape::Seq(item, _) => self.shape(item),
+            Shape::Case { union, case } => self.case(*union, case),
+            Shape::Declared(declared) => {
+                // A type argument is looked into where it is written. The declaration is then
+                // looked into once, with its parameters unbound, however it is applied: that ends
+                // on a record that applies itself to an ever larger argument, and misses nothing,
+                // since a field typed by a parameter holds only what the argument does.
+                for (_, argument) in &declared.args {
+                    self.shape(argument);
+                }
+                self.declaration(declared.addr);
+            }
+        }
+    }
+
+    fn declaration(&mut self, addr: DeclAddr) {
+        if !self.entered.insert((addr, None)) {
+            return;
+        }
+        let program = self.program;
+        let Some(item) = program.item(addr) else {
+            return;
+        };
+        match item {
+            Item::TypeAlias(alias) => {
+                let target = program.resolve(addr.module, &alias.ty, &TypeArgs::NONE);
+                self.shape(&target);
+            }
+            Item::Record(record) => {
+                for place in program.listed_record(addr, record, self.listed) {
+                    self.held[place] = true;
+                }
+                if record.is_abstract {
+                    // A value at an abstract record is one of the shapes that extend it.
+                    for descendant in program.descendants(addr) {
+                        match descendant {
+                            Descendant::Record(record) => self.declaration(record),
+                            Descendant::Case(union, case) => self.case(union, &case),
+                        }
+                    }
+                }
+                let bindings = record
+                    .type_params
+                    .iter()
+                    .map(|param| (param.name.clone(), None))
+                    .collect::<Vec<_>>();
+                let fields = program.record_fields(addr.module, record);
+                self.fields(&fields, &bindings);
+            }
+            Item::Union(union) => {
+                for place in program.listed_union_base(addr.module, union, self.listed) {
+                    self.held[place] = true;
+                }
+                for case in &union.cases {
+                    self.case(addr, &case.name);
+                }
+            }
+            // None of these is a type a parameter's value can have.
+            Item::Component(_) | Item::Function(_) | Item::Value(_) => {}
+        }
+    }
+
+    fn case(&mut self, union_addr: DeclAddr, case_name: &Name) {
+        if !self.entered.insert((union_addr, Some(case_name.clone()))) {
+            return;
+        }
+        let program = self.program;
+        let Some(Item::Union(union)) = program.item(union_addr) else {
+            return;
+        };
+        for place in program.listed_union_base(union_addr.module, union, self.listed) {
+            self.held[place] = true;
+        }
+        if let Some(case) = union.cases.iter().find(|case| case.name == *case_name) {
+            let fields = program.case_fields(union_addr.module, union, case);
+            self.fields(&fields, &[]);
+        }
+    }
+
+    fn fields(&mut self, fields: &[EffectiveField], bindings: &[(Name, Option<Shape>)]) {
+        for field in fields {
+            let Some(module) = self
+                .program
+                .by_identity
+                .get(field.module_identity.as_str())
+                .copied()
+            else {
+                continue;
+            };
+            let shape = self
+                .program
+                .resolve(module, &field.ty, &TypeArgs { bindings });
+            self.shape(&shape);
+        }
+    }
 }
 
 /// What stands in for the type parameters of the record whose field is being resolved.

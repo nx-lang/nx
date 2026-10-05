@@ -551,7 +551,10 @@ export interface NxParameterSchema {
   readonly description?: string;
 
   /**
-   * The record or union the parameter is declared with, ignoring its `?` mark.
+   * The record or union the parameter is declared with, ignoring its `?` mark. A parameter
+   * declared through a type alias names what the alias denotes, through any number of aliases, so
+   * `type` keeps the author's spelling and this names the declaration. Absent for any other type,
+   * an alias of an occurrence such as `type Plans = Plan+` included.
    */
   readonly typeRef?: NxDeclarationName;
 
@@ -560,6 +563,16 @@ export interface NxParameterSchema {
    * schema.
    */
   readonly hostSupplied?: NxDeclarationName;
+
+  /**
+   * The listed host-supplied types this parameter's type holds without being one: under an
+   * occurrence, as a field of a record or of a union case, through a type alias or as a type
+   * argument, at any depth, in the order they were listed. A record that is two of the listed
+   * types is named for both. A type derived from a listed type, its `.Update` or `.Property`, is
+   * another type and holds none of it. Absent when it holds none. Such a parameter is still in the
+   * input schema, and a caller decides what to make of it.
+   */
+  readonly hostSuppliedWithin?: readonly NxDeclarationName[];
 }
 
 /**

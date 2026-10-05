@@ -1384,6 +1384,313 @@ fn a_sequence_of_a_listed_type_is_not_host_supplied() {
     assert!(schema.input_schema.is_none());
 }
 
+/// The schema of `name` in a program whose host library declares two subtypes of `ToolContext`,
+/// with `ToolContext` listed as host-supplied.
+fn held_in(main: &str, name: &str) -> FunctionSchema {
+    held_in_listing(main, name, tool_context())
+}
+
+/// The schema of `name` in that program, with the host-supplied types of `options`.
+fn held_in_listing(main: &str, name: &str, options: FunctionSchemaOptions) -> FunctionSchema {
+    let registry = LibraryRegistry::new();
+    registry
+        .load_library_from_sources(&NxLibrarySource::new(
+            "libraries/chat-link",
+            vec![NxLibraryModule::new(
+                "ChatLink.nx",
+                "import \"@nx/agent\"\nexport type ChatToolContext extends ToolContext = { conversationId:string }\nexport type AuditToolContext extends ToolContext = { actor:string }",
+            )],
+        ))
+        .expect("library loads");
+    let artifact = build_in(
+        &[(
+            "main.nx",
+            &format!("import \"@nx/agent\"\nimport \"libraries/chat-link\"\n{main}"),
+        )],
+        &registry.build_context(),
+    );
+    function_with(&artifact, DeclarationRef::entry(name), options)
+}
+
+/// The listed types each parameter's type holds, as the answer serializes them: `null` for a
+/// parameter whose entry has no such member.
+fn held(schema: &FunctionSchema) -> Vec<Value> {
+    serde_json::to_value(&schema.parameters)
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|parameter| parameter["hostSuppliedWithin"].clone())
+        .collect()
+}
+
+fn the_tool_context() -> Value {
+    json!([{ "module": AGENT_MODULE, "name": "ToolContext" }])
+}
+
+#[test]
+fn a_listed_type_under_an_occurrence_is_named_and_the_parameter_is_kept() {
+    let schema = held_in(
+        "let many(orderId:string, contexts:ChatToolContext+): string = { orderId }",
+        "many",
+    );
+    assert!(schema.parameters[1].host_supplied.is_none());
+    assert_eq!(held(&schema), vec![Value::Null, the_tool_context()]);
+    // Nothing else about the answer changes: the parameter is still an argument.
+    let input = input(&schema);
+    assert_eq!(input["required"], json!(["orderId", "contexts"]));
+    assert_eq!(input["properties"]["contexts"]["type"], "array");
+    assert!(schema.diagnostics.is_empty());
+}
+
+#[test]
+fn a_listed_type_held_as_a_field_is_named_at_any_depth() {
+    let schema = held_in(
+        "type Request = { orderId:string context:ChatToolContext }\ntype Batch = { requests:Request+ }\nlet send(request:Request, batch:Batch, note:string): string = { note }",
+        "send",
+    );
+    assert_eq!(
+        held(&schema),
+        vec![the_tool_context(), the_tool_context(), Value::Null]
+    );
+}
+
+#[test]
+fn two_parameters_of_one_record_are_both_named() {
+    // The schema describes `Request` once and refers to it for the second parameter; what a
+    // parameter holds is found for each on its own.
+    let schema = held_in(
+        "type Request = { context:ChatToolContext }\nlet both(first:Request, second:Request): string = { \"\" }",
+        "both",
+    );
+    assert_eq!(held(&schema), vec![the_tool_context(), the_tool_context()]);
+}
+
+#[test]
+fn a_parameter_that_holds_no_listed_type_says_nothing() {
+    let schema = held_in(
+        "type Plan = { name:string seats:int }\nlet price(orderId:string, plan:Plan, plans?:Plan+): int = { 1 }",
+        "price",
+    );
+    assert_eq!(held(&schema), vec![Value::Null, Value::Null, Value::Null]);
+    assert!(schema
+        .parameters
+        .iter()
+        .all(|parameter| parameter.host_supplied_within.is_empty()));
+}
+
+#[test]
+fn a_record_that_holds_itself_ends_and_is_named_once() {
+    let schema = held_in(
+        "type Node = { next?:Node context?:ChatToolContext }\nlet walk(node:Node): string = { \"\" }",
+        "walk",
+    );
+    assert_eq!(held(&schema), vec![the_tool_context()]);
+}
+
+#[test]
+fn a_listed_type_in_a_union_case_through_an_alias_and_as_a_type_argument_is_named() {
+    let schema = held_in(
+        "type Target =\n  | nobody\n  | chat { context:ChatToolContext }\ntype Contexts = ChatToolContext+\ntype Page = { T:type items:T+ }\ntype Plan = { name:string }\nlet reach(target:Target, alias:Contexts, page:<Page T=ChatToolContext />, plans:<Page T=Plan />): string = { \"\" }",
+        "reach",
+    );
+    assert_eq!(
+        held(&schema),
+        vec![
+            the_tool_context(),
+            the_tool_context(),
+            the_tool_context(),
+            Value::Null
+        ]
+    );
+}
+
+#[test]
+fn an_alias_of_a_listed_type_is_host_supplied_as_the_type_it_denotes() {
+    // An alias denotes its target everywhere else: in the schema, and to a runtime.
+    let schema = held_in(
+        "type Context = ChatToolContext\ntype Again = Context\ntype Base = ToolContext\ntype Order = { id:string }\ntype OrderAlias = Order\nlet lookup(orderId:string, context:Context, again:Again, base:Base, order:OrderAlias): string = { orderId }",
+        "lookup",
+    );
+    let parameters = serde_json::to_value(&schema.parameters).unwrap();
+    let chat = json!({ "module": "libraries/chat-link/ChatLink.nx", "name": "ChatToolContext" });
+    let listed = json!({ "module": AGENT_MODULE, "name": "ToolContext" });
+    for index in [1, 2] {
+        assert_eq!(parameters[index]["hostSupplied"], listed);
+        assert_eq!(parameters[index]["typeRef"], chat);
+        assert!(parameters[index].get("hostSuppliedWithin").is_none());
+    }
+    // The spelling is still the author's.
+    assert_eq!(parameters[1]["type"], "Context");
+    assert_eq!(parameters[3]["hostSupplied"], listed);
+    assert_eq!(parameters[3]["typeRef"], listed);
+    // An alias of any record names the record it denotes, host-supplied or not.
+    assert!(parameters[4].get("hostSupplied").is_none());
+    assert_eq!(
+        parameters[4]["typeRef"],
+        json!({ "module": "main.nx", "name": "Order" })
+    );
+    let input = input(&schema);
+    assert_eq!(
+        input["properties"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect::<Vec<_>>(),
+        vec!["order", "orderId"]
+    );
+    assert_eq!(input["required"], json!(["orderId", "order"]));
+}
+
+#[test]
+fn an_alias_of_an_occurrence_of_a_listed_type_is_not_host_supplied() {
+    let schema = held_in(
+        "type Contexts = ChatToolContext+\ntype Names = string+\nlet many(contexts:Contexts, names:Names): string = { \"\" }",
+        "many",
+    );
+    assert!(schema.parameters[0].host_supplied.is_none());
+    assert!(schema.parameters[0].type_ref.is_none());
+    assert!(schema.parameters[1].type_ref.is_none());
+    assert_eq!(held(&schema), vec![the_tool_context(), Value::Null]);
+}
+
+#[test]
+fn a_record_that_is_two_listed_types_is_named_for_each() {
+    let main = "abstract type SignalContext extends ToolContext = { origin:string }\ntype Signal extends SignalContext = | ping | pong { n:int }\ntype Request = { orderId:string context:ChatToolContext }\nlet many(contexts:ChatToolContext+, request:Request, audits:AuditToolContext+, signal:Signal, context:ChatToolContext): string = { \"\" }";
+    let base = || DeclarationRef::in_module(AGENT_MODULE, "ToolContext");
+    let chat = || DeclarationRef::in_module("libraries/chat-link/ChatLink.nx", "ChatToolContext");
+    let signal = || DeclarationRef::entry("SignalContext");
+    let base_name = json!({ "module": AGENT_MODULE, "name": "ToolContext" });
+    let chat_name =
+        json!({ "module": "libraries/chat-link/ChatLink.nx", "name": "ChatToolContext" });
+    let signal_name = json!({ "module": "main.nx", "name": "SignalContext" });
+    let listing = |host_supplied_types| {
+        held_in_listing(
+            main,
+            "many",
+            FunctionSchemaOptions {
+                host_supplied_types,
+            },
+        )
+    };
+
+    // A `ChatToolContext` is a `ToolContext` too, and a case of `Signal` is its base and what
+    // that extends: each is named, in the order listed.
+    let schema = listing(vec![base(), chat(), signal()]);
+    assert_eq!(
+        held(&schema),
+        vec![
+            json!([base_name, chat_name]),
+            json!([base_name, chat_name]),
+            json!([base_name]),
+            json!([base_name, signal_name]),
+            Value::Null,
+        ]
+    );
+    let schema = listing(vec![signal(), chat(), base()]);
+    assert_eq!(
+        held(&schema),
+        vec![
+            json!([chat_name, base_name]),
+            json!([chat_name, base_name]),
+            json!([base_name]),
+            json!([signal_name, base_name]),
+            Value::Null,
+        ]
+    );
+    // A parameter the host fills in is filled in as one listed type: the first it is.
+    assert_eq!(
+        serde_json::to_value(&schema.parameters[4].host_supplied).unwrap(),
+        chat_name
+    );
+
+    // A type listed twice is one listed type, at its first place.
+    let schema = listing(vec![base(), chat(), base(), chat()]);
+    assert_eq!(held(&schema)[0], json!([base_name, chat_name]));
+}
+
+#[test]
+fn a_derived_type_of_a_listed_type_holds_none_of_it() {
+    // A value of `ChatToolContext.Update` is not a `ChatToolContext`, and no host fills one in:
+    // a parameter typed by it is an argument like any other. The update record of a record that
+    // holds a context still reaches the field.
+    let schema = held_in(
+        "type Request = { orderId:string context:ChatToolContext }\nlet patch(own:ChatToolContext.Update, base:ToolContext.Update, property:ChatToolContext.Property, holder:Request.Update): string = { \"\" }",
+        "patch",
+    );
+    for index in [0, 1, 2] {
+        assert!(schema.parameters[index].host_supplied.is_none());
+    }
+    assert_eq!(
+        held(&schema),
+        vec![Value::Null, Value::Null, Value::Null, the_tool_context()]
+    );
+    let input = input(&schema);
+    assert_eq!(
+        input["required"],
+        json!(["own", "base", "property", "holder"])
+    );
+}
+
+#[test]
+fn a_record_that_applies_itself_to_a_growing_argument_ends() {
+    let schema = held_in(
+        "type Grow = { T:type value?:T inner?:<Grow T=<Grow T=T />/> }\nlet grow(plain:<Grow T=string />, held:<Grow T=ChatToolContext />): string = { \"\" }",
+        "grow",
+    );
+    assert_eq!(held(&schema), vec![Value::Null, the_tool_context()]);
+}
+
+#[test]
+fn the_abstract_listed_type_and_a_subtype_the_host_does_not_use_are_named() {
+    let schema = held_in(
+        "let any(contexts:ToolContext+, audits:AuditToolContext+): string = { \"\" }",
+        "any",
+    );
+    assert_eq!(held(&schema), vec![the_tool_context(), the_tool_context()]);
+}
+
+#[test]
+fn a_host_supplied_parameter_names_nothing_it_holds() {
+    let schema = held_in(
+        "let lookup(orderId:string, context:ChatToolContext, base:ToolContext): string = { orderId }",
+        "lookup",
+    );
+    assert!(schema.parameters[1].host_supplied.is_some());
+    assert!(schema.parameters[2].host_supplied.is_some());
+    assert_eq!(held(&schema), vec![Value::Null, Value::Null, Value::Null]);
+}
+
+#[test]
+fn listed_types_are_named_in_the_order_listed_and_each_once() {
+    let artifact = source(
+        "type A = { a:string }\ntype B = { b:string }\ntype Holder = { first:A second:B again:A+ }\nlet hold(holder:Holder, only:B+): string = { \"\" }",
+    );
+    let schema = function_with(
+        &artifact,
+        DeclarationRef::entry("hold"),
+        FunctionSchemaOptions {
+            host_supplied_types: vec![DeclarationRef::entry("B"), DeclarationRef::entry("A")],
+        },
+    );
+    assert_eq!(
+        held(&schema),
+        vec![
+            json!([{ "module": "main.nx", "name": "B" }, { "module": "main.nx", "name": "A" }]),
+            json!([{ "module": "main.nx", "name": "B" }]),
+        ]
+    );
+}
+
+#[test]
+fn with_no_listed_types_nothing_is_named() {
+    let artifact = source(
+        "import \"@nx/agent\"\ntype Chat extends ToolContext = { id:string }\nlet many(contexts:Chat+): string = { \"\" }",
+    );
+    let schema = function(&artifact, "many");
+    assert_eq!(held(&schema), vec![Value::Null]);
+}
+
 #[test]
 fn a_listed_type_the_program_does_not_declare_matches_nothing() {
     let artifact = source("let add(a:int, b:int): int = { a + b }");

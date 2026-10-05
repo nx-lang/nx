@@ -181,12 +181,12 @@ CI/PR builds, release-publication registry writes, and artifact-based pull reque
 ### Requirement: Workspace npm packages ship on the package release track
 The package release track SHALL treat the workspace's publishable npm packages
 (`@nx-lang/sdk-wasm`, `@nx-lang/ir-runtime`, `@nx-lang/language-core`, `@nx-lang/language-protocol`,
-`@nx-lang/language-client`, `@nx-lang/monaco` and `@nx-lang/value-view`) the same way it treats the
-`@nx-lang/language` editor-assets package: built and verified on pull request and `main` builds,
-packed at the release tag's version, attached to the draft GitHub Release, and published to npm from
-the `production` environment when the release is published. Their versions SHALL be the release
-tag's version, and workspace references between them SHALL resolve to that version in the packed
-artifacts.
+`@nx-lang/language-client`, `@nx-lang/monaco`, `@nx-lang/value-view` and `@nx-lang/agent`) the same
+way it treats the `@nx-lang/language` editor-assets package: built and verified on pull request and
+`main` builds, packed at the release tag's version, attached to the draft GitHub Release, and
+published to npm from the `production` environment when the release is published. Their versions
+SHALL be the release tag's version, and workspace references between them SHALL resolve to that
+version in the packed artifacts.
 
 #### Scenario: Pull request builds pack every npm package
 - **WHEN** a pull request build runs for package-related changes
@@ -212,6 +212,12 @@ artifacts.
 #### Scenario: Workspace references are resolved in the artifacts
 - **WHEN** a packed package depended on another workspace package through a workspace reference
 - **THEN** the packed manifest SHALL name the release version instead of the workspace reference
+
+#### Scenario: The agent package is published after the runtime it depends on
+- **WHEN** a release that includes `@nx-lang/agent` is published
+- **THEN** `@nx-lang/ir-runtime` SHALL be published before `@nx-lang/agent`
+- **AND** the packed `@nx-lang/agent` manifest SHALL depend on `@nx-lang/ir-runtime` at the release
+  version and SHALL list `ai` only as an optional peer dependency
 
 ### Requirement: Packages and the VS Code extension are released together
 NX SHALL release its packages and its VS Code extension as one release: one

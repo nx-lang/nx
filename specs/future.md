@@ -1434,6 +1434,34 @@ report `Undefined identifier` at the default. The fix is to walk record and unio
 same way. An inherited field counts as declared before the record's own fields, as it is in the
 flattened order the runtimes use.
 
+## A record default of the wrong type passes the checker when it reads another field
+
+`type Req = { n:int label:string = { n } }` type-checks, and so does `label:string = { n + 1 }`.
+Building a `Req` then fails at run time: the interpreter reports "Type mismatch in record field
+'label': expected string, got int", and the IR runtimes report `nx-ir-boundary-type`, "Expected
+req.label to be a string." A default that reads no field is checked (`label:string = { 1 }` is
+"Default value for record property 'label' expects string, found int"), and so is a function
+parameter's default that reads an earlier parameter (`let f(n:int, label:string = { n })`). So
+the gap is a record field's default whose expression mentions another field. A union case's
+fields were not tried.
+
+It matters beyond the late error. The IR runtimes fill a record's defaults in while they check a
+host's argument that holds the record, so the failure carries a boundary code although the host's
+value fits. `@nx-lang/agent` reports a boundary failure to the model as its own mistake
+(`add-agent-host-package`, review finding RF16); `name-the-argument-in-boundary-diagnostics`
+stops that by not naming an argument for a failure raised by a default, and the program is wrong
+either way.
+
+The same review saw a second program of this kind fail differently and did not find out why: a
+field `total:int = { for i in 0..n { for j in 0..n { i * j } } n }` compiles and then fails in the
+TypeScript IR runtime with `nx-ir-number` on the multiplication. It was not run in the Rust
+runtime. Worth reproducing when this is picked up, since it may be a second gap.
+
+The fix is in the checker: type a record field's default with the earlier fields in scope, as a
+parameter's default is typed with the earlier parameters in scope, and report the same
+diagnostic. It belongs with "A record default that reads a later field passes the checker and
+fails at run time" above, which is the same walk over a record's fields.
+
 ## HIR type references carry no span and no error form
 
 HIR's `ast::TypeRef` has no source span and no way to say "this reference is malformed". Both
@@ -1896,3 +1924,138 @@ enforced" above and could land before the rest. For `int64`, where such a value 
 "`int64` is still a JavaScript `number`" above: carrying it as a `bigint` in the TypeScript
 runtime would let that runtime hold it properly, and the refusal would go.
 
+## Agent Host Package: What `add-agent-host-package` Left For Later
+
+### A function with an optional context parameter cannot run in a host that supplies no context
+
+**Observed.** `@nx-lang/agent` fills every context parameter at every call. A host names its
+context type when it normalizes (`toolContextType`); a host that names none is refused any tool
+whose function declares a context parameter, with `nx-agent-context-parameter`, even when the
+parameter is written `context?: ChatToolContext`. And a host that does name one gets
+`invalid-context` for a call it passes no record to, whether or not the parameter is optional.
+
+**Why it might matter.** The second half is right and should stay: a host that has a context has
+one for every call, so a missing record is a host bug, and failing is better than quietly running
+the function's no-context path. The first half is the gap. A function in a shared library that
+works with or without a context cannot be used as a tool by a host that has none to give. No host
+is in that position today; ReachMe supplies a context.
+
+**What would settle it.** Decide it when an agent is normalized, not at each call. With no
+`toolContextType`, a required context parameter stays an error and an optional one is recorded as
+left unfilled. It has to be recorded, not dropped: the parameter is out of the input schema, and a
+key of the model's input with its name must still be discarded, or a model could forge the
+context. That is a member on the definition's `contextParameters` entries (or a second list), a
+few lines in `normalizeAgent`, and a few in `prepareFunctionCalls`. `normalizeAgent` would begin
+to read a parameter's `required`, which the schema export answers and the package does not read
+today (`AgentParameterSchema` would gain the member). The definition format version need not change while the package is
+unstable.
+
+### No provider has been given the schemas the package stores
+
+**Observed.** A tool's `inputSchema` is JSON Schema draft 2020-12 as the declaration schema export
+writes it: `$ref` into `$defs` for every declared type, `anyOf` where a union or an abstract
+record is described, `const` for a `$type`, and `not` for `never`. The AI
+SDK adapter passes it to the provider unchanged, and the package's tests run it through the SDK
+against a mock model only. No real provider has been sent one.
+
+**Why it might matter.** Providers accept subsets of JSON Schema for tool input, and the subset
+differs by provider and by mode (a strict mode narrows it further). A provider that refuses
+`$ref`, or a keyword a constrained type will add, refuses the tool, and the first host to find out
+would find out in production.
+
+**What would settle it.** Send the tools of the `agent-library` corpus program, and ReachMe's, to
+each provider ReachMe uses and record what is refused. If something is, the fix is an option on
+the adapter (or a function beside it) that rewrites a stored schema for a provider: inlining
+`$ref` is mechanical for schemas with no recursion, and the export could mark the recursive ones.
+The package deliberately rewrites nothing today (`add-agent-host-package`, `design.md`, decision
+14).
+
+### An `invalid-request` the model caused is reported to it in general terms
+
+**Observed.** The AI SDK adapter gives the model a failure's own message only for `invalid-input`
+and for a code a host function chose. Every other code of the package's gets a fixed sentence, because the reason can hold what a model
+should not see (`add-agent-host-package`, `design.md`, decision 10). `invalid-request` is among
+them, and two of its causes are the model's: an argument that fills a path placeholder with an
+empty string, and one that comes out as `.` or `..`. For those the model is told only that the
+tool "could not make a request from these arguments".
+
+**Why it might matter.** The model may repeat the call instead of correcting it. The other causes
+of `invalid-request` are the author's or a damaged definition's, and one of their messages holds
+the connection's base URL, so the code as a whole cannot be shown.
+
+**What would settle it.** Put the builder's `rule` on the failed result, and let the adapter show
+the message for `empty-path-parameter` and `dot-segment`, whose text names only the parameter and
+the segment. The builder has a rule for each of its own refusals. Two `invalid-request` failures
+are found before it runs and have none (an arguments function that did not return an
+`HttpArguments`, and a tool that is not the shape the package wrote); they would carry no rule and
+stay general. A host that needs it sooner can throw its own error from `onResult`.
+
+### A host value that is not JSON is measured as one value, then walked
+
+**Observed.** The TypeScript IR runtime's input measure enters a list and a plain object and
+counts anything else as one value: a typed array, a `Buffer`, a `Date`, a `Map`, an instance of a
+class. Its boundary check and its result writer do enter such a value where the type allows
+(`runtime/typescript/src/index.ts`, `isPlainInput` against `requireObject`). Seen through
+`@nx-lang/agent` (`add-agent-host-package`, review, verification of RF19 and RF20):
+
+- A 5 MB `Uint8Array` in a context field typed `object` measures 8 and passes `maxContextSize`
+  and `maxInputSize`, whatever its size. What happens next depends on the function. One that does
+  not return the value succeeds in a handful of operations, since the check does not enter a
+  value at an `object` field. One that returns it, or the record that holds it, fails with
+  `nx-ir-resource-limit` naming `maxOperations`, because the result writer walks it. So the input
+  limit does not bound such a value, and the operation budget does only when it is written out.
+- A function, a symbol, a bigint or an instance of a class in a field typed `object` is passed
+  through, and comes back in the result if the function returns it, so a tool's output is not
+  always JSON.
+- An instance of a class in a field typed as a record is entered by the check, which refuses a
+  member that is `undefined`, though the measure did not enter it. `@nx-lang/agent` leaves out
+  `undefined` members only where the measure enters, so such a member is refused; its README
+  says to write a nested part of the context as a plain object.
+
+The Rust runtime takes an `NxValue`, which can hold none of these, so only a JavaScript host can
+pass one.
+
+**Why it might matter.** A host that builds a value from its own objects, as TypeScript lets it,
+gets a limit that does not mean what it says and a result that is not what the canonical encoding
+promises. None of it can be reached from a model's input, which arrives as parsed JSON.
+
+**What would settle it.** Decide what a value that is not JSON is at the TypeScript runtime's
+boundary: refused where it is found, with a boundary code, which is the simplest rule and makes
+the measure and the check agree; or entered by the measure as the check enters it. Either way the
+measure and the check should read the same set of values.
+
+**Proposed.** The change `treat-host-values-as-json` takes the first course: the runtime reads its
+input once at the entry, treats an `undefined` member of a plain object as absent, and refuses
+anything that is not JSON. It also removes the agent package's copy of the context record. This
+entry is removed when that change is applied.
+
+### What a constrained-types change has to hold for the agent package
+
+**Observed.** `@nx-lang/agent` never interprets a type: schemas pass through, the runtime's
+boundary is the validator, and the compiler finds context types. `add-agent-host-package`,
+`design.md`, decision 14 lists the three conditions that design places on the change that adds
+constrained types (the export writes a constraint into the schemas; both runtimes check it at the
+boundary and report it with a code beginning `nx-ir-boundary-`; a constrained form of a context
+type is still host-supplied). That design is archived with its change, so the list is kept
+reachable from here.
+
+**What would settle it.** Read that decision when the constrained-types change is designed, and
+check its design against the three conditions, plus any that
+`name-the-argument-in-boundary-diagnostics` adds.
+
+## `packages/language-http`: The 413 Test Fails About One Run In Four
+
+**Observed.** `the Node listener answers identically to the handler`
+(`packages/language-http/test/handler.test.ts`) failed in two of seven runs on 2026-10-04, each
+time with `TypeError: fetch failed`, cause `write ECONNRESET`. Nothing in that package had
+changed. The test's last request posts a 2 MB body and expects status 413.
+
+**Why it might matter.** It fails `pnpm -r test`, which stops at the first failing package, so the
+packages after it are not tested in that run, and a release build can fail for no reason.
+
+**What would settle it.** The likely cause, not confirmed: the listener answers 413 and the
+connection is reset while the client is still writing the body, so the client sees the reset and
+not the answer. Confirm by logging the order of events on the server side. If so, the listener
+should read and discard the rest of an oversized body before it answers, or answer with
+`Connection: close` and end the socket only after the response is flushed, and the test should
+then pass a few hundred times in a row.

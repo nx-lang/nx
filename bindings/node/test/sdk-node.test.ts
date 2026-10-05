@@ -818,6 +818,30 @@ describe("declaration schemas", () => {
     }
   });
 
+  it("names the host-supplied types a parameter's type holds", () => {
+    const toolContext = { module: "@nx/agent/agent.nx", name: "ToolContext" };
+    const artifact = buildProgramArtifactFromSource(
+      [
+        'import "@nx/agent"',
+        "type ChatContext extends ToolContext = { conversationId:string }",
+        "let send(contexts:ChatContext+, orderId:string, context:ChatContext): string = { orderId }"
+      ].join("\n"),
+      { fileName: "tools.nx" }
+    );
+    try {
+      const schema = artifact.functionSchema({ name: "send" }, { hostSuppliedTypes: [toolContext] });
+      expect(schema.parameters.map((parameter) => [parameter.name, parameter.hostSuppliedWithin])).toEqual([
+        ["contexts", [toolContext]],
+        ["orderId", undefined],
+        ["context", undefined]
+      ]);
+      expect("hostSuppliedWithin" in schema.parameters[1]!).toBe(false);
+      expect(Object.keys(schema.inputSchema!.properties as object)).toEqual(["contexts", "orderId"]);
+    } finally {
+      artifact.dispose();
+    }
+  });
+
   it("refuses a disposed artifact", () => {
     const artifact = buildProgramArtifactFromSource(tools, { fileName: "tools.nx" });
     artifact.dispose();

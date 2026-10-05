@@ -322,7 +322,7 @@ answers for a record, action, union, type alias, `<Target>.Update` or `<Target>.
 
 | Option | Query | Meaning |
 | ------ | ----- | ------- |
-| `hostSuppliedTypes` | `functionSchema` | Types whose parameters the host fills in itself, such as `{ module: "@nx/agent/agent.nx", name: "ToolContext" }`. A parameter declared with one, or with a record extending one, is left out of `inputSchema` and its entry names the type as `hostSupplied`. A type the program does not declare matches nothing. |
+| `hostSuppliedTypes` | `functionSchema` | Types whose parameters the host fills in itself, such as `{ module: "@nx/agent/agent.nx", name: "ToolContext" }`. A parameter declared with one, with a record extending one, or with a type alias of either, is left out of `inputSchema` and its entry names the type as `hostSupplied`. A parameter whose type holds one without being one, under `+` or as a field of a record at any depth, stays in `inputSchema` and its entry lists the types it holds as `hostSuppliedWithin`. A type the program does not declare matches nothing. An entry's `typeRef` names the record or union the parameter is declared with, and through a type alias what the alias denotes. |
 | `direction` | `typeSchema` | `output` (the default) describes a value a runtime returns: every record carries `$type`. `input` describes a value a host supplies: `$type` is asked for only where a runtime needs it to choose a shape, at an abstract record or a payload union case. |
 
 A schema describes the canonical JSON encoding and nothing wider: a value valid against

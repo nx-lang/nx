@@ -428,6 +428,11 @@ Read function records only from members declared at a function type. An element 
 renders a record of the same shape, and at an `object`-typed member nothing tells the two apart or
 resolves the record against the program.
 
+A host that gives such functions to an AI model as tools can use
+[`@nx-lang/agent`](../../packages/agent), which is unstable. It is built on `callFunction`, and
+adds each tool's JSON Schemas, a budget and input limits for every call, and results that say why
+a call failed.
+
 ## Versions
 
 Install this package and `@nx-lang/sdk-wasm` at the same release version. The two are released

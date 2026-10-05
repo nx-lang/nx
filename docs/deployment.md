@@ -19,8 +19,8 @@ The tag workflow, `release.yml`, creates a draft GitHub Release titled `NX 1.2.3
 - one npm tarball per package: the `@nx-lang/language` editor assets and the workspace packages
   `@nx-lang/language-protocol`, `@nx-lang/language-core`, `@nx-lang/language-client`,
   `@nx-lang/ir-runtime`, `@nx-lang/sdk-wasm` (with the WebAssembly module inside),
-  `@nx-lang/monaco` and `@nx-lang/value-view`. A workspace package's dependency on another is pinned
-  to the release version;
+  `@nx-lang/monaco`, `@nx-lang/value-view` and `@nx-lang/agent` (unstable). A workspace package's
+  dependency on another is pinned to the release version;
 - one VSIX per extension target (`linux-x64`, `darwin-arm64`, `win32-x64`), each with its
   platform's `nx-lsp`;
 - a release manifest and checksums.
