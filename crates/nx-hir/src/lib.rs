@@ -25,6 +25,7 @@ pub mod components;
 pub mod db;
 pub mod declarations;
 pub mod doc;
+mod fnv;
 pub mod lower;
 pub mod prepared;
 pub mod records;
@@ -37,6 +38,7 @@ use rustc_hash::FxHashMap;
 use smol_str::SmolStr;
 
 pub use doc::{Doc, DocData, DocLink};
+pub use fnv::Fnv1a64;
 // Re-export lowering function
 pub use lower::lower;
 pub use prepared::{
@@ -106,10 +108,10 @@ pub const PRELUDE_VERSION: &str = "1";
 
 /// The reserved root that every module the compiler carries lives under.
 ///
-/// <para>The prelude is one module today, and its identity is the only reserved one. This names the
-/// root so a check that means "this module is the compiler's own, not the author's" does not have to
-/// be a list of identities that a second carried module would silently fall out of.</para>
-pub const PRELUDE_ROOT_PREFIX: &str = "@nx/";
+/// <para>The prelude and the standard libraries live here. No workspace module and no host library
+/// may be named under it, so a check that means "this module is the compiler's own, not the
+/// author's" is a prefix test rather than a list of identities.</para>
+pub const NX_RESERVED_ROOT_PREFIX: &str = "@nx/";
 
 /// The name of the prelude's range record, which the two range operators construct.
 pub const PRELUDE_RANGE_NAME: &str = "Range";
@@ -631,6 +633,7 @@ pub fn type_ref_names(ty: &ast::TypeRef) -> Vec<&Name> {
                 }
                 collect(return_type, names);
             }
+            ast::TypeRef::AnyFunction { return_type } => collect(return_type, names),
         }
     }
     let mut names = Vec::new();

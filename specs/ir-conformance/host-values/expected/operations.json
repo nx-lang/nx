@@ -1,0 +1,157 @@
+{
+  "counts": {
+    "main.nx::Counter": {
+      "batches": [
+        15,
+        21
+      ],
+      "initial": 13
+    },
+    "main.nx::bound#list": 13,
+    "main.nx::greeting#long": 8,
+    "main.nx::held#longName": 6,
+    "main.nx::held#record": 8,
+    "main.nx::held#text": 5,
+    "main.nx::held#wideInteger": 5,
+    "main.nx::listed#one": 4,
+    "main.nx::listed#three": 8,
+    "main.nx::same#firstItem": 9,
+    "main.nx::same#unlikeNames": 11
+  },
+  "failures": {
+    "main.nx::bound#list": [
+      {
+        "budget": 6,
+        "declaration": "main.nx::count"
+      },
+      {
+        "budget": 12,
+        "declaration": "main.nx::bound"
+      }
+    ],
+    "main.nx::greeting#long": [
+      {
+        "budget": 4,
+        "declaration": "main.nx::greeting",
+        "source": {
+          "end": 2181,
+          "identity": "main.nx",
+          "start": 2165
+        }
+      },
+      {
+        "budget": 7,
+        "declaration": "main.nx::greeting"
+      }
+    ],
+    "main.nx::held#longName": [
+      {
+        "budget": 3,
+        "declaration": "main.nx::held"
+      },
+      {
+        "budget": 5,
+        "declaration": "main.nx::held"
+      }
+    ],
+    "main.nx::held#record": [
+      {
+        "budget": 4,
+        "declaration": "main.nx::held"
+      },
+      {
+        "budget": 7,
+        "declaration": "main.nx::held"
+      }
+    ],
+    "main.nx::held#text": [
+      {
+        "budget": 2,
+        "declaration": "main.nx::held"
+      },
+      {
+        "budget": 4,
+        "declaration": "main.nx::held"
+      }
+    ],
+    "main.nx::held#wideInteger": [
+      {
+        "budget": 2,
+        "declaration": "main.nx::held"
+      },
+      {
+        "budget": 4,
+        "declaration": "main.nx::held"
+      }
+    ],
+    "main.nx::listed#one": [
+      {
+        "budget": 2,
+        "declaration": "main.nx::listed"
+      },
+      {
+        "budget": 3,
+        "declaration": "main.nx::listed"
+      }
+    ],
+    "main.nx::listed#three": [
+      {
+        "budget": 4,
+        "declaration": "main.nx::listed"
+      },
+      {
+        "budget": 7,
+        "declaration": "main.nx::listed"
+      }
+    ],
+    "main.nx::same#firstItem": [
+      {
+        "budget": 4,
+        "declaration": "main.nx::same",
+        "source": {
+          "end": 2821,
+          "identity": "main.nx",
+          "start": 2820
+        }
+      },
+      {
+        "budget": 8,
+        "declaration": "main.nx::same"
+      }
+    ],
+    "main.nx::same#unlikeNames": [
+      {
+        "budget": 5,
+        "declaration": "main.nx::same",
+        "source": {
+          "end": 2821,
+          "identity": "main.nx",
+          "start": 2815
+        }
+      },
+      {
+        "budget": 10,
+        "declaration": "main.nx::same"
+      }
+    ]
+  },
+  "inputSizes": {
+    "main.nx::Counter": {
+      "batches": [
+        3,
+        6
+      ],
+      "initial": 4
+    },
+    "main.nx::bound#list": 5,
+    "main.nx::greeting#long": 2,
+    "main.nx::held#longName": 3,
+    "main.nx::held#record": 5,
+    "main.nx::held#text": 2,
+    "main.nx::held#wideInteger": 2,
+    "main.nx::listed#one": 2,
+    "main.nx::listed#three": 4,
+    "main.nx::same#firstItem": 8,
+    "main.nx::same#unlikeNames": 6
+  }
+}

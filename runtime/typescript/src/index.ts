@@ -20,6 +20,8 @@ export const NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1 = "update-intrinsics-v1
 export const NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1 = "action-handlers-v1";
 /** Function types, function references as values, and calls of function-typed values by name. */
 export const NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1 = "function-values-v1";
+/** The function reference type, `<function ... />: R`: the `anyFunction` type kind. */
+export const NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1 = "function-reference-type-v1";
 /** Iteration over a range: the `forRange` node. Building a range needs no feature. */
 export const NX_IR_REQUIRED_FEATURE_RANGES_V1 = "ranges-v1";
 /**
@@ -34,6 +36,7 @@ const knownFeatures = new Set([
   NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1,
   NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1,
   NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1,
+  NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1,
   NX_IR_REQUIRED_FEATURE_RANGES_V1,
   NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1,
 ]);
@@ -621,7 +624,7 @@ type TextType = (typeof textTypes)[number];
  * The type kinds. `2` (`array`) and `3` (`nullable`) were retired with schema 5, replaced by
  * `seq`, and stay assigned so no later kind reuses them; a reader reports either as malformed.
  */
-export const typeKinds = { primitive: 0, nominal: 1, function: 4, seq: 5 } as const;
+export const typeKinds = { primitive: 0, nominal: 1, function: 4, seq: 5, anyFunction: 6 } as const;
 /**
  * The bits of a `seq` type's occurrence cell: whether the type admits no value and whether it
  * admits more than one. `?` is `1`, `+` is `2` and `*` is `3`; exactly one is never a `seq`.
@@ -691,6 +694,31 @@ export interface NxIrDiagnostic {
   readonly source?: NxIrSourceSpan;
   /** The declaration the expression belongs to, as `identity::name`, when it is known. */
   readonly declaration?: string;
+  /**
+   * The limit that was reached. Every `nx-ir-resource-limit` diagnostic carries one, and no other
+   * does, so a host tells an exhausted budget from runaway recursion without reading the message.
+   */
+  readonly limit?: NxIrLimit;
+  /**
+   * The parameter whose argument the failure is in, by its declared name. It is present when
+   * `callFunction` or `evaluateFunction` refuses a value the host passed for one parameter (a
+   * value that does not fit the parameter's type, at any depth, or a `Function` record in it that
+   * names no function) and when a required parameter was given nothing. Nothing else carries it:
+   * not a failure a default raises, a resource limit, a failure in the function's body or result,
+   * or a failure of another entry point.
+   */
+  readonly argument?: string;
+}
+
+/**
+ * A limit an evaluation reached. `name` is `maxOperations`, `maxInputSize`, `maxCallDepth` or
+ * `maxRangeLength` for the limits a host sets, `maxExpressionNesting` for the fixed bound on
+ * nesting, or `engine` for a limit of the JavaScript engine, which has no value and depends on
+ * where the runtime runs. The Rust runtime reports the same names for the limits the two share.
+ */
+export interface NxIrLimit {
+  readonly name: string;
+  readonly value?: number;
 }
 
 export type NxResult<T> =
@@ -698,11 +726,19 @@ export type NxResult<T> =
   | { readonly ok: false; readonly diagnostics: readonly NxIrDiagnostic[] };
 
 /**
- * A value in the canonical JSON encoding. The empty value — an absent optional, an untaken
- * branch, an empty `for` — is the empty array, and the runtime never holds `null` as an NX value.
- * `null` is here for the host boundary only: a decoder reads it as the empty value wherever the
- * site admits zero, and the encoder writes it for a cleared field of an update record, which is
- * the one place the canonical encoding spells `null`.
+ * A canonical value in its JavaScript form, which `docs/nx-ir-format.md` (*Host values*) defines:
+ * what a host passes to an evaluation API and gets back, held in plain JavaScript data. A host
+ * that computed a value passes it as it is, as one that read it from JSON does; nothing is
+ * encoded on the way. A record is a plain object and a sequence is an array. Anything else
+ * JavaScript can hold, an instance of a class, a `Date`, a `Map`, a typed array, a function, is
+ * refused where it is passed. A host may also set a member to `undefined` to leave it out, which
+ * {@link NxHostValue}, the type the evaluation APIs take, admits; a value the runtime returns
+ * has no such member.
+ *
+ * <para>The empty value — an absent optional, an untaken branch, an empty `for` — is the empty
+ * array, and the runtime never holds `null` as an NX value. `null` is here for the host boundary
+ * only: it is read as the empty value wherever the site admits zero, and it is written for a
+ * cleared field of an update record, which is the one place canonical JSON spells `null`.</para>
  */
 export type NxCanonicalValue =
   | null
@@ -711,6 +747,23 @@ export type NxCanonicalValue =
   | string
   | readonly NxCanonicalValue[]
   | { readonly [key: string]: NxCanonicalValue };
+
+/**
+ * A canonical value as a host passes one: an {@link NxCanonicalValue} in which a member of a plain
+ * object may be `undefined`, which is a member left out. Every evaluation API takes its input at
+ * this type and returns an `NxCanonicalValue`, which has no such member, so a value the runtime
+ * returned is one a host can pass back.
+ */
+export type NxHostValue =
+  | null
+  | boolean
+  | number
+  | string
+  | readonly NxHostValue[]
+  | { readonly [key: string]: NxHostValue | undefined };
+
+/** Named host values as a host passes them: props, a state, a state patch or arguments by name. */
+export type NxHostRecord = { readonly [key: string]: NxHostValue | undefined };
 
 export class NxIrRuntimeError extends Error {
   public readonly diagnostics: readonly NxIrDiagnostic[];
@@ -735,7 +788,9 @@ export type PreparedType =
   | { readonly kind: "primitive"; readonly name: string }
   | { readonly kind: "nominal"; readonly slot: number; readonly name: string }
   | { readonly kind: "seq"; readonly item: PreparedType; readonly mayBeEmpty: boolean; readonly mayBeMany: boolean }
-  | { readonly kind: "function"; readonly params: readonly PreparedParam[]; readonly result: PreparedType };
+  | { readonly kind: "function"; readonly params: readonly PreparedParam[]; readonly result: PreparedType }
+  /** A function type whose parameters are not stated, `<function ... />: R`. */
+  | { readonly kind: "anyFunction"; readonly result: PreparedType };
 
 /** Whether a site of this type admits the empty value: a `?` or `*` occurrence. */
 function admitsEmpty(ty: PreparedType): boolean {
@@ -940,19 +995,86 @@ export interface NxLinkOptions {
 }
 
 export interface NxRuntimeOptions {
+  /** How deeply function calls may nest. 100 by default. */
   readonly maxCallDepth?: number;
   /**
-   * The most integers one range may hold when a `forRange` iterates it. One million by default,
-   * which is the interpreter's operation budget.
+   * The most integers one range may hold when a `forRange` iterates it. One million by default.
    *
    * <para>A range makes an enormous loop one token long, so the count is checked before the body
    * runs at all rather than discovered part-way through.</para>
    */
   readonly maxRangeLength?: number;
+  /**
+   * The most operations one call may cost, counted as `docs/nx-ir-format.md` defines an operation:
+   * one per node evaluated, one per item placed in a sequence, and one per 64 UTF-16 code units of
+   * a string a concatenation produces. Absent, the call is unlimited.
+   *
+   * <para>One budget covers one call of an evaluation function and everything it evaluates; for
+   * `dispatchComponentActions`, every handler of the batch and the render after it. A host that
+   * evaluates code it did not write should set it: the call depth and the range length bound
+   * neither work nor allocation. A value that is not a non-negative safe integer is refused with
+   * `nx-ir-options`.</para>
+   */
+  readonly maxOperations?: number;
+  /**
+   * The largest input one call may be given, measured as `docs/nx-ir-format.md` defines the input
+   * size of a call and as {@link measureInputSize} measures one value: one for each value, and one
+   * more for every 64 UTF-16 code units of a string, a type name and a field name. Absent, the
+   * input is unlimited and nothing is measured.
+   *
+   * <para>It covers every value the host passes to one call: arguments, props, content, a state,
+   * the entries of a batch and a state patch. An instance is not input. A call whose input is
+   * larger fails with `nx-ir-resource-limit` whose `limit.name` is `maxInputSize`, before the
+   * program is looked at, and measuring stops as soon as the size passes the limit. The limit is
+   * separate from `maxOperations`: measuring charges no operation. A value that is not a
+   * non-negative safe integer is refused with `nx-ir-options`.</para>
+   */
+  readonly maxInputSize?: number;
+  /**
+   * An object of the host's that the runtime reports what the call used to. The runtime removes
+   * both members when the call begins and sets them when it ends, whether it returns or throws.
+   * An object the runtime cannot write to is refused with `nx-ir-options` before anything runs.
+   *
+   * <para>Calls that overlap and share one object leave the numbers of whichever ended last, so
+   * give each call its own.</para>
+   */
+  readonly usage?: NxRuntimeUsage;
 }
+
+/** What one call of an evaluation function used, as {@link NxRuntimeOptions.usage} reports it. */
+export interface NxRuntimeUsage {
+  /**
+   * The operations the call used, when `maxOperations` was set; absent otherwise, since with no
+   * budget the runtime counts nothing. For a call that returned this is its operation count, the
+   * least budget it succeeds under. For one that threw it is what was charged before the failure:
+   * a charge the budget refused is not among them, so the number is never more than the budget.
+   */
+  operations?: number;
+  /**
+   * The input size of the call, when `maxInputSize` was set and the input was within it; absent
+   * otherwise, since input that is refused is not measured to its end.
+   */
+  inputSize?: number;
+}
+
+/** The default of {@link NxRuntimeOptions.maxCallDepth}. */
+export const NX_DEFAULT_MAX_CALL_DEPTH = 100;
 
 /** The default of {@link NxRuntimeOptions.maxRangeLength}. */
 export const NX_DEFAULT_MAX_RANGE_LENGTH = 1_000_000;
+
+/**
+ * How deeply expressions may nest across every call of one evaluation: the bound the Rust runtime
+ * holds. The call depth is the host's to raise, so it cannot be what keeps evaluation inside the
+ * engine's stack; this bound is fixed.
+ */
+const MAX_EXPRESSION_NESTING = 1000;
+
+/**
+ * The UTF-16 code units of a string per operation it costs, where its length is charged: when a
+ * concatenation produces it and when it is written for the host.
+ */
+const TEXT_UNITS = 64;
 
 /**
  * A handler as the runtime holds it between the render that created it and the dispatch that
@@ -1010,7 +1132,7 @@ export interface ComponentInitOptions extends NxRuntimeOptions {
    * Initializing again with the state an instance holds and new props is how a host re-renders an
    * instance whose props changed without losing its state.
    */
-  readonly state?: Readonly<Record<string, NxCanonicalValue>>;
+  readonly state?: NxHostRecord;
 }
 
 export interface ComponentInitResult {
@@ -1230,7 +1352,7 @@ const EMIT: readonly Op[] = ["str", "ref"];
  * entry of that kind is reported as malformed rather than laid out.
  */
 const layouts: Record<NxIrTable, readonly (readonly Op[] | undefined)[]> = {
-  types: [["str"], ["ref"], undefined, undefined, ["type", { list: PARAM }], ["itemType", "occurrence"]],
+  types: [["str"], ["ref"], undefined, undefined, ["type", { list: PARAM }], ["itemType", "occurrence"], ["type"]],
   constants: [["i64"], ["str"], ["f64"]],
   nodes: [
     undefined,
@@ -1568,6 +1690,9 @@ class TableReader {
         prepared = { kind: "function", params, result };
         break;
       }
+      case typeKinds.anyFunction:
+        prepared = { kind: "anyFunction", result: this.type(entry[1]!) };
+        break;
       default:
         // Every kind the validator admits is handled above.
         fail("nx-ir-malformed", `Unknown type kind ${String(entry[0])} at type ${index}.`);
@@ -1911,118 +2036,162 @@ function programOf(program: NxPreparedProgram | NxPreparedModule): NxPreparedPro
 export function evaluateFunction(
   program: NxPreparedProgram | NxPreparedModule,
   name: string,
-  args: readonly NxCanonicalValue[] = [],
+  args: readonly (NxHostValue | undefined)[] = [],
   options: NxRuntimeOptions = {},
 ): NxCanonicalValue {
-  const linkedProgram = programOf(program);
-  const declaration = linkedProgram.functionEntrypoints.get(name);
-  if (declaration === undefined || declaration.kind.tag !== "function") {
-    fail("nx-ir-missing-entrypoint", `Function entrypoint '${name}' was not found.`);
-  }
-  return entryResult(declaration, invokeFunction(linkedProgram, linkedProgram.entry, declaration, args, options, 0));
+  return evaluate(options, (input) => measureValues(input, args), (evaluation) => {
+    requireHostList(args, `the arguments of '${name}'`);
+    const linkedProgram = programOf(program);
+    const declaration = linkedProgram.functionEntrypoints.get(name);
+    if (declaration === undefined || declaration.kind.tag !== "function") {
+      fail("nx-ir-missing-entrypoint", `Function entrypoint '${name}' was not found.`);
+    }
+    // Counted before any is read, so a list far longer than the function takes is refused for
+    // its length and is not copied.
+    requireArgumentCount(declaration.name, declaration.kind.params, args.length);
+    const read = readHostArguments(args, declaration.kind.params, evaluation);
+    const result = invokeFunction(linkedProgram, linkedProgram.entry, declaration, read, evaluation, 0, true);
+    return entryResult(declarationContext(linkedProgram, linkedProgram.entry, declaration, evaluation), result);
+  });
 }
 
 export function constructComponentDescriptor(
   program: NxPreparedProgram | NxPreparedModule,
   name: string,
-  props: Record<string, NxCanonicalValue> = {},
-  content: readonly NxCanonicalValue[] = [],
+  props: NxHostRecord = {},
+  content: readonly NxHostValue[] = [],
   options: NxRuntimeOptions = {},
 ): NxCanonicalValue {
-  const linkedProgram = programOf(program);
-  const { declaration, component } = componentDeclaration(linkedProgram, name);
-  const { fields: input, handlers } = splitHandlerProperties(linkedProgram.entry, declaration, props, `${name} props`);
-  const contentField = component.props.find((field) => field.isContent);
-  // A host supplies content as an argument, with no body to have been written or not written, and
-  // the argument defaults to the empty array. So no content passed means no content: there is no
-  // way for a caller to say "a body that produced nothing", and the declared default stands.
-  applyContentBinding(input, contentField?.name, component.props, content, name, false);
-  const normalized = normalizeFields(
-    linkedProgram,
-    linkedProgram.entry,
-    declaration,
-    component.props,
-    input,
-    [],
-    `${name} props`,
-    false,
-      options,
-  );
-  return canonicalizeRendered({ $type: declaration.name, ...normalized, ...handlerObject(handlers) }).value;
+  const measured = (input: InputMeasure): void => {
+    measureRecord(input, props);
+    measureValues(input, content);
+  };
+  return evaluate(options, measured, (evaluation) => {
+    const readProps = readHostRecord(props, `${name} props`);
+    const readContent = readHostValues(content, `${name} content`, (index) => `${name} content[${index}]`);
+    const linkedProgram = programOf(program);
+    const { declaration, component } = componentDeclaration(linkedProgram, name);
+    const { fields: input, handlers } = splitHandlerProperties(linkedProgram.entry, declaration, readProps, `${name} props`);
+    const contentField = component.props.find((field) => field.isContent);
+    // A host supplies content as an argument, with no body to have been written or not written,
+    // and the argument defaults to the empty array. So no content passed means no content: there is
+    // no way for a caller to say "a body that produced nothing", and the declared default stands.
+    applyContentBinding(input, contentField?.name, component.props, readContent, name, false);
+    const normalized = normalizeFields(
+      linkedProgram,
+      linkedProgram.entry,
+      declaration,
+      component.props,
+      input,
+      [],
+      `${name} props`,
+      false,
+      evaluation,
+    );
+    return canonicalizeRendered(
+      { $type: declaration.name, ...normalized, ...handlerObject(handlers) },
+      undefined,
+      declarationContext(linkedProgram, linkedProgram.entry, declaration, evaluation),
+    ).value;
+  });
 }
 
 export function initializeComponent(
   program: NxPreparedProgram | NxPreparedModule,
   name: string,
-  props: Record<string, NxCanonicalValue> = {},
+  props: NxHostRecord = {},
   options: ComponentInitOptions = {},
 ): ComponentInitResult {
-  const linkedProgram = programOf(program);
-  const { declaration, component } = componentDeclaration(linkedProgram, name);
-  if (component.isAbstract || component.body < 0) {
-    fail("nx-ir-component", `Component '${name}' cannot be initialized because it has no body.`);
-  }
-  const path = `${name} props`;
-  const resolved = resolveParentHandlersInProps(props, options.parent, path);
-  const { fields, handlers: handlerProps } = splitHandlerProperties(linkedProgram.entry, declaration, resolved, path);
-  const frame: NxCanonicalValue[] = [];
-  const normalizedProps = normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.props, fields, frame, path, false, options);
-  const state =
-    options.state === undefined
-      ? normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.state, {}, frame, `${name} state`, false, options)
-      : normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.state, { ...options.state }, frame, `${name} state`, true, options);
-  const { value: rendered, handlers } = canonicalizeRendered(
-    evalNode(component.body, {
-      program: linkedProgram,
-      linked: linkedProgram.entry,
-      declaration,
-      frame,
-      options,
-      depth: 0,
-    }),
-    1,
-  );
-  const instance = freezeInstance({
-    component: name,
-    declaration,
-    props: normalizedProps,
-    handlerProps,
-    state,
-    handlers,
-    generation: 1,
-  });
-  return { rendered, state: { ...state }, instance };
-}
-
-export function evaluateComponent(
-  program: NxPreparedProgram | NxPreparedModule,
-  name: string,
-  props: Record<string, NxCanonicalValue>,
-  state: Record<string, NxCanonicalValue>,
-  options: NxRuntimeOptions = {},
-): ComponentEvaluateResult {
-  const linkedProgram = programOf(program);
-  const { declaration, component } = componentDeclaration(linkedProgram, name);
-  if (component.isAbstract || component.body < 0) {
-    fail("nx-ir-component", `Component '${name}' cannot be evaluated because it has no body.`);
-  }
-  const path = `${name} props`;
-  const { fields } = splitHandlerProperties(linkedProgram.entry, declaration, props, path);
-  const frame: NxCanonicalValue[] = [];
-  normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.props, fields, frame, path, false, options);
-  normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.state, state, frame, `${name} state`, true, options);
-  return {
-    rendered: canonicalizeRendered(
+  // The props, and the state when the host passes one. The parent instance is not input.
+  const measured = (input: InputMeasure): void => {
+    measureRecord(input, props);
+    if (options.state !== undefined) {
+      measureRecord(input, options.state);
+    }
+  };
+  return evaluate(options, measured, (evaluation) => {
+    const path = `${name} props`;
+    const readProps = readHostRecord(props, path);
+    const readState = options.state === undefined ? undefined : readHostRecord(options.state, `${name} state`);
+    const linkedProgram = programOf(program);
+    const { declaration, component } = componentDeclaration(linkedProgram, name);
+    if (component.isAbstract || component.body < 0) {
+      fail("nx-ir-component", `Component '${name}' cannot be initialized because it has no body.`);
+    }
+    const resolved = resolveParentHandlersInProps(readProps, options.parent, path);
+    const { fields, handlers: handlerProps } = splitHandlerProperties(linkedProgram.entry, declaration, resolved, path);
+    const frame: NxCanonicalValue[] = [];
+    const normalizedProps = normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.props, fields, frame, path, false, evaluation);
+    const state =
+      readState === undefined
+        ? normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.state, {}, frame, `${name} state`, false, evaluation)
+        : normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.state, { ...readState }, frame, `${name} state`, true, evaluation);
+    const output = declarationContext(linkedProgram, linkedProgram.entry, declaration, evaluation);
+    const { value: rendered, handlers } = canonicalizeRendered(
       evalNode(component.body, {
         program: linkedProgram,
         linked: linkedProgram.entry,
         declaration,
         frame,
-        options,
+        evaluation,
         depth: 0,
       }),
-    ).value,
+      1,
+      output,
+    );
+    chargeWrittenFields(state, output);
+    const instance = freezeInstance({
+      component: name,
+      declaration,
+      props: normalizedProps,
+      handlerProps,
+      state,
+      handlers,
+      generation: 1,
+    });
+    return { rendered, state: { ...state }, instance };
+  });
+}
+
+export function evaluateComponent(
+  program: NxPreparedProgram | NxPreparedModule,
+  name: string,
+  props: NxHostRecord,
+  state: NxHostRecord,
+  options: NxRuntimeOptions = {},
+): ComponentEvaluateResult {
+  const measured = (input: InputMeasure): void => {
+    measureRecord(input, props);
+    measureRecord(input, state);
   };
+  return evaluate(options, measured, (evaluation) => {
+    const path = `${name} props`;
+    const readProps = readHostRecord(props, path);
+    const readState = readHostRecord(state, `${name} state`);
+    const linkedProgram = programOf(program);
+    const { declaration, component } = componentDeclaration(linkedProgram, name);
+    if (component.isAbstract || component.body < 0) {
+      fail("nx-ir-component", `Component '${name}' cannot be evaluated because it has no body.`);
+    }
+    const { fields } = splitHandlerProperties(linkedProgram.entry, declaration, readProps, path);
+    const frame: NxCanonicalValue[] = [];
+    normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.props, fields, frame, path, false, evaluation);
+    normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.state, readState, frame, `${name} state`, true, evaluation);
+    return {
+      rendered: canonicalizeRendered(
+        evalNode(component.body, {
+          program: linkedProgram,
+          linked: linkedProgram.entry,
+          declaration,
+          frame,
+          evaluation,
+          depth: 0,
+        }),
+        undefined,
+        declarationContext(linkedProgram, linkedProgram.entry, declaration, evaluation),
+      ).value,
+    };
+  });
 }
 
 /**
@@ -2033,15 +2202,32 @@ export function evaluateComponent(
  * order. A handler the component's own body bound reads the state live and patches it with the
  * component's update records; any other handler sees only what it captured, and everything it
  * returns is an effect. The body is rendered once against the state the batch produced. A failure
- * throws before anything is returned, so the instance given stays the state of record.
+ * throws before anything is returned, so the instance given stays the state of record. One
+ * operation budget covers the whole batch and the render after it.
  */
 export function dispatchComponentActions(
   program: NxPreparedProgram | NxPreparedModule,
   instance: NxComponentInstance,
-  batch: readonly NxCanonicalValue[],
+  batch: readonly NxHostValue[],
   options: NxRuntimeOptions = {},
 ): ComponentDispatchResult {
-  const linkedProgram = programOf(program);
+  // The entries of the batch, all of them before any runs. The instance is not input.
+  return evaluate(
+    options,
+    (input) => measureValues(input, batch),
+    (evaluation) => {
+      const entries = readHostValues(batch, "the dispatched batch", (index) => `dispatch entry ${index}`);
+      return dispatchBatch(programOf(program), instance, entries, evaluation);
+    },
+  );
+}
+
+function dispatchBatch(
+  linkedProgram: NxPreparedProgram,
+  instance: NxComponentInstance,
+  batch: readonly NxCanonicalValue[],
+  evaluation: Evaluation,
+): ComponentDispatchResult {
   const { declaration, component } = componentDeclaration(linkedProgram, instance.component);
   if (declaration !== instance.declaration) {
     fail("nx-ir-component", `The instance of '${instance.component}' was initialized by another program.`);
@@ -2069,11 +2255,11 @@ export function dispatchComponentActions(
         handler,
         requireObject(object.action, `${path}.action`),
         owned ? { component, state: working } : undefined,
-        options,
+        evaluation,
       );
       for (const result of results) {
         if (owned && isUpdateRecordFor(result, linkedProgram, ownerKey)) {
-          working = patchComponentState(linkedProgram, linked, declaration, component, working, result as NxRecordObject, options);
+          working = patchComponentState(linkedProgram, linked, declaration, component, working, result as NxRecordObject, evaluation);
         } else {
           effects.push(result);
         }
@@ -2090,11 +2276,14 @@ export function dispatchComponentActions(
     }
     // The entry is host input, so it is constructed against the emitted action before the handler
     // is looked up: a malformed payload fails whether or not the parent bound one.
-    const action = normalizeActionInput(linkedProgram, resolveReference(linked, emit.action.slot, emit.action.name), object, `${typeName} action`, options);
+    const action = normalizeActionInput(linkedProgram, resolveReference(linked, emit.action.slot, emit.action.name), object, `${typeName} action`, evaluation);
     const handler = instance.handlerProps.get(handlerPropertyName(emit.name));
     if (handler !== undefined) {
-      // The parent bound this handler, so everything it returns belongs to the parent, via the host.
-      effects.push(...invokeHandler(linkedProgram, handler, action, undefined, options));
+      // The parent bound this handler, so everything it returns belongs to the parent, via the
+      // host. A loop rather than a spread, which the engine limits to so many arguments.
+      for (const effect of invokeHandler(linkedProgram, handler, action, undefined, evaluation)) {
+        effects.push(effect);
+      }
     }
   });
 
@@ -2110,10 +2299,14 @@ export function dispatchComponentActions(
     frame[component.props.length + index] = working[field.name] ?? [];
   });
   const generation = instance.generation + 1;
+  const output = declarationContext(linkedProgram, linked, declaration, evaluation);
   const { value: rendered, handlers } = canonicalizeRendered(
-    evalNode(component.body, { program: linkedProgram, linked, declaration, frame, options, depth: 0 }),
+    evalNode(component.body, { program: linkedProgram, linked, declaration, frame, evaluation, depth: 0 }),
     generation,
+    output,
   );
+  const writtenEffects = effects.map((effect) => canonicalizeRendered(effect, undefined, output).value);
+  chargeWrittenFields(working, output);
   const next = freezeInstance({
     component: instance.component,
     declaration,
@@ -2125,7 +2318,7 @@ export function dispatchComponentActions(
   });
   return {
     rendered,
-    effects: effects.map((effect) => canonicalizeRendered(effect).value),
+    effects: writtenEffects,
     state: { ...working },
     instance: next,
   };
@@ -2134,12 +2327,17 @@ export function dispatchComponentActions(
 export function normalizeComponentState(
   program: NxPreparedProgram | NxPreparedModule,
   name: string,
-  state: Record<string, NxCanonicalValue>,
+  state: NxHostRecord,
   options: NxRuntimeOptions = {},
 ): Record<string, NxCanonicalValue> {
-  const linkedProgram = programOf(program);
-  const { declaration, component } = componentDeclaration(linkedProgram, name);
-  return normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.state, state, propsFrame(component), `${name} state`, true, options);
+  return evaluate(options, (input) => measureRecord(input, state), (evaluation) => {
+    const readState = readHostRecord(state, `${name} state`);
+    const linkedProgram = programOf(program);
+    const { declaration, component } = componentDeclaration(linkedProgram, name);
+    const normalized = normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.state, readState, propsFrame(component), `${name} state`, true, evaluation);
+    chargeWrittenFields(normalized, declarationContext(linkedProgram, linkedProgram.entry, declaration, evaluation));
+    return normalized;
+  });
 }
 
 /**
@@ -2162,13 +2360,23 @@ function propsFrame(component: Extract<PreparedDeclarationKind, { tag: "componen
 export function applyComponentStatePatch(
   program: NxPreparedProgram | NxPreparedModule,
   name: string,
-  currentState: Record<string, NxCanonicalValue>,
-  patch: Record<string, NxCanonicalValue>,
+  currentState: NxHostRecord,
+  patch: NxHostRecord,
   options: NxRuntimeOptions = {},
 ): Record<string, NxCanonicalValue> {
-  const linkedProgram = programOf(program);
-  const { declaration, component } = componentDeclaration(linkedProgram, name);
-  return patchComponentState(linkedProgram, linkedProgram.entry, declaration, component, currentState, patch, options);
+  const measured = (input: InputMeasure): void => {
+    measureRecord(input, currentState);
+    measureRecord(input, patch);
+  };
+  return evaluate(options, measured, (evaluation) => {
+    const readState = readHostRecord(currentState, `${name} state`);
+    const readPatch = readHostRecord(patch, `${name} state patch`);
+    const linkedProgram = programOf(program);
+    const { declaration, component } = componentDeclaration(linkedProgram, name);
+    const patched = patchComponentState(linkedProgram, linkedProgram.entry, declaration, component, readState, readPatch, evaluation);
+    chargeWrittenFields(patched, declarationContext(linkedProgram, linkedProgram.entry, declaration, evaluation));
+    return patched;
+  });
 }
 
 /** Applies a patch to a component's state with full validation: what `applyComponentStatePatch` and dispatch share. */
@@ -2179,7 +2387,7 @@ function patchComponentState(
   component: Extract<PreparedDeclarationKind, { tag: "component" }>,
   currentState: Readonly<Record<string, NxCanonicalValue>>,
   patch: Readonly<Record<string, NxCanonicalValue>>,
-  options: NxRuntimeOptions,
+  evaluation: Evaluation,
 ): Record<string, NxCanonicalValue> {
   const name = declaration.name;
   const { $type: discriminator, ...fields } = patch;
@@ -2193,7 +2401,7 @@ function patchComponentState(
       fail("nx-ir-state-field", `Unknown ${name} state field '${key}'.`);
     }
   }
-  return normalizeFields(program, linked, declaration, component.state, { ...currentState, ...fields }, propsFrame(component), `${name} state`, true, options);
+  return normalizeFields(program, linked, declaration, component.state, { ...currentState, ...fields }, propsFrame(component), `${name} state`, true, evaluation);
 }
 
 function componentDeclaration(
@@ -2219,8 +2427,577 @@ interface EvalContext {
   readonly declaration: PreparedDeclaration;
   /** The declaration's locals, by slot. */
   readonly frame: NxCanonicalValue[];
-  readonly options: NxRuntimeOptions;
+  readonly evaluation: Evaluation;
   readonly depth: number;
+}
+
+/**
+ * What one call of an exported evaluation function carries through everything it evaluates: the
+ * limits it runs under, the operations its budget has left, and how deeply expressions nest.
+ *
+ * <para>Only `evaluate` creates one, and only the exported functions call `evaluate`, so an
+ * internal path that one API shares with another — dispatch rendering, initialization normalizing
+ * state — receives the state it was given and has no options to start a fresh budget from.</para>
+ */
+interface Evaluation {
+  readonly maxCallDepth: number;
+  readonly maxRangeLength: number;
+  /** The budget the host set, for diagnostics; `undefined` when it set none. */
+  readonly maxOperations: number | undefined;
+  /** The operations left: `Infinity` when the host set no budget, which subtraction leaves alone. */
+  remaining: number;
+  /**
+   * How many `evalNode` calls are in progress. A throw abandons the whole evaluation, so a failed
+   * call needs no unwinding.
+   */
+  nesting: number;
+  /**
+   * Whether a default failed, by its expression or by its value not fitting its type. A failure
+   * ends the evaluation, so once this is set the failure that leaves is that one, and it is not
+   * in an argument even when the default was filled in while an argument was checked.
+   */
+  defaultFailed: boolean;
+}
+
+/**
+ * Runs one call of an exported evaluation function under the limits `options` sets, with the whole
+ * budget. An option that is not what it must be is refused before anything runs. Then the host's
+ * input is measured, when it set a limit on it: `input` adds each value the call was passed to the
+ * measure it is given, and a call whose input is over the limit is refused before `run` looks at
+ * the program. `run` starts by reading the same values as host values, limit or no limit: see
+ * {@link readHostValue}. A `RangeError` the engine raises along the way — a call stack, a string or an array
+ * past what the engine holds — is reported as `nx-ir-resource-limit` naming the `engine` limit.
+ * Every other exception propagates: it is a fault of the runtime, not of the program. However the
+ * call ends, what it used is written to the `usage` object the host gave, if it gave one.
+ */
+function evaluate<T>(options: NxRuntimeOptions, input: (measure: InputMeasure) => void, run: (evaluation: Evaluation) => T): T {
+  // The report is cleared before anything else can refuse the call, so that an object the host
+  // gave to an earlier call never shows that call's numbers for this one.
+  const usage = clearedUsage(options.usage);
+  const maxOperations = options.maxOperations;
+  if (maxOperations !== undefined && !(Number.isSafeInteger(maxOperations) && maxOperations >= 0)) {
+    fail("nx-ir-options", `The maxOperations option must be a non-negative safe integer, got ${String(maxOperations)}.`);
+  }
+  const maxInputSize = options.maxInputSize;
+  if (maxInputSize !== undefined && !(Number.isSafeInteger(maxInputSize) && maxInputSize >= 0)) {
+    fail("nx-ir-options", `The maxInputSize option must be a non-negative safe integer, got ${String(maxInputSize)}.`);
+  }
+  const evaluation: Evaluation = {
+    maxCallDepth: options.maxCallDepth ?? NX_DEFAULT_MAX_CALL_DEPTH,
+    maxRangeLength: options.maxRangeLength ?? NX_DEFAULT_MAX_RANGE_LENGTH,
+    maxOperations,
+    remaining: maxOperations ?? Infinity,
+    nesting: 0,
+    defaultFailed: false,
+  };
+  let inputSize: number | undefined;
+  try {
+    if (maxInputSize !== undefined) {
+      const measure: InputMeasure = { size: 0, limit: maxInputSize };
+      input(measure);
+      if (measure.size > maxInputSize) {
+        failLimit({ name: "maxInputSize", value: maxInputSize }, `The call's input is larger than its limit of ${maxInputSize}.`);
+      }
+      inputSize = measure.size;
+    }
+    return run(evaluation);
+  } catch (error) {
+    if (error instanceof RangeError) {
+      throw new NxIrRuntimeError([
+        {
+          severity: "error",
+          code: "nx-ir-resource-limit",
+          message: `The evaluation reached a limit of the JavaScript engine: ${error.message}`,
+          limit: { name: "engine" },
+        },
+      ]);
+    }
+    throw error;
+  } finally {
+    if (usage !== undefined) {
+      // The object is the host's, and a write to it can run the host's code. Whatever that does,
+      // the call's own outcome stands.
+      try {
+        if (maxOperations !== undefined) {
+          usage.operations = maxOperations - evaluation.remaining;
+        }
+        if (inputSize !== undefined) {
+          usage.inputSize = inputSize;
+        }
+      } catch {
+        // Dropped: see above.
+      }
+    }
+  }
+}
+
+/**
+ * The `usage` object of a call's options with both of its members removed, ready for the call's
+ * report, or `undefined` when the host gave none. The object must be one the runtime can write to,
+ * and writing is the test: both members are set and then removed, and a value that is no object,
+ * or on which either step throws, is refused. Removing a member a frozen object does not have
+ * succeeds, so removing alone would not find one.
+ */
+function clearedUsage(usage: unknown): NxRuntimeUsage | undefined {
+  if (usage === undefined) {
+    return undefined;
+  }
+  if (typeof usage !== "object" || usage === null) {
+    fail("nx-ir-options", `The usage option must be an object the runtime can write to, got ${usage === null ? "null" : typeof usage}.`);
+  }
+  const sink = usage as NxRuntimeUsage;
+  try {
+    sink.operations = 0;
+    sink.inputSize = 0;
+    delete sink.operations;
+    delete sink.inputSize;
+  } catch {
+    fail("nx-ir-options", "The usage option must be an object the runtime can write to: its members could not be set and removed.");
+  }
+  return sink;
+}
+
+/** The running size of a call's input against the limit it must stay within. */
+interface InputMeasure {
+  size: number;
+  readonly limit: number;
+}
+
+/** A list or an object the measuring walk has entered, and how far it has read. */
+interface PendingInput {
+  readonly items: readonly unknown[] | undefined;
+  readonly object: Readonly<Record<string, unknown>> | undefined;
+  readonly keys: readonly string[] | undefined;
+  index: number;
+  /** How many of an object's members are still counted among the walk's reserved ones. */
+  reserved: number;
+}
+
+/**
+ * Whether `value` is an object the measure enters: one whose prototype is `Object.prototype`, of
+ * this realm or another, or nothing. A `Date`, a `Map`, an instance of a class and a function
+ * value are not, and neither is a handler the runtime made, which holds the linked program.
+ */
+function isPlainInput(value: unknown): value is Readonly<Record<string, unknown>> {
+  if (typeof value !== "object" || value === null || madeHandlers.has(value)) {
+    return false;
+  }
+  const prototype: unknown = Object.getPrototypeOf(value);
+  return prototype === null || Object.getPrototypeOf(prototype) === null;
+}
+
+/**
+ * Adds the size of one host value to `measure`, as `docs/nx-ir-format.md` defines the input size
+ * of a call: one for the value, a list, an empty one and a `null` included, one more for every 64
+ * UTF-16 code units of a string, of a type name and of each field name, and then what it holds.
+ * A `$type` member that holds a string is the type name and counts its length alone. A member that
+ * is `undefined` is a member left out, and neither its name nor a value is counted. A value that
+ * is no canonical value is one value and is not entered: a call refuses it when it reads its
+ * input, after the measure.
+ *
+ * <para>The walk keeps its own stack, so no nesting reaches the engine's, and it takes every
+ * reference it meets as a new value, so an object that holds itself is counted until the limit is
+ * passed. It stops as soon as the size passes the limit. A list is read by index, one item at a
+ * time. An object's names have to be listed when it is entered, all at once, so the walk counts
+ * them then, the ones whose value is not `undefined`: every member costs at least one, except a
+ * `$type` that holds a string, so an object
+ * with more members than the limit has room for is refused when its names are listed, and the
+ * members of an object that is entered are reserved against the limit until they are read. Each
+ * object entered is one of the size and its members but one are reserved, so the names listed in
+ * one call that hold a value are no more than twice the limit, and those of the one object the
+ * limit is passed in: that one listing is the only cost the limit does not bound, however an
+ * object is nested in itself or in others, beside the names of members that are `undefined`,
+ * which a value read from JSON never has.</para>
+ */
+function measureValue(measure: InputMeasure, value: unknown): void {
+  if (measure.size > measure.limit) {
+    return;
+  }
+  const pending: PendingInput[] = [];
+  // The members of the objects on the stack that are not read yet, less one for each object,
+  // whose `$type` may cost nothing: what the size will grow by at the least.
+  let reserved = 0;
+  let next = value;
+  for (;;) {
+    measure.size += 1;
+    if (typeof next === "string") {
+      measure.size += lengthCost(next);
+    } else if (Array.isArray(next)) {
+      pending.push({ items: next, object: undefined, keys: undefined, index: 0, reserved: 0 });
+    } else if (isPlainInput(next)) {
+      const keys = Object.keys(next);
+      let members = 0;
+      for (const key of keys) {
+        if (next[key] !== undefined) {
+          members += 1;
+        }
+      }
+      const least = Math.max(members - 1, 0);
+      if (least > measure.limit - measure.size - reserved) {
+        // The input is larger than the limit whatever the members hold, so none is read.
+        measure.size += reserved + least;
+        return;
+      }
+      reserved += least;
+      pending.push({ items: undefined, object: next, keys, index: 0, reserved: least });
+    }
+    if (measure.size > measure.limit) {
+      return;
+    }
+    // The next value to count: the next item or field of the innermost list or object that has one.
+    for (;;) {
+      const top = pending[pending.length - 1];
+      if (top === undefined) {
+        return;
+      }
+      if (top.items !== undefined) {
+        if (top.index < top.items.length) {
+          next = top.items[top.index++];
+          break;
+        }
+        pending.pop();
+        continue;
+      }
+      const keys = top.keys!;
+      if (top.index >= keys.length) {
+        pending.pop();
+        continue;
+      }
+      const key = keys[top.index++]!;
+      const held = top.object![key];
+      if (held === undefined) {
+        continue;
+      }
+      if (key === "$type" && typeof held === "string") {
+        // The type name is the one member nothing was reserved for.
+        measure.size += lengthCost(held);
+        if (measure.size > measure.limit) {
+          return;
+        }
+        continue;
+      }
+      if (top.reserved > 0) {
+        top.reserved -= 1;
+        reserved -= 1;
+      }
+      measure.size += lengthCost(key);
+      if (measure.size > measure.limit) {
+        return;
+      }
+      next = held;
+      break;
+    }
+  }
+}
+
+/**
+ * Adds each of `values` to `measure`: the positional arguments of a call, its content, or the
+ * entries of a batch. The list itself is not a value the host supplied and is not counted. An
+ * element that is `undefined`, or a hole, is the empty value and counts one.
+ */
+function measureValues(measure: InputMeasure, values: readonly unknown[]): void {
+  if (!Array.isArray(values)) {
+    measureValue(measure, values);
+    return;
+  }
+  for (let index = 0; index < values.length && measure.size <= measure.limit; index += 1) {
+    measureValue(measure, values[index]);
+  }
+}
+
+/**
+ * Adds a map of named values to `measure` as the one record it is passed as: props, a state, a
+ * patch or arguments by name. One the host left out is an empty record, which is one.
+ */
+function measureRecord(measure: InputMeasure, fields: unknown): void {
+  measureValue(measure, fields === undefined ? {} : fields);
+}
+
+/**
+ * The size of one value as `docs/nx-ir-format.md` defines the input size of a call and as
+ * {@link NxRuntimeOptions.maxInputSize} measures it. It evaluates nothing and needs no program.
+ *
+ * <para>With a `limit`, measuring stops as soon as the size passes it and the result is some
+ * number greater than the limit: the value is too large, and how large is not found out. A host
+ * uses this to hold one part of what it passes to a number of its own before it calls.</para>
+ *
+ * <para>Pass a limit for any value that did not come from JSON. The walk takes every reference
+ * as a new value, so a value that holds itself has no finite size, and measuring one with no
+ * limit does not return: it ends when the engine runs out of memory.</para>
+ *
+ * <para>An object is measured as one record, which is how the props, the state, the patch and the
+ * arguments by name of a call are measured. An array is measured as the list it is, which is one
+ * more than its items add to a call that takes them as its positional arguments, its content or
+ * its batch, since a call counts the entries and not the list.</para>
+ */
+export function measureInputSize(value: unknown, limit?: number): number {
+  if (limit !== undefined && !(Number.isSafeInteger(limit) && limit >= 0)) {
+    fail("nx-ir-options", `The limit of measureInputSize must be a non-negative safe integer, got ${String(limit)}.`);
+  }
+  const measure: InputMeasure = { size: 0, limit: limit ?? Infinity };
+  measureValue(measure, value);
+  return measure.size;
+}
+
+/** A list or a plain object the reading of a host value has entered, and how far it has read. */
+interface HostFrame {
+  readonly source: readonly unknown[] | Readonly<Record<string, unknown>>;
+  /** The names of an object's members; `undefined` for a list. */
+  readonly keys: readonly string[] | undefined;
+  /** The item or member to read next, so the one being read is the one before it. */
+  index: number;
+  /** `source` without what was left out below it, once something was. */
+  copy: unknown[] | Record<string, unknown> | undefined;
+}
+
+/**
+ * Reads a value a host passed as a canonical value in its JavaScript form, which
+ * `docs/nx-ir-format.md` defines: `null`, a boolean, a number, a string, an array or a plain
+ * object, which is what {@link isPlainInput} takes, and a handler or a function value this runtime
+ * made. Anything else is refused with `nx-ir-boundary-type` and the path to it from `path`, and is
+ * not read: nothing is converted. A member of a plain object that is `undefined` is a member left
+ * out, and the value returned does not have it. An item of an array cannot be left out, so one
+ * that is `undefined`, or a hole, is refused, and so is `undefined` itself.
+ *
+ * <para>The value returned is the host's own when nothing was left out, which is the usual case.
+ * Otherwise the objects and arrays on the way down to a member that was left out are copied
+ * without it and the rest is shared, so the host's value is never changed.</para>
+ *
+ * <para>The walk keeps its own stack, as the measure does, so no nesting reaches the engine's. It
+ * keeps the objects it is inside, and refuses one found inside itself, which has no finite size;
+ * the same object held twice side by side is two values. It charges no operation: it runs once in
+ * a call, over input whose size is the host's to limit, and before anything is evaluated.</para>
+ */
+function readHostValue(value: unknown, path: string): NxCanonicalValue {
+  if (isReadAsPassed(value, 0)) {
+    return value as NxCanonicalValue;
+  }
+  const frames: HostFrame[] = [];
+  const entered = new Set<object>();
+  const copyOf = (frame: HostFrame): unknown[] | Record<string, unknown> =>
+    (frame.copy ??= frame.keys === undefined ? (frame.source as readonly unknown[]).slice() : { ...frame.source });
+  // Where the value being read is: the item or member each entered list and object is at.
+  const here = (): string =>
+    path + frames.map((frame) => (frame.keys === undefined ? `[${frame.index - 1}]` : `.${frame.keys[frame.index - 1]!}`)).join("");
+  let next = value;
+  for (;;) {
+    if (Array.isArray(next) || isPlainInput(next)) {
+      if (entered.has(next)) {
+        fail("nx-ir-boundary-type", `Expected ${here()} to be a value of finite size, got an object that holds itself.`);
+      }
+      entered.add(next);
+      frames.push({ source: next, keys: Array.isArray(next) ? undefined : Object.keys(next), index: 0, copy: undefined });
+    } else {
+      if (!isHostScalar(next)) {
+        const got = describeHostValue(next);
+        fail("nx-ir-boundary-type", `Expected ${here()} to be ${hostValueKinds}, got ${got}${typeof next === "object" ? ", which is not a plain object" : ""}.`);
+      }
+      if (frames.length === 0) {
+        return next;
+      }
+    }
+    // The next value to read: the next item or member of the innermost list or object that has
+    // one. A list or an object with none left is read, and goes into the one it is in if anything
+    // was left out of it.
+    for (;;) {
+      const top = frames[frames.length - 1]!;
+      if (top.keys === undefined) {
+        const items = top.source as readonly unknown[];
+        if (top.index < items.length) {
+          next = items[top.index++];
+          break;
+        }
+      } else {
+        const object = top.source as Readonly<Record<string, unknown>>;
+        let held: unknown;
+        while (held === undefined && top.index < top.keys.length) {
+          const key = top.keys[top.index++]!;
+          held = object[key];
+          if (held === undefined) {
+            delete (copyOf(top) as Record<string, unknown>)[key];
+          }
+        }
+        if (held !== undefined) {
+          next = held;
+          break;
+        }
+      }
+      frames.pop();
+      entered.delete(top.source);
+      const read = top.copy ?? top.source;
+      const parent = frames[frames.length - 1];
+      if (parent === undefined) {
+        return read as NxCanonicalValue;
+      }
+      if (read !== top.source) {
+        const copy = copyOf(parent);
+        if (parent.keys === undefined) {
+          (copy as unknown[])[parent.index - 1] = read;
+        } else {
+          (copy as Record<string, unknown>)[parent.keys[parent.index - 1]!] = read;
+        }
+      }
+    }
+  }
+}
+
+/** How deeply {@link isReadAsPassed} looks into a value before it leaves the value to the full reading. */
+const READ_AS_PASSED_DEPTH = 32;
+
+/**
+ * Whether {@link readHostValue} would return `value` as it is: every value in it is one a host
+ * passes, and no member of an object in it is `undefined`. This is the usual case, answered
+ * without the stack, the paths and the copies the full reading keeps. It answers `false` for
+ * whatever it does not settle, and the full reading then decides: a value to refuse, a member to
+ * leave out, an object whose prototype is another realm's, and a value nested more deeply than
+ * `READ_AS_PASSED_DEPTH`, which is every value that holds itself. So its recursion is bounded by
+ * that depth and not by the input.
+ */
+function isReadAsPassed(value: unknown, depth: number): boolean {
+  if (typeof value !== "object") {
+    return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+  }
+  if (value === null) {
+    return true;
+  }
+  if (depth >= READ_AS_PASSED_DEPTH) {
+    return false;
+  }
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      const item: unknown = value[index];
+      if (typeof item !== "string" && typeof item !== "number" && typeof item !== "boolean" && !isReadAsPassed(item, depth + 1)) {
+        return false;
+      }
+    }
+    return true;
+  }
+  const prototype: unknown = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    return isFunctionReference(value);
+  }
+  const object = value as Readonly<Record<string, unknown>>;
+  if (object.$nxKind !== undefined && madeHandlers.has(object)) {
+    return true;
+  }
+  // Every name `Object.keys` lists is one this loop reads, so nothing the full reading would read
+  // is missed; a name it reads beside them can only send the value to the full reading.
+  for (const key in object) {
+    const held = object[key];
+    if (typeof held !== "string" && typeof held !== "number" && typeof held !== "boolean" && !isReadAsPassed(held, depth + 1)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+const hostValueKinds = "null, a boolean, a number, a string, an array or a plain object";
+
+/** Whether `value` is a host value with nothing inside it to read: a scalar, or a handler or a function value this runtime made. */
+function isHostScalar(value: unknown): value is NxCanonicalValue {
+  switch (typeof value) {
+    case "string":
+    case "number":
+    case "boolean":
+      return true;
+    case "object":
+      return value === null || madeHandlers.has(value) || isFunctionReference(value);
+    default:
+      return false;
+  }
+}
+
+/** What a value that is no host value is, for the diagnostic that refuses it. */
+function describeHostValue(value: unknown): string {
+  if (typeof value !== "object" || value === null) {
+    return value === undefined ? "undefined" : typeof value === "function" ? "a function" : `a ${typeof value}`;
+  }
+  // The object is the host's, and so is whatever answers for its class.
+  let name: unknown;
+  try {
+    name = (Object.getPrototypeOf(value) as { constructor?: { name?: unknown } } | null)?.constructor?.name;
+  } catch {
+    name = undefined;
+  }
+  return typeof name === "string" && name !== "" ? `an instance of ${name}` : "an object of a class with no name";
+}
+
+/**
+ * Requires `fields` to be the plain object a host passes named values in: props, a state, a patch
+ * or arguments by name.
+ */
+function requirePlainRecord(fields: unknown, path: string): void {
+  if (!isPlainInput(fields)) {
+    const got = Array.isArray(fields) ? "an array" : fields === null ? "null" : describeHostValue(fields);
+    fail("nx-ir-boundary-type", `Expected ${path} to be a plain object, got ${got}.`);
+  }
+}
+
+/**
+ * Requires `values` to be the array a host passes a list of values in: positional arguments,
+ * content or a batch. Anything else that holds values, a `Set` or an object with a length, would
+ * be measured as one value and read as none.
+ */
+function requireHostList(values: unknown, path: string): void {
+  if (!Array.isArray(values)) {
+    const got = values === null ? "null" : isPlainInput(values) ? "a plain object" : describeHostValue(values);
+    fail("nx-ir-boundary-type", `Expected ${path} to be an array, got ${got}.`);
+  }
+}
+
+/** Reads a map of named values a host passed, as {@link readHostValue} reads any value. */
+function readHostRecord(fields: NxHostRecord, path: string): Record<string, NxCanonicalValue> {
+  requirePlainRecord(fields, path);
+  return readHostValue(fields, path) as Record<string, NxCanonicalValue>;
+}
+
+/**
+ * Reads each of `values`, a call's content or the entries of its batch, as {@link readHostValue}
+ * reads any value, by the path `pathOf` gives its index; `path` names the list itself. The list
+ * is returned as it is when nothing was left out of any.
+ */
+function readHostValues(values: readonly NxHostValue[], path: string, pathOf: (index: number) => string): readonly NxCanonicalValue[] {
+  requireHostList(values, path);
+  let read: NxCanonicalValue[] | undefined;
+  for (let index = 0; index < values.length; index += 1) {
+    const value = readHostValue(values[index], pathOf(index));
+    if (value !== values[index]) {
+      (read ??= values.slice() as NxCanonicalValue[])[index] = value;
+    }
+  }
+  return read ?? (values as readonly NxCanonicalValue[]);
+}
+
+/**
+ * Charges `amount` operations, failing before the operation is performed when the budget does not
+ * cover it. The failure names the declaration of `context` and, when the charge is for a node,
+ * that node's span; a charge for work no node did, such as writing a result for the host, has none.
+ */
+function charge(context: EvalContext, nodeIndex: number | undefined, amount: number): void {
+  if ((context.evaluation.remaining -= amount) < 0) {
+    budgetExhausted(context, nodeIndex, amount);
+  }
+}
+
+/** The context a charge is made in when it is for a declaration as a whole and not for a node of it. */
+function declarationContext(
+  program: NxPreparedProgram,
+  linked: LinkedModule,
+  declaration: PreparedDeclaration,
+  evaluation: Evaluation,
+): EvalContext {
+  return { program, linked, declaration, frame: [], evaluation, depth: 0 };
+}
+
+/**
+ * Fails an evaluation whose budget did not cover a charge of `amount`. The charge was subtracted
+ * before it was tested and was not made, so it is put back: what is left is what the call had
+ * before the charge it was refused, which is what the usage report counts from.
+ */
+function budgetExhausted(context: EvalContext, nodeIndex: number | undefined, amount: number): never {
+  context.evaluation.remaining += amount;
+  const budget = context.evaluation.maxOperations!;
+  failLimit({ name: "maxOperations", value: budget }, `The evaluation exceeded its budget of ${budget} operations.`, context, nodeIndex);
 }
 
 /**
@@ -2247,6 +3024,16 @@ class FunctionReferenceValue {
 function functionRecord(reference: FunctionReferenceValue): NxCanonicalValue {
   return { $type: functionTypeName, module: reference.linked.module.identity, name: reference.declaration.name };
 }
+
+/**
+ * The record a function value renders as, and the one a host supplies where a function value is
+ * expected. Read it from a member declared at a function type, and call it with `callFunction`.
+ */
+export type NxFunctionRecord = {
+  readonly $type: "Function";
+  readonly module: string;
+  readonly name: string;
+};
 
 /** The `Function` record a host supplies where a function value is expected, if `value` is one. */
 function asFunctionRecord(value: unknown): { module: string; name: string } | undefined {
@@ -2297,36 +3084,37 @@ function resolveReference(linked: LinkedModule, slot: number, name: string): { l
  * Calls a function with its arguments by position. An argument that is `undefined`, or past the
  * end of `args`, was left out: the function fills its parameter with the default it declares,
  * evaluated here after the parameters before it, or with empty when the parameter is optional.
+ *
+ * `fromHost` says the call is the one a host made through `evaluateFunction` or `callFunction`,
+ * and not one a body or a default makes: a failure in an argument of that call names the argument.
  */
 function invokeFunction(
   program: NxPreparedProgram,
   linked: LinkedModule,
   declaration: PreparedDeclaration,
   args: readonly (NxCanonicalValue | undefined)[],
-  options: NxRuntimeOptions,
+  evaluation: Evaluation,
   depth: number,
+  fromHost: boolean,
 ): NxCanonicalValue {
-  const maxCallDepth = options.maxCallDepth ?? 100;
+  const maxCallDepth = evaluation.maxCallDepth;
   if (depth > maxCallDepth) {
-    fail("nx-ir-resource-limit", `Maximum NX IR call depth ${maxCallDepth} was exceeded.`);
+    failLimit({ name: "maxCallDepth", value: maxCallDepth }, `Maximum NX IR call depth ${maxCallDepth} was exceeded.`);
   }
   const kind = declaration.kind;
   if (kind.tag !== "function") {
     fail("nx-ir-call", `'${declaration.name}' is not a function.`);
   }
-  if (args.length > kind.params.length) {
-    fail("nx-ir-arguments", `Function '${declaration.name}' expected at most ${kind.params.length} arguments, got ${args.length}.`);
-  }
+  requireArgumentCount(declaration.name, kind.params, args.length);
   const frame: NxCanonicalValue[] = [];
-  const context: EvalContext = { program, linked, declaration, frame, options, depth };
-  kind.params.forEach((param, index) => {
-    const arg = args[index];
+  const context: EvalContext = { program, linked, declaration, frame, evaluation, depth };
+  const bind = (param: PreparedDeclaredParam, arg: NxCanonicalValue | undefined): NxCanonicalValue => {
     let value: NxCanonicalValue;
     if (arg !== undefined) {
       // Body content reaches the content parameter as the list of children the emitter
       // gathered, and a child that is itself a list is spliced, as it is for a component's
       // content.
-      value = param.isContent && Array.isArray(arg) ? spliceContent(arg) : arg;
+      value = param.isContent && Array.isArray(arg) ? bindContent(arg, context) : arg;
     } else if (param.default >= 0) {
       value = evalNode(param.default, context);
     } else if (param.isOptional) {
@@ -2334,12 +3122,103 @@ function invokeFunction(
     } else {
       fail("nx-ir-arguments", `Function '${declaration.name}' requires argument '${param.name}'.`);
     }
-    frame[index] = normalizeValue(context, param.ty, value, param.name);
+    return normalizeValue(context, param.ty, value, param.name);
+  };
+  kind.params.forEach((param, index) => {
+    const arg = args[index];
+    // A parameter the host gave nothing for and that has a default is the function's own to
+    // fill: what its default raises is not in anything the host passed.
+    if (!fromHost || (arg === undefined && param.default >= 0)) {
+      frame[index] = bind(param, arg);
+      return;
+    }
+    try {
+      frame[index] = bind(param, arg);
+    } catch (error) {
+      throw error instanceof NxIrRuntimeError ? namingArgument(error, param.name, evaluation) : error;
+    }
   });
   const result = evalNode(kind.body, context);
   return kind.result === undefined
     ? result
     : normalizeValue(context, kind.result, result, `return value for '${declaration.name}'`);
+}
+
+/**
+ * The failure of the host's call in the binding of `argument`, with the argument named on each
+ * diagnostic that is about the value the host passed: a boundary failure, a missing required
+ * argument or a `Function` record that names no function. A default that failed while the value
+ * was checked is not about that value whatever its code, and neither is a limit or a failure of
+ * the image, which have other codes.
+ */
+function namingArgument(error: NxIrRuntimeError, argument: string, evaluation: Evaluation): NxIrRuntimeError {
+  if (evaluation.defaultFailed || !error.diagnostics.some((diagnostic) => isAboutArgument(diagnostic.code))) {
+    return error;
+  }
+  return new NxIrRuntimeError(
+    error.diagnostics.map((diagnostic) => (isAboutArgument(diagnostic.code) ? { ...diagnostic, argument } : diagnostic)),
+  );
+}
+
+function isAboutArgument(code: string): boolean {
+  return code === "nx-ir-arguments" || code === "nx-ir-function-value" || code.startsWith("nx-ir-boundary-");
+}
+
+/** What the host passed for the parameter `name` of the function it called, read as a host value. */
+function readHostArgument(value: NxHostValue, name: string, evaluation: Evaluation): NxCanonicalValue {
+  try {
+    return readHostValue(value, name);
+  } catch (error) {
+    throw error instanceof NxIrRuntimeError ? namingArgument(error, name, evaluation) : error;
+  }
+}
+
+/** Refuses a call of `name` with more positional arguments than the function has parameters. */
+function requireArgumentCount(name: string, params: readonly PreparedDeclaredParam[], count: number): void {
+  if (count > params.length) {
+    fail("nx-ir-arguments", `Function '${name}' expected at most ${params.length} arguments, got ${count}.`);
+  }
+}
+
+/**
+ * The positional arguments a host passed, which are no more than `params`, each read as a host
+ * value by its parameter's name, all of them before the first is bound. One that is `undefined`,
+ * or a hole, or past the end of `args`, was left out and stays so.
+ */
+function readHostArguments(
+  args: readonly (NxHostValue | undefined)[],
+  params: readonly PreparedDeclaredParam[],
+  evaluation: Evaluation,
+): (NxCanonicalValue | undefined)[] {
+  return params.map((param, index) => {
+    const arg = args[index];
+    return arg === undefined ? undefined : readHostArgument(arg, param.name, evaluation);
+  });
+}
+
+/**
+ * The arguments a host passed by name, as the positional arguments of `params`, each read as a
+ * host value by its parameter's name. The record of them is the host's too, and so is what it
+ * holds under a name the function does not declare, which is dropped, as the subset rule allows,
+ * but is read, and is in no argument.
+ */
+function readNamedHostArguments(
+  args: NxHostRecord,
+  params: readonly PreparedDeclaredParam[],
+  evaluation: Evaluation,
+): (NxCanonicalValue | undefined)[] {
+  requirePlainRecord(args, "the arguments callFunction is given");
+  const declared = new Set(params.map((param) => param.name));
+  for (const key of Object.keys(args)) {
+    const value = args[key];
+    if (!declared.has(key) && value !== undefined) {
+      readHostValue(value, key);
+    }
+  }
+  return params.map((param) => {
+    const value = Object.prototype.hasOwnProperty.call(args, param.name) ? args[param.name] : undefined;
+    return value === undefined ? undefined : readHostArgument(value, param.name, evaluation);
+  });
 }
 
 function entryAt(context: EvalContext, index: number): Uint32Array {
@@ -2363,8 +3242,8 @@ function nodesAt(context: EvalContext, entry: Uint32Array, at: number): { values
  * what makes two `for` loops side by side, or a list-returning function among the children, read
  * as one list of children.
  */
-function contentAt(context: EvalContext, entry: Uint32Array, at: number): NxCanonicalValue[] {
-  return itemsAt(context, entry, at);
+function contentAt(context: EvalContext, nodeIndex: number, entry: Uint32Array, at: number): NxCanonicalValue[] {
+  return itemsAt(context, nodeIndex, entry, at);
 }
 
 /**
@@ -2377,12 +3256,12 @@ function hasBodyAt(entry: Uint32Array, at: number): boolean {
   return entry[at] !== 0;
 }
 
-/** Evaluates the `count, node × count` list at `at` as the items of one sequence. */
-function itemsAt(context: EvalContext, entry: Uint32Array, at: number): NxCanonicalValue[] {
+/** Evaluates the `count, node × count` list at `at` as the items of the sequence node `nodeIndex` builds. */
+function itemsAt(context: EvalContext, nodeIndex: number, entry: Uint32Array, at: number): NxCanonicalValue[] {
   const count = entry[at]!;
   const items: NxCanonicalValue[] = [];
   for (let position = at + 1; position < at + 1 + count; position += 1) {
-    evalItemInto(entry[position]!, context, items);
+    evalItemInto(entry[position]!, context, nodeIndex, items);
   }
   return items;
 }
@@ -2394,12 +3273,20 @@ function itemsAt(context: EvalContext, entry: Uint32Array, at: number): NxCanoni
  * whole rule. A conditional that takes no branch needs no case here: it evaluates to the empty
  * value, which is the empty sequence, so it splices away like any other list-valued item, and a
  * conditional nested in one is no different.
+ *
+ * `builder` is the node building the sequence, which pays one operation for every item placed. The
+ * items of a list are appended in a loop, which the engine does not limit as it does the arguments
+ * of a spread.
  */
-function evalItemInto(index: number, context: EvalContext, items: NxCanonicalValue[]): void {
+function evalItemInto(index: number, context: EvalContext, builder: number, items: NxCanonicalValue[]): void {
   const value = evalNode(index, context);
   if (Array.isArray(value)) {
-    items.push(...value);
+    charge(context, builder, value.length);
+    for (const item of value) {
+      items.push(item);
+    }
   } else {
+    charge(context, builder, 1);
     items.push(value);
   }
 }
@@ -2419,7 +3306,7 @@ function takenBranch(context: EvalContext, entry: Uint32Array, index: number): n
     const patterns = entry[position]!;
     let matched = false;
     for (let pattern = position + 1; pattern < position + 1 + patterns; pattern += 1) {
-      if (!matched && patternMatches(scrutinee, evalPattern(context, entry[pattern]!))) {
+      if (!matched && patternMatches(scrutinee, evalPattern(context, entry[pattern]!), context, entry[pattern]!)) {
         matched = true;
       }
     }
@@ -2436,7 +3323,8 @@ function takenBranch(context: EvalContext, entry: Uint32Array, index: number): n
 /**
  * A match arm's pattern as a value. A pattern naming a union case with fields stands for every
  * record of that case, so it is the case's `$type` alone: building the record would ask for fields
- * a pattern never supplies. Every other pattern is evaluated as the expression it is.
+ * a pattern never supplies. Every other pattern is evaluated as the expression it is. The shortcut
+ * costs what evaluating the node would have: one operation.
  */
 function evalPattern(context: EvalContext, index: number): NxCanonicalValue {
   const entry = entryAt(context, index);
@@ -2449,14 +3337,36 @@ function evalPattern(context: EvalContext, index: number): NxCanonicalValue {
       declaration.kind.tag === "union" &&
       declaration.kind.cases.some((candidate) => candidate.name === caseName && !candidate.isConstant)
     ) {
+      charge(context, index, 1);
       return { $type: `${unionName}.${caseName}` };
     }
   }
   return evalNode(index, context);
 }
 
-function spliceContent(values: readonly NxCanonicalValue[]): NxCanonicalValue[] {
-  return values.flatMap((value) => (Array.isArray(value) ? value : [value]));
+/**
+ * The list a call binds to a content parameter: the children gathered, with a child that is itself
+ * a list spliced. The list is built anew for the call, so each item of the argument is paid for by
+ * the function it is bound in: one, or one for each item it contributes when it is itself a
+ * sequence of several. A `null`, which only a list the host passed at `object` can hold, is one
+ * item like any other here and is kept as the host wrote it.
+ */
+function bindContent(values: readonly NxCanonicalValue[], context: EvalContext): NxCanonicalValue[] {
+  const items: NxCanonicalValue[] = [];
+  for (const value of values) {
+    if (Array.isArray(value)) {
+      // A sequence among the items contributes its own, and costs one for each, or one when it
+      // contributes none: the list is as long to go through whatever it holds.
+      charge(context, undefined, Math.max(value.length, 1));
+      for (const item of value) {
+        items.push(item);
+      }
+    } else {
+      charge(context, undefined, 1);
+      items.push(value);
+    }
+  }
+  return items;
 }
 
 /** Evaluates the `count, (name, node) × count` list at `at` into an object, in property order. */
@@ -2476,7 +3386,34 @@ function propertiesAt(
   return { properties, next: position };
 }
 
+/**
+ * Evaluates node `index`, after charging it one operation and checking that it nests no deeper
+ * than evaluation may.
+ */
 function evalNode(index: number, context: EvalContext): NxCanonicalValue {
+  const evaluation = context.evaluation;
+  if ((evaluation.remaining -= 1) < 0) {
+    budgetExhausted(context, index, 1);
+  }
+  if (evaluation.nesting >= MAX_EXPRESSION_NESTING) {
+    nestingExceeded(context, index);
+  }
+  evaluation.nesting += 1;
+  const value = evalNodeKind(index, context);
+  evaluation.nesting -= 1;
+  return value;
+}
+
+function nestingExceeded(context: EvalContext, index: number): never {
+  failLimit(
+    { name: "maxExpressionNesting", value: MAX_EXPRESSION_NESTING },
+    `Maximum NX IR expression nesting was exceeded: expressions nest more than ${MAX_EXPRESSION_NESTING} deep.`,
+    context,
+    index,
+  );
+}
+
+function evalNodeKind(index: number, context: EvalContext): NxCanonicalValue {
   const entry = entryAt(context, index);
   const image = context.linked.module.artifact;
   switch (entry[0]) {
@@ -2538,7 +3475,7 @@ function evalNode(index: number, context: EvalContext): NxCanonicalValue {
       return body === undefined ? [] : evalNode(body, context);
     }
     case nodeKinds.array:
-      return itemsAt(context, entry, 1);
+      return itemsAt(context, index, entry, 1);
     case nodeKinds.for: {
       // The iterable is read as its items: a `+` or `*` value is an array of them, and a `?` value
       // is the empty array or the one item it holds, so a `for` over an optional runs at most once.
@@ -2564,7 +3501,7 @@ function evalNode(index: number, context: EvalContext): NxCanonicalValue {
         if (indexSlot !== NX_IR_NONE) {
           context.frame[indexSlot] = position;
         }
-        evalItemInto(entry[6]!, context, results);
+        evalItemInto(entry[6]!, context, index, results);
       });
       return results;
     }
@@ -2579,10 +3516,10 @@ function evalNode(index: number, context: EvalContext): NxCanonicalValue {
           index,
         );
       }
-      const limit = context.options.maxRangeLength ?? NX_DEFAULT_MAX_RANGE_LENGTH;
+      const limit = context.evaluation.maxRangeLength;
       if (range.count > limit) {
-        fail(
-          "nx-ir-resource-limit",
+        failLimit(
+          { name: "maxRangeLength", value: limit },
           `Iterating this range would run the loop body ${range.count} times, above the maxRangeLength limit of ${limit}.`,
           context,
           index,
@@ -2596,7 +3533,7 @@ function evalNode(index: number, context: EvalContext): NxCanonicalValue {
         if (indexSlot !== NX_IR_NONE) {
           context.frame[indexSlot] = position;
         }
-        evalItemInto(entry[6]!, context, results);
+        evalItemInto(entry[6]!, context, index, results);
       }
       return results;
     }
@@ -2620,7 +3557,7 @@ function evalNode(index: number, context: EvalContext): NxCanonicalValue {
       return evalUnionCase(context, index, entry);
     case nodeKinds.element: {
       const { properties, next } = propertiesAt(context, entry, 3);
-      const content = contentAt(context, entry, next);
+      const content = contentAt(context, index, entry, next);
       // The interpreter's rule for an element with no declared content field: one child is
       // bound as itself, several as a list.
       if (content.length === 1) {
@@ -2677,7 +3614,7 @@ function evalActionHandler(context: EvalContext, entry: Uint32Array): NxCanonica
   const action = resolveReference(context.linked, entry[4]!, image.string(entry[5]!));
   const ownerSlot = entry[7]!;
   const owner = ownerSlot === NX_IR_NONE ? undefined : resolveReference(context.linked, ownerSlot, image.string(entry[8]!));
-  return internal({
+  const handler: ActionHandlerValue = {
     $nxKind: "actionHandler",
     linked: context.linked,
     declaration: context.declaration,
@@ -2689,7 +3626,9 @@ function evalActionHandler(context: EvalContext, entry: Uint32Array): NxCanonica
     owner: owner === undefined ? undefined : `${owner.linked.module.identity}::${owner.declaration.name}`,
     body: entry[9]!,
     captured: context.frame.slice(),
-  });
+  };
+  madeHandlers.add(handler);
+  return internal(handler);
 }
 
 const float64Cells = new Uint32Array(2);
@@ -2714,7 +3653,14 @@ function evalConstant(context: EvalContext, constantIndex: number, nodeIndex: nu
       float64Cells[littleEndian ? 1 : 0] = constant[2]!;
       return float64View[0]!;
     case constantKinds.bigint:
-      return { $type: "nx.int", value: image.string(constant[1]!) };
+      // A JavaScript number cannot hold it exactly, and nothing here computes with anything else,
+      // so the integer is refused where it is read and never becomes a value this runtime holds.
+      fail(
+        "nx-ir-number",
+        `The integer ${image.string(constant[1]!)} is outside JavaScript's safe range, which this runtime cannot hold.`,
+        context,
+        nodeIndex,
+      );
     default:
       fail("nx-ir-literal", `Unknown constant kind '${String(constant[0])}'.`, context, nodeIndex);
   }
@@ -2747,7 +3693,7 @@ function evalCall(context: EvalContext, nodeIndex: number, entry: Uint32Array): 
     const node = entry[position]!;
     args.push(node === NX_IR_NONE ? undefined : evalNode(node, context));
   }
-  return invokeFunction(context.program, callee.linked, callee.declaration, args, context.options, context.depth + 1);
+  return invokeFunction(context.program, callee.linked, callee.declaration, args, context.evaluation, context.depth + 1, false);
 }
 
 /**
@@ -2760,7 +3706,7 @@ function evalNamedCall(context: EvalContext, nodeIndex: number, entry: Uint32Arr
     fail("nx-ir-call", "NX IR named call callee did not evaluate to a function value.", context, nodeIndex);
   }
   const { properties } = propertiesAt(context, entry, 2);
-  return invokeFunctionByName(context.program, callee, properties, context.options, context.depth + 1);
+  return invokeFunctionByName(context.program, callee, properties, context.evaluation, context.depth + 1);
 }
 
 /**
@@ -2773,7 +3719,7 @@ function invokeFunctionByName(
   program: NxPreparedProgram,
   callee: FunctionReferenceValue,
   args: Record<string, NxCanonicalValue>,
-  options: NxRuntimeOptions,
+  evaluation: Evaluation,
   depth: number,
 ): NxCanonicalValue {
   const kind = callee.declaration.kind;
@@ -2783,7 +3729,7 @@ function invokeFunctionByName(
   const positional = kind.params.map((param) =>
     Object.prototype.hasOwnProperty.call(args, param.name) ? args[param.name]! : undefined,
   );
-  return invokeFunction(program, callee.linked, callee.declaration, positional, options, depth);
+  return invokeFunction(program, callee.linked, callee.declaration, positional, evaluation, depth, false);
 }
 
 /**
@@ -2793,17 +3739,30 @@ function invokeFunctionByName(
  */
 export function callFunction(
   program: NxPreparedProgram | NxPreparedModule,
-  value: NxCanonicalValue,
-  args: Record<string, NxCanonicalValue> = {},
+  value: NxHostValue,
+  args: NxHostRecord = {},
   options: NxRuntimeOptions = {},
 ): NxCanonicalValue {
-  const linkedProgram = programOf(program);
-  const record = asFunctionRecord(value);
-  if (record === undefined) {
-    fail("nx-ir-function-value", "callFunction expects a Function record: { $type: \"Function\", module, name }.");
-  }
-  const callee = resolveFunctionRecord(linkedProgram, record, "callFunction");
-  return entryResult(callee.declaration, invokeFunctionByName(linkedProgram, callee, args, options, 0));
+  // The function record, and the arguments by name as one record.
+  const measured = (input: InputMeasure): void => {
+    measureValue(input, value);
+    measureRecord(input, args);
+  };
+  return evaluate(options, measured, (evaluation) => {
+    // What is no record at all is not a function record, which is said first; a record is then
+    // read as any host value is.
+    const record = isPlainInput(value) ? asFunctionRecord(readHostValue(value, "the function callFunction is given")) : undefined;
+    if (record === undefined) {
+      fail("nx-ir-function-value", "callFunction expects a Function record: { $type: \"Function\", module, name }.");
+    }
+    const linkedProgram = programOf(program);
+    const callee = resolveFunctionRecord(linkedProgram, record, "callFunction");
+    // `resolveFunctionRecord` answers a function, so its declaration has parameters.
+    const params = callee.declaration.kind.tag === "function" ? callee.declaration.kind.params : [];
+    const read = readNamedHostArguments(args, params, evaluation);
+    const result = invokeFunction(linkedProgram, callee.linked, callee.declaration, read, evaluation, 0, true);
+    return entryResult(declarationContext(linkedProgram, callee.linked, callee.declaration, evaluation), result);
+  });
 }
 
 /**
@@ -2811,9 +3770,10 @@ export function callFunction(
  * type is a standalone `T?` and holds nothing — the host's spelling of an absent single value.
  * Every other result keeps its encoding, so an empty `T*` stays `[]`.
  */
-function entryResult(declaration: PreparedDeclaration, value: NxCanonicalValue): NxCanonicalValue {
+function entryResult(context: EvalContext, value: NxCanonicalValue): NxCanonicalValue {
+  const declaration = context.declaration;
   const isOptionalResult = declaration.kind.tag === "function" && declaration.kind.isOptionalResult;
-  return isOptionalResult && isEmptyValue(value) ? null : canonicalizeRendered(value).value;
+  return isOptionalResult && isEmptyValue(value) ? null : canonicalizeRendered(value, undefined, context).value;
 }
 
 function evalRecord(context: EvalContext, nodeIndex: number, entry: Uint32Array): NxCanonicalValue {
@@ -2825,13 +3785,13 @@ function evalRecord(context: EvalContext, nodeIndex: number, entry: Uint32Array)
   }
   const record = declaration.kind;
   const { properties, next } = propertiesAt(context, entry, 3);
-  const content = contentAt(context, entry, next);
+  const content = contentAt(context, nodeIndex, entry, next);
   const contentField = record.fields.find((field) => field.isContent)?.name;
   applyContentBinding(properties, contentField, record.fields, content, name, hasBodyAt(entry, next));
   const normalized =
     record.updateTarget !== undefined
-      ? normalizePatchFields(context, record.fields, properties, name)
-      : normalizeFields(context.program, linked, declaration, record.fields, properties, [], name, false, context.options);
+      ? normalizePatchFields({ ...context, linked, declaration, frame: [] }, record.fields, properties, name)
+      : normalizeFields(context.program, linked, declaration, record.fields, properties, [], name, false, context.evaluation);
   return { $type: name, ...normalized };
 }
 
@@ -2852,11 +3812,11 @@ function evalUnionCase(context: EvalContext, nodeIndex: number, entry: Uint32Arr
     return caseName;
   }
   const { properties, next } = propertiesAt(context, entry, 4);
-  const content = contentAt(context, entry, next);
+  const content = contentAt(context, nodeIndex, entry, next);
   const path = `${unionName}.${caseName}`;
   const contentField = unionCase.fields.find((field) => field.isContent)?.name;
   applyContentBinding(properties, contentField, unionCase.fields, content, path, hasBodyAt(entry, next));
-  const normalized = normalizeFields(context.program, linked, declaration, unionCase.fields, properties, [], path, false, context.options);
+  const normalized = normalizeFields(context.program, linked, declaration, unionCase.fields, properties, [], path, false, context.evaluation);
   return { $type: path, ...normalized };
 }
 
@@ -2869,11 +3829,11 @@ function evalComponentDescriptor(context: EvalContext, nodeIndex: number, entry:
   }
   const component = declaration.kind;
   const { properties, next } = propertiesAt(context, entry, 3);
-  const content = contentAt(context, entry, next);
+  const content = contentAt(context, nodeIndex, entry, next);
   const { fields: props, handlers } = splitHandlerProperties(linked, declaration, properties, `${name} props`);
   const contentField = component.props.find((field) => field.isContent)?.name;
   applyContentBinding(props, contentField, component.props, content, name, hasBodyAt(entry, next));
-  const normalized = normalizeFields(context.program, linked, declaration, component.props, props, [], `${name} props`, false, context.options);
+  const normalized = normalizeFields(context.program, linked, declaration, component.props, props, [], `${name} props`, false, context.evaluation);
   return { $type: name, ...normalized, ...handlerObject(handlers) };
 }
 
@@ -2991,10 +3951,25 @@ function resolveParentHandlersInProps(
  * `h<generation>-<n>` numbered by a walk that visits lists in order and object keys in sorted
  * order, which is the interpreter's walk, so the two runtimes agree on every token. The handlers
  * met are returned by token, for the instance that owns the output.
+ *
+ * <para>Writing a value for the host costs the evaluation of `payer` one operation for each value
+ * written, a sequence and the empty value included, and one more for every 64 UTF-16 code units
+ * of text, charged before the value is written. This is where a value held once and
+ * reached by many paths becomes as many copies, so it is where its size as a tree is paid for.
+ * Without a payer, for a helper a host calls on values it holds, and for an evaluation with no
+ * budget, nothing is charged.</para>
  */
-function canonicalizeRendered(value: NxCanonicalValue, generation?: number): { value: NxCanonicalValue; handlers: Map<string, ActionHandlerValue> } {
+function canonicalizeRendered(
+  value: NxCanonicalValue,
+  generation?: number,
+  payer?: EvalContext,
+): { value: NxCanonicalValue; handlers: Map<string, ActionHandlerValue> } {
   const handlers = new Map<string, ActionHandlerValue>();
+  const paid = budgeted(payer);
   const walk = (item: NxCanonicalValue): NxCanonicalValue => {
+    if (paid !== undefined) {
+      charge(paid, undefined, writtenCost(item));
+    }
     if (Array.isArray(item)) {
       return item.map(walk);
     }
@@ -3017,7 +3992,8 @@ function canonicalizeRendered(value: NxCanonicalValue, generation?: number): { v
     // order so the output reads as the declaration does.
     const canonical = new Map<string, NxCanonicalValue>();
     for (const key of Object.keys(item).sort()) {
-      canonical.set(key, walk(item[key]!));
+      // The discriminator is the record's type, not a value it holds.
+      canonical.set(key, key === "$type" ? item[key]! : walk(item[key]!));
     }
     // An update record is the one place the canonical encoding writes `null`: a present empty
     // field is a cleared one, and key presence is what carries that, so the value is `null`
@@ -3033,6 +4009,75 @@ function canonicalizeRendered(value: NxCanonicalValue, generation?: number): { v
   return { value: walk(value), handlers };
 }
 
+/**
+ * What writing `item` for the host costs, apart from the values inside it: one for a value, a
+ * sequence and the empty value included, and one more for every 64 UTF-16 code units of a string,
+ * of a record's type name and of each of its field names, which are text written with it. A
+ * declared name is short and costs nothing; one a host supplied may not be. Every value costs one
+ * because every value takes a place in what is written: a list of empty values is as long to copy
+ * as a list of numbers. A `null`, which only a value the host passed at `object` can hold, is the
+ * empty value and one value.
+ */
+function writtenCost(item: NxCanonicalValue): number {
+  if (typeof item === "string") {
+    return 1 + lengthCost(item);
+  }
+  if (!isObject(item) || isActionHandler(item) || isFunctionReference(item)) {
+    return 1;
+  }
+  let cost = 1;
+  for (const key of Object.keys(item)) {
+    const text = key === "$type" ? item.$type : key;
+    if (typeof text === "string") {
+      cost += lengthCost(text);
+    }
+  }
+  return cost;
+}
+
+/** What reading `text` costs beyond the value it belongs to: one operation for every 64 UTF-16 code units. */
+function lengthCost(text: string): number {
+  return Math.floor(text.length / TEXT_UNITS);
+}
+
+/**
+ * The context to charge a walk over a value to, or `undefined` when the evaluation has no budget:
+ * nothing reads its count, so the walk skips the charges and whatever only a count needs.
+ */
+function budgeted(context: EvalContext | undefined): EvalContext | undefined {
+  return context === undefined || context.evaluation.maxOperations === undefined ? undefined : context;
+}
+
+/**
+ * Charges `payer` for values returned to the host as they are, as `canonicalizeRendered` charges
+ * for the ones it rewrites, so that what a call returns costs the same in every runtime whether or
+ * not this one has to copy it. Nothing reads the count of an evaluation with no budget, so the
+ * walk is made only under one.
+ */
+function chargeWrittenFields(fields: Readonly<Record<string, NxCanonicalValue>>, payer: EvalContext): void {
+  if (payer.evaluation.maxOperations === undefined) {
+    return;
+  }
+  const walk = (item: NxCanonicalValue): void => {
+    charge(payer, undefined, writtenCost(item));
+    if (Array.isArray(item)) {
+      item.forEach(walk);
+      return;
+    }
+    if (!isObject(item) || isActionHandler(item) || isFunctionReference(item)) {
+      return;
+    }
+    for (const key of Object.keys(item)) {
+      if (key !== "$type") {
+        walk(item[key]!);
+      }
+    }
+  };
+  for (const key of Object.keys(fields)) {
+    walk(fields[key]!);
+  }
+}
+
 function freezeInstance(instance: NxComponentInstance): NxComponentInstance {
   Object.freeze(instance.props);
   Object.freeze(instance.state);
@@ -3045,7 +4090,7 @@ function normalizeActionInput(
   action: { linked: LinkedModule; declaration: PreparedDeclaration },
   input: Readonly<Record<string, NxCanonicalValue>>,
   path: string,
-  options: NxRuntimeOptions,
+  evaluation: Evaluation,
 ): NxRecordObject {
   const expected = action.declaration.name;
   const kind = action.declaration.kind;
@@ -3056,7 +4101,7 @@ function normalizeActionInput(
   if (discriminator !== undefined && discriminator !== expected) {
     fail("nx-ir-type", `Expected ${path} to be a '${expected}' action, got '${String(discriminator)}'.`);
   }
-  return { $type: expected, ...normalizeFields(program, action.linked, action.declaration, kind.fields, rest, [], path, false, options) };
+  return { $type: expected, ...normalizeFields(program, action.linked, action.declaration, kind.fields, rest, [], path, false, evaluation) };
 }
 
 /**
@@ -3073,14 +4118,14 @@ function invokeHandler(
     readonly component: Extract<PreparedDeclarationKind, { tag: "component" }>;
     readonly state: Readonly<Record<string, NxCanonicalValue>>;
   } | undefined,
-  options: NxRuntimeOptions,
+  evaluation: Evaluation,
 ): NxCanonicalValue[] {
   const label = `${handler.componentName}.${handler.emit}`;
   const expected = handler.action.declaration.name;
   if (action.$type !== expected) {
     fail("nx-ir-type", `Expected an action of type '${expected}' for handler ${label}, got '${String(action.$type)}'.`);
   }
-  const normalizedAction = normalizeActionInput(program, handler.action, action, `${label} action`, options);
+  const normalizedAction = normalizeActionInput(program, handler.action, action, `${label} action`, evaluation);
   const frame = handler.captured.slice();
   if (live !== undefined) {
     live.component.state.forEach((field, index) => {
@@ -3093,10 +4138,10 @@ function invokeHandler(
     linked: handler.linked,
     declaration: handler.declaration,
     frame,
-    options,
+    evaluation,
     depth: 0,
   });
-  const results = Array.isArray(result) ? [...result] : [result];
+  const results = Array.isArray(result) ? result.slice() : [result];
   if (results.length === 0) {
     fail("nx-ir-handler-result", `Handler ${label} returned an empty list; a handler returns an action, an update record, or a list of them.`);
   }
@@ -3125,8 +4170,14 @@ function isUpdateRecordFor(value: NxCanonicalValue, program: NxPreparedProgram, 
   });
 }
 
+/**
+ * The handlers this runtime made. A value the host passes can carry the tag a handler has, so the
+ * tag does not make one: such a value is a record, entered and paid for like any other.
+ */
+const madeHandlers = new WeakSet<object>();
+
 function isActionHandler(value: unknown): value is ActionHandlerValue {
-  return typeof value === "object" && value !== null && (value as { readonly $nxKind?: unknown }).$nxKind === "actionHandler";
+  return typeof value === "object" && value !== null && madeHandlers.has(value);
 }
 
 /** A rendered handler as a host sees it: the record canonical output carries in a handler's place. */
@@ -3163,7 +4214,7 @@ function evalIntrinsic(context: EvalContext, nodeIndex: number, entry: Uint32Arr
       return mergeUpdateRecords(intrinsicRecord(args[0]!, intrinsic), intrinsicRecord(args[1]!, intrinsic));
     case "diff":
       expectArity(2);
-      return diffRecordValues(intrinsicRecord(args[0]!, intrinsic), intrinsicRecord(args[1]!, intrinsic));
+      return diffRecordValues(intrinsicRecord(args[0]!, intrinsic), intrinsicRecord(args[1]!, intrinsic), context, nodeIndex);
     case "changed": {
       expectArity(1);
       const update = intrinsicRecord(args[0]!, intrinsic);
@@ -3294,7 +4345,8 @@ function mergeUpdateRecords(first: NxRecordObject, second: NxRecordObject): NxRe
   return { ...first, ...later };
 }
 
-function diffRecordValues(before: NxRecordObject, after: NxRecordObject): NxRecordObject {
+/** Each comparison is paid for by the node at `nodeIndex` of `context`, as any equality is; a host's own call has neither. */
+function diffRecordValues(before: NxRecordObject, after: NxRecordObject, context?: EvalContext, nodeIndex?: number): NxRecordObject {
   if (before.$type !== after.$type) {
     fail("nx-ir-intrinsic", `Cannot diff '${before.$type}' against '${after.$type}': the records have different types.`);
   }
@@ -3306,7 +4358,7 @@ function diffRecordValues(before: NxRecordObject, after: NxRecordObject): NxReco
       continue;
     }
     const next = fieldOrEmpty(after, key);
-    if (!valuesEqual(fieldOrEmpty(before, key), next)) {
+    if (!valuesEqual(fieldOrEmpty(before, key), next, budgeted(context), nodeIndex)) {
       output[key] = next;
     }
   }
@@ -3325,31 +4377,139 @@ function fieldOrEmpty(record: Readonly<Record<string, NxCanonicalValue>>, key: s
  * holding an equal item. The empty value equals only the empty value, being the empty sequence,
  * and every empty is the one empty value, so an omitted optional field compares equal to one
  * written empty.
+ *
+ * <para>Comparing two values costs the node at `nodeIndex` of `context` one operation for the
+ * pair. Two sequences of one length then compare their items in order and stop at the first pair
+ * that differs: the order of a sequence is the same in every runtime, so what was compared, and
+ * its cost, is too. Two records of one type are lined up by name and compare every pair of field
+ * values, whether or not an earlier pair already differed: the order fields are held in is not the
+ * same in every runtime, so stopping at the first difference would make the count depend on it. A
+ * name only one of them holds costs one. Text costs its length wherever it is read: two
+ * strings one more for every 64 UTF-16 code units of the shorter, two records likewise for their
+ * type names, and every field name for each record that holds it. So the cost of a comparison is a
+ * property of the two values.</para>
+ *
+ * <para>`context` is `undefined` when nobody pays: for a helper a host calls, and for an
+ * evaluation with no budget (see `budgeted`). The walk then stops at the first difference between
+ * two records as well, which cannot change the result.</para>
  */
-function valuesEqual(left: NxCanonicalValue, right: NxCanonicalValue): boolean {
+function valuesEqual(left: NxCanonicalValue, right: NxCanonicalValue, context?: EvalContext, nodeIndex?: number): boolean {
+  if (context !== undefined) {
+    charge(context, nodeIndex, 1);
+  }
   if (Array.isArray(left) && Array.isArray(right)) {
-    return left.length === right.length && left.every((item, index) => valuesEqual(item, right[index]!));
+    let equal = left.length === right.length;
+    if (equal) {
+      for (let index = 0; index < left.length; index += 1) {
+        if (!valuesEqual(left[index]!, right[index]!, context, nodeIndex)) {
+          equal = false;
+          break;
+        }
+      }
+    }
+    return equal;
   }
   if (Array.isArray(left)) {
-    return left.length === 1 && valuesEqual(left[0]!, right);
+    return left.length === 1 && valuesEqual(left[0]!, right, context, nodeIndex);
   }
   if (Array.isArray(right)) {
-    return right.length === 1 && valuesEqual(left, right[0]!);
+    return right.length === 1 && valuesEqual(left, right[0]!, context, nodeIndex);
   }
   if (isFunctionReference(left) || isFunctionReference(right)) {
     return isFunctionReference(left) && isFunctionReference(right) && left.declaration === right.declaration;
+  }
+  if (isActionHandler(left) || isActionHandler(right)) {
+    return isActionHandler(left) && isActionHandler(right) && handlersEqual(left, right, context, nodeIndex);
   }
   if (isObject(left) || isObject(right)) {
     if (!isObject(left) || !isObject(right)) {
       return false;
     }
-    const leftKeys = Object.keys(left);
-    return (
-      leftKeys.length === Object.keys(right).length &&
-      leftKeys.every((key) => Object.prototype.hasOwnProperty.call(right, key) && valuesEqual(left[key]!, right[key]!))
-    );
+    return recordsEqual(left, right, context, nodeIndex);
+  }
+  if (context !== undefined && typeof left === "string" && typeof right === "string") {
+    charge(context, nodeIndex, lengthCost(left.length < right.length ? left : right));
   }
   return left === right;
+}
+
+/**
+ * Whether two records are equal: one type, the same field names, and equal values under each.
+ *
+ * Two records of different types cost the pair and the shorter type name, and nothing about their
+ * fields is read. Two of one type are lined up by field name, and every name either holds is paid
+ * for: its length, for each record that holds it; then the pair of values where both hold it, and
+ * one operation where only one does. So a comparison that fails on the names costs as much as the
+ * names it had to read, however wide the records are and whichever is the wider. A walk nobody
+ * pays for answers from the field counts when they differ, and stops at the first difference.
+ */
+function recordsEqual(
+  left: Readonly<Record<string, NxCanonicalValue>>,
+  right: Readonly<Record<string, NxCanonicalValue>>,
+  context?: EvalContext,
+  nodeIndex?: number,
+): boolean {
+  const [leftType, rightType] = [left.$type, right.$type];
+  if (context !== undefined && typeof leftType === "string" && typeof rightType === "string") {
+    charge(context, nodeIndex, lengthCost(leftType.length < rightType.length ? leftType : rightType));
+  }
+  // The discriminator is the record's type, compared here before any field is looked at, and not a
+  // value the record holds.
+  if (leftType !== rightType) {
+    return false;
+  }
+  const isField = (key: string): boolean => key !== "$type";
+  const leftKeys = Object.keys(left).filter(isField);
+  const rightKeys = Object.keys(right).filter(isField);
+  let equal = leftKeys.length === rightKeys.length;
+  if (context === undefined) {
+    return equal && leftKeys.every((key) => Object.prototype.hasOwnProperty.call(right, key) && valuesEqual(left[key]!, right[key]!));
+  }
+  for (const key of leftKeys) {
+    charge(context, nodeIndex, lengthCost(key));
+  }
+  for (const key of rightKeys) {
+    charge(context, nodeIndex, lengthCost(key));
+  }
+  let held = 0;
+  for (const key of leftKeys) {
+    if (Object.prototype.hasOwnProperty.call(right, key)) {
+      held += 1;
+      if (!valuesEqual(left[key]!, right[key]!, context, nodeIndex)) {
+        equal = false;
+      }
+    } else {
+      charge(context, nodeIndex, 1);
+      equal = false;
+    }
+  }
+  // The names only `right` holds: one operation each.
+  charge(context, nodeIndex, rightKeys.length - held);
+  return equal && held === rightKeys.length;
+}
+
+/**
+ * Whether two handlers are one handler: the same node with the same capture. The captured values
+ * are compared slot by slot, each pair paid for as `valuesEqual` compares any pair, up to the first
+ * slot that differs: the slots of a frame are in one order in every runtime.
+ */
+function handlersEqual(left: ActionHandlerValue, right: ActionHandlerValue, context?: EvalContext, nodeIndex?: number): boolean {
+  let equal =
+    left.linked === right.linked &&
+    left.declaration === right.declaration &&
+    left.body === right.body &&
+    left.captured.length === right.captured.length;
+  if (equal) {
+    for (let slot = 0; slot < left.captured.length; slot += 1) {
+      const [mine, theirs] = [left.captured[slot], right.captured[slot]];
+      const same = mine === undefined || theirs === undefined ? mine === theirs : valuesEqual(mine, theirs, context, nodeIndex);
+      if (!same) {
+        equal = false;
+        break;
+      }
+    }
+  }
+  return equal;
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -3404,8 +4564,8 @@ function applyContentBinding(
  * still holds the empty value, so a default or a body reads it as such.</para>
  *
  * `linked` and `declaration` are where the fields were declared: defaults are node indices of that
- * module, and a nominal type resolves through that module's table. `options` are the caller's own,
- * so a default is evaluated under the host's limits.
+ * module, and a nominal type resolves through that module's table. `evaluation` is the caller's
+ * own, so a default is evaluated under the host's limits and charged to the call's budget.
  */
 function normalizeFields(
   program: NxPreparedProgram,
@@ -3416,7 +4576,7 @@ function normalizeFields(
   frame: NxCanonicalValue[],
   path: string,
   requireExplicit: boolean,
-  options: NxRuntimeOptions,
+  evaluation: Evaluation,
 ): Record<string, NxCanonicalValue> {
   const known = new Set(fields.map((field) => field.name));
   for (const key of Object.keys(input)) {
@@ -3427,7 +4587,7 @@ function normalizeFields(
   // The host's limits hold while a default is evaluated too: a `forRange` in a field default is as
   // much of a loop as one in a body, and a host that lowered the limit to bound untrusted IR means
   // it everywhere.
-  const context: EvalContext = { program, linked, declaration, frame, options, depth: 0 };
+  const context: EvalContext = { program, linked, declaration, frame, evaluation, depth: 0 };
   const firstSlot = frame.length;
   const output: Record<string, NxCanonicalValue> = {};
   fields.forEach((field, offset) => {
@@ -3435,7 +4595,12 @@ function normalizeFields(
     if (Object.prototype.hasOwnProperty.call(input, field.name)) {
       value = normalizeValue(context, field.ty, input[field.name]!, `${path}.${field.name}`);
     } else if (!requireExplicit && field.default >= 0) {
-      value = normalizeValue(context, field.ty, evalNode(field.default, context), `${path}.${field.name}`);
+      try {
+        value = normalizeValue(context, field.ty, evalNode(field.default, context), `${path}.${field.name}`);
+      } catch (error) {
+        evaluation.defaultFailed = true;
+        throw error;
+      }
     } else if (!field.isRequired && admitsEmpty(field.ty)) {
       value = [];
     } else {
@@ -3528,6 +4693,10 @@ function normalizeValue(context: EvalContext, ty: PreparedType, value: NxCanonic
         : `Expected ${path} to hold one value, got a sequence of ${value.length}.`,
     );
   }
+  // Checking one value against the type it is to have costs one operation, charged before the
+  // check: a record's fields are values of their own, and so are a sequence's items, which is why
+  // a sequence type costs nothing above.
+  charge(context, undefined, 1);
   if (value === null) {
     fail("nx-ir-boundary-type", `Expected ${path} to hold a value, got null.`);
   }
@@ -3536,10 +4705,13 @@ function normalizeValue(context: EvalContext, ty: PreparedType, value: NxCanonic
       return normalizePrimitiveValue(ty.name, value, path);
     case "nominal":
       return normalizeNominalValue(context, ty, value, path);
-    case "function": {
+    case "function":
+    case "anyFunction": {
       // A function value from the program is already a reference; one from a host is the
       // canonical record, resolved to the declaration it names. The checker related the value's
-      // declaration to the type by name, so no parameter is re-checked here.
+      // declaration to the type by name, so no parameter is re-checked here, and at a function
+      // reference type, `<function ... />: R`, neither is the result: any function of the linked
+      // program is accepted.
       if (isFunctionReference(value)) {
         return value;
       }
@@ -3645,7 +4817,7 @@ function normalizeNominalValue(
           [],
           path,
           false,
-          context.options,
+          context.evaluation,
         ),
       };
     }
@@ -3661,7 +4833,7 @@ function normalizeNominalValue(
     const { $type: _discard, ...rest } = object;
     return {
       $type: display,
-      ...normalizeFields(context.program, linked, declaration, kind.fields, rest, [], path, false, context.options),
+      ...normalizeFields(context.program, linked, declaration, kind.fields, rest, [], path, false, context.evaluation),
     };
   }
   if (kind.tag === "union") {
@@ -3690,7 +4862,7 @@ function normalizeNominalValue(
     const { $type: _discard, ...rest } = object;
     return {
       $type: typeName,
-      ...normalizeFields(context.program, linked, declaration, unionCase.fields, rest, [], path, false, context.options),
+      ...normalizeFields(context.program, linked, declaration, unionCase.fields, rest, [], path, false, context.evaluation),
     };
   }
   return value;
@@ -3792,11 +4964,13 @@ function evalBinary(
       if (typeof lhs !== "string" || typeof rhs !== "string") {
         fail("nx-ir-operator", "Operator 'concat' requires string operands.", context, nodeIndex);
       }
+      // One operation per 64 UTF-16 code units of the result, charged before it is built.
+      charge(context, nodeIndex, Math.floor((lhs.length + rhs.length) / TEXT_UNITS));
       return lhs + rhs;
     case "eq":
-      return valuesEqual(lhs, rhs);
+      return valuesEqual(lhs, rhs, budgeted(context), nodeIndex);
     case "ne":
-      return !valuesEqual(lhs, rhs);
+      return !valuesEqual(lhs, rhs, budgeted(context), nodeIndex);
     case "lt":
       return number(lhs) < number(rhs);
     case "le":
@@ -3838,7 +5012,7 @@ export function float32Text(value: number): string {
  *
  * For every type but `float32` that form is what `String()` prints for the carried value, which
  * is the ECMAScript number-to-string conversion the form is defined as. An integer outside the
- * safe range is carried as its digits and prints as them.
+ * safe range never reaches it: the runtime refuses one where it reads it.
  */
 function primitiveText(context: EvalContext, nodeIndex: number, value: NxCanonicalValue, type: string): string {
   const refuse = (): never =>
@@ -3853,16 +5027,7 @@ function primitiveText(context: EvalContext, nodeIndex: number, value: NxCanonic
     case "int":
     case "int32":
     case "int64":
-      if (typeof value === "number") {
-        return String(value);
-      }
-      if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-        const wide = value as { readonly $type?: unknown; readonly value?: unknown };
-        if (wide.$type === "nx.int" && typeof wide.value === "string") {
-          return wide.value;
-        }
-      }
-      return refuse();
+      return typeof value === "number" ? String(value) : refuse();
     default:
       return fail("nx-ir-operator", `A text conversion names '${type}', which has no text form.`, context, nodeIndex);
   }
@@ -3918,16 +5083,17 @@ function optionalItem(value: NxCanonicalValue): NxCanonicalValue | undefined {
 /**
  * Whether a match arm's pattern matches the scrutinee. The `{}` pattern — the empty value —
  * matches exactly the empty value; a record pattern matches by `$type`; anything else by the
- * language's equality.
+ * language's equality, which is the one of the three that walks the values and so the one the
+ * pattern's node pays for.
  */
-function patternMatches(value: NxCanonicalValue, pattern: NxCanonicalValue): boolean {
+function patternMatches(value: NxCanonicalValue, pattern: NxCanonicalValue, context: EvalContext, nodeIndex: number): boolean {
   if (isEmptyValue(pattern) || isEmptyValue(value)) {
     return isEmptyValue(pattern) && isEmptyValue(value);
   }
   if (isObject(value) && isObject(pattern) && typeof pattern.$type === "string") {
     return value.$type === pattern.$type;
   }
-  return valuesEqual(value, pattern);
+  return valuesEqual(value, pattern, budgeted(context), nodeIndex);
 }
 
 function isFunctionReference(value: unknown): value is FunctionReferenceValue {
@@ -3951,6 +5117,11 @@ function isObject(value: unknown): value is Record<string, NxCanonicalValue> {
  */
 function fail(code: string, message: string, context?: EvalContext, nodeIndex?: number): never {
   throw new NxIrRuntimeError([diagnostic(code, message, context, nodeIndex)]);
+}
+
+/** Raises an `nx-ir-resource-limit` diagnostic that carries the limit reached. */
+function failLimit(limit: NxIrLimit, message: string, context?: EvalContext, nodeIndex?: number): never {
+  throw new NxIrRuntimeError([{ ...diagnostic("nx-ir-resource-limit", message, context, nodeIndex), limit }]);
 }
 
 function diagnostic(code: string, message: string, context?: EvalContext, nodeIndex?: number): NxIrDiagnostic {

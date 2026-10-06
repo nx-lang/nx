@@ -2002,7 +2002,14 @@ impl LoweringContext {
                 self.rejected_type_parameters
                     .borrow_mut()
                     .truncate(enclosing);
-                TypeRef::function(params, return_type)
+                // `...` leaves the parameters unspecified. Beside parameters it is a validation
+                // error, and the type stays the function reference type so that the one report
+                // is not followed by a parameter mismatch.
+                if node.child_by_field("ellipsis").is_some() {
+                    TypeRef::any_function(return_type)
+                } else {
+                    TypeRef::function(params, return_type)
+                }
             }
             SyntaxKind::APPLIED_TYPE => {
                 // The tag goes through the same bare-name resolution a written type name does,
@@ -3399,6 +3406,69 @@ type Mode = light | dark"#;
                 assert!(names.contains(&"west"));
             }
             other => panic!("Expected union definition, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_lower_function_reference_type() {
+        let source = r#"
+            type Any = <function ... />: object*
+            type Maybe = <function ... />: string?
+            type Many = (<function ... />: string)+
+            type Higher = <function Fn:<function ... />: Args />: <function ... />: string
+            type Mixed = <function Item:string ... />: string
+        "#;
+        let parse_result = parse_str(source, "types.nx");
+        let tree = parse_result.tree.expect("Should parse");
+        let module = lower(tree.root(), SourceId::new(0));
+        let alias = |name: &str| {
+            module
+                .items()
+                .iter()
+                .find_map(|item| match item {
+                    Item::TypeAlias(alias) if alias.name.as_str() == name => Some(alias.ty.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("alias {name} should lower"))
+        };
+
+        assert_eq!(
+            alias("Any"),
+            TypeRef::any_function(TypeRef::zero_or_more(TypeRef::name("object")))
+        );
+        assert_eq!(
+            alias("Maybe"),
+            TypeRef::any_function(TypeRef::optional(TypeRef::name("string")))
+        );
+        assert_eq!(
+            alias("Many"),
+            TypeRef::one_or_more(TypeRef::any_function(TypeRef::name("string")))
+        );
+        assert_eq!(
+            alias("Higher"),
+            TypeRef::function(
+                vec![FunctionParam::new(
+                    "Fn",
+                    TypeRef::any_function(TypeRef::name("Args"))
+                )],
+                TypeRef::any_function(TypeRef::name("string")),
+            )
+        );
+        // Validation reports the mix; lowering keeps the type a function reference type.
+        assert_eq!(
+            alias("Mixed"),
+            TypeRef::any_function(TypeRef::name("string"))
+        );
+        for (name, spelled) in [
+            ("Any", "<function ... />: object*"),
+            ("Maybe", "<function ... />: string?"),
+            ("Many", "(<function ... />: string)+"),
+            (
+                "Higher",
+                "<function Fn:<function ... />: Args />: <function ... />: string",
+            ),
+        ] {
+            assert_eq!(crate::ast::spell_type_ref(&alias(name)), spelled);
         }
     }
 

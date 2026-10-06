@@ -1,0 +1,402 @@
+{
+  "method": {
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "m": {
+          "$ref": "#/$defs/HttpMethod",
+          "default": "get"
+        }
+      },
+      "additionalProperties": false,
+      "$defs": {
+        "HttpMethod": {
+          "type": "string",
+          "enum": [
+            "get",
+            "post",
+            "put",
+            "patch",
+            "delete"
+          ]
+        }
+      }
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$ref": "#/$defs/HttpMethod",
+      "$defs": {
+        "HttpMethod": {
+          "type": "string",
+          "enum": [
+            "get",
+            "post",
+            "put",
+            "patch",
+            "delete"
+          ]
+        }
+      }
+    },
+    "diagnostics": []
+  },
+  "fail": {
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$ref": "#/$defs/LoadState",
+      "$defs": {
+        "LoadState": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "idle"
+              ]
+            },
+            {
+              "$ref": "#/$defs/LoadState.failed"
+            }
+          ]
+        },
+        "LoadState.failed": {
+          "type": "object",
+          "properties": {
+            "$type": {
+              "const": "LoadState.failed"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "$type",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "diagnostics": []
+  },
+  "idle": {
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$ref": "#/$defs/LoadState",
+      "$defs": {
+        "LoadState": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "idle"
+              ]
+            },
+            {
+              "$ref": "#/$defs/LoadState.failed"
+            }
+          ]
+        },
+        "LoadState.failed": {
+          "type": "object",
+          "properties": {
+            "$type": {
+              "const": "LoadState.failed"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "$type",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "diagnostics": []
+  },
+  "state": {
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "s": {
+          "$ref": "#/$defs/LoadState"
+        }
+      },
+      "required": [
+        "s"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "LoadState": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "idle"
+              ]
+            },
+            {
+              "$ref": "#/$defs/LoadState.failed"
+            }
+          ]
+        },
+        "LoadState.failed": {
+          "type": "object",
+          "properties": {
+            "$type": {
+              "const": "LoadState.failed"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "$type",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$ref": "#/$defs/LoadState",
+      "$defs": {
+        "LoadState": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "idle"
+              ]
+            },
+            {
+              "$ref": "#/$defs/LoadState.failed"
+            }
+          ]
+        },
+        "LoadState.failed": {
+          "type": "object",
+          "properties": {
+            "$type": {
+              "const": "LoadState.failed"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "$type",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "diagnostics": []
+  },
+  "closed": {
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$ref": "#/$defs/UiEvent",
+      "$defs": {
+        "UiEvent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UiEvent.clicked"
+            },
+            {
+              "$ref": "#/$defs/UiEvent.closed"
+            }
+          ]
+        },
+        "UiEvent.clicked": {
+          "type": "object",
+          "properties": {
+            "$type": {
+              "const": "UiEvent.clicked"
+            },
+            "source": {
+              "type": "string",
+              "default": "ui"
+            },
+            "x": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "$type",
+            "source",
+            "x"
+          ],
+          "additionalProperties": false
+        },
+        "UiEvent.closed": {
+          "type": "object",
+          "properties": {
+            "$type": {
+              "const": "UiEvent.closed"
+            },
+            "source": {
+              "type": "string",
+              "default": "ui"
+            }
+          },
+          "required": [
+            "$type",
+            "source"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "diagnostics": []
+  },
+  "event": {
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "e": {
+          "$ref": "#/$defs/UiEvent"
+        }
+      },
+      "required": [
+        "e"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "UiEvent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UiEvent.clicked"
+            },
+            {
+              "$ref": "#/$defs/UiEvent.closed"
+            }
+          ]
+        },
+        "UiEvent.clicked": {
+          "type": "object",
+          "properties": {
+            "$type": {
+              "const": "UiEvent.clicked"
+            },
+            "source": {
+              "type": "string",
+              "default": "ui"
+            },
+            "x": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "$type",
+            "x"
+          ],
+          "additionalProperties": false
+        },
+        "UiEvent.closed": {
+          "type": "object",
+          "properties": {
+            "$type": {
+              "const": "UiEvent.closed"
+            },
+            "source": {
+              "type": "string",
+              "default": "ui"
+            }
+          },
+          "required": [
+            "$type"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$ref": "#/$defs/UiEvent",
+      "$defs": {
+        "UiEvent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UiEvent.clicked"
+            },
+            {
+              "$ref": "#/$defs/UiEvent.closed"
+            }
+          ]
+        },
+        "UiEvent.clicked": {
+          "type": "object",
+          "properties": {
+            "$type": {
+              "const": "UiEvent.clicked"
+            },
+            "source": {
+              "type": "string",
+              "default": "ui"
+            },
+            "x": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "$type",
+            "source",
+            "x"
+          ],
+          "additionalProperties": false
+        },
+        "UiEvent.closed": {
+          "type": "object",
+          "properties": {
+            "$type": {
+              "const": "UiEvent.closed"
+            },
+            "source": {
+              "type": "string",
+              "default": "ui"
+            }
+          },
+          "required": [
+            "$type",
+            "source"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "diagnostics": []
+  }
+}

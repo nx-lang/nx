@@ -1,0 +1,16 @@
+{
+  "entry": "main.nx",
+  "implicitImports": [
+    "@nx/agent"
+  ],
+  "emit": [
+    "main.nx",
+    "@nx/agent/agent.nx"
+  ],
+  "entrypoints": [
+    {
+      "module": "main.nx",
+      "function": "root"
+    }
+  ]
+}

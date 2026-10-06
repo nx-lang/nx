@@ -14,6 +14,14 @@ pub struct CodegenProgram {
     pub entrypoints: Vec<CodegenEntrypoint>,
     pub component_entrypoints: Vec<CodegenEntrypoint>,
     pub source_entries: Vec<CodegenSourceEntry>,
+    /// The modules that declare a concrete subtype of an abstract record a function of the program
+    /// takes or returns, by identity, in the program's module order.
+    ///
+    /// <para>The entry module's image lists them in its module table beside the modules it
+    /// references, so a runtime that links the program from its entry can resolve every subtype a
+    /// host may name by `$type` at such a site, including one declared in a module nothing
+    /// references.</para>
+    pub boundary_subtype_modules: Vec<String>,
 }
 
 impl CodegenProgram {
@@ -190,6 +198,10 @@ pub enum CodegenTypeRef {
     },
     Function {
         params: Vec<CodegenFunctionParam>,
+        return_type: Box<CodegenTypeRef>,
+    },
+    /// A function type whose parameters are not stated, `<function ... />: R`.
+    AnyFunction {
         return_type: Box<CodegenTypeRef>,
     },
 }

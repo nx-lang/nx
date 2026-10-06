@@ -1,0 +1,21 @@
+{
+  "first": [
+    {
+      "args": {},
+      "result": {
+        "$type": "Page",
+        "items": [{ "$type": "Plan", "name": "a" }],
+        "total": 1
+      }
+    }
+  ],
+  "total": [
+    {
+      "args": {
+        "plans": { "items": [{ "name": "a" }], "total": 1 },
+        "names": { "items": ["b"], "total": 2 }
+      },
+      "result": 3
+    }
+  ]
+}

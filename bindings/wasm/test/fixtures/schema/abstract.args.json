@@ -1,0 +1,8 @@
+{
+  "describe": [
+    { "args": { "shape": { "$type": "Circle", "r": 1 } } },
+    { "args": { "shape": { "$type": "Square", "side": 2, "label": "s" } } }
+  ],
+  "unit": [{ "args": {}, "result": { "$type": "Circle", "r": 1 } }],
+  "exact": [{ "args": { "circle": { "$type": "Circle", "r": 2 }, "shape": { "$type": "Square", "side": 1 } } }]
+}

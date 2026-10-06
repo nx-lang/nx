@@ -1,0 +1,52 @@
+type Plan = { name:string seats:int monthlyPrice:int }
+type NewTicket = { subject:string priority:int }
+
+let companyName = "Example"
+
+/// Finds the plans that fit a team.
+let findPlans(
+  /// Number of people who need a seat.
+  teamSize: int,
+  /// Upper price limit per month, in dollars.
+  maxMonthlyPrice?: int
+): Plan* = { <Plan name="Team" seats={teamSize} monthlyPrice=20 /> }
+
+let refundPolicy =
+  <Document:markdown title="Refund policy">
+    Refunds are available within 30 days of purchase.
+  </Document>
+
+let shop = <HttpConnection name="shop" baseUrl="https://api.example.com" />
+
+/// Looks up one order and returns its status.
+let lookupOrder(
+  /// The order number from the customer's confirmation email.
+  orderId: string
+): HttpArguments =
+  <HttpArguments pathParams={ <HttpParam name="orderId" value={orderId} /> } />
+
+/// Opens a support ticket for the customer.
+let openTicket(
+  /// A one-line summary of the problem.
+  subject: string
+): HttpArguments =
+  <HttpArguments body={ <NewTicket subject={subject} priority=2 /> } />
+
+let supportTools: Tool+ = {
+  <WebSearchTool allowedDomains={ "docs.example.com" } />
+  <FunctionTool function={findPlans} />
+  <HttpTool connection={shop} method={HttpMethod.get}
+            path="/orders/{orderId}" arguments={lookupOrder} />
+  <HttpTool connection={shop} method={HttpMethod.post}
+            path="/tickets" arguments={openTicket} maxCallsPerConversation=1 />
+}
+
+let supportAgent =
+  <Agent:markdown name="support" model="balanced"
+      documents={ refundPolicy } tools={supportTools}
+      limits={ <AgentLimits maxSteps=6 /> }>
+    You are the support assistant for @{companyName}.
+    Answer from the documents and the documentation site. Offer a call when you cannot help.
+  </Agent>
+
+let root(): Agent = { supportAgent }

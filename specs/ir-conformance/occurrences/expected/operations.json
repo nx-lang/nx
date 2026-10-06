@@ -1,0 +1,23 @@
+{
+  "counts": {
+    "main.nx::ada": 5,
+    "main.nx::anonymous": 18,
+    "main.nx::cleared": 4,
+    "main.nx::clearedNick": 12,
+    "main.nx::has": 32,
+    "main.nx::hasNot": 14,
+    "main.nx::isNotTagged": 14,
+    "main.nx::isTagged": 32,
+    "main.nx::lone": 11,
+    "main.nx::name": 32,
+    "main.nx::named": 35,
+    "main.nx::noName": 12,
+    "main.nx::noNick": 30,
+    "main.nx::renamed": 5,
+    "main.nx::root": 26,
+    "main.nx::several": 19,
+    "main.nx::withAuthor": 24,
+    "main.nx::withoutAuthor": 5,
+    "main.nx::writtenEmpty": 7
+  }
+}

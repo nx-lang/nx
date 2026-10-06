@@ -1,0 +1,66 @@
+{
+  "name": "@nx-lang/agent",
+  "version": "0.1.0",
+  "description": "Unstable. Turns an evaluated NX Agent value into tool definitions a host stores, and into tools it runs over @nx-lang/ir-runtime, with an AI SDK adapter.",
+  "license": "MIT",
+  "homepage": "https://nxlang.org",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nx-lang/nx.git",
+    "directory": "packages/agent"
+  },
+  "type": "module",
+  "files": [
+    "dist",
+    "!dist/test",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    },
+    "./normalize": {
+      "types": "./dist/src/normalize.d.ts",
+      "import": "./dist/src/normalize.js"
+    },
+    "./execute": {
+      "types": "./dist/src/execute.d.ts",
+      "import": "./dist/src/execute.js"
+    },
+    "./ai-sdk": {
+      "types": "./dist/src/ai-sdk.d.ts",
+      "import": "./dist/src/ai-sdk.js"
+    }
+  },
+  "types": "./dist/src/index.d.ts",
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.json && node --no-warnings --test \"dist/test/**/*.test.js\"",
+    "prepack": "pnpm run build",
+    "verify:package": "node ../../scripts/verify-package.mjs"
+  },
+  "dependencies": {
+    "@nx-lang/ir-runtime": "workspace:*"
+  },
+  "peerDependencies": {
+    "ai": "^7.0.0"
+  },
+  "peerDependenciesMeta": {
+    "ai": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@nx-lang/sdk-wasm": "workspace:*",
+    "@types/node": "^22.20.0",
+    "ai": "^7.0.0",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

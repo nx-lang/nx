@@ -3,9 +3,15 @@
  * prepared, linked where its module table requires, and evaluated, and each named entrypoint's
  * canonical value must equal the result the interpreter recorded. Each lifecycle is initialized
  * and its batches dispatched in order, and every rendered output, tokens included, and every
- * effect list must equal what the interpreter recorded.
+ * effect list must equal what the interpreter recorded. An entrypoint that names arguments, a
+ * case, is evaluated with them, and its recorded result is the Rust runtime's. Every evaluation
+ * must cost exactly the operations recorded for it, stop where the recorded failures say a smaller
+ * budget stops it, and have exactly the input size recorded for it, where one is; and the usage
+ * report must give the recorded numbers. A case marked as one that fails must fail with the code
+ * the Rust runtime's diagnostic had and name the argument it named, or none; and a call a limit
+ * refuses names no argument.
  */
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -37,7 +43,11 @@ function loadCorpus() {
         strippedArtifacts.set(identity, new Uint8Array(readFileSync(join(dir, "expected", `${file}.stripped.nxir`))));
       }
       const results = JSON.parse(readFileSync(join(dir, "expected", "results.json"), "utf8"));
-      return { name, manifest, artifacts, strippedArtifacts, results };
+      const operations = JSON.parse(readFileSync(join(dir, "expected", "operations.json"), "utf8"));
+      // Only a program with a case marked as one that fails has recorded diagnostics.
+      const diagnosticsPath = join(dir, "expected", "diagnostics.json");
+      const diagnostics = existsSync(diagnosticsPath) ? JSON.parse(readFileSync(diagnosticsPath, "utf8")) : {};
+      return { name, manifest, artifacts, strippedArtifacts, results, diagnostics, operations };
     });
 }
 
@@ -52,6 +62,127 @@ function stableJson(value) {
     return `{${entries.join(",")}}`;
   }
   return JSON.stringify(value);
+}
+
+/**
+ * Whether a call failed on the limit `name`, with a diagnostic that names no argument: a limit is
+ * not in a value the host passed, wherever it is reached.
+ */
+function stoppedBy(error, name) {
+  const diagnostic = error instanceof NxIrRuntimeError ? error.diagnostics[0] : undefined;
+  return diagnostic?.limit?.name === name && diagnostic.argument === undefined;
+}
+
+/**
+ * Checks that an evaluation costs exactly `recorded` operations: under that budget it succeeds,
+ * and under one less it fails on the budget.
+ */
+function checkCount(what, recorded, run) {
+  if (!Number.isSafeInteger(recorded)) {
+    throw new Error(`${what}: no operation count is recorded (found ${JSON.stringify(recorded)})`);
+  }
+  try {
+    run({ maxOperations: recorded });
+  } catch (error) {
+    throw new Error(`${what} fails under its recorded count of ${recorded} operations: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (recorded === 0) {
+    return;
+  }
+  try {
+    run({ maxOperations: recorded - 1 });
+  } catch (error) {
+    if (stoppedBy(error, "maxOperations")) {
+      return;
+    }
+    throw new Error(`${what} under ${recorded - 1} operations, one less than recorded, fails otherwise than on the budget, or names an argument: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  throw new Error(`${what} succeeds under ${recorded - 1} operations, one less than recorded`);
+}
+
+/**
+ * The key an entrypoint's result, count, failures and input size are kept under:
+ * `identity::function`, and `identity::function#case` for a case, an entrypoint with arguments.
+ * The two members go together.
+ */
+function entrypointKey(program, entrypoint) {
+  if ((entrypoint.arguments === undefined) !== (entrypoint.case === undefined)) {
+    throw new Error(`${program.name} ${entrypoint.module}::${entrypoint.function}: \`arguments\` and \`case\` go together`);
+  }
+  // `fails` is a boolean, and leaving it out is `false`, as the Rust readers of the corpus have it.
+  if (entrypoint.fails !== undefined && typeof entrypoint.fails !== "boolean") {
+    throw new Error(`${program.name} ${entrypoint.module}::${entrypoint.function}: \`fails\` is \`true\` or \`false\``);
+  }
+  if (entrypoint.fails && entrypoint.arguments === undefined) {
+    throw new Error(`${program.name} ${entrypoint.module}::${entrypoint.function}: only a case is marked \`fails\``);
+  }
+  const key = `${entrypoint.module}::${entrypoint.function}`;
+  return entrypoint.case === undefined ? key : `${key}#${entrypoint.case}`;
+}
+
+/**
+ * The options an evaluation is compared with its recorded result under: an input limit equal to
+ * its recorded input size where one is recorded, so that the size is shown to admit the call and
+ * yield the result, and none otherwise.
+ */
+function underRecordedSize(recorded) {
+  return recorded === undefined ? {} : { maxInputSize: recorded };
+}
+
+/**
+ * Checks that an evaluation's input has exactly the `recorded` size, where one is recorded: the
+ * call is refused for its input under a limit one less. That it proceeds under the size itself is
+ * checked where its result is compared.
+ */
+function checkInputSize(what, recorded, run) {
+  if (recorded === undefined || recorded === 0) {
+    return;
+  }
+  try {
+    run({ maxInputSize: recorded - 1 });
+  } catch (error) {
+    if (stoppedBy(error, "maxInputSize")) {
+      return;
+    }
+    throw new Error(`${what} under an input limit of ${recorded - 1}, one less than its recorded input size, fails otherwise than on the limit, or names an argument: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  throw new Error(`${what} proceeds under an input limit of ${recorded - 1}, one less than its recorded input size`);
+}
+
+/**
+ * Checks that a case marked as one that fails fails with the `recorded` diagnostic: its code, and
+ * the argument it names or none. Nothing else is recorded for such a case.
+ */
+function checkFails(recorded, run) {
+  let value;
+  try {
+    value = run({});
+  } catch (error) {
+    if (!(error instanceof NxIrRuntimeError)) {
+      throw error;
+    }
+    const actual = error.diagnostics.map(({ code, argument }) => ({ code, argument }));
+    if (stableJson(actual) !== stableJson([{ code: recorded?.code, argument: recorded?.argument }])) {
+      throw new Error(`expected to fail with ${stableJson(recorded)}, got ${stableJson(actual)}: ${error.message}`);
+    }
+    return;
+  }
+  throw new Error(`is marked \`fails\` and gives ${stableJson(value)}`);
+}
+
+/**
+ * Checks that the usage report of an evaluation gives its recorded operation count and, where one
+ * is recorded, its input size, under a budget and a limit it cannot reach.
+ */
+function checkUsage(what, count, inputSize, run) {
+  const usage = {};
+  run({ maxOperations: 2 ** 40, maxInputSize: 2 ** 40, usage });
+  if (usage.operations !== count) {
+    throw new Error(`${what}: the usage report gives ${usage.operations} operations, and ${count} are recorded`);
+  }
+  if (inputSize !== undefined && usage.inputSize !== inputSize) {
+    throw new Error(`${what}: the usage report gives an input size of ${usage.inputSize}, and ${inputSize} is recorded`);
+  }
 }
 
 let failures = 0;
@@ -71,15 +202,28 @@ for (const program of loadCorpus()) {
     // incidentally but genuinely. Adding the prelude to `modules` would remove that silently.
     const resolve = (identity) => modules.get(identity);
     for (const entrypoint of program.manifest.entrypoints) {
-      const label = `${program.name} (${variant}) ${entrypoint.module}::${entrypoint.function}`;
+      let label = `${program.name} (${variant}) ${entrypoint.module}::${entrypoint.function}`;
       try {
+        const key = entrypointKey(program, entrypoint);
+        label = `${program.name} (${variant}) ${key}`;
         const module = modules.get(entrypoint.module);
         if (module === undefined) {
           throw new Error(`the corpus emits no artifact for ${entrypoint.module}`);
         }
         const linked = linkNxIrProgram(module, { resolve });
-        const actual = evaluateFunction(linked, entrypoint.function);
-        const expected = program.results[`${entrypoint.module}::${entrypoint.function}`];
+        const run = (options) => evaluateFunction(linked, entrypoint.function, entrypoint.arguments ?? [], options);
+        if (entrypoint.fails) {
+          checkFails(program.diagnostics[key], run);
+          console.log(`ok - ${label} fails as recorded`);
+          continue;
+        }
+        const count = program.operations.counts[key];
+        const inputSize = program.operations.inputSizes?.[key];
+        checkCount("the evaluation", count, run);
+        checkInputSize("the evaluation", inputSize, run);
+        checkUsage("the evaluation", count, inputSize, run);
+        const actual = run(underRecordedSize(inputSize));
+        const expected = program.results[key];
         if (stableJson(actual) !== stableJson(expected)) {
           throw new Error(`expected ${stableJson(expected)}, got ${stableJson(actual)}`);
         }
@@ -97,17 +241,29 @@ for (const program of loadCorpus()) {
           throw new Error(`the corpus emits no artifact for ${lifecycle.module}`);
         }
         const linked = linkNxIrProgram(module, { resolve });
-        const expected = program.results[`${lifecycle.module}::${lifecycle.component}`];
+        const key = `${lifecycle.module}::${lifecycle.component}`;
+        const expected = program.results[key];
+        const counts = program.operations.counts[key] ?? {};
+        const inputSizes = program.operations.inputSizes?.[key] ?? {};
         const expect = (what, actual, wanted) => {
           if (stableJson(actual) !== stableJson(wanted)) {
             throw new Error(`${what}: expected ${stableJson(wanted)}, got ${stableJson(actual)}`);
           }
         };
-        const initialized = initializeComponent(linked, lifecycle.component, lifecycle.props ?? {});
+        const initialize = (options) => initializeComponent(linked, lifecycle.component, lifecycle.props ?? {}, options);
+        checkCount("initialization", counts.initial, initialize);
+        checkInputSize("initialization", inputSizes.initial, initialize);
+        checkUsage("initialization", counts.initial, inputSizes.initial, initialize);
+        const initialized = initialize(underRecordedSize(inputSizes.initial));
         expect("initial rendered output", initialized.rendered, expected.initial);
         let instance = initialized.instance;
         lifecycle.batches.forEach((batch, index) => {
-          const dispatched = dispatchComponentActions(linked, instance, batch);
+          const dispatch = (options) => dispatchComponentActions(linked, instance, batch, options);
+          const inputSize = inputSizes.batches?.[index];
+          checkCount(`batch ${index}`, counts.batches?.[index], dispatch);
+          checkInputSize(`batch ${index}`, inputSize, dispatch);
+          checkUsage(`batch ${index}`, counts.batches?.[index], inputSize, dispatch);
+          const dispatched = dispatch(underRecordedSize(inputSize));
           expect(`batch ${index} rendered output`, dispatched.rendered, expected.batches[index].rendered);
           expect(`batch ${index} effects`, dispatched.effects, expected.batches[index].effects);
           instance = dispatched.instance;
@@ -119,6 +275,50 @@ for (const program of loadCorpus()) {
       }
     }
   }
+}
+
+// A budget below an evaluation's count stops it at the node the corpus records: the same
+// declaration and, from the image with its debug section, the same span. Equal counts alone do not
+// show that two runtimes charge in the same order; these do.
+let recordedFailures = 0;
+for (const program of loadCorpus()) {
+  const modules = new Map([...program.artifacts].map(([identity, image]) => [identity, prepareNxIrModule(image)]));
+  const resolve = (identity) => modules.get(identity);
+  for (const [key, records] of Object.entries(program.operations.failures ?? {})) {
+    // A key is `identity::function`, or `identity::function#case` for a case, whose arguments
+    // are the entrypoint's: the entrypoint is found by its key, not by parsing the key.
+    const entrypoint = program.manifest.entrypoints.find((candidate) => entrypointKey(program, candidate) === key);
+    if (entrypoint === undefined) {
+      failures += 1;
+      console.log(`not ok - ${program.name}: failures are recorded for ${key}, which is no entrypoint`);
+      continue;
+    }
+    const linked = linkNxIrProgram(modules.get(entrypoint.module), { resolve });
+    for (const record of records) {
+      recordedFailures += 1;
+      const label = `${program.name} ${key} under ${record.budget} operations`;
+      try {
+        evaluateFunction(linked, entrypoint.function, entrypoint.arguments ?? [], { maxOperations: record.budget });
+        failures += 1;
+        console.log(`not ok - ${label}: succeeds`);
+      } catch (error) {
+        const diagnostic = error instanceof NxIrRuntimeError ? error.diagnostics[0] : undefined;
+        // A budget that runs out while an argument is checked is still not in the argument.
+        const actual = stableJson({ argument: diagnostic?.argument, declaration: diagnostic?.declaration, limit: diagnostic?.limit, source: diagnostic?.source });
+        const wanted = stableJson({ argument: undefined, declaration: record.declaration, limit: { name: "maxOperations", value: record.budget }, source: record.source });
+        if (actual === wanted) {
+          console.log(`ok - ${label} stops at its recorded node`);
+        } else {
+          failures += 1;
+          console.log(`not ok - ${label}: expected ${wanted}, got ${error instanceof NxIrRuntimeError ? actual : String(error)}`);
+        }
+      }
+    }
+  }
+}
+if (recordedFailures === 0) {
+  failures += 1;
+  console.log("not ok - the corpus records no failures");
 }
 
 // Damage: every corpus image cut at every four-byte boundary, and every cell of the smallest one
@@ -146,9 +346,7 @@ console.log(`ok - ${refusedTruncations} truncated images refused`);
 const subject = images
   .filter(({ program, identity }) => program.manifest.entrypoints.some((entrypoint) => entrypoint.module === identity))
   .reduce((best, candidate) => (candidate.image.byteLength < best.image.byteLength ? candidate : best));
-const subjectEntrypoints = subject.program.manifest.entrypoints
-  .filter((entrypoint) => entrypoint.module === subject.identity)
-  .map((entrypoint) => entrypoint.function);
+const subjectEntrypoints = subject.program.manifest.entrypoints.filter((entrypoint) => entrypoint.module === subject.identity);
 const intactModules = new Map([...subject.program.strippedArtifacts].map(([identity, image]) => [identity, prepareNxIrModule(image)]));
 let opened = 0;
 let refused = 0;
@@ -171,10 +369,10 @@ for (let offset = 0; offset < subject.image.byteLength; offset += 4) {
       continue;
     }
     opened += 1;
-    for (const name of subjectEntrypoints) {
+    for (const { function: name, arguments: args } of subjectEntrypoints) {
       try {
         const linked = linkNxIrProgram(result.value, { resolve: (identity) => intactModules.get(identity) });
-        evaluateFunction(linked, name);
+        evaluateFunction(linked, name, args ?? []);
         evaluated += 1;
       } catch (error) {
         if (error instanceof NxIrRuntimeError) {

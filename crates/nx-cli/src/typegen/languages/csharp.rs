@@ -87,6 +87,10 @@ pub(crate) fn collect_warnings(graph: &ExportedTypeGraph, namespace: &str) -> Ve
             if !imported_type_uses_dependency_namespace(imported_type) {
                 continue;
             }
+            // A standard library's namespace is fixed, not assumed.
+            if nx_api::standard_library_entry(&imported_type.library_name).is_some() {
+                continue;
+            }
 
             let assumed_namespace =
                 assumed_dependency_namespace_for_library(namespace, &imported_type.library_name);
@@ -1779,7 +1783,7 @@ fn csharp_type_inner(
         // serializes (MessagePack has no formatter for it, which breaks the whole containing type,
         // and `System.Text.Json` refuses it outright) nor carries the declaration. `NxFunctionRef`
         // is the `Function` record the runtime renders, as `NxActionHandlerRef` is for a handler.
-        TypeRef::Function { .. } => CSharpType {
+        TypeRef::Function { .. } | TypeRef::AnyFunction { .. } => CSharpType {
             text: "global::NxLang.Nx.NxFunctionRef".to_string(),
             is_reference: true,
             is_nullable: false,
@@ -2007,7 +2011,7 @@ fn csharp_imported_alias_target_type(
                 is_nullable: false,
             }
         }
-        TypeRef::Function { .. } => CSharpType {
+        TypeRef::Function { .. } | TypeRef::AnyFunction { .. } => CSharpType {
             text: "global::NxLang.Nx.NxFunctionRef".to_string(),
             is_reference: true,
             is_nullable: false,
@@ -2195,7 +2199,7 @@ fn imported_type_uses_dependency_namespace(imported_type: &ImportedType) -> bool
 fn imported_alias_target_uses_dependency_namespace(ty: &TypeRef) -> bool {
     match ty {
         TypeRef::Seq { inner, .. } => imported_alias_target_uses_dependency_namespace(inner),
-        TypeRef::Function { .. } => false,
+        TypeRef::Function { .. } | TypeRef::AnyFunction { .. } => false,
         TypeRef::Applied { name, .. } | TypeRef::Name(name) => !matches!(
             name.as_str(),
             "string"
@@ -2215,6 +2219,11 @@ fn imported_alias_target_uses_dependency_namespace(ty: &TypeRef) -> bool {
 // Cross-library C# references currently assume sibling namespaces derived from dependency
 // directory names because nx modules do not publish an explicit external namespace mapping yet.
 fn assumed_dependency_namespace_for_library(current_namespace: &str, library_name: &str) -> String {
+    // A standard library's contracts live in one namespace, whatever namespace the host's own
+    // libraries are generated into.
+    if let Some(library) = nx_api::standard_library_entry(library_name) {
+        return library.csharp_namespace.to_string();
+    }
     let dependency_segment = sanitize_csharp_member_name(library_name);
     let mut namespace_parts = current_namespace
         .split('.')

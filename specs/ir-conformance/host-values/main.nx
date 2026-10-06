@@ -1,0 +1,57 @@
+// Host values: entrypoints evaluated with arguments, which no entrypoint without them can supply.
+// Each case of `program.json` passes canonical values as a host that read them from JSON holds
+// them, and every runtime must give the recorded result, operation count, failures and input size
+// for it. Only input that every runtime accepts, spelled alike, with one result is here: no `null`
+// inside a value at `object`, and no integer outside the safe range except as the record JSON
+// spells one with.
+//
+// The counts and input sizes worked by hand, as `docs/nx-ir-format.md` defines them, are beside
+// the declaration each belongs to. An input size is one for each value and one more for every 64
+// UTF-16 code units of a string, a type name and a field name.
+
+external component <Button label?:string emits { Tapped { } } />
+
+// A list at a sequence parameter is checked item by item and written item by item.
+// `three`, `[1, 2, 3]`, is 8 operations: three items checked, the `slot`, and the list and its
+// three items written. Its input is 4, the list and its items. `one`, `[7]`, is 4 and 2.
+let listed(xs:int+) = { xs }
+// A value at `object` is one value to check, whatever it holds, and is written value by value:
+// the argument and the result checked and the `slot` are 3, and then what is written.
+// `record`, a `Point` with a number and a list of two strings, writes 5 values and is 8; its
+// input is those same 5. `text`, 64 `é`, which are 128 bytes of UTF-8, writes one value and one
+// for its 64 code units and is 5, on an input of 2. `longName`, an object whose one name is 70
+// code units, writes the object, one for the name and the number and is 6, on an input of 3.
+// `wideInteger`, the record JSON spells a large integer with, is a record and its string: 5, on
+// an input of 2.
+let held(o:object): object = { o }
+// Text is paid for by its length where a `concat` builds it and where it is written. `long`, 100
+// code units, is 8: the argument checked, the `binary`, its literal and its `slot`, 1 for the 107
+// code units built, the result checked, and 2 to write them. Its input is 2.
+let greeting(name:string): string = { "Hello, " + name }
+// Two host values compared: two lists in order up to the first pair that differs, and two
+// records of one type lined up by field name. Around the comparison are 7: two arguments
+// checked, the `binary` and its two `slot` nodes, the result checked and the boolean written.
+// `firstItem`, `[0, 1, 2]` and `[9, 1, 2]`, compares the lists and their first pair, 2, and is 9,
+// on an input of 8. `unlikeNames`, two records of type `T` that share `a` and hold `b` and `c`,
+// compares the records and the pair under `a` and pays one each for `b` and `c`, 4, and is 11,
+// on an input of 6.
+let same(a:object, b:object): boolean = { a == b }
+// A list bound to a content parameter is built anew for the call, so each of its items is placed.
+// `list`, `[1, 2, 3, 4]`, is 13: the argument checked, the `call`, its callee and its `slot`, 4
+// items bound, the list checked as one value, the literal, the result of `count` checked, the
+// result of `bound` checked, and the number written. Its input is 5.
+let count(content items:object): int = { 1 }
+let bound(xs:object): int = { count(xs) }
+
+// Props a host passes, a default it leaves out, and batches it dispatches. The title is 71 code
+// units. Initialization is 13: the two props checked, the state default and its check, the
+// element with its `slot` and its handler, the label checked, 4 to write the element, its label
+// with one for the length, and its handler, and 1 to write the state. Its input is 4: the props
+// as one record, the title with one for its length, and the step. A tap is 6, the update record
+// with its `binary` and two `slot` nodes, its field checked, and the state field checked when it
+// is patched; the render and what is written are 9 more. So a batch of one tap is 15 on an input
+// of 3, the entry, its token and its action, and a batch of two is 21 on an input of 6.
+component <Counter title:string step:int = 1 /> = {
+  state { count:int = 0 }
+  <Button label={title} onTapped=<Update count={count + step} /> />
+}

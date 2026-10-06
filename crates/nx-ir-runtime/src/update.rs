@@ -1,6 +1,7 @@
 //! The update intrinsics: `apply`, `merge`, `diff` and `changed`, over records.
 
 use crate::error::{fail, Result};
+use crate::eval::Meter;
 use crate::program::ProgramData;
 use crate::value::{remove_field, set_field, values_equal, Record, Value};
 use std::sync::Arc;
@@ -72,8 +73,8 @@ pub(crate) fn merge(first: &Record, second: &Record) -> Result<Value> {
 /// `diff(before, after)`: the update carrying exactly the fields whose values differ, each with
 /// its value from `after`. A field either record leaves out is an empty optional there, so a
 /// field only one of them carries still compares, and one `after` leaves out is present and
-/// empty in the result.
-pub(crate) fn diff(before: &Record, after: &Record) -> Result<Value> {
+/// empty in the result. Each comparison is paid for by `meter`, as any equality is.
+pub(crate) fn diff(before: &Record, after: &Record, meter: &Meter<'_, '_>) -> Result<Value> {
     if before.type_name != after.type_name {
         return fail(
             "nx-ir-intrinsic",
@@ -95,7 +96,7 @@ pub(crate) fn diff(before: &Record, after: &Record) -> Result<Value> {
     );
     for name in names {
         let next = after.get(name).unwrap_or(&empty);
-        if !values_equal(before.get(name).unwrap_or(&empty), next) {
+        if !values_equal(before.get(name).unwrap_or(&empty), next, meter)? {
             fields.push((Arc::clone(name), next.clone()));
         }
     }

@@ -1,0 +1,10 @@
+<Agent
+  documents={<Document text="Refunds are available within 30 days of purchase." title="Refund policy" />}
+  instructions="You are the support assistant. Answer from the documents."
+  limits=<AgentLimits maxSteps=6 />
+  model="balanced"
+  name="support"
+  tools={<WebSearchTool
+    allowedDomains={"docs.example.com"}
+  /> <FunctionTool function={findPlans} />}
+/>

@@ -114,6 +114,42 @@ impl Doc {
         out.push_str(&self.text[copied..]);
         out
     }
+
+    /// The documentation as Markdown for a reader outside NX: the text with every doc link
+    /// replaced by its path in a code span, and nothing else changed.
+    ///
+    /// <para>Generated host types and exported schemas both carry this form, so neither needs to
+    /// know what a doc link is.</para>
+    pub fn markdown(&self) -> String {
+        self.replace_links(|link| Some(link.code_span()))
+    }
+
+    /// The summary of [`Doc::markdown`]: its first Markdown block.
+    pub fn markdown_summary(&self) -> String {
+        markdown_summary(&self.markdown()).to_string()
+    }
+}
+
+/// The summary of CommonMark `text`: its first block, as written, without surrounding whitespace.
+///
+/// <para>For ordinary text that is the first paragraph. A block that can interrupt a paragraph,
+/// such as a list, ends the summary without a blank line.</para>
+pub fn markdown_summary(text: &str) -> &str {
+    let mut depth = 0usize;
+    for (event, range) in Parser::new_ext(text, Options::empty()).into_offset_iter() {
+        match event {
+            Event::Start(_) => {
+                if depth == 0 {
+                    return text[range].trim();
+                }
+                depth += 1;
+            }
+            Event::End(_) => depth = depth.saturating_sub(1),
+            _ if depth == 0 => return text[range].trim(),
+            _ => {}
+        }
+    }
+    text.trim()
 }
 
 /// Whether `offset` in CommonMark `text` is inside a code span or a code block, where brackets form
@@ -282,5 +318,27 @@ mod tests {
         let replaced =
             doc.replace_links(|link| (link.path_text() != "Missing").then(|| link.code_span()));
         assert_eq!(replaced, "Use `Grid` with [Missing] and `Row`.");
+    }
+
+    #[test]
+    fn markdown_writes_every_link_as_code() {
+        assert_eq!(
+            doc("Ignored when [maxMonthlyPrice] is set.").markdown(),
+            "Ignored when `maxMonthlyPrice` is set."
+        );
+    }
+
+    #[test]
+    fn the_summary_is_the_first_block() {
+        assert_eq!(
+            doc("Summary line.\n\nMore detail.").markdown_summary(),
+            "Summary line."
+        );
+        assert_eq!(doc("Modes:\n- fill\n- cover").markdown_summary(), "Modes:");
+        assert_eq!(
+            doc("Two lines\nof summary.\n\nRest.").markdown_summary(),
+            "Two lines\nof summary."
+        );
+        assert_eq!(doc("See [Theme].").markdown_summary(), "See `Theme`.");
     }
 }

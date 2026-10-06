@@ -1,0 +1,48 @@
+{
+  "entry": "main.nx",
+  "emit": [
+    "main.nx"
+  ],
+  "entrypoints": [
+    {
+      "module": "main.nx",
+      "function": "defaulted"
+    },
+    {
+      "module": "main.nx",
+      "function": "full"
+    },
+    {
+      "module": "main.nx",
+      "function": "wrapped"
+    },
+    {
+      "module": "main.nx",
+      "function": "passed"
+    },
+    {
+      "module": "main.nx",
+      "function": "kit"
+    },
+    {
+      "module": "main.nx",
+      "function": "kitExtra"
+    },
+    {
+      "module": "main.nx",
+      "function": "identical"
+    },
+    {
+      "module": "main.nx",
+      "function": "distinct"
+    },
+    {
+      "module": "main.nx",
+      "function": "typed"
+    },
+    {
+      "module": "main.nx",
+      "function": "root"
+    }
+  ]
+}

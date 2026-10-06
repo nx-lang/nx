@@ -16,6 +16,7 @@ import {
 
 import type { NxHost } from "../src/host.js";
 import { createNxHost } from "../src/node.js";
+import { corpus } from "./schema-corpus.js";
 import { nxModule } from "./support.js";
 
 /**
@@ -246,6 +247,98 @@ function captureDiagnostics(run: () => unknown): readonly unknown[] {
 
   throw new Error("Expected the source not to compile.");
 }
+
+describe("declaration schema parity with the Node SDK", () => {
+  for (const entry of corpus) {
+    it(`answers identical schemas for ${entry.identity}`, () => {
+      const modules = [{ identity: entry.identity, source: entry.source }];
+      const wasmArtifact = host.buildWorkspaceArtifact({ modules, entry: entry.identity });
+      const registry = new NodeLibraryRegistry();
+      const buildContext = registry.createBuildContext();
+      const workspace = new NodeWorkspace(modules);
+      const nodeArtifact = NodeProgramArtifact.buildWorkspace(workspace, {
+        buildContext,
+        entryIdentity: entry.identity
+      });
+      try {
+        for (const name of Object.keys(entry.golden)) {
+          const fromWasm = wasmArtifact.functionSchema({ name });
+          const fromNode = nodeArtifact.functionSchema({ name });
+          // Schema documents, documentation, parameters and diagnostics alike, as JSON text.
+          expect(JSON.stringify(fromWasm), `${entry.identity} ${name}`).toBe(JSON.stringify(fromNode));
+        }
+      } finally {
+        wasmArtifact.dispose();
+        nodeArtifact.dispose();
+        workspace.dispose();
+        buildContext.dispose();
+        registry.dispose();
+      }
+    });
+  }
+
+  it("answers identically with host-supplied types", () => {
+    const source = [
+      'import "@nx/agent"',
+      "type ChatContext extends ToolContext = { conversationId:string }",
+      "type Request = { context:ChatContext }",
+      "let lookupOrder(orderId:string, context:ChatContext): HttpArguments = { <HttpArguments /> }",
+      "let send(contexts:ChatContext+, request:Request): string = { \"\" }"
+    ].join("\n");
+    const options = { hostSuppliedTypes: [{ module: "@nx/agent/agent.nx", name: "ToolContext" }] };
+    const wasmArtifact = host.buildProgramArtifact(source, { fileName: "tools.nx" });
+    const registry = new NodeLibraryRegistry();
+    const buildContext = registry.createBuildContext();
+    const nodeArtifact = NodeProgramArtifact.buildSource(source, { fileName: "tools.nx", buildContext });
+    try {
+      const fromWasm = wasmArtifact.functionSchema({ name: "lookupOrder" }, options);
+      expect(fromWasm.parameters[1]!.hostSupplied).toEqual(options.hostSuppliedTypes[0]);
+      expect(JSON.stringify(fromWasm)).toBe(
+        JSON.stringify(nodeArtifact.functionSchema({ name: "lookupOrder" }, options))
+      );
+      // And for parameters that hold a listed type without being one.
+      const heldFromWasm = wasmArtifact.functionSchema({ name: "send" }, options);
+      expect(heldFromWasm.parameters.map((parameter) => parameter.hostSuppliedWithin)).toEqual([
+        options.hostSuppliedTypes,
+        options.hostSuppliedTypes
+      ]);
+      expect(JSON.stringify(heldFromWasm)).toBe(JSON.stringify(nodeArtifact.functionSchema({ name: "send" }, options)));
+    } finally {
+      wasmArtifact.dispose();
+      nodeArtifact.dispose();
+      buildContext.dispose();
+      registry.dispose();
+    }
+  });
+
+  it("answers identical type schemas in both directions, and for a type with no JSON form", () => {
+    const source = [
+      "type Booking = { host:string durationMinutes:int = 30 }",
+      "type Row = { template:<function Item:string />: string }"
+    ].join("\n");
+    const wasmArtifact = host.buildProgramArtifact(source, { fileName: "types.nx" });
+    const registry = new NodeLibraryRegistry();
+    const buildContext = registry.createBuildContext();
+    const nodeArtifact = NodeProgramArtifact.buildSource(source, { fileName: "types.nx", buildContext });
+    try {
+      for (const name of ["Booking", "Row"]) {
+        for (const direction of ["input", "output"] as const) {
+          expect(JSON.stringify(wasmArtifact.typeSchema({ name }, { direction }))).toBe(
+            JSON.stringify(nodeArtifact.typeSchema({ name }, { direction }))
+          );
+        }
+      }
+      expect(wasmArtifact.typeSchema({ name: "Row" }).diagnostics[0]!.code).toBe(
+        "schema-inexpressible-type"
+      );
+    } finally {
+      wasmArtifact.dispose();
+      nodeArtifact.dispose();
+      buildContext.dispose();
+      registry.dispose();
+    }
+  });
+});
 
 describe("evaluation parity with the command line", () => {
   const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");

@@ -1,0 +1,13 @@
+// `+` and `*` arrays, `?` as absence, and a standalone `T?` result.
+
+type Box = { items:string+ tags?:string+ note?:string }
+
+let box(items:string+, tags?:string+, note?:string): Box = {
+  <Box items={items} tags={tags} note={note} />
+}
+
+let find(id:string): Box? = { if id == "x" { <Box items="a" /> } else { {} } }
+
+let none(): string* = { {} }
+
+let count(values?:int+): int = { 0 }

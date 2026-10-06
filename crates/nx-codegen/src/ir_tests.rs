@@ -14,10 +14,10 @@ use nx_api::{
 use nx_ir::{
     explain_nx_ir, explain_nx_ir_image, kinds, write_nx_ir_image, ExplainError, NxIrArtifact,
     NxIrImage, NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1,
-    NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1, NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1,
-    NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1, NX_IR_REQUIRED_FEATURE_RANGES_V1,
-    NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1, NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
-    NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
+    NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1, NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1,
+    NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1, NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1,
+    NX_IR_REQUIRED_FEATURE_RANGES_V1, NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1,
+    NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1, NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
 };
 use std::collections::BTreeMap;
 use std::fs;
@@ -172,8 +172,7 @@ let root() = { <User name="Ada" /> }
 type Theme = light | dark
 /// A user.
 type User = {
-  /// The name.
-  name:string
+  name:string      /// The name.
   score:int = 42   /// The score.
 }
 /// The root.
@@ -325,6 +324,75 @@ fn a_module_nothing_references_is_not_in_the_table() {
     let entry = entry_artifact(&artifact);
     assert_eq!(entry.modules.len(), 1);
     assert_eq!(entry.modules[0].identity, "main.nx");
+}
+
+#[test]
+fn the_entry_lists_the_modules_that_declare_its_boundary_subtypes() {
+    // `f` takes the abstract `Base`. `X` is declared in a module the entry imports and never
+    // references, and `Y` in a module nothing imports; a host may name either by `$type`.
+    let artifact = artifact_from_workspace(
+        &[
+            (
+                "main.nx",
+                "import \"./base.nx\"\nimport \"./x.nx\"\nlet f(s:Base): string = { \"ok\" }",
+            ),
+            (
+                "base.nx",
+                "export abstract type Base = { id:int }\nexport type A extends Base = { a:string }",
+            ),
+            (
+                "x.nx",
+                "import \"./base.nx\"\nexport type X extends Base = { x:string }",
+            ),
+            (
+                "y.nx",
+                "import \"./base.nx\"\nexport type Y extends Base = { y:string }",
+            ),
+        ],
+        "main.nx",
+    );
+    let artifacts = all_artifacts(&artifact);
+    let table = |identity: &str| {
+        artifacts[identity]
+            .modules
+            .iter()
+            .map(|entry| entry.identity.as_str())
+            .collect::<Vec<_>>()
+    };
+    // The referenced module first, then the declaring modules in the program's module order.
+    assert_eq!(table("main.nx"), vec!["main.nx", "base.nx", "x.nx", "y.nx"]);
+    // Only the entry lists them; every other image still names only what it references.
+    assert_eq!(table("x.nx"), vec!["x.nx", "base.nx"]);
+    assert_eq!(table("base.nx"), vec!["base.nx"]);
+}
+
+#[test]
+fn a_record_applied_to_itself_without_end_emits() {
+    let artifact = artifact_from_source(
+        "type Box = { T:type v:T inner?:<Box T=<Box T=T /> /> }\nlet f(b:<Box T=int />): int = { 1 }",
+    );
+    let entry = entry_artifact(&artifact);
+    assert_eq!(entry.modules.len(), 1);
+}
+
+#[test]
+fn a_function_nothing_imports_adds_nothing_to_the_entry() {
+    let artifact = artifact_from_workspace(
+        &[
+            ("main.nx", "let root() = { 1 }"),
+            (
+                "tools.nx",
+                "import \"./base.nx\"\nlet use(s:Base): int = { 1 }",
+            ),
+            (
+                "base.nx",
+                "export abstract type Base = { id:int }\nexport type A extends Base = { a:string }",
+            ),
+        ],
+        "main.nx",
+    );
+    let entry = entry_artifact(&artifact);
+    assert_eq!(entry.modules.len(), 1);
 }
 
 #[test]
@@ -2083,6 +2151,123 @@ fn a_function_typed_prop_is_a_function_type_in_nx_spelling() {
     assert_contains(&text, &format!("ItemTemplate: {checked}"));
 }
 
+// ------------------------------------------------------------------------------------------------
+// The function reference type
+// ------------------------------------------------------------------------------------------------
+
+fn type_entries_of_kind(model: &NxIrArtifact, kind: i64) -> Vec<Vec<i64>> {
+    model
+        .types
+        .iter()
+        .filter_map(|entry| entry.as_list())
+        .filter(|entry| entry.first().and_then(|k| k.as_int()) == Some(kind))
+        .map(|entry| entry.iter().filter_map(|cell| cell.as_int()).collect())
+        .collect()
+}
+
+#[test]
+fn a_function_reference_field_is_typed_by_the_function_reference_kind() {
+    assert_eq!(kinds::ty::ANY_FUNCTION, 6);
+    assert_eq!(
+        kinds::name(kinds::ty::NAMES, kinds::ty::ANY_FUNCTION),
+        Some("anyFunction")
+    );
+    let artifact = artifact_from_source(
+        "type AnyFn = <function ... />: object*\ntype Tool = { fn:AnyFn extra?:AnyFn+ }\n\
+         let root() = { 1 }",
+    );
+    let model = entry_artifact(&artifact);
+    let text = explain(&model);
+    assert_contains(&text, "fn: <function ... />: object*");
+    assert_contains(&text, "extra: (<function ... />: object*)*");
+
+    // One entry, whose operand is `object*`, and no function type with no parameters.
+    let entries = type_entries_of_kind(&model, kinds::ty::ANY_FUNCTION);
+    assert_eq!(entries.len(), 1, "{:?}", model.types);
+    let result = model.types[entries[0][1] as usize]
+        .as_list()
+        .expect("result type entry");
+    assert_eq!(result[0].as_int(), Some(kinds::ty::SEQ));
+    assert_eq!(
+        result[2].as_int(),
+        Some(kinds::ty::OCCURRENCE_EMPTY | kinds::ty::OCCURRENCE_MANY)
+    );
+    assert!(type_entries_of_kind(&model, kinds::ty::FUNCTION).is_empty());
+    assert_eq!(read_back(&image_bytes(&artifact)), model);
+}
+
+#[test]
+fn a_stated_result_is_the_function_reference_entrys_operand() {
+    let model = entry_artifact(&artifact_from_source(
+        "type Args = { q:string }\n\
+         type Tool = { build: <function ... />: Args any: <function ... />: object* }\n\
+         let root() = { 1 }",
+    ));
+    let text = explain(&model);
+    assert_contains(&text, "build: <function ... />: Args");
+    assert_contains(&text, "any: <function ... />: object*");
+    let entries = type_entries_of_kind(&model, kinds::ty::ANY_FUNCTION);
+    assert_eq!(entries.len(), 2, "{:?}", model.types);
+    let result_kinds: Vec<_> = entries
+        .iter()
+        .map(|entry| {
+            model.types[entry[1] as usize].as_list().expect("entry")[0]
+                .as_int()
+                .expect("kind")
+        })
+        .collect();
+    assert!(
+        result_kinds.contains(&kinds::ty::NOMINAL),
+        "{result_kinds:?}"
+    );
+    assert!(result_kinds.contains(&kinds::ty::SEQ), "{result_kinds:?}");
+}
+
+#[test]
+fn a_module_that_uses_the_function_reference_type_lists_its_feature() {
+    let model = entry_artifact(&artifact_from_source(
+        "type Tool = { fn: <function ... />: object* }\nlet double(n:int): int = {n * 2}\n\
+         let root() = <Tool fn={double} />",
+    ));
+    let text = explain(&model);
+    assert_contains(&text, "<Tool fn=double />");
+    for feature in [
+        NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1,
+        NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1,
+    ] {
+        assert!(
+            model.required_features.contains(&feature.to_string()),
+            "{:?}",
+            model.required_features
+        );
+    }
+
+    // A module that only declares a field of the type binds no function value.
+    let declared = entry_artifact(&artifact_from_source(
+        "type Tool = { fn: <function ... />: object* }\nlet root() = { 1 }",
+    ));
+    assert_eq!(
+        declared.required_features,
+        vec![NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1.to_string()]
+    );
+}
+
+#[test]
+fn a_module_without_the_function_reference_type_does_not_list_its_feature() {
+    let model = entry_artifact(&artifact_from_source(&format!(
+        "{TEMPLATE_LIST}let <Row Item:object Index:int />: string = \"r\"\n\
+         let root() = <List ItemTemplate={{Row}} />"
+    )));
+    assert!(
+        !model
+            .required_features
+            .contains(&NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1.to_string()),
+        "{:?}",
+        model.required_features
+    );
+    assert!(type_entries_of_kind(&model, kinds::ty::ANY_FUNCTION).is_empty());
+}
+
 #[test]
 fn two_identical_function_types_share_one_table_entry() {
     let artifact = artifact_from_source(
@@ -2346,6 +2531,137 @@ fn the_prelude_identity_is_a_valid_file_name_everywhere() {
             "'{component}' would be rewritten by Windows"
         );
     }
+}
+
+// ------------------------------------------------------------------------------------------------
+// A standard library as a linked module
+// ------------------------------------------------------------------------------------------------
+
+const AGENT_MODULE: &str = "@nx/agent/agent.nx";
+
+const AGENT_PROGRAM: &str =
+    "import \"@nx/agent\"\nlet root() = { <Agent name=\"support\">Be brief.</Agent> }";
+
+fn agent_library_image(artifact: &ProgramArtifact) -> Vec<u8> {
+    let mut images = emit_nx_ir(
+        artifact,
+        &NxIrEmitOptions {
+            modules: Some(vec![AGENT_MODULE.to_string()]),
+            debug: true,
+        },
+    )
+    .expect("nx ir");
+    assert_eq!(images.len(), 1);
+    let image = images.remove(0);
+    assert_eq!(image.identity, AGENT_MODULE);
+    assert_eq!(image.metadata.identity, AGENT_MODULE);
+    image.bytes
+}
+
+#[test]
+fn a_program_that_uses_the_agent_library_links_it_and_copies_nothing() {
+    let entry = entry_artifact(&artifact_from_source(AGENT_PROGRAM));
+    let library = entry
+        .modules
+        .iter()
+        .skip(1)
+        .find(|entry| entry.identity == AGENT_MODULE)
+        .expect("the module table lists the agent library");
+    let version = nx_api::standard_library_entry("@nx/agent")
+        .expect("the agent library")
+        .version();
+    assert_eq!(library.version, version);
+    assert_eq!(version.len(), 16);
+    assert!(version
+        .chars()
+        .all(|digit| digit.is_ascii_digit() || ('a'..='f').contains(&digit)));
+
+    let text = explain(&entry);
+    assert_contains(&text, "@nx/agent/agent.nx:Agent");
+    assert!(
+        !text.contains("record Agent"),
+        "the entry holds none of the library's declarations:\n{text}"
+    );
+}
+
+#[test]
+fn the_library_image_is_emitted_when_named_and_with_every_module() {
+    let artifact = artifact_from_source(AGENT_PROGRAM);
+    let every = all_artifacts(&artifact);
+    assert_eq!(
+        every.keys().map(String::as_str).collect::<Vec<_>>(),
+        [AGENT_MODULE, "main.nx"]
+    );
+    let library = &every[AGENT_MODULE];
+    assert_eq!(
+        library.modules[0].version,
+        nx_api::standard_library_entry("@nx/agent")
+            .expect("the agent library")
+            .version(),
+        "the library image records its own version"
+    );
+    let text = explain(library);
+    assert_line(&text, "record Agent");
+    assert_line(&text, "record Tool abstract");
+
+    // The image does not depend on the program it was emitted from.
+    let other = artifact_from_workspace(
+        &[
+            (
+                "app/main.nx",
+                "import \"@nx/agent\"\nimport \"./tools.nx\"\nlet root(): Tool+ = { tools() }",
+            ),
+            (
+                "app/tools.nx",
+                "import { Tool, WebSearchTool } from \"@nx/agent\"\nexport let tools(): Tool+ = { <WebSearchTool /> }",
+            ),
+        ],
+        "app/main.nx",
+    );
+    assert_eq!(agent_library_image(&artifact), agent_library_image(&other));
+}
+
+#[test]
+fn the_library_image_requires_the_function_reference_type_and_an_entry_does_not() {
+    let artifact = artifact_from_source(AGENT_PROGRAM);
+    let every = all_artifacts(&artifact);
+    let requires = |identity: &str| {
+        every[identity]
+            .required_features
+            .iter()
+            .any(|feature| feature == NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1)
+    };
+    assert!(requires(AGENT_MODULE));
+    assert!(
+        !requires("main.nx"),
+        "an entry whose own type table holds no function reference type does not list the feature"
+    );
+    assert_contains(
+        &explain(&every[AGENT_MODULE]),
+        NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1,
+    );
+}
+
+/// A program that imports no standard library emits what it emitted before they existed. The
+/// conformance corpus holds that byte for byte; here the check is that no library module is linked
+/// or emitted, even for a module that declares one of the library's names itself.
+#[test]
+fn a_program_that_imports_no_standard_library_emits_none() {
+    let artifact =
+        artifact_from_source("type Tool = { label:string }\nlet root() = { <Tool label=\"x\" /> }");
+    let every = all_artifacts(&artifact);
+    assert_eq!(
+        every.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["main.nx"]
+    );
+    assert_eq!(
+        every["main.nx"]
+            .modules
+            .iter()
+            .map(|entry| entry.identity.as_str())
+            .collect::<Vec<_>>(),
+        ["main.nx"]
+    );
 }
 
 // ------------------------------------------------------------------------------------------------

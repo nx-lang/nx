@@ -5,8 +5,10 @@ description: 'Ordinary comments, and the `///` doc comments that document declar
 
 NX has three kinds of ordinary comment, which the compiler ignores, and one kind of doc comment,
 which documents the declaration or member it is attached to. Editors show that documentation in
-hover and completion, and `nxlang typegen` carries it into the generated C# and TypeScript. For the
-grammar, see [nx-grammar.md](https://github.com/nx-lang/nx/blob/main/nx-grammar.md#lexical-structure).
+hover and completion, `nxlang typegen` carries it into the generated C# and TypeScript, and the
+compiler SDKs carry it into JSON Schema as descriptions (see
+[Declaration Schemas](/reference/concepts/declaration-schemas)). For the grammar, see
+[nx-grammar.md](https://github.com/nx-lang/nx/blob/main/nx-grammar.md#lexical-structure).
 
 ## Ordinary comments
 - `//` comments run to the end of the line.

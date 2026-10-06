@@ -39,8 +39,7 @@ export type Schedule = { week:<Range T=int/> spans?:<Range T=float64/>+ patch:<R
 /// let x = <Shelf label="A" />
 /// ```
 export type Shelf = {
-  /// The shelf's *visible* label.
-  label:string
+  label:string     /// The shelf's *visible* label.
   facing?:Facing   /// Which way it faces.
 }
 /// Which way a shelf faces.

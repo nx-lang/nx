@@ -2,7 +2,9 @@
 
 ## Purpose
 TBD - created by archiving change add-nx-ir-format. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: TypeScript runtime loads and prepares NX IR programs
 The TypeScript runtime SHALL expose APIs that accept an NX IR artifact as bytes, validate the image
 header, IR schema version, runtime ABI, required features and every structural reference before
@@ -947,3 +949,604 @@ implement `occurrence-v1` SHALL refuse a module that lists it by name.
 #### Scenario: An older runtime refuses the module by name
 - **WHEN** a runtime that does not implement `occurrence-v1` prepares a module that lists it
 - **THEN** preparation SHALL fail with a diagnostic naming the feature
+
+### Requirement: TypeScript runtime accepts any function at a function reference site
+The TypeScript runtime SHALL read the function reference type kind, validating its result operand,
+and the `function-reference-type-v1` feature. Where it normalizes a value against a function
+reference type — a host-supplied argument, prop, state value, patch or batch entry, a record or
+component field, a parameter and a result — it SHALL accept a function value of the linked
+program, and SHALL accept a host-supplied `Function` record,
+`{ "$type": "Function", "module", "name" }`, when it names a function declaration of the linked
+program, whatever that function's parameters. It SHALL NOT compare the function's result with the
+type's result operand, as it compares no part of a signature at a site typed by a function type
+with stated parameters. It SHALL refuse a `Function` record that names a module the program does
+not link, or a name that module does not declare as a function, with the `nx-ir-function-value`
+diagnostic naming the function, and SHALL refuse any other value — a string, a number, a boolean,
+a record of another `$type`, a `Function` record without a string `module` and `name` — with the
+`nx-ir-boundary-type` diagnostic naming the site. Occurrences over the type SHALL follow the rules
+the runtime applies to an occurrence over any type. Canonical output SHALL render a value at such a
+site as the `Function` record `function-values` defines. The runtime SHALL NOT call the function
+when it normalizes, stores, compares or renders the value. `callFunction` SHALL be unchanged, so a
+record read from such a field is callable with arguments keyed by the function's own parameter
+names, each validated against that parameter's declared type. The package SHALL export a type
+`NxFunctionRecord` describing the record: `$type` the literal `"Function"`, `module` a string and
+`name` a string.
+
+#### Scenario: A rendered function reference field carries the Function record
+- **WHEN** a linked program declares, in `main.nx`, `type Tool = { fn: <function ... />: object* } let double(n:int): int = {n * 2} let root() = <Tool fn={double} />`
+- **AND** `evaluateFunction(program, "root")` is called
+- **THEN** the result SHALL be `{ "$type": "Tool", "fn": { "$type": "Function", "module": "main.nx", "name": "double" } }`
+
+#### Scenario: A field with a stated result renders the same record
+- **WHEN** a linked program declares, in `main.nx`, `type Args = { q:string } type Tool = { build: <function ... />: Args } let make(q:string): Args = <Args q={q} /> let root() = <Tool build={make} />`
+- **AND** `evaluateFunction(program, "root")` is called
+- **THEN** the result's `build` field SHALL be `{ "$type": "Function", "module": "main.nx", "name": "make" }`
+
+#### Scenario: A host supplies a function of any signature
+- **WHEN** the first program also declares `let greet(name:string, loud?:boolean): string = {name}` and `let pass(tool:Tool): Tool = {tool}`
+- **AND** the host calls `evaluateFunction(program, "pass", [{ "$type": "Tool", "fn": { "$type": "Function", "module": "main.nx", "name": "greet" } }])`
+- **THEN** the call SHALL succeed and the result's `fn` SHALL be that record
+
+#### Scenario: A record naming no function is refused
+- **WHEN** the host supplies `{ "$type": "Function", "module": "main.nx", "name": "Nope" }` at the `fn` field
+- **THEN** the runtime SHALL fail with `nx-ir-function-value` naming `Nope`
+- **AND** `{ "$type": "Function", "module": "other.nx", "name": "double" }`, where the program links no `other.nx`, SHALL fail with `nx-ir-function-value` naming `other.nx`
+
+#### Scenario: A non-function at a function reference site is refused
+- **WHEN** the host supplies `"double"`, `1`, `{ "$type": "Tool" }` or `{ "$type": "Function", "name": "double" }` at the `fn` field
+- **THEN** each SHALL fail with `nx-ir-boundary-type` naming the field
+
+#### Scenario: A value that names something other than a function is refused
+- **WHEN** the host supplies `{ "$type": "Function", "module": "main.nx", "name": "Tool" }` at the `fn` field
+- **THEN** the runtime SHALL fail with `nx-ir-function-value`, because `Tool` is a record and not a function
+
+#### Scenario: Occurrences over a function reference type follow the ordinary rules
+- **WHEN** a program declares `type AnyFn = <function ... />: object* type Kit = { all:AnyFn+ one?:AnyFn }` and the host supplies a `Kit` with `all` set to `[]`, and another with `one` omitted and `all` holding one record
+- **THEN** the first SHALL be refused because `all` admits no empty value
+- **AND** the second SHALL be accepted, with `one` normalized to the empty value
+
+#### Scenario: A record from a function reference field is callable by its own parameters
+- **WHEN** the host reads the `fn` record of the first scenario and calls `callFunction(program, record, { n: 4 })`
+- **THEN** the call SHALL return `8`
+- **AND** `callFunction(program, record, { n: "four" })` SHALL fail with a diagnostic naming `n`, because the argument does not have the parameter's declared type
+
+#### Scenario: A module needing the type is refused by an older runtime
+- **WHEN** a runtime that does not implement `function-reference-type-v1` prepares a module that lists it
+- **THEN** preparation SHALL fail with a diagnostic naming the feature
+
+#### Scenario: The corpus program passes
+- **WHEN** the TypeScript runtime runs the function reference conformance program
+- **THEN** every entrypoint SHALL produce the recorded result
+
+### Requirement: TypeScript runtime enforces an operation budget
+The runtime options every evaluation API accepts SHALL include `maxOperations`, the most
+operations one call may cost, counted as `nx-ir-format` defines an operation. When the option is
+absent the call SHALL be unlimited, so a host that does not set it sees no change. A value that is
+not a non-negative safe integer SHALL be refused with a diagnostic naming the option before
+anything is evaluated; it SHALL NOT be read as unlimited.
+
+One budget SHALL cover one call of a public API and everything that call evaluates: the function
+and every function it calls, parameter defaults, value initializers, a component's state defaults
+and body, and, for `dispatchComponentActions`, every handler the batch runs and the render that
+follows. The APIs are `evaluateFunction`, `callFunction`, `constructComponentDescriptor`,
+`initializeComponent`, `evaluateComponent`, `dispatchComponentActions`, `normalizeComponentState`
+and `applyComponentStatePatch`. Each call SHALL start with the whole budget; nothing SHALL carry
+over from an earlier call.
+
+A charge that would take the count above the budget SHALL fail the call with
+`nx-ir-resource-limit` before the operation charged is performed. The diagnostic SHALL name the
+declaration the charge belongs to, as `nx-ir-format` assigns it, and, when the charge is for a
+node and the image carries its debug section, the node's span, and its `limit` SHALL be
+`{ name: "maxOperations", value }` with the budget the host set. The call SHALL return nothing, and a failed dispatch SHALL leave the instance it was given
+unchanged and usable, as for any other failure. A budget equal to the cost of the call SHALL
+succeed.
+
+#### Scenario: Nested loops end at the budget
+- **WHEN** an image evaluates `for a in 0..1000 { for b in 0..1000 { for c in 0..1000 { a + b + c } } }` under `maxOperations: 100000`
+- **THEN** evaluation SHALL fail with `nx-ir-resource-limit` whose `limit` is `{ name: "maxOperations", value: 100000 }`
+- **AND** the diagnostic SHALL name the function the loops are written in
+- **AND** no more than one hundred thousand operations SHALL have been performed
+
+#### Scenario: An absent budget is unlimited
+- **WHEN** an image evaluates `for i in 0..1000000 { i }` under options that do not set `maxOperations`
+- **THEN** evaluation SHALL return the list of one million integers
+
+#### Scenario: The budget is exact
+- **WHEN** an evaluation costs `n` operations
+- **THEN** it SHALL succeed under `maxOperations: n`
+- **AND** it SHALL fail with `nx-ir-resource-limit` under `maxOperations: n - 1`
+
+#### Scenario: A list that doubles on each call is stopped
+- **WHEN** an image evaluates `let grow(n:int, xs:int+): int+ = { if n == 0 { xs } else { grow(n - 1, { xs xs }) } }` with `60` and a list of one integer under `maxOperations: 100000`
+- **THEN** evaluation SHALL fail with `nx-ir-resource-limit` whose `limit` names `maxOperations`
+- **AND** no list longer than one hundred thousand items SHALL have been built
+
+#### Scenario: A string that doubles on each call is stopped
+- **WHEN** an image evaluates `let grow(n:int, s:string): string = { if n == 0 { s } else { grow(n - 1, s + s) } }` with `60` and `"x"` under `maxOperations: 100000`
+- **THEN** evaluation SHALL fail with `nx-ir-resource-limit` whose `limit` names `maxOperations`
+
+#### Scenario: A value shared many times over is stopped wherever it is walked
+- **WHEN** a function builds a record that holds one value twice, forty levels deep, and the value is checked against its type at each call, compared with another like it, or returned to the host, under `maxOperations: 100000`
+- **THEN** each evaluation SHALL fail with `nx-ir-resource-limit` whose `limit` names `maxOperations`
+- **AND** SHALL NOT take time or memory that grows with the 2^40 values the record is as a tree
+
+#### Scenario: A result too large for the budget is refused as it is written
+- **WHEN** a function returns a list of 100 references to one string of 16,384 UTF-16 code units under `maxOperations: 1000`
+- **THEN** evaluation SHALL fail with `nx-ir-resource-limit` whose `limit` names `maxOperations`
+- **AND** the diagnostic SHALL name the function and carry no span
+
+#### Scenario: A batch shares one budget
+- **WHEN** a host dispatches a batch of three handler invocations, each of whose handlers costs more than a third of `maxOperations`
+- **THEN** dispatch SHALL fail with `nx-ir-resource-limit` whose `limit` names `maxOperations`
+- **AND** the instance given SHALL dispatch a later, cheaper batch successfully
+
+#### Scenario: A state default is under the budget
+- **WHEN** a component's state field defaults to `for i in 0..100000 { i }` and a host initializes it under `maxOperations: 1000`
+- **THEN** initialization SHALL fail with `nx-ir-resource-limit` whose `limit` names `maxOperations`
+
+#### Scenario: Each call starts with the whole budget
+- **WHEN** a host evaluates a function costing 600 operations twice with the same options object, whose `maxOperations` is 1000
+- **THEN** both evaluations SHALL succeed
+
+#### Scenario: A budget that is not a count is refused
+- **WHEN** a host evaluates a function under `maxOperations: NaN`, `maxOperations: -1` or `maxOperations: 1.5`
+- **THEN** each call SHALL fail with a diagnostic naming `maxOperations`
+- **AND** no node SHALL have been evaluated
+
+### Requirement: TypeScript runtime resource-limit diagnostics name the limit
+Every diagnostic the runtime reports with the code `nx-ir-resource-limit` SHALL carry a `limit`
+with the `name` of the limit that was reached and, where the limit is a number, its `value`. The
+names SHALL be `maxOperations`, `maxCallDepth` and `maxRangeLength` for the limits a host sets,
+`maxExpressionNesting` for the fixed nesting bound, and `engine` for a limit of the JavaScript
+engine, which has no value. A diagnostic with any other code SHALL carry no `limit`. The message
+SHALL continue to state the limit in words.
+
+#### Scenario: Runaway recursion names the call-depth limit
+- **WHEN** a program evaluates a function that calls itself without end under the default options
+- **THEN** the diagnostic's `limit` SHALL be `{ name: "maxCallDepth", value: 100 }`
+
+#### Scenario: An oversized range names the range limit
+- **WHEN** an image evaluates `for i in 0..2000000 { i }` under the default options
+- **THEN** the diagnostic's `limit` SHALL be `{ name: "maxRangeLength", value: 1000000 }`
+
+#### Scenario: A host tells the limits apart without the message
+- **WHEN** one evaluation fails for an exhausted budget and another for runaway recursion
+- **THEN** the two diagnostics SHALL have the same code and different `limit.name` values
+
+### Requirement: TypeScript runtime bounds expression nesting and reports engine limits as diagnostics
+The runtime SHALL refuse to nest expressions more than 1,000 deep across every call of one
+evaluation, the bound the Rust runtime holds, failing with `nx-ir-resource-limit` whose `limit` is
+`{ name: "maxExpressionNesting", value: 1000 }`. The bound SHALL be fixed: raising `maxCallDepth`
+SHALL NOT raise it.
+
+A `RangeError` the JavaScript engine raises while a public API evaluates — an exhausted call
+stack, a string longer than the engine holds, an array longer than the engine holds — SHALL be
+reported as an `NxIrRuntimeError` with the code `nx-ir-resource-limit` whose `limit` names
+`engine`, and SHALL NOT reach the host as a `RangeError`. Placing the items of one sequence in
+another, or the effects of a dispatched handler in a batch's effects, SHALL NOT depend on how many
+arguments the engine accepts in one call.
+
+#### Scenario: Recursion past a raised call depth is still a diagnostic
+- **WHEN** a program evaluates a function that calls itself without end under `maxCallDepth: 1000000`
+- **THEN** evaluation SHALL fail with `nx-ir-resource-limit` whose `limit` names `maxExpressionNesting` or `engine`
+- **AND** the call SHALL NOT throw a `RangeError`
+
+#### Scenario: A long list is spliced
+- **WHEN** an image evaluates an element whose content is `for i in 0..200000 { i }`
+- **THEN** evaluation SHALL return the element with two hundred thousand content items
+
+#### Scenario: A handler returns many effects
+- **WHEN** a host dispatches an action whose parent-bound handler returns 200,000 actions
+- **THEN** dispatch SHALL return the 200,000 effects
+
+#### Scenario: A string past the engine's limit is a diagnostic
+- **WHEN** a function doubles a string on each of 40 nested calls under the default options
+- **THEN** evaluation SHALL fail with `nx-ir-resource-limit`
+- **AND** the call SHALL NOT throw a `RangeError`
+
+### Requirement: TypeScript runtime refuses an integer outside the safe range
+The runtime carries every number as a JavaScript number and SHALL NOT hold an integer outside
+JavaScript's safe range in any other form. Reading such a literal from an image SHALL fail with
+`nx-ir-number`, naming the declaration and, with a debug section, the literal's span; the image
+SHALL still prepare, and a path that does not reach the literal SHALL run. The refusal is charged
+as any node is: under a budget the node's operation is taken before it fails.
+
+A value the host passes that has the shape canonical JSON gives such an integer,
+`{ "$type": "nx.int", "value": "<digits>" }`, SHALL be a record at `object`: returned unchanged,
+compared as a record is, matched as a pattern as a record is, and charged as a record is, whatever
+else it holds. At a parameter typed as an integer it SHALL be refused, as any value that is not a
+number is. The runtime SHALL export nothing that makes such an integer.
+
+#### Scenario: A literal outside the safe range is refused where it is read
+- **WHEN** a prepared program evaluates `let big() = { 9007199254740993 }`
+- **THEN** evaluation SHALL fail with `nx-ir-number` naming `big` and the literal
+- **AND** another function of the same image that does not reach the literal SHALL evaluate
+
+#### Scenario: Whatever would have used it does not run
+- **WHEN** a function compares its argument with a literal outside the safe range, or matches it as a pattern
+- **THEN** evaluation SHALL fail with `nx-ir-number`
+
+#### Scenario: The record a host passes is a record
+- **WHEN** a host passes `{ "$type": "nx.int", "value": "1152921504606846976" }` at `object` and the function returns it
+- **THEN** the result SHALL be that record, for the cost of a record with one string field
+- **AND** the same value at a parameter typed `int` SHALL fail with `nx-ir-boundary-type`
+
+#### Scenario: Text or fields in that shape are paid for
+- **WHEN** a host passes a record named `nx.int` whose `value` is a megabyte of text, or that holds a megabyte beside its `value`, and a function returns it 20 times
+- **THEN** the call SHALL be refused under a budget of 100,000
+
+### Requirement: TypeScript runtime limits the size of host input
+The runtime options every evaluation API accepts SHALL include `maxInputSize`, the largest input
+size one call may be given, measured as `nx-ir-format` defines the input size of a call. When the
+option is absent the input SHALL be unlimited and the runtime SHALL NOT measure it, so a host that
+does not set it sees no change. A value that is not a non-negative safe integer SHALL be refused
+with a diagnostic naming the option before anything is measured or evaluated.
+
+The limit SHALL cover what the host passes to one call: the arguments of `evaluateFunction`; the
+function record and the arguments of `callFunction`; the props and the content of
+`constructComponentDescriptor`; the props of `initializeComponent` and the state its options carry;
+the props and the state of `evaluateComponent`; the batch of `dispatchComponentActions`; the state
+of `normalizeComponentState`; and the current state and the patch of `applyComponentStatePatch`. A
+component instance, and the parent instance of `initializeComponent`, SHALL NOT be measured.
+
+A call whose input is larger than the limit SHALL fail with `nx-ir-resource-limit` whose `limit`
+is `{ name: "maxInputSize", value }` with the limit the host set, before the program is looked
+at, before any value is checked against a type and before any node is evaluated. The runtime SHALL
+stop measuring as soon as the size passes the limit, within the bound `nx-ir-format` sets, and
+SHALL measure without recursion, so a value that is too large, that nests deeply, or that holds
+itself SHALL be refused by the limit and SHALL NOT exhaust the engine's stack or memory first.
+Measuring the input SHALL charge nothing to `maxOperations`. A refused dispatch SHALL leave the
+instance it was given usable.
+
+#### Scenario: Input over the limit is refused before anything runs
+- **WHEN** a host evaluates a function with a list of 20,000 integers under `maxInputSize: 1000`
+- **THEN** evaluation SHALL fail with `nx-ir-resource-limit` whose `limit` is `{ name: "maxInputSize", value: 1000 }`
+- **AND** no node SHALL have been evaluated and no argument checked against its parameter's type
+
+#### Scenario: Input at the limit is accepted
+- **WHEN** the input of a call has the size `n`
+- **THEN** the call SHALL proceed under `maxInputSize: n`
+- **AND** SHALL be refused under `maxInputSize: n - 1`
+
+#### Scenario: An absent limit measures nothing
+- **WHEN** a host evaluates a function with a list of one million integers under options that do not set `maxInputSize`
+- **THEN** evaluation SHALL proceed as it did before the option existed
+
+#### Scenario: A value that holds itself is refused by the limit
+- **WHEN** a host passes an object one of whose fields is the object itself, under `maxInputSize: 1000`
+- **THEN** the call SHALL fail with `nx-ir-resource-limit` whose `limit` names `maxInputSize`
+- **AND** SHALL NOT fail for a limit of the JavaScript engine
+
+#### Scenario: A deeply nested value is refused by the limit
+- **WHEN** a host passes an array nested 100,000 deep under `maxInputSize: 1000`
+- **THEN** the call SHALL fail with `nx-ir-resource-limit` whose `limit` names `maxInputSize`
+
+#### Scenario: Every kind of input is measured
+- **WHEN** a host passes more than the limit as props, as content, as a state, as a batch, or as a state patch
+- **THEN** the call SHALL fail with `nx-ir-resource-limit` whose `limit` names `maxInputSize`
+
+#### Scenario: A batch is measured whole before any of it runs
+- **WHEN** a host dispatches a batch whose first entry is small and whose second is larger than the limit
+- **THEN** the dispatch SHALL fail with `nx-ir-resource-limit` whose `limit` names `maxInputSize`
+- **AND** no handler SHALL have run
+
+#### Scenario: Oversized input is reported before any other fault of the call
+- **WHEN** a host evaluates a component with props of the wrong type and a state larger than the limit, or names an entrypoint the program lacks with arguments larger than the limit
+- **THEN** each call SHALL fail with `nx-ir-resource-limit` whose `limit` names `maxInputSize`
+
+#### Scenario: An instance is not measured
+- **WHEN** a host dispatches a batch of one small entry against an instance whose state holds 50,000 values, under `maxInputSize: 100`
+- **THEN** the dispatch SHALL proceed
+
+#### Scenario: The limit and the budget are told apart
+- **WHEN** one call fails for its input and another for its operation budget
+- **THEN** the two diagnostics SHALL have the same code and different `limit.name` values
+
+#### Scenario: A limit that is not a size is refused
+- **WHEN** a host evaluates a function under `maxInputSize: NaN`, `maxInputSize: -1` or `maxInputSize: 1.5`
+- **THEN** each call SHALL fail with a diagnostic naming `maxInputSize`
+- **AND** nothing SHALL have been measured or evaluated
+
+### Requirement: TypeScript runtime reports what a call used
+The runtime options every evaluation API accepts SHALL include `usage`, an object of the host's
+that the runtime writes to. On every call given one, the runtime SHALL first remove `operations`
+and `inputSize` from it, and when the call ends, whether it returns or throws, SHALL set
+`operations` to the operations the call used if `maxOperations` was set, and `inputSize` to the
+input size of the call if `maxInputSize` was set and the input was within it. The numbers SHALL be
+those `nx-ir-format` defines; for a call that fails for its budget, the charge that was refused
+SHALL NOT be counted. With `usage` absent the runtime SHALL do nothing for it, and with
+`maxOperations` absent it SHALL count nothing for it. The object SHALL NOT be measured as input.
+
+A `usage` that is not an object the runtime can write to SHALL be refused with `nx-ir-options`
+before anything is measured or evaluated: a value that is no object, or an object to which the
+runtime cannot write both members and remove them again at the start of the call, as a frozen
+object or one that cannot be extended. The write at the end of a call SHALL
+NOT change the call's outcome: if it fails, the call SHALL still return what it returned or throw
+what it threw. One object given to calls that overlap holds the numbers of whichever ended last;
+a host that wants each call's numbers gives each call its own.
+
+#### Scenario: A successful call reports its count
+- **WHEN** a host evaluates a function that costs 29 operations under `{ maxOperations: 100000, usage }`
+- **THEN** `usage.operations` SHALL be 29 when the call returns
+
+#### Scenario: A call that fails reports what it used
+- **WHEN** a host evaluates a function under `{ maxOperations: 10, usage }` and it fails for the budget
+- **THEN** the call SHALL throw as it does without `usage`
+- **AND** `usage.operations` SHALL be at most 10
+
+#### Scenario: A refused charge is not reported
+- **WHEN** a call under `{ maxOperations: 10, usage }` has been charged 5 operations and its next charge, 31 for a concatenation, is refused
+- **THEN** `usage.operations` SHALL be 5, as the Rust runtime reports
+
+#### Scenario: A sink that cannot be written is refused
+- **WHEN** a host passes `usage: Object.freeze({})`, `usage: Object.preventExtensions({})`, or `usage: 5`
+- **THEN** the call SHALL fail with `nx-ir-options` naming `usage`
+- **AND** nothing SHALL have been measured or evaluated
+
+#### Scenario: Writing the report never replaces the outcome
+- **WHEN** a call fails with a diagnostic and the write to `usage` at its end throws
+- **THEN** the call SHALL throw the diagnostic it failed with
+
+#### Scenario: A dispatch reports one number for the batch
+- **WHEN** a host dispatches a batch of three entries under a budget with `usage`
+- **THEN** `usage.operations` SHALL be what the three handlers and the render after them used together
+
+#### Scenario: The input size is reported when it is measured
+- **WHEN** a host evaluates a function with a list of 1,000 integers under `{ maxInputSize: 5000, usage }`
+- **THEN** `usage.inputSize` SHALL be 1,001
+- **AND** under options that do not set `maxInputSize` it SHALL be absent
+
+#### Scenario: A report does not carry over
+- **WHEN** a host passes one `usage` object to a call under a budget and then to a call with none
+- **THEN** after the second call `usage.operations` SHALL be absent
+
+### Requirement: TypeScript runtime exports the input measure
+The runtime SHALL export `measureInputSize(value, limit?)`, which returns the size of one value as
+`nx-ir-format` defines it and as `maxInputSize` measures it. Given a limit, it SHALL stop as soon
+as the size passes the limit and return a number greater than the limit, within the bound on work
+that `nx-ir-format` sets for the limit. It SHALL evaluate nothing and need no program. An object
+measured this way is measured as one record, which is how the props, the state, the patch and the
+arguments by name of a call are measured; an array is measured as the list it is, one more than
+its items add to a call that takes them as its positional arguments, content or batch.
+
+#### Scenario: A value measured alone has the size it has in a call
+- **WHEN** a host measures a value with `measureInputSize` and then passes it as the one argument of a function under `{ maxInputSize, usage }`
+- **THEN** the two sizes SHALL be equal
+
+#### Scenario: Measuring stops at the limit
+- **WHEN** a host measures a list of one million integers with a limit of 1,000
+- **THEN** the result SHALL be greater than 1,000
+- **AND** no more than the limit allows of the list SHALL have been read
+
+### Requirement: TypeScript runtime diagnostics name the argument a failure is in
+A diagnostic for a failure the runtime finds in a value a host passed as an argument of the
+function it called, through `callFunction` or `evaluateFunction`, SHALL carry `argument`: the name
+of the parameter the value was passed for. That covers a value that does not fit the parameter's
+type, at any depth inside the value; any other refusal of the value itself, such as a `Function`
+record in it that names no function; and a required parameter that was given no argument. The
+name SHALL be the parameter's declared name, whether the host passed the arguments by name or by
+position.
+
+A diagnostic SHALL carry no `argument` when the failure is not in a value the host passed for one
+parameter, even when the runtime finds it while it is checking an argument:
+
+- a failure raised by a default, a parameter's or a record field's: by evaluating its expression,
+  by a function it calls, or by its value not fitting the type it is declared with;
+- a resource limit, whichever limit it is and whenever it is reached, the budget spent while an
+  argument is checked included;
+- a failure of the image or the program that the runtime finds while it checks a value, such as a
+  schema or a reference it cannot resolve;
+- a failure while the function's body is evaluated, including one in the arguments of a function
+  the body calls;
+- a failure in the function's result;
+- more positional arguments than the function has parameters;
+- the `Function` record `callFunction` is given to say which function to call, when it is not such
+  a record or names no function: it is not an argument of the function;
+- a failure of any other entry point.
+
+The member is data for a program to read. The message SHALL continue to name the argument in
+words, and no diagnostic's code SHALL change.
+
+#### Scenario: A value of the wrong type names its parameter
+- **WHEN** a host calls `let findPlans(teamSize:int, note?:string): string` through `callFunction`
+  with `{ teamSize: "five" }`
+- **THEN** the call SHALL fail with `nx-ir-boundary-type` and the diagnostic's `argument` SHALL be
+  `teamSize`
+
+#### Scenario: A failure deep inside a value names the parameter that holds it
+- **WHEN** a host calls a function whose parameter `request` is a record with a field `items` of
+  records, and the third item's `quantity` is a string where an `int` is declared
+- **THEN** the diagnostic's `argument` SHALL be `request`
+
+#### Scenario: A missing required argument names its parameter
+- **WHEN** a host calls that `findPlans` with `{}`
+- **THEN** the call SHALL fail with `nx-ir-arguments` and the diagnostic's `argument` SHALL be
+  `teamSize`
+
+#### Scenario: A positional argument is named by its parameter
+- **WHEN** a host calls `findPlans` through `evaluateFunction` with the positional arguments
+  `["five"]`
+- **THEN** the diagnostic's `argument` SHALL be `teamSize`
+
+#### Scenario: A function record that names no function names its parameter
+- **WHEN** a host calls a function whose parameter `step` is of a function type with the record
+  `{ $type: "Function", module: "main.nx", name: "missing" }`
+- **THEN** the call SHALL fail with `nx-ir-function-value` and the diagnostic's `argument` SHALL
+  be `step`
+
+#### Scenario: The function record of the call itself names no argument
+- **WHEN** a host calls `callFunction` with the record
+  `{ $type: "Function", module: "main.nx", name: "missing" }` as the function to call
+- **THEN** the call SHALL fail with `nx-ir-function-value` and the diagnostic SHALL carry no
+  `argument`
+
+#### Scenario: A failure a field default raises names no argument
+- **WHEN** a program declares `type Req = { n:int share:int = { 100 / n } }` and
+  `let f(req:Req): int`, and a host calls `f` with `{ req: { $type: "Req", n: 0 } }`, a value that
+  fits `Req`
+- **THEN** the call SHALL fail with the code a division by zero has and the diagnostic SHALL carry
+  no `argument`
+- **AND** a field default whose value does not fit its field's type SHALL fail with a diagnostic
+  that carries no `argument`, whatever its code
+
+#### Scenario: A parameter's default names no argument
+- **WHEN** a host calls `let g(n:int, share:int = { 100 / n }): int` with `{ n: 0 }`
+- **THEN** the diagnostic SHALL carry no `argument`
+
+#### Scenario: A default that fails with a code an argument's failure has names no argument
+- **WHEN** a program declares
+  `type Stepper = { step: <function n:int />: int value:int = { step(1) } }`,
+  `let stepperValue(s:Stepper): int` and `let needsTwo(n:int, m:int): int`, and a host calls
+  `stepperValue` with a `Stepper` whose `step` is the `Function` record of `needsTwo` and that has
+  no `value`
+- **THEN** the call SHALL fail with `nx-ir-arguments`, raised by the call the default makes, and
+  the diagnostic SHALL carry no `argument`
+- **AND** a call of
+  `let stepped(step: <function n:int />: int, value:int = { <step n={1} /> }): int` with that
+  record for `step` and nothing for `value` SHALL fail with `nx-ir-arguments` and carry no
+  `argument`
+- **AND** the same call of `stepped` with the string `one` for `value` SHALL fail with a diagnostic
+  whose `argument` is `value`
+
+#### Scenario: A failure inside the function names no argument
+- **WHEN** a host calls a function with arguments that fit its parameters, and the function's body
+  then fails, by dividing by zero or in a call it makes to another function
+- **THEN** the diagnostic SHALL carry no `argument`
+
+#### Scenario: A limit names no argument
+- **WHEN** a host calls a function with input over `maxInputSize`, or with fifty records for a
+  parameter `items:Item+` under an operation budget of twenty, so that the budget is spent while
+  the argument is checked
+- **THEN** each diagnostic SHALL carry its `limit` and no `argument`
+
+### Requirement: TypeScript runtime reads a host value in its JavaScript form
+A value a host passes to an evaluation API SHALL be read, at any depth, as a canonical value in
+the form `nx-ir-format` requires this runtime to define, which is: `null`, a boolean, a number, a
+string, an array, or a plain object, which is an object whose prototype is `Object.prototype`, of
+this realm or another, or nothing. The handler and function values the runtime makes for its own
+use, which a host passes back as it received them, SHALL be accepted where they are today. A host
+SHALL NOT need to have read the value from JSON or to write it as JSON: an object and an array
+the host built are the value. This SHALL hold for every value the input limit covers: arguments,
+props, content, state, a state patch and the entries of a batch. What holds those values is the
+host's too: positional arguments, content and a batch SHALL each be an array, and props, a state,
+a state patch and arguments by name SHALL each be a plain object. Anything else in their place
+SHALL be refused as a value that is not canonical is, with no `argument`, so that nothing the
+input measure counts as one value is a list the call goes on to read. The types the evaluation
+APIs declare for their input SHALL admit a member that is `undefined`, and the types of what they
+return SHALL NOT.
+
+A member of a plain object whose value is `undefined` SHALL be absent, everywhere the runtime
+reads the object. The input measure SHALL NOT count it. The check SHALL treat it as a member that
+was left out: a field with a default takes its default, an optional field is empty, a required
+field with no default is reported missing, and a name the type does not declare is not reported
+unknown. The program SHALL NOT be given it: a value held at a site typed `object` SHALL be held
+without the member, and the host's own object SHALL NOT be changed.
+
+A value that is not canonical SHALL be refused: after the input limit, so that input over the
+limit is still refused by the limit, and before any value is checked against a type or any node
+is evaluated. The failure SHALL be `nx-ir-boundary-type` with a message that names the path to
+the value and says what it is not. Every value the call goes on to check or to hold SHALL be read
+for this, whether or not a type would have looked at it: a value at a site typed `object`
+included, at any depth inside it. A plain object or an array that holds itself SHALL be refused
+the same way when no input limit refuses it first, and SHALL NOT exhaust the engine's stack or
+memory; the same object held twice, side by side, is not a value that holds itself and SHALL be
+accepted, and is read once for each place it is held, as the input size counts it. An item of an array that is `undefined` is not a member that can be absent: it SHALL be
+read as it is today where the array is a call's positional arguments, and SHALL be refused
+anywhere else.
+
+A refusal of a value that is in what the host passed for a parameter of the function it called,
+through `callFunction` or `evaluateFunction`, is a failure in that argument, and its diagnostic
+SHALL carry `argument` as *TypeScript runtime diagnostics name the argument a failure is in*
+requires. A refusal anywhere else SHALL carry none.
+
+Reading the input SHALL charge nothing to `maxOperations` and SHALL NOT recurse more deeply than
+a fixed bound, however deeply the input is nested. The input size
+SHALL still be taken first, and `measureInputSize` SHALL still need no program: a value that is
+not canonical counts one there and is refused after. No recorded result, operation count or input
+size SHALL change for input that was accepted before and is accepted now.
+
+#### Scenario: A value the host built is the value
+- **WHEN** a host calls `let greet(person:Person): string`, where
+  `type Person = { name:string nickname?:string title:string = "Dr" }`, with a `person` it built
+  as an object literal, and again with one it read with `JSON.parse`
+- **THEN** the two calls SHALL have the same result, operation count and input size
+
+#### Scenario: An optional field set to undefined is absent
+- **WHEN** a host calls `greet` with
+  `{ person: { name: "Ada", nickname: undefined, title: undefined } }`
+- **THEN** the call SHALL succeed, with `nickname` empty and `title` holding `Dr`
+- **AND** its `inputSize` SHALL equal that of the call with `{ person: { name: "Ada" } }`
+
+#### Scenario: A required field set to undefined is missing
+- **WHEN** a host passes that function `{ person: { name: undefined } }`
+- **THEN** the call SHALL fail with `nx-ir-boundary-field` naming the missing field `name`
+
+#### Scenario: An undeclared member that is undefined is not unknown
+- **WHEN** a host passes that function `{ person: { name: "Ada", extra: undefined } }`
+- **THEN** the call SHALL succeed
+- **AND** the same call with `extra: 1` SHALL fail with `nx-ir-boundary-field` naming `extra`
+
+#### Scenario: An instance of a class is not a record
+- **WHEN** a host passes that function a `person` that is an instance of a class with the members
+  `name` and `nickname`
+- **THEN** the call SHALL fail with `nx-ir-boundary-type` naming `person` and saying it is not a
+  plain object
+- **AND** the diagnostic's `argument` SHALL be `person`
+- **AND** an object with no prototype holding the same members SHALL be accepted
+
+#### Scenario: A value that is not canonical is refused inside an open object
+- **WHEN** a host calls `let keep(extra:object): string` with `extra` holding, three levels down
+  inside plain objects and arrays, a `Uint8Array` of five million bytes, or a `Date`, a `Map`, a
+  function, a symbol or a big integer
+- **THEN** each call SHALL fail with `nx-ir-boundary-type` naming the path to the value, with the
+  `argument` `extra`
+- **AND** the typed array SHALL NOT be read: the refusal SHALL take no longer than for one of
+  eight bytes
+
+#### Scenario: A refusal outside a function's arguments names no argument
+- **WHEN** a host renders a component with props that hold a `Date`
+- **THEN** the call SHALL fail with `nx-ir-boundary-type` naming the path to the value
+- **AND** the diagnostic SHALL carry no `argument`
+
+#### Scenario: An undefined member inside an open object is not given to the program
+- **WHEN** a host calls `let echo(extra:object): object = { extra }` with
+  `{ extra: { a: 1, b: undefined, c: { d: undefined } } }`
+- **THEN** the result SHALL be `{ a: 1, c: {} }`
+- **AND** the object the host passed SHALL still have its member `b`
+
+#### Scenario: An open object that holds itself is refused
+- **WHEN** a host passes `keep` a plain object one of whose members is the object itself, with no
+  input limit set
+- **THEN** the call SHALL fail with `nx-ir-boundary-type` and SHALL NOT exhaust the stack or fail
+  to return
+
+#### Scenario: The same object held twice is accepted
+- **WHEN** a host passes `keep` `{ first: shared, second: shared }`, where `shared` is one plain
+  object
+- **THEN** the call SHALL succeed
+
+#### Scenario: A list that is not an array is refused
+- **WHEN** a host passes content or a batch as a `Set`, or positional arguments as an object with
+  a `length`, whatever they hold and under any input limit they are within
+- **THEN** each call SHALL fail with `nx-ir-boundary-type` saying an array was expected, with no
+  `argument`
+- **AND** nothing the `Set` or the object holds SHALL have been checked or evaluated
+
+#### Scenario: A member set to undefined is written without a cast
+- **WHEN** a TypeScript host passes `{ name: "Ada", nickname: undefined }` as an argument, as
+  props, as a state or as a state patch
+- **THEN** the call SHALL type-check against the package's declarations
+
+#### Scenario: Input over the limit is refused by the limit first
+- **WHEN** a host passes `keep` a value that holds a `Date` and is larger than `maxInputSize`
+- **THEN** the call SHALL fail with `nx-ir-resource-limit` naming `maxInputSize`
+- **AND** the diagnostic SHALL carry no `argument`
+
+#### Scenario: A handler the runtime made is still accepted
+- **WHEN** a host renders a component, takes an action handler from the rendered output and passes
+  it back as a prop of a child
+- **THEN** the call SHALL be accepted as it is today
+
+#### Scenario: Accepted input costs what it cost
+- **WHEN** the conformance corpus is evaluated
+- **THEN** every recorded result, operation count and input size SHALL be as recorded

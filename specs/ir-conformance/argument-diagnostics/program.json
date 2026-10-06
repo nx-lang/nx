@@ -1,0 +1,18 @@
+{
+  "entry": "main.nx",
+  "emit": [
+    "main.nx"
+  ],
+  "recordFailures": true,
+  "entrypoints": [
+    { "module": "main.nx", "function": "findPlans", "case": "wrongType", "arguments": ["five"], "fails": true },
+    { "module": "main.nx", "function": "findPlans", "case": "missing", "arguments": [], "fails": true },
+    { "module": "main.nx", "function": "total", "case": "deepField", "arguments": [{"$type": "Request", "order": {"$type": "Order", "items": [{"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 2}, {"$type": "Item", "quantity": "three"}]}}], "fails": true },
+    { "module": "main.nx", "function": "through", "case": "noFunction", "arguments": [{"$type": "Function", "module": "main.nx", "name": "missing"}], "fails": true },
+    { "module": "main.nx", "function": "share", "case": "defaultDivides", "arguments": [{"$type": "Req", "n": 0}], "fails": true },
+    { "module": "main.nx", "function": "ratio", "case": "bodyDivides", "arguments": [0], "fails": true },
+    { "module": "main.nx", "function": "stepperValue", "case": "fieldDefault", "arguments": [{"$type": "Stepper", "step": {"$type": "Function", "module": "main.nx", "name": "needsTwo"}}], "fails": true },
+    { "module": "main.nx", "function": "stepped", "case": "parameterDefault", "arguments": [{"$type": "Function", "module": "main.nx", "name": "needsTwo"}], "fails": true },
+    { "module": "main.nx", "function": "count", "case": "fifty", "arguments": [[{"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}, {"$type": "Item", "quantity": 1}]] }
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "$type": "Agent",
+  "name": "support",
+  "description": "Answers customer questions.",
+  "model": "balanced",
+  "documents": [
+    {
+      "$type": "Document",
+      "title": "Refund policy",
+      "text": "Refunds are available within 30 days of purchase."
+    }
+  ],
+  "tools": [
+    {
+      "$type": "FunctionTool",
+      "function": {
+        "$type": "Function",
+        "module": "main.nx",
+        "name": "findPlans"
+      }
+    },
+    {
+      "$type": "WebSearchTool",
+      "allowedDomains": [
+        "docs.example.com"
+      ]
+    },
+    {
+      "$type": "HttpTool",
+      "connection": {
+        "$type": "HttpConnection",
+        "name": "shop",
+        "baseUrl": "https://api.example.com/v1/"
+      },
+      "method": "get",
+      "path": "/orders/{orderId}",
+      "arguments": {
+        "$type": "Function",
+        "module": "main.nx",
+        "name": "lookupOrder"
+      }
+    },
+    {
+      "$type": "HttpTool",
+      "connection": {
+        "$type": "HttpConnection",
+        "name": "shop",
+        "baseUrl": "https://api.example.com/v1/"
+      },
+      "method": "post",
+      "path": "/orders",
+      "arguments": {
+        "$type": "Function",
+        "module": "main.nx",
+        "name": "placeOrder"
+      },
+      "maxCallsPerConversation": 3
+    }
+  ],
+  "limits": {
+    "$type": "AgentLimits",
+    "maxSteps": 6,
+    "maxToolCalls": 12
+  },
+  "instructions": "You are the support assistant. Answer from the documents."
+}

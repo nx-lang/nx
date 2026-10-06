@@ -155,6 +155,6 @@ pub use semantics::{
     resolve_type_ref_with_seen, type_satisfies_expected,
 };
 pub use ty::{
-    check_function_satisfies, display_type_pair, read_type, DeclaringOrigin, FunctionMismatch,
-    FunctionParam, Occurrence, Primitive, Type, TypeId, UnionCaseType, UnionType,
+    check_function_satisfies, check_function_types, display_type_pair, read_type, DeclaringOrigin,
+    FunctionMismatch, FunctionParam, Occurrence, Primitive, Type, TypeId, UnionCaseType, UnionType,
 };

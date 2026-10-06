@@ -52,6 +52,13 @@ pub(crate) fn common_item_supertype(lhs: &Type, rhs: &Type) -> Type {
         return lhs.clone();
     }
 
+    // Two function types neither of which satisfies the other are still both functions: they
+    // join to the type every function satisfies rather than to `object`. Their results are not
+    // joined.
+    if lhs.is_function_like() && rhs.is_function_like() {
+        return Type::widest_function();
+    }
+
     Type::named("object")
 }
 
@@ -127,6 +134,9 @@ where
                 .collect();
             let ret = resolve_type_ref_with_seen(return_type, seen, resolve_named);
             Type::function(params, ret)
+        }
+        ast::TypeRef::AnyFunction { return_type } => {
+            Type::any_function(resolve_type_ref_with_seen(return_type, seen, resolve_named))
         }
     }
 }

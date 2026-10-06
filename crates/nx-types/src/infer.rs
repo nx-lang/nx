@@ -4,7 +4,7 @@ use crate::{
     numeric_literal_target,
     semantics::{common_item_supertype, PRIMITIVE_TYPE_NAMES},
     ty::{
-        check_function_satisfies, read_type, DeclaringOrigin, FunctionMismatch, FunctionParam,
+        check_function_types, read_type, DeclaringOrigin, FunctionMismatch, FunctionParam,
         NamedType, Occurrence, Primitive, TypeParameterRef, UnionCaseType, UnionType,
     },
     type_satisfies_expected as generic_type_satisfies_expected, Type, TypeEnvironment,
@@ -601,6 +601,10 @@ impl<'a> InferenceContext<'a> {
             (Type::UnionCase(lhs_case), Type::UnionCase(rhs_case)) => {
                 lhs_case.shares_union_with(rhs_case)
             }
+            // Function values compare by the declaration they name, whatever type either side
+            // was declared at: one function can satisfy two function types neither of which
+            // satisfies the other.
+            _ if lhs_item.is_function_like() && rhs_item.is_function_like() => true,
             _ => {
                 self.type_satisfies_expected(&lhs_item, &rhs_item)
                     || self.type_satisfies_expected(&rhs_item, &lhs_item)
@@ -733,6 +737,20 @@ impl<'a> InferenceContext<'a> {
                     self.infer_intrinsic_call(intrinsic, args, *span)
                 } else {
                     let func_ty = self.infer_expr(*func);
+
+                    // A function reference value cannot be called at all: its parameters are not
+                    // stated, so no argument could be checked.
+                    if func_ty.item().is_any_function() {
+                        let name = match self.module.raw_module().expr(*func) {
+                            ast::Expr::Ident(name) => Some(name.clone()),
+                            _ => None,
+                        };
+                        self.report_function_reference_call(name.as_ref(), &func_ty, *span);
+                        for arg in args {
+                            self.infer_expr(*arg);
+                        }
+                        return Type::Error;
+                    }
 
                     // A function-typed value is called as an element, never by position: the
                     // value's own declaration may order — or omit — parameters differently from
@@ -2568,6 +2586,10 @@ impl<'a> InferenceContext<'a> {
 
                 (**ret).clone()
             }
+            Type::AnyFunction { .. } => {
+                self.report_function_reference_call(None, func_ty, span);
+                Type::Error
+            }
             _ => {
                 self.error(
                     "not-a-function",
@@ -3076,6 +3098,24 @@ impl<'a> InferenceContext<'a> {
         element: &nx_hir::Element,
         span: TextSpan,
     ) -> Type {
+        // A tag that names a value of a function reference type is an attempt to call it, and is
+        // reported as that rather than falling through to an element with no declaration.
+        if let Some(ty) = self
+            .env
+            .lookup(&element.tag)
+            .filter(|ty| ty.item().is_any_function())
+        {
+            let ty = ty.clone();
+            self.report_function_reference_call(Some(&element.tag), &ty, span);
+            // Nothing states what the arguments bind to, so they are inferred on their own terms,
+            // as they are for a tag that resolves to nothing.
+            self.property_paths_for_entries(element.property_entries());
+            for content in &element.content {
+                self.infer_expr(*content);
+            }
+            return Type::Error;
+        }
+
         // A tag that names a function-typed value — a prop, a parameter, a `let` — is a call of
         // that value: every parameter of the type is required, since the value's own declaration
         // may need any of them, and an argument the type lacks has nowhere to go.
@@ -4557,6 +4597,9 @@ impl<'a> InferenceContext<'a> {
                 let ret = self.type_from_type_ref_walk(declaring_module, return_type, seen, scoped);
                 Type::function(params, ret)
             }
+            ast::TypeRef::AnyFunction { return_type } => Type::any_function(
+                self.type_from_type_ref_walk(declaring_module, return_type, seen, scoped),
+            ),
         }
     }
 
@@ -6280,6 +6323,34 @@ impl<'a> InferenceContext<'a> {
         self.error_involving(code, message, span, None);
     }
 
+    /// Reports a call of a value whose type is a function reference type, `<function ... />: R`.
+    /// Such a value is passed, stored and compared, never called: nothing states its parameters.
+    fn report_function_reference_call(
+        &mut self,
+        name: Option<&Name>,
+        ty: &Type,
+        span: nx_diagnostics::TextSpan,
+    ) {
+        let (subject, binding) = match name {
+            Some(name) => (format!("'{name}'"), format!("'{name}'")),
+            None => ("This value".to_string(), "the binding".to_string()),
+        };
+        // An optional or sequence binding of the type is no more callable than one function is.
+        let result = match ty.item() {
+            Type::AnyFunction { ret } => ret.to_string(),
+            other => other.to_string(),
+        };
+        self.error(
+            "function-reference-not-callable",
+            format!(
+                "{subject} cannot be called because its parameters are not stated: its type is \
+                 `{ty}`; to call it, declare {binding} at a function type with its parameters, \
+                 such as `<function Item:string />: {result}`"
+            ),
+            span,
+        );
+    }
+
     /// Records a warning: something the author should look at that does not make the program
     /// wrong, such as a presence test on a value that is always present.
     fn warn(&mut self, code: &str, message: String, span: nx_diagnostics::TextSpan) {
@@ -6324,11 +6395,12 @@ impl<'a> InferenceContext<'a> {
     fn check_property_slot(&mut self, name: &Name, written: &ast::TypeRef, ty: Type) -> Type {
         let span = self.type_ref_span;
         if ty.admits_zero() {
-            let base = ty.item().to_string();
+            // `T*` becomes `name?:T+`, spelled through the type's own display so that a function
+            // type under the suffix keeps its parentheses.
             let fix = if ty.admits_many() {
-                format!("{name}?:{base}+")
+                format!("{name}?:{}", Type::one_or_more(ty.item().clone()))
             } else {
-                format!("{name}?:{base}")
+                format!("{name}?:{}", ty.item())
             };
             // A bare name whose resolved type carries the occurrence is an alias: name it, since
             // the suffix the rule is about is written at the alias, not here.
@@ -7494,9 +7566,10 @@ impl<'a> InferenceContext<'a> {
             (Type::Union(union), Type::Named(expected_name)) => {
                 self.union_type_satisfies_record(&union.name, union.origin(), expected_name)
             }
-            (Type::Function { .. }, Type::Function { .. }) => {
-                self.function_satisfies_expected(actual, expected).is_ok()
-            }
+            (
+                Type::Function { .. } | Type::AnyFunction { .. },
+                Type::Function { .. } | Type::AnyFunction { .. },
+            ) => self.function_satisfies_expected(actual, expected).is_ok(),
             _ => false,
         }
     }
@@ -7511,18 +7584,10 @@ impl<'a> InferenceContext<'a> {
         actual: &Type,
         expected: &Type,
     ) -> Result<(), FunctionMismatch> {
-        let (Some((actual_params, actual_ret)), Some((expected_params, expected_ret))) =
-            (actual.function_parts(), expected.function_parts())
-        else {
-            return Ok(());
-        };
-        check_function_satisfies(
-            actual_params,
-            actual_ret,
-            expected_params,
-            expected_ret,
-            &mut |value, target| self.type_satisfies_expected(value, target),
-        )
+        check_function_types(actual, expected, &mut |value, target| {
+            self.type_satisfies_expected(value, target)
+        })
+        .unwrap_or(Ok(()))
     }
 
     /// True when `never` occurs anywhere in this type.
@@ -7535,7 +7600,7 @@ impl<'a> InferenceContext<'a> {
         match ty {
             Type::Primitive(Primitive::Never) => true,
             Type::Seq { item, .. } => Self::mentions_never(item),
-            Type::Function { ret, .. } => Self::mentions_never(ret),
+            Type::Function { ret, .. } | Type::AnyFunction { ret } => Self::mentions_never(ret),
             _ => false,
         }
     }
@@ -7599,6 +7664,18 @@ impl<'a> InferenceContext<'a> {
                 .common_record_supertype(lhs_name, rhs_name)
                 .or_else(|| self.common_component_supertype(lhs_name, rhs_name))
                 .unwrap_or_else(|| common_item_supertype(lhs, rhs)),
+            // Two function types join to the one both satisfy, under this checker's relation so
+            // that a record or component subtype in a signature pairs as it does at a binding,
+            // and otherwise to the widest function reference type. Their results are not joined.
+            _ if lhs.is_function_like() && rhs.is_function_like() => {
+                if self.type_satisfies_expected(lhs, rhs) {
+                    rhs.clone()
+                } else if self.type_satisfies_expected(rhs, lhs) {
+                    lhs.clone()
+                } else {
+                    Type::widest_function()
+                }
+            }
             _ => common_item_supertype(lhs, rhs),
         }
     }

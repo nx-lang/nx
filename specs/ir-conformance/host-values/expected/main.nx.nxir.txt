@@ -1,0 +1,45 @@
+module main.nx fingerprint 12652264459537661976
+requires update-records-v1 action-handlers-v1
+entrypoints functions [listed held greeting same count bound] components [Button Counter]
+
+component Button external @12:1-12:65
+  props
+    label: string?
+  emits
+    Tapped = Button.Tapped
+
+record Button.Tapped @12:50-12:60
+
+function listed(xs: int+) @17:1-17:29 =
+  xs
+
+function held(o: object): object @26:1-26:35 =
+  o
+
+function greeting(name: string): string @30:1-30:57 =
+  ("Hello, " concat name)
+
+function same(a: object, b: object): boolean @38:1-38:51 =
+  (a eq b)
+
+function count(content items: object): int @43:1-43:45 =
+  1
+
+function bound(xs: object): int @44:1-44:42 =
+  count(xs)
+
+component Counter @54:1-57:2
+  props
+    title: string required
+    step: int = 1
+  state
+    count: int = 0
+  body =
+    <Button label=title
+      onTapped=handler Button.Tapped action@3:Button.Tapped owner Counter =>
+        <Counter.Update count=(count add step) />
+    >
+    </Button>
+
+record Counter.Update update of Counter @54:1-57:2
+  count: int

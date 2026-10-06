@@ -1,0 +1,116 @@
+// The probe library of the cost validation: one function or component for each operation a
+// runtime performs on a value a host passed it. Every probe takes the host value and, where it
+// repeats a step, how many times to repeat it, so that a case can be run at two scales: a step
+// that does work in proportion to the value for a fixed charge then grows its time and its
+// allocations as the product of the two while its count grows with the repeats alone.
+//
+// No probe holds an integer literal outside JavaScript's safe range or does arithmetic that can
+// leave it: the TypeScript runtime refuses such an integer where the Rust runtime computes with
+// it, so a probe that reached one would differ on every case for a reason that has nothing to do
+// with cost.
+//
+// Operations a runtime performs on a value that have no probe, and why:
+// - Restoring a stored instance: only the Rust runtime serializes one, it takes no options and
+//   it evaluates nothing, so it has no count to compare.
+// - The update helpers a host calls on values it holds (`apply`, `merge`, `diff`, `changed`
+//   outside a program): they take no options, so nothing is charged and nothing is limited. The
+//   intrinsics of the same names, which a program calls, have probes.
+// - Resolving a parent's handlers in the props of a child the host initializes: it needs a parent
+//   instance, which is not input, and an `ActionHandler` record without one is refused, which the
+//   reserved-name cases cover.
+// - `changed`: it reads the names an update record holds, which are declared names, and no value.
+// - Receiving a map of props, of state or of a patch that holds members the component does not
+//   declare: both runtimes refuse the call for the first such member, with the same code, having
+//   read the map once, which is work in proportion to the input that the input limit bounds. The
+//   maps a call accepts hold declared names only, and the value under one of them is what the
+//   probes vary. Arguments by name are the one map whose undeclared members a call accepts, and
+//   drops, and they have a probe.
+
+external component <Button emits { Tapped { } } />
+external component <Field emits { Changed { value:object } } />
+action Ping = { n:int }
+
+type Pair = { left:int right:string }
+type Holder = { held?:object content items?:object+ }
+type Opt = { held?:object n:int = 0 }
+
+// Holding a value, and passing it through an untyped parameter: one operation whatever it holds.
+let keep(o:object): int = { 1 }
+let hold(o:object, n:int) = { for i in 0..n { keep(o) } }
+
+// Passing it through a typed parameter: each value is checked at every call.
+let takeInts(xs:int+): int = { 1 }
+let typedInts(xs:int+, n:int) = { for i in 0..n { takeInts(xs) } }
+let takeText(s:string): int = { 1 }
+let typedText(s:string, n:int) = { for i in 0..n { takeText(s) } }
+let takePair(p:Pair): int = { 1 }
+let typedRecord(p:Pair, n:int) = { for i in 0..n { takePair(p) } }
+let takeObjects(xs:object+): int = { 1 }
+let typedObjects(xs:object+, n:int) = { for i in 0..n { takeObjects(xs) } }
+
+// Binding it to a content parameter: the list is built anew for each call.
+let ignore(content c:object): int = { 1 }
+let bindContent(o:object, n:int) = { for i in 0..n { ignore(o) } }
+
+// Comparing it: by `eq`, by a pattern that matches by equality, and by `diff`.
+let compareEq(a:object, b:object, n:int) = { for i in 0..n { a == b } }
+let comparePattern(n:int, o?:object) = { for i in 0..n { if o is { {} => 0  "x" => 1  7 => 2  else => 3 } } }
+let compareDiff(a:object, b:object, n:int) = { for i in 0..n { diff(<Opt held={a} />, <Opt held={b} />) } }
+// Comparing it with itself, which is one allocation compared with itself, and comparing a record
+// that holds a number that is not equal to itself: a float squared past what a float holds is
+// infinite, and the difference of two infinities is not a number.
+let same(o:object): boolean = { o == o }
+let compareSelf(o:object, n:int) = { for i in 0..n { same(o) } }
+let compareUnequal(v:float64, n:int) = { for i in 0..n { same(<box v={v * v - v * v} />) } }
+
+// Placing it in a sequence.
+let place(o:object, n:int) = { for i in 0..n { o } }
+let twice(o:object) = { o o }
+
+// Concatenating it and converting it to text.
+let concatText(s:string, n:int) = { for i in 0..n { s + s } }
+let intText(v:int, n:int) = { for i in 0..n { "v" + v } }
+let floatText(v:float64, n:int) = { for i in 0..n { "v" + v } }
+
+// Constructing a record that holds it as a property and as content.
+let asProperty(o:object, n:int) = { for i in 0..n { <Holder held={o} /> } }
+let asContent(o:object, n:int) = { for i in 0..n { <Holder>{o}</Holder> } }
+let asElement(o:object, n:int) = { for i in 0..n { <box v={o}>{o}</box> } }
+
+// Capturing it in an action handler, and comparing two such handlers.
+let button(o:object) = <Button onTapped=<Ping n={1} /> />
+let captureHandler(o:object, n:int) = { for i in 0..n { button(o) } }
+let compareHandlers(a:object, b:object, n:int) = { for i in 0..n { button(a) == button(b) } }
+
+// Applying and merging an update record that holds it.
+let applyUpdate(o:object, n:int) = { for i in 0..n { apply(<Opt />, <Opt.Update held={o} />) } }
+let mergeUpdates(a:object, b:object, n:int) = { for i in 0..n { merge(<Opt.Update held={a} />, <Opt.Update held={b} n={1} />) } }
+
+// Testing its presence. A parameter a caller may leave out comes after the required ones.
+let present(n:int, o?:object) = { for i in 0..n { if o? { 1 } else { 0 } } }
+let fallback(n:int, o?:object) = { for i in 0..n { keep(o ?? 1) } }
+
+// Reading a member of it, and iterating over it, where its type allows that.
+let member(p:Pair, n:int) = { for i in 0..n { p.left } }
+let iterate(xs:object+, n:int) = { for i in 0..n { for x in xs { keep(x) } } }
+
+// Returning it.
+let pass(o:object): object = { o }
+
+// Receiving it as a prop, and rendering it.
+component <Shown data:object label?:string /> = { <box>{data}</box> }
+
+// Receiving it as the content a host passes to a descriptor, which is bound to the content
+// property on a path of its own.
+component <Wrapped label?:string content items?:object+ /> = { <box>{items}</box> }
+
+// Receiving it as an action's payload, storing it in component state, and patching that state:
+// `Changed` stores its payload, and each `Tapped` after it patches another field of a state that
+// holds it.
+component <Form /> = {
+  state { held?:object count:int = 0 }
+  <panel>
+    <Field onChanged=<Update held={action.value} /> />
+    <Button onTapped=<Update count={count + 1} /> />
+  </panel>
+}

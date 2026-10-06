@@ -175,6 +175,19 @@ pub enum TypeRef {
         /// Return type
         return_type: Box<TypeRef>,
     },
+
+    /// Function reference type: a function type whose parameter list is `...`, the type of a
+    /// function of any parameters whose result satisfies the stated one.
+    ///
+    /// <para>A variant of its own rather than a flag on [`TypeRef::Function`], so that code which
+    /// reads a function type's parameters cannot mistake this for a function of no parameters.
+    /// </para>
+    ///
+    /// Example: `<function ... />: HttpArguments`, `<function ... />: object*`
+    AnyFunction {
+        /// Return type
+        return_type: Box<TypeRef>,
+    },
 }
 
 /// One parameter of a function type.
@@ -292,6 +305,13 @@ impl TypeRef {
         }
     }
 
+    /// Create a function reference type, `<function ... />: R`.
+    pub fn any_function(return_type: TypeRef) -> Self {
+        Self::AnyFunction {
+            return_type: Box::new(return_type),
+        }
+    }
+
     /// The reference lowering stands in for a type it could not lower: a syntax error, a missing
     /// type, or a construct post-parse validation has already rejected.
     ///
@@ -349,6 +369,12 @@ pub fn spell_function_type<'a>(
     out
 }
 
+/// Spells a function reference type the way source writes one, `<function ... />: Node`, for the
+/// same three callers as [`spell_function_type`].
+pub fn spell_function_reference_type(result: &str) -> String {
+    format!("<function ... />: {result}")
+}
+
 /// Spells a type reference as source does, parenthesizing a function type under an occurrence
 /// suffix, because a suffix written after the result would bind to the result instead.
 pub fn spell_type_ref(ty: &TypeRef) -> String {
@@ -379,6 +405,9 @@ pub fn spell_type_ref(ty: &TypeRef) -> String {
                 &spell_type_ref(return_type),
             )
         }
+        TypeRef::AnyFunction { return_type } => {
+            spell_function_reference_type(&spell_type_ref(return_type))
+        }
     }
 }
 
@@ -406,7 +435,9 @@ pub fn spell_applied_type<'a>(
 /// is spelled as it stands.
 pub fn spell_type_ref_under_suffix(ty: &TypeRef) -> String {
     match ty {
-        TypeRef::Function { .. } => format!("({})", spell_type_ref(ty)),
+        TypeRef::Function { .. } | TypeRef::AnyFunction { .. } => {
+            format!("({})", spell_type_ref(ty))
+        }
         _ => spell_type_ref(ty),
     }
 }

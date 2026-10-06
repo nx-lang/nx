@@ -374,6 +374,44 @@ it does declare is always present, because the type supplied it. A paren-style c
 function-typed value, `Row(item, 0)`, is rejected with a diagnostic showing the element form:
 positions would depend on the order of parameters the value's own declaration does not share.
 
+### Functions a host calls
+
+Some functions are never called from NX. A tool a host offers to a model, or a function that builds
+the arguments of a request, is called by the host, with arguments the host checks against the
+function's own parameters. No one parameter list fits every such function, so the property that
+holds one is declared at a [function reference type](/reference/syntax/types#any-parameters),
+`<function ... />: R`, which takes a function of any parameters whose result satisfies `R`:
+
+```nx
+type HttpArguments = { url:string }
+
+type FunctionTool = { name:string function: <function ... />: object* }
+type HttpTool = { name:string arguments: <function ... />: HttpArguments }
+
+let findPlans(region:string, limit?:int): string* = {region}
+let planRequest(plan:string): HttpArguments = <HttpArguments url={plan} />
+
+let tools = {
+  <FunctionTool name="find_plans" function={findPlans} />
+  <HttpTool name="get_plan" arguments={planRequest} />
+}
+```
+
+`<function ... />: object*` takes any function at all; a stated result, as on `arguments`, is
+checked where the function is bound, so `arguments={findPlans}` is an error in the editor rather
+than a failure in the host. Each renders as the same `Function` record, which the host calls by the
+function's own parameter names.
+
+NX code can pass such a value on, store it and compare it, and cannot call it:
+
+```nx fragment
+let invoke(f: <function ... />: int, n:int): int = <f n={n} />
+// error: 'f' cannot be called because its parameters are not stated
+```
+
+To call a function, declare the binding at a function type with its parameters,
+`f: <function n:int />: int`.
+
 ## Paren-style Functions
 
 ```nx

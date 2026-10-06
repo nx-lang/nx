@@ -80,6 +80,52 @@ fn a_function_bound_to_a_function_typed_property_is_the_function_value() {
 }
 
 #[test]
+fn a_function_bound_to_a_function_reference_field_is_the_function_value() {
+    let runtime = Runtime::new(
+        "type Tool = { fn: <function ... />: object* }\n\
+         let double(n:int): int = {n * 2}\n\
+         let pass(tool:Tool): Tool = {tool}\n\
+         let root() = <Tool fn={double} />\n\
+         let passed() = {pass(<Tool fn={double} />)}",
+    );
+    for entry in ["root", "passed"] {
+        assert_eq!(
+            runtime.call(entry),
+            record("Tool", &[("fn", function("double"))]),
+            "{entry}"
+        );
+    }
+}
+
+#[test]
+fn a_function_reference_field_default_names_a_function() {
+    let runtime = Runtime::new(
+        "let identity(value:string): string = {value}\n\
+         type Tool = { fn: <function ... />: object* = {identity} }\n\
+         let root() = <Tool />",
+    );
+    assert_eq!(
+        runtime.call("root"),
+        record("Tool", &[("fn", function("identity"))])
+    );
+}
+
+#[test]
+fn function_reference_values_compare_by_declaration() {
+    let runtime = Runtime::new(
+        "type AnyFn = <function ... />: object*\n\
+         let double(n:int): int = {n * 2}\nlet greet(name:string): string = {name}\n\
+         let same(f:AnyFn, g:AnyFn): boolean = {f == g}\n\
+         let typed(f:AnyFn, g: <function n:int />: int): boolean = {f == g}\n\
+         let a() = {same(double, double)}\nlet b() = {same(double, greet)}\n\
+         let c() = {typed(double, double)}",
+    );
+    assert_eq!(runtime.call("a"), Value::Boolean(true));
+    assert_eq!(runtime.call("b"), Value::Boolean(false));
+    assert_eq!(runtime.call("c"), Value::Boolean(true));
+}
+
+#[test]
 fn function_values_are_equal_when_they_name_the_same_declaration() {
     assert_eq!(function("Row"), function("Row"));
     assert_ne!(function("Row"), function("Compact"));

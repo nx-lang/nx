@@ -1,0 +1,17 @@
+{
+  "counts": {
+    "main.nx::count#fifty": 103
+  },
+  "failures": {
+    "main.nx::count#fifty": [
+      {
+        "budget": 51,
+        "declaration": "main.nx::Item"
+      },
+      {
+        "budget": 102,
+        "declaration": "main.nx::count"
+      }
+    ]
+  }
+}

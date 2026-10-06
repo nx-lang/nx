@@ -35,6 +35,11 @@ pub const NX_IR_REQUIRED_FEATURE_RANGES_V1: &str = "ranges-v1";
 /// a match arm carries the `{}` pattern, so a runtime that predates them refuses it by name.
 pub const NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1: &str = "occurrence-v1";
 
+/// Required by a module whose type table holds a function reference type, `<function ... />: R`,
+/// so a runtime that predates the type refuses the module by name rather than by an unknown type
+/// kind.
+pub const NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1: &str = "function-reference-type-v1";
+
 /// The kind numbers of schema 5. A number, once assigned, is never reused for anything else.
 pub mod kinds {
     /// Node kinds: the first element of every `nodes` entry.
@@ -114,6 +119,9 @@ pub mod kinds {
         /// occurrence cell is `OCCURRENCE_EMPTY | OCCURRENCE_MANY` bits — `1` for `?`, `2` for
         /// `+`, `3` for `*`.
         pub const SEQ: i64 = 5;
+        /// A function type whose parameters are not stated, `<function ... />: R`: `[6, result]`.
+        /// A function of any parameters whose result satisfies the result type satisfies it.
+        pub const ANY_FUNCTION: i64 = 6;
 
         /// Bit 0 of a function type parameter's flags cell: the parameter takes body content.
         pub const FUNCTION_PARAM_CONTENT: i64 = 1;
@@ -130,6 +138,7 @@ pub mod kinds {
             (NOMINAL, "nominal"),
             (FUNCTION, "function"),
             (SEQ, "seq"),
+            (ANY_FUNCTION, "anyFunction"),
         ];
 
         /// How many values a `SEQ` type admits: the two bits of its occurrence cell.

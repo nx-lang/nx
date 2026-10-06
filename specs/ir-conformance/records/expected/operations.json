@@ -1,0 +1,18 @@
+{
+  "counts": {
+    "main.nx::ada": 11,
+    "main.nx::applied": 17,
+    "main.nx::changedKeys": 32,
+    "main.nx::city": 28,
+    "main.nx::cover": 2,
+    "main.nx::failure": 5,
+    "main.nx::home": 22,
+    "main.nx::idle": 2,
+    "main.nx::key": 2,
+    "main.nx::merged": 11,
+    "main.nx::patch": 4,
+    "main.nx::root": 13,
+    "main.nx::userAge": 18,
+    "main.nx::userName": 18
+  }
+}

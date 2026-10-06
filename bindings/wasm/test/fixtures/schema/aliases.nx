@@ -1,0 +1,11 @@
+// Type aliases are transparent; update records make every field optional.
+
+type Names = string+
+
+let greet(names:Names): string = { "hi" }
+
+type User = { name:string email?:string }
+
+let patch(update:User.Update): User.Update = { update }
+
+let rename(name:string): User.Update = { <User.Update name={name} /> }

@@ -16,9 +16,9 @@ use std::ptr;
 use nx_api::{
     build_workspace_program_artifact, diagnostics_to_api_with_source_entries,
     eval_program_artifact_nx_text_with_limits, load_program_artifact_from_source,
-    validate_workspace, LibraryRegistry, NxDiagnostic, NxLibraryModule, NxLibrarySource,
-    NxSeverity, NxWorkspace, NxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
-    ResourceLimits,
+    program_artifact_function_schema_json, program_artifact_type_schema_json, validate_workspace,
+    LibraryRegistry, NxDiagnostic, NxLibraryModule, NxLibrarySource, NxSeverity, NxWorkspace,
+    NxWorkspaceModule, ProgramArtifact, ProgramBuildContext, ResourceLimits, SchemaQueryError,
 };
 use nx_codegen::{emit_nx_ir, write_nx_ir_bundle, NxIrEmitOptions};
 use nx_ir::explain_nx_ir_image;
@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 
 /// ABI version the loader checks before it makes any other call. Bump it whenever an export's
 /// signature, a status code or a payload shape changes.
-pub const ABI_VERSION: u32 = 5;
+pub const ABI_VERSION: u32 = 6;
 
 /// The operation succeeded; the payload is its JSON result.
 pub const STATUS_OK: u32 = 0;
@@ -349,6 +349,39 @@ pub unsafe extern "C" fn nx_wasm_program_diagnostics(
     into_result(program_diagnostics(&*handle))
 }
 
+/// Answers with the schema of a function of the artifact `handle` names, from `{ reference: {
+/// module?, name }, options?: { hostSuppliedTypes } }` JSON: its arguments' and result's JSON
+/// Schema, its documentation and its parameters. A type with no JSON form is part of the answer;
+/// a reference that names no function answers with diagnostics.
+///
+/// # Safety
+/// `handle` must be a live handle from [`nx_wasm_program_build`] or [`nx_wasm_workspace_build`];
+/// `ptr` and `len` must describe UTF-8 bytes in the module's memory.
+#[no_mangle]
+pub unsafe extern "C" fn nx_wasm_program_function_schema(
+    handle: *mut ProgramArtifact,
+    ptr: *const u8,
+    len: usize,
+) -> *mut NxWasmResult {
+    into_result(program_function_schema(&*handle, argument(ptr, len)))
+}
+
+/// Answers with the schema of a declared type of the artifact `handle` names, from `{ reference: {
+/// module?, name }, options?: { direction } }` JSON. A type with no JSON form is part of the
+/// answer; a reference that names no type answers with diagnostics.
+///
+/// # Safety
+/// `handle` must be a live handle from [`nx_wasm_program_build`] or [`nx_wasm_workspace_build`];
+/// `ptr` and `len` must describe UTF-8 bytes in the module's memory.
+#[no_mangle]
+pub unsafe extern "C" fn nx_wasm_program_type_schema(
+    handle: *mut ProgramArtifact,
+    ptr: *const u8,
+    len: usize,
+) -> *mut NxWasmResult {
+    into_result(program_type_schema(&*handle, argument(ptr, len)))
+}
+
 /// Releases the artifact `handle` names.
 ///
 /// # Safety
@@ -598,6 +631,31 @@ fn program_evaluate_nx(program: &ProgramArtifact) -> Operation {
     let text =
         eval_program_artifact_nx_text_with_limits(program, limits).map_err(evaluation_error)?;
     result_json(&text)
+}
+
+fn program_function_schema(
+    program: &ProgramArtifact,
+    argument: Result<&str, OperationError>,
+) -> Operation {
+    program_artifact_function_schema_json(program, argument?)
+        .map(String::into_bytes)
+        .map_err(schema_query_error)
+}
+
+fn program_type_schema(
+    program: &ProgramArtifact,
+    argument: Result<&str, OperationError>,
+) -> Operation {
+    program_artifact_type_schema_json(program, argument?)
+        .map(String::into_bytes)
+        .map_err(schema_query_error)
+}
+
+fn schema_query_error(error: SchemaQueryError) -> OperationError {
+    match error {
+        SchemaQueryError::Request(message) => internal_error(message),
+        SchemaQueryError::Declaration(diagnostics) => evaluation_error(diagnostics),
+    }
 }
 
 fn explain_ir(argument: Result<&[u8], OperationError>) -> Operation {
@@ -1139,6 +1197,57 @@ mod tests {
             "{payload}"
         );
         unsafe { nx_wasm_registry_free(registry) };
+    }
+
+    #[test]
+    fn a_program_answers_with_function_and_type_schemas() {
+        let (status, payload) = call(
+            nx_wasm_program_build,
+            r#"{"source":"/// A plan.\ntype Plan = { name:string }\n/// Finds plans.\nlet findPlans(teamSize:int): Plan* = { {} }","fileName":"tools.nx"}"#,
+        );
+        assert_eq!(status, STATUS_OK, "{payload}");
+        let program = handle_from(&payload) as *mut ProgramArtifact;
+
+        let (status, payload) = call_on(
+            program,
+            nx_wasm_program_function_schema,
+            r#"{"reference":{"name":"findPlans"}}"#,
+        );
+        assert_eq!(status, STATUS_OK, "{payload}");
+        let answer: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(answer["module"], "tools.nx");
+        assert_eq!(answer["description"], "Finds plans.");
+        assert_eq!(answer["parameters"][0]["name"], "teamSize");
+        assert_eq!(answer["inputSchema"]["required"][0], "teamSize");
+        assert_eq!(answer["outputSchema"]["items"]["$ref"], "#/$defs/Plan");
+        assert_eq!(answer["declaration"]["start_line"], 4);
+        // Key order is part of the answer.
+        assert!(
+            payload.contains(r#""inputSchema":{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object""#),
+            "{payload}"
+        );
+
+        let (status, payload) = call_on(
+            program,
+            nx_wasm_program_type_schema,
+            r#"{"reference":{"module":"tools.nx","name":"Plan"},"options":{"direction":"input"}}"#,
+        );
+        assert_eq!(status, STATUS_OK, "{payload}");
+        let answer: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(answer["description"], "A plan.");
+        assert!(answer["schema"]["$defs"]["Plan"]["properties"]
+            .get("$type")
+            .is_none());
+
+        let (status, payload) = call_on(
+            program,
+            nx_wasm_program_function_schema,
+            r#"{"reference":{"name":"missing"}}"#,
+        );
+        assert_eq!(status, STATUS_EVALUATION_ERROR, "{payload}");
+        assert!(payload.contains("schema-unknown-declaration"), "{payload}");
+
+        unsafe { nx_wasm_program_free(program) };
     }
 
     #[test]

@@ -1,0 +1,9 @@
+// Primitives and the top type.
+
+type Sizes = { s:string f:boolean n:int a:int32 b:int64 c:float32 d:float64 o:object }
+
+let echo(s:string, f:boolean, n:int, a:int32, b:int64, c:float32, d:float64, o:object): string = { s }
+
+let sizes(): Sizes = { <Sizes s="s" f=true n=1 a=2 b=3 c=1.5 d=2.5 o="any" /> }
+
+let anything(value:object): object = { value }

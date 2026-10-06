@@ -49,6 +49,11 @@ trailing root `Element` for rendered markup. Imports target libraries rather tha
 files. A local library is a directory containing `.nx` files, and every `.nx` file under that
 directory contributes declarations to the imported library recursively.
 
+A library path whose first segment is `@nx` names a standard library, NX source the compiler
+carries: `import "@nx/agent"`. Such a path is never resolved relative to the importing module, so it
+is written the same way from a module at any depth, and only the two-segment form `@nx/<name>` names
+a library. The whole `@nx/` root is reserved for the prelude and the standard libraries.
+
 Imports introduce unqualified names by default. `import "<library>" as Prefix` keeps imported names
 under `Prefix.Name`, while `import { Name as Prefix.Name } from "<library>"` adds a qualified
 prefix for just that imported declaration. The qualified selective alias must contain exactly one
@@ -113,9 +118,14 @@ OccurrenceSuffix ::=
     | "*"           (* zero or more *)
 
 (* An element function's signature with "function" in the name slot. "function" is a keyword only
-   here; elsewhere it is an identifier. *)
+   here; elsewhere it is an identifier. The token "..." in place of the parameters leaves them
+   unspecified: it stands for the whole parameter list and is accepted nowhere else. *)
 FunctionType ::=
-    "<" "function" {PropertyDefinition} "/>" ":" TypeDeclaration
+    "<" "function" FunctionTypeParameters "/>" ":" TypeDeclaration
+
+FunctionTypeParameters ::=
+    {PropertyDefinition}
+    | "..."
 
 (* One instantiation of a generic record, spelled as the element that constructs it with only its
    type arguments. A missing argument parses and is reported by name, so "{" not "+". *)
@@ -164,6 +174,14 @@ sequence-of function type is written with parentheses: `(<function Item:Contact 
 A function
 satisfies a function type by parameter name, and may declare fewer parameters than the type
 supplies; see the language reference on functions.
+
+The token `...` in place of the parameters leaves them unspecified: `<function ... />: R` is the
+*function reference type*, satisfied by a function of any parameters whose result satisfies `R`.
+Here `...` is a token of the language, not an elision. It stands for the whole parameter list, so
+a function type that writes it beside a parameter definition is rejected during post-parse
+validation, and it is accepted nowhere else: not in a function or component signature, not in an
+element, and not as a type on its own. The result type is required as in every function type, and
+a suffix after it binds to it, so a sequence of such functions is `(<function ... />: R)+`.
 
 A type parameter is a property definition whose declared type is the keyword `type`:
 `type Range = { T:type start:T end:T }`, `external component <List TItem:type items?:TItem+ />`.

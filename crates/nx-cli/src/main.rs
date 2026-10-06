@@ -28,6 +28,7 @@ use nx_types::Type;
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::Arc;
 
 #[derive(Parser)]
 #[command(name = "nxlang")]
@@ -62,12 +63,16 @@ enum Commands {
         output: Option<PathBuf>,
     },
 
-    /// Generate language-specific type definitions from an NX file or library directory
+    /// Generate language-specific type definitions from an NX file, library directory, or
+    /// standard library
     ///
     /// Outputs exported NX type declarations. File input generates one file. Directory input
-    /// analyzes the full library and writes one generated file per contributing module.
+    /// analyzes the full library and writes one generated file per contributing module. A standard
+    /// library name such as `@nx/agent` generates that library's types from the source the
+    /// compiler carries, as for a library directory.
     Typegen {
-        /// Path to an NX source file or NX library directory
+        /// Path to an NX source file or NX library directory, or a standard library name such as
+        /// `@nx/agent`
         file: PathBuf,
 
         /// Target language for generated code
@@ -82,9 +87,11 @@ enum Commands {
         #[arg(long)]
         editorconfig: Option<PathBuf>,
 
-        /// C# namespace for generated types (only used for --language csharp)
-        #[arg(long, default_value = "Nx.Generated")]
-        csharp_namespace: String,
+        /// C# namespace for generated types (only used for --language csharp). Defaults to
+        /// `Nx.Generated`, or for a standard library to the namespace its references use, such as
+        /// `NxLang.Agent`
+        #[arg(long)]
+        csharp_namespace: Option<String>,
 
         /// Package prefix for TypeScript dependency-library imports (only used for --language typescript)
         #[arg(long = "typescript-package-prefix")]
@@ -195,7 +202,7 @@ fn main() -> ExitCode {
             language,
             output.as_ref(),
             editorconfig.as_ref(),
-            &csharp_namespace,
+            csharp_namespace.as_deref(),
             typescript_package_prefix.as_deref(),
         ),
         Commands::Codegen {
@@ -321,24 +328,42 @@ fn generate_types(
     language: GenLanguage,
     output: Option<&PathBuf>,
     editorconfig: Option<&PathBuf>,
-    csharp_namespace: &str,
+    csharp_namespace: Option<&str>,
     typescript_package_prefix: Option<&str>,
 ) -> ExitCode {
-    let input_kind = match classify_generate_input(path) {
-        Ok(kind) => kind,
+    // A name under `@nx/` is a standard library before it is a path.
+    let standard_library = match standard_library_input(path) {
+        Ok(library) => library,
         Err(message) => {
             eprintln!("Error: {}", message);
             return ExitCode::from(1);
         }
+    };
+    let input_kind = match standard_library {
+        Some(_) => GenerateInputKind::LibraryDirectory,
+        None => match classify_generate_input(path) {
+            Ok(kind) => kind,
+            Err(message) => {
+                eprintln!("Error: {}", message);
+                return ExitCode::from(1);
+            }
+        },
     };
 
     let target_language = match language {
         GenLanguage::Typescript => typegen::TargetLanguage::TypeScript,
         GenLanguage::Csharp => typegen::TargetLanguage::CSharp,
     };
+    // A standard library's contracts default to the namespace every host library's generated code
+    // refers to them by, so the two bind without the caller repeating it.
     let csharp_namespace = match language {
         GenLanguage::Typescript => None,
-        GenLanguage::Csharp => Some(csharp_namespace.to_string()),
+        GenLanguage::Csharp => Some(
+            csharp_namespace
+                .or(standard_library.map(|library| library.csharp_namespace))
+                .unwrap_or(typegen::DEFAULT_CSHARP_NAMESPACE)
+                .to_string(),
+        ),
     };
     let typescript_package_prefix = match language {
         GenLanguage::Typescript => typescript_package_prefix.map(str::to_string),
@@ -367,10 +392,33 @@ fn generate_types(
         format,
     };
 
+    if let Some(library) = standard_library {
+        return generate_types_from_library(path, output, &opts, || {
+            Ok(Arc::clone(library.artifact()))
+        });
+    }
     match input_kind {
         GenerateInputKind::SourceFile => generate_types_from_file(path, output, &opts),
-        GenerateInputKind::LibraryDirectory => generate_types_from_library(path, output, &opts),
+        GenerateInputKind::LibraryDirectory => {
+            generate_types_from_library(path, output, &opts, || {
+                LibraryRegistry::new().load_library_from_directory(path)
+            })
+        }
     }
+}
+
+/// The standard library `path` names, when it is written as one: `@nx/<name>`.
+///
+/// <para>Any argument under `@nx/` is read as a standard library name, so one that names none is an
+/// error listing those that exist rather than a path that happens not to be there.</para>
+fn standard_library_input(path: &Path) -> Result<Option<&'static nx_api::StandardLibrary>, String> {
+    let name = path.to_string_lossy().replace('\\', "/");
+    if name != "@nx" && !name.starts_with(nx_hir::NX_RESERVED_ROOT_PREFIX) {
+        return Ok(None);
+    }
+    nx_api::standard_library_entry(&name)
+        .map(Some)
+        .ok_or_else(|| nx_api::unknown_standard_library_message(&name))
 }
 
 fn generate_executable_source(
@@ -528,9 +576,12 @@ fn generate_executable_nx_ir(
 
 /// Where a module's artifact goes under the output root: its identity with `.nxir` in place of
 /// `.nx`. A source-file build's identity is the path the caller gave (`flatten`), so only its
-/// file name is kept; a workspace identity keeps its directories.
+/// file name is kept; a workspace identity keeps its directories. A standard library module keeps
+/// its directories either way: its identity is never a caller's path, and flattened it could take
+/// the entry's own file name (`agent.nxir`).
 fn nx_ir_relative_path(identity: &str, flatten: bool) -> PathBuf {
     let path = Path::new(identity);
+    let flatten = flatten && nx_api::standard_library_for_module(identity).is_none();
     let escapes = flatten
         || path.is_absolute()
         || path.components().any(|component| {
@@ -695,6 +746,7 @@ fn generate_types_from_library(
     path: &Path,
     output: Option<&PathBuf>,
     opts: &typegen::GenerateTypesOptions,
+    load: impl FnOnce() -> Result<Arc<nx_api::LibraryArtifact>, Vec<nx_api::NxDiagnostic>>,
 ) -> ExitCode {
     let Some(output_root) = output else {
         eprintln!("Error: Library generation requires an output directory");
@@ -706,8 +758,7 @@ fn generate_types_from_library(
         return ExitCode::from(1);
     }
 
-    let registry = LibraryRegistry::new();
-    let library = match registry.load_library_from_directory(path) {
+    let library = match load() {
         Ok(library) => library,
         Err(diagnostics) => return render_api_diagnostics(&diagnostics),
     };
@@ -2340,6 +2391,265 @@ export type QuestionFlowInitialExperience = {
         assert!(generated.contains("questionFlow: QuestionFlow;"));
         assert!(stderr.contains("Warning:"));
         assert!(stderr.contains("@org/nx-question-flow"));
+    }
+
+    const AGENT_TYPE_NAMES: [&str; 13] = [
+        "Agent",
+        "Document",
+        "AgentLimits",
+        "Tool",
+        "FunctionTool",
+        "WebSearchTool",
+        "ToolContext",
+        "Connection",
+        "HttpConnection",
+        "HttpMethod",
+        "HttpParam",
+        "HttpArguments",
+        "HttpTool",
+    ];
+
+    #[test]
+    fn test_cli_typegen_standard_library_writes_typescript_output() {
+        let dir = TempDir::new().unwrap();
+        let output_path = dir.path().join("generated-ts");
+
+        let output = run_cli(&[
+            "typegen",
+            "@nx/agent",
+            "--language",
+            "typescript",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{stderr}");
+        assert!(!stderr.contains("Warning:"), "{stderr}");
+        let agent = fs::read_to_string(output_path.join("agent.ts")).unwrap();
+        let index = fs::read_to_string(output_path.join("index.ts")).unwrap();
+        assert!(output_path.join("_nx.ts").is_file());
+        assert!(index.contains("export * from \"./agent\";"));
+
+        for name in AGENT_TYPE_NAMES {
+            assert!(
+                agent.contains(&format!("export interface {name} "))
+                    || agent.contains(&format!("export type {name} ")),
+                "agent.ts declares {name}"
+            );
+        }
+        // The NX documentation travels as doc comments, and both function fields are function
+        // references.
+        assert!(agent.contains(
+            " * A reusable definition of an agent: who answers, with what reference text and which tools."
+        ));
+        assert!(agent.contains("   * The most model calls one run may make."));
+        assert!(agent.contains("function: NxFunctionRef;"));
+        assert!(agent.contains("arguments: NxFunctionRef;"));
+        assert!(agent.contains("body?: unknown;"));
+    }
+
+    #[test]
+    fn test_cli_typegen_standard_library_writes_csharp_output() {
+        let dir = TempDir::new().unwrap();
+        let output_path = dir.path().join("generated-cs");
+
+        let output = run_cli(&[
+            "typegen",
+            "@nx/agent",
+            "--language",
+            "csharp",
+            "--csharp-namespace",
+            "NxLang.Agent",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{stderr}");
+        // The one expected warning: `ToolContext` is abstract and only a host declares a subtype.
+        let warnings = stderr
+            .lines()
+            .filter(|line| line.starts_with("Warning:"))
+            .collect::<Vec<_>>();
+        assert_eq!(warnings.len(), 1, "{stderr}");
+        assert!(warnings[0].contains("'ToolContext'"), "{stderr}");
+
+        let agent = fs::read_to_string(output_path.join("agent.g.cs")).unwrap();
+        assert!(agent.contains("namespace NxLang.Agent"));
+        assert!(agent.contains("public sealed class Agent"));
+        assert!(agent.contains(
+            "/// <summary>A reusable definition of an agent: who answers, with what reference text and which tools.</summary>"
+        ));
+        assert!(agent.contains("global::NxLang.Nx.NxFunctionRef Function"));
+    }
+
+    #[test]
+    fn test_cli_typegen_standard_library_csharp_defaults_to_its_fixed_namespace() {
+        let dir = TempDir::new().unwrap();
+        let output_path = dir.path().join("generated-cs");
+
+        let output = run_cli(&[
+            "typegen",
+            "@nx/agent",
+            "--language",
+            "csharp",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let agent = fs::read_to_string(output_path.join("agent.g.cs")).unwrap();
+        assert!(agent.contains("namespace NxLang.Agent"), "{agent}");
+    }
+
+    #[test]
+    fn test_cli_typegen_standard_library_requires_a_known_name_and_an_output_directory() {
+        let dir = TempDir::new().unwrap();
+        let output_path = dir.path().join("generated-ts");
+
+        let output = run_cli(&[
+            "typegen",
+            "@nx/nope",
+            "--language",
+            "typescript",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success());
+        assert!(
+            stderr.contains("@nx/nope") && stderr.contains("@nx/agent"),
+            "{stderr}"
+        );
+        assert!(
+            !output_path.exists(),
+            "nothing is written for an unknown library"
+        );
+
+        let output = run_cli(&["typegen", "@nx/agent", "--language", "typescript"]);
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("requires an output directory"));
+    }
+
+    fn create_agent_host_library(dir: &TempDir) -> PathBuf {
+        let chat_link_path = dir.path().join("chat-link");
+        fs::create_dir_all(&chat_link_path).unwrap();
+        fs::write(
+            chat_link_path.join("ChatLink.nx"),
+            r#"import "@nx/agent"
+
+export type RecordSearchTool extends Tool = { recordKind:string }
+export type AssistantConfig = { agent?:Agent }
+"#,
+        )
+        .unwrap();
+        chat_link_path
+    }
+
+    #[test]
+    fn test_cli_typegen_host_library_imports_standard_library_types_from_the_fixed_package() {
+        let dir = TempDir::new().unwrap();
+        let chat_link_path = create_agent_host_library(&dir);
+        let output_path = dir.path().join("generated-ts");
+
+        let output = run_cli(&[
+            "typegen",
+            chat_link_path.to_str().unwrap(),
+            "--language",
+            "typescript",
+            "--typescript-package-prefix",
+            "@org/nx-",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{stderr}");
+        assert!(!stderr.contains("Warning:"), "{stderr}");
+        let generated = fs::read_to_string(output_path.join("ChatLink.ts")).unwrap();
+        assert!(generated.contains("import type { Agent, Tool } from \"@nx-lang/agent\";"));
+        assert!(generated.contains("export interface RecordSearchTool extends Tool {"));
+        assert!(generated.contains("agent?: Agent;"));
+        assert!(!generated.contains("@org/nx-"));
+    }
+
+    #[test]
+    fn test_cli_typegen_host_library_qualifies_standard_library_types_with_the_fixed_namespace() {
+        let dir = TempDir::new().unwrap();
+        let chat_link_path = create_agent_host_library(&dir);
+        let output_path = dir.path().join("generated-cs");
+
+        let output = run_cli(&[
+            "typegen",
+            chat_link_path.to_str().unwrap(),
+            "--language",
+            "csharp",
+            "--csharp-namespace",
+            "Org.ChatLink",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{stderr}");
+        assert!(!stderr.contains("Warning:"), "{stderr}");
+        let generated = fs::read_to_string(output_path.join("ChatLink.g.cs")).unwrap();
+        assert!(generated.contains("namespace Org.ChatLink"));
+        assert!(
+            generated.contains("public sealed class RecordSearchTool : global::NxLang.Agent.Tool")
+        );
+        assert!(generated.contains("public global::NxLang.Agent.Agent? Agent { get; set; }"));
+    }
+
+    #[test]
+    fn test_cli_run_and_codegen_reach_a_standard_library() {
+        let (dir, path) = create_temp_nx_file(
+            "import \"@nx/agent\"\nlet root() = { <Agent name=\"support\">Be brief.</Agent> }",
+        );
+
+        let output = run_cli(&["run", path.to_str().unwrap()]);
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "<Agent instructions=\"Be brief.\" name=\"support\" />"
+        );
+
+        let output_path = dir.path().join("ir");
+        let output = run_cli(&[
+            "codegen",
+            path.to_str().unwrap(),
+            "--target",
+            "nx-ir",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let library_image = output_path.join("@nx").join("agent").join("agent.nxir");
+        assert!(
+            library_image.is_file(),
+            "the library image is written beside the entry's"
+        );
+
+        let explained = run_cli(&["ir", "explain", library_image.to_str().unwrap()]);
+        let text = String::from_utf8_lossy(&explained.stdout);
+        assert!(text.contains("module @nx/agent/agent.nx"), "{text}");
+        assert!(text.contains("function-reference-type-v1"), "{text}");
+    }
+
+    #[test]
+    fn test_cli_typegen_help_mentions_the_standard_library_form() {
+        let output = run_cli(&["typegen", "--help"]);
+        assert!(output.status.success());
+        assert!(String::from_utf8_lossy(&output.stdout).contains("@nx/agent"));
     }
 
     #[test]

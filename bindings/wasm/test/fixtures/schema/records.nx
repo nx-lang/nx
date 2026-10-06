@@ -1,0 +1,23 @@
+// Required, optional, defaulted and inherited fields, actions and markup-style names.
+
+type Booking = { host:string notes?:string durationMinutes:int = 30 }
+
+let book(request:Booking): Booking = { request }
+
+let newBooking(host:string): Booking = { <Booking host={host} /> }
+
+abstract type Entity = { id:int }
+
+type User extends Entity = { name:string }
+
+let user(id:int, name:string): User = { <User id={id} name={name} /> }
+
+action Saved = { id:int }
+
+let saved(id:int): Saved = { <Saved id={id} /> }
+
+type Label = { aria-label?:string text:string }
+
+let label(value:Label): Label = { value }
+
+let page(size:int = 20, label:string = "items"): int = { size }

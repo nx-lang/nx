@@ -1,0 +1,15 @@
+{
+  "box": [
+    { "args": { "items": ["a", "b"], "tags": ["x"], "note": "n" } },
+    {
+      "args": { "items": ["a"] },
+      "result": { "$type": "Box", "items": ["a"] }
+    }
+  ],
+  "find": [
+    { "args": { "id": "x" }, "result": { "$type": "Box", "items": ["a"] } },
+    { "args": { "id": "y" }, "result": null }
+  ],
+  "none": [{ "args": {}, "result": [] }],
+  "count": [{ "args": { "values": [1, 2] } }, { "args": {} }]
+}

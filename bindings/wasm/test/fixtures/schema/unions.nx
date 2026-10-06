@@ -1,0 +1,21 @@
+// Constant, payload and mixed unions, a fieldless case of a union with a base, and defaults.
+
+type HttpMethod = get | post | put | patch | delete
+
+let method(m:HttpMethod = get): HttpMethod = { m }
+
+type LoadState = idle | failed { message:string }
+
+let fail(message:string): LoadState = { <LoadState.failed message={message} /> }
+
+let idle(): LoadState = { LoadState.idle }
+
+let state(s:LoadState): LoadState = { s }
+
+abstract type EventBase = { source:string = "ui" }
+
+type UiEvent extends EventBase = | clicked { x:int } | closed
+
+let closed(): UiEvent = { <UiEvent.closed /> }
+
+let event(e:UiEvent): UiEvent = { e }

@@ -1,0 +1,109 @@
+{
+  "main.nx::Tally": {
+    "batches": [
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Button",
+          "onTapped": {
+            "$type": "ActionHandler",
+            "action": "Button.Tapped",
+            "token": "h2-1"
+          }
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Button",
+          "onTapped": {
+            "$type": "ActionHandler",
+            "action": "Button.Tapped",
+            "token": "h3-1"
+          }
+        }
+      }
+    ],
+    "initial": {
+      "$type": "Button",
+      "onTapped": {
+        "$type": "ActionHandler",
+        "action": "Button.Tapped",
+        "token": "h1-1"
+      }
+    }
+  },
+  "main.nx::bound": 3,
+  "main.nx::checked": 3,
+  "main.nx::compared": false,
+  "main.nx::comparedHandlers": false,
+  "main.nx::comparedLists": false,
+  "main.nx::comparedText": true,
+  "main.nx::concat": "éééééééééééééééééééééééééééééééééééééééé𝄞éééééééééééééééééééééééééééééééééééééééé𝄞",
+  "main.nx::content": {
+    "$type": "list",
+    "content": [
+      {
+        "$type": "item"
+      },
+      {
+        "$type": "item"
+      },
+      {
+        "$type": "item",
+        "index": 0
+      },
+      {
+        "$type": "item",
+        "index": 1
+      },
+      {
+        "$type": "item",
+        "index": 2
+      }
+    ]
+  },
+  "main.nx::defaults": "Hello, world",
+  "main.nx::directCall": 1,
+  "main.nx::forItems": [
+    2,
+    3,
+    4
+  ],
+  "main.nx::forRange": [
+    0,
+    1,
+    4,
+    9,
+    16
+  ],
+  "main.nx::misaligned": false,
+  "main.nx::patched": {
+    "$type": "Opt.Update",
+    "b": 5
+  },
+  "main.nx::patterns": 4,
+  "main.nx::spliced": [
+    1,
+    2,
+    3,
+    1,
+    2,
+    3
+  ],
+  "main.nx::updated": true,
+  "main.nx::valueCall": 6,
+  "main.nx::valueReference": 84,
+  "main.nx::written": [
+    {
+      "$type": "Point",
+      "x": 1,
+      "y": 2
+    },
+    {
+      "$type": "Point",
+      "x": 1,
+      "y": 2
+    }
+  ]
+}

@@ -17,6 +17,8 @@ export declare const NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1 = "update-intri
 export declare const NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1 = "action-handlers-v1";
 /** Function types, function references as values, and calls of function-typed values by name. */
 export declare const NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1 = "function-values-v1";
+/** The function reference type, `<function ... />: R`: the `anyFunction` type kind. */
+export declare const NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1 = "function-reference-type-v1";
 /** Iteration over a range: the `forRange` node. Building a range needs no feature. */
 export declare const NX_IR_REQUIRED_FEATURE_RANGES_V1 = "ranges-v1";
 /**
@@ -129,6 +131,7 @@ export declare const typeKinds: {
     readonly nominal: 1;
     readonly function: 4;
     readonly seq: 5;
+    readonly anyFunction: 6;
 };
 /**
  * The bits of a `seq` type's occurrence cell: whether the type admits no value and whether it
@@ -166,6 +169,30 @@ export interface NxIrDiagnostic {
     readonly source?: NxIrSourceSpan;
     /** The declaration the expression belongs to, as `identity::name`, when it is known. */
     readonly declaration?: string;
+    /**
+     * The limit that was reached. Every `nx-ir-resource-limit` diagnostic carries one, and no other
+     * does, so a host tells an exhausted budget from runaway recursion without reading the message.
+     */
+    readonly limit?: NxIrLimit;
+    /**
+     * The parameter whose argument the failure is in, by its declared name. It is present when
+     * `callFunction` or `evaluateFunction` refuses a value the host passed for one parameter (a
+     * value that does not fit the parameter's type, at any depth, or a `Function` record in it that
+     * names no function) and when a required parameter was given nothing. Nothing else carries it:
+     * not a failure a default raises, a resource limit, a failure in the function's body or result,
+     * or a failure of another entry point.
+     */
+    readonly argument?: string;
+}
+/**
+ * A limit an evaluation reached. `name` is `maxOperations`, `maxInputSize`, `maxCallDepth` or
+ * `maxRangeLength` for the limits a host sets, `maxExpressionNesting` for the fixed bound on
+ * nesting, or `engine` for a limit of the JavaScript engine, which has no value and depends on
+ * where the runtime runs. The Rust runtime reports the same names for the limits the two share.
+ */
+export interface NxIrLimit {
+    readonly name: string;
+    readonly value?: number;
 }
 export type NxResult<T> = {
     readonly ok: true;
@@ -175,14 +202,35 @@ export type NxResult<T> = {
     readonly diagnostics: readonly NxIrDiagnostic[];
 };
 /**
- * A value in the canonical JSON encoding. The empty value — an absent optional, an untaken
- * branch, an empty `for` — is the empty array, and the runtime never holds `null` as an NX value.
- * `null` is here for the host boundary only: a decoder reads it as the empty value wherever the
- * site admits zero, and the encoder writes it for a cleared field of an update record, which is
- * the one place the canonical encoding spells `null`.
+ * A canonical value in its JavaScript form, which `docs/nx-ir-format.md` (*Host values*) defines:
+ * what a host passes to an evaluation API and gets back, held in plain JavaScript data. A host
+ * that computed a value passes it as it is, as one that read it from JSON does; nothing is
+ * encoded on the way. A record is a plain object and a sequence is an array. Anything else
+ * JavaScript can hold, an instance of a class, a `Date`, a `Map`, a typed array, a function, is
+ * refused where it is passed. A host may also set a member to `undefined` to leave it out, which
+ * {@link NxHostValue}, the type the evaluation APIs take, admits; a value the runtime returns
+ * has no such member.
+ *
+ * <para>The empty value — an absent optional, an untaken branch, an empty `for` — is the empty
+ * array, and the runtime never holds `null` as an NX value. `null` is here for the host boundary
+ * only: it is read as the empty value wherever the site admits zero, and it is written for a
+ * cleared field of an update record, which is the one place canonical JSON spells `null`.</para>
  */
 export type NxCanonicalValue = null | boolean | number | string | readonly NxCanonicalValue[] | {
     readonly [key: string]: NxCanonicalValue;
+};
+/**
+ * A canonical value as a host passes one: an {@link NxCanonicalValue} in which a member of a plain
+ * object may be `undefined`, which is a member left out. Every evaluation API takes its input at
+ * this type and returns an `NxCanonicalValue`, which has no such member, so a value the runtime
+ * returned is one a host can pass back.
+ */
+export type NxHostValue = null | boolean | number | string | readonly NxHostValue[] | {
+    readonly [key: string]: NxHostValue | undefined;
+};
+/** Named host values as a host passes them: props, a state, a state patch or arguments by name. */
+export type NxHostRecord = {
+    readonly [key: string]: NxHostValue | undefined;
 };
 export declare class NxIrRuntimeError extends Error {
     readonly diagnostics: readonly NxIrDiagnostic[];
@@ -208,6 +256,11 @@ export type PreparedType = {
 } | {
     readonly kind: "function";
     readonly params: readonly PreparedParam[];
+    readonly result: PreparedType;
+}
+/** A function type whose parameters are not stated, `<function ... />: R`. */
+ | {
+    readonly kind: "anyFunction";
     readonly result: PreparedType;
 };
 export interface NxIrReference {
@@ -380,16 +433,68 @@ export interface NxLinkOptions {
     readonly allowVersionMismatch?: boolean;
 }
 export interface NxRuntimeOptions {
+    /** How deeply function calls may nest. 100 by default. */
     readonly maxCallDepth?: number;
     /**
-     * The most integers one range may hold when a `forRange` iterates it. One million by default,
-     * which is the interpreter's operation budget.
+     * The most integers one range may hold when a `forRange` iterates it. One million by default.
      *
      * <para>A range makes an enormous loop one token long, so the count is checked before the body
      * runs at all rather than discovered part-way through.</para>
      */
     readonly maxRangeLength?: number;
+    /**
+     * The most operations one call may cost, counted as `docs/nx-ir-format.md` defines an operation:
+     * one per node evaluated, one per item placed in a sequence, and one per 64 UTF-16 code units of
+     * a string a concatenation produces. Absent, the call is unlimited.
+     *
+     * <para>One budget covers one call of an evaluation function and everything it evaluates; for
+     * `dispatchComponentActions`, every handler of the batch and the render after it. A host that
+     * evaluates code it did not write should set it: the call depth and the range length bound
+     * neither work nor allocation. A value that is not a non-negative safe integer is refused with
+     * `nx-ir-options`.</para>
+     */
+    readonly maxOperations?: number;
+    /**
+     * The largest input one call may be given, measured as `docs/nx-ir-format.md` defines the input
+     * size of a call and as {@link measureInputSize} measures one value: one for each value, and one
+     * more for every 64 UTF-16 code units of a string, a type name and a field name. Absent, the
+     * input is unlimited and nothing is measured.
+     *
+     * <para>It covers every value the host passes to one call: arguments, props, content, a state,
+     * the entries of a batch and a state patch. An instance is not input. A call whose input is
+     * larger fails with `nx-ir-resource-limit` whose `limit.name` is `maxInputSize`, before the
+     * program is looked at, and measuring stops as soon as the size passes the limit. The limit is
+     * separate from `maxOperations`: measuring charges no operation. A value that is not a
+     * non-negative safe integer is refused with `nx-ir-options`.</para>
+     */
+    readonly maxInputSize?: number;
+    /**
+     * An object of the host's that the runtime reports what the call used to. The runtime removes
+     * both members when the call begins and sets them when it ends, whether it returns or throws.
+     * An object the runtime cannot write to is refused with `nx-ir-options` before anything runs.
+     *
+     * <para>Calls that overlap and share one object leave the numbers of whichever ended last, so
+     * give each call its own.</para>
+     */
+    readonly usage?: NxRuntimeUsage;
 }
+/** What one call of an evaluation function used, as {@link NxRuntimeOptions.usage} reports it. */
+export interface NxRuntimeUsage {
+    /**
+     * The operations the call used, when `maxOperations` was set; absent otherwise, since with no
+     * budget the runtime counts nothing. For a call that returned this is its operation count, the
+     * least budget it succeeds under. For one that threw it is what was charged before the failure:
+     * a charge the budget refused is not among them, so the number is never more than the budget.
+     */
+    operations?: number;
+    /**
+     * The input size of the call, when `maxInputSize` was set and the input was within it; absent
+     * otherwise, since input that is refused is not measured to its end.
+     */
+    inputSize?: number;
+}
+/** The default of {@link NxRuntimeOptions.maxCallDepth}. */
+export declare const NX_DEFAULT_MAX_CALL_DEPTH = 100;
 /** The default of {@link NxRuntimeOptions.maxRangeLength}. */
 export declare const NX_DEFAULT_MAX_RANGE_LENGTH = 1000000;
 /**
@@ -449,7 +554,7 @@ export interface ComponentInitOptions extends NxRuntimeOptions {
      * Initializing again with the state an instance holds and new props is how a host re-renders an
      * instance whose props changed without losing its state.
      */
-    readonly state?: Readonly<Record<string, NxCanonicalValue>>;
+    readonly state?: NxHostRecord;
 }
 export interface ComponentInitResult {
     readonly rendered: NxCanonicalValue;
@@ -482,10 +587,10 @@ export declare function prepareNxIrProgram(input: Uint8Array | ArrayBuffer): NxP
 export declare function tryPrepareNxIrProgram(input: Uint8Array | ArrayBuffer): NxResult<NxPreparedProgram>;
 /** The key that identifies one declaration across a program: its module's identity and its name. */
 export declare function declarationKey(linked: LinkedModule, reference: NxIrReference): string;
-export declare function evaluateFunction(program: NxPreparedProgram | NxPreparedModule, name: string, args?: readonly NxCanonicalValue[], options?: NxRuntimeOptions): NxCanonicalValue;
-export declare function constructComponentDescriptor(program: NxPreparedProgram | NxPreparedModule, name: string, props?: Record<string, NxCanonicalValue>, content?: readonly NxCanonicalValue[], options?: NxRuntimeOptions): NxCanonicalValue;
-export declare function initializeComponent(program: NxPreparedProgram | NxPreparedModule, name: string, props?: Record<string, NxCanonicalValue>, options?: ComponentInitOptions): ComponentInitResult;
-export declare function evaluateComponent(program: NxPreparedProgram | NxPreparedModule, name: string, props: Record<string, NxCanonicalValue>, state: Record<string, NxCanonicalValue>, options?: NxRuntimeOptions): ComponentEvaluateResult;
+export declare function evaluateFunction(program: NxPreparedProgram | NxPreparedModule, name: string, args?: readonly (NxHostValue | undefined)[], options?: NxRuntimeOptions): NxCanonicalValue;
+export declare function constructComponentDescriptor(program: NxPreparedProgram | NxPreparedModule, name: string, props?: NxHostRecord, content?: readonly NxHostValue[], options?: NxRuntimeOptions): NxCanonicalValue;
+export declare function initializeComponent(program: NxPreparedProgram | NxPreparedModule, name: string, props?: NxHostRecord, options?: ComponentInitOptions): ComponentInitResult;
+export declare function evaluateComponent(program: NxPreparedProgram | NxPreparedModule, name: string, props: NxHostRecord, state: NxHostRecord, options?: NxRuntimeOptions): ComponentEvaluateResult;
 /**
  * Dispatches a batch against an instance and returns the next one, without touching the instance
  * given. Each entry is either an action the component emits, which runs the handler the parent
@@ -494,10 +599,11 @@ export declare function evaluateComponent(program: NxPreparedProgram | NxPrepare
  * order. A handler the component's own body bound reads the state live and patches it with the
  * component's update records; any other handler sees only what it captured, and everything it
  * returns is an effect. The body is rendered once against the state the batch produced. A failure
- * throws before anything is returned, so the instance given stays the state of record.
+ * throws before anything is returned, so the instance given stays the state of record. One
+ * operation budget covers the whole batch and the render after it.
  */
-export declare function dispatchComponentActions(program: NxPreparedProgram | NxPreparedModule, instance: NxComponentInstance, batch: readonly NxCanonicalValue[], options?: NxRuntimeOptions): ComponentDispatchResult;
-export declare function normalizeComponentState(program: NxPreparedProgram | NxPreparedModule, name: string, state: Record<string, NxCanonicalValue>, options?: NxRuntimeOptions): Record<string, NxCanonicalValue>;
+export declare function dispatchComponentActions(program: NxPreparedProgram | NxPreparedModule, instance: NxComponentInstance, batch: readonly NxHostValue[], options?: NxRuntimeOptions): ComponentDispatchResult;
+export declare function normalizeComponentState(program: NxPreparedProgram | NxPreparedModule, name: string, state: NxHostRecord, options?: NxRuntimeOptions): Record<string, NxCanonicalValue>;
 /**
  * Applies a patch to host-owned component state and returns the validated next state.
  *
@@ -506,13 +612,40 @@ export declare function normalizeComponentState(program: NxPreparedProgram | NxP
  * absent one keeps it, and a present empty value — `null` or `[]` — clears an optional state field,
  * so the next state carries no key for it; for a field that is not optional it is rejected.
  */
-export declare function applyComponentStatePatch(program: NxPreparedProgram | NxPreparedModule, name: string, currentState: Record<string, NxCanonicalValue>, patch: Record<string, NxCanonicalValue>, options?: NxRuntimeOptions): Record<string, NxCanonicalValue>;
+export declare function applyComponentStatePatch(program: NxPreparedProgram | NxPreparedModule, name: string, currentState: NxHostRecord, patch: NxHostRecord, options?: NxRuntimeOptions): Record<string, NxCanonicalValue>;
+/**
+ * The size of one value as `docs/nx-ir-format.md` defines the input size of a call and as
+ * {@link NxRuntimeOptions.maxInputSize} measures it. It evaluates nothing and needs no program.
+ *
+ * <para>With a `limit`, measuring stops as soon as the size passes it and the result is some
+ * number greater than the limit: the value is too large, and how large is not found out. A host
+ * uses this to hold one part of what it passes to a number of its own before it calls.</para>
+ *
+ * <para>Pass a limit for any value that did not come from JSON. The walk takes every reference
+ * as a new value, so a value that holds itself has no finite size, and measuring one with no
+ * limit does not return: it ends when the engine runs out of memory.</para>
+ *
+ * <para>An object is measured as one record, which is how the props, the state, the patch and the
+ * arguments by name of a call are measured. An array is measured as the list it is, which is one
+ * more than its items add to a call that takes them as its positional arguments, its content or
+ * its batch, since a call counts the entries and not the list.</para>
+ */
+export declare function measureInputSize(value: unknown, limit?: number): number;
+/**
+ * The record a function value renders as, and the one a host supplies where a function value is
+ * expected. Read it from a member declared at a function type, and call it with `callFunction`.
+ */
+export type NxFunctionRecord = {
+    readonly $type: "Function";
+    readonly module: string;
+    readonly name: string;
+};
 /**
  * Calls the function a canonical `Function` record names with arguments keyed by parameter name,
  * and returns the canonical result. An argument the function does not declare is dropped, as the
  * subset rule allows; a parameter it declares and the arguments lack is a diagnostic naming it.
  */
-export declare function callFunction(program: NxPreparedProgram | NxPreparedModule, value: NxCanonicalValue, args?: Record<string, NxCanonicalValue>, options?: NxRuntimeOptions): NxCanonicalValue;
+export declare function callFunction(program: NxPreparedProgram | NxPreparedModule, value: NxHostValue, args?: NxHostRecord, options?: NxRuntimeOptions): NxCanonicalValue;
 /** A record or update record as the runtime holds it: a `$type` and its fields. */
 export type NxRecordObject = {
     readonly $type: string;

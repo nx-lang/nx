@@ -2521,6 +2521,11 @@
               "include": "#comments"
             },
             {
+              "comment": "`...` in place of the parameters, `<function ... />: R`: a function of any parameters.",
+              "name": "punctuation.definition.parameters.ellipsis.nx",
+              "match": "\\.\\.\\."
+            },
+            {
               "include": "#declaration-property"
             }
           ]

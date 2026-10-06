@@ -807,22 +807,21 @@ reason that has nothing to do with the position.
 
 ## Editor Completion: Record Tags And Tags Still Being Typed
 
-Property-name completion answers only a closed tag that names a component. Measured against the
-language service with `type Contact = { name:string email?:string }` and
+Property-name completion answers only a closed tag that names a component or a record. Measured
+against the language service with `type Contact = { name:string email?:string }` and
 `component <Card title:string />`:
 
 | At the cursor | Offered |
 | --- | --- |
 | `<Card ⟨here⟩/>` | `title`, with its documentation |
-| `<Contact ⟨here⟩/>` | keywords and names only |
+| `<Contact ⟨here⟩/>` | `name` and `email`, with their documentation |
 | `{ <Card ⟨here⟩ }` | keywords and names only |
 | `let foo = <Contact ⟨here⟩` | keywords and names only |
 
-- **Record and action tags.** `completions` in `crates/nx-language-service/src/lib.rs` offers
-  properties only when `scope.visible[tag]` is a `Component`, while hover goes through
-  `DocumentScope::element`, which also accepts a record. So hovering `name` in `<Contact name="a" />`
-  answers and completing it does not. Neither path accepts an action, though `<Saved id=1 />`
-  constructs one. Completion should use `element`, and `element` should accept actions. The
+- **Action tags.** `completions` in `crates/nx-language-service/src/lib.rs` offers properties through
+  `DocumentScope::element`, as hover does, which accepts a component or a record; record tags were
+  added by `add-agent-library`, whose agent types are all records. Neither path accepts an action,
+  though `<Saved id=1 />` constructs one, so `element` should accept actions. The
   editor-language-service spec promises property completions only "for a known component", so the
   spec widens with it.
 - **A tag still being typed.** Until a tag is closed it does not parse as an `element`, and the
@@ -1435,6 +1434,45 @@ report `Undefined identifier` at the default. The fix is to walk record and unio
 same way. An inherited field counts as declared before the record's own fields, as it is in the
 flattened order the runtimes use.
 
+## A record default of the wrong type passes the checker when it reads another field
+
+`type Req = { n:int label:string = { n } }` type-checks, and so does `label:string = { n + 1 }`.
+Building a `Req` then fails at run time: the interpreter reports "Type mismatch in record field
+'label': expected string, got int", and the IR runtimes report `nx-ir-boundary-type`, "Expected
+req.label to be a string." A default that reads no field is checked (`label:string = { 1 }` is
+"Default value for record property 'label' expects string, found int"), and so is a function
+parameter's default that reads an earlier parameter (`let f(n:int, label:string = { n })`). So
+the gap is a record field's default whose expression mentions another field. A union case's
+fields were not tried.
+
+It matters beyond the late error. The IR runtimes fill a record's defaults in while they check a
+host's argument that holds the record, so the failure carries a boundary code although the host's
+value fits. `@nx-lang/agent` reported that to the model as its own mistake
+(`add-agent-host-package`, review finding RF16) until
+`name-the-argument-in-boundary-diagnostics`: a failure a default raises now names no argument,
+and the package reports it as `evaluation-failed`. The program is wrong either way.
+
+Three tests compile `type Unfit = { n:int label:string = { n } }` (or `Req`) to show it: the
+argument tests of `runtime/typescript/test/emitted-ir.test.mjs` and of
+`crates/nx-codegen/src/ir_runtime_tests.rs`, and one of `packages/agent/test/execute.test.ts`.
+They stop compiling when the checker rejects the default. Drop those assertions then. The
+runtimes do not depend on them: the `Stepper` cases of the same two test files and of the
+conformance program `argument-diagnostics` (`fieldDefault`, `parameterDefault`) have a default
+that fails with `nx-ir-arguments` by calling a function value the host supplied, which needs no
+gap, and they are what fail when a runtime stops telling a default's failure from an argument's.
+The package's test has no such replacement, since a tool's function cannot take a function from
+a model; its rule is held by `packages/agent/test/classify.test.ts`.
+
+The same review saw a second program of this kind fail differently and did not find out why: a
+field `total:int = { for i in 0..n { for j in 0..n { i * j } } n }` compiles and then fails in the
+TypeScript IR runtime with `nx-ir-number` on the multiplication. It was not run in the Rust
+runtime. Worth reproducing when this is picked up, since it may be a second gap.
+
+The fix is in the checker: type a record field's default with the earlier fields in scope, as a
+parameter's default is typed with the earlier parameters in scope, and report the same
+diagnostic. It belongs with "A record default that reads a later field passes the checker and
+fails at run time" above, which is the same walk over a record's fields.
+
 ## HIR type references carry no span and no error form
 
 HIR's `ast::TypeRef` has no source span and no way to say "this reference is malformed". Both
@@ -1628,3 +1666,490 @@ have each block rule include only itself, not `#comments`. Add parser and gramma
 - `**/` and `--->` closers;
 - `//` inside a block comment;
 - an unterminated nested comment.
+
+## A function-typed binding named after a record does not shadow it at a tag
+
+**Observed.** At an element tag, a parameter or prop of function type takes precedence over a
+same-named function or component declaration, but not over a same-named record. With a parameter
+named `Card` in scope and `<Card title="x" />` in the body:
+
+| same-named declaration | parameter's type | what `<Card title="x" />` does |
+| --- | --- | --- |
+| element function | function type | calls the parameter |
+| external component | function type | calls the parameter |
+| record | function type | constructs the record |
+| record | `string` | constructs the record |
+| element function | `string` | calls the declared function |
+
+```nx
+type Card = { title:string }
+let <Mk title:string />: string = {"called " + title}
+let b(Card: <function title:string />: string): object = <Card title="x" />
+let root() = {b(Mk)}
+// { "$type": "Card", "title": "x" }, not "called x"
+```
+
+So the rule in practice is that a tag names a callable value when one is in scope and otherwise
+names a declaration, and records are the one exception. Lowering turns a tag that names a record
+into a record construction before the checker sees a tag at all, so `function_typed_value` in
+`crates/nx-types/src/infer.rs`, which is where a binding wins over a function or a component, is
+never asked.
+
+The same gap reaches the function reference type. `function-reference-type` says a tag that names a
+binding of that type is rejected with `function-reference-not-callable` and does not fall through.
+That holds beside a function or a component, and beside a record the element silently constructs
+the record instead. Found as RF3 of the `add-function-reference-type` review and left there, because
+it is a rule for every binding rather than for that type.
+
+**Suggestion.** Make the record case match the other two: a binding of function type, with stated
+or unspecified parameters, wins at the tag, and any other binding does not affect it.
+
+Full lexical shadowing, where any binding of the name wins and a non-callable one is an error, is
+the cleaner rule on paper and is what JSX does. It fits NX badly, because component props are
+PascalCase and a data prop that shares an element's name is ordinary: `Text:string` beside
+`<Text>`, or `Icon:string` beside `<Icon name={Icon} />`. The last row of the table shows the
+language already declines to shadow there.
+
+The cost of the suggested rule is the one it already has for functions and components: what a tag
+means depends on the binding's type, so retyping a parameter can change `<Card />` from a call to a
+construction with no diagnostic.
+
+If this is revisited in the future:
+- Fix it in lowering. Lowering knows scopes and not types, so it would keep the tag an element
+  whenever a lexical binding of that name is in scope and leave the choice between a call, the
+  not-callable diagnostic and a record construction to the checker.
+- Check first whether the checker's element path can construct a record from an element, and how
+  much the interpreter, the IR emitter and generated JavaScript rely on receiving a record literal
+  there. That is the uncertain part of the cost.
+- Decide whether a top-level `let` of function type that shares a record's name is the same case
+  or a duplicate declaration.
+- Add the case to the `function-values` scenarios about a lexical binding shadowing a function,
+  and a scenario to `function-reference-type` for a prop that shares a record's name.
+- Hold all three engines to it with a conformance corpus program.
+
+## Generated TypeScript: an omitted optional field beside a defaulted one fails `tsc`
+
+**Observed.** `nxlang codegen --target typescript` emits a record construction that does not
+type-check when the record declares a field with a default and the construction leaves an optional
+field out:
+
+```nx
+type Tool = { name?:string label:string = "x" }
+let root() = <Tool />
+```
+
+```ts
+export type Tool = {
+  readonly $type: "Tool";
+  readonly name?: string;
+  readonly label?: string;
+};
+
+export function root(): Tool {
+  return (() => { const __nx_field_0 = nxEmpty; const __nx_field_1 = "x"; return { $type: "Tool" as const, ...nxOptional("name", __nx_field_0), label: __nx_field_1 }; })();
+}
+```
+
+```
+error TS2322: Type '{ label: string; name?: readonly never[] | undefined; $type: "Tool"; }' is not assignable to type 'Tool'.
+  Types of property 'name' are incompatible.
+    Type 'readonly never[]' is not assignable to type 'string'.
+```
+
+A default sends the construction down the path that binds every field to a local first, and an
+omitted optional field is bound to `nxEmpty`, whose type is `readonly never[]`. `nxOptional` then
+carries that type into the object, where the field is declared `string`. Supplying the optional
+field (`<Tool name="n" />`) type-checks, and so does the same record without a default, which is
+emitted as a plain object literal that leaves the field out. The JavaScript target is unaffected:
+only the types are wrong, and the value is right.
+
+Found while fixing RF1 of the `add-function-reference-type` review, whose test could not use the
+`function-references` corpus program because that program has a record of this shape. It
+reproduces on the tree before that change, with no function type involved.
+
+**Fix.** Type the omitted case so it cannot reach the field's type: have `nxOptional` return an
+empty object type when its value is `nxEmpty`, or do not emit the spread at all for a field the
+construction is known to leave out. The emitter is `crates/nx-codegen/src/emit.rs` and the helper
+is in `crates/nx-codegen/src/runtime.rs`.
+
+**What would settle it.** A `tests.rs` case that runs `tsc --strict` over this record, with the
+optional field omitted and supplied, beside the existing
+`assert_generated_typescript_artifact_type_checks` cases. Better, run `tsc --strict` over the
+generated TypeScript of every conformance corpus program that source codegen accepts, as the
+JavaScript target is already run over them: this bug sat behind a corpus program nothing compiled
+as TypeScript.
+
+## Generated TypeScript: a function bound at a function type with stated parameters fails `tsc`
+
+**Observed.** A function type with stated parameters is emitted as a function of one object of
+named arguments, and a function declaration is emitted with positional parameters, so no generated
+function is assignable to a function-typed site:
+
+```nx
+type Tool = { fn: <function n:int />: int }
+let double(n:int): int = {n * 2}
+let root() = <Tool fn={double} />
+```
+
+```ts
+export type Tool = {
+  readonly $type: "Tool";
+  readonly fn: (args: { n: number }) => number;
+};
+
+export function double(n: number): number {
+  return (n * 2);
+}
+```
+
+```
+error TS2322: Type '(n: number) => number' is not assignable to type '(args: { n: number; }) => number'.
+  Types of parameters 'n' and 'args' are incompatible.
+```
+
+An element-style function fails the same way, since it is emitted positionally too, and with two
+parameters the message becomes "Target signature provides too few arguments. Expected 2 or more,
+but got 1." The JavaScript target is unaffected.
+
+This is a mismatch between two decisions rather than a slip in one. The argument-object shape
+comes from `add-function-types` (its D6: NX arguments bind by name), and `typegen` emits the same
+shape for a host's contract types. A function declaration's positional shape is what a paren call
+compiles to. Executable source codegen also refuses a call of a function-typed value (`namedCall`),
+so generated code never calls through the type, and the two shapes have never had to meet at a
+call.
+
+The function reference type, `<function ... />: R`, does not have the problem: it is emitted as
+`(...args: never[]) => unknown`, which every function is assignable to.
+
+Found as part of RF1 of the `add-function-reference-type` review, and noted there as existing
+before that change.
+
+**Options.**
+- Emit the function type as what a generated function is: positional parameters in the type's
+  order. This is wrong for the subset rule. A function may declare fewer parameters than the type
+  and in another order, so a positional type describes the wrong function.
+- Emit a function value as an adapter, `(args) => double(args.n)`, wherever a function name is
+  used as a value. It matches the declared type and is what a call by name needs, but it gives
+  each use a new JavaScript function, so `==` on two function values, which NX defines by
+  declaration, would need the adapter cached per declaration.
+- Emit the type as something every function is assignable to, as the function reference type is,
+  and keep the precise shape for `typegen` only. Cheapest, and honest while generated code cannot
+  call the value anyway.
+
+**What would settle it.** Decide it together with whether executable source codegen should support
+`namedCall`: the adapter is the natural answer if it should, and the loose type if it should not.
+Either way, add a `tsc --strict` case for an element-style and a paren-style function bound at a
+function-typed field, with one and with two parameters, and for a function that declares fewer
+parameters than the type.
+
+## Generated TypeScript: single-file `typegen` imports nothing from a library
+
+**Observed.** `nxlang typegen <file> --language typescript` writes the types a file references from
+an imported library by name, with no `import type` for them and no warning, so the output does not
+compile on its own:
+
+```nx
+import "@nx/agent"
+import "./ui"
+export type Config = { agent?:Agent theme?:Theme }
+```
+
+```ts
+export interface Config extends NxRecord<"Config"> {
+  agent?: Agent;
+  theme?: Theme;
+}
+```
+
+This holds for any library, a directory library (`./ui`) as much as a standard library
+(`@nx/agent`), so it predates standard libraries. Library generation (`typegen <directory>`) does
+write the imports, from `@nx-lang/agent` for a standard library's types and from a package named
+after the directory otherwise. Single-file C# is already right: it qualifies `Agent` as
+`global::NxLang.Agent.Agent` and `Theme` with an assumed namespace, warning about the assumption.
+
+Found as a question in the `add-agent-library` review (`openspec/changes/add-agent-library/review.md`).
+It was left out of that change because fixing it for standard libraries alone would make
+single-file output import some libraries and not others.
+
+**What would settle it.** Give single-file TypeScript output the cross-library imports library
+generation already writes, through the same `ImportedTypeCollector`, with the fixed
+`@nx-lang/agent` target for a standard library and the assumed-package warning for any other. Add a
+`tsc` check of single-file output that references a directory library's type and an `@nx/agent`
+type.
+
+## IR Runtime Evaluation Budget: What `add-ir-runtime-evaluation-budget` Left For Later
+
+### TODO: set the agent package's default operation budget from measured tools
+
+**Observed.** `add-agent-host-package` gives every tool call a default budget of 100,000
+operations (`NX_AGENT_DEFAULT_MAX_OPERATIONS`) when the host sets none. The number was chosen by
+reasoning, not measured: "a realistic tool costs hundreds to a few thousand operations". Since it
+was chosen the cost model grew to charge every walk over a value (type checks, equality, values
+written for the host), so the same tool costs more operations than it did when the estimate was
+made, and no real tool has been counted. ReachMe passes 200,000 of its own.
+
+**Why it might matter.** A default that is too low fails tools that are doing nothing wrong; one
+that is too high is a weaker bound on code the host did not write. Raising a default later is
+easy, since a tool that outgrows it fails with a `limit` that says so, and lowering one that tools
+have come to rely on breaks them, so the first number should be near right.
+
+**What would settle it.** Once `add-ir-runtime-input-limit-and-cost-tests` has landed, a call
+reports the operations it used (`usage` in the runtime options, and on a tool's result in the
+agent package). Run ReachMe's function tools and HTTP arguments functions, and the tools of the
+`agent-library` and `agent-tool-context` corpus programs, with typical and with large arguments,
+record the operations each uses, and set the default to a round number several times the largest.
+Write the measurement beside the number in the agent package's design.
+
+### The Rust runtime's splice path is slower with no budget, and it is not known why
+
+**Observed.** With no budget set, a loop of 200,000 iterations that each splice a five-item list
+runs 6 to 12 percent slower in the Rust IR runtime than before the budget was added. Every other
+case measured with no budget is within the 5 percent the change allowed itself. It is not the cost of counting: a
+build with every charge compiled out is still 4 to 5 percent slower on that case. Restoring the
+old `push_item`, a flag that skips the counter, forced inlining and moving the failure paths out
+of line were each tried and did not explain it (`add-ir-runtime-evaluation-budget`, `design.md`,
+decision 10). It was accepted as measured, for now.
+
+**What would settle it.** Profile the splice case in an optimized build before and after the
+change (`perf`, or `cargo asm` on `Machine::place` and its callers) and look at code layout and at
+what the optimizer no longer inlines or vectorizes. `add-ir-runtime-performance-harness` would
+make the case repeatable.
+
+### An `int` literal outside ±(2^53−1) compiles, and the two IR runtimes then disagree
+
+**Observed.** `int` is specified as exact over ±(2^53−1) on every backend, but the compiler
+accepts `let big() = { 9007199254740993 }` with no annotation, where the literal is an `int`
+outside that range. The emitter writes it as a `bigint` constant. The Rust IR runtime evaluates
+it as a 64-bit integer and computes with it; the TypeScript IR runtime, since
+`add-ir-runtime-evaluation-budget`, refuses it where it reads it, with `nx-ir-number`, because a
+JavaScript number cannot hold it and carrying it as anything else cost more than it was worth
+(that change's review, RF24 to RF31). So the same program runs in one runtime and fails in the
+other, and the `expressions` corpus program keeps `big` as a declaration and not as an entrypoint.
+
+**Why it might matter.** It is the one place a valid program's result depends on the runtime for a
+reason the source does not show. It is rare: the literal has to exceed nine quadrillion.
+
+**What would settle it.** For `int`, a compile-time diagnostic on a literal outside ±(2^53−1), so
+the program never reaches a runtime; that is a small part of "Bounds checks are specified but not
+enforced" above and could land before the rest. For `int64`, where such a value is legitimate,
+"`int64` is still a JavaScript `number`" above: carrying it as a `bigint` in the TypeScript
+runtime would let that runtime hold it properly, and the refusal would go.
+
+## Agent Host Package: What `add-agent-host-package` Left For Later
+
+### A function with an optional context parameter cannot run in a host that supplies no context
+
+**Observed.** `@nx-lang/agent` fills every context parameter at every call. A host names its
+context type when it normalizes (`toolContextType`); a host that names none is refused any tool
+whose function declares a context parameter, with `nx-agent-context-parameter`, even when the
+parameter is written `context?: ChatToolContext`. And a host that does name one gets
+`invalid-context` for a call it passes no record to, whether or not the parameter is optional.
+
+**Why it might matter.** The second half is right and should stay: a host that has a context has
+one for every call, so a missing record is a host bug, and failing is better than quietly running
+the function's no-context path. The first half is the gap. A function in a shared library that
+works with or without a context cannot be used as a tool by a host that has none to give. No host
+is in that position today; ReachMe supplies a context.
+
+**What would settle it.** Decide it when an agent is normalized, not at each call. With no
+`toolContextType`, a required context parameter stays an error and an optional one is recorded as
+left unfilled. It has to be recorded, not dropped: the parameter is out of the input schema, and a
+key of the model's input with its name must still be discarded, or a model could forge the
+context. That is a member on the definition's `contextParameters` entries (or a second list), a
+few lines in `normalizeAgent`, and a few in `prepareFunctionCalls`. `normalizeAgent` would begin
+to read a parameter's `required`, which the schema export answers and the package does not read
+today (`AgentParameterSchema` would gain the member). The definition format version need not change while the package is
+unstable.
+
+### No provider has been given the schemas the package stores
+
+**Observed.** A tool's `inputSchema` is JSON Schema draft 2020-12 as the declaration schema export
+writes it: `$ref` into `$defs` for every declared type, `anyOf` where a union or an abstract
+record is described, `const` for a `$type`, and `not` for `never`. The AI
+SDK adapter passes it to the provider unchanged, and the package's tests run it through the SDK
+against a mock model only. No real provider has been sent one.
+
+**Why it might matter.** Providers accept subsets of JSON Schema for tool input, and the subset
+differs by provider and by mode (a strict mode narrows it further). A provider that refuses
+`$ref`, or a keyword a constrained type will add, refuses the tool, and the first host to find out
+would find out in production.
+
+**What would settle it.** Send the tools of the `agent-library` corpus program, and ReachMe's, to
+each provider ReachMe uses and record what is refused. If something is, the fix is an option on
+the adapter (or a function beside it) that rewrites a stored schema for a provider: inlining
+`$ref` is mechanical for schemas with no recursion, and the export could mark the recursive ones.
+The package deliberately rewrites nothing today (`add-agent-host-package`, `design.md`, decision
+14).
+
+### An `invalid-request` the model caused is reported to it in general terms
+
+**Observed.** The AI SDK adapter gives the model a failure's own message only for `invalid-input`
+and for a code a host function chose. Every other code of the package's gets a fixed sentence, because the reason can hold what a model
+should not see (`add-agent-host-package`, `design.md`, decision 10). `invalid-request` is among
+them, and two of its causes are the model's: an argument that fills a path placeholder with an
+empty string, and one that comes out as `.` or `..`. For those the model is told only that the
+tool "could not make a request from these arguments".
+
+**Why it might matter.** The model may repeat the call instead of correcting it. The other causes
+of `invalid-request` are the author's or a damaged definition's, and one of their messages holds
+the connection's base URL, so the code as a whole cannot be shown.
+
+**What would settle it.** Put the builder's `rule` on the failed result, and let the adapter show
+the message for `empty-path-parameter` and `dot-segment`, whose text names only the parameter and
+the segment. The builder has a rule for each of its own refusals. Two `invalid-request` failures
+are found before it runs and have none (an arguments function that did not return an
+`HttpArguments`, and a tool that is not the shape the package wrote); they would carry no rule and
+stay general. A host that needs it sooner can throw its own error from `onResult`.
+
+### What a constrained-types change has to hold for the agent package
+
+**Observed.** `@nx-lang/agent` never interprets a type: schemas pass through, the runtime's
+boundary is the validator, and the compiler finds context types. `add-agent-host-package`,
+`design.md`, decision 14 lists the three conditions that design places on the change that adds
+constrained types (the export writes a constraint into the schemas; both runtimes check it at the
+boundary and report it with a code beginning `nx-ir-boundary-`; a constrained form of a context
+type is still host-supplied). That design is archived with its change, so the list is kept
+reachable from here.
+
+`name-the-argument-in-boundary-diagnostics` added a fourth. `@nx-lang/agent` now reports a
+boundary failure as `invalid-input`, the one failure the model is told about and asked to correct,
+only when the diagnostic names the argument it is in (`argument`, in both runtimes), and as
+`invalid-context` when that argument is a context parameter. So a constraint checked on a value
+the host passed has to be reported with the argument named, like every other boundary failure.
+One reported with a boundary code and no argument is `evaluation-failed`, and the model is not
+told what to correct. A default computed from another field that misses its own field's
+constraint is the case that should name none: the host's value fits.
+
+**What would settle it.** Read that decision when the constrained-types change is designed, and
+check its design against the three conditions and the fourth above.
+
+## Host Values: What `define-host-values` Left For Later
+
+### Reading a host value costs about 5% of a call that only takes input
+
+**Observed.** The TypeScript IR runtime reads every value a host passes, once in a call, before
+anything is checked (`readHostValue`, `runtime/typescript/src/index.ts`). Measured on a call that
+does nothing but take 10,000 records of three fields (`define-host-values`, task 2.2; Node 24, one
+laptop):
+
+- The reading as first written, one walk with its own stack, a set of the objects it is inside and
+  a list of names for every object, added about 1.6 ms to a 2.7 ms call: 60%.
+- The reading as it is now adds 0.13 to 0.2 ms: about 5%, between 4% and 7% over runs whose own
+  noise is of that size. The change's review measured the same call between 4% faster and 15%
+  slower than before. Timed alone, it is 13 ns a record of one shape and 19 to 23 ns over mixed
+  shapes.
+
+**The trade-off, and what it was based on.** The 60% is why the reading is in two parts. A check
+written for the usual case, `isReadAsPassed`, answers whether a value has nothing to refuse and
+nothing to leave out, with no stack, no set and no list, by a recursion that stops at 32 levels.
+Whatever it does not settle goes to the full walk, which is the first version unchanged and still
+costs what it cost. So:
+
+- A value with an `undefined` member, a value nested more than 32 deep, an object of another
+  realm and a value that is refused all pay the full walk. Only plain data with nothing to leave
+  out is cheap. A host that sets optional fields to `undefined` as a habit is on the slow path for
+  every call.
+- The change's design set a bound of 5% and named a fallback, folding the reading into the walk of
+  the input measure. The fallback was not taken: it helps only a call with `maxInputSize`, which
+  already pays about 0.5 ms (18%) for the measure, and leaves a call with no limit where it is.
+- The same 60% is why a value that shares one object in many places is not read once (the next
+  entry): remembering the objects seen is the set the fast check exists to avoid.
+
+Each of these was decided against one number from one machine and one shape of input. Nothing
+watches the cost, and no test fails if it doubles.
+
+**Why it might matter.** A component host passes its whole state on every call, so input the size
+of the state is the ordinary case and not a stress test. The check that follows the reading
+allocates a record for every record and the result writer copies everything it writes, so 5% of
+this call is small beside them; if they are made cheaper, as a same-language host could expect,
+the reading becomes a larger share of what is left.
+
+**What would settle it.** Put the call in the harness of `add-ir-runtime-performance-harness`,
+with three inputs: plain data, the same data with one `undefined` member at the bottom, and data
+nested past 32 levels. Then the bound is a number a run checks. If the slow path matters, the
+full walk can lose its set when the input was measured first (a value within the limit holds
+nothing that holds itself) and its list of names by reading members as the fast check does. If
+the fast path matters, the measure can report that it met nothing but plain data with no
+`undefined` member, which lets a call with a limit skip the reading altogether.
+
+### A value that shares one object in many places is read as the tree it spells
+
+**Observed.** The reading takes every reference as a new value, as the input measure does, so an
+object held in two places is read twice. Fifty-three objects that each hold the next one twice,
+passed to `let keep(extra:object): string` under `maxOperations: 1000` and no input limit, take
+1.5 s and are charged 4 operations; each two more levels take four times as long
+(`define-host-values`, review, RF2). Before that change the same call returned in under a
+millisecond, since nothing read a value at `object` that the function did not return. With
+`maxInputSize: 1000` the value is refused by the limit in 1 ms.
+
+This is documented: `runtime/typescript/README.md` (*Host values*) and `docs/nx-ir-format.md`
+(*Host values*, *What the limit bounds*) say a shared object is read and measured once for each
+place it is held and that `maxInputSize`, not `maxOperations`, bounds it. It is not bounded.
+
+**Why it might matter.** A host that sets an operation budget and no input limit has a call whose
+time the budget does not bound. A value read from JSON holds nothing twice, so nothing a model or
+a wire sends has this shape; a host's own code does, when it builds a value from parts it reuses,
+which is an ordinary thing to do in JavaScript and costs nothing until the parts nest.
+
+**What would settle it.** Either make the reading linear in distinct objects, or decide that the
+input limit is required for a call whose time has to be bounded and say so where the budget is
+described. The first was not done because of the cost in the entry above: the full walk can
+remember an object it read with nothing left out and pass over it when it meets it again, but the
+fast check would need the same set, or a count of values after which it gives the value to the
+full walk, and either is paid by every call. The input size would still count the value as a
+tree, by its definition in the `nx-ir-format` spec, so the limit and the reading would then
+disagree about how large such a value is; that has to be decided with it.
+
+### A value typed by a generated TypeScript interface cannot be passed without a spread
+
+**Observed.** `nxlang typegen` declares a record as an `interface` that extends `NxRecord`
+(`crates/nx-cli/src/typegen/languages/typescript.rs`). The evaluation functions of
+`@nx-lang/ir-runtime` take `NxHostValue` and `NxHostRecord`, whose object form is an index
+signature, and TypeScript gives an interface no implicit index signature. So a value of a
+generated type is refused by the compiler where a host value is expected:
+
+```ts
+interface NxRecord<TType extends string = string> { $type: TType }
+interface Person extends NxRecord<"Person"> { name: string; nickname?: string } // as typegen writes it
+declare const person: Person;
+evaluateFunction(program, "greet", [person]);
+// TS2322: Index signature for type 'string' is missing in type 'Person'.
+evaluateFunction(program, "greet", [{ ...person }]);    // compiles
+```
+
+The same value typed by a type alias (`type Person = { ... }`) or written as a literal compiles.
+This predates `define-host-values`: `NxCanonicalValue` had the same index signature. That change
+made it more visible, because it says a host passes the value it built as it holds it, and the
+value a host is led to build is one of the generated types. The runtime accepts the value either
+way; only the types disagree.
+
+**Why it might matter.** Every TypeScript host that uses the generated types meets it at its first
+call, and the fix it finds, a spread or a cast at each call, is the copy or the loss of checking
+the model says a host does not need. `@nx-lang/agent` does not have the problem for its tool
+context record, whose type accepts any object with a `$type`, which shows one way out.
+
+**What would settle it.** Decide where the two meet. `typegen` can declare records as type
+aliases, which are assignable to an index signature; that changes declaration merging and how the
+types read in an editor, and is a change to every generated file. Or the runtime's input types can
+stop using an index signature for the top of a value (a mapped or generic parameter that accepts
+any object whose members are host values), which keeps the generated files and loses nothing a
+host relies on. Either way, add a compiled sample that passes a generated type to each entry
+point, so the two cannot drift apart again; the runtime's README samples are not compiled by any
+test today.
+
+## `packages/language-http`: The 413 Test Fails About One Run In Four
+
+**Observed.** `the Node listener answers identically to the handler`
+(`packages/language-http/test/handler.test.ts`) failed in two of seven runs on 2026-10-04, each
+time with `TypeError: fetch failed`, cause `write ECONNRESET`. Nothing in that package had
+changed. The test's last request posts a 2 MB body and expects status 413.
+
+**Why it might matter.** It fails `pnpm -r test`, which stops at the first failing package, so the
+packages after it are not tested in that run, and a release build can fail for no reason.
+
+**What would settle it.** The likely cause, not confirmed: the listener answers 413 and the
+connection is reset while the client is still writing the body, so the client sees the reset and
+not the answer. Confirm by logging the order of events on the server side. If so, the listener
+should read and discard the rest of an oversized body before it answers, or answer with
+`Connection: close` and end the socket only after the response is flushed, and the test should
+then pass a few hundred times in a row.

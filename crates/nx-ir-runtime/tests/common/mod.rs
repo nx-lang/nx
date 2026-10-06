@@ -8,9 +8,27 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
+/// A function to evaluate. With arguments it is a *case*, and its case name is part of its key.
 pub struct Entrypoint {
     pub module: String,
     pub function: String,
+    pub case: Option<String>,
+    /// The canonical values to pass by position: none for an entrypoint that is not a case.
+    pub arguments: Vec<NxValue>,
+    /// Whether the case is one every runtime fails alike. Its diagnostic is recorded, and no
+    /// result, count or input size.
+    pub fails: bool,
+}
+
+impl Entrypoint {
+    /// The key results, counts, failures and input sizes are kept under: `identity::function`,
+    /// and `identity::function#case` for a case.
+    pub fn key(&self) -> String {
+        match &self.case {
+            Some(case) => format!("{}::{}#{case}", self.module, self.function),
+            None => format!("{}::{}", self.module, self.function),
+        }
+    }
 }
 
 pub struct Lifecycle {
@@ -28,6 +46,12 @@ pub struct CorpusProgram {
     pub entrypoints: Vec<Entrypoint>,
     pub lifecycles: Vec<Lifecycle>,
     pub results: serde_json::Value,
+    /// The code, and the argument when it names one, of the diagnostic each case marked as one
+    /// that fails fails with. Empty for a program with no such case.
+    pub diagnostics: serde_json::Value,
+    /// What each evaluation costs, where recorded budgets below that stop it, and, for a program
+    /// that records them, the input size of each case and lifecycle step.
+    pub operations: serde_json::Value,
 }
 
 pub fn corpus_root() -> PathBuf {
@@ -96,9 +120,39 @@ pub fn load_corpus() -> Vec<CorpusProgram> {
                     .map(|entrypoints| {
                         entrypoints
                             .iter()
-                            .map(|entrypoint| Entrypoint {
-                                module: text(entrypoint, "module"),
-                                function: text(entrypoint, "function"),
+                            .map(|entrypoint| {
+                                let module = text(entrypoint, "module");
+                                let function = text(entrypoint, "function");
+                                let case = entrypoint
+                                    .get("case")
+                                    .map(|case| case.as_str().expect("a case name").to_string());
+                                let arguments = entrypoint.get("arguments").map(|arguments| {
+                                    arguments
+                                        .as_array()
+                                        .expect("a list of arguments")
+                                        .iter()
+                                        .map(value)
+                                        .collect::<Vec<_>>()
+                                });
+                                assert_eq!(
+                                    arguments.is_some(),
+                                    case.is_some(),
+                                    "{name} {module}::{function}: `arguments` and `case` go together"
+                                );
+                                let fails = entrypoint
+                                    .get("fails")
+                                    .is_some_and(|fails| fails.as_bool().expect("`fails`"));
+                                assert!(
+                                    !fails || arguments.is_some(),
+                                    "{name} {module}::{function}: only a case is marked `fails`"
+                                );
+                                Entrypoint {
+                                    module,
+                                    function,
+                                    case,
+                                    arguments: arguments.unwrap_or_default(),
+                                    fails,
+                                }
                             })
                             .collect()
                     })
@@ -130,6 +184,10 @@ pub fn load_corpus() -> Vec<CorpusProgram> {
                     })
                     .unwrap_or_default(),
                 results: read_json(dir.join("expected").join("results.json")),
+                diagnostics: Some(dir.join("expected").join("diagnostics.json"))
+                    .filter(|path| path.exists())
+                    .map_or(serde_json::json!({}), read_json),
+                operations: read_json(dir.join("expected").join("operations.json")),
                 name,
             }
         })

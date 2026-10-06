@@ -1,0 +1,14 @@
+{
+  "entry": "main.nx",
+  "emit": [
+    "main.nx",
+    "context.nx",
+    "@nx/agent/agent.nx"
+  ],
+  "entrypoints": [
+    {
+      "module": "main.nx",
+      "function": "root"
+    }
+  ]
+}

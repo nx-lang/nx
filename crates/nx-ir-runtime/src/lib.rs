@@ -31,24 +31,28 @@ mod component;
 mod error;
 mod eval;
 mod helpers;
+mod input;
 mod module;
 mod normalize;
 mod program;
 mod stored;
 mod text;
 mod update;
+mod usage;
 mod value;
 
 pub use component::{
     ComponentDispatchResult, ComponentInit, ComponentInitResult, ComponentInstance,
 };
-pub use error::{Diagnostic, NxIrRuntimeError, Result, SourceSpan};
+pub use error::{Diagnostic, Limit, NxIrRuntimeError, Result, SourceSpan};
 pub use eval::{RuntimeOptions, NX_DEFAULT_MAX_CALL_DEPTH, NX_DEFAULT_MAX_RANGE_LENGTH};
 pub use helpers::{apply, diff, merge};
+pub use input::{input_size, record_input_size};
 pub use module::PreparedModule;
 pub use nx_ir::{NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION};
 pub use program::{LinkOptions, Program, NX_PRELUDE_MODULE_IDENTITY};
 pub use text::float32_text;
+pub use usage::Usage;
 
 /// The README's examples, compiled as doc tests.
 #[cfg(doctest)]
@@ -66,5 +70,7 @@ mod tests {
         shareable::<Program>();
         shareable::<ComponentInstance>();
         shareable::<NxIrRuntimeError>();
+        shareable::<RuntimeOptions>();
+        shareable::<Usage>();
     }
 }

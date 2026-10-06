@@ -1,0 +1,221 @@
+{
+  "describe": {
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "shape": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Circle"
+            },
+            {
+              "$ref": "#/$defs/Square"
+            }
+          ]
+        }
+      },
+      "required": [
+        "shape"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "Circle": {
+          "type": "object",
+          "properties": {
+            "$type": {
+              "const": "Circle"
+            },
+            "label": {
+              "type": "string"
+            },
+            "r": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "$type",
+            "r"
+          ],
+          "additionalProperties": false
+        },
+        "Square": {
+          "type": "object",
+          "properties": {
+            "$type": {
+              "const": "Square"
+            },
+            "label": {
+              "type": "string"
+            },
+            "side": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "$type",
+            "side"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string"
+    },
+    "diagnostics": []
+  },
+  "unit": {
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Circle"
+        },
+        {
+          "$ref": "#/$defs/Square"
+        }
+      ],
+      "$defs": {
+        "Circle": {
+          "type": "object",
+          "properties": {
+            "$type": {
+              "const": "Circle"
+            },
+            "label": {
+              "type": "string"
+            },
+            "r": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "$type",
+            "r"
+          ],
+          "additionalProperties": false
+        },
+        "Square": {
+          "type": "object",
+          "properties": {
+            "$type": {
+              "const": "Square"
+            },
+            "label": {
+              "type": "string"
+            },
+            "side": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "$type",
+            "side"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "diagnostics": []
+  },
+  "exact": {
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "circle": {
+          "$ref": "#/$defs/Circle"
+        },
+        "shape": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Circle"
+            },
+            {
+              "$ref": "#/$defs/Square"
+            }
+          ]
+        }
+      },
+      "required": [
+        "circle",
+        "shape"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "Circle": {
+          "type": "object",
+          "properties": {
+            "$type": {
+              "const": "Circle"
+            },
+            "label": {
+              "type": "string"
+            },
+            "r": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "$type",
+            "r"
+          ],
+          "additionalProperties": false
+        },
+        "Square": {
+          "type": "object",
+          "properties": {
+            "$type": {
+              "const": "Square"
+            },
+            "label": {
+              "type": "string"
+            },
+            "side": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "$type",
+            "side"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$ref": "#/$defs/Circle",
+      "$defs": {
+        "Circle": {
+          "type": "object",
+          "properties": {
+            "$type": {
+              "const": "Circle"
+            },
+            "label": {
+              "type": "string"
+            },
+            "r": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "$type",
+            "r"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "diagnostics": []
+  }
+}

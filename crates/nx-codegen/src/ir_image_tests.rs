@@ -252,6 +252,49 @@ fn a_malformed_seq_type_is_refused() {
     }
 }
 
+/// A function reference type entry is the kind and one type operand: with none, with two, or with
+/// an operand that names no type of the table, the image is refused.
+#[test]
+fn a_malformed_function_reference_type_is_refused() {
+    use nx_ir::IrItem;
+    let base = snippet_input();
+    let object = base.types.len() as i64;
+    let with_extra = |extra: IrItem| {
+        let mut artifact = base.clone();
+        let name = artifact.strings.len() as i64;
+        artifact.strings.push("object".to_string());
+        artifact
+            .types
+            .push(IrItem::ints([kinds::ty::PRIMITIVE, name]));
+        artifact.types.push(extra);
+        write_nx_ir_image(&artifact)
+    };
+
+    let bytes = with_extra(IrItem::ints([kinds::ty::ANY_FUNCTION, object])).expect("image");
+    let image = NxIrImage::open(&bytes).expect("a well-formed function reference type");
+    assert_eq!(
+        image.to_artifact().types.last(),
+        Some(&IrItem::ints([kinds::ty::ANY_FUNCTION, object]))
+    );
+
+    // The writer validates what it writes, so a malformed entry is refused there; an image that
+    // reached a reader some other way is refused by the same check when it is opened.
+    for extra in [
+        IrItem::ints([kinds::ty::ANY_FUNCTION]),
+        IrItem::ints([kinds::ty::ANY_FUNCTION, object, object]),
+        IrItem::ints([kinds::ty::ANY_FUNCTION, object + 2]),
+    ] {
+        let message = match with_extra(extra.clone()) {
+            Err(error) => format!("{error:?}"),
+            Ok(bytes) => match NxIrImage::open(&bytes) {
+                Err(NxIrImageError::Malformed(message)) => message,
+                other => panic!("expected a malformed image for {extra:?}, got {other:?}"),
+            },
+        };
+        assert!(message.contains("type 1"), "{extra:?}: {message}");
+    }
+}
+
 /// Cut at every four-byte boundary, an image is refused rather than read short.
 #[test]
 fn a_truncated_image_is_refused_at_every_boundary() {

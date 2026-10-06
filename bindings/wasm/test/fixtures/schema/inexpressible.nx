@@ -1,0 +1,10 @@
+// Types with no JSON form are reported, and the other side is still answered.
+
+let render(template:<function Item:string />: string, title:string): string = { title }
+
+// What a host passes as `render`'s template: a function value, never a JSON value.
+let shout(Item:string): string = { Item + "!" }
+
+type Row = { template:<function Item:string />: string }
+
+let rows(count:int): Row* = { {} }

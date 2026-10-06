@@ -64,6 +64,10 @@
   (property_definition
     name: (markup_identifier) @variable.parameter))
 
+;; `...` in place of the parameters: `<function ... />: R`, a function of any parameters.
+(function_type
+  "..." @punctuation.special)
+
 ;; Applied types: `<Range T=int/>` names one instantiation of a generic record. The tag is the
 ;; record, the argument names are its type parameters.
 (applied_type

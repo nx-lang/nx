@@ -101,6 +101,7 @@ pub fn build_codegen_program(artifact: &ProgramArtifact) -> Result<CodegenProgra
         entrypoints,
         component_entrypoints,
         source_entries,
+        boundary_subtype_modules: nx_api::program_artifact_boundary_subtype_modules(artifact),
     })
 }
 
@@ -211,6 +212,7 @@ fn type_names(ty: &Type, names: &mut Vec<Name>) {
             }
             type_names(ret, names);
         }
+        Type::AnyFunction { ret } => type_names(ret, names),
         _ => {}
     }
 }
@@ -3000,6 +3002,16 @@ fn build_type_ref_resolving_aliases(
                 }
                 mapped
             },
+            return_type: Box::new(build_type_ref_resolving_aliases(
+                artifact,
+                resolved_module,
+                prepared_cache,
+                return_type,
+                aliases,
+                diagnostics,
+            )?),
+        }),
+        ast::TypeRef::AnyFunction { return_type } => Some(CodegenTypeRef::AnyFunction {
             return_type: Box::new(build_type_ref_resolving_aliases(
                 artifact,
                 resolved_module,

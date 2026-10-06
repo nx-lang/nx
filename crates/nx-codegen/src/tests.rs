@@ -864,6 +864,7 @@ fn materialized_record_iife_uses_collision_free_field_temps() {
     let program = CodegenProgram {
         fingerprint: 1,
         entry_identity: "main.nx".to_string(),
+        boundary_subtype_modules: Vec::new(),
         modules: vec![CodegenModule {
             id: module_id,
             provenance: CodegenModuleProvenance::SourceProvider {
@@ -3169,4 +3170,34 @@ fn generated_javascript_refuses_a_match_on_the_empty_pattern() {
         "{:?}",
         error.diagnostics
     );
+}
+
+/// Generated TypeScript for a function reference site type-checks whatever function is bound
+/// there: a paren function of one or of several parameters, an element function, and one whose
+/// result NX admits by the one-level lift or under `object*`.
+#[test]
+fn generated_typescript_for_function_reference_sites_type_checks() {
+    let source = "type Args = { q:string }\n\
+         type AnyFn = <function ... />: object*\n\
+         type Tool = { fn: <function ... />: object* build: <function ... />: Args }\n\
+         type Kit = { all:AnyFn+ many: <function ... />: string* }\n\
+         let double(n:int): int = {n * 2}\n\
+         let add(a:int, b:int): int = {a + b}\n\
+         let greet(name:string, loud?:boolean): string = {name}\n\
+         let <Row Item:object Index:int />: string = \"r\"\n\
+         let makeArgs(q:string): Args = <Args q={q} />\n\
+         let pass(f:AnyFn): AnyFn = {f}\n\
+         let same(f:AnyFn, g:AnyFn): boolean = {f == g}\n\
+         let tool() = <Tool fn={double} build={makeArgs} />\n\
+         let kit() = <Kit all={double add Row} many={greet} />\n\
+         let root() = <Tool fn={pass(add)} build={makeArgs} />\n";
+    let artifact = artifact_from_source(source);
+    let output = emit_program(&artifact, &CodegenOptions::typescript()).expect("ts output");
+    let text: String = output
+        .files
+        .iter()
+        .map(|file| file.content.as_str())
+        .collect();
+    assert!(text.contains("(...args: never[]) => unknown"), "{text}");
+    assert_generated_typescript_artifact_type_checks(&artifact);
 }

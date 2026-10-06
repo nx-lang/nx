@@ -368,14 +368,12 @@ let root() = { <User name={label(<User name="Ada" />)} /> }
 "#;
         let documented = r#"/// A user.
 type User = {
-  /// The name.
-  name:string
+  name:string      /// The name.
   score:int = 42   /// The score.
 }
 /// A label for [User].
 let label(
-  /// Whose label.
-  user:User
+  user:User   /// Whose label.
 ): string = {user.name}
 /// The root.
 let root() = { <User name={label(<User name="Ada" />)} /> }

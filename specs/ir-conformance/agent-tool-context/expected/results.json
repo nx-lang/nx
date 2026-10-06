@@ -1,0 +1,34 @@
+{
+  "main.nx::root": {
+    "$type": "Agent",
+    "instructions": "Be brief.",
+    "model": "any-model-name-at-all",
+    "name": "support",
+    "tools": [
+      {
+        "$type": "FunctionTool",
+        "function": {
+          "$type": "Function",
+          "module": "main.nx",
+          "name": "whoAmI"
+        }
+      },
+      {
+        "$type": "FunctionTool",
+        "function": {
+          "$type": "Function",
+          "module": "main.nx",
+          "name": "callIdOf"
+        }
+      },
+      {
+        "$type": "FunctionTool",
+        "function": {
+          "$type": "Function",
+          "module": "main.nx",
+          "name": "seatCount"
+        }
+      }
+    ]
+  }
+}

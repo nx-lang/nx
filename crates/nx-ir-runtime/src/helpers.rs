@@ -1,6 +1,7 @@
 //! The update helpers a host calls on values it holds.
 
 use crate::error::Result;
+use crate::eval::Meter;
 use crate::program::Program;
 use crate::update;
 use crate::value::{from_host, to_host, Value};
@@ -19,6 +20,7 @@ pub fn apply(target: &NxValue, update: &NxValue) -> Result<NxValue> {
     to_host(
         &update::apply(record(&target, "apply")?, record(&update, "apply")?)?,
         None,
+        &Meter::free(),
     )
 }
 
@@ -29,6 +31,7 @@ pub fn merge(first: &NxValue, second: &NxValue) -> Result<NxValue> {
     to_host(
         &update::merge(record(&first, "merge")?, record(&second, "merge")?)?,
         None,
+        &Meter::free(),
     )
 }
 
@@ -39,8 +42,13 @@ pub fn merge(first: &NxValue, second: &NxValue) -> Result<NxValue> {
 pub fn diff(before: &NxValue, after: &NxValue) -> Result<NxValue> {
     let (before, after) = (from_host(before)?, from_host(after)?);
     to_host(
-        &update::diff(record(&before, "diff")?, record(&after, "diff")?)?,
+        &update::diff(
+            record(&before, "diff")?,
+            record(&after, "diff")?,
+            &Meter::free(),
+        )?,
         None,
+        &Meter::free(),
     )
 }
 

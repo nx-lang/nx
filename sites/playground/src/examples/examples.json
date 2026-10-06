@@ -15,5 +15,6 @@
   { "id": "element-functions", "title": "Element-style functions", "topic": "Functions", "docs": "language-tour/functions#element-style-functions" },
   { "id": "components", "title": "Components", "topic": "Components", "docs": "language-tour/functions#component-declarations" },
   { "id": "text", "title": "Text content", "topic": "Text", "docs": "language-tour/textual-content" },
-  { "id": "typed-text", "title": "Typed text and @{}", "topic": "Text", "docs": "language-tour/textual-content#embedded-expressions-in-text" }
+  { "id": "typed-text", "title": "Typed text and @{}", "topic": "Text", "docs": "language-tour/textual-content#embedded-expressions-in-text" },
+  { "id": "agent", "title": "An AI agent and its tools", "topic": "Libraries", "docs": "reference/libraries/agent" }
 ]

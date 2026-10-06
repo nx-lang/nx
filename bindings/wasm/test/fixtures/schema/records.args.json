@@ -1,0 +1,19 @@
+{
+  "book": [
+    {
+      "args": { "request": { "host": "Ada" } },
+      "result": { "$type": "Booking", "host": "Ada", "durationMinutes": 30 }
+    },
+    { "args": { "request": { "host": "Ada", "notes": "n", "durationMinutes": 45 } } }
+  ],
+  "newBooking": [
+    {
+      "args": { "host": "Ada" },
+      "result": { "$type": "Booking", "host": "Ada", "durationMinutes": 30 }
+    }
+  ],
+  "user": [{ "args": { "id": 1, "name": "Ada" }, "result": { "$type": "User", "id": 1, "name": "Ada" } }],
+  "saved": [{ "args": { "id": 7 }, "result": { "$type": "Saved", "id": 7 } }],
+  "label": [{ "args": { "value": { "aria-label": "Close", "text": "x" } } }],
+  "page": [{ "args": {}, "result": 20 }, { "args": { "size": 5, "label": "rows" }, "result": 5 }]
+}

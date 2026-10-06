@@ -24,10 +24,10 @@ use nx_interpreter::{ResolvedItemKind, RuntimeModuleId};
 use nx_ir::{
     kinds, write_nx_ir_image, IrItem, NxIrArtifact, NxIrDebug, NxIrDebugSpans, NxIrImageError,
     NxIrModuleEntry, NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1,
-    NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1, NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1,
-    NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1, NX_IR_REQUIRED_FEATURE_RANGES_V1,
-    NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1, NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
-    NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
+    NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1, NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1,
+    NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1, NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1,
+    NX_IR_REQUIRED_FEATURE_RANGES_V1, NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1,
+    NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1, NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
 };
 use nx_types::{Primitive, Type};
 use rustc_hash::FxHashSet;
@@ -312,29 +312,19 @@ fn module_version(program: &CodegenProgram, module: &CodegenModule) -> String {
 /// The fingerprint of a module: a hash of its identity and source text, so a regenerated module
 /// with the same text keeps its fingerprint and one with different text does not.
 ///
-/// <para>The hash is FNV-1a over the identity, a zero byte, and the source. It is spelled out here
-/// rather than taken from `DefaultHasher`, whose algorithm the standard library explicitly does not
-/// promise across releases: the fingerprint travels in the artifact, so the same source must hash
-/// the same whatever toolchain emitted it. `docs/nx-ir-format.md` says so as part of the format.
-/// </para>
+/// <para>The hash is FNV-1a over the identity, a zero byte, and the source, so the same source
+/// hashes the same whatever toolchain emitted it. `docs/nx-ir-format.md` says so as part of the
+/// format.</para>
 fn module_fingerprint(program: &CodegenProgram, module: &CodegenModule) -> u64 {
-    const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
-    const PRIME: u64 = 0x0000_0100_0000_01b3;
-    let mut hash = OFFSET_BASIS;
-    let mut write = |bytes: &[u8]| {
-        for byte in bytes {
-            hash ^= u64::from(*byte);
-            hash = hash.wrapping_mul(PRIME);
-        }
-    };
-    write(module_identity(module).as_bytes());
-    write(&[0]);
-    write(
+    let mut hasher = nx_hir::Fnv1a64::new();
+    hasher.write(module_identity(module).as_bytes());
+    hasher.write(&[0]);
+    hasher.write(
         module_source(program, module)
             .unwrap_or_default()
             .as_bytes(),
     );
-    hash
+    hasher.finish()
 }
 
 /// The features a runtime must support to run `module`.
@@ -818,6 +808,21 @@ impl<'a> ModuleEmitter<'a> {
         if !self.diagnostics.is_empty() {
             return Err(CodegenError::new(self.diagnostics));
         }
+        // The entry links the modules that declare a subtype a host may name at a function's
+        // boundary, after the modules its code references, so a program linked from the entry
+        // resolves every subtype the program declares there.
+        if module_identity(self.module) == self.program.entry_identity {
+            for identity in &self.program.boundary_subtype_modules {
+                if let Some(module) = self
+                    .program
+                    .modules
+                    .iter()
+                    .find(|module| module_identity(module) == *identity)
+                {
+                    self.module_slot(module.id);
+                }
+            }
+        }
 
         let modules = self
             .module_slots
@@ -844,19 +849,26 @@ impl<'a> ModuleEmitter<'a> {
         let mut required_features = required_features(self.module);
         // A function type anywhere in the type table needs the feature too; the table is complete
         // here, so it is asked directly rather than by walking every declaration's types.
-        let has_function_type = self.types.items.iter().any(|entry| {
-            entry
-                .as_list()
-                .and_then(|entry| entry.first())
-                .and_then(IrItem::as_int)
-                == Some(kinds::ty::FUNCTION)
-        });
-        if has_function_type
+        let has_type_kind = |kind: i64| {
+            self.types.items.iter().any(|entry| {
+                entry
+                    .as_list()
+                    .and_then(|entry| entry.first())
+                    .and_then(IrItem::as_int)
+                    == Some(kind)
+            })
+        };
+        if has_type_kind(kinds::ty::FUNCTION)
             && !required_features
                 .iter()
                 .any(|feature| feature == NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1)
         {
             required_features.push(NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1.to_string());
+        }
+        // A function reference type is a type kind a runtime that predates it has never seen. It
+        // needs no function value: a module may only declare a field of the type.
+        if has_type_kind(kinds::ty::ANY_FUNCTION) {
+            required_features.push(NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1.to_string());
         }
         self.string(NX_IR_RUNTIME_ABI);
         for feature in &required_features {
@@ -972,6 +984,11 @@ impl<'a> ModuleEmitter<'a> {
                     IrItem::Int(result),
                     IrItem::List(params),
                 ])
+            }
+            // `[6, result]`: a function of any parameters, so there are none to record.
+            CodegenTypeRef::AnyFunction { return_type } => {
+                let result = self.type_ref(return_type);
+                IrItem::ints([kinds::ty::ANY_FUNCTION, result])
             }
         };
         self.intern_type(entry)

@@ -1,4 +1,4 @@
-module main.nx fingerprint 12997715528169375669
+module main.nx fingerprint 5933433373916885200
 entrypoints functions [add arithmetic integerDivision realDivision integerRemainder realRemainder comparisons moreComparisons ordered andSkipsRight orSkipsRight andTakesRight orTakesRight negation logicalNot greeting chooseBig small classify classified stageLabel reviewStage loadLabel idleLoad failedLoad bareLabel bareFailed doubled squares big maybe element root] components []
 
 value answer =

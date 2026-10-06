@@ -1,0 +1,9 @@
+{
+  "counts": {
+    "main.nx::described": 25,
+    "main.nx::root": 27,
+    "main.nx::undescribed": 16,
+    "main.nx::withAuthor": 12,
+    "main.nx::withoutAuthor": 5
+  }
+}

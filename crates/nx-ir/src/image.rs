@@ -180,6 +180,7 @@ impl Table {
                 // so an image carrying one is refused as malformed.
                 ty::SEQ => &[Op::Type, Op::Int],
                 ty::FUNCTION => &[Op::Type, Op::List(PARAM)],
+                ty::ANY_FUNCTION => &[Op::Type],
                 _ => return None,
             },
             Table::Constants => match kind {

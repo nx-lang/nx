@@ -1,0 +1,31 @@
+{
+  "counts": {
+    "main.nx::Counter": {
+      "batches": [
+        39,
+        48,
+        40,
+        30,
+        30
+      ],
+      "initial": 35
+    },
+    "main.nx::Page": {
+      "batches": [
+        53,
+        53,
+        53,
+        46
+      ],
+      "initial": 50
+    },
+    "main.nx::Tens": {
+      "batches": [
+        46,
+        52
+      ],
+      "initial": 42
+    },
+    "main.nx::root": 7
+  }
+}

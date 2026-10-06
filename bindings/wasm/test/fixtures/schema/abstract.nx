@@ -1,0 +1,13 @@
+// A site typed by an abstract record is any shape that extends it.
+
+abstract type Shape = { label?:string }
+
+type Circle extends Shape = { r:float64 }
+
+type Square extends Shape = { side:float64 }
+
+let describe(shape:Shape): string = { "shape" }
+
+let unit(): Shape = { <Circle r=1.0 /> }
+
+let exact(circle:Circle, shape:Shape): Circle = { circle }

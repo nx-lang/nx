@@ -39,6 +39,24 @@ describe('NX TextMate grammar: function types', function () {
       .and.not.include('keyword.operator.arithmetic.nx');
   });
 
+  it('scopes the ellipsis of a function reference type', function () {
+    const lines = [
+      'type Tool = { fn: <function ... />: object* build?: <function ... />: Args }',
+      'type Many = (<function ... />: string)+',
+    ];
+    for (const { line, tokens } of tokenizeLines(grammar, lines)) {
+      expect(scopesForSubstring(line, tokens, 'function'), line).to.include('keyword.other.function.nx');
+      expect(scopesForSubstring(line, tokens, '...'), line)
+        .to.include('punctuation.definition.parameters.ellipsis.nx')
+        .and.include('meta.type.function.nx');
+    }
+    const [{ line, tokens }] = tokenizeLines(grammar, [lines[0]]);
+    expect(scopesForSubstring(line, tokens, 'object')).to.include('support.type.primitive.nx');
+    expect(scopesForSubstring(line, tokens, '*')).to.include('keyword.operator.type-modifier.nx');
+    expect(scopesForSubstring(line, tokens, 'Args')).to.include('entity.name.type.nx');
+    expect(scopesForSubstring(line, tokens, 'build')).to.include('variable.other.property.nx');
+  });
+
   it('scopes a function type alias as a function type', function () {
     const line = 'type RowTemplate = <function Item:Contact Index:int />: DrawnNode';
     const { tokens } = grammar.tokenizeLine(line, null);

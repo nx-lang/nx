@@ -1,0 +1,193 @@
+module @nx/agent/agent.nx fingerprint 11527925250760699671
+requires update-records-v1 property-unions-v1 function-reference-type-v1
+entrypoints functions [] components []
+
+record AgentLimits @11:1-16:2
+  maxSteps: int?
+  maxToolCalls: int?
+
+record Document @19:1-24:2
+  title: string required
+  content text: string required
+
+record Tool abstract @27:1-32:2
+  name: string?
+  description: string?
+
+record Agent @35:1-50:2
+  name: string required
+  description: string?
+  model: string?
+  documents: Document*
+  tools: Tool*
+  limits: AgentLimits?
+  content instructions: string required
+
+record FunctionTool extends Tool @54:1-58:2
+  name: string?
+  description: string?
+  function: <function ... />: object* required
+
+record WebSearchTool extends Tool @61:1-64:2
+  name: string?
+  description: string?
+  allowedDomains: string*
+
+record ToolContext abstract @69:1-73:2
+  callId: string required
+
+union HttpMethod @76:1-76:59
+  case get constant
+  case post constant
+  case put constant
+  case patch constant
+  case delete constant
+
+record Connection abstract @79:1-84:2
+  name: string required
+  description: string?
+
+record HttpConnection extends Connection @87:1-90:2
+  name: string required
+  description: string?
+  baseUrl: string required
+
+record HttpParam @93:1-98:2
+  name: string required
+  value: string required
+
+record HttpArguments @101:1-108:2
+  pathParams: HttpParam*
+  query: HttpParam*
+  body: object?
+
+record HttpTool extends Tool @111:1-123:2
+  name: string?
+  description: string?
+  connection: HttpConnection required
+  method: HttpMethod required
+  path: string required
+  arguments: <function ... />: HttpArguments required
+  maxCallsPerConversation: int?
+
+record AgentLimits.Update update of AgentLimits @11:1-16:2
+  maxSteps: int?
+  maxToolCalls: int?
+
+record Document.Update update of Document @19:1-24:2
+  title: string
+  content text: string
+
+record Tool.Update update of Tool @27:1-32:2
+  name: string?
+  description: string?
+
+record Agent.Update update of Agent @35:1-50:2
+  name: string
+  description: string?
+  model: string?
+  documents: Document*
+  tools: Tool*
+  limits: AgentLimits?
+  content instructions: string
+
+record FunctionTool.Update update of FunctionTool @54:1-58:2
+  name: string?
+  description: string?
+  function: <function ... />: object*
+
+record WebSearchTool.Update update of WebSearchTool @61:1-64:2
+  name: string?
+  description: string?
+  allowedDomains: string*
+
+record ToolContext.Update update of ToolContext @69:1-73:2
+  callId: string
+
+record Connection.Update update of Connection @79:1-84:2
+  name: string
+  description: string?
+
+record HttpConnection.Update update of HttpConnection @87:1-90:2
+  name: string
+  description: string?
+  baseUrl: string
+
+record HttpParam.Update update of HttpParam @93:1-98:2
+  name: string
+  value: string
+
+record HttpArguments.Update update of HttpArguments @101:1-108:2
+  pathParams: HttpParam*
+  query: HttpParam*
+  body: object?
+
+record HttpTool.Update update of HttpTool @111:1-123:2
+  name: string?
+  description: string?
+  connection: HttpConnection
+  method: HttpMethod
+  path: string
+  arguments: <function ... />: HttpArguments
+  maxCallsPerConversation: int?
+
+union AgentLimits.Property property of AgentLimits @11:1-16:2
+  case maxSteps constant
+  case maxToolCalls constant
+
+union Document.Property property of Document @19:1-24:2
+  case title constant
+  case text constant
+
+union Tool.Property property of Tool @27:1-32:2
+  case name constant
+  case description constant
+
+union Agent.Property property of Agent @35:1-50:2
+  case name constant
+  case description constant
+  case model constant
+  case documents constant
+  case tools constant
+  case limits constant
+  case instructions constant
+
+union FunctionTool.Property property of FunctionTool @54:1-58:2
+  case name constant
+  case description constant
+  case function constant
+
+union WebSearchTool.Property property of WebSearchTool @61:1-64:2
+  case name constant
+  case description constant
+  case allowedDomains constant
+
+union ToolContext.Property property of ToolContext @69:1-73:2
+  case callId constant
+
+union Connection.Property property of Connection @79:1-84:2
+  case name constant
+  case description constant
+
+union HttpConnection.Property property of HttpConnection @87:1-90:2
+  case name constant
+  case description constant
+  case baseUrl constant
+
+union HttpParam.Property property of HttpParam @93:1-98:2
+  case name constant
+  case value constant
+
+union HttpArguments.Property property of HttpArguments @101:1-108:2
+  case pathParams constant
+  case query constant
+  case body constant
+
+union HttpTool.Property property of HttpTool @111:1-123:2
+  case name constant
+  case description constant
+  case connection constant
+  case method constant
+  case path constant
+  case arguments constant
+  case maxCallsPerConversation constant

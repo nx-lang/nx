@@ -1,0 +1,19 @@
+import "@nx/agent"
+import "./context.nx"
+
+/// Says which conversation the call belongs to.
+let whoAmI(context: ChatToolContext): string = { context.conversationId }
+
+/// Echoes the call's id; any host context will do.
+let callIdOf(context: ToolContext): string = { context.callId }
+
+/// Counts the seats a team needs, up to a cap.
+let seatCount(teamSize: int, cap?: int): int = { teamSize }
+
+let root(): Agent = {
+  <Agent name="support" model="any-model-name-at-all" tools={
+    <FunctionTool function={whoAmI} />
+    <FunctionTool function={callIdOf} />
+    <FunctionTool function={seatCount} />
+  }>Be brief.</Agent>
+}

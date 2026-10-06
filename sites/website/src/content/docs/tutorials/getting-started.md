@@ -98,6 +98,10 @@ console.log(evaluateFunction(program, "root"));
 with `compileNxModule(fetch(url))`. An application that only runs NX it compiled ahead of time
 ships the IR bytes and needs only `@nx-lang/ir-runtime`.
 
+A host that gives NX functions to an AI model as tools adds
+[`@nx-lang/agent`](https://www.npmjs.com/package/@nx-lang/agent), which is unstable: see
+[Running an agent in a host](/reference/libraries/agent-hosts).
+
 ## 5) Next steps
 
 - The [Language Tour](/language-tour/elements) walks through elements, functions, expressions and

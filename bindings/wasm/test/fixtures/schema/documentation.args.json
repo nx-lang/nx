@@ -1,0 +1,6 @@
+{
+  "findPlans": [
+    { "args": { "teamSize": 4 }, "result": [{ "$type": "Plan", "name": "Team", "seats": 4 }] },
+    { "args": { "teamSize": 4, "billing": "yearly", "maxMonthlyPrice": 100 } }
+  ]
+}

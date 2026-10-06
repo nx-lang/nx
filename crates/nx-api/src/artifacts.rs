@@ -251,6 +251,9 @@ impl LibraryRegistry {
         &self,
         root_path: impl AsRef<Path>,
     ) -> Result<Arc<LibraryArtifact>, Vec<crate::NxDiagnostic>> {
+        if let Some(diagnostic) = reserved_directory_root_diagnostic(root_path.as_ref()) {
+            return Err(crate::diagnostics::diagnostics_to_api(&[diagnostic], ""));
+        }
         let artifact = self
             .load_library_from_directory_internal(root_path.as_ref())
             .map_err(|error| {
@@ -281,6 +284,12 @@ impl LibraryRegistry {
         &self,
         root_path: impl AsRef<Path>,
     ) -> io::Result<Arc<LibraryArtifact>> {
+        if let Some(diagnostic) = reserved_directory_root_diagnostic(root_path.as_ref()) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                diagnostic.message().to_string(),
+            ));
+        }
         self.load_library_from_directory_internal(root_path.as_ref())
     }
 
@@ -488,6 +497,11 @@ impl LibraryRegistry {
     }
 
     fn get_loaded_library(&self, root: &Path) -> Option<Arc<LibraryArtifact>> {
+        // A standard library is never loaded: every registry, an empty one included, answers for
+        // its root with the one snapshot the process holds.
+        if let Some(library) = standard_library_for_root(root) {
+            return Some(library);
+        }
         let state = self.inner.read().expect("library registry lock poisoned");
         state.libraries.get(root).cloned()
     }
@@ -536,6 +550,10 @@ impl LibraryRegistry {
         let result = (|| {
             let dependency_roots = discover_library_dependency_roots(&root_path)?;
             for dependency_root in &dependency_roots {
+                // A standard library has no directory to load; the registry already answers for it.
+                if standard_library_for_root(dependency_root).is_some() {
+                    continue;
+                }
                 let _ = self.load_library_from_directory_internal_with_stack(
                     dependency_root,
                     loading_stack,
@@ -654,6 +672,10 @@ impl ProgramBuildContext {
     }
 
     fn visible_library(&self, root: &Path) -> Option<Arc<LibraryArtifact>> {
+        // A standard library is visible in every context, whatever roots the context is limited to.
+        if let Some(library) = standard_library_for_root(root) {
+            return Some(library);
+        }
         if !self.visible_roots.contains(root) {
             return None;
         }
@@ -686,6 +708,9 @@ impl ProgramBuildContext {
     }
 
     fn visible_library_by_logical_identity(&self, identity: &str) -> LogicalLibraryResolution {
+        if let Some(library) = standard_library(identity) {
+            return LogicalLibraryResolution::Found(PathBuf::from(identity), Arc::clone(library));
+        }
         let mut visible_roots = self.visible_roots.iter().collect::<Vec<_>>();
         visible_roots.sort();
         let suffix = format!("/{}", identity);
@@ -1106,6 +1131,320 @@ fn build_prelude_library() -> LibraryArtifact {
     )
 }
 
+/// How settled a standard library's declarations are.
+///
+/// <para>This is a documented contract, not something the compiler acts on: nothing warns on an
+/// import of an unstable library. It says what a release may change.</para>
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StandardLibraryStability {
+    /// The declarations may change incompatibly in any release, including a patch release.
+    Unstable,
+    /// The declarations change incompatibly only in a release whose version marks a breaking
+    /// change.
+    Stable,
+}
+
+impl StandardLibraryStability {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Unstable => "unstable",
+            Self::Stable => "stable",
+        }
+    }
+}
+
+/// One module of a standard library: its identity relative to the library's root, and the source
+/// the compiler carries for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StandardLibraryModule {
+    pub identity: &'static str,
+    pub source: &'static str,
+}
+
+/// A library the compiler carries: NX source a module imports as `import "@nx/<name>"`, with
+/// nothing supplied, loaded or enabled by the host.
+#[derive(Debug)]
+pub struct StandardLibrary {
+    /// The library's logical root, which is also its import path: `@nx/agent`.
+    pub root: &'static str,
+    pub stability: StandardLibraryStability,
+    /// The library's modules, in identity order.
+    pub modules: &'static [StandardLibraryModule],
+    /// The TypeScript package generated code imports this library's types from.
+    pub typescript_package: &'static str,
+    /// The C# namespace generated code qualifies this library's types with.
+    pub csharp_namespace: &'static str,
+    artifact: OnceLock<Arc<LibraryArtifact>>,
+}
+
+impl StandardLibrary {
+    pub(crate) const fn new(
+        root: &'static str,
+        stability: StandardLibraryStability,
+        modules: &'static [StandardLibraryModule],
+        typescript_package: &'static str,
+        csharp_namespace: &'static str,
+    ) -> Self {
+        Self {
+            root,
+            stability,
+            modules,
+            typescript_package,
+            csharp_namespace,
+            artifact: OnceLock::new(),
+        }
+    }
+
+    /// The library, analyzed on first use and at most once per process.
+    ///
+    /// <para>It is an ordinary [`LibraryArtifact`] built by the same code as the prelude and as a
+    /// library a host loads from memory, so every consumer that reads a library reads this one with
+    /// no case of its own.</para>
+    pub fn artifact(&self) -> &Arc<LibraryArtifact> {
+        self.artifact
+            .get_or_init(|| Arc::new(build_standard_library(self)))
+    }
+
+    /// The version every NX IR image of one of this library's modules records.
+    ///
+    /// <para>It is derived from the library's source rather than bumped by hand: 16 lowercase hex
+    /// digits of a 64-bit FNV-1a hash over, for each module in identity order, the module's
+    /// library-relative identity, a zero byte, its source text and a zero byte. No runtime carries
+    /// a copy of a standard library's image, so nothing needs a contract number to compare against;
+    /// what matters is that an entry image and the library image it links were compiled from the
+    /// same source, and any edit, a comment included, changes the hash.</para>
+    pub fn version(&self) -> String {
+        let mut modules = self.modules.to_vec();
+        modules.sort_by_key(|module| module.identity);
+        let mut hasher = nx_hir::Fnv1a64::new();
+        for module in modules {
+            hasher.write(module.identity.as_bytes());
+            hasher.write(&[0]);
+            hasher.write(module.source.as_bytes());
+            hasher.write(&[0]);
+        }
+        format!("{:016x}", hasher.finish())
+    }
+}
+
+/// The standard libraries the compiler carries.
+static STANDARD_LIBRARIES: [StandardLibrary; 1] = [StandardLibrary::new(
+    "@nx/agent",
+    StandardLibraryStability::Unstable,
+    &[StandardLibraryModule {
+        identity: "agent.nx",
+        source: include_str!("std/agent/agent.nx"),
+    }],
+    "@nx-lang/agent",
+    "NxLang.Agent",
+)];
+
+/// Every standard library, in root order.
+pub fn standard_libraries() -> &'static [StandardLibrary] {
+    &STANDARD_LIBRARIES
+}
+
+/// The standard library whose root is exactly `root`, without analyzing it.
+pub fn standard_library_entry(root: &str) -> Option<&'static StandardLibrary> {
+    STANDARD_LIBRARIES
+        .iter()
+        .find(|library| library.root == root)
+}
+
+/// The standard library whose root is exactly `root`, analyzed once per process.
+pub fn standard_library(root: &str) -> Option<&'static Arc<LibraryArtifact>> {
+    standard_library_entry(root).map(StandardLibrary::artifact)
+}
+
+/// The standard library that owns the module `module_identity`, such as `@nx/agent/agent.nx`.
+pub fn standard_library_for_module(module_identity: &str) -> Option<&'static StandardLibrary> {
+    STANDARD_LIBRARIES.iter().find(|library| {
+        module_identity
+            .strip_prefix(library.root)
+            .is_some_and(|rest| rest.starts_with('/'))
+    })
+}
+
+fn standard_library_for_root(root: &Path) -> Option<Arc<LibraryArtifact>> {
+    root.to_str().and_then(standard_library).map(Arc::clone)
+}
+
+pub(crate) fn build_standard_library(library: &StandardLibrary) -> LibraryArtifact {
+    let source_files = library
+        .modules
+        .iter()
+        .map(|module| {
+            let file_name = format!("{}/{}", library.root, module.identity);
+            let parse_result = syntax_parse_str(module.source, &file_name);
+            let source_id = SourceId::new(parse_result.source_id.as_u32());
+            let diagnostics = normalize_diagnostics_file_name(parse_result.errors, &file_name);
+            let preserved_module = parse_result.tree.map(|tree| lower(tree.root(), source_id));
+            LibrarySourceFile {
+                path: PathBuf::from(&file_name),
+                file_name,
+                source: module.source.to_string(),
+                source_id,
+                diagnostics,
+                preserved_module,
+            }
+        })
+        .collect();
+
+    // An empty registry is enough: a standard library imports nothing but another standard
+    // library, and every registry answers for those.
+    build_library_artifact_from_sources(
+        PathBuf::from(library.root),
+        Some(library.version()),
+        source_files,
+        &LibraryRegistry::new(),
+    )
+}
+
+/// What an import path under the reserved root names.
+#[derive(Debug, Clone, Copy)]
+enum StandardImport {
+    Library(&'static StandardLibrary),
+    /// A path under `@nx/` that is no standard library's root: an unknown name, or a path with
+    /// further segments after a library's name.
+    Unknown,
+}
+
+/// Classifies an import path whose first segment is `@nx`; `None` for any other path.
+///
+/// <para>This is asked before a path is resolved against its importer, which is what makes
+/// `import "@nx/agent"` mean the same library from a module at any depth.</para>
+fn standard_import(library_path: &str) -> Option<StandardImport> {
+    let library_path = library_path.trim();
+    if !is_reserved_identity(library_path) {
+        return None;
+    }
+    Some(match standard_library_entry(library_path) {
+        Some(library) => StandardImport::Library(library),
+        None => StandardImport::Unknown,
+    })
+}
+
+/// Whether `identity` is the reserved root or lies under it.
+fn is_reserved_identity(identity: &str) -> bool {
+    identity.starts_with(nx_hir::NX_RESERVED_ROOT_PREFIX)
+        || identity == nx_hir::NX_RESERVED_ROOT_PREFIX.trim_end_matches('/')
+}
+
+/// The identity a workspace import names: a standard library's root as written, or the path
+/// resolved against the importing module.
+fn workspace_import_target_identity(
+    importer_identity: &str,
+    library_path: &str,
+) -> Result<String, crate::workspace::WorkspaceIdentityError> {
+    if standard_import(library_path).is_some() {
+        return Ok(library_path.trim().to_string());
+    }
+    normalize_workspace_import_identity(importer_identity, library_path)
+}
+
+/// Says that `name` names no standard library, and lists the ones that exist.
+///
+/// <para>The one wording for this, used by the compiler's `unknown-standard-library` diagnostic
+/// and by any tool that takes a standard library's name, such as `nxlang typegen`.</para>
+pub fn unknown_standard_library_message(name: &str) -> String {
+    format!(
+        "'{}' is not a standard library. The standard libraries are: {}",
+        name,
+        STANDARD_LIBRARIES
+            .iter()
+            .map(|library| library.root)
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+/// The diagnostic for a path under `@nx/` that names no standard library, labelled at the import
+/// when one was written.
+fn unknown_standard_library_diagnostic(path: &str, label: Option<(&str, TextSpan)>) -> Diagnostic {
+    let mut builder = Diagnostic::error("unknown-standard-library")
+        .with_message(unknown_standard_library_message(path))
+        .with_help(
+            "A standard library is imported by its name alone, such as `import \"@nx/agent\"`; its modules are not importable on their own.",
+        );
+    if let Some((file_name, span)) = label {
+        builder = builder.with_label(Label::primary(file_name, span));
+    }
+    builder.build()
+}
+
+/// One diagnostic per written import in `imports` that misuses the reserved root: a path under
+/// `@nx/` that names no standard library, or a relative path that `resolve` places under `@nx/`.
+///
+/// <para>`resolve` answers the identity a relative path names from this module, where the pipeline
+/// resolves paths to identities at all; a directory library's paths resolve to directories, which
+/// are never under the reserved root. The import itself binds nothing: the pipelines skip both
+/// kinds of path.</para>
+fn standard_import_diagnostics(
+    imports: &[Import],
+    file_name: &str,
+    resolve: impl Fn(&str) -> Option<String>,
+) -> Vec<Diagnostic> {
+    imports
+        .iter()
+        .filter_map(|import| match standard_import(&import.library_path) {
+            Some(StandardImport::Unknown) => Some(unknown_standard_library_diagnostic(
+                import.library_path.trim(),
+                Some((file_name, import.span)),
+            )),
+            Some(StandardImport::Library(_)) => None,
+            None => resolve(&import.library_path)
+                .filter(|identity| is_reserved_identity(identity))
+                .map(|identity| {
+                    reserved_import_path_diagnostic(
+                        &import.library_path,
+                        &identity,
+                        file_name,
+                        import.span,
+                    )
+                }),
+        })
+        .collect()
+}
+
+fn reserved_import_path_diagnostic(
+    path: &str,
+    identity: &str,
+    file_name: &str,
+    span: TextSpan,
+) -> Diagnostic {
+    Diagnostic::error("import-path-reserved")
+        .with_message(format!(
+            "Import '{}' resolves to '{}', which lies under '{}', the root reserved for the NX prelude and standard libraries",
+            path.trim(),
+            identity,
+            nx_hir::NX_RESERVED_ROOT_PREFIX
+        ))
+        .with_label(Label::primary(file_name, span))
+        .with_help(
+            "A standard library is imported by its name alone, such as `import \"@nx/agent\"`; rename a directory named `@nx`.",
+        )
+        .build()
+}
+
+fn reserved_library_root_diagnostic(root: &str) -> Diagnostic {
+    Diagnostic::error("library-root-reserved")
+        .with_message(format!(
+            "Library root '{}' lies under '{}', which is reserved for the NX prelude and standard libraries",
+            root,
+            nx_hir::NX_RESERVED_ROOT_PREFIX
+        ))
+        .with_help("Load the library under a root of your own.")
+        .build()
+}
+
+/// The refusal for a directory library named by a path under the reserved root, such as
+/// `@nx/mine` relative to the working directory.
+fn reserved_directory_root_diagnostic(root_path: &Path) -> Option<Diagnostic> {
+    let root = root_path.to_string_lossy().replace('\\', "/");
+    let root = root.trim_start_matches("./");
+    is_reserved_identity(root).then(|| reserved_library_root_diagnostic(root))
+}
+
 /// Binds the prelude's exported declarations in `module`, under every name the module has not
 /// otherwise bound.
 ///
@@ -1116,13 +1455,11 @@ fn build_prelude_library() -> LibraryArtifact {
 /// import goes through: it is not something the author wrote, so it cannot be something the author
 /// wrote twice.</para>
 fn apply_prelude_bindings(module: &mut PreparedModule) {
-    // The prelude's own modules are skipped, and by their reserved root rather than by the one
-    // identity it has today: this runs inside `prelude_library()`'s initialization, so a second
-    // carried module reaching `prelude_library()` again from here would deadlock the `OnceLock`.
-    if module
-        .module_identity()
-        .starts_with(nx_hir::PRELUDE_ROOT_PREFIX)
-    {
+    // Only the prelude itself is skipped: this runs inside `prelude_library()`'s initialization, so
+    // reaching `prelude_library()` again from here would deadlock the `OnceLock`. A standard
+    // library's modules do see the prelude; each is built outside that initialization, under a
+    // `OnceLock` of its own.
+    if module.module_identity() == nx_hir::PRELUDE_MODULE_IDENTITY {
         return;
     }
 
@@ -1205,6 +1542,10 @@ fn prepare_in_memory_library(
             ))
             .build()
     })?;
+
+    if is_reserved_identity(&root) {
+        return Err(reserved_library_root_diagnostic(&root).into());
+    }
 
     let mut identities = FxHashSet::default();
     let mut modules = Vec::with_capacity(library.modules.len());
@@ -1466,7 +1807,20 @@ fn prepare_library_source_file(
     current_file_index: usize,
 ) -> PreparedSourceFile {
     let source_file = &source_files[current_file_index];
-    let diagnostics = source_file.diagnostics.clone();
+    let mut diagnostics = source_file.diagnostics.clone();
+    if let Some(module) = source_file.preserved_module.as_ref() {
+        let logical = is_logical_library_path(&source_file.path);
+        diagnostics.extend(standard_import_diagnostics(
+            &module.imports,
+            &source_file.file_name,
+            |path| {
+                logical
+                    .then(|| normalize_logical_library_path(&source_file.path, path).ok())
+                    .flatten()
+                    .map(|root| root.to_string_lossy().replace('\\', "/"))
+            },
+        ));
+    }
     let Some(preserved_module) = source_file.preserved_module.clone() else {
         return PreparedSourceFile::ParseFailed(parse_failure_artifact(
             &source_file.file_name,
@@ -1873,7 +2227,14 @@ fn prepare_logical_source_file(
     current_file_index: usize,
 ) -> PreparedSourceFile {
     let source_file = &source_files[current_file_index];
-    let diagnostics = source_file.diagnostics.clone();
+    let mut diagnostics = source_file.diagnostics.clone();
+    if let Some(module) = source_file.preserved_module.as_ref() {
+        diagnostics.extend(standard_import_diagnostics(
+            &module.imports,
+            &source_file.identity,
+            |path| normalize_workspace_import_identity(&source_file.identity, path).ok(),
+        ));
+    }
     let Some(preserved_module) = source_file.preserved_module.clone() else {
         return PreparedSourceFile::ParseFailed(parse_failure_artifact(
             &source_file.identity,
@@ -1925,6 +2286,11 @@ fn unknown_implicit_import_diagnostics(
         .implicit_imports()
         .iter()
         .filter_map(|identity| {
+            if is_reserved_identity(identity) {
+                return standard_library_entry(identity)
+                    .is_none()
+                    .then(|| unknown_standard_library_diagnostic(identity, None));
+            }
             if graph.contains_identity(identity) {
                 // Only a library whose root is spelled exactly this identity competes with the
                 // workspace module. A directory library whose path merely ends in it is no claim on
@@ -1994,15 +2360,26 @@ fn synthesize_implicit_imports(
         .iter()
         .filter(|import| matches!(import.kind, ImportKind::Wildcard { alias: None }))
         .filter_map(|import| {
-            normalize_workspace_import_identity(&source_file.identity, &import.library_path).ok()
+            workspace_import_target_identity(&source_file.identity, &import.library_path).ok()
         })
         .collect::<FxHashSet<_>>();
     for identity in implicit_imports {
         if written_wildcards.contains(identity) {
             continue;
         }
+        // A standard library is imported by its name from any depth, so the path is the identity
+        // itself. An identity under the reserved root that names no standard library is the build
+        // request's fault, already reported, and synthesizes nothing.
+        let library_path = if is_reserved_identity(identity) {
+            if standard_library_entry(identity).is_none() {
+                continue;
+            }
+            identity.clone()
+        } else {
+            workspace_import_path(&source_file.identity, identity)
+        };
         module.raw_module_mut().imports.push(Import {
-            library_path: workspace_import_path(&source_file.identity, identity),
+            library_path,
             kind: ImportKind::Wildcard { alias: None },
             span: TextSpan::new(0.into(), 0.into()),
         });
@@ -2073,23 +2450,41 @@ fn apply_graph_imports(
             continue;
         }
 
-        let target_identity = match normalize_workspace_import_identity(
-            &source_file.identity,
-            &import.library_path,
+        // A path under `@nx/` that names no standard library is reported once, with its own code,
+        // when the module is prepared; here it only binds nothing.
+        if matches!(
+            standard_import(&import.library_path),
+            Some(StandardImport::Unknown)
         ) {
-            Ok(identity) => identity,
-            Err(error) => {
-                module.add_diagnostic(LoweringDiagnostic {
-                    message: format!(
-                        "Workspace import '{}' is invalid: {}",
-                        import.library_path, error
-                    ),
-                    span: import.span,
-                });
-                module.mark_import_incomplete(import.span);
-                continue;
-            }
-        };
+            module.mark_import_incomplete(import.span);
+            continue;
+        }
+
+        let target_identity =
+            match workspace_import_target_identity(&source_file.identity, &import.library_path) {
+                // A relative path that lands under the reserved root is reported, with its own
+                // code, when the module is prepared; it does not reach a standard library by
+                // another name.
+                Ok(identity)
+                    if standard_import(&import.library_path).is_none()
+                        && is_reserved_identity(&identity) =>
+                {
+                    module.mark_import_incomplete(import.span);
+                    continue;
+                }
+                Ok(identity) => identity,
+                Err(error) => {
+                    module.add_diagnostic(LoweringDiagnostic {
+                        message: format!(
+                            "Workspace import '{}' is invalid: {}",
+                            import.library_path, error
+                        ),
+                        span: import.span,
+                    });
+                    module.mark_import_incomplete(import.span);
+                    continue;
+                }
+            };
 
         // A synthesized implicit import carries an empty span, which no written import has. It is
         // the host's context rather than a line the author repeated, so an explicit import of the
@@ -2684,8 +3079,23 @@ fn apply_build_context_imports(
             continue;
         }
 
-        let normalized_root = if logical {
+        let standard = standard_import(&import.library_path);
+        let normalized_root = if let Some(standard) = standard {
+            match standard {
+                StandardImport::Library(library) => PathBuf::from(library.root),
+                // Reported once, with its own code, when the module is prepared.
+                StandardImport::Unknown => {
+                    module.mark_import_incomplete(import.span);
+                    continue;
+                }
+            }
+        } else if logical {
             match normalize_logical_library_path(&root_path, &import.library_path) {
+                // Reported, with its own code, when the module is prepared.
+                Ok(path) if is_reserved_identity(&path.to_string_lossy().replace('\\', "/")) => {
+                    module.mark_import_incomplete(import.span);
+                    continue;
+                }
                 Ok(path) => path,
                 Err(error) => {
                     module.add_diagnostic(LoweringDiagnostic {
@@ -2716,7 +3126,7 @@ fn apply_build_context_imports(
             }
         };
 
-        if !logical && !normalized_root.is_dir() {
+        if standard.is_none() && !logical && !normalized_root.is_dir() {
             module.add_diagnostic(LoweringDiagnostic {
                 message: format!(
                     "Local library import '{}' must resolve to a directory",
@@ -3101,7 +3511,7 @@ fn build_resolved_program(
 
         for import in &artifact.imports {
             let target_identity =
-                normalize_workspace_import_identity(&artifact.file_name, &import.library_path).ok();
+                workspace_import_target_identity(&artifact.file_name, &import.library_path).ok();
             if let Some(target_artifact) = target_identity
                 .as_ref()
                 .and_then(|identity| root_module_by_identity.get(identity))
@@ -3233,7 +3643,7 @@ fn build_resolved_program(
 
         // The prelude's exports are visible in every module, and bound last: a name the module
         // declares itself, or reached through an import of its own, keeps its meaning.
-        if !artifact.file_name.starts_with(nx_hir::PRELUDE_ROOT_PREFIX) {
+        if artifact.file_name != nx_hir::PRELUDE_MODULE_IDENTITY {
             let declared_here = artifact
                 .lowered_module
                 .as_ref()
@@ -3542,6 +3952,7 @@ fn type_to_type_ref(ty: &Type) -> Option<TypeRef> {
                 .collect::<Option<Vec<_>>>()?,
             type_to_type_ref(ret)?,
         )),
+        Type::AnyFunction { ret } => Some(TypeRef::any_function(type_to_type_ref(ret)?)),
         Type::Named(named) if named.args().is_empty() => Some(TypeRef::name(named.name.clone())),
         // One instantiation of a generic record publishes as the applied type an importing module
         // would write, so the consumer's checker resolves it to the same instantiation.
@@ -3679,8 +4090,17 @@ fn library_import_root(base_file: &Path, library_path: &str) -> Option<PathBuf> 
         return None;
     }
 
+    match standard_import(library_path) {
+        Some(StandardImport::Library(library)) => return Some(PathBuf::from(library.root)),
+        Some(StandardImport::Unknown) => return None,
+        None => {}
+    }
+
     if is_logical_library_path(base_file) {
-        return normalize_logical_library_path(base_file, library_path).ok();
+        // A relative path into the reserved root is refused at the import, not a dependency.
+        return normalize_logical_library_path(base_file, library_path)
+            .ok()
+            .filter(|root| !is_reserved_identity(&root.to_string_lossy().replace('\\', "/")));
     }
 
     normalize_local_library_path(base_file, library_path).ok()
@@ -4092,8 +4512,7 @@ mod tests {
             people_dir.join("User.nx"),
             r#"/// Something with a name.
 export abstract type Named = {
-  /// The display name.
-  name:string
+  name:string   /// The display name.
 }
 
 /// A person.
@@ -4103,8 +4522,7 @@ export type User extends Named = {
 
 /// Greets someone.
 export let greet(
-  /// Who to greet.
-  who:string
+  who:string   /// Who to greet.
 ): string = {who}
 
 export type Mode =

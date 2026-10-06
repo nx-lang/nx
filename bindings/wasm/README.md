@@ -20,6 +20,7 @@ it is handed, including the sources of the libraries a host loads into a registr
 | Validate a workspace, answering diagnostics as data        |                                              |
 | Emit one NX IR artifact per module, library modules too    |                                              |
 | Evaluate `root` to annotated NX text                       |                                              |
+| JSON Schema and documentation for a function or a type     | Deriving schemas from an NX IR image         |
 | Hover, completions, diagnostics, document symbols          | Threads, streaming, incremental analysis     |
 | An in-process `NxLanguageService` over host documents      |                                              |
 
@@ -225,6 +226,123 @@ const program = linkNxIrProgram(prepareNxIrModule(entry.bytes), {
 });
 ```
 
+## Standard libraries
+
+A standard library is NX source the module itself carries, imported by a reserved name:
+`import "@nx/agent"`. Nothing is loaded for it. Every entry point that analyzes or builds NX resolves
+it with no registry, build context or option, and a `loadLibrary` whose root lies under `@nx/` is
+refused with `library-root-reserved`. A path under `@nx/` that names no standard library is
+reported as `unknown-standard-library`, listing those that exist.
+
+`@nx/agent` is the first: product-neutral types for declaring an AI agent, its documents and its
+tools. It is **unstable**, so its declarations may change incompatibly in any release, including a
+patch release; a host gets a change only by moving its pin of the NX packages.
+
+```ts
+const registry = host.createLibraryRegistry();
+// A host library that names an agent type writes the import itself: a module of an implicitly
+// imported library receives no implicit imports.
+registry.loadLibrary({
+  root: "libraries/chat-link",
+  modules: [{ identity: "ChatLink.nx", source: 'import "@nx/agent"\nexport type AssistantConfig = { agent?:Agent }' }]
+});
+// Naming the standard library's root as an implicit import puts it in scope for tenant source, so
+// an authored config needs no import line.
+const context = registry.createBuildContext({ implicitImports: ["libraries/chat-link", "@nx/agent"] });
+const artifact = host.buildWorkspaceArtifact({ modules: tenantModules, entry: "main.nx", buildContext: context });
+
+// The library's image is emitted like any library module's and stored with the program's others;
+// no runtime carries it.
+const images = artifact.generateNxIr({ modules: [] });
+const library = prepareNxIrModule(images.find((image) => image.identity === "@nx/agent/agent.nx")!.bytes);
+const version = library.version; // 16 hex digits derived from the library's source
+```
+
+A program links `@nx/agent/agent.nx` only if something it uses imports the library, and the image
+is the same bytes whichever program emitted it. Its version is read from that image; a host that
+needs it before any tenant compiles builds the one-line source `import "@nx/agent"` and emits the
+library image from it. The library image lists the required feature `function-reference-type-v1`,
+so the runtime that links it must be a release that supports that feature.
+
+## Declaration schemas
+
+A host that hands an NX function to a system that speaks JSON Schema — a language model's tool
+interface, an MCP client — asks the artifact for it while it compiles. `functionSchema` answers with
+JSON Schema (draft 2020-12) for the function's arguments and for its result, its `///` documentation,
+and one entry per parameter:
+
+```ts
+const artifact = host.buildWorkspaceArtifact({
+  modules: [{ identity: "tools.nx", source }],
+  entry: "tools.nx"
+});
+try {
+  const tool = artifact.functionSchema({ name: "findPlans" });
+  tool.description;  // "Finds the plans that fit a team.\n\nPlans are sorted by price."
+  tool.summary;      // "Finds the plans that fit a team."
+  tool.inputSchema;  // { $schema, type: "object", properties: { teamSize: { type: "integer", … } }, … }
+  tool.outputSchema; // { $schema, type: "array", items: { $ref: "#/$defs/Plan" }, $defs: { Plan: … } }
+  tool.parameters;   // [{ name: "teamSize", type: "int", required: true, description: "…" }, …]
+
+  const images = artifact.generateNxIr(); // the image a runtime calls the function from
+  store(tool, images);
+} finally {
+  artifact.dispose();
+}
+```
+
+with `tools.nx`:
+
+```nx
+/// A plan a team can buy.
+type Plan = {
+  name:string   /// The plan's display name.
+}
+
+/// Finds the plans that fit a team.
+///
+/// Plans are sorted by price.
+let findPlans(
+  teamSize:int,   /// Number of people who need a seat.
+  maxMonthlyPrice?:int
+): Plan* = { <Plan name="Team" /> }
+```
+
+These two queries are the supported way to read a program's types and documentation. The NX IR
+image holds neither — it erases generic arguments, records no alias targets, and carries no doc
+comments — so a host that only executes images, with `@nx-lang/ir-runtime`, derives the schemas
+when it compiles and stores them beside the images. Doc comments and these queries first ship
+together in release 0.6.0, the minimum version for both.
+
+A function is named by the identity of its module and its name, the pair a `Function` record
+carries, so a host holding one from an evaluated value asks for its schema directly. The module
+defaults to the entry; a library module is named `<root>/<module>`, `@nx/agent/agent.nx` for the
+agent library. Any function qualifies, exported or not. `typeSchema(reference, { direction })`
+answers for a record, action, union, type alias, `<Target>.Update` or `<Target>.Property`.
+
+| Option | Query | Meaning |
+| ------ | ----- | ------- |
+| `hostSuppliedTypes` | `functionSchema` | Types whose parameters the host fills in itself, such as `{ module: "@nx/agent/agent.nx", name: "ToolContext" }`. A parameter declared with one, with a record extending one, or with a type alias of either, is left out of `inputSchema` and its entry names the type as `hostSupplied`. A parameter whose type holds one without being one, under `+` or as a field of a record at any depth, stays in `inputSchema` and its entry lists the types it holds as `hostSuppliedWithin`. A type the program does not declare matches nothing. An entry's `typeRef` names the record or union the parameter is declared with, and through a type alias what the alias denotes. |
+| `direction` | `typeSchema` | `output` (the default) describes a value a runtime returns: every record carries `$type`. `input` describes a value a host supplies: `$type` is asked for only where a runtime needs it to choose a shape, at an abstract record or a payload union case. |
+
+A schema describes the canonical JSON encoding and nothing wider: a value valid against
+`inputSchema` is accepted as the function's arguments by a runtime running the image from the same
+artifact, and a value the function returns is valid against `outputSchema`; the package's tests
+hold both against `@nx-lang/ir-runtime`. Objects are closed (`additionalProperties: false`), an
+optional field or parameter is left out of `required` rather than made nullable, and `object` is
+`{ "not": { "type": "null" } }`, any value but `null`. Records, unions and applied generic records are `$defs` entries the document refers to by
+`$ref`, so a recursive type is described once. The mapping for every type form is on the website's
+*Declaration schemas* reference page.
+
+A type with no JSON form is reported, never approximated, and the answer is still returned: the
+affected schema is absent and `diagnostics` says why, while the other side is answered.
+
+| Code | Meaning |
+| ---- | ------- |
+| `schema-inexpressible-type` | A parameter, field or result has a function type, a function reference type (`FunctionTool.function`), a component type, markup, an abstract record nothing in the program extends, or a result the checker could not infer. Labeled at the member. |
+| `schema-ambiguous-discriminator` | Two shapes at one abstract-record site share a `$type`, which a runtime refuses as ambiguous. |
+| `schema-unknown-declaration` | The reference names nothing in the program. Thrown as `NxEvaluationError`, not answered. |
+
 ## Evaluating root to NX text
 
 `artifact.evaluateNx()` runs the entry module's `root` and returns `{ text, nodes }`. `text` is the
@@ -319,7 +437,7 @@ editor stays live.
 
 | Error                      | Thrown when                                                          |
 | -------------------------- | -------------------------------------------------------------------- |
-| `NxEvaluationError`        | NX reports diagnostics: source that does not compile, a `root` that is missing, fails or has no NX spelling, an unparseable snapshot URI, duplicate identities, a library that cannot be loaded. Carries `diagnostics`. |
+| `NxEvaluationError`        | NX reports diagnostics: source that does not compile, a `root` that is missing, fails or has no NX spelling, an unparseable snapshot URI, duplicate identities, a library that cannot be loaded, a schema query for a declaration the program does not have. Carries `diagnostics`. |
 | `NxDisposedResourceError`  | An operation is attempted on a disposed artifact, snapshot, registry, build context or host. Disposing twice is allowed. |
 | `NxHostCrashedError`       | The module trapped, and on every later call to that host. Carries `operation`. |
 | `NxWasmError`              | The module's ABI version is not the loader's, or it answered in a shape the loader cannot read. |
@@ -329,21 +447,32 @@ The names and shapes match `@nx-lang/sdk-node`, so code can move between the two
 ## ABI
 
 The module exports `nx_wasm_abi_version`, which the loader checks before any other call and refuses
-when it disagrees, naming both versions. The current version is 4, which added library registries
-(`nx_wasm_registry_new`, `nx_wasm_registry_load`, `nx_wasm_registry_free`), build contexts
-(`nx_wasm_build_context_new`, `nx_wasm_build_context_free`) and `nx_wasm_workspace_validate`, and
-gave `nx_wasm_workspace_build` a build-context handle argument (null for none). Arguments cross as
-UTF-8 JSON in buffers from
-`nx_wasm_alloc`, or as an image's bytes for `nx_wasm_ir_explain`; every operation answers with a
-pointer to a `{ status, ptr, len }` record whose payload is UTF-8 JSON, except that
-`nx_wasm_program_nx_ir` answers with an NX IR bundle (a `u32` header length, a JSON header
-`[{ identity, metadata, offset, length }]`, padding to four bytes, then the images), released
-through `nx_wasm_result_free` before the call returns. Handles to artifacts, snapshots, registries
-and build contexts are opaque to the loader, and a build context is refused by any host but the one
-that created it.
+when it disagrees, naming both versions. The current version is 6. Version 4 added library
+registries (`nx_wasm_registry_new`, `nx_wasm_registry_load`, `nx_wasm_registry_free`), build
+contexts (`nx_wasm_build_context_new`, `nx_wasm_build_context_free`) and
+`nx_wasm_workspace_validate`, and gave `nx_wasm_workspace_build` a build-context handle argument
+(null for none); 5 added `nx_wasm_program_diagnostics`; 6 added `nx_wasm_program_function_schema`
+and `nx_wasm_program_type_schema`.
+
+| Exports | Purpose |
+| ------- | ------- |
+| `nx_wasm_abi_version`, `nx_wasm_alloc`, `nx_wasm_free`, `nx_wasm_result_free` | The version check and the module's memory |
+| `nx_wasm_program_build`, `nx_wasm_workspace_build`, `nx_wasm_workspace_validate` | Building and validating programs |
+| `nx_wasm_program_nx_ir`, `nx_wasm_program_evaluate_nx`, `nx_wasm_program_diagnostics`, `nx_wasm_program_function_schema`, `nx_wasm_program_type_schema`, `nx_wasm_program_free` | A program artifact's operations |
+| `nx_wasm_registry_new`, `nx_wasm_registry_load`, `nx_wasm_registry_free`, `nx_wasm_build_context_new`, `nx_wasm_build_context_free` | Library registries and build contexts |
+| `nx_wasm_snapshot_new`, `nx_wasm_snapshot_hover`, `nx_wasm_snapshot_completions`, `nx_wasm_snapshot_diagnostics`, `nx_wasm_snapshot_document_symbols`, `nx_wasm_snapshot_free` | Language snapshots |
+| `nx_wasm_ir_explain` | Explaining an image |
+
+Arguments cross as UTF-8 JSON in buffers from `nx_wasm_alloc`, or as an image's bytes for
+`nx_wasm_ir_explain`; every operation answers with a pointer to a `{ status, ptr, len }` record
+whose payload is UTF-8 JSON, except that `nx_wasm_program_nx_ir` answers with an NX IR bundle (a
+`u32` header length, a JSON header `[{ identity, metadata, offset, length }]`, padding to four
+bytes, then the images), released through `nx_wasm_result_free` before the call returns. Handles
+to artifacts, snapshots, registries and build contexts are opaque to the loader, and a build
+context is refused by any host but the one that created it.
 
 The Rust side is `bindings/wasm/native` (crate `nx-sdk-wasm-native`), over `nx-api`, `nx-codegen` and
-`nx-language-service`. Its NX IR and diagnostic payloads are the ones the Node binding serializes, and
+`nx-language-service`. Its NX IR, diagnostic and schema payloads are the ones the Node binding serializes, and
 the package's parity tests compare the two bindings' answers on every test run, so a divergence fails
 the build rather than reaching a site.
 
@@ -354,5 +483,6 @@ the build rather than reaching a site.
 | `native/`       | The Rust crate and its ABI                                          |
 | `src/`          | The loader, the two WASI entry points, the language service, errors and types |
 | `scripts/`      | The wasm build and clean scripts                                    |
-| `test/`         | Loader, SDK, language service, trap, entry-point and Node-SDK parity tests |
+| `test/`         | Loader, SDK, language service, trap, entry-point, schema agreement and Node-SDK parity tests |
+| `test/fixtures/schema/` | The schema corpus: one NX source per mapping, with the documents the export answers and argument cases |
 | `dist/nx.wasm`  | The built module (gitignored; produced by `pnpm run build`)         |

@@ -2,10 +2,13 @@
   "coverage": {
     "binaryOperators": {
       "add": [
+        "argument-diagnostics",
         "components",
         "conversions",
+        "evaluation-cost",
         "expressions",
         "handlers",
+        "host-values",
         "occurrence-lifting",
         "parameter-defaults",
         "ranges",
@@ -15,22 +18,29 @@
         "expressions"
       ],
       "concat": [
+        "agent-library",
         "components",
         "conversions",
+        "evaluation-cost",
         "expressions",
         "function-values",
+        "host-values",
         "occurrence-lifting",
         "occurrences",
         "parameter-defaults"
       ],
       "div": [
+        "argument-diagnostics",
         "conversions",
         "expressions"
       ],
       "eq": [
         "conversions",
+        "evaluation-cost",
         "expressions",
+        "function-references",
         "function-values",
+        "host-values",
         "occurrence-lifting",
         "ranges"
       ],
@@ -53,6 +63,7 @@
         "expressions"
       ],
       "idiv": [
+        "argument-diagnostics",
         "conversions",
         "expressions"
       ],
@@ -70,7 +81,9 @@
         "expressions"
       ],
       "mul": [
+        "evaluation-cost",
         "expressions",
+        "function-references",
         "function-values",
         "parameter-defaults",
         "ranges"
@@ -98,12 +111,17 @@
         "ranges"
       ],
       "int": [
+        "agent-library",
+        "argument-diagnostics",
         "components",
         "conversions",
+        "evaluation-cost",
         "expressions",
+        "function-references",
         "function-values",
         "generic-records",
         "handlers",
+        "host-values",
         "occurrence-lifting",
         "occurrences",
         "parameter-defaults",
@@ -117,20 +135,28 @@
     "declarations": {
       "component": [
         "components",
+        "evaluation-cost",
         "function-values",
         "handlers",
+        "host-values",
         "occurrences",
         "snippet",
         "trailing-element",
         "two-module"
       ],
       "function": [
+        "agent-library",
+        "agent-tool-context",
+        "argument-diagnostics",
         "components",
         "conversions",
+        "evaluation-cost",
         "expressions",
+        "function-references",
         "function-values",
         "generic-records",
         "handlers",
+        "host-values",
         "occurrence-lifting",
         "occurrence-patterns",
         "occurrences",
@@ -142,10 +168,16 @@
         "two-module"
       ],
       "record": [
+        "agent-library",
+        "agent-tool-context",
+        "argument-diagnostics",
         "conversions",
+        "evaluation-cost",
+        "function-references",
         "function-values",
         "generic-records",
         "handlers",
+        "host-values",
         "occurrence-lifting",
         "occurrence-patterns",
         "occurrences",
@@ -153,19 +185,25 @@
         "two-module"
       ],
       "typeAlias": [
+        "function-references",
         "function-values",
         "occurrence-lifting",
         "records"
       ],
       "union": [
+        "agent-library",
+        "agent-tool-context",
+        "evaluation-cost",
         "expressions",
         "handlers",
         "records",
         "two-module"
       ],
       "value": [
+        "agent-library",
         "components",
         "conversions",
+        "evaluation-cost",
         "expressions",
         "function-values",
         "handlers",
@@ -176,6 +214,7 @@
     },
     "intrinsics": {
       "apply": [
+        "evaluation-cost",
         "generic-records",
         "occurrences",
         "records"
@@ -192,13 +231,19 @@
     },
     "nodes": {
       "actionHandler": [
+        "evaluation-cost",
         "handlers",
+        "host-values",
         "two-module"
       ],
       "array": [
+        "agent-library",
+        "agent-tool-context",
         "components",
         "conversions",
+        "evaluation-cost",
         "expressions",
+        "function-references",
         "function-values",
         "handlers",
         "occurrence-lifting",
@@ -207,12 +252,17 @@
         "records"
       ],
       "binary": [
+        "agent-library",
+        "argument-diagnostics",
         "components",
         "conversions",
+        "evaluation-cost",
         "expressions",
+        "function-references",
         "function-values",
         "generic-records",
         "handlers",
+        "host-values",
         "occurrence-lifting",
         "occurrences",
         "parameter-defaults",
@@ -221,6 +271,7 @@
       ],
       "bool": [
         "conversions",
+        "evaluation-cost",
         "expressions",
         "occurrence-lifting",
         "ranges",
@@ -228,10 +279,14 @@
         "trailing-element"
       ],
       "call": [
+        "argument-diagnostics",
         "conversions",
+        "evaluation-cost",
         "expressions",
+        "function-references",
         "function-values",
         "generic-records",
+        "host-values",
         "occurrence-lifting",
         "occurrence-patterns",
         "occurrences",
@@ -247,14 +302,17 @@
       ],
       "component": [
         "components",
+        "evaluation-cost",
         "function-values",
         "handlers",
+        "host-values",
         "occurrences",
         "snippet",
         "trailing-element",
         "two-module"
       ],
       "element": [
+        "evaluation-cost",
         "expressions",
         "handlers"
       ],
@@ -263,11 +321,13 @@
       ],
       "for": [
         "components",
+        "evaluation-cost",
         "expressions",
         "handlers",
         "occurrence-lifting"
       ],
       "forRange": [
+        "evaluation-cost",
         "ranges"
       ],
       "if": [
@@ -277,16 +337,21 @@
       ],
       "ifIs": [
         "conversions",
+        "evaluation-cost",
         "expressions",
         "occurrence-patterns"
       ],
       "intrinsic": [
+        "evaluation-cost",
         "generic-records",
         "occurrences",
         "records"
       ],
       "member": [
+        "agent-tool-context",
+        "argument-diagnostics",
         "conversions",
+        "evaluation-cost",
         "expressions",
         "function-values",
         "generic-records",
@@ -298,15 +363,22 @@
         "two-module"
       ],
       "namedCall": [
+        "argument-diagnostics",
+        "evaluation-cost",
         "function-values"
       ],
       "number": [
+        "agent-library",
+        "argument-diagnostics",
         "components",
         "conversions",
+        "evaluation-cost",
         "expressions",
+        "function-references",
         "function-values",
         "generic-records",
         "handlers",
+        "host-values",
         "occurrence-lifting",
         "occurrences",
         "parameter-defaults",
@@ -320,10 +392,15 @@
         "occurrences"
       ],
       "record": [
+        "agent-library",
+        "agent-tool-context",
         "conversions",
+        "evaluation-cost",
+        "function-references",
         "function-values",
         "generic-records",
         "handlers",
+        "host-values",
         "occurrence-lifting",
         "occurrence-patterns",
         "occurrences",
@@ -332,12 +409,17 @@
         "two-module"
       ],
       "reference": [
+        "agent-library",
+        "agent-tool-context",
         "components",
         "conversions",
+        "evaluation-cost",
         "expressions",
+        "function-references",
         "function-values",
         "generic-records",
         "handlers",
+        "host-values",
         "occurrence-lifting",
         "occurrence-patterns",
         "occurrences",
@@ -348,12 +430,18 @@
         "two-module"
       ],
       "slot": [
+        "agent-library",
+        "agent-tool-context",
+        "argument-diagnostics",
         "components",
         "conversions",
+        "evaluation-cost",
         "expressions",
+        "function-references",
         "function-values",
         "generic-records",
         "handlers",
+        "host-values",
         "occurrence-lifting",
         "occurrence-patterns",
         "occurrences",
@@ -363,12 +451,18 @@
         "two-module"
       ],
       "string": [
+        "agent-library",
+        "agent-tool-context",
+        "argument-diagnostics",
         "components",
         "conversions",
+        "evaluation-cost",
         "expressions",
+        "function-references",
         "function-values",
         "generic-records",
         "handlers",
+        "host-values",
         "occurrence-lifting",
         "occurrence-patterns",
         "occurrences",
@@ -387,6 +481,8 @@
         "expressions"
       ],
       "unionCase": [
+        "agent-library",
+        "evaluation-cost",
         "expressions",
         "handlers",
         "records",
@@ -394,12 +490,25 @@
       ]
     },
     "types": {
+      "anyFunction": [
+        "agent-library",
+        "agent-tool-context",
+        "function-references"
+      ],
       "function": [
+        "argument-diagnostics",
+        "evaluation-cost",
+        "function-references",
         "function-values"
       ],
       "nominal": [
+        "agent-library",
+        "agent-tool-context",
+        "argument-diagnostics",
         "components",
+        "evaluation-cost",
         "expressions",
+        "function-references",
         "function-values",
         "generic-records",
         "handlers",
@@ -413,12 +522,18 @@
         "two-module"
       ],
       "primitive": [
+        "agent-library",
+        "agent-tool-context",
+        "argument-diagnostics",
         "components",
         "conversions",
+        "evaluation-cost",
         "expressions",
+        "function-references",
         "function-values",
         "generic-records",
         "handlers",
+        "host-values",
         "occurrence-lifting",
         "occurrence-patterns",
         "occurrences",
@@ -430,11 +545,17 @@
         "two-module"
       ],
       "seq": [
+        "agent-library",
+        "agent-tool-context",
+        "argument-diagnostics",
         "components",
         "conversions",
+        "evaluation-cost",
+        "function-references",
         "function-values",
         "generic-records",
         "handlers",
+        "host-values",
         "occurrence-lifting",
         "occurrence-patterns",
         "occurrences",
@@ -454,12 +575,18 @@
     }
   },
   "programs": [
+    "agent-library",
+    "agent-tool-context",
+    "argument-diagnostics",
     "components",
     "conversions",
+    "evaluation-cost",
     "expressions",
+    "function-references",
     "function-values",
     "generic-records",
     "handlers",
+    "host-values",
     "occurrence-lifting",
     "occurrence-patterns",
     "occurrences",

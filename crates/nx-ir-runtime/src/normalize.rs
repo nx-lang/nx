@@ -4,8 +4,8 @@
 //! schema the image carries: occurrences, records and their discriminators, abstract records,
 //! unions, update records and function values.</para>
 
-use crate::error::{fail, Result};
-use crate::eval::{bind, Cx, Frame, Machine};
+use crate::error::{fail, fail_limit, Result};
+use crate::eval::{bind, Cx, Frame, Machine, STACK_LIMIT};
 use crate::module::{DeclarationKind, Field, Primitive, Ref, Shape, Type};
 use crate::value::{get_field, CaseValue, Fields, FunctionRef, Record, Value, FUNCTION_TYPE};
 use std::fmt;
@@ -116,8 +116,8 @@ impl<'p> Machine<'p> {
         path: &Path<'_>,
     ) -> Result<Value> {
         if !self.within_stack() {
-            return fail(
-                "nx-ir-resource-limit",
+            return fail_limit(
+                STACK_LIMIT,
                 "A value nests too deeply to check within the stack an evaluation may use.",
             );
         }
@@ -193,6 +193,10 @@ impl<'p> Machine<'p> {
                 }
             };
         }
+        // Checking one value against the type it is to have costs one operation, charged before
+        // the check: a record's fields are values of their own, and so are a sequence's items,
+        // which is why a sequence type costs nothing above.
+        self.charge(cx, None, 1)?;
         match ty {
             Type::Primitive(primitive) => normalize_primitive(*primitive, value, path),
             Type::UnknownPrimitive(name) => {
@@ -431,10 +435,10 @@ impl<'p> Machine<'p> {
             let at = Path::Field(&root, &field.name);
             let value = match (get_field(input, &field.name), field.default) {
                 (Some(value), _) => self.normalize(cx, &field.ty, value.clone(), &at)?,
-                (None, Some(default)) if !require_explicit => {
-                    let value = self.eval(cx, frame, default)?;
-                    self.normalize(cx, &field.ty, value, &at)?
-                }
+                (None, Some(default)) if !require_explicit => self
+                    .eval(cx, frame, default)
+                    .and_then(|value| self.normalize(cx, &field.ty, value, &at))
+                    .map_err(|error| self.default_failed(error))?,
                 _ if !field.is_required && field.ty.admits_empty() => Value::empty(),
                 _ => {
                     return Err(self.error(

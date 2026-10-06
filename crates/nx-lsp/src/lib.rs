@@ -1066,4 +1066,59 @@ component <Card title:string subtitle:string /> = {
                 .collect::<Vec<_>>()
         );
     }
+
+    #[tokio::test]
+    async fn the_lsp_offers_and_describes_an_imported_standard_library_with_no_build_context() {
+        let (server, _) = test_server(Duration::from_millis(1));
+        let uri = Url::parse("nx://tenant/agent.nx").expect("uri");
+        let source = "import \"@nx/agent\"\n<Agent name=\"support\" />\n";
+
+        server
+            .did_open(did_open_params(uri.clone(), "nx", 1, source))
+            .await;
+
+        let hover = server
+            .hover(HoverParams {
+                text_document_position_params: document_position(uri.clone(), 1, 3),
+                work_done_progress_params: Default::default(),
+            })
+            .await
+            .expect("hover")
+            .expect("hover response");
+        let HoverContents::Markup(markup) = &hover.contents else {
+            panic!("expected markup hover contents");
+        };
+        assert!(
+            markup.value.contains("(standard library @nx/agent)"),
+            "got: {}",
+            markup.value
+        );
+        assert!(
+            markup.value.contains("type Agent")
+                && markup.value.contains("A reusable definition of an agent"),
+            "got: {}",
+            markup.value
+        );
+
+        let completions = server
+            .completion(CompletionParams {
+                text_document_position: document_position(uri, 1, 22),
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+                context: None,
+            })
+            .await
+            .expect("completion")
+            .expect("completion response");
+        let CompletionResponse::Array(completions) = completions else {
+            panic!("expected completion array");
+        };
+        let labels = completions
+            .iter()
+            .map(|completion| completion.label.clone())
+            .collect::<Vec<_>>();
+        for name in ["model", "tools", "instructions"] {
+            assert!(labels.contains(&name.to_string()), "got: {labels:?}");
+        }
+    }
 }

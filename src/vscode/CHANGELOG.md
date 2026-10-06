@@ -2,6 +2,159 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.6.0
+
+### Doc comments
+- New. A `///` line comment documents the declaration or member it is attached to: written on the
+  lines above an item, or after an item that starts and ends on its line. Every declaration and
+  member can be documented: types, records, actions, unions and their cases and payload fields,
+  values, functions and their parameters, components and their properties, `emits` entries and
+  `state` fields. A doc comment that documents nothing, a misaligned continuation and an item
+  documented twice are errors.
+- Documentation is CommonMark; its first paragraph is the summary. `[Name]` and `[Type.member]` are
+  doc links, resolved like any name in the module, with an `unresolved-doc-link` warning when one
+  names nothing.
+- Hover and completion items show documentation, hover on a doc link reports what it names, and
+  typing a link suggests the names it can resolve to. Doc comments and their Markdown are
+  highlighted.
+- `nxlang typegen` writes documentation into the generated C# (XML documentation comments) and
+  TypeScript (`/** */` comments).
+- `@nx-lang/sdk-wasm`: `NxProgramArtifact.diagnostics()` returns the warnings of a program that
+  builds, such as an unresolved doc link.
+
+### Declaration schemas
+- New in `@nx-lang/sdk-wasm` and `@nx-lang/sdk-node`: `NxProgramArtifact.functionSchema` answers
+  with JSON Schema (draft 2020-12) for a function's arguments and result, with its `///`
+  documentation as descriptions and an entry per parameter, and `typeSchema` answers for a declared
+  type, written for input or output. Any function of the program can be described, named by its
+  module and name as a `Function` record names it, so a host can describe a function to a language
+  model or an MCP client as a tool. A schema describes the canonical JSON encoding, and agrees with
+  what the runtime accepts and returns.
+- A type with no JSON form, such as a function type or an abstract record nothing extends, is
+  reported as `schema-inexpressible-type` in the answer rather than approximated. A host can name
+  types it supplies itself, such as `@nx/agent`'s `ToolContext`, to leave their parameters out.
+  See [declaration schemas](https://nxlang.org/reference/concepts/declaration-schemas).
+- A parameter declared with a host-supplied type, with a record that extends one or with a type
+  alias of either is left out, and its entry says so as `hostSupplied`. A parameter whose type only
+  holds one, under `+` or as a field of a record at any depth, stays in the input schema, and its
+  entry lists the types it holds as `hostSuppliedWithin`, so a host can refuse a function that
+  would ask a caller for values the host means to supply. An entry's `typeRef` names the record or
+  union the parameter is declared with, and through a type alias what the alias denotes.
+- `@nx-lang/sdk-wasm`'s module ABI version is now 6; the loader refuses a module of another version.
+- The entry module's NX IR image now also lists every module that declares a subtype of an abstract
+  record a function takes or returns, so a runtime linked from the entry accepts a host value naming
+  any of them, including one declared in a module nothing else uses. Before, such a value was
+  refused with `nx-ir-boundary-type`.
+
+### Language
+- A function type may leave its parameters unspecified with `...`: `<function ... />: R` is the
+  type of a function of any parameters whose result satisfies `R`, and `<function ... />: object*`
+  takes any function. `...` is highlighted in that position, hover shows the type as written, and
+  calling a value of such a type reports `function-reference-not-callable`.
+
+### Standard libraries
+- NX now has libraries of its own: source the compiler carries, imported by a reserved name with
+  nothing to install or load. `import "@nx/agent"` works in a single file, a workspace, a library
+  and the editor, in every import form. A path under `@nx/` that names no standard library is
+  reported as `unknown-standard-library`, listing the ones that exist.
+- **Breaking:** the whole `@nx/` root is now reserved, where only `@nx/prelude.nx` was before. A
+  workspace module whose identity lies under `@nx/` is refused, a host library whose root lies
+  under it is refused with `library-root-reserved`, and an import path beginning `@nx/` is no
+  longer resolved relative to the importing file. A directory named `@nx` beside a module has to
+  be renamed.
+- Hover on a standard library declaration, or on one of its fields, shows its signature and
+  documentation under a `(standard library @nx/<name>)` label, and completions offer its names only
+  in a file that imports it.
+- Completions inside the opening tag of a record written as an element now offer its fields, as
+  they already did for a component's properties.
+
+### `@nx/agent` (unstable)
+- New. Thirteen product-neutral types for declaring an AI agent, its reference documents and its
+  tools: `Agent`, `Document`, `AgentLimits`, `Tool`, `FunctionTool`, `WebSearchTool`, `ToolContext`,
+  `Connection`, `HttpConnection`, `HttpMethod`, `HttpParam`, `HttpArguments` and `HttpTool`. The
+  library holds types only; a host decides how an agent runs. It is unstable: its declarations may
+  change incompatibly in any release, including a patch release. See
+  [the agent library](https://nxlang.org/reference/libraries/agent).
+
+### `@nx-lang/agent` (unstable)
+- New npm package for JavaScript hosts of `@nx/agent`. `normalizeAgent` turns an evaluated `Agent`
+  into a definition a host stores: plain JSON, with each tool's name, description and JSON Schemas
+  in the MCP tool shape. `createAgentTools` makes the stored tools executable over a linked NX IR
+  program, with no compiler: a function tool runs under an operation budget and two input limits,
+  and an HTTP tool's request is built so that nothing a model sends can move it off its
+  connection, and handed to the host to send. `@nx-lang/agent/ai-sdk` maps the tools to a Vercel
+  AI SDK tool set. The package calls no model and makes no request itself. It is unstable, as the
+  library is: its API and the stored definition format may change in any release. See
+  [running an agent in a host](https://nxlang.org/reference/libraries/agent-hosts).
+- A failed call says whose mistake it was. `@nx-lang/agent` reports `invalid-context` for a context
+  record that does not fit the function's context type, as it does for one that was not passed,
+  and `invalid-input` only for a failure in an argument the model sent, which is the one failure
+  the model is told about in full. A boundary failure that is in no argument, such as a record
+  field default whose value does not fit its field, is `evaluation-failed`.
+- **Breaking**: the tool context record is read as the IR runtime reads any host value. An
+  instance of a class below the top level of the record, which was passed as it was, is refused
+  with `invalid-context`, as a `Date` or a typed array anywhere in it is. The record itself can
+  still be an instance of a class, and a member that is `undefined` is still left out.
+
+### NX IR runtimes
+- New: `nx-ir-runtime`, a Rust crate that runs compiled NX IR images in a Rust host with no
+  compiler: prepare, link, evaluate, the component lifecycle and the update helpers, with values
+  exchanged as `NxValue`. It reports the `nx-ir-*` codes `@nx-lang/ir-runtime` does, and the
+  conformance corpus holds the two runtimes to the same results. The crate is in the repository;
+  this release does not publish it to a registry.
+- An operation budget for code a host did not write: `maxOperations` in `@nx-lang/ir-runtime` and
+  `RuntimeOptions::max_operations` in `nx-ir-runtime`, unset and unlimited by default. An operation
+  is a unit of work on a value, such as a node evaluated, an item placed in a list, a value checked
+  against a type or written for the host, so the budget bounds work and allocation, which
+  `maxCallDepth` and `maxRangeLength` do not. One budget covers one call and everything it does,
+  and a call that would exceed it fails with `nx-ir-resource-limit` before the work is done. Both
+  runtimes count the same number for the same call. `docs/nx-ir-format.md` (*Evaluation cost*) has
+  the rules, with worked counts.
+- An input limit: `maxInputSize` and `RuntimeOptions::max_input_size`, unset by default, bound what
+  a host hands one call: its arguments, props, content, state, batch and patch. A call given more
+  fails with `nx-ir-resource-limit` before the program is looked at. The measure is exported, as
+  `measureInputSize` and as `input_size` and `record_input_size`, and both runtimes measure the
+  same size for the same input.
+- A call reports what it used. Give it a `usage` object (`RuntimeOptions::usage` in Rust) and the
+  runtime writes the operations the call cost and its input size, whether it returns or fails, so
+  a host can choose a budget by measuring the programs it means to allow.
+- Every `nx-ir-resource-limit` diagnostic carries `limit`, which names the limit it met and gives
+  the limit's value where it has one. Expressions may nest at most 1,000 deep in one evaluation,
+  and `@nx-lang/ir-runtime` reports a `RangeError` the JavaScript engine raises during evaluation
+  as `nx-ir-resource-limit` whose limit is named `engine`.
+- **Breaking**: `@nx-lang/ir-runtime` refuses an integer literal outside JavaScript's safe range
+  where a program reaches it, with `nx-ir-number`. It used to carry the digits without being able
+  to compute with them. The Rust runtime, which has 64-bit integers, runs the same program.
+- A diagnostic names the argument a failure is in. When `callFunction` or `evaluateFunction`
+  refuses a value the host passed for a parameter, or a required parameter was given nothing, the
+  diagnostic carries `argument`, the parameter's name (`NxIrDiagnostic.argument` in
+  `@nx-lang/ir-runtime`, `Diagnostic::argument` in the `nx-ir-runtime` crate), so a host tells which
+  argument to correct without reading the message. A failure a default raises, a resource limit
+  and a failure inside the function name none. Both runtimes name the same argument for the same
+  call, and the conformance corpus holds them to it with cases that fail.
+- What a host value is, is now one rule for every runtime: a canonical value, held in the host's
+  own data, with JSON as an encoding of it and not something a host has to produce. A value a
+  host computed is passed as one it read from JSON is, with nothing encoded on the way.
+  `docs/nx-ir-format.md` (*Host values*) has the forms: plain objects and arrays in JavaScript,
+  `NxValue` in Rust. The Rust runtime is unchanged.
+- `@nx-lang/ir-runtime` reads its input by that rule, once in a call, after the input limit and
+  before anything is checked. A member of a plain object set to `undefined` is now a member left
+  out, at any depth, where the call failed: a default applies, an optional field is empty, and
+  `maxInputSize` and `measureInputSize` do not count it. The evaluation functions take their input
+  as the new types `NxHostValue` and `NxHostRecord`, which admit such a member, and still return
+  `NxCanonicalValue`.
+- **Breaking**, for a host that passes anything but plain data to `@nx-lang/ir-runtime`: an
+  instance of a class, a `Date`, a `Map`, a `Set`, a typed array, a function, a symbol, a big
+  integer, an object that holds itself and an `undefined` item of an array are refused where they
+  are passed, with `nx-ir-boundary-type` and the path, inside a value typed `object` too, where
+  they were let through. Nothing is converted: pass the text or the number a `Date` means, and
+  spread an instance of a class. Positional arguments, content and a batch have to be arrays, and
+  props, a state, a patch and arguments by name plain objects. A refusal inside an argument of
+  `callFunction` or `evaluateFunction` names the argument. An `undefined` item of a list at a
+  typed site, which was already refused, keeps its code and has the new message. Values the
+  runtime returned are accepted back as they were, and a value read from JSON or built as object
+  literals and arrays is unaffected.
+
 ## 0.5.0
 The extension now ships with the NX packages, from one tag and at one version, so extension 0.5.0
 understands the same NX as `@nx-lang/sdk-wasm` and `NxLang.Sdk` 0.5.0. This is why the version

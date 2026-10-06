@@ -1,0 +1,80 @@
+module main.nx fingerprint 14639652977665353874
+requires function-values-v1 function-reference-type-v1
+entrypoints functions [double greet Row names makeArgs otherArgs pass wrap passTool same sameTyped defaulted full wrapped passed kit kitExtra identical distinct typed root] components []
+
+record Args
+  q: string required
+
+alias AnyFn
+
+record Tool
+  fn: <function ... />: object* required
+  fallback: (<function ... />: object*)?
+  build: <function ... />: Args = makeArgs
+
+record Kit
+  all: (<function ... />: object*)+ required
+  extra: (<function ... />: object*)*
+
+function double(n: int): int =
+  (n mul 2)
+
+function greet(name: string, loud?: boolean): string =
+  name
+
+function Row(Item: object, Index: int): string =
+  "r"
+
+function names(): string* =
+  ["a", "b"]
+
+function makeArgs(q: string): Args =
+  <Args q=q />
+
+function otherArgs(q: string, limit?: int): Args =
+  <Args q=q />
+
+function pass(f: <function ... />: object*): <function ... />: object* =
+  f
+
+function wrap(f: <function ... />: object*): Tool =
+  <Tool fn=f />
+
+function passTool(tool: Tool): Tool =
+  tool
+
+function same(f: <function ... />: object*, g: <function ... />: object*): boolean =
+  (f eq g)
+
+function sameTyped(f: <function ... />: object*, g: <function n:int />: int): boolean =
+  (f eq g)
+
+function defaulted() =
+  <Tool fn=double />
+
+function full() =
+  <Tool build=otherArgs fallback=names fn=Row />
+
+function wrapped() =
+  wrap(greet)
+
+function passed() =
+  pass(double)
+
+function kit() =
+  <Kit all=[double, greet, Row] />
+
+function kitExtra() =
+  <Kit all=double extra=[names, makeArgs] />
+
+function identical() =
+  same(double, double)
+
+function distinct() =
+  same(double, greet)
+
+function typed() =
+  sameTyped(double, double)
+
+function root() =
+  <Tool build=makeArgs fn=pass(greet) />

@@ -1,0 +1,7 @@
+// A function an agent's HTTP tool names: its result is the agent library's `HttpArguments`.
+import "@nx/agent"
+
+/// Builds the request that looks an order up.
+let lookupOrder(
+  orderId:string   /// The order's identifier.
+):HttpArguments = { <HttpArguments pathParams=<HttpParam name="id" value={orderId} /> /> }

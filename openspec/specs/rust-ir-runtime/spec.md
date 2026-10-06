@@ -124,8 +124,8 @@ value the Rust runtime returns SHALL equal the canonical value `typescript-ir-ru
 the same images and the same inputs, and where that capability requires a diagnostic the Rust
 runtime SHALL fail with a diagnostic of the same code naming the same item. The one exception is
 an integer outside JavaScript's safe range, as an operand or as a result: the Rust runtime SHALL
-compute it as a 64-bit integer, wrapping at 64 bits, where the TypeScript runtime refuses the
-operand or loses precision. A name that is not a
+compute it as a 64-bit integer, wrapping at 64 bits, where the TypeScript runtime refuses such
+an integer where it reads one from an image, and loses precision where arithmetic passes 2^53. A name that is not a
 function entrypoint SHALL fail with the missing-entrypoint diagnostic. An entry call SHALL return
 the host `null` for an empty result of a function whose declaration sets the optional-result flag.
 A call by `Function` record SHALL drop an argument the function does not declare and SHALL fail
@@ -169,9 +169,12 @@ The host `null` SHALL be read as the empty value where the site admits zero and 
 does not, an `object` site admitting it as the empty list, and SHALL be written only for a cleared field of an update record and for an empty
 optional result of an entry call. An integer outside JavaScript's safe range SHALL be returned as
 the 64-bit integer variant, and its canonical JSON wrapper `{ "$type": "nx.int", "value": "<digits>" }`
-SHALL be accepted at an integer site. Serialized to JSON, a value the Rust runtime returns SHALL
-equal the canonical value the TypeScript runtime returns, comparing numbers by value, ignoring key
-order, and reading such an integer in either spelling.
+SHALL be accepted at an integer site. At an `object` site that wrapper
+SHALL be read as the record it is, as the TypeScript runtime reads it. Serialized to JSON, a value
+the Rust runtime returns SHALL equal the canonical value the TypeScript runtime returns, comparing
+numbers by value and ignoring key order; an integer outside JavaScript's safe range, which the
+TypeScript runtime does not hold, SHALL be compared with its canonical JSON form in either
+spelling.
 
 #### Scenario: Either integer width is accepted
 - **WHEN** a host passes a 32-bit integer value and then a 64-bit integer value holding `3` for a
@@ -310,11 +313,23 @@ exported helpers, and SHALL evaluate the same four as intrinsic calls inside a p
 
 ### Requirement: Rust runtime bounds evaluation and never panics
 Every evaluation API SHALL accept runtime options holding a maximum call depth, defaulting to 100,
-and a maximum range length, defaulting to one million. Exceeding either SHALL fail with
-`nx-ir-resource-limit` naming the limit, and a range above its limit SHALL be refused before its
-body runs. Every API SHALL report every failure as an error value carrying diagnostics. No image
-that preparation accepted, no host value, and no instance SHALL cause the runtime to panic or to
-exhaust the native stack.
+a maximum range length, defaulting to one million, and an operation budget, absent by default.
+Exceeding the call depth or the range length SHALL fail with `nx-ir-resource-limit` naming the
+limit, and a range above its limit SHALL be refused before its body runs. Every API SHALL report
+every failure as an error value carrying diagnostics. No image that preparation accepted, no host
+value, and no instance SHALL cause the runtime to panic or to exhaust the native stack.
+
+The operation budget SHALL be counted as `nx-ir-format` defines an operation, and an absent budget
+SHALL be unlimited. One budget SHALL cover one call of an evaluation API and everything that call
+evaluates — for `dispatch_component_actions`, every handler the batch runs and the render that
+follows — and each call SHALL start with the whole budget. A charge that would take the count above
+the budget SHALL fail the call with `nx-ir-resource-limit` before the operation charged is
+performed, naming the declaration the charge belongs to, as `nx-ir-format` assigns it, and, when
+the charge is for a node and the image carries its debug section, the node's span. A walk the
+runtime makes over a value for a purpose of its own, such as bounding how deeply state nests,
+SHALL visit a value reached from several places once. For the same images, the same input and the same budget, the
+Rust runtime SHALL fail at the node the TypeScript runtime fails at, and SHALL succeed where it
+succeeds, wherever the two runtimes compute the same values.
 
 #### Scenario: Unbounded recursion ends in a diagnostic
 - **WHEN** a program evaluates a function that calls itself without end
@@ -329,6 +344,35 @@ exhaust the native stack.
 - **WHEN** an image with one overwritten cell passes preparation and its entrypoints are evaluated
 - **THEN** each evaluation SHALL either succeed or return an error with a diagnostic
 - **AND** SHALL NOT panic
+
+#### Scenario: Nested loops end at the budget
+- **WHEN** an image evaluates `for a in 0..1000 { for b in 0..1000 { for c in 0..1000 { a + b + c } } }` under an operation budget of one hundred thousand
+- **THEN** evaluation SHALL fail with `nx-ir-resource-limit` naming the operation budget and its value
+- **AND** no more than one hundred thousand operations SHALL have been performed
+
+#### Scenario: An absent budget is unlimited
+- **WHEN** an image evaluates `for i in 0..1000000 { i }` under the default options
+- **THEN** evaluation SHALL return the list of one million integers
+
+#### Scenario: The budget is exact and agrees with the TypeScript runtime
+- **WHEN** an evaluation costs `n` operations in the TypeScript runtime
+- **THEN** the Rust runtime SHALL evaluate it under a budget of `n`
+- **AND** SHALL fail with `nx-ir-resource-limit` under a budget of `n - 1`, naming the same declaration and, with a debug section, the same span
+
+#### Scenario: A value that doubles on each call is stopped before it is allocated
+- **WHEN** a function doubles a list, or a string, on each of 60 nested calls under an operation budget of one hundred thousand
+- **THEN** evaluation SHALL fail with `nx-ir-resource-limit` naming the operation budget
+- **AND** the runtime SHALL NOT have allocated a list or a string the budget does not pay for
+
+#### Scenario: A value shared many times over is stopped wherever it is walked
+- **WHEN** a function builds a record that holds one value twice, forty levels deep, and the value is checked against its type at each call, compared with another like it, returned to the host, or stored in component state, under an operation budget of one hundred thousand
+- **THEN** each evaluation SHALL fail with `nx-ir-resource-limit` naming the operation budget
+- **AND** SHALL NOT take time or memory that grows with the 2^40 values the record is as a tree
+
+#### Scenario: A batch shares one budget and leaves the instance usable
+- **WHEN** a host dispatches a batch whose handlers together cost more than the operation budget
+- **THEN** dispatch SHALL fail with `nx-ir-resource-limit` naming the operation budget
+- **AND** the instance given SHALL dispatch a later, cheaper batch successfully
 
 ### Requirement: Rust runtime diagnostics identify the failing declaration
 A diagnostic the Rust runtime reports SHALL carry a code from the `nx-ir-*` set the TypeScript
@@ -372,3 +416,224 @@ initialization, explicit-state evaluation and dispatch.
 - **WHEN** a supported NX program is evaluated by the interpreter and its emitted IR is evaluated
   by the Rust runtime
 - **THEN** the two results SHALL be equal as canonical values
+
+### Requirement: Rust runtime accepts any function at a function reference site
+The Rust runtime SHALL read the function reference type kind, validating its result operand, and
+the `function-reference-type-v1` feature, and SHALL normalize, validate, compare and render a value
+at a site of a function reference type with the rules `typescript-ir-runtime` states for that
+site: a function value of the linked program is accepted, a host-supplied `Function` record is
+accepted when it names a function declaration of the linked program, whatever its signature, a
+record that names none is refused with `nx-ir-function-value` naming the function, and any other
+value is refused with `nx-ir-boundary-type` naming the site. For the same images and the same
+inputs the canonical value it returns SHALL equal the TypeScript runtime's, and where that runtime
+fails the Rust runtime SHALL fail with a diagnostic of the same code naming the same item. A call
+by `Function` record SHALL be unchanged.
+
+#### Scenario: A function reference field renders the Function record
+- **WHEN** a prepared program declares, in `main.nx`, `type Tool = { fn: <function ... />: object* } let double(n:int): int = {n * 2} let root() = <Tool fn={double} />` and a caller evaluates `root`
+- **THEN** the result's `fn` field, serialized to JSON, SHALL be `{ "$type": "Function", "module": "main.nx", "name": "double" }`
+
+#### Scenario: A host-supplied record is validated against the program
+- **WHEN** a host supplies a `Tool` whose `fn` is a `Function` record naming `double`, one naming `Nope`, and one whose `fn` is the string `"double"`
+- **THEN** the first SHALL be accepted
+- **AND** the second SHALL fail with `nx-ir-function-value` naming `Nope`
+- **AND** the third SHALL fail with `nx-ir-boundary-type` naming `fn`
+
+#### Scenario: The corpus program agrees with the TypeScript runtime
+- **WHEN** the Rust runtime runs the function reference conformance program
+- **THEN** every entrypoint SHALL produce the recorded result the TypeScript runtime produces
+
+#### Scenario: A damaged function reference entry is refused
+- **WHEN** a cell of an `anyFunction` type entry in a corpus image is overwritten with an arbitrary value
+- **THEN** preparation SHALL either refuse the image with a diagnostic or read it as a valid image, and SHALL NOT panic
+
+### Requirement: Rust runtime resource-limit diagnostics name the limit
+Every diagnostic the Rust runtime reports with the code `nx-ir-resource-limit` SHALL carry the name
+of the limit that was reached and, where the limit is a number, its value, as data beside the
+message. A limit the TypeScript runtime also has SHALL carry the name the TypeScript runtime gives
+it: `maxOperations`, `maxCallDepth`, `maxRangeLength` and `maxExpressionNesting`. The limits only
+the Rust runtime has SHALL be named `maxStackBytes` for the native stack an evaluation may use and
+`maxValueNesting` for the nesting of a value at the host boundary or in component state. A
+diagnostic with any other code SHALL carry no limit.
+
+#### Scenario: The operation budget is named
+- **WHEN** an evaluation fails for an exhausted operation budget of five thousand
+- **THEN** the diagnostic's limit SHALL have the name `maxOperations` and the value `5000`
+
+#### Scenario: The two runtimes name a shared limit alike
+- **WHEN** the same image fails in both runtimes for runaway recursion under the default options
+- **THEN** both diagnostics SHALL name the limit `maxCallDepth` with the value `100`
+
+#### Scenario: A value nested too deeply names its own limit
+- **WHEN** a host passes a value nested 300 levels deep
+- **THEN** the diagnostic's limit SHALL have the name `maxValueNesting` and the value `256`
+
+### Requirement: Rust runtime limits the size of host input
+The runtime options every evaluation API accepts SHALL include an input limit, absent by default,
+measured as `nx-ir-format` defines the input size of a call. An absent limit SHALL be unlimited.
+The limit SHALL cover every host value passed to a public method that takes runtime options, the
+same values the TypeScript runtime measures; a component instance SHALL NOT be measured, and
+restoring a stored instance, which takes no options, SHALL keep the bounds it has. A call whose
+input is larger than the limit SHALL fail with `nx-ir-resource-limit` naming the limit
+`maxInputSize` and its value, before the program is looked at, before any value is checked against
+a type and before any node is evaluated, having stopped measuring as soon as the size passed the
+limit, within the bound `nx-ir-format` sets. Measuring the input SHALL charge nothing to the
+operation budget.
+
+The Rust runtime SHALL measure the size the TypeScript runtime measures for the same input, so
+that the input limit refuses the same calls in both. The input limit SHALL be applied before the
+runtime's bound on the nesting of a host value: input that passes both SHALL be reported for its
+size. Input within the limit that nests more deeply than that bound SHALL still be refused for its
+nesting, which the TypeScript runtime does not bound.
+
+#### Scenario: Input over the limit is refused before anything runs
+- **WHEN** a host evaluates a function with a list of 20,000 integers under an input limit of 1,000
+- **THEN** evaluation SHALL fail with `nx-ir-resource-limit` whose limit has the name `maxInputSize` and the value `1000`
+- **AND** no node SHALL have been evaluated
+
+#### Scenario: The limit is exact and agrees with the TypeScript runtime
+- **WHEN** the input of a call has the size `n` in the TypeScript runtime
+- **THEN** the Rust runtime SHALL accept it under an input limit of `n`
+- **AND** SHALL refuse it under a limit of `n - 1`
+
+#### Scenario: An absent limit is unlimited
+- **WHEN** a host evaluates a function with a list of one million integers under the default options
+- **THEN** evaluation SHALL proceed as it did before the option existed
+
+#### Scenario: A batch is measured whole before any of it runs
+- **WHEN** a host dispatches a batch whose first entry is small and whose second is larger than the limit, under an operation budget of zero
+- **THEN** the dispatch SHALL fail with `nx-ir-resource-limit` naming `maxInputSize`, not the budget
+- **AND** no handler SHALL have run
+
+#### Scenario: Oversized input is reported before any other fault of the call
+- **WHEN** a host evaluates a component with props of the wrong type and a state larger than the limit
+- **THEN** the call SHALL fail with `nx-ir-resource-limit` naming `maxInputSize`
+
+#### Scenario: Size is reported before nesting
+- **WHEN** a host passes a value nested 2,000 deep under an input limit of 1,000
+- **THEN** the call SHALL fail with `nx-ir-resource-limit` naming `maxInputSize`
+- **AND** a value nested 300 deep, of size 301, under the same limit SHALL fail naming the nesting bound
+
+#### Scenario: A refused dispatch leaves the instance usable
+- **WHEN** a host dispatches a batch larger than the input limit
+- **THEN** dispatch SHALL fail with `nx-ir-resource-limit` naming `maxInputSize`
+- **AND** the instance given SHALL dispatch a later, smaller batch successfully
+
+### Requirement: Rust runtime reports what a call used and exports the input measure
+The runtime options SHALL be able to carry a usage report that the host shares with the runtime.
+When a call given one ends, whether it succeeds or fails, the report SHALL hold the operations the
+call used if an operation budget was set and none otherwise, and the input size of the call if an
+input limit was set and the input was within it and none otherwise, replacing what an earlier call
+left there. The numbers SHALL be those `nx-ir-format` defines and SHALL equal what the TypeScript
+runtime reports for the same call, for a call that fails as for one that succeeds: a charge the
+budget refused SHALL NOT be counted. With no report given the runtime SHALL do nothing for one, and
+with no budget it SHALL count nothing for one.
+
+The runtime SHALL export a function that returns the size of one host value as `nx-ir-format`
+defines it and as the input limit measures it, and that, given a limit, stops as soon as the size
+passes the limit and returns a number greater than it; and one that does the same for a map of
+named values measured as one record, which is the form props, a state, a patch and arguments by
+name are passed in, so that a host measures one without copying it.
+
+#### Scenario: A successful call reports its count
+- **WHEN** a host evaluates a function that costs 29 operations under a budget of 100,000 with a usage report
+- **THEN** the report SHALL hold 29 operations
+
+#### Scenario: A failed call reports what it used
+- **WHEN** a host evaluates a function under a budget of 10 with a usage report and it fails for the budget
+- **THEN** the report SHALL hold at most 10 operations
+
+#### Scenario: A refused charge is not reported
+- **WHEN** a call under a budget of 10 has been charged 5 operations and its next charge, 31 for a concatenation, is refused
+- **THEN** the report SHALL hold 5 operations
+
+#### Scenario: A map is measured as the record it is passed as
+- **WHEN** a host measures the props map `{ "title": "Home", "count": 3 }` with the exported function for maps
+- **THEN** the size SHALL be three, as the call that takes those props reports
+
+#### Scenario: The two runtimes report alike
+- **WHEN** a corpus case is evaluated in both runtimes under a budget and an input limit it fits, with a usage report
+- **THEN** both reports SHALL hold the recorded operation count and the recorded input size
+
+#### Scenario: A value measured alone has the size it has in a call
+- **WHEN** a host measures a value with the exported function and then passes it as the one argument of a function under an input limit with a usage report
+- **THEN** the two sizes SHALL be equal
+
+### Requirement: Rust runtime allocation is validated against its operation count
+The repository's tests SHALL measure, for the Rust runtime and every generated case of
+`nx-ir-format`'s cost validation at both of its scales, the bytes the runtime asks its allocator
+for during the call. The tests SHALL fail when that number exceeds a fixed multiple of the call's
+operation count plus its input size, and SHALL fail when the bytes for each unit of that sum at
+the larger scale are more than twice what they are at the smaller. The measure SHALL be of bytes
+requested, the check SHALL block a merge, and the generated cases a known finding covers SHALL be
+exempt until it is fixed. A step that copies the input a fixed number of times in a call is within
+these bounds and is not what the check looks for.
+
+#### Scenario: Allocation follows the count
+- **WHEN** a generated case is evaluated at its two scales
+- **THEN** at each scale the bytes allocated SHALL be within the fixed multiple of the operation count plus the input size
+- **AND** the bytes for each unit of that sum SHALL at most double between the scales
+
+#### Scenario: A copy that is not charged is caught
+- **WHEN** the runtime is changed so that a value written for the host is no longer charged
+- **THEN** the allocation check SHALL fail naming the seed and a case that returns a value many times
+
+#### Scenario: The check is repeatable
+- **WHEN** the allocation check is run twice in one build
+- **THEN** it SHALL measure the same number of bytes for the same case
+- **AND** every case SHALL be within the bounds in an unoptimized build and in an optimized one
+
+### Requirement: Rust runtime diagnostics name the argument a failure is in
+A diagnostic for a failure the Rust runtime finds in a value a host passed as an argument of the
+function it called, by name or by position, SHALL carry the name of the parameter the value was
+passed for, as data beside the message. It SHALL carry that name for the same failures the
+TypeScript runtime names an argument for, and SHALL carry none for the failures the TypeScript
+runtime names none for: a failure a default raises, a resource limit whenever it is reached, a
+failure of the image or the program found while a value is checked, a failure while the body is
+evaluated, a failure in the result, more positional arguments than the function has parameters,
+a `Function` record given to `call_function` to say which function to call that is not such a
+record or names no function, and a failure of any other entry point. For the same image and the
+same arguments the two runtimes SHALL name the same argument, or both name none. No diagnostic's
+code SHALL change.
+
+#### Scenario: A value of the wrong type names its parameter
+- **WHEN** a host calls `let findPlans(teamSize:int, note?:string): string` with `teamSize` bound
+  to the string `five`
+- **THEN** the call SHALL fail with `nx-ir-boundary-type` and the diagnostic SHALL name the
+  argument `teamSize`
+
+#### Scenario: A missing required argument names its parameter
+- **WHEN** a host calls that `findPlans` with no arguments
+- **THEN** the call SHALL fail with `nx-ir-arguments` and the diagnostic SHALL name the argument
+  `teamSize`
+
+#### Scenario: The two runtimes name an argument alike
+- **WHEN** the same image is called in both runtimes with each of: a value of the wrong type, a
+  record with a wrong field three levels down, a missing required argument, a `Function` record
+  that names no function, input over the input limit, an operation budget spent while an argument
+  is checked, a record whose field default divides by zero, arguments that fit followed by a
+  division by zero in the body, a record whose field default fails with `nx-ir-arguments`, and a
+  parameter left out whose default fails with `nx-ir-arguments`
+- **THEN** for each call both diagnostics SHALL name the same argument, or both SHALL name none
+- **AND** the conformance corpus SHALL hold each of those calls as a case or as a check it makes
+  of a case, so that a difference fails the corpus tests of the runtime that differs
+
+#### Scenario: A limit names no argument
+- **WHEN** a host calls a function with input over the input limit, or with fifty records for a
+  parameter `items:Item+` under an operation budget of twenty
+- **THEN** each diagnostic SHALL name its limit and no argument
+
+#### Scenario: A failure a field default raises names no argument
+- **WHEN** a program declares `type Req = { n:int share:int = { 100 / n } }` and
+  `let f(req:Req): int`, and a host calls `f` with a `Req` whose `n` is `0`
+- **THEN** the diagnostic SHALL name no argument
+
+#### Scenario: A default that fails with a code an argument's failure has names no argument
+- **WHEN** a host passes a record that fits its type and one of whose field defaults calls a
+  function value the record holds without an argument that function requires, or leaves out a
+  parameter whose default makes such a call
+- **THEN** the call SHALL fail with `nx-ir-arguments` and the diagnostic SHALL name no argument
+
+#### Scenario: A failure inside the function names no argument
+- **WHEN** a host calls a function with arguments that fit its parameters and the body then fails
+- **THEN** the diagnostic SHALL name no argument

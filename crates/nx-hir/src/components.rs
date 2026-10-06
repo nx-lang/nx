@@ -1261,6 +1261,9 @@ pub fn erase_type_parameters(ty: &ast::TypeRef, params: &[Name]) -> ast::TypeRef
                 .collect(),
             return_type: Box::new(erase_type_parameters(return_type, params)),
         },
+        ast::TypeRef::AnyFunction { return_type } => {
+            ast::TypeRef::any_function(erase_type_parameters(return_type, params))
+        }
     }
 }
 
@@ -2340,6 +2343,18 @@ mod tests {
         assert_eq!(
             erase_type_parameters(&template("TItem"), &params),
             template("object")
+        );
+    }
+
+    #[test]
+    fn erase_type_parameters_reaches_the_result_of_a_function_reference_type() {
+        let params = [Name::new("TItem")];
+        assert_eq!(
+            erase_type_parameters(
+                &ast::TypeRef::any_function(ast::TypeRef::one_or_more(ast::TypeRef::name("TItem"))),
+                &params
+            ),
+            ast::TypeRef::any_function(ast::TypeRef::one_or_more(ast::TypeRef::name("object")))
         );
     }
 

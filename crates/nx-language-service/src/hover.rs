@@ -346,3 +346,12 @@ pub(crate) fn builtin_type(kind: &str, name: &str) -> String {
 pub(crate) fn builtin_type_label(kind: &str) -> String {
     format!("({})", kind)
 }
+
+/// `fragment` under `(standard library @nx/agent)` when `module_identity` is a module of a
+/// standard library, and `fragment` alone otherwise.
+pub(crate) fn with_origin_label(module_identity: &str, fragment: String) -> String {
+    match nx_api::standard_library_for_module(module_identity) {
+        Some(library) => format!("(standard library {})\n{fragment}", library.root),
+        None => fragment,
+    }
+}

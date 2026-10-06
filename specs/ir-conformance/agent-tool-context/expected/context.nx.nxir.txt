@@ -1,0 +1,8 @@
+module context.nx fingerprint 15703603823325835117
+links @nx/agent/agent.nx version "b06c00c30be50ada" fingerprint 11527925250760699671
+entrypoints functions [] components []
+
+record ChatToolContext extends @nx/agent/agent.nx:ToolContext @4:1-7:2
+  callId: string required
+  conversationId: string required
+  contactEmail: string?

@@ -44,7 +44,7 @@ pub struct GeneratedOutput<T> {
     pub warnings: Vec<String>,
 }
 
-const DEFAULT_CSHARP_NAMESPACE: &str = "Nx.Generated";
+pub(crate) const DEFAULT_CSHARP_NAMESPACE: &str = "Nx.Generated";
 
 pub fn format_options_from_editorconfig(
     language: TargetLanguage,
@@ -1036,6 +1036,162 @@ mod tests {
             "{csharp}"
         );
         assert!(!csharp.contains("System.Delegate"), "{csharp}");
+    }
+
+    const REFERENCE_TOOL: &str = "export type Tool = { fn: <function ... />: object* fallback?: <function ... />: object* all?: (<function ... />: object*)+ }\n";
+
+    /// A member of a function reference type holds the rendered `Function` record, so C# types it
+    /// as the SDK's function reference whatever the result type, and declares nothing.
+    #[test]
+    fn generates_a_csharp_function_reference_for_a_function_reference_type() {
+        let csharp = generate_for(REFERENCE_TOOL, TargetLanguage::CSharp);
+        assert!(
+            csharp.contains("global::NxLang.Nx.NxFunctionRef Fn"),
+            "{csharp}"
+        );
+        assert!(
+            csharp.contains("global::NxLang.Nx.NxFunctionRef? Fallback"),
+            "{csharp}"
+        );
+        assert!(
+            csharp.contains("global::NxLang.Nx.NxFunctionRef[]? All"),
+            "{csharp}"
+        );
+        assert!(!csharp.contains("class NxFunctionRef"), "{csharp}");
+        assert!(!csharp.contains("record NxFunctionRef"), "{csharp}");
+    }
+
+    /// A stated result changes nothing about the member: the record on the wire is the same. An
+    /// alias of the type maps as any alias does, and the update companion types the member alike.
+    #[test]
+    fn a_function_reference_type_with_a_stated_result_maps_to_the_same_record_type() {
+        let source = "export type Args = { q:string }\n\
+                      export type Builder = <function ... />: Args\n\
+                      export type Tool = { build: <function ... />: Args named:Builder }\n";
+        let csharp = generate_for(source, TargetLanguage::CSharp);
+        assert!(
+            csharp.contains("global::NxLang.Nx.NxFunctionRef Build"),
+            "{csharp}"
+        );
+        assert!(
+            csharp.contains("global::NxLang.Nx.NxFunctionRef Named"),
+            "{csharp}"
+        );
+        let typescript = generate_for(source, TargetLanguage::TypeScript);
+        assert!(typescript.contains("build: NxFunctionRef;"), "{typescript}");
+        assert!(
+            typescript.contains("export type Builder = NxFunctionRef;"),
+            "{typescript}"
+        );
+        assert!(typescript.contains("named: Builder;"), "{typescript}");
+    }
+
+    /// Single-file TypeScript has nowhere to import a shared type from, so it declares
+    /// `NxFunctionRef` once, beside `NxRecord`.
+    #[test]
+    fn typescript_single_file_output_declares_the_function_reference_once() {
+        let typescript = generate_for(REFERENCE_TOOL, TargetLanguage::TypeScript);
+        assert_eq!(
+            typescript.matches("export interface NxFunctionRef").count(),
+            1,
+            "{typescript}"
+        );
+        for line in [
+            "$type: \"Function\";",
+            "module: string;",
+            "name: string;",
+            "fn: NxFunctionRef;",
+            "fallback?: NxFunctionRef;",
+            "all?: NxFunctionRef[];",
+        ] {
+            assert!(
+                typescript.contains(line),
+                "missing `{line}` in {typescript}"
+            );
+        }
+        assert!(!typescript.contains("=>"), "{typescript}");
+    }
+
+    /// Output that names no function reference type is what it was before the type existed: no
+    /// `NxFunctionRef`, and a function type with stated parameters keeps its arrow mapping.
+    #[test]
+    fn output_without_a_function_reference_member_is_unchanged() {
+        let source = "export type R = { render: <function Item:string />: string }\n";
+        let typescript = generate_for(source, TargetLanguage::TypeScript);
+        assert!(!typescript.contains("NxFunctionRef"), "{typescript}");
+        assert!(
+            typescript.contains("render: (args: { Item: string }) => string;"),
+            "{typescript}"
+        );
+        let csharp = generate_for(source, TargetLanguage::CSharp);
+        assert!(
+            csharp.contains("global::NxLang.Nx.NxFunctionRef Render"),
+            "{csharp}"
+        );
+    }
+
+    /// Library TypeScript declares `NxFunctionRef` once, in the helper module beside `NxRecord`,
+    /// and each module that names it imports it from there.
+    #[test]
+    fn typescript_library_output_declares_the_function_reference_in_the_helper_module() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let library_dir = temp_dir.path().join("agent");
+        fs::create_dir_all(&library_dir).expect("library dir");
+        fs::write(
+            library_dir.join("tools.nx"),
+            "export type FunctionTool = { function: <function ... />: object* }",
+        )
+        .expect("tools file");
+        fs::write(
+            library_dir.join("http.nx"),
+            "export type HttpArguments = { url:string }\n\
+             export type HttpTool = { arguments: <function ... />: HttpArguments }",
+        )
+        .expect("http file");
+        fs::write(
+            library_dir.join("plain.nx"),
+            "export type Mode = light | dark",
+        )
+        .expect("plain file");
+
+        let artifact = build_library_artifact_from_directory(&library_dir).expect("library build");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::TypeScript,
+            csharp_namespace: None,
+            typescript_package_prefix: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
+        };
+        let files = generate_library_types(&artifact, &opts).unwrap();
+        let file = |name: &str| {
+            &files
+                .iter()
+                .find(|file| file.relative_path == *name)
+                .unwrap_or_else(|| panic!("{name}"))
+                .content
+        };
+
+        let helper = file("_nx.ts");
+        assert_eq!(
+            helper.matches("export interface NxFunctionRef").count(),
+            1,
+            "{helper}"
+        );
+        for module in ["tools.ts", "http.ts"] {
+            let content = file(module);
+            assert!(
+                content.contains("import type { NxRecord, NxFunctionRef } from \"./_nx\";"),
+                "{module}: {content}"
+            );
+            assert!(!content.contains("interface NxFunctionRef"), "{content}");
+        }
+        assert!(file("tools.ts").contains("function: NxFunctionRef;"));
+        assert!(file("http.ts").contains("arguments: NxFunctionRef;"));
+        assert!(!file("plain.ts").contains("NxFunctionRef"));
+        assert!(
+            file("index.ts").contains("export type { NxRecord, NxFunctionRef } from \"./_nx\";"),
+            "{}",
+            file("index.ts")
+        );
     }
 
     /// The TypeScript compiler, from `PATH` or from the repository's own `runtime/typescript`
