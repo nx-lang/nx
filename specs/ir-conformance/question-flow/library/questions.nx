@@ -1,0 +1,74 @@
+// The question kinds a flow is built from. Each is an external component: the host draws it and
+// collects its answer; the flow that shows it decides what the answer leads to.
+export type ChoiceLayout = list | grid | chips
+export type RatingIcon = star | heart | thumb
+export type DateFormat = iso | dayFirst | monthFirst
+
+export type Choice = {
+  value:string
+  label:string
+  description?:string
+  imageUrl?:string
+}
+
+export abstract external component <Node />
+
+export abstract external component
+<Question extends Node
+  id:string
+  label:string
+  help?:string
+  required:boolean = true
+  requiredMessage?:string
+/>
+
+export external component <ShortText extends Question placeholder?:string maxLength?:int />
+export external component <LongText extends Question placeholder?:string minLength?:int maxLength?:int rows:int = 4 />
+export external component <Email extends Question placeholder?:string allowedDomains?:string+ />
+export external component <Phone extends Question defaultCountry?:string allowsExtension:boolean = false />
+export external component <Url extends Question placeholder?:string requiresHttps:boolean = true />
+export external component <Number extends Question min?:float64 max?:float64 step?:float64 unit?:string />
+export external component <Integer extends Question min?:int max?:int />
+export external component <Currency extends Question currency:string = "USD" min?:float64 max?:float64 />
+export external component <Percent extends Question decimals:int = 0 />
+export external component
+<Slider extends Question
+  min:float64 = 0
+  max:float64 = 100
+  step:float64 = 1
+  minLabel?:string
+  maxLabel?:string
+/>
+export external component <Rating extends Question stars:int = 5 icon:RatingIcon = {RatingIcon.star} />
+export external component <Nps extends Question lowLabel?:string highLabel?:string />
+export external component <Scale extends Question points:int = 5 lowLabel?:string highLabel?:string />
+export external component <YesNo extends Question yesLabel:string = "Yes" noLabel:string = "No" />
+export external component <Consent extends Question statement:string linkUrl?:string />
+export external component
+<SingleChoice extends Question
+  allowsOther:boolean = false
+  layout:ChoiceLayout = {ChoiceLayout.list}
+  content choices:Choice+
+/>
+export external component
+<MultiChoice extends Question
+  minSelected?:int
+  maxSelected?:int
+  allowsOther:boolean = false
+  layout:ChoiceLayout = {ChoiceLayout.list}
+  content choices:Choice+
+/>
+export external component <Dropdown extends Question searchable:boolean = false content choices:Choice+ />
+export external component <PictureChoice extends Question columns:int = 2 content choices:Choice+ />
+export external component <Ranking extends Question maxRanked?:int content choices:Choice+ />
+export external component <Matrix extends Question rows:string+ columns:string+ multiplePerRow:boolean = false />
+export external component <Date extends Question format:DateFormat = {DateFormat.iso} min?:string max?:string />
+export external component <Time extends Question stepMinutes:int = 15 uses24Hour:boolean = true />
+export external component <DateRange extends Question format:DateFormat = {DateFormat.iso} maxDays?:int />
+export external component <Address extends Question countries?:string+ requiresPostalCode:boolean = true />
+export external component <Country extends Question preferred?:string+ />
+export external component <FileUpload extends Question accept?:string+ maxFiles:int = 1 maxMegabytes:int = 10 />
+export external component <Signature extends Question penColor?:string />
+export external component <Payment extends Question amount:float64 currency:string = "USD" description?:string />
+export external component <Statement extends Question body:string buttonLabel:string = "Continue" />
+export external component <Hidden extends Question value:string />

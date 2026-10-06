@@ -1,0 +1,1978 @@
+{
+  "main.nx::Flow": {
+    "batches": [
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Screen",
+          "children": [
+            {
+              "$type": "Progress",
+              "answered": 1,
+              "total": 30
+            },
+            {
+              "$type": "Step",
+              "onTextAnswered": {
+                "$type": "ActionHandler",
+                "action": "Step.TextAnswered",
+                "token": "h2-1"
+              },
+              "question": {
+                "$type": "Email",
+                "allowedDomains": [
+                  "example.com",
+                  "example.org"
+                ],
+                "help": "We only write about this survey.",
+                "id": "email",
+                "label": "Thanks, Ada. Where can we reach you?",
+                "required": true
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Start over",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h2-2"
+              }
+            }
+          ],
+          "subtitle": "Question 2 of 30",
+          "title": "Developer tooling survey"
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Screen",
+          "children": [
+            {
+              "$type": "Progress",
+              "answered": 2,
+              "total": 30
+            },
+            {
+              "$type": "Step",
+              "onChoiceAnswered": {
+                "$type": "ActionHandler",
+                "action": "Step.ChoiceAnswered",
+                "token": "h3-1"
+              },
+              "question": {
+                "$type": "SingleChoice",
+                "allowsOther": true,
+                "choices": [
+                  {
+                    "$type": "Choice",
+                    "description": "You write or review code most days.",
+                    "label": "Engineering",
+                    "value": "engineer"
+                  },
+                  {
+                    "$type": "Choice",
+                    "description": "You shape how the product looks and behaves.",
+                    "label": "Design",
+                    "value": "designer"
+                  },
+                  {
+                    "$type": "Choice",
+                    "description": "You lead people who do one of the above.",
+                    "label": "Management",
+                    "value": "manager"
+                  },
+                  {
+                    "$type": "Choice",
+                    "label": "Something else",
+                    "value": "other"
+                  }
+                ],
+                "id": "role",
+                "label": "Which describes your work best?",
+                "layout": "chips",
+                "required": true
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Start over",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h3-2"
+              }
+            }
+          ],
+          "subtitle": "Question 3 of 30",
+          "title": "Developer tooling survey"
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Screen",
+          "children": [
+            {
+              "$type": "Progress",
+              "answered": 3,
+              "total": 30
+            },
+            {
+              "$type": "Step",
+              "onChoicesAnswered": {
+                "$type": "ActionHandler",
+                "action": "Step.ChoicesAnswered",
+                "token": "h4-1"
+              },
+              "question": {
+                "$type": "MultiChoice",
+                "allowsOther": false,
+                "choices": [
+                  {
+                    "$type": "Choice",
+                    "label": "Rust",
+                    "value": "rust"
+                  },
+                  {
+                    "$type": "Choice",
+                    "label": "TypeScript",
+                    "value": "typescript"
+                  },
+                  {
+                    "$type": "Choice",
+                    "label": "C#",
+                    "value": "csharp"
+                  },
+                  {
+                    "$type": "Choice",
+                    "label": "Python",
+                    "value": "python"
+                  },
+                  {
+                    "$type": "Choice",
+                    "label": "Go",
+                    "value": "go"
+                  },
+                  {
+                    "$type": "Choice",
+                    "label": "Kotlin",
+                    "value": "kotlin"
+                  },
+                  {
+                    "$type": "Choice",
+                    "label": "Swift",
+                    "value": "swift"
+                  },
+                  {
+                    "$type": "Choice",
+                    "label": "Another",
+                    "value": "other"
+                  }
+                ],
+                "id": "languages",
+                "label": "Which languages do you work in?",
+                "layout": "grid",
+                "maxSelected": 4,
+                "minSelected": 1,
+                "required": true
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Start over",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h4-2"
+              }
+            }
+          ],
+          "subtitle": "Question 4 of 30",
+          "title": "Developer tooling survey"
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Screen",
+          "children": [
+            {
+              "$type": "Progress",
+              "answered": 4,
+              "total": 30
+            },
+            {
+              "$type": "Step",
+              "onIntegerAnswered": {
+                "$type": "ActionHandler",
+                "action": "Step.IntegerAnswered",
+                "token": "h5-1"
+              },
+              "question": {
+                "$type": "Integer",
+                "help": "Count yourself.",
+                "id": "teamSize",
+                "label": "How many people are on your team?",
+                "max": 10000,
+                "min": 1,
+                "required": true
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Start over",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h5-2"
+              }
+            }
+          ],
+          "subtitle": "Question 5 of 30",
+          "title": "Developer tooling survey"
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Screen",
+          "children": [
+            {
+              "$type": "Progress",
+              "answered": 5,
+              "total": 30
+            },
+            {
+              "$type": "Step",
+              "onChoiceAnswered": {
+                "$type": "ActionHandler",
+                "action": "Step.ChoiceAnswered",
+                "token": "h6-1"
+              },
+              "question": {
+                "$type": "Dropdown",
+                "choices": [
+                  {
+                    "$type": "Choice",
+                    "label": "Platform",
+                    "value": "platform"
+                  },
+                  {
+                    "$type": "Choice",
+                    "label": "Product",
+                    "value": "product"
+                  },
+                  {
+                    "$type": "Choice",
+                    "label": "Data",
+                    "value": "data"
+                  },
+                  {
+                    "$type": "Choice",
+                    "label": "Security",
+                    "value": "security"
+                  },
+                  {
+                    "$type": "Choice",
+                    "label": "Support",
+                    "value": "support"
+                  },
+                  {
+                    "$type": "Choice",
+                    "label": "Research",
+                    "value": "research"
+                  }
+                ],
+                "id": "department",
+                "label": "Which department is that team in?",
+                "required": true,
+                "searchable": true
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Start over",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h6-2"
+              }
+            }
+          ],
+          "subtitle": "Question 6 of 30",
+          "title": "Developer tooling survey"
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Screen",
+          "children": [
+            {
+              "$type": "Progress",
+              "answered": 6,
+              "total": 30
+            },
+            {
+              "$type": "Step",
+              "onBooleanAnswered": {
+                "$type": "ActionHandler",
+                "action": "Step.BooleanAnswered",
+                "token": "h7-1"
+              },
+              "question": {
+                "$type": "YesNo",
+                "id": "usesCi",
+                "label": "Does your team build every change automatically?",
+                "noLabel": "Not yet",
+                "required": true,
+                "yesLabel": "Yes"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Start over",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h7-2"
+              }
+            }
+          ],
+          "subtitle": "Question 7 of 30",
+          "title": "Developer tooling survey"
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Screen",
+          "children": [
+            {
+              "$type": "Progress",
+              "answered": 7,
+              "total": 30
+            },
+            {
+              "$type": "Step",
+              "onChoiceAnswered": {
+                "$type": "ActionHandler",
+                "action": "Step.ChoiceAnswered",
+                "token": "h8-1"
+              },
+              "question": {
+                "$type": "SingleChoice",
+                "allowsOther": true,
+                "choices": [
+                  {
+                    "$type": "Choice",
+                    "label": "A hosted service",
+                    "value": "hosted"
+                  },
+                  {
+                    "$type": "Choice",
+                    "label": "Our own machines",
+                    "value": "own"
+                  },
+                  {
+                    "$type": "Choice",
+                    "label": "Both",
+                    "value": "both"
+                  }
+                ],
+                "id": "ciProvider",
+                "label": "Where do those builds run?",
+                "layout": "list",
+                "required": true
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Start over",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h8-2"
+              }
+            }
+          ],
+          "subtitle": "Question 8 of 30",
+          "title": "Developer tooling survey"
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Screen",
+          "children": [
+            {
+              "$type": "Progress",
+              "answered": 8,
+              "total": 30
+            },
+            {
+              "$type": "Step",
+              "onNumberAnswered": {
+                "$type": "ActionHandler",
+                "action": "Step.NumberAnswered",
+                "token": "h9-1"
+              },
+              "question": {
+                "$type": "Slider",
+                "id": "buildMinutes",
+                "label": "How long does a build take, in minutes?",
+                "max": 120.0,
+                "maxLabel": "Two hours",
+                "min": 1.0,
+                "minLabel": "A minute",
+                "required": true,
+                "step": 1.0
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Start over",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h9-2"
+              }
+            }
+          ],
+          "subtitle": "Question 9 of 30",
+          "title": "Developer tooling survey"
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Screen",
+          "children": [
+            {
+              "$type": "Progress",
+              "answered": 9,
+              "total": 30
+            },
+            {
+              "$type": "Step",
+              "onIntegerAnswered": {
+                "$type": "ActionHandler",
+                "action": "Step.IntegerAnswered",
+                "token": "h10-1"
+              },
+              "question": {
+                "$type": "Rating",
+                "icon": "star",
+                "id": "rating",
+                "label": "How do you rate your tools today?",
+                "required": true,
+                "stars": 5
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Start over",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h10-2"
+              }
+            }
+          ],
+          "subtitle": "Question 10 of 30",
+          "title": "Developer tooling survey"
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Screen",
+          "children": [
+            {
+              "$type": "Progress",
+              "answered": 10,
+              "total": 30
+            },
+            {
+              "$type": "Step",
+              "onTextAnswered": {
+                "$type": "ActionHandler",
+                "action": "Step.TextAnswered",
+                "token": "h11-1"
+              },
+              "question": {
+                "$type": "LongText",
+                "id": "trouble",
+                "label": "You gave 2 of 5. What gets in your way?",
+                "maxLength": 2000,
+                "minLength": 10,
+                "placeholder": "The slowest or most fragile part of your day",
+                "required": true,
+                "rows": 6
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Start over",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h11-2"
+              }
+            }
+          ],
+          "subtitle": "Question 11 of 30",
+          "title": "Developer tooling survey"
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Screen",
+          "children": [
+            {
+              "$type": "Progress",
+              "answered": 11,
+              "total": 30
+            },
+            {
+              "$type": "Step",
+              "onIntegerAnswered": {
+                "$type": "ActionHandler",
+                "action": "Step.IntegerAnswered",
+                "token": "h12-1"
+              },
+              "question": {
+                "$type": "Nps",
+                "highLabel": "Certainly",
+                "id": "nps",
+                "label": "How likely are you to recommend your setup to a new teammate?",
+                "lowLabel": "Not at all",
+                "required": true
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Start over",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h12-2"
+              }
+            }
+          ],
+          "subtitle": "Question 12 of 30",
+          "title": "Developer tooling survey"
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Screen",
+          "children": [
+            {
+              "$type": "Progress",
+              "answered": 12,
+              "total": 30
+            },
+            {
+              "$type": "Step",
+              "onChoicesAnswered": {
+                "$type": "ActionHandler",
+                "action": "Step.ChoicesAnswered",
+                "token": "h13-1"
+              },
+              "question": {
+                "$type": "Ranking",
+                "choices": [
+                  {
+                    "$type": "Choice",
+                    "label": "Build speed",
+                    "value": "speed"
+                  },
+                  {
+                    "$type": "Choice",
+                    "label": "Flaky tests",
+                    "value": "flakiness"
+                  },
+                  {
+                    "$type": "Choice",
+                    "label": "Review turnaround",
+                    "value": "review"
+                  },
+                  {
+                    "$type": "Choice",
+                    "label": "Documentation",
+                    "value": "docs"
+                  },
+                  {
+                    "$type": "Choice",
+                    "label": "Onboarding",
+                    "value": "onboarding"
+                  }
+                ],
+                "id": "priorities",
+                "label": "Put these in the order you would fix them.",
+                "maxRanked": 3,
+                "required": true
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Start over",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h13-2"
+              }
+            }
+          ],
+          "subtitle": "Question 13 of 30",
+          "title": "Developer tooling survey"
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Screen",
+          "children": [
+            {
+              "$type": "Progress",
+              "answered": 13,
+              "total": 30
+            },
+            {
+              "$type": "Step",
+              "onAnswered": {
+                "$type": "ActionHandler",
+                "action": "Step.Answered",
+                "token": "h14-1"
+              },
+              "question": {
+                "$type": "Matrix",
+                "columns": [
+                  "Daily",
+                  "Weekly",
+                  "Rarely",
+                  "Never"
+                ],
+                "id": "frequency",
+                "label": "How often do you use each of these?",
+                "multiplePerRow": false,
+                "required": true,
+                "rows": [
+                  "Debugger",
+                  "Profiler",
+                  "Formatter",
+                  "Linter"
+                ]
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Start over",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h14-2"
+              }
+            }
+          ],
+          "subtitle": "Question 14 of 30",
+          "title": "Developer tooling survey"
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Screen",
+          "children": [
+            {
+              "$type": "Progress",
+              "answered": 14,
+              "total": 30
+            },
+            {
+              "$type": "Step",
+              "onTextAnswered": {
+                "$type": "ActionHandler",
+                "action": "Step.TextAnswered",
+                "token": "h15-1"
+              },
+              "question": {
+                "$type": "Date",
+                "format": "iso",
+                "id": "startDate",
+                "label": "When did you join the team?",
+                "max": "2026-12-31",
+                "required": true
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Start over",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h15-2"
+              }
+            }
+          ],
+          "subtitle": "Question 15 of 30",
+          "title": "Developer tooling survey"
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Screen",
+          "children": [
+            {
+              "$type": "Progress",
+              "answered": 15,
+              "total": 30
+            },
+            {
+              "$type": "Step",
+              "onAnswered": {
+                "$type": "ActionHandler",
+                "action": "Step.Answered",
+                "token": "h16-1"
+              },
+              "question": {
+                "$type": "DateRange",
+                "format": "dayFirst",
+                "id": "trial",
+                "label": "Which two weeks could you try a new setup?",
+                "maxDays": 14,
+                "required": true
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Start over",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h16-2"
+              }
+            }
+          ],
+          "subtitle": "Question 16 of 30",
+          "title": "Developer tooling survey"
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Screen",
+          "children": [
+            {
+              "$type": "Progress",
+              "answered": 16,
+              "total": 30
+            },
+            {
+              "$type": "Step",
+              "onTextAnswered": {
+                "$type": "ActionHandler",
+                "action": "Step.TextAnswered",
+                "token": "h17-1"
+              },
+              "question": {
+                "$type": "Time",
+                "id": "callTime",
+                "label": "What time suits a short call?",
+                "required": true,
+                "stepMinutes": 30,
+                "uses24Hour": true
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Start over",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h17-2"
+              }
+            }
+          ],
+          "subtitle": "Question 17 of 30",
+          "title": "Developer tooling survey"
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Screen",
+          "children": [
+            {
+              "$type": "Progress",
+              "answered": 17,
+              "total": 30
+            },
+            {
+              "$type": "Step",
+              "onChoiceAnswered": {
+                "$type": "ActionHandler",
+                "action": "Step.ChoiceAnswered",
+                "token": "h18-1"
+              },
+              "question": {
+                "$type": "Country",
+                "id": "country",
+                "label": "Where are you based?",
+                "preferred": [
+                  "FR",
+                  "DE",
+                  "US",
+                  "JP"
+                ],
+                "required": true
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Start over",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h18-2"
+              }
+            }
+          ],
+          "subtitle": "Question 18 of 30",
+          "title": "Developer tooling survey"
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Screen",
+          "children": [
+            {
+              "$type": "Progress",
+              "answered": 18,
+              "total": 30
+            },
+            {
+              "$type": "Step",
+              "onBooleanAnswered": {
+                "$type": "ActionHandler",
+                "action": "Step.BooleanAnswered",
+                "token": "h19-1"
+              },
+              "question": {
+                "$type": "YesNo",
+                "id": "wantsParcel",
+                "label": "May we post you a thank-you parcel?",
+                "noLabel": "No, thanks",
+                "required": true,
+                "yesLabel": "Yes, please"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Start over",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h19-2"
+              }
+            }
+          ],
+          "subtitle": "Question 19 of 30",
+          "title": "Developer tooling survey"
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Screen",
+          "children": [
+            {
+              "$type": "Progress",
+              "answered": 19,
+              "total": 30
+            },
+            {
+              "$type": "Step",
+              "onTextAnswered": {
+                "$type": "ActionHandler",
+                "action": "Step.TextAnswered",
+                "token": "h20-1"
+              },
+              "question": {
+                "$type": "Phone",
+                "allowsExtension": false,
+                "defaultCountry": "FR",
+                "id": "phone",
+                "label": "A number for the courier or the call?",
+                "required": false
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Start over",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h20-2"
+              }
+            }
+          ],
+          "subtitle": "Question 20 of 30",
+          "title": "Developer tooling survey"
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Screen",
+          "children": [
+            {
+              "$type": "Progress",
+              "answered": 20,
+              "total": 30
+            },
+            {
+              "$type": "Step",
+              "onTextAnswered": {
+                "$type": "ActionHandler",
+                "action": "Step.TextAnswered",
+                "token": "h21-1"
+              },
+              "question": {
+                "$type": "Url",
+                "id": "repository",
+                "label": "Link a repository we may look at.",
+                "placeholder": "https://example.com/team/project",
+                "required": false,
+                "requiresHttps": true
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Start over",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h21-2"
+              }
+            }
+          ],
+          "subtitle": "Question 21 of 30",
+          "title": "Developer tooling survey"
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Screen",
+          "children": [
+            {
+              "$type": "Progress",
+              "answered": 21,
+              "total": 30
+            },
+            {
+              "$type": "Step",
+              "onAnswered": {
+                "$type": "ActionHandler",
+                "action": "Step.Answered",
+                "token": "h22-1"
+              },
+              "question": {
+                "$type": "FileUpload",
+                "accept": [
+                  ".yml",
+                  ".yaml",
+                  ".json",
+                  ".toml"
+                ],
+                "id": "config",
+                "label": "Attach your build configuration, if you can share it.",
+                "maxFiles": 3,
+                "maxMegabytes": 5,
+                "required": false
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Start over",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h22-2"
+              }
+            }
+          ],
+          "subtitle": "Question 22 of 30",
+          "title": "Developer tooling survey"
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Screen",
+          "children": [
+            {
+              "$type": "Progress",
+              "answered": 22,
+              "total": 30
+            },
+            {
+              "$type": "Step",
+              "onNumberAnswered": {
+                "$type": "ActionHandler",
+                "action": "Step.NumberAnswered",
+                "token": "h23-1"
+              },
+              "question": {
+                "$type": "Currency",
+                "currency": "EUR",
+                "id": "budget",
+                "label": "What does your team spend on tools each month?",
+                "max": 100000.0,
+                "min": 0.0,
+                "required": true
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Start over",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h23-2"
+              }
+            }
+          ],
+          "subtitle": "Question 23 of 30",
+          "title": "Developer tooling survey"
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Screen",
+          "children": [
+            {
+              "$type": "Progress",
+              "answered": 23,
+              "total": 30
+            },
+            {
+              "$type": "Step",
+              "onNumberAnswered": {
+                "$type": "ActionHandler",
+                "action": "Step.NumberAnswered",
+                "token": "h24-1"
+              },
+              "question": {
+                "$type": "Percent",
+                "decimals": 1,
+                "id": "coverage",
+                "label": "How much of your code do tests cover?",
+                "required": true
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Start over",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h24-2"
+              }
+            }
+          ],
+          "subtitle": "Question 24 of 30",
+          "title": "Developer tooling survey"
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Screen",
+          "children": [
+            {
+              "$type": "Progress",
+              "answered": 24,
+              "total": 30
+            },
+            {
+              "$type": "Step",
+              "onChoiceAnswered": {
+                "$type": "ActionHandler",
+                "action": "Step.ChoiceAnswered",
+                "token": "h25-1"
+              },
+              "question": {
+                "$type": "PictureChoice",
+                "choices": [
+                  {
+                    "$type": "Choice",
+                    "imageUrl": "https://example.com/themes/dark.png",
+                    "label": "Dark",
+                    "value": "dark"
+                  },
+                  {
+                    "$type": "Choice",
+                    "imageUrl": "https://example.com/themes/light.png",
+                    "label": "Light",
+                    "value": "light"
+                  },
+                  {
+                    "$type": "Choice",
+                    "imageUrl": "https://example.com/themes/contrast.png",
+                    "label": "High contrast",
+                    "value": "contrast"
+                  }
+                ],
+                "columns": 3,
+                "id": "theme",
+                "label": "Which editor theme is closest to yours?",
+                "required": true
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Start over",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h25-2"
+              }
+            }
+          ],
+          "subtitle": "Question 25 of 30",
+          "title": "Developer tooling survey"
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Screen",
+          "children": [
+            {
+              "$type": "Progress",
+              "answered": 25,
+              "total": 30
+            },
+            {
+              "$type": "Step",
+              "onIntegerAnswered": {
+                "$type": "ActionHandler",
+                "action": "Step.IntegerAnswered",
+                "token": "h26-1"
+              },
+              "question": {
+                "$type": "Scale",
+                "highLabel": "Strongly agree",
+                "id": "confidence",
+                "label": "I can change any part of our code without fear.",
+                "lowLabel": "Strongly disagree",
+                "points": 7,
+                "required": true
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Start over",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h26-2"
+              }
+            }
+          ],
+          "subtitle": "Question 26 of 30",
+          "title": "Developer tooling survey"
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Screen",
+          "children": [
+            {
+              "$type": "Progress",
+              "answered": 26,
+              "total": 30
+            },
+            {
+              "$type": "Step",
+              "onTextAnswered": {
+                "$type": "ActionHandler",
+                "action": "Step.TextAnswered",
+                "token": "h27-1"
+              },
+              "question": {
+                "$type": "LongText",
+                "id": "comments",
+                "label": "Anything else we should know?",
+                "maxLength": 4000,
+                "required": false,
+                "rows": 4
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Start over",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h27-2"
+              }
+            }
+          ],
+          "subtitle": "Question 27 of 30",
+          "title": "Developer tooling survey"
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Screen",
+          "children": [
+            {
+              "$type": "Progress",
+              "answered": 27,
+              "total": 30
+            },
+            {
+              "$type": "Step",
+              "onBooleanAnswered": {
+                "$type": "ActionHandler",
+                "action": "Step.BooleanAnswered",
+                "token": "h28-1"
+              },
+              "question": {
+                "$type": "Consent",
+                "id": "consent",
+                "label": "One last thing.",
+                "linkUrl": "https://example.com/privacy",
+                "required": true,
+                "statement": "You may store my answers for twelve months."
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Start over",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h28-2"
+              }
+            }
+          ],
+          "subtitle": "Question 28 of 30",
+          "title": "Developer tooling survey"
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Screen",
+          "children": [
+            {
+              "$type": "Progress",
+              "answered": 28,
+              "total": 30
+            },
+            {
+              "$type": "Step",
+              "onAnswered": {
+                "$type": "ActionHandler",
+                "action": "Step.Answered",
+                "token": "h29-1"
+              },
+              "question": {
+                "$type": "Signature",
+                "id": "signature",
+                "label": "Sign to confirm.",
+                "penColor": "#1D4ED8",
+                "required": true
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Start over",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h29-2"
+              }
+            }
+          ],
+          "subtitle": "Question 29 of 30",
+          "title": "Developer tooling survey"
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Screen",
+          "children": [
+            {
+              "$type": "Progress",
+              "answered": 29,
+              "total": 30
+            },
+            {
+              "$type": "Step",
+              "onAnswered": {
+                "$type": "ActionHandler",
+                "action": "Step.Answered",
+                "token": "h30-1"
+              },
+              "question": {
+                "$type": "Statement",
+                "body": "Ada, engineer on a team of 24: your answers are below.",
+                "buttonLabel": "Send",
+                "id": "review",
+                "label": "Ready to send?",
+                "required": true
+              }
+            },
+            {
+              "$type": "Summary",
+              "rows": [
+                {
+                  "$type": "SummaryRow",
+                  "label": "Name",
+                  "value": "Ada"
+                },
+                {
+                  "$type": "SummaryRow",
+                  "label": "Role",
+                  "value": "engineer"
+                },
+                {
+                  "$type": "SummaryRow",
+                  "label": "Team",
+                  "value": "24"
+                },
+                {
+                  "$type": "SummaryRow",
+                  "label": "Rating",
+                  "value": "2 of 5"
+                }
+              ],
+              "title": "Your answers"
+            },
+            {
+              "$type": "Button",
+              "label": "Start over",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h30-2"
+              }
+            }
+          ],
+          "subtitle": "Question 30 of 30",
+          "title": "Developer tooling survey"
+        }
+      },
+      {
+        "effects": [
+          {
+            "$type": "Completed",
+            "answered": 30,
+            "respondent": "Ada"
+          }
+        ],
+        "rendered": {
+          "$type": "Screen",
+          "children": [
+            {
+              "$type": "Progress",
+              "answered": 30,
+              "total": 30
+            },
+            {
+              "$type": "Summary",
+              "rows": [
+                {
+                  "$type": "SummaryRow",
+                  "label": "Name",
+                  "value": "Ada"
+                },
+                {
+                  "$type": "SummaryRow",
+                  "label": "Role",
+                  "value": "engineer"
+                },
+                {
+                  "$type": "SummaryRow",
+                  "label": "Team",
+                  "value": "24"
+                },
+                {
+                  "$type": "SummaryRow",
+                  "label": "Rating",
+                  "value": "2 of 5"
+                }
+              ],
+              "title": "Your answers"
+            },
+            {
+              "$type": "Notice",
+              "body": "We have 30 answers from you.",
+              "title": "Sent"
+            },
+            {
+              "$type": "Button",
+              "label": "Start over",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h31-1"
+              }
+            }
+          ],
+          "subtitle": "Thank you, Ada.",
+          "title": "Developer tooling survey"
+        }
+      }
+    ],
+    "initial": {
+      "$type": "Screen",
+      "children": [
+        {
+          "$type": "Progress",
+          "answered": 0,
+          "total": 30
+        },
+        {
+          "$type": "Step",
+          "onTextAnswered": {
+            "$type": "ActionHandler",
+            "action": "Step.TextAnswered",
+            "token": "h1-1"
+          },
+          "question": {
+            "$type": "ShortText",
+            "id": "name",
+            "label": "What should we call you?",
+            "maxLength": 40,
+            "placeholder": "First name",
+            "required": true
+          }
+        },
+        {
+          "$type": "Button",
+          "label": "Start over",
+          "onTapped": {
+            "$type": "ActionHandler",
+            "action": "Button.Tapped",
+            "token": "h1-2"
+          }
+        }
+      ],
+      "subtitle": "Question 1 of 30",
+      "title": "Developer tooling survey"
+    }
+  },
+  "main.nx::definition": {
+    "$type": "FlowDefinition",
+    "description": "Thirty questions about how your team builds software.",
+    "id": "tooling-survey",
+    "questions": [
+      {
+        "$type": "ShortText",
+        "id": "name",
+        "label": "What should we call you?",
+        "maxLength": 40,
+        "placeholder": "First name",
+        "required": true
+      },
+      {
+        "$type": "Email",
+        "allowedDomains": [
+          "example.com",
+          "example.org"
+        ],
+        "help": "We only write about this survey.",
+        "id": "email",
+        "label": "Thanks, there. Where can we reach you?",
+        "required": true
+      },
+      {
+        "$type": "SingleChoice",
+        "allowsOther": true,
+        "choices": [
+          {
+            "$type": "Choice",
+            "description": "You write or review code most days.",
+            "label": "Engineering",
+            "value": "engineer"
+          },
+          {
+            "$type": "Choice",
+            "description": "You shape how the product looks and behaves.",
+            "label": "Design",
+            "value": "designer"
+          },
+          {
+            "$type": "Choice",
+            "description": "You lead people who do one of the above.",
+            "label": "Management",
+            "value": "manager"
+          },
+          {
+            "$type": "Choice",
+            "label": "Something else",
+            "value": "other"
+          }
+        ],
+        "id": "role",
+        "label": "Which describes your work best?",
+        "layout": "chips",
+        "required": true
+      },
+      {
+        "$type": "MultiChoice",
+        "allowsOther": false,
+        "choices": [
+          {
+            "$type": "Choice",
+            "label": "Rust",
+            "value": "rust"
+          },
+          {
+            "$type": "Choice",
+            "label": "TypeScript",
+            "value": "typescript"
+          },
+          {
+            "$type": "Choice",
+            "label": "C#",
+            "value": "csharp"
+          },
+          {
+            "$type": "Choice",
+            "label": "Python",
+            "value": "python"
+          },
+          {
+            "$type": "Choice",
+            "label": "Go",
+            "value": "go"
+          },
+          {
+            "$type": "Choice",
+            "label": "Kotlin",
+            "value": "kotlin"
+          },
+          {
+            "$type": "Choice",
+            "label": "Swift",
+            "value": "swift"
+          },
+          {
+            "$type": "Choice",
+            "label": "Another",
+            "value": "other"
+          }
+        ],
+        "id": "languages",
+        "label": "Which languages do you work in?",
+        "layout": "grid",
+        "maxSelected": 4,
+        "minSelected": 1,
+        "required": true
+      },
+      {
+        "$type": "SingleChoice",
+        "allowsOther": false,
+        "choices": [
+          {
+            "$type": "Choice",
+            "label": "A shared canvas",
+            "value": "canvas"
+          },
+          {
+            "$type": "Choice",
+            "label": "In code",
+            "value": "code"
+          },
+          {
+            "$type": "Choice",
+            "label": "On paper, mostly",
+            "value": "paper"
+          }
+        ],
+        "id": "designTool",
+        "label": "Where do your designs live?",
+        "layout": "list",
+        "required": false
+      },
+      {
+        "$type": "Integer",
+        "id": "reports",
+        "label": "How many people report to you?",
+        "max": 500,
+        "min": 0,
+        "required": true
+      },
+      {
+        "$type": "Integer",
+        "help": "Count yourself.",
+        "id": "teamSize",
+        "label": "How many people are on your team?",
+        "max": 10000,
+        "min": 1,
+        "required": true
+      },
+      {
+        "$type": "Dropdown",
+        "choices": [
+          {
+            "$type": "Choice",
+            "label": "Platform",
+            "value": "platform"
+          },
+          {
+            "$type": "Choice",
+            "label": "Product",
+            "value": "product"
+          },
+          {
+            "$type": "Choice",
+            "label": "Data",
+            "value": "data"
+          },
+          {
+            "$type": "Choice",
+            "label": "Security",
+            "value": "security"
+          },
+          {
+            "$type": "Choice",
+            "label": "Support",
+            "value": "support"
+          },
+          {
+            "$type": "Choice",
+            "label": "Research",
+            "value": "research"
+          }
+        ],
+        "id": "department",
+        "label": "Which department is that team in?",
+        "required": true,
+        "searchable": true
+      },
+      {
+        "$type": "YesNo",
+        "id": "usesCi",
+        "label": "Does your team build every change automatically?",
+        "noLabel": "Not yet",
+        "required": true,
+        "yesLabel": "Yes"
+      },
+      {
+        "$type": "SingleChoice",
+        "allowsOther": true,
+        "choices": [
+          {
+            "$type": "Choice",
+            "label": "A hosted service",
+            "value": "hosted"
+          },
+          {
+            "$type": "Choice",
+            "label": "Our own machines",
+            "value": "own"
+          },
+          {
+            "$type": "Choice",
+            "label": "Both",
+            "value": "both"
+          }
+        ],
+        "id": "ciProvider",
+        "label": "Where do those builds run?",
+        "layout": "list",
+        "required": true
+      },
+      {
+        "$type": "Slider",
+        "id": "buildMinutes",
+        "label": "How long does a build take, in minutes?",
+        "max": 120.0,
+        "maxLabel": "Two hours",
+        "min": 1.0,
+        "minLabel": "A minute",
+        "required": true,
+        "step": 1.0
+      },
+      {
+        "$type": "Rating",
+        "icon": "star",
+        "id": "rating",
+        "label": "How do you rate your tools today?",
+        "required": true,
+        "stars": 5
+      },
+      {
+        "$type": "LongText",
+        "id": "trouble",
+        "label": "You gave 0 of 5. What gets in your way?",
+        "maxLength": 2000,
+        "minLength": 10,
+        "placeholder": "The slowest or most fragile part of your day",
+        "required": true,
+        "rows": 6
+      },
+      {
+        "$type": "Nps",
+        "highLabel": "Certainly",
+        "id": "nps",
+        "label": "How likely are you to recommend your setup to a new teammate?",
+        "lowLabel": "Not at all",
+        "required": true
+      },
+      {
+        "$type": "Ranking",
+        "choices": [
+          {
+            "$type": "Choice",
+            "label": "Build speed",
+            "value": "speed"
+          },
+          {
+            "$type": "Choice",
+            "label": "Flaky tests",
+            "value": "flakiness"
+          },
+          {
+            "$type": "Choice",
+            "label": "Review turnaround",
+            "value": "review"
+          },
+          {
+            "$type": "Choice",
+            "label": "Documentation",
+            "value": "docs"
+          },
+          {
+            "$type": "Choice",
+            "label": "Onboarding",
+            "value": "onboarding"
+          }
+        ],
+        "id": "priorities",
+        "label": "Put these in the order you would fix them.",
+        "maxRanked": 3,
+        "required": true
+      },
+      {
+        "$type": "Matrix",
+        "columns": [
+          "Daily",
+          "Weekly",
+          "Rarely",
+          "Never"
+        ],
+        "id": "frequency",
+        "label": "How often do you use each of these?",
+        "multiplePerRow": false,
+        "required": true,
+        "rows": [
+          "Debugger",
+          "Profiler",
+          "Formatter",
+          "Linter"
+        ]
+      },
+      {
+        "$type": "Date",
+        "format": "iso",
+        "id": "startDate",
+        "label": "When did you join the team?",
+        "max": "2026-12-31",
+        "required": true
+      },
+      {
+        "$type": "DateRange",
+        "format": "dayFirst",
+        "id": "trial",
+        "label": "Which two weeks could you try a new setup?",
+        "maxDays": 14,
+        "required": true
+      },
+      {
+        "$type": "Time",
+        "id": "callTime",
+        "label": "What time suits a short call?",
+        "required": true,
+        "stepMinutes": 30,
+        "uses24Hour": true
+      },
+      {
+        "$type": "Country",
+        "id": "country",
+        "label": "Where are you based?",
+        "preferred": [
+          "FR",
+          "DE",
+          "US",
+          "JP"
+        ],
+        "required": true
+      },
+      {
+        "$type": "YesNo",
+        "id": "wantsParcel",
+        "label": "May we post you a thank-you parcel?",
+        "noLabel": "No, thanks",
+        "required": true,
+        "yesLabel": "Yes, please"
+      },
+      {
+        "$type": "Address",
+        "countries": [
+          "FR",
+          "DE",
+          "US",
+          "JP"
+        ],
+        "id": "address",
+        "label": "Where should your's parcel go?",
+        "required": true,
+        "requiresPostalCode": true
+      },
+      {
+        "$type": "Phone",
+        "allowsExtension": false,
+        "defaultCountry": "FR",
+        "id": "phone",
+        "label": "A number for the courier or the call?",
+        "required": false
+      },
+      {
+        "$type": "Url",
+        "id": "repository",
+        "label": "Link a repository we may look at.",
+        "placeholder": "https://example.com/team/project",
+        "required": false,
+        "requiresHttps": true
+      },
+      {
+        "$type": "FileUpload",
+        "accept": [
+          ".yml",
+          ".yaml",
+          ".json",
+          ".toml"
+        ],
+        "id": "config",
+        "label": "Attach your build configuration, if you can share it.",
+        "maxFiles": 3,
+        "maxMegabytes": 5,
+        "required": false
+      },
+      {
+        "$type": "Currency",
+        "currency": "EUR",
+        "id": "budget",
+        "label": "What does your team spend on tools each month?",
+        "max": 100000.0,
+        "min": 0.0,
+        "required": true
+      },
+      {
+        "$type": "Percent",
+        "decimals": 1,
+        "id": "coverage",
+        "label": "How much of your code do tests cover?",
+        "required": true
+      },
+      {
+        "$type": "PictureChoice",
+        "choices": [
+          {
+            "$type": "Choice",
+            "imageUrl": "https://example.com/themes/dark.png",
+            "label": "Dark",
+            "value": "dark"
+          },
+          {
+            "$type": "Choice",
+            "imageUrl": "https://example.com/themes/light.png",
+            "label": "Light",
+            "value": "light"
+          },
+          {
+            "$type": "Choice",
+            "imageUrl": "https://example.com/themes/contrast.png",
+            "label": "High contrast",
+            "value": "contrast"
+          }
+        ],
+        "columns": 3,
+        "id": "theme",
+        "label": "Which editor theme is closest to yours?",
+        "required": true
+      },
+      {
+        "$type": "Scale",
+        "highLabel": "Strongly agree",
+        "id": "confidence",
+        "label": "I can change any part of our code without fear.",
+        "lowLabel": "Strongly disagree",
+        "points": 7,
+        "required": true
+      },
+      {
+        "$type": "LongText",
+        "id": "comments",
+        "label": "Anything else we should know?",
+        "maxLength": 4000,
+        "required": false,
+        "rows": 4
+      },
+      {
+        "$type": "Consent",
+        "id": "consent",
+        "label": "One last thing.",
+        "linkUrl": "https://example.com/privacy",
+        "required": true,
+        "statement": "You may store my answers for twelve months."
+      },
+      {
+        "$type": "Signature",
+        "id": "signature",
+        "label": "Sign to confirm.",
+        "penColor": "#1D4ED8",
+        "required": true
+      },
+      {
+        "$type": "Statement",
+        "body": "You, respondent on a team of 1: your answers are below.",
+        "buttonLabel": "Send",
+        "id": "review",
+        "label": "Ready to send?",
+        "required": true
+      },
+      {
+        "$type": "Hidden",
+        "id": "source",
+        "label": "Source",
+        "required": true,
+        "value": "conformance"
+      }
+    ],
+    "title": "Developer tooling survey",
+    "version": 3
+  },
+  "main.nx::received#none": false,
+  "main.nx::received#three": true
+}

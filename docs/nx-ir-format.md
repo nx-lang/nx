@@ -490,7 +490,10 @@ node and type cell of every image with its own entry index, which is the bound t
 describes. The TypeScript suite damages the smallest image that owns a function entrypoint and links
 and evaluates every damaged image it accepted, so a hostile artifact is exercised through evaluation
 and not only through opening. The Rust runtime's suite does the same over every cell of every
-corpus image, running each damaged image's function entrypoints and component lifecycles.
+image of every corpus program whose images are all within 16,384 bytes, running each damaged
+image's function entrypoints and component lifecycles. That is every program but the two large
+ones: overwriting a cell runs the whole program again, so they are cut at every boundary and not
+swept cell by cell.
 
 ## Required features
 
@@ -1358,9 +1361,13 @@ emitter's tests pin
 the images byte for byte and check that each committed text is the explanation of its committed
 image; the TypeScript runtime's tests and the Rust runtime's tests each evaluate the images, drive
 the lifecycles, check every count by evaluating under it and under one less, and refuse every
-truncation and cell overwrite of them; and the corpus is where another runtime starts. It covers
+truncation of them and every cell overwrite of the small ones; and the corpus is where another
+runtime starts. It covers
 every node, type and declaration kind, a program spanning two images, derived declarations, a
-document that is a single trailing element, and components that bind action handlers. It also holds
+document that is a single trailing element, and components that bind action handlers. Two of its
+programs are of the size a host runs, a snippet against a catalog of 45 external components and a
+question flow with state over a library of 31 question kinds, and they are what the TypeScript
+runtime's performance harness times. It also holds
 the size budget: an image emitted without its debug section is at most six times the UTF-8 length
 of its module's source.
 

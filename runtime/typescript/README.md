@@ -191,6 +191,31 @@ refused the same way. The same object held twice, side by side, is two values, r
 once for each place it is held: a value that shares one object in many places is as large as the
 tree it spells, and `maxInputSize` is what bounds the reading of it, not `maxOperations`.
 
+**What reading costs.** Plain data with nothing to leave out is checked in one pass and used as
+it was passed, with no copy: about 25 ns for a record of three fields, measured by the `input`
+phase of the harness below (*Performance*) on one machine. A value the check does not settle is
+read again by a slower walk that keeps track of where it is and of the objects it is inside, at
+about five times that for each record. Two things send a value there: a member that is
+`undefined`, anywhere in it, and nesting deeper than 32 levels. It is the whole value that takes
+the slower walk, not the part that caused it. A positional argument, an item of content and an
+entry of a batch are each a value of their own; props, a state, a patch and arguments by name are
+each one value, so one `undefined` member anywhere in a state sends the state. None of this is
+noticed on a call of ordinary size, where it is microseconds. A host that passes thousands of
+records on a path that runs often keeps to the fast one by leaving an absent member out instead
+of setting it to `undefined`:
+
+```ts
+const row = { id, label, ...(note === undefined ? {} : { note }) }; // not { id, label, note }
+```
+
+The slower walk can be made cheaper, and has not been. `specs/future.md` (*Reading a host value
+costs about 25 ns a record, five times that on the slow path*) lists how: it can drop its set of
+the objects it is inside when `maxInputSize` has already measured the value, since a value within
+the limit holds nothing that holds itself; it can read an object's members as the fast check does
+instead of listing their names first; and the input measure can report that it met only plain
+data with no `undefined` member, which would let a call that sets a limit skip the reading
+altogether.
+
 ## Limits
 
 Every evaluation API takes runtime options:
@@ -528,6 +553,90 @@ together from one tag, and the artifacts the SDK emits at that version satisfy t
 format, schema and feature checks. The repository's tests run every SDK's emitted IR and the
 conformance corpus through this runtime on every build.
 
+## Performance
+
+`bench/` holds a harness that times each call a host makes, on programs of the size hosts run. It
+is not part of the published package; run it from a checkout.
+
+```bash
+pnpm --filter @nx-lang/ir-runtime bench          # every call, cold and warm, as a table and as JSON
+pnpm --filter @nx-lang/ir-runtime bench:compare  # this tree against the revision it is based on
+```
+
+**What is timed.** Two programs of the conformance corpus, read from their committed images, so
+nothing is compiled: `large-catalog`, a snippet against a library of 45 external components, and
+`question-flow`, a component with state over a library of 31 question kinds, whose script answers
+30 questions. A third workload makes calls that take input, against functions the corpus already
+has.
+
+| Phase | The call |
+| --- | --- |
+| `load` | Importing the runtime module. Cold only. |
+| `prepare` | `prepareNxIrModule` for every image of the program |
+| `link` | `linkNxIrProgram` of the entry against the prepared modules |
+| `evaluate` | `evaluateFunction` of a function that takes no arguments |
+| `initialize` | `initializeComponent` with props |
+| `resume` | `initializeComponent` with `options.state`, a state stored after 15 answers: what a host that keeps only the state does |
+| `evaluate with state` | `evaluateComponent` with props and that state |
+| `dispatch` | `dispatchComponentActions` with one answer: the 30 answers in order, reported for one |
+| `input` | `evaluateFunction` given 10,000 records: at `object` as plain data, with one member `undefined` in the last record, and inside 33 objects; and as records of a declared type, plain and with one member `undefined` |
+| `tool call` | `callFunction` by name with arguments, and with a context record |
+
+Every phase that evaluates is timed twice: with no limits, and with `maxOperations`,
+`maxInputSize` and `usage` set to values the call does not reach. The difference is what setting
+limits costs, and the second is where the report's operations and input size come from. A count
+is exact and the same on every machine; where the corpus records one, the harness's test checks
+that the report gives it.
+
+**What a number means.** *Warm* is a call after it has run until its time stopped falling: the
+median and the 95th percentile of 200 samples, a call shorter than 0.1 ms being sampled in
+batches. Each call is warmed and timed in an isolate of its own (a `worker_threads` worker), so
+no call runs on what another taught the engine; a host's isolate runs a mix of calls, and its
+times are not below these. An isolate now and then settles on slower code for a call than the
+others do, so `bench` times each call in three and reports the one whose median is in the
+middle. *Cold* is the first execution of a call in a fresh isolate after the
+runtime module was loaded there, over 15 isolates: it includes the engine compiling the runtime's
+code for that call. It approximates the first request an isolate serves and is not another
+engine's cold start. `ns/op` is the warm time with no limits divided by the operations, which is
+the number to compare across phases.
+
+**Comparing two revisions.** `bench:compare` answers whether a change made a call slower. It
+reads the base revision's committed build (`dist/src`) and its corpus images from Git, the merge
+base with `origin/main` unless `--base <ref>` names another, and in each of 7 rounds times every
+call once for the base and once for the working tree, one straight after the other. A call is
+named as slower, or faster, when the two medians are more than 10% apart in at least 6 of the 7
+rounds. The command exits with 1 when a call is slower, and with 2 when it could not compare at
+all. Both operation counts are in the report, so a
+call that costs more operations shows without any noise. A call is reported as not comparable
+when its program's sources differ between the two revisions, when the base has no such program,
+when the base's runtime lacks a function the call uses, or when the call fails on either side. Nothing measured on another machine is
+kept or compared with, and there is no baseline file. `--base-runtime <dir>` and
+`--head-runtime <dir>` compare two build directories directly. CI runs the comparison on every
+pull request as a job that reports in its summary and does not block a merge.
+
+**Running the steps in another engine.** `bench/core.mjs` builds the steps and is the only part
+a host needs. It loads no module, reads no clock and uses nothing of Node, and it is handed the
+runtime, so it runs the host's own bundled build:
+
+```js
+import * as runtime from "@nx-lang/ir-runtime";
+import { buildSteps } from "./core.mjs";
+
+// `corpus` holds each program of `PROGRAMS` by name, read however the host reads files:
+// { manifest: <its program.json>, images: { <module identity>: <its .stripped.nxir as a Uint8Array> } }
+const steps = buildSteps(runtime, corpus);
+const step = steps.find((step) => step.phase === "dispatch" && step.variant === "unlimited");
+step.ready(); // prepares, links and initializes, outside what is timed
+for (let run = 0; run < 1000; run += 1) {
+  step.run(); // the 30 dispatches; `step.divisor` is 30
+}
+```
+
+How to time them is the host's to decide. In a deployed Cloudflare Worker `performance.now()` and
+`Date.now()` do not advance while code runs, so a loop like this one is timed from outside: by
+the caller of a request that runs it a known number of times, or from the CPU time the platform
+reports for the request.
+
 ## Layout
 
 | Path | What it holds |
@@ -537,3 +646,6 @@ conformance corpus through this runtime on every build.
 | `test/corpus.test.mjs` | Evaluates every image of `specs/ir-conformance` against the interpreter's results, drives every lifecycle it names, and refuses every truncation and cell overwrite of them |
 | `test/emitted-ir.test.mjs` | Compiles NX through the CLI and runs the emitted IR, comparing with the native evaluator |
 | `test/cost-runner.mjs` | This runtime's side of the cost validation: run by the harness in `crates/nx-codegen/tests/cost_differential.rs` over generated cases, not by `pnpm test` |
+| `bench/core.mjs` | The steps the performance harness times; runs in any JavaScript engine |
+| `bench/run.mjs`, `bench/compare.mjs` | The Node drivers behind `bench` and `bench:compare`, with `measure.mjs`, `sample.mjs`, `worker.mjs`, `corpus.mjs` and `report.mjs` |
+| `bench/core.test.mjs` | Runs every step once against the committed build and checks the counts the corpus records, and that the corpus's generated catalog is what its script writes |

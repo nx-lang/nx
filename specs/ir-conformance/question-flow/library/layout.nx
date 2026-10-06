@@ -1,0 +1,36 @@
+// What a flow puts around a question, and the actions a host dispatches back.
+import "./answers.nx"
+import "./questions.nx"
+
+// A flow as data: what a host reads to list, title and validate a flow without running it.
+export type FlowDefinition = {
+  id:string
+  title:string
+  description?:string
+  version:int = 1
+  content questions:Question+
+}
+
+export type SummaryRow = { label:string value:string }
+
+// One step of a flow: a question and the handlers for its answer. The host raises the action
+// that matches the answer's type, so the flow reads the answer's own fields without a test.
+export external component
+<Step extends Node
+  question:Question
+  emits {
+    TextAnswered { answer:TextAnswer }
+    NumberAnswered { answer:NumberAnswer }
+    IntegerAnswered { answer:IntegerAnswer }
+    BooleanAnswered { answer:BooleanAnswer }
+    ChoiceAnswered { answer:ChoiceAnswer }
+    ChoicesAnswered { answer:ChoicesAnswer }
+    Answered { answer:Answer }
+  }
+/>
+
+export external component <Progress extends Node answered:int total:int />
+export external component <Summary extends Node title:string content rows:SummaryRow+ />
+export external component <Notice extends Node title:string body?:string />
+export external component <Button extends Node label:string emits { Tapped { } } />
+export external component <Screen extends Node title:string subtitle?:string content children:Node+ />

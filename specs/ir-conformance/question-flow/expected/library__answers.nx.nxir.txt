@@ -1,0 +1,76 @@
+module library/answers.nx fingerprint 4710217782950829473
+entrypoints functions [] components []
+
+record Answer abstract @3:1-6:2
+  questionId: string required
+  note: string?
+
+record TextAnswer extends Answer @8:1-8:57
+  questionId: string required
+  note: string?
+  value: string required
+
+record NumberAnswer extends Answer @9:1-9:60
+  questionId: string required
+  note: string?
+  value: float64 required
+
+record IntegerAnswer extends Answer @10:1-10:57
+  questionId: string required
+  note: string?
+  value: int required
+
+record BooleanAnswer extends Answer @11:1-11:61
+  questionId: string required
+  note: string?
+  value: boolean required
+
+record ChoiceAnswer extends Answer @12:1-12:76
+  questionId: string required
+  note: string?
+  selected: string required
+  other: string?
+
+record ChoicesAnswer extends Answer @13:1-13:64
+  questionId: string required
+  note: string?
+  selected: string+ required
+
+record RangeAnswer extends Answer @14:1-14:67
+  questionId: string required
+  note: string?
+  from: string required
+  to: string required
+
+record MatrixRowAnswer @15:1-15:59
+  row: string required
+  column: string required
+
+record MatrixAnswer extends Answer @16:1-16:68
+  questionId: string required
+  note: string?
+  rows: MatrixRowAnswer+ required
+
+record AddressAnswer extends Answer @17:1-22:2
+  questionId: string required
+  note: string?
+  street: string required
+  city: string required
+  postalCode: string?
+  country: string required
+
+record FileAnswer extends Answer @23:1-23:66
+  questionId: string required
+  note: string?
+  name: string required
+  bytes: int required
+
+record SignatureAnswer extends Answer @24:1-24:77
+  questionId: string required
+  note: string?
+  strokes: int required
+  signedAt: string required
+
+record SkippedAnswer extends Answer @25:1-25:47
+  questionId: string required
+  note: string?

@@ -1,0 +1,55 @@
+{
+  "entry": "main.nx",
+  "emit": [
+    "main.nx",
+    "library/answers.nx",
+    "library/layout.nx",
+    "library/questions.nx"
+  ],
+  "recordFailures": true,
+  "recordInputSizes": true,
+  "entrypoints": [
+    { "module": "main.nx", "function": "definition" },
+    { "module": "main.nx", "function": "received", "case": "three", "arguments": [[{"$type": "TextAnswer", "questionId": "name", "value": "Ada"}, {"$type": "NumberAnswer", "questionId": "buildMinutes", "value": 12.5}, {"$type": "ChoicesAnswer", "questionId": "languages", "selected": ["rust", "typescript"]}]] },
+    { "module": "main.nx", "function": "received", "case": "none", "arguments": [[]] }
+  ],
+  "lifecycles": [
+    {
+      "module": "main.nx",
+      "component": "Flow",
+      "props": {"respondent": "friend"},
+      "batches": [
+        [{"$type": "ActionHandlerInvocation", "token": "h1-1", "action": {"$type": "Step.TextAnswered", "answer": {"$type": "TextAnswer", "questionId": "name", "value": "Ada"}}}],
+        [{"$type": "ActionHandlerInvocation", "token": "h2-1", "action": {"$type": "Step.TextAnswered", "answer": {"$type": "TextAnswer", "questionId": "email", "value": "ada@example.com"}}}],
+        [{"$type": "ActionHandlerInvocation", "token": "h3-1", "action": {"$type": "Step.ChoiceAnswered", "answer": {"$type": "ChoiceAnswer", "questionId": "role", "selected": "engineer"}}}],
+        [{"$type": "ActionHandlerInvocation", "token": "h4-1", "action": {"$type": "Step.ChoicesAnswered", "answer": {"$type": "ChoicesAnswer", "questionId": "languages", "selected": ["rust", "typescript"]}}}],
+        [{"$type": "ActionHandlerInvocation", "token": "h5-1", "action": {"$type": "Step.IntegerAnswered", "answer": {"$type": "IntegerAnswer", "questionId": "teamSize", "value": 24}}}],
+        [{"$type": "ActionHandlerInvocation", "token": "h6-1", "action": {"$type": "Step.ChoiceAnswered", "answer": {"$type": "ChoiceAnswer", "questionId": "department", "selected": "platform"}}}],
+        [{"$type": "ActionHandlerInvocation", "token": "h7-1", "action": {"$type": "Step.BooleanAnswered", "answer": {"$type": "BooleanAnswer", "questionId": "usesCi", "value": true}}}],
+        [{"$type": "ActionHandlerInvocation", "token": "h8-1", "action": {"$type": "Step.ChoiceAnswered", "answer": {"$type": "ChoiceAnswer", "questionId": "ciProvider", "selected": "other", "other": "A machine under a desk"}}}],
+        [{"$type": "ActionHandlerInvocation", "token": "h9-1", "action": {"$type": "Step.NumberAnswered", "answer": {"$type": "NumberAnswer", "questionId": "buildMinutes", "value": 12.5}}}],
+        [{"$type": "ActionHandlerInvocation", "token": "h10-1", "action": {"$type": "Step.IntegerAnswered", "answer": {"$type": "IntegerAnswer", "questionId": "rating", "value": 2}}}],
+        [{"$type": "ActionHandlerInvocation", "token": "h11-1", "action": {"$type": "Step.TextAnswered", "answer": {"$type": "TextAnswer", "questionId": "trouble", "value": "Every change waits twelve minutes for a build, and one test in five fails for no reason we can find."}}}],
+        [{"$type": "ActionHandlerInvocation", "token": "h12-1", "action": {"$type": "Step.IntegerAnswered", "answer": {"$type": "IntegerAnswer", "questionId": "nps", "value": 6}}}],
+        [{"$type": "ActionHandlerInvocation", "token": "h13-1", "action": {"$type": "Step.ChoicesAnswered", "answer": {"$type": "ChoicesAnswer", "questionId": "priorities", "selected": ["flakiness", "speed", "review"]}}}],
+        [{"$type": "ActionHandlerInvocation", "token": "h14-1", "action": {"$type": "Step.Answered", "answer": {"$type": "MatrixAnswer", "questionId": "frequency", "rows": [{"$type": "MatrixRowAnswer", "row": "Debugger", "column": "Weekly"}, {"$type": "MatrixRowAnswer", "row": "Profiler", "column": "Rarely"}, {"$type": "MatrixRowAnswer", "row": "Formatter", "column": "Daily"}, {"$type": "MatrixRowAnswer", "row": "Linter", "column": "Daily"}]}}}],
+        [{"$type": "ActionHandlerInvocation", "token": "h15-1", "action": {"$type": "Step.TextAnswered", "answer": {"$type": "TextAnswer", "questionId": "startDate", "value": "2024-03-18"}}}],
+        [{"$type": "ActionHandlerInvocation", "token": "h16-1", "action": {"$type": "Step.Answered", "answer": {"$type": "RangeAnswer", "questionId": "trial", "from": "2026-11-02", "to": "2026-11-13"}}}],
+        [{"$type": "ActionHandlerInvocation", "token": "h17-1", "action": {"$type": "Step.TextAnswered", "answer": {"$type": "TextAnswer", "questionId": "callTime", "value": "14:30"}}}],
+        [{"$type": "ActionHandlerInvocation", "token": "h18-1", "action": {"$type": "Step.ChoiceAnswered", "answer": {"$type": "ChoiceAnswer", "questionId": "country", "selected": "FR"}}}],
+        [{"$type": "ActionHandlerInvocation", "token": "h19-1", "action": {"$type": "Step.BooleanAnswered", "answer": {"$type": "BooleanAnswer", "questionId": "wantsParcel", "value": false}}}],
+        [{"$type": "ActionHandlerInvocation", "token": "h20-1", "action": {"$type": "Step.TextAnswered", "answer": {"$type": "TextAnswer", "questionId": "phone", "value": "+33 1 23 45 67 89"}}}],
+        [{"$type": "ActionHandlerInvocation", "token": "h21-1", "action": {"$type": "Step.TextAnswered", "answer": {"$type": "TextAnswer", "questionId": "repository", "value": "https://example.com/ada/engine"}}}],
+        [{"$type": "ActionHandlerInvocation", "token": "h22-1", "action": {"$type": "Step.Answered", "answer": {"$type": "FileAnswer", "questionId": "config", "name": "ci.yml", "bytes": 2048}}}],
+        [{"$type": "ActionHandlerInvocation", "token": "h23-1", "action": {"$type": "Step.NumberAnswered", "answer": {"$type": "NumberAnswer", "questionId": "budget", "value": 1250}}}],
+        [{"$type": "ActionHandlerInvocation", "token": "h24-1", "action": {"$type": "Step.NumberAnswered", "answer": {"$type": "NumberAnswer", "questionId": "coverage", "value": 71.5}}}],
+        [{"$type": "ActionHandlerInvocation", "token": "h25-1", "action": {"$type": "Step.ChoiceAnswered", "answer": {"$type": "ChoiceAnswer", "questionId": "theme", "selected": "dark"}}}],
+        [{"$type": "ActionHandlerInvocation", "token": "h26-1", "action": {"$type": "Step.IntegerAnswered", "answer": {"$type": "IntegerAnswer", "questionId": "confidence", "value": 3}}}],
+        [{"$type": "ActionHandlerInvocation", "token": "h27-1", "action": {"$type": "Step.TextAnswered", "answer": {"$type": "TextAnswer", "questionId": "comments", "value": "Thank you for asking.", "note": "Typed on a phone"}}}],
+        [{"$type": "ActionHandlerInvocation", "token": "h28-1", "action": {"$type": "Step.BooleanAnswered", "answer": {"$type": "BooleanAnswer", "questionId": "consent", "value": true}}}],
+        [{"$type": "ActionHandlerInvocation", "token": "h29-1", "action": {"$type": "Step.Answered", "answer": {"$type": "SignatureAnswer", "questionId": "signature", "strokes": 14, "signedAt": "2026-10-06T09:30:00Z"}}}],
+        [{"$type": "ActionHandlerInvocation", "token": "h30-1", "action": {"$type": "Step.Answered", "answer": {"$type": "SkippedAnswer", "questionId": "review"}}}]
+      ]
+    }
+  ]
+}

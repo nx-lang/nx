@@ -297,3 +297,42 @@ jobs:
       uses: ./.github/actions/setup-rust-node
     - name: ⏱ Report cases whose time outgrows their count
       run: cargo test --release --locked -p nx-codegen --test cost_differential -- --ignored --nocapture time_report
+
+  # The TypeScript IR runtime's speed: on a pull request, each call a host makes timed for the
+  # revision the change is based on and for the change, one straight after the other on this
+  # runner, and a call named when the change is slower in most rounds; on a push, the timings
+  # alone, kept as an artifact. It needs Node and nothing else: both revisions' builds and corpus
+  # images are committed. A shared runner is noisy, so the job reports and never fails the
+  # workflow.
+  runtime-performance:
+    name: ⏱ Runtime performance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    steps:
+    - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+      with:
+        fetch-depth: 0 # The comparison reads the base revision's build and images from Git.
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+    # On a pull request the checkout is the merge of the change into the base branch, so the tip
+    # of that branch is the revision the checkout is based on.
+    - name: ⏱ Compare with the base revision
+      if: github.event_name == 'pull_request'
+      env:
+        BASE_REF: ${{ github.base_ref }}
+      run: node runtime/typescript/bench/compare.mjs --base "origin/$BASE_REF" --markdown "$GITHUB_STEP_SUMMARY"
+    - name: ⏱ Time every call
+      if: github.event_name != 'pull_request'
+      shell: bash # For `pipefail`: the step fails when the harness does, not when `tee` does.
+      run: |
+        node runtime/typescript/bench/run.mjs | tee report.txt
+        { echo '## Runtime performance'; echo; echo '```'; cat report.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+    - name: 📢 Upload the timings
+      if: cancelled() == false
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      with:
+        name: runtime-performance
+        path: runtime/typescript/bench/out/*.json

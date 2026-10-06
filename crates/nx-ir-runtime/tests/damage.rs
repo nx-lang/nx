@@ -1,7 +1,8 @@
-//! Damage: every corpus image cut at every four-byte boundary, and every cell of every one
-//! overwritten, must be refused with a diagnostic or read as a valid image. A damaged image that
-//! prepares is then linked and run as the corpus runs it, entrypoints and lifecycles both, since
-//! a stranger's image is evaluated, not just opened. A panic anywhere fails the test.
+//! Damage: every corpus image cut at every four-byte boundary, and every cell of every image
+//! of a program whose images are all within [`SWEPT_IMAGE_LIMIT`] overwritten, must be refused
+//! with a diagnostic or read as a valid image. A damaged image that prepares is then linked and
+//! run as the corpus runs it, entrypoints and lifecycles both, since a stranger's image is
+//! evaluated, not just opened. A panic anywhere fails the test.
 
 mod common;
 
@@ -10,6 +11,16 @@ use nx_ir_runtime::{
     ComponentInit, LinkOptions, NxIrRuntimeError, PreparedModule, Program, RuntimeOptions,
 };
 use std::collections::BTreeMap;
+
+/// The size, in bytes, above which an image takes its program out of the sweep that overwrites
+/// every cell. Overwriting a cell links and runs the whole program again, so the sweep grows with
+/// the square of a program's size; the corpus's large programs (`specs/ir-conformance/README.md`)
+/// have an image above this and are cut at every boundary only.
+const SWEPT_IMAGE_LIMIT: usize = 16 * 1024;
+
+/// The programs the sweep leaves out. A program that grows past the limit fails the test until
+/// it is named here, so that none leaves the sweep unnoticed.
+const LEFT_OUT_OF_THE_SWEEP: [&str; 2] = ["large-catalog", "question-flow"];
 
 #[test]
 fn every_truncated_corpus_image_is_refused() {
@@ -108,9 +119,17 @@ fn drive(linked: &Program, program: &CorpusProgram, identity: &str) -> (usize, u
 #[test]
 fn every_cell_of_every_corpus_image_can_be_overwritten_without_a_panic() {
     let (mut opened, mut refused, mut unlinked, mut succeeded, mut failed) = (0, 0, 0, 0, 0);
+    let (mut swept, mut left_out) = (0, Vec::new());
     for program in load_corpus() {
+        let images = || program.images.iter().chain(&program.stripped_images);
+        let largest = images().map(|(_, image)| image.len()).max().unwrap_or(0);
+        if largest > SWEPT_IMAGE_LIMIT {
+            left_out.push((program.name, largest));
+            continue;
+        }
+        swept += 1;
         let intact = prepare_all(&program.stripped_images);
-        for (identity, image) in program.images.iter().chain(&program.stripped_images) {
+        for (identity, image) in images() {
             for offset in (0..image.len()).step_by(4) {
                 for value in [0u32, 1, 0xffff_ffff, 0x7fff_fff0] {
                     let mut damaged = image.clone();
@@ -140,6 +159,15 @@ fn every_cell_of_every_corpus_image_can_be_overwritten_without_a_panic() {
         "{opened} opened, {refused} refused, {succeeded} succeeded, {failed} failed"
     );
     println!(
-        "{opened} damaged images opened ({unlinked} did not link), {refused} refused; {succeeded} operations succeeded, {failed} failed with a diagnostic"
+        "{swept} programs swept: {opened} damaged images opened ({unlinked} did not link), {refused} refused; {succeeded} operations succeeded, {failed} failed with a diagnostic"
     );
+    assert_eq!(
+        left_out
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>(),
+        LEFT_OUT_OF_THE_SWEEP,
+        "the programs with an image above {SWEPT_IMAGE_LIMIT} bytes, which the sweep leaves out, are not the ones named: {left_out:?}"
+    );
+    println!("left out, for an image above {SWEPT_IMAGE_LIMIT} bytes: {left_out:?}");
 }

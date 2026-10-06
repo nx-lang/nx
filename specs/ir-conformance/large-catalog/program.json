@@ -1,0 +1,20 @@
+{
+  "entry": "input.nx",
+  "implicitImports": [
+    "catalog.nx"
+  ],
+  "versions": {
+    "catalog.nx": "1"
+  },
+  "emit": [
+    "input.nx",
+    "catalog.nx"
+  ],
+  "recordFailures": true,
+  "entrypoints": [
+    {
+      "module": "input.nx",
+      "function": "root"
+    }
+  ]
+}

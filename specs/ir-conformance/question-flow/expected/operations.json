@@ -1,0 +1,113 @@
+{
+  "counts": {
+    "main.nx::Flow": {
+      "batches": [
+        303,
+        356,
+        424,
+        323,
+        409,
+        339,
+        390,
+        372,
+        372,
+        406,
+        393,
+        461,
+        455,
+        475,
+        474,
+        488,
+        509,
+        507,
+        521,
+        527,
+        555,
+        554,
+        557,
+        616,
+        583,
+        590,
+        604,
+        610,
+        707,
+        690
+      ],
+      "initial": 267
+    },
+    "main.nx::definition": 1285,
+    "main.nx::received#none": 4,
+    "main.nx::received#three": 14
+  },
+  "failures": {
+    "main.nx::definition": [
+      {
+        "budget": 642,
+        "declaration": "library/questions.nx::Address"
+      },
+      {
+        "budget": 1284,
+        "declaration": "main.nx::definition"
+      }
+    ],
+    "main.nx::received#none": [
+      {
+        "budget": 2,
+        "declaration": "main.nx::received"
+      },
+      {
+        "budget": 3,
+        "declaration": "main.nx::received"
+      }
+    ],
+    "main.nx::received#three": [
+      {
+        "budget": 7,
+        "declaration": "library/answers.nx::ChoicesAnswer"
+      },
+      {
+        "budget": 13,
+        "declaration": "main.nx::received"
+      }
+    ]
+  },
+  "inputSizes": {
+    "main.nx::Flow": {
+      "batches": [
+        6,
+        6,
+        6,
+        8,
+        6,
+        6,
+        6,
+        7,
+        6,
+        6,
+        7,
+        6,
+        9,
+        18,
+        6,
+        7,
+        6,
+        6,
+        6,
+        6,
+        6,
+        7,
+        6,
+        6,
+        6,
+        6,
+        7,
+        6,
+        7,
+        5
+      ],
+      "initial": 2
+    },
+    "main.nx::received#none": 1,
+    "main.nx::received#three": 12
+  }
+}

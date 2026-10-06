@@ -4,7 +4,8 @@ NX programs with the images the compiler emits for them, the explained text of e
 values a runtime evaluates them to, and what a runtime renders and emits when a host drives their
 component lifecycles. The emitter's tests pin the images byte for byte and keep the text in step;
 the TypeScript runtime's tests and the Rust runtime's tests each evaluate them, dispatch them, and
-refuse every truncation and cell overwrite of them; another runtime starts here. Together the programs cover every node, type,
+refuse every truncation of them and every cell overwrite of the small ones; another runtime starts
+here. Together the programs cover every node, type,
 constant and declaration kind of the schema, every binary operator and intrinsic, a program
 spanning two images, derived declarations, a snippet compiled against an implicitly imported
 catalog, a document that is a single trailing element, components that bind action handlers, two
@@ -20,6 +21,23 @@ against a type, compared and written for the host, `host-values`, whose entrypoi
 evaluated with arguments: the values a host passes, which no entrypoint without arguments can
 supply, with the input size of each, and `argument-diagnostics`, whose cases are calls every
 runtime fails alike, each with the code of its diagnostic and the argument it names.
+
+Two programs are of the size a host runs, where the others are as small as what they cover allows.
+`large-catalog` is a library of 45 external components, 11 of them abstract bases three levels
+deep, with 37 types and 399 properties, and a screen compiled against it as an implicit import: 61
+elements in its source, 92 once its loops have run. Its catalog is written by `large-catalog/generate-catalog.mjs`, which takes no
+input and writes the same bytes every time; change the script's tables, not `catalog.nx`, which
+the TypeScript runtime's tests hold to the script's output.
+`question-flow` is a library of 31 question kinds in three modules, a flow as data, and a flow as
+a component with state whose lifecycle answers one question per batch, 30 in all; six of its steps
+are shown only for some earlier answers. They are what `runtime/typescript/bench` times, and they
+are held to their recorded results, counts and input sizes as every program is.
+
+Overwriting a cell of an image links and runs its whole program again, so that sweep grows with
+the square of a program's size. A program with an image above 16,384 bytes is left out of it, and
+the test names the programs it leaves out, the two large ones: another program that grows past the
+limit fails the test until it is added to that list or made smaller. Every image of every program
+is still cut at every four-byte boundary.
 
 Each program is a directory:
 

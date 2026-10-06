@@ -1,0 +1,366 @@
+// A question flow of the size a host runs on every interaction: a library of question kinds in
+// three modules, a flow as data (`definition`, the call a host makes to list and validate a flow),
+// and a flow as a component whose state holds the step, the answers and the answers that later
+// steps depend on. The lifecycle in `program.json` answers one question per batch, 30 in all.
+//
+// Six steps are shown only for some earlier answers: step 3 asks one of three questions by the
+// role given at step 2; step 5 is for a team above ten; steps 7 and 8 are for a team that uses
+// continuous integration; step 10 is for a rating of two or less; step 19 is for a respondent
+// who asked for a parcel. The scripted run takes the first variant of step 3, passes through 5,
+// 7, 8 and 10, and skips 19.
+import "./library/answers.nx"
+import "./library/questions.nx"
+import "./library/layout.nx"
+
+action Completed = { respondent:string answered:int }
+
+let total = 30
+
+let nameQuestion = <ShortText id="name" label="What should we call you?" placeholder="First name" maxLength=40 />
+
+let emailQuestion(name:string) =
+  <Email id="email" label={"Thanks, " + name + ". Where can we reach you?"}
+    help="We only write about this survey." allowedDomains={ "example.com" "example.org" } />
+
+let roleQuestion =
+  <SingleChoice id="role" label="Which describes your work best?" layout=chips allowsOther={true}>
+    <Choice value="engineer" label="Engineering" description="You write or review code most days." />
+    <Choice value="designer" label="Design" description="You shape how the product looks and behaves." />
+    <Choice value="manager" label="Management" description="You lead people who do one of the above." />
+    <Choice value="other" label="Something else" />
+  </SingleChoice>
+
+let languagesQuestion =
+  <MultiChoice id="languages" label="Which languages do you work in?" minSelected=1 maxSelected=4 layout=grid>
+    <Choice value="rust" label="Rust" />
+    <Choice value="typescript" label="TypeScript" />
+    <Choice value="csharp" label="C#" />
+    <Choice value="python" label="Python" />
+    <Choice value="go" label="Go" />
+    <Choice value="kotlin" label="Kotlin" />
+    <Choice value="swift" label="Swift" />
+    <Choice value="other" label="Another" />
+  </MultiChoice>
+
+let designToolQuestion =
+  <SingleChoice id="designTool" label="Where do your designs live?" required={false}>
+    <Choice value="canvas" label="A shared canvas" />
+    <Choice value="code" label="In code" />
+    <Choice value="paper" label="On paper, mostly" />
+  </SingleChoice>
+
+let reportsQuestion = <Integer id="reports" label="How many people report to you?" min=0 max=500 />
+
+let teamSizeQuestion =
+  <Integer id="teamSize" label="How many people are on your team?" help="Count yourself." min=1 max=10000 />
+
+let departmentQuestion =
+  <Dropdown id="department" label="Which department is that team in?" searchable={true}>
+    <Choice value="platform" label="Platform" />
+    <Choice value="product" label="Product" />
+    <Choice value="data" label="Data" />
+    <Choice value="security" label="Security" />
+    <Choice value="support" label="Support" />
+    <Choice value="research" label="Research" />
+  </Dropdown>
+
+let ciQuestion = <YesNo id="usesCi" label="Does your team build every change automatically?" noLabel="Not yet" />
+
+let ciProviderQuestion =
+  <SingleChoice id="ciProvider" label="Where do those builds run?" allowsOther={true}>
+    <Choice value="hosted" label="A hosted service" />
+    <Choice value="own" label="Our own machines" />
+    <Choice value="both" label="Both" />
+  </SingleChoice>
+
+let buildMinutesQuestion =
+  <Slider id="buildMinutes" label="How long does a build take, in minutes?" min=1 max=120 step=1
+    minLabel="A minute" maxLabel="Two hours" />
+
+let ratingQuestion = <Rating id="rating" label="How do you rate your tools today?" stars=5 icon=star />
+
+let troubleQuestion(rating:int) =
+  <LongText id="trouble" label={"You gave " + rating + " of 5. What gets in your way?"}
+    placeholder="The slowest or most fragile part of your day" minLength=10 maxLength=2000 rows=6 />
+
+let npsQuestion =
+  <Nps id="nps" label="How likely are you to recommend your setup to a new teammate?"
+    lowLabel="Not at all" highLabel="Certainly" />
+
+let prioritiesQuestion =
+  <Ranking id="priorities" label="Put these in the order you would fix them." maxRanked=3>
+    <Choice value="speed" label="Build speed" />
+    <Choice value="flakiness" label="Flaky tests" />
+    <Choice value="review" label="Review turnaround" />
+    <Choice value="docs" label="Documentation" />
+    <Choice value="onboarding" label="Onboarding" />
+  </Ranking>
+
+let frequencyQuestion =
+  <Matrix id="frequency" label="How often do you use each of these?"
+    rows={ "Debugger" "Profiler" "Formatter" "Linter" }
+    columns={ "Daily" "Weekly" "Rarely" "Never" } />
+
+let startDateQuestion = <Date id="startDate" label="When did you join the team?" format=iso max="2026-12-31" />
+
+let trialQuestion =
+  <DateRange id="trial" label="Which two weeks could you try a new setup?" format=dayFirst maxDays=14 />
+
+let callTimeQuestion = <Time id="callTime" label="What time suits a short call?" stepMinutes=30 />
+
+let countryQuestion = <Country id="country" label="Where are you based?" preferred={ "FR" "DE" "US" "JP" } />
+
+let parcelQuestion =
+  <YesNo id="wantsParcel" label="May we post you a thank-you parcel?" yesLabel="Yes, please" noLabel="No, thanks" />
+
+let addressQuestion(name:string) =
+  <Address id="address" label={"Where should " + name + "'s parcel go?"} countries={ "FR" "DE" "US" "JP" } />
+
+let phoneQuestion = <Phone id="phone" label="A number for the courier or the call?" required={false} defaultCountry="FR" />
+
+let repositoryQuestion =
+  <Url id="repository" label="Link a repository we may look at." required={false}
+    placeholder="https://example.com/team/project" />
+
+let configQuestion =
+  <FileUpload id="config" label="Attach your build configuration, if you can share it." required={false}
+    accept={ ".yml" ".yaml" ".json" ".toml" } maxFiles=3 maxMegabytes=5 />
+
+let budgetQuestion =
+  <Currency id="budget" label="What does your team spend on tools each month?" currency="EUR" min=0 max=100000 />
+
+let coverageQuestion = <Percent id="coverage" label="How much of your code do tests cover?" decimals=1 />
+
+let themeQuestion =
+  <PictureChoice id="theme" label="Which editor theme is closest to yours?" columns=3>
+    <Choice value="dark" label="Dark" imageUrl="https://example.com/themes/dark.png" />
+    <Choice value="light" label="Light" imageUrl="https://example.com/themes/light.png" />
+    <Choice value="contrast" label="High contrast" imageUrl="https://example.com/themes/contrast.png" />
+  </PictureChoice>
+
+let confidenceQuestion =
+  <Scale id="confidence" label="I can change any part of our code without fear." points=7
+    lowLabel="Strongly disagree" highLabel="Strongly agree" />
+
+let commentsQuestion =
+  <LongText id="comments" label="Anything else we should know?" required={false} maxLength=4000 />
+
+let consentQuestion =
+  <Consent id="consent" label="One last thing." statement="You may store my answers for twelve months."
+    linkUrl="https://example.com/privacy" />
+
+let signatureQuestion = <Signature id="signature" label="Sign to confirm." penColor="#1D4ED8" />
+
+let reviewQuestion(name:string, role:string, teamSize:int) =
+  <Statement id="review" label="Ready to send?"
+    body={name + ", " + role + " on a team of " + teamSize + ": your answers are below."} buttonLabel="Send" />
+
+// The flow as data, every question of every branch in order. A question whose text depends on an
+// answer is given the text it has before the answer is known.
+let definition(): FlowDefinition =
+  <FlowDefinition id="tooling-survey" title="Developer tooling survey"
+    description="Thirty questions about how your team builds software." version=3>
+    {nameQuestion}
+    {emailQuestion("there")}
+    {roleQuestion}
+    {languagesQuestion}
+    {designToolQuestion}
+    {reportsQuestion}
+    {teamSizeQuestion}
+    {departmentQuestion}
+    {ciQuestion}
+    {ciProviderQuestion}
+    {buildMinutesQuestion}
+    {ratingQuestion}
+    {troubleQuestion(0)}
+    {npsQuestion}
+    {prioritiesQuestion}
+    {frequencyQuestion}
+    {startDateQuestion}
+    {trialQuestion}
+    {callTimeQuestion}
+    {countryQuestion}
+    {parcelQuestion}
+    {addressQuestion("your")}
+    {phoneQuestion}
+    {repositoryQuestion}
+    {configQuestion}
+    {budgetQuestion}
+    {coverageQuestion}
+    {themeQuestion}
+    {confidenceQuestion}
+    {commentsQuestion}
+    {consentQuestion}
+    {signatureQuestion}
+    {reviewQuestion("You", "respondent", 1)}
+    <Hidden id="source" label="Source" value="conformance" />
+  </FlowDefinition>
+
+// Whether a host sent any answers: a call that reads a list of typed records and writes back one
+// value, which is what reading input costs with nothing else in the way.
+let received(answers?:Answer+): boolean = { answers? }
+
+component <Flow respondent:string = "there" emits { Completed } /> = {
+  state {
+    step:int = 0
+    answered:int = 0
+    name:string = {respondent}
+    role:string = ""
+    teamSize:int = 0
+    rating:int = 0
+    answers?:Answer+
+  }
+  <Screen title="Developer tooling survey"
+    subtitle={if step == 31 { "Thank you, " + name + "." } else { "Question " + (answered + 1) + " of " + total }}>
+    <Progress answered={answered} total={total} />
+    if step == 0 {
+      <Step question={nameQuestion}
+        onTextAnswered=<Update step=1 answered={answered + 1} name={action.answer.value} answers={ answers action.answer } /> />
+    }
+    if step == 1 {
+      <Step question={emailQuestion(name)}
+        onTextAnswered=<Update step=2 answered={answered + 1} answers={ answers action.answer } /> />
+    }
+    if step == 2 {
+      <Step question={roleQuestion}
+        onChoiceAnswered=<Update step=3 answered={answered + 1} role={action.answer.selected} answers={ answers action.answer } /> />
+    }
+    if step == 3 && role == "engineer" {
+      <Step question={languagesQuestion}
+        onChoicesAnswered=<Update step=4 answered={answered + 1} answers={ answers action.answer } /> />
+    }
+    if step == 3 && role == "designer" {
+      <Step question={designToolQuestion}
+        onChoiceAnswered=<Update step=4 answered={answered + 1} answers={ answers action.answer } /> />
+    }
+    if step == 3 && role != "engineer" && role != "designer" {
+      <Step question={reportsQuestion}
+        onIntegerAnswered=<Update step=4 answered={answered + 1} answers={ answers action.answer } /> />
+    }
+    if step == 4 {
+      <Step question={teamSizeQuestion}
+        onIntegerAnswered=<Update step={if action.answer.value > 10 { 5 } else { 6 }} answered={answered + 1}
+          teamSize={action.answer.value} answers={ answers action.answer } /> />
+    }
+    if step == 5 {
+      <Step question={departmentQuestion}
+        onChoiceAnswered=<Update step=6 answered={answered + 1} answers={ answers action.answer } /> />
+    }
+    if step == 6 {
+      <Step question={ciQuestion}
+        onBooleanAnswered=<Update step={if action.answer.value { 7 } else { 9 }} answered={answered + 1}
+          answers={ answers action.answer } /> />
+    }
+    if step == 7 {
+      <Step question={ciProviderQuestion}
+        onChoiceAnswered=<Update step=8 answered={answered + 1} answers={ answers action.answer } /> />
+    }
+    if step == 8 {
+      <Step question={buildMinutesQuestion}
+        onNumberAnswered=<Update step=9 answered={answered + 1} answers={ answers action.answer } /> />
+    }
+    if step == 9 {
+      <Step question={ratingQuestion}
+        onIntegerAnswered=<Update step={if action.answer.value <= 2 { 10 } else { 11 }} answered={answered + 1}
+          rating={action.answer.value} answers={ answers action.answer } /> />
+    }
+    if step == 10 {
+      <Step question={troubleQuestion(rating)}
+        onTextAnswered=<Update step=11 answered={answered + 1} answers={ answers action.answer } /> />
+    }
+    if step == 11 {
+      <Step question={npsQuestion}
+        onIntegerAnswered=<Update step=12 answered={answered + 1} answers={ answers action.answer } /> />
+    }
+    if step == 12 {
+      <Step question={prioritiesQuestion}
+        onChoicesAnswered=<Update step=13 answered={answered + 1} answers={ answers action.answer } /> />
+    }
+    if step == 13 {
+      <Step question={frequencyQuestion}
+        onAnswered=<Update step=14 answered={answered + 1} answers={ answers action.answer } /> />
+    }
+    if step == 14 {
+      <Step question={startDateQuestion}
+        onTextAnswered=<Update step=15 answered={answered + 1} answers={ answers action.answer } /> />
+    }
+    if step == 15 {
+      <Step question={trialQuestion}
+        onAnswered=<Update step=16 answered={answered + 1} answers={ answers action.answer } /> />
+    }
+    if step == 16 {
+      <Step question={callTimeQuestion}
+        onTextAnswered=<Update step=17 answered={answered + 1} answers={ answers action.answer } /> />
+    }
+    if step == 17 {
+      <Step question={countryQuestion}
+        onChoiceAnswered=<Update step=18 answered={answered + 1} answers={ answers action.answer } /> />
+    }
+    if step == 18 {
+      <Step question={parcelQuestion}
+        onBooleanAnswered=<Update step={if action.answer.value { 19 } else { 20 }} answered={answered + 1}
+          answers={ answers action.answer } /> />
+    }
+    if step == 19 {
+      <Step question={addressQuestion(name)}
+        onAnswered=<Update step=20 answered={answered + 1} answers={ answers action.answer } /> />
+    }
+    if step == 20 {
+      <Step question={phoneQuestion}
+        onTextAnswered=<Update step=21 answered={answered + 1} answers={ answers action.answer } /> />
+    }
+    if step == 21 {
+      <Step question={repositoryQuestion}
+        onTextAnswered=<Update step=22 answered={answered + 1} answers={ answers action.answer } /> />
+    }
+    if step == 22 {
+      <Step question={configQuestion}
+        onAnswered=<Update step=23 answered={answered + 1} answers={ answers action.answer } /> />
+    }
+    if step == 23 {
+      <Step question={budgetQuestion}
+        onNumberAnswered=<Update step=24 answered={answered + 1} answers={ answers action.answer } /> />
+    }
+    if step == 24 {
+      <Step question={coverageQuestion}
+        onNumberAnswered=<Update step=25 answered={answered + 1} answers={ answers action.answer } /> />
+    }
+    if step == 25 {
+      <Step question={themeQuestion}
+        onChoiceAnswered=<Update step=26 answered={answered + 1} answers={ answers action.answer } /> />
+    }
+    if step == 26 {
+      <Step question={confidenceQuestion}
+        onIntegerAnswered=<Update step=27 answered={answered + 1} answers={ answers action.answer } /> />
+    }
+    if step == 27 {
+      <Step question={commentsQuestion}
+        onTextAnswered=<Update step=28 answered={answered + 1} answers={ answers action.answer } /> />
+    }
+    if step == 28 {
+      <Step question={consentQuestion}
+        onBooleanAnswered=<Update step=29 answered={answered + 1} answers={ answers action.answer } /> />
+    }
+    if step == 29 {
+      <Step question={signatureQuestion}
+        onAnswered=<Update step=30 answered={answered + 1} answers={ answers action.answer } /> />
+    }
+    if step == 30 {
+      <Step question={reviewQuestion(name, role, teamSize)}
+        onAnswered={<Update step=31 answered={answered + 1} answers={ answers action.answer } />
+          <Completed respondent={name} answered={answered + 1} />} />
+    }
+    if step >= 30 {
+      <Summary title="Your answers">
+        <SummaryRow label="Name" value={name} />
+        <SummaryRow label="Role" value={role} />
+        <SummaryRow label="Team" value={"" + teamSize} />
+        <SummaryRow label="Rating" value={rating + " of 5"} />
+      </Summary>
+    }
+    if step == 31 {
+      <Notice title="Sent" body={"We have " + answered + " answers from you."} />
+    }
+    <Button label="Start over" onTapped=<Update step=0 answered=0 role="" teamSize=0 rating=0 answers={} /> />
+  </Screen>
+}
