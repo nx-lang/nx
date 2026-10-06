@@ -3,19 +3,26 @@
  * this machine, in one run. Each revision's committed build runs that revision's committed corpus
  * images. In each round every call is timed once for each side, one straight after the other in
  * an isolate of its own, and a step is named when the working tree is slower, or faster, by more
- * than a fraction in most rounds. No timing from
- * another machine is read or kept.
+ * than a fraction over the rounds (`verdict.mjs` has the rule). No timing from another machine is
+ * read or kept.
  *
  *   node bench/compare.mjs [--base <ref>] [--rounds <n>] [--samples <n>] [--threshold <fraction>]
- *                          [--base-runtime <dir>] [--head-runtime <dir>] [--json <path>] [--markdown <path>]
+ *                          [--cold-threshold <fraction>] [--base-runtime <dir>] [--head-runtime <dir>]
+ *                          [--json <path>] [--markdown <path>]
  *
  * `--base` is the revision to compare with, the merge base of `HEAD` and `origin/main` by
  * default. Its build (`runtime/typescript/dist/src`) and its corpus programs are read from Git
- * into a temporary directory; nothing is built. `--rounds` is how many times each side runs (7),
- * `--samples` how many warm samples a step gets in a round (40), and `--threshold` how far apart
- * two medians must be to count (0.1). `--base-runtime` and `--head-runtime` name a build
- * directory in place of a revision's; with `--base-runtime` and no `--base`, both sides run the
- * working tree's corpus, which is how two builds that are not revisions are compared.
+ * into a temporary directory; nothing is built. `--rounds` is how many times each side runs (7)
+ * and `--samples` how many warm samples a step gets in a round (40). `--base-runtime` and
+ * `--head-runtime` name a build directory in place of a revision's; with `--base-runtime` and no
+ * `--base`, both sides run the working tree's corpus, which is how two builds that are not
+ * revisions are compared.
+ *
+ * Three kinds of time are compared. Each call's warm time, with no limits and with limits, is
+ * named beyond `--threshold` (0.07), and so is the time the runtime module takes to load in a
+ * fresh isolate, of which a round has one for every call. Each call's cold time, its first
+ * execution in each round's fresh isolate, is named beyond `--cold-threshold` (0.2): it is one
+ * sample a round where a warm time is the median of forty, so it is judged more loosely.
  *
  * A step is not compared, and says why, when its program's sources or `program.json` differ
  * between the two sides, when the base has no such program, when the base's runtime does not
@@ -37,6 +44,7 @@ import { corpusRoot } from "./corpus.mjs";
 import { loadSide, measureWarm } from "./measure.mjs";
 import { formatTime, markdownTable, textTable } from "./report.mjs";
 import { median } from "./sample.mjs";
+import { verdict } from "./verdict.mjs";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const repository = resolve(here, "../../..");
@@ -52,7 +60,8 @@ try {
       base: { type: "string" },
       rounds: { type: "string", default: "7" },
       samples: { type: "string", default: "40" },
-      threshold: { type: "string", default: "0.1" },
+      threshold: { type: "string", default: "0.07" },
+      "cold-threshold": { type: "string", default: "0.2" },
       "base-runtime": { type: "string" },
       "head-runtime": { type: "string", default: join(here, "../dist/src") },
       json: { type: "string", default: join(here, "out/compare.json") },
@@ -65,11 +74,13 @@ try {
 const rounds = Number(options.rounds);
 const samples = Number(options.samples);
 const threshold = Number(options.threshold);
-if (!Number.isSafeInteger(rounds) || rounds < 1 || !Number.isSafeInteger(samples) || samples < 1 || !(threshold > 0)) {
-  cannotCompare("--rounds and --samples each take a count of at least 1, and --threshold a fraction above 0");
+const coldThreshold = Number(options["cold-threshold"]);
+if (!Number.isSafeInteger(rounds) || rounds < 1 || !Number.isSafeInteger(samples) || samples < 1) {
+  cannotCompare("--rounds and --samples each take a count of at least 1");
 }
-/** How many rounds must agree for a step to be named: three quarters of them. */
-const needed = Math.ceil(rounds * 0.75);
+if (!(threshold > 0) || !(coldThreshold > 0)) {
+  cannotCompare("--threshold and --cold-threshold each take a fraction above 0");
+}
 
 const git = (...args) => execFileSync("git", args, { cwd: repository, encoding: "utf8", maxBuffer: 2 ** 28 }).trim();
 
@@ -201,12 +212,26 @@ try {
     process.stderr.write(`round ${round + 1} of ${rounds}\n`);
   }
 
+  // A row gives a step for each of its variants and one for its cold time: the first call of
+  // the variant with no limits in each round's fresh isolate.
+  const timeOf = (run, variant) => (variant === "cold" ? run.first : run[variant].median);
+  const judged = (step, baseTimes, headTimes) => {
+    const ratios = headTimes.map((time, round) => time / baseTimes[round]);
+    return {
+      ...step,
+      base: median(baseTimes),
+      ratio: median(ratios),
+      ratios,
+      verdict: verdict(ratios, step.variant === "cold" ? coldThreshold : threshold),
+    };
+  };
   const steps = [];
   for (const { row, reason, base: baseRuns, head: headRuns } of rows) {
-    for (const { variant } of row.variants) {
-      const step = { step: row.name, variant, calls: row.calls };
-      if (headRuns.length > 0 && headRuns[0][variant] !== undefined) {
-        step.head = median(headRuns.map((run) => run[variant].median));
+    for (const variant of [...row.variants.map(({ variant }) => variant), "cold"]) {
+      // The cold time of a dispatch step is its first call alone, so it is not divided.
+      const step = { step: row.name, variant, calls: variant === "cold" ? 1 : row.calls };
+      if (headRuns.length > 0 && (variant === "cold" || headRuns[0][variant] !== undefined)) {
+        step.head = median(headRuns.map((run) => timeOf(run, variant)));
         if (variant === "limited") {
           step.headOperations = headRuns[0].operations;
         }
@@ -215,21 +240,20 @@ try {
         steps.push({ ...step, verdict: "not comparable", reason });
         continue;
       }
-      const ratios = headRuns.map((run, round) => run[variant].median / baseRuns[round][variant].median);
-      step.base = median(baseRuns.map((run) => run[variant].median));
-      step.ratio = median(ratios);
-      step.ratios = ratios;
       if (variant === "limited") {
         step.baseOperations = baseRuns[0].operations;
       }
-      step.verdict =
-        ratios.filter((ratio) => ratio > 1 + threshold).length >= needed
-          ? "slower"
-          : ratios.filter((ratio) => ratio < 1 / (1 + threshold)).length >= needed
-            ? "faster"
-            : "";
-      steps.push(step);
+      steps.push(judged(step, baseRuns.map((run) => timeOf(run, variant)), headRuns.map((run) => timeOf(run, variant))));
     }
+  }
+  // Loading the runtime module, which every isolate does once: a round's time for a side is the
+  // median over the isolates of the rows both sides ran, and so is as steady as a warm time and
+  // judged as one.
+  const both = rows.filter(({ reason, head: headRuns }) => reason === undefined && headRuns.length === rounds);
+  if (both.length > 0) {
+    const loads = (side) => Array.from({ length: rounds }, (_, round) => median(both.map((compared) => compared[side][round].load)));
+    const [baseLoads, headLoads] = [loads("base"), loads("head")];
+    steps.unshift({ ...judged({ step: "load / the runtime module", variant: "load", calls: 1 }, baseLoads, headLoads), head: median(headLoads) });
   }
   report = {
     base: base.name,
@@ -239,17 +263,19 @@ try {
     rounds,
     samples,
     threshold,
+    coldThreshold,
     steps,
   };
 } catch (error) {
   cannotCompare(error instanceof Error ? (error.stack ?? error.message) : String(error));
 }
 
+const percent = (fraction) => `${Math.round(fraction * 100)}%`;
 const named = (verdict) => report.steps.filter((step) => step.verdict === verdict);
 const operationsChanged = report.steps.filter((step) => step.baseOperations !== undefined && step.baseOperations !== step.headOperations);
 const lines = [
   `${report.head[0].toUpperCase()}${report.head.slice(1)} against ${report.base}: ${report.rounds} rounds of ${report.samples} samples on ${report.node}, ${report.platform}.`,
-  `A step is named when it is beyond ${(threshold * 100).toFixed(0)}% in ${needed} of ${report.rounds} rounds.`,
+  `A step is named when the median of its rounds is beyond ${percent(threshold)}, or ${percent(coldThreshold)} for a cold time, and ${Math.ceil(report.rounds * 0.75)} of ${report.rounds} rounds agree.`,
   "",
 ];
 const list = (title, steps, describe) => {

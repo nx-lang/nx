@@ -603,16 +603,36 @@ the number to compare across phases.
 **Comparing two revisions.** `bench:compare` answers whether a change made a call slower. It
 reads the base revision's committed build (`dist/src`) and its corpus images from Git, the merge
 base with `origin/main` unless `--base <ref>` names another, and in each of 7 rounds times every
-call once for the base and once for the working tree, one straight after the other. A call is
-named as slower, or faster, when the two medians are more than 10% apart in at least 6 of the 7
-rounds. The command exits with 1 when a call is slower, and with 2 when it could not compare at
-all. Both operation counts are in the report, so a
-call that costs more operations shows without any noise. A call is reported as not comparable
-when its program's sources differ between the two revisions, when the base has no such program,
-when the base's runtime lacks a function the call uses, or when the call fails on either side. Nothing measured on another machine is
-kept or compared with, and there is no baseline file. `--base-runtime <dir>` and
-`--head-runtime <dir>` compare two build directories directly. CI runs the comparison on every
-pull request as a job that reports in its summary and does not block a merge.
+call once for the base and once for the working tree, one straight after the other. It compares
+three kinds of time:
+
+| Time | What it is | Named beyond |
+| --- | --- | --- |
+| Warm | A call's warm median in a round, with no limits and with limits | 7% |
+| Load | The time the runtime module takes to load in a fresh isolate, the median of a round's isolates | 7% |
+| Cold | A call's first execution in a round's fresh isolate, one sample a round | 20% |
+
+A step is named as slower, or faster, when the median of its seven ratios is beyond that fraction
+and at least 6 of the 7 rounds are beyond half of it the same way. One round's ratio is noisy and
+the median of seven is not: a build compared with itself forty times, on a desktop and on GitHub
+runners, was named for none of 1,200 warm, 340 cold and 20 load steps, and the same ratios made
+10% larger are named 84% of the time for a warm step and 15% larger 96%; a cold step has to be
+30% slower to be named nine times in ten. So a slowdown of a few percent passes, which is what
+the comparison with the last release, below, is for.
+
+The command exits with 1 when a step is slower, and with 2 when it could not compare at all.
+Both operation counts are in the report, so a call that costs more operations shows without any
+noise. A call is reported as not comparable when its program's sources differ between the two
+revisions, when the base has no such program, when the base's runtime lacks a function the call
+uses, or when the call fails on either side. Nothing measured on another machine is kept or
+compared with, and there is no baseline file. `--base-runtime <dir>` and `--head-runtime <dir>`
+compare two build directories directly.
+
+CI runs the comparison in a job that reports in its summary and does not block a merge: on every
+pull request against the revision the change is based on, and on every push to `main` against
+the last release (`--base v<x.y.z>`), which is what names several small slowdowns that no one
+pull request was named for. The release steps in `docs/deployment.md` say to read it before a
+tag.
 
 **Running the steps in another engine.** `bench/core.mjs` builds the steps and is the only part
 a host needs. It loads no module, reads no clock and uses nothing of Node, and it is handed the
@@ -647,5 +667,5 @@ reports for the request.
 | `test/emitted-ir.test.mjs` | Compiles NX through the CLI and runs the emitted IR, comparing with the native evaluator |
 | `test/cost-runner.mjs` | This runtime's side of the cost validation: run by the harness in `crates/nx-codegen/tests/cost_differential.rs` over generated cases, not by `pnpm test` |
 | `bench/core.mjs` | The steps the performance harness times; runs in any JavaScript engine |
-| `bench/run.mjs`, `bench/compare.mjs` | The Node drivers behind `bench` and `bench:compare`, with `measure.mjs`, `sample.mjs`, `worker.mjs`, `corpus.mjs` and `report.mjs` |
-| `bench/core.test.mjs` | Runs every step once against the committed build and checks the counts the corpus records, and that the corpus's generated catalog is what its script writes |
+| `bench/run.mjs`, `bench/compare.mjs` | The Node drivers behind `bench` and `bench:compare`, with `measure.mjs`, `sample.mjs`, `worker.mjs`, `corpus.mjs`, `report.mjs` and `verdict.mjs`, the rule a step is named by |
+| `bench/core.test.mjs` | Runs every step once against the committed build and checks the counts the corpus records, that the corpus's generated catalog is what its script writes, and the rule a step is named by |

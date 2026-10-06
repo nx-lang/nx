@@ -95,8 +95,9 @@ export function sampleWarm(steps, samples) {
  * - `{ kind: "cold", index }`: the first call of the step at `index`. Resolves to
  *   `{ load, first }`, the time to load the runtime module and the time of that call.
  * - `{ kind: "warm", indices, samples }`: the steps at `indices`, warmed and sampled together.
- *   Resolves to `{ timings, usages }`, each in the order of `indices`: what {@link sampleWarm}
- *   returned, and what one more run of each step reported.
+ *   Resolves to `{ load, first, timings, usages }`: the time to load the runtime module, the time
+ *   of the first call of the first step, made before anything was warm, and, each in the order
+ *   of `indices`, what {@link sampleWarm} returned and what one more run of each step reported.
  */
 export function inFreshIsolate(task, { runtimeUrl, corpus, stored }) {
   return new Promise((resolve, reject) => {

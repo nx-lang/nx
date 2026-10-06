@@ -2091,9 +2091,9 @@ costs what it cost. So:
 
 Each of these was decided against one number from one machine and one shape of input. The three
 shapes and two small calls are now steps of the harness, and `bench:compare` names one when a
-change makes it slower than the revision it is based on by more than 10% in most rounds. It names
-the reading as it was merged on those steps, the slow path and the two-integer call in every run
-and plain data in half of them, and on no step of the two programs.
+change makes it slower than the revision it is based on by more than 7% over its rounds. It names
+the reading as it was merged on those steps, the slow path and both small calls in every run and
+plain data in some, and on no step of the two programs.
 
 **Why it might matter.** A component host passes its whole state on every call, so input the size
 of the state is the ordinary case and not a stress test. The check that follows the reading

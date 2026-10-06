@@ -49,10 +49,12 @@ export async function loadSide(runtimeDir, corpusDir) {
 
 /**
  * The warm times of one row, its variants sampled together in an isolate of their own:
- * `{ unlimited, limited, operations, inputSize, recorded, nsPerOperation }`, the last four from
- * the variant with limits, where the row has one and the corpus records a count. With `isolates`
- * above 1 the row is timed in that many isolates, one after another, and the times are those of
- * the isolate whose median for the first variant is the middle one.
+ * `{ unlimited, limited, operations, inputSize, recorded, nsPerOperation, load, first }`. The
+ * four after `limited` are from the variant with limits, where the row has one and the corpus
+ * records a count; `load` and `first` are that isolate's cold times, of loading the runtime module
+ * and of the first call of the variant with no limits. With `isolates` above 1 the row is timed
+ * in that many isolates, one after another, and the times are those of the isolate whose median
+ * for the first variant is the middle one.
  */
 export async function measureWarm(side, row, samples, isolates = 1) {
   const task = { kind: "warm", indices: row.variants.map(({ index }) => index), samples };
@@ -61,8 +63,8 @@ export async function measureWarm(side, row, samples, isolates = 1) {
     runs.push(await inFreshIsolate(task, side.isolate));
   }
   runs.sort((left, right) => left.timings[0].median - right.timings[0].median);
-  const { timings, usages } = runs[(runs.length - 1) >> 1];
-  const measured = {};
+  const { load, first, timings, usages } = runs[(runs.length - 1) >> 1];
+  const measured = { load, first };
   for (const [position, { variant, recorded }] of row.variants.entries()) {
     measured[variant] = timings[position];
     if (variant === "limited") {

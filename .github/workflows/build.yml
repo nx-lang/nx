@@ -298,12 +298,13 @@ jobs:
     - name: ⏱ Report cases whose time outgrows their count
       run: cargo test --release --locked -p nx-codegen --test cost_differential -- --ignored --nocapture time_report
 
-  # The TypeScript IR runtime's speed: on a pull request, each call a host makes timed for the
-  # revision the change is based on and for the change, one straight after the other on this
-  # runner, and a call named when the change is slower in most rounds; on a push, the timings
-  # alone, kept as an artifact. It needs Node and nothing else: both revisions' builds and corpus
-  # images are committed. A shared runner is noisy, so the job reports and never fails the
-  # workflow.
+  # The TypeScript IR runtime's speed. Each call a host makes is timed for a base revision and
+  # for this one, one straight after the other on this runner, and a call is named when this
+  # revision is slower over the rounds. On a pull request the base is the revision the change is
+  # based on. On a push it is the last release, which is what shows several small slowdowns that
+  # no one pull request was named for; the timings of this revision alone follow, as a record. It
+  # needs Node and nothing else: every revision's build and corpus images are committed. A shared
+  # runner is noisy, so the job reports and never fails the workflow.
   runtime-performance:
     name: ⏱ Runtime performance
     runs-on: ubuntu-latest
@@ -324,8 +325,14 @@ jobs:
       env:
         BASE_REF: ${{ github.base_ref }}
       run: node runtime/typescript/bench/compare.mjs --base "origin/$BASE_REF" --markdown "$GITHUB_STEP_SUMMARY"
-    - name: ⏱ Time every call
+    # A step whose program changed since the release is reported as not comparable.
+    - name: ⏱ Compare with the last release
       if: github.event_name != 'pull_request'
+      run: |
+        release=$(git describe --tags --abbrev=0 --match 'v[0-9]*')
+        node runtime/typescript/bench/compare.mjs --base "$release" --markdown "$GITHUB_STEP_SUMMARY"
+    - name: ⏱ Time every call
+      if: github.event_name != 'pull_request' && cancelled() == false
       shell: bash # For `pipefail`: the step fails when the harness does, not when `tee` does.
       run: |
         node runtime/typescript/bench/run.mjs | tee report.txt

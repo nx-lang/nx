@@ -2,7 +2,8 @@
  * The harness's core, tested against the committed build: every step runs, a step the corpus
  * records an operation count for reports that count, two builds of the runtime run the same steps
  * apart, and the core's source loads no module and names nothing of Node, which is what lets a
- * host run it in its own engine. It also holds the generated catalog to its generator.
+ * host run it in its own engine. It also holds the generated catalog to its generator, and checks
+ * the rule the comparison names a step by.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -11,6 +12,7 @@ import { pathToFileURL } from "node:url";
 import * as runtime from "../dist/src/index.js";
 import { buildSteps, stepName, storedStates } from "./core.mjs";
 import { corpusRoot, loadCorpus } from "./corpus.mjs";
+import { verdict } from "./verdict.mjs";
 
 let failures = 0;
 function check(label, run) {
@@ -128,6 +130,26 @@ check("the core loads no module and names nothing of Node or of a clock", () => 
   const found = source.match(/\b(import|require|process|Buffer|performance|Date|setTimeout|setInterval|globalThis|global|console)\b/g);
   if (found !== null) {
     throw new Error(`it names ${[...new Set(found)].join(", ")}`);
+  }
+});
+
+// The comparison's rule: the median of a step's rounds beyond the threshold, with three quarters
+// of them agreeing on the direction, so that neither a wild round nor a mild median names a step.
+check("a step is named by the median of its rounds and their agreement", () => {
+  const cases = [
+    ["a steady 10%", [1.1, 1.09, 1.11, 1.1, 1.12, 1.08, 1.1], "slower"],
+    ["10% with one round far the other way", [1.1, 1.09, 0.5, 1.1, 1.12, 1.08, 1.1], "slower"],
+    ["two wild rounds on an unchanged step", [1.0, 2.5, 0.99, 1.01, 1.9, 1.0, 0.98], ""],
+    ["a median just under the threshold", [1.06, 1.06, 1.06, 1.06, 1.06, 1.06, 1.06], ""],
+    ["a median over it that three rounds contradict", [1.09, 1.09, 1.09, 1.09, 0.99, 1.0, 1.01], ""],
+    ["a steady 10% faster", [0.9, 0.91, 0.9, 0.89, 0.9, 0.92, 0.9], "faster"],
+    ["one round, which is its own median", [1.3], "slower"],
+  ];
+  for (const [what, ratios, expected] of cases) {
+    const actual = verdict(ratios, 0.07);
+    if (actual !== expected) {
+      throw new Error(`${what}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+    }
   }
 });
 

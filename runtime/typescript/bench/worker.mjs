@@ -24,6 +24,11 @@ if (task.kind === "cold") {
   parentPort.postMessage({ load, first: performance.now() - starting });
 } else {
   const picked = task.indices.map((index) => steps[index]);
+  // The first call of the first step is this isolate's cold sample, taken before anything warms.
+  picked[0].ready();
+  const starting = performance.now();
+  (picked[0].first ?? picked[0].run)();
+  const first = performance.now() - starting;
   const timings = sampleWarm(picked, task.samples);
-  parentPort.postMessage({ timings, usages: picked.map((step) => step.run()) });
+  parentPort.postMessage({ load, first, timings, usages: picked.map((step) => step.run()) });
 }
