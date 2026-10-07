@@ -8,7 +8,7 @@
  *
  *   node bench/compare.mjs [--base <ref>] [--rounds <n>] [--samples <n>] [--threshold <fraction>]
  *                          [--cold-threshold <fraction>] [--base-runtime <dir>] [--head-runtime <dir>]
- *                          [--json <path>] [--markdown <path>]
+ *                          [--json <path>] [--markdown <path>] [--report-only]
  *
  * `--base` is the revision to compare with, the merge base of `HEAD` and `origin/main` by
  * default. Its build (`runtime/typescript/dist/src`) and its corpus programs are read from Git
@@ -30,7 +30,10 @@
  * are always the working tree's.
  *
  * The command exits with 1 when it names a step as slower, and with 2 when it could not compare
- * at all: an option it cannot read, a revision with no build.
+ * at all: an option it cannot read, a revision with no build. With `--report-only` a step named
+ * as slower is reported and the command exits with 0, so that any other exit is a failure to run:
+ * it is how a comparison that is expected to name steps for a while, one with the last release,
+ * is kept from failing every time.
  */
 import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -66,6 +69,7 @@ try {
       "head-runtime": { type: "string", default: join(here, "../dist/src") },
       json: { type: "string", default: join(here, "out/compare.json") },
       markdown: { type: "string" },
+      "report-only": { type: "boolean", default: false },
     },
   }));
 } catch (error) {
@@ -319,6 +323,6 @@ if (options.markdown !== undefined) {
 mkdirSync(dirname(resolve(options.json)), { recursive: true });
 writeFileSync(resolve(options.json), `${JSON.stringify(report, undefined, 2)}\n`);
 console.log(`\nwritten to ${resolve(options.json)}`);
-if (named("slower").length > 0) {
+if (named("slower").length > 0 && !options["report-only"]) {
   process.exitCode = 1;
 }

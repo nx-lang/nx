@@ -328,15 +328,13 @@ jobs:
     # A step whose program changed since the release is reported as not comparable. The release
     # is the last one before this commit, so a commit that is itself a release is compared with
     # the one before it. A call that is slower than in the release is named in the summary and
-    # does not fail the step, which would otherwise fail on every push until the next release;
-    # the step fails when the comparison could not be made.
+    # does not fail the step (`--report-only`), which would otherwise fail on every push until the
+    # next release; the step fails when the comparison could not be made.
     - name: ⏱ Compare with the last release
       if: github.event_name != 'pull_request'
       run: |
         release=$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD^)
-        status=0
-        node runtime/typescript/bench/compare.mjs --base "$release" --markdown "$GITHUB_STEP_SUMMARY" || status=$?
-        if [ "$status" -gt 1 ]; then exit "$status"; fi
+        node runtime/typescript/bench/compare.mjs --base "$release" --report-only --markdown "$GITHUB_STEP_SUMMARY"
     - name: ⏱ Time every call
       if: github.event_name != 'pull_request' && cancelled() == false
       shell: bash # For `pipefail`: the step fails when the harness does, not when `tee` does.

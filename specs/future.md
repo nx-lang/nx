@@ -1897,7 +1897,7 @@ tool of a real host has been counted yet.
 
 A budget bounds operations and not time, and a small tool's time is mostly not its operations: the
 5-operation call above takes about 0.4 µs with no limits, of which reading its arguments is about
-0.15, and about 0.8 µs with a budget and an input limit set (*Reading a host value costs up to 25 ns a record, and about 100 on the slow path*,
+0.15, and about 0.8 µs with a budget and an input limit set (*Reading a host value costs up to 30 ns a record, and about 100 on the slow path*,
 below).
 
 **What would settle it.** A call reports the operations it used (`usage` in the runtime options,
@@ -2035,7 +2035,7 @@ check its design against the three conditions and the fourth above.
 
 ## Host Values: What `define-host-values` Left For Later
 
-### Reading a host value costs up to 25 ns a record, and about 100 on the slow path
+### Reading a host value costs up to 30 ns a record, and about 100 on the slow path
 
 **Observed.** The TypeScript IR runtime reads every value a host passes, once in a call, before
 anything is checked (`readHostValue`, `runtime/typescript/src/index.ts`). When the reading was
@@ -2058,7 +2058,7 @@ Node 24 (2026-10-06); times are with no limits set, before and after, and a rang
 - **A call that is nothing but input shows it, and plain data only just.** 10,000 records of three
   fields passed at `object` and returned, plain data, which the fast check settles: 0.98 to 1.18
   times, about 1.6 ms either way, and 1.07 to 1.16 times with limits set. That is from nothing to
-  0.3 ms, up to about 25 ns a record; the two builds timed in pairs in one isolate gave 3 to 18.
+  0.3 ms, up to about 30 ns a record; the two builds timed in pairs in one isolate gave 3 to 18.
   Task 2.2 measured 0.13 to 0.2 ms. The step's own time moves by a tenth between one comparison
   and the next, which is as large as the effect, so this is the edge of what the harness
   resolves.
@@ -2098,8 +2098,8 @@ costs what it cost. So:
 Each of these was decided against one number from one machine and one shape of input. The three
 shapes and two small calls are now steps of the harness, and `bench:compare` names one when a
 change makes it slower than the revision it is based on by more than 7% over its rounds. It names
-the reading as it was merged on those steps, the slow path and the two-integer call in every run
-and plain data and the other small call in some, and on no step of the two programs.
+the reading as it was merged on those steps, the slow path and both small calls in every run and
+plain data in some, and on no step of the two programs.
 
 **Why it might matter.** A component host passes its whole state on every call, so input the size
 of the state is the ordinary case and not a stress test. The check that follows the reading

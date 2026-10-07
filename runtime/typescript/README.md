@@ -192,7 +192,7 @@ once for each place it is held: a value that shares one object in many places is
 tree it spells, and `maxInputSize` is what bounds the reading of it, not `maxOperations`.
 
 **What reading costs.** Plain data with nothing to leave out is checked in one pass and used as
-it was passed, with no copy: up to about 25 ns for a record of three fields, measured by the
+it was passed, with no copy: up to about 30 ns for a record of three fields, measured by the
 `input` phase of the harness below (*Performance*) on one machine. A value the check does not
 settle is read again by a slower walk that keeps track of where it is and of the objects it is
 inside, at about 100 ns for each record. Three things send a value there: a member that is
@@ -210,7 +210,7 @@ const row = { id, label, ...(note === undefined ? {} : { note }) }; // not { id,
 ```
 
 The slower walk can be made cheaper, and has not been. `specs/future.md` (*Reading a host value
-costs up to 25 ns a record, and about 100 on the slow path*) lists how: it can drop its set of
+costs up to 30 ns a record, and about 100 on the slow path*) lists how: it can drop its set of
 the objects it is inside when `maxInputSize` has already measured the value, since a value within
 the limit holds nothing that holds itself; it can read an object's members as the fast check does
 instead of listing their names first; and the input measure can report that it met only plain
@@ -621,7 +621,9 @@ runners, was named for none of 1,200 warm, 340 cold and 20 load steps, and the s
 30% slower to be named nine times in ten. So a slowdown of a few percent passes, which is what
 the comparison with the last release, below, is for.
 
-The command exits with 1 when a step is slower, and with 2 when it could not compare at all.
+The command exits with 1 when a step is slower, and with 2 when it could not compare at all;
+with `--report-only` a slower step is reported and does not fail it, which is how CI runs the
+comparison with the last release.
 Both operation counts are in the report, so a call that costs more operations shows without any
 noise. A call is reported as not comparable when its program's sources differ between the two
 revisions, when the base has no such program, when the base's runtime lacks a function the call
