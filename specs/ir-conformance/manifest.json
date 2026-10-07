@@ -11,11 +11,13 @@
         "host-values",
         "occurrence-lifting",
         "parameter-defaults",
+        "question-flow",
         "ranges",
         "two-module"
       ],
       "and": [
-        "expressions"
+        "expressions",
+        "question-flow"
       ],
       "concat": [
         "agent-library",
@@ -25,9 +27,11 @@
         "expressions",
         "function-values",
         "host-values",
+        "large-catalog",
         "occurrence-lifting",
         "occurrences",
-        "parameter-defaults"
+        "parameter-defaults",
+        "question-flow"
       ],
       "div": [
         "argument-diagnostics",
@@ -42,6 +46,7 @@
         "function-values",
         "host-values",
         "occurrence-lifting",
+        "question-flow",
         "ranges"
       ],
       "fadd32": [
@@ -57,10 +62,12 @@
         "conversions"
       ],
       "ge": [
-        "expressions"
+        "expressions",
+        "question-flow"
       ],
       "gt": [
-        "expressions"
+        "expressions",
+        "question-flow"
       ],
       "idiv": [
         "argument-diagnostics",
@@ -71,7 +78,8 @@
         "expressions"
       ],
       "le": [
-        "expressions"
+        "expressions",
+        "question-flow"
       ],
       "lt": [
         "conversions",
@@ -90,7 +98,8 @@
       ],
       "ne": [
         "expressions",
-        "occurrence-lifting"
+        "occurrence-lifting",
+        "question-flow"
       ],
       "or": [
         "expressions"
@@ -107,7 +116,9 @@
       "float": [
         "conversions",
         "expressions",
+        "large-catalog",
         "occurrence-lifting",
+        "question-flow",
         "ranges"
       ],
       "int": [
@@ -122,9 +133,11 @@
         "generic-records",
         "handlers",
         "host-values",
+        "large-catalog",
         "occurrence-lifting",
         "occurrences",
         "parameter-defaults",
+        "question-flow",
         "ranges",
         "records",
         "snippet",
@@ -139,7 +152,9 @@
         "function-values",
         "handlers",
         "host-values",
+        "large-catalog",
         "occurrences",
+        "question-flow",
         "snippet",
         "trailing-element",
         "two-module"
@@ -157,10 +172,12 @@
         "generic-records",
         "handlers",
         "host-values",
+        "large-catalog",
         "occurrence-lifting",
         "occurrence-patterns",
         "occurrences",
         "parameter-defaults",
+        "question-flow",
         "ranges",
         "records",
         "snippet",
@@ -178,9 +195,11 @@
         "generic-records",
         "handlers",
         "host-values",
+        "large-catalog",
         "occurrence-lifting",
         "occurrence-patterns",
         "occurrences",
+        "question-flow",
         "records",
         "two-module"
       ],
@@ -196,6 +215,8 @@
         "evaluation-cost",
         "expressions",
         "handlers",
+        "large-catalog",
+        "question-flow",
         "records",
         "two-module"
       ],
@@ -207,8 +228,10 @@
         "expressions",
         "function-values",
         "handlers",
+        "large-catalog",
         "occurrence-lifting",
         "parameter-defaults",
+        "question-flow",
         "snippet"
       ]
     },
@@ -234,6 +257,7 @@
         "evaluation-cost",
         "handlers",
         "host-values",
+        "question-flow",
         "two-module"
       ],
       "array": [
@@ -246,9 +270,11 @@
         "function-references",
         "function-values",
         "handlers",
+        "large-catalog",
         "occurrence-lifting",
         "occurrence-patterns",
         "occurrences",
+        "question-flow",
         "records"
       ],
       "binary": [
@@ -263,9 +289,11 @@
         "generic-records",
         "handlers",
         "host-values",
+        "large-catalog",
         "occurrence-lifting",
         "occurrences",
         "parameter-defaults",
+        "question-flow",
         "ranges",
         "two-module"
       ],
@@ -273,7 +301,9 @@
         "conversions",
         "evaluation-cost",
         "expressions",
+        "large-catalog",
         "occurrence-lifting",
+        "question-flow",
         "ranges",
         "snippet",
         "trailing-element"
@@ -291,6 +321,7 @@
         "occurrence-patterns",
         "occurrences",
         "parameter-defaults",
+        "question-flow",
         "ranges",
         "records",
         "two-module"
@@ -306,7 +337,9 @@
         "function-values",
         "handlers",
         "host-values",
+        "large-catalog",
         "occurrences",
+        "question-flow",
         "snippet",
         "trailing-element",
         "two-module"
@@ -317,13 +350,15 @@
         "handlers"
       ],
       "exists": [
-        "occurrences"
+        "occurrences",
+        "question-flow"
       ],
       "for": [
         "components",
         "evaluation-cost",
         "expressions",
         "handlers",
+        "large-catalog",
         "occurrence-lifting"
       ],
       "forRange": [
@@ -333,7 +368,9 @@
       "if": [
         "conversions",
         "expressions",
-        "occurrence-lifting"
+        "large-catalog",
+        "occurrence-lifting",
+        "question-flow"
       ],
       "ifIs": [
         "conversions",
@@ -356,9 +393,11 @@
         "function-values",
         "generic-records",
         "handlers",
+        "large-catalog",
         "occurrence-lifting",
         "occurrence-patterns",
         "occurrences",
+        "question-flow",
         "records",
         "two-module"
       ],
@@ -379,9 +418,11 @@
         "generic-records",
         "handlers",
         "host-values",
+        "large-catalog",
         "occurrence-lifting",
         "occurrences",
         "parameter-defaults",
+        "question-flow",
         "ranges",
         "records",
         "snippet",
@@ -401,9 +442,11 @@
         "generic-records",
         "handlers",
         "host-values",
+        "large-catalog",
         "occurrence-lifting",
         "occurrence-patterns",
         "occurrences",
+        "question-flow",
         "ranges",
         "records",
         "two-module"
@@ -420,10 +463,12 @@
         "generic-records",
         "handlers",
         "host-values",
+        "large-catalog",
         "occurrence-lifting",
         "occurrence-patterns",
         "occurrences",
         "parameter-defaults",
+        "question-flow",
         "ranges",
         "records",
         "snippet",
@@ -442,10 +487,12 @@
         "generic-records",
         "handlers",
         "host-values",
+        "large-catalog",
         "occurrence-lifting",
         "occurrence-patterns",
         "occurrences",
         "parameter-defaults",
+        "question-flow",
         "ranges",
         "records",
         "two-module"
@@ -463,10 +510,12 @@
         "generic-records",
         "handlers",
         "host-values",
+        "large-catalog",
         "occurrence-lifting",
         "occurrence-patterns",
         "occurrences",
         "parameter-defaults",
+        "question-flow",
         "records",
         "snippet",
         "trailing-element",
@@ -475,7 +524,9 @@
       "text": [
         "conversions",
         "function-values",
-        "parameter-defaults"
+        "large-catalog",
+        "parameter-defaults",
+        "question-flow"
       ],
       "unary": [
         "expressions"
@@ -485,6 +536,8 @@
         "evaluation-cost",
         "expressions",
         "handlers",
+        "large-catalog",
+        "question-flow",
         "records",
         "two-module"
       ]
@@ -512,9 +565,11 @@
         "function-values",
         "generic-records",
         "handlers",
+        "large-catalog",
         "occurrence-lifting",
         "occurrence-patterns",
         "occurrences",
+        "question-flow",
         "ranges",
         "records",
         "snippet",
@@ -534,10 +589,12 @@
         "generic-records",
         "handlers",
         "host-values",
+        "large-catalog",
         "occurrence-lifting",
         "occurrence-patterns",
         "occurrences",
         "parameter-defaults",
+        "question-flow",
         "ranges",
         "records",
         "snippet",
@@ -556,10 +613,12 @@
         "generic-records",
         "handlers",
         "host-values",
+        "large-catalog",
         "occurrence-lifting",
         "occurrence-patterns",
         "occurrences",
         "parameter-defaults",
+        "question-flow",
         "records",
         "snippet",
         "trailing-element"
@@ -587,10 +646,12 @@
     "generic-records",
     "handlers",
     "host-values",
+    "large-catalog",
     "occurrence-lifting",
     "occurrence-patterns",
     "occurrences",
     "parameter-defaults",
+    "question-flow",
     "ranges",
     "records",
     "snippet",

@@ -55,25 +55,34 @@ Only stable `major.minor.patch` release tags are supported in this implementatio
 
 1. Merge the release change to `main`, including a section for the release version in
    `src/vscode/CHANGELOG.md`, which the Marketplace and Open VSX show as the extension's changelog.
-2. Create and push a release tag:
+2. Check what the release does to the speed of `@nx-lang/ir-runtime`. Every push to `main` compares
+   it with the last release in the `⏱ Runtime performance` job of the Build workflow, and the job's
+   summary names each call that is slower than it was in that release. To run the same comparison
+   on your own machine, about two minutes:
+   ```bash
+   node runtime/typescript/bench/compare.mjs --base v1.2.2
+   ```
+   Look at any call it names before tagging. `runtime/typescript/README.md` (*Performance*) says
+   how to read the report.
+3. Create and push a release tag:
    ```bash
    git tag v1.2.3
    git push origin v1.2.3
    ```
-3. Wait for the Release workflow to finish.
-4. Open the draft GitHub Release for `v1.2.3`, titled `NX 1.2.3`.
-5. Inspect the attached `.nupkg`, `.snupkg`, npm `.tgz` files, the three `.vsix` files,
+4. Wait for the Release workflow to finish.
+5. Open the draft GitHub Release for `v1.2.3`, titled `NX 1.2.3`.
+6. Inspect the attached `.nupkg`, `.snupkg`, npm `.tgz` files, the three `.vsix` files,
    `release-manifest.json`, and `release-checksums.txt`.
-6. Confirm the manifest tag, version, commit, artifact names, and checksums match the intended
+7. Confirm the manifest tag, version, commit, artifact names, and checksums match the intended
    release, and that every VSIX contains publisher `nx-lang`, extension `nx-language`, and version
    `1.2.3`.
-7. Publish the GitHub Release.
-8. Approve the `production` environment deployments if reviewers are required.
-9. Confirm publication:
-   - NuGet.org lists `NxLang.Sdk` 1.2.3.
-   - `npm view @nx-lang/sdk-wasm version`, and the same for each package, answers `1.2.3`.
-   - The Visual Studio Marketplace and Open VSX list `nx-lang.nx-language` 1.2.3 for all three
-     platforms.
+8. Publish the GitHub Release.
+9. Approve the `production` environment deployments if reviewers are required.
+10. Confirm publication:
+    - NuGet.org lists `NxLang.Sdk` 1.2.3.
+    - `npm view @nx-lang/sdk-wasm version`, and the same for each package, answers `1.2.3`.
+    - The Visual Studio Marketplace and Open VSX list `nx-lang.nx-language` 1.2.3 for all three
+      platforms.
 
 The publish job publishes the npm tarballs in dependency order (`scripts/publish-packages.mjs`), so
 a consumer installing a just-published package finds its `@nx-lang/*` dependencies on the registry

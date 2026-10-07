@@ -1,0 +1,77 @@
+module library/layout.nx fingerprint 11139573422423982897
+links library/questions.nx version "" fingerprint 14700776180858802568
+links library/answers.nx version "" fingerprint 4710217782950829473
+entrypoints functions [] components [Step Progress Summary Notice Button Screen]
+
+record FlowDefinition
+  id: string required
+  title: string required
+  description: string?
+  version: int = 1
+  content questions: library/questions.nx:Question+ required
+
+record SummaryRow
+  label: string required
+  value: string required
+
+component Step external
+  props
+    question: library/questions.nx:Question required
+  emits
+    TextAnswered = Step.TextAnswered
+    NumberAnswered = Step.NumberAnswered
+    IntegerAnswered = Step.IntegerAnswered
+    BooleanAnswered = Step.BooleanAnswered
+    ChoiceAnswered = Step.ChoiceAnswered
+    ChoicesAnswered = Step.ChoicesAnswered
+    Answered = Step.Answered
+
+record Step.TextAnswered
+  answer: library/answers.nx:TextAnswer required
+
+record Step.NumberAnswered
+  answer: library/answers.nx:NumberAnswer required
+
+record Step.IntegerAnswered
+  answer: library/answers.nx:IntegerAnswer required
+
+record Step.BooleanAnswered
+  answer: library/answers.nx:BooleanAnswer required
+
+record Step.ChoiceAnswered
+  answer: library/answers.nx:ChoiceAnswer required
+
+record Step.ChoicesAnswered
+  answer: library/answers.nx:ChoicesAnswer required
+
+record Step.Answered
+  answer: library/answers.nx:Answer required
+
+component Progress external
+  props
+    answered: int required
+    total: int required
+
+component Summary external
+  props
+    title: string required
+    content rows: SummaryRow+ required
+
+component Notice external
+  props
+    title: string required
+    body: string?
+
+component Button external
+  props
+    label: string required
+  emits
+    Tapped = Button.Tapped
+
+record Button.Tapped
+
+component Screen external
+  props
+    title: string required
+    subtitle: string?
+    content children: library/questions.nx:Node+ required

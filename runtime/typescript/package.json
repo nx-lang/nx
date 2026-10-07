@@ -27,7 +27,9 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "tsc -p tsconfig.json && node dist/test/runtime.test.js && node test/corpus.test.mjs && node test/emitted-ir.test.mjs",
+    "test": "tsc -p tsconfig.json && node dist/test/runtime.test.js && node test/corpus.test.mjs && node test/emitted-ir.test.mjs && node bench/core.test.mjs",
+    "bench": "tsc -p tsconfig.json && node bench/run.mjs",
+    "bench:compare": "tsc -p tsconfig.json && node bench/compare.mjs",
     "prepack": "pnpm run build",
     "verify:package": "node ../../scripts/verify-package.mjs"
   },

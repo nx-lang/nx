@@ -1,0 +1,4306 @@
+module catalog.nx fingerprint 4871325874332043762
+entrypoints functions [] components [Node View LayoutBase Layout Stack Row Column Wrap Grid TextBase Label RichText Link ShapeBase Shape Curve Line Frame ImageBase Image Icon Svg Animation Avatar InputBase Entry Editor Search RangeBase Slider Progress Stepper ScrollBase Scroll List Carousel OverlayBase Drawer Popup Sheet ToggleBase Switch Checkbox Button Spinner]
+
+union Align
+  case Start constant
+  case Center constant
+  case End constant
+  case Fill constant
+
+union Axis
+  case Horizontal constant
+  case Vertical constant
+
+union BarVisibility
+  case Auto constant
+  case Always constant
+  case Never constant
+
+union Blend
+  case Clear constant
+  case Source constant
+  case Destination constant
+  case SourceOver constant
+  case DestinationOver constant
+  case SourceIn constant
+  case DestinationIn constant
+  case SourceOut constant
+  case DestinationOut constant
+  case SourceAtop constant
+  case DestinationAtop constant
+  case Xor constant
+  case Plus constant
+  case Modulate constant
+  case Screen constant
+  case Overlay constant
+  case Darken constant
+  case Lighten constant
+  case ColorDodge constant
+  case ColorBurn constant
+  case HardLight constant
+  case SoftLight constant
+  case Difference constant
+  case Exclusion constant
+  case Multiply constant
+  case Hue constant
+  case Saturation constant
+  case Color constant
+  case Luminosity constant
+
+union CacheKind
+  case None constant
+  case Image constant
+  case Operations constant
+  case Memory constant
+  case Gpu constant
+
+union ClipKind
+  case None constant
+  case Bounds constant
+  case Outline constant
+
+union ColorFilter
+  case None constant
+  case Grayscale constant
+  case Sepia constant
+  case Invert constant
+  case Tint constant
+
+union DrawerEdge
+  case Left constant
+  case Top constant
+  case Right constant
+  case Bottom constant
+
+union Easing
+  case Linear constant
+  case EaseIn constant
+  case EaseOut constant
+  case EaseInOut constant
+  case Spring constant
+
+union FontStyle
+  case Upright constant
+  case Italic constant
+  case Oblique constant
+
+union FontWeight
+  case Thin constant
+  case Light constant
+  case Regular constant
+  case Medium constant
+  case SemiBold constant
+  case Bold constant
+  case Black constant
+
+union GradientKind
+  case None constant
+  case Linear constant
+  case Radial constant
+  case Sweep constant
+
+union ImageFit
+  case Fill constant
+  case Contain constant
+  case Cover constant
+  case ScaleDown constant
+  case None constant
+
+union ImageQuality
+  case Low constant
+  case Medium constant
+  case High constant
+
+union IndicatorKind
+  case Ring constant
+  case Bar constant
+  case Dots constant
+
+union KeyboardKind
+  case Text constant
+  case Number constant
+  case Email constant
+  case Phone constant
+  case Url constant
+
+union LayoutKind
+  case Vertical constant
+  case Horizontal constant
+  case Layered constant
+  case Flow constant
+  case Table constant
+
+union PointerMode
+  case Auto constant
+  case PassThrough constant
+  case Block constant
+
+union ReturnKey
+  case Done constant
+  case Next constant
+  case Find constant
+  case Send constant
+  case Go constant
+
+union ScrollMode
+  case None constant
+  case Vertical constant
+  case Horizontal constant
+  case Both constant
+
+union ShapeKind
+  case Rectangle constant
+  case Circle constant
+  case Ellipse constant
+  case Arc constant
+  case Outline constant
+  case Polygon constant
+  case Segment constant
+
+union SliderKind
+  case Single constant
+  case Range constant
+
+union SnapMode
+  case None constant
+  case Start constant
+  case Center constant
+  case End constant
+
+union StrokeCap
+  case Butt constant
+  case Round constant
+  case Square constant
+
+union StrokeJoin
+  case Miter constant
+  case Round constant
+  case Bevel constant
+
+union TextAlign
+  case Start constant
+  case Center constant
+  case End constant
+  case Justify constant
+
+union TextCase
+  case AsWritten constant
+  case Lower constant
+  case Upper constant
+  case Title constant
+
+union TextTrim
+  case None constant
+  case Character constant
+  case Word constant
+  case Ellipsis constant
+
+union TouchEffect
+  case None constant
+  case Ripple constant
+  case Highlight constant
+  case Shrink constant
+
+union TransitionKind
+  case None constant
+  case Fade constant
+  case Slide constant
+  case Zoom constant
+  case Flip constant
+
+union Visibility
+  case Visible constant
+  case Hidden constant
+  case Collapsed constant
+
+record Corners
+  TopLeft: float64 = 0.0
+  TopRight: float64 = 0.0
+  BottomRight: float64 = 0.0
+  BottomLeft: float64 = 0.0
+
+record Edge
+  Color: string = "#000000"
+  Width: float64 = 1.0
+  Dash: string = ""
+
+record Gradient
+  Kind: GradientKind = GradientKind.Linear
+  Angle: float64 = 0.0
+  Colors: string+ required
+  Stops: float64*
+
+record Insets
+  Left: float64 = 0.0
+  Top: float64 = 0.0
+  Right: float64 = 0.0
+  Bottom: float64 = 0.0
+
+record Point
+  X: float64 = 0.0
+  Y: float64 = 0.0
+
+record Shadow
+  Color: string = "#000000"
+  X: float64 = 0.0
+  Y: float64 = 0.0
+  Blur: float64 = 0.0
+
+component Node abstract external
+
+component View abstract external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+
+record View.Tapped
+
+record View.LongPressed
+
+record View.Appeared
+
+record View.Disappeared
+
+component LayoutBase abstract external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    Columns: string?
+    Rows: string?
+    ItemKeyPath: string?
+    EmptyText: string?
+    GroupKeyPath: string?
+    HeaderText: string?
+    FooterText: string?
+    RowSpacing: float64?
+    ColumnSpacing: float64?
+    ItemWidth: float64?
+    ItemHeight: float64?
+    EstimatedItemSize: float64?
+    InflateBefore: float64?
+    InflateAfter: float64?
+    SplitRatio: float64?
+    RecycleMargin: float64?
+    LoadMoreThreshold: float64?
+    StickyOffset: float64?
+    MaxColumns: int?
+    MaxRows: int?
+    BatchSize: int?
+    InitialIndex: int?
+    IsVirtualized: boolean?
+    RecyclesCells: boolean?
+    WrapsContent: boolean?
+    EqualizesHeights: boolean?
+    EqualizesWidths: boolean?
+    IsReversed: boolean?
+    FillsLastRow: boolean?
+    KeepsPosition: boolean?
+    ShowsEmptyView: boolean?
+    IsGrouped: boolean?
+    HasStickyHeaders: boolean?
+    Kind: LayoutKind?
+    Direction: Axis?
+    JustifyContent: Align?
+    AlignItems: Align?
+    ItemPadding: Insets?
+    ItemCorners: Corners?
+    Spacing: float64 = 0.0
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+    ItemAppeared = LayoutBase.ItemAppeared
+    ItemDisappeared = LayoutBase.ItemDisappeared
+    SelectionChanged = LayoutBase.SelectionChanged
+
+record LayoutBase.ItemAppeared
+  index: int required
+
+record LayoutBase.ItemDisappeared
+  index: int required
+
+record LayoutBase.SelectionChanged
+  index: int required
+
+component Layout external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    Columns: string?
+    Rows: string?
+    ItemKeyPath: string?
+    EmptyText: string?
+    GroupKeyPath: string?
+    HeaderText: string?
+    FooterText: string?
+    RowSpacing: float64?
+    ColumnSpacing: float64?
+    ItemWidth: float64?
+    ItemHeight: float64?
+    EstimatedItemSize: float64?
+    InflateBefore: float64?
+    InflateAfter: float64?
+    SplitRatio: float64?
+    RecycleMargin: float64?
+    LoadMoreThreshold: float64?
+    StickyOffset: float64?
+    MaxColumns: int?
+    MaxRows: int?
+    BatchSize: int?
+    InitialIndex: int?
+    IsVirtualized: boolean?
+    RecyclesCells: boolean?
+    WrapsContent: boolean?
+    EqualizesHeights: boolean?
+    EqualizesWidths: boolean?
+    IsReversed: boolean?
+    FillsLastRow: boolean?
+    KeepsPosition: boolean?
+    ShowsEmptyView: boolean?
+    IsGrouped: boolean?
+    HasStickyHeaders: boolean?
+    Kind: LayoutKind?
+    Direction: Axis?
+    JustifyContent: Align?
+    AlignItems: Align?
+    ItemPadding: Insets?
+    ItemCorners: Corners?
+    Spacing: float64 = 0.0
+    CacheScale: float64?
+    KeepsCacheWhenHidden: boolean?
+    RedrawsOnResize: boolean?
+    IsMirrored: boolean?
+    content Children: Node*
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+    ItemAppeared = LayoutBase.ItemAppeared
+    ItemDisappeared = LayoutBase.ItemDisappeared
+    SelectionChanged = LayoutBase.SelectionChanged
+
+component Stack external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    Columns: string?
+    Rows: string?
+    ItemKeyPath: string?
+    EmptyText: string?
+    GroupKeyPath: string?
+    HeaderText: string?
+    FooterText: string?
+    RowSpacing: float64?
+    ColumnSpacing: float64?
+    ItemWidth: float64?
+    ItemHeight: float64?
+    EstimatedItemSize: float64?
+    InflateBefore: float64?
+    InflateAfter: float64?
+    SplitRatio: float64?
+    RecycleMargin: float64?
+    LoadMoreThreshold: float64?
+    StickyOffset: float64?
+    MaxColumns: int?
+    MaxRows: int?
+    BatchSize: int?
+    InitialIndex: int?
+    IsVirtualized: boolean?
+    RecyclesCells: boolean?
+    WrapsContent: boolean?
+    EqualizesHeights: boolean?
+    EqualizesWidths: boolean?
+    IsReversed: boolean?
+    FillsLastRow: boolean?
+    KeepsPosition: boolean?
+    ShowsEmptyView: boolean?
+    IsGrouped: boolean?
+    HasStickyHeaders: boolean?
+    Kind: LayoutKind?
+    Direction: Axis?
+    JustifyContent: Align?
+    AlignItems: Align?
+    ItemPadding: Insets?
+    ItemCorners: Corners?
+    Spacing: float64 = 0.0
+    StretchesItems: boolean?
+    MaxItemsShown: int?
+    content Children: Node*
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+    ItemAppeared = LayoutBase.ItemAppeared
+    ItemDisappeared = LayoutBase.ItemDisappeared
+    SelectionChanged = LayoutBase.SelectionChanged
+
+component Row external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    Columns: string?
+    Rows: string?
+    ItemKeyPath: string?
+    EmptyText: string?
+    GroupKeyPath: string?
+    HeaderText: string?
+    FooterText: string?
+    RowSpacing: float64?
+    ColumnSpacing: float64?
+    ItemWidth: float64?
+    ItemHeight: float64?
+    EstimatedItemSize: float64?
+    InflateBefore: float64?
+    InflateAfter: float64?
+    SplitRatio: float64?
+    RecycleMargin: float64?
+    LoadMoreThreshold: float64?
+    StickyOffset: float64?
+    MaxColumns: int?
+    MaxRows: int?
+    BatchSize: int?
+    InitialIndex: int?
+    IsVirtualized: boolean?
+    RecyclesCells: boolean?
+    WrapsContent: boolean?
+    EqualizesHeights: boolean?
+    EqualizesWidths: boolean?
+    IsReversed: boolean?
+    FillsLastRow: boolean?
+    KeepsPosition: boolean?
+    ShowsEmptyView: boolean?
+    IsGrouped: boolean?
+    HasStickyHeaders: boolean?
+    Kind: LayoutKind?
+    Direction: Axis?
+    JustifyContent: Align?
+    AlignItems: Align?
+    ItemPadding: Insets?
+    ItemCorners: Corners?
+    Spacing: float64 = 0.0
+    AlignsBaselines: boolean?
+    WrapsWhenNarrow: boolean?
+    MinItemWidth: float64?
+    content Children: Node*
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+    ItemAppeared = LayoutBase.ItemAppeared
+    ItemDisappeared = LayoutBase.ItemDisappeared
+    SelectionChanged = LayoutBase.SelectionChanged
+
+component Column external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    Columns: string?
+    Rows: string?
+    ItemKeyPath: string?
+    EmptyText: string?
+    GroupKeyPath: string?
+    HeaderText: string?
+    FooterText: string?
+    RowSpacing: float64?
+    ColumnSpacing: float64?
+    ItemWidth: float64?
+    ItemHeight: float64?
+    EstimatedItemSize: float64?
+    InflateBefore: float64?
+    InflateAfter: float64?
+    SplitRatio: float64?
+    RecycleMargin: float64?
+    LoadMoreThreshold: float64?
+    StickyOffset: float64?
+    MaxColumns: int?
+    MaxRows: int?
+    BatchSize: int?
+    InitialIndex: int?
+    IsVirtualized: boolean?
+    RecyclesCells: boolean?
+    WrapsContent: boolean?
+    EqualizesHeights: boolean?
+    EqualizesWidths: boolean?
+    IsReversed: boolean?
+    FillsLastRow: boolean?
+    KeepsPosition: boolean?
+    ShowsEmptyView: boolean?
+    IsGrouped: boolean?
+    HasStickyHeaders: boolean?
+    Kind: LayoutKind?
+    Direction: Axis?
+    JustifyContent: Align?
+    AlignItems: Align?
+    ItemPadding: Insets?
+    ItemCorners: Corners?
+    Spacing: float64 = 0.0
+    DistributesEvenly: boolean?
+    MinItemHeight: float64?
+    content Children: Node*
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+    ItemAppeared = LayoutBase.ItemAppeared
+    ItemDisappeared = LayoutBase.ItemDisappeared
+    SelectionChanged = LayoutBase.SelectionChanged
+
+component Wrap external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    Columns: string?
+    Rows: string?
+    ItemKeyPath: string?
+    EmptyText: string?
+    GroupKeyPath: string?
+    HeaderText: string?
+    FooterText: string?
+    RowSpacing: float64?
+    ColumnSpacing: float64?
+    ItemWidth: float64?
+    ItemHeight: float64?
+    EstimatedItemSize: float64?
+    InflateBefore: float64?
+    InflateAfter: float64?
+    SplitRatio: float64?
+    RecycleMargin: float64?
+    LoadMoreThreshold: float64?
+    StickyOffset: float64?
+    MaxColumns: int?
+    MaxRows: int?
+    BatchSize: int?
+    InitialIndex: int?
+    IsVirtualized: boolean?
+    RecyclesCells: boolean?
+    WrapsContent: boolean?
+    EqualizesHeights: boolean?
+    EqualizesWidths: boolean?
+    IsReversed: boolean?
+    FillsLastRow: boolean?
+    KeepsPosition: boolean?
+    ShowsEmptyView: boolean?
+    IsGrouped: boolean?
+    HasStickyHeaders: boolean?
+    Kind: LayoutKind?
+    Direction: Axis?
+    JustifyContent: Align?
+    AlignItems: Align?
+    ItemPadding: Insets?
+    ItemCorners: Corners?
+    Spacing: float64 = 0.0
+    LineSpacing: float64?
+    MaxLinesShown: int?
+    LineAlign: Align?
+    TrimsTrailingSpacing: boolean?
+    content Children: Node*
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+    ItemAppeared = LayoutBase.ItemAppeared
+    ItemDisappeared = LayoutBase.ItemDisappeared
+    SelectionChanged = LayoutBase.SelectionChanged
+
+component Grid external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    Columns: string?
+    Rows: string?
+    ItemKeyPath: string?
+    EmptyText: string?
+    GroupKeyPath: string?
+    HeaderText: string?
+    FooterText: string?
+    RowSpacing: float64?
+    ColumnSpacing: float64?
+    ItemWidth: float64?
+    ItemHeight: float64?
+    EstimatedItemSize: float64?
+    InflateBefore: float64?
+    InflateAfter: float64?
+    SplitRatio: float64?
+    RecycleMargin: float64?
+    LoadMoreThreshold: float64?
+    StickyOffset: float64?
+    MaxColumns: int?
+    MaxRows: int?
+    BatchSize: int?
+    InitialIndex: int?
+    IsVirtualized: boolean?
+    RecyclesCells: boolean?
+    WrapsContent: boolean?
+    EqualizesHeights: boolean?
+    EqualizesWidths: boolean?
+    IsReversed: boolean?
+    FillsLastRow: boolean?
+    KeepsPosition: boolean?
+    ShowsEmptyView: boolean?
+    IsGrouped: boolean?
+    HasStickyHeaders: boolean?
+    Kind: LayoutKind?
+    Direction: Axis?
+    JustifyContent: Align?
+    AlignItems: Align?
+    ItemPadding: Insets?
+    ItemCorners: Corners?
+    Spacing: float64 = 0.0
+    DefaultColumn: string?
+    DefaultRow: string?
+    LineColor: string?
+    ColumnCount: int?
+    RowCount: int?
+    LineWidth: float64?
+    ShowsLines: boolean?
+    content Children: Node*
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+    ItemAppeared = LayoutBase.ItemAppeared
+    ItemDisappeared = LayoutBase.ItemDisappeared
+    SelectionChanged = LayoutBase.SelectionChanged
+
+component TextBase abstract external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    FontFamily: string?
+    TextColor: string?
+    StrokeColor: string?
+    ShadowColor: string?
+    LinkColor: string?
+    Locale: string?
+    FallbackFamily: string?
+    LineHeight: float64?
+    LineSpacing: float64?
+    LetterSpacing: float64?
+    ParagraphSpacing: float64?
+    StrokeWidth: float64?
+    MaxFontSize: float64?
+    MinFontSize: float64?
+    AutoSizeStep: float64?
+    DropShadowSize: float64?
+    FirstLineIndent: float64?
+    MaxLines: int?
+    MinLines: int?
+    AutoSize: boolean?
+    IsSelectable: boolean?
+    IsUnderlined: boolean?
+    IsStruckThrough: boolean?
+    KeepsSpacesOnLineBreak: boolean?
+    UsesFontScaling: boolean?
+    Weight: FontWeight?
+    Style: FontStyle?
+    HorizontalTextAlign: TextAlign?
+    VerticalTextAlign: Align?
+    Case: TextCase?
+    Trim: TextTrim?
+    TextGradient: Gradient?
+    TextShadow: Shadow?
+    FontSize: float64 = 14.0
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+
+component Label external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    FontFamily: string?
+    TextColor: string?
+    StrokeColor: string?
+    ShadowColor: string?
+    LinkColor: string?
+    Locale: string?
+    FallbackFamily: string?
+    LineHeight: float64?
+    LineSpacing: float64?
+    LetterSpacing: float64?
+    ParagraphSpacing: float64?
+    StrokeWidth: float64?
+    MaxFontSize: float64?
+    MinFontSize: float64?
+    AutoSizeStep: float64?
+    DropShadowSize: float64?
+    FirstLineIndent: float64?
+    MaxLines: int?
+    MinLines: int?
+    AutoSize: boolean?
+    IsSelectable: boolean?
+    IsUnderlined: boolean?
+    IsStruckThrough: boolean?
+    KeepsSpacesOnLineBreak: boolean?
+    UsesFontScaling: boolean?
+    Weight: FontWeight?
+    Style: FontStyle?
+    HorizontalTextAlign: TextAlign?
+    VerticalTextAlign: Align?
+    Case: TextCase?
+    Trim: TextTrim?
+    TextGradient: Gradient?
+    TextShadow: Shadow?
+    FontSize: float64 = 14.0
+    Text: string?
+    FormatString: string?
+    HeadingLevel: int?
+    IsHeading: boolean?
+    IsMonospaced: boolean?
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+
+component RichText external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    FontFamily: string?
+    TextColor: string?
+    StrokeColor: string?
+    ShadowColor: string?
+    LinkColor: string?
+    Locale: string?
+    FallbackFamily: string?
+    LineHeight: float64?
+    LineSpacing: float64?
+    LetterSpacing: float64?
+    ParagraphSpacing: float64?
+    StrokeWidth: float64?
+    MaxFontSize: float64?
+    MinFontSize: float64?
+    AutoSizeStep: float64?
+    DropShadowSize: float64?
+    FirstLineIndent: float64?
+    MaxLines: int?
+    MinLines: int?
+    AutoSize: boolean?
+    IsSelectable: boolean?
+    IsUnderlined: boolean?
+    IsStruckThrough: boolean?
+    KeepsSpacesOnLineBreak: boolean?
+    UsesFontScaling: boolean?
+    Weight: FontWeight?
+    Style: FontStyle?
+    HorizontalTextAlign: TextAlign?
+    VerticalTextAlign: Align?
+    Case: TextCase?
+    Trim: TextTrim?
+    TextGradient: Gradient?
+    TextShadow: Shadow?
+    FontSize: float64 = 14.0
+    Markup: string?
+    LinkStyleClass: string?
+    CodeFontFamily: string?
+    AllowsLinks: boolean?
+    OpensLinksExternally: boolean?
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+
+component Link external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    FontFamily: string?
+    TextColor: string?
+    StrokeColor: string?
+    ShadowColor: string?
+    LinkColor: string?
+    Locale: string?
+    FallbackFamily: string?
+    LineHeight: float64?
+    LineSpacing: float64?
+    LetterSpacing: float64?
+    ParagraphSpacing: float64?
+    StrokeWidth: float64?
+    MaxFontSize: float64?
+    MinFontSize: float64?
+    AutoSizeStep: float64?
+    DropShadowSize: float64?
+    FirstLineIndent: float64?
+    MaxLines: int?
+    MinLines: int?
+    AutoSize: boolean?
+    IsSelectable: boolean?
+    IsUnderlined: boolean?
+    IsStruckThrough: boolean?
+    KeepsSpacesOnLineBreak: boolean?
+    UsesFontScaling: boolean?
+    Weight: FontWeight?
+    Style: FontStyle?
+    HorizontalTextAlign: TextAlign?
+    VerticalTextAlign: Align?
+    Case: TextCase?
+    Trim: TextTrim?
+    TextGradient: Gradient?
+    TextShadow: Shadow?
+    FontSize: float64 = 14.0
+    Text: string?
+    Url: string?
+    VisitedColor: string?
+    OpensExternally: boolean?
+    IsVisited: boolean?
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+    Opened = Link.Opened
+
+record Link.Opened
+  url: string required
+
+component ShapeBase abstract external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    FillColor: string?
+    StrokeColor: string?
+    Data: string?
+    DashPattern: string?
+    StrokeWidth: float64?
+    StartAngle: float64?
+    SweepAngle: float64?
+    InnerRadius: float64?
+    SmoothFactor: float64?
+    StrokeMiter: float64?
+    DashPhase: float64?
+    CornerSmoothing: float64?
+    RotationX: float64?
+    RotationY: float64?
+    Perspective: float64?
+    CameraDistance: float64?
+    IsClosed: boolean?
+    IsAntialiased: boolean?
+    FillsWithStroke: boolean?
+    Kind: ShapeKind?
+    Cap: StrokeCap?
+    Join: StrokeJoin?
+    Fill: Gradient?
+    StrokeGradient: Gradient?
+    InnerShadow: Shadow?
+    Pivot: Point?
+    Points: Point*
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+
+component Shape external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    FillColor: string?
+    StrokeColor: string?
+    Data: string?
+    DashPattern: string?
+    StrokeWidth: float64?
+    StartAngle: float64?
+    SweepAngle: float64?
+    InnerRadius: float64?
+    SmoothFactor: float64?
+    StrokeMiter: float64?
+    DashPhase: float64?
+    CornerSmoothing: float64?
+    RotationX: float64?
+    RotationY: float64?
+    Perspective: float64?
+    CameraDistance: float64?
+    IsClosed: boolean?
+    IsAntialiased: boolean?
+    FillsWithStroke: boolean?
+    Kind: ShapeKind?
+    Cap: StrokeCap?
+    Join: StrokeJoin?
+    Fill: Gradient?
+    StrokeGradient: Gradient?
+    InnerShadow: Shadow?
+    Pivot: Point?
+    Points: Point*
+    content Children: Node*
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+
+component Curve external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    FillColor: string?
+    StrokeColor: string?
+    Data: string?
+    DashPattern: string?
+    StrokeWidth: float64?
+    StartAngle: float64?
+    SweepAngle: float64?
+    InnerRadius: float64?
+    SmoothFactor: float64?
+    StrokeMiter: float64?
+    DashPhase: float64?
+    CornerSmoothing: float64?
+    RotationX: float64?
+    RotationY: float64?
+    Perspective: float64?
+    CameraDistance: float64?
+    IsClosed: boolean?
+    IsAntialiased: boolean?
+    FillsWithStroke: boolean?
+    Kind: ShapeKind?
+    Cap: StrokeCap?
+    Join: StrokeJoin?
+    Fill: Gradient?
+    StrokeGradient: Gradient?
+    InnerShadow: Shadow?
+    Pivot: Point?
+    Points: Point*
+    ViewportWidth: float64?
+    ViewportHeight: float64?
+    ScalesToFit: boolean?
+    HorizontalContentAlign: Align?
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+
+component Line external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    FillColor: string?
+    StrokeColor: string?
+    Data: string?
+    DashPattern: string?
+    StrokeWidth: float64?
+    StartAngle: float64?
+    SweepAngle: float64?
+    InnerRadius: float64?
+    SmoothFactor: float64?
+    StrokeMiter: float64?
+    DashPhase: float64?
+    CornerSmoothing: float64?
+    RotationX: float64?
+    RotationY: float64?
+    Perspective: float64?
+    CameraDistance: float64?
+    IsClosed: boolean?
+    IsAntialiased: boolean?
+    FillsWithStroke: boolean?
+    Kind: ShapeKind?
+    Cap: StrokeCap?
+    Join: StrokeJoin?
+    Fill: Gradient?
+    StrokeGradient: Gradient?
+    InnerShadow: Shadow?
+    Pivot: Point?
+    Points: Point*
+    X1: float64?
+    Y1: float64?
+    X2: float64?
+    Y2: float64?
+    StartMarker: string?
+    EndMarker: string?
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+
+component Frame external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    FillColor: string?
+    StrokeColor: string?
+    Data: string?
+    DashPattern: string?
+    StrokeWidth: float64?
+    StartAngle: float64?
+    SweepAngle: float64?
+    InnerRadius: float64?
+    SmoothFactor: float64?
+    StrokeMiter: float64?
+    DashPhase: float64?
+    CornerSmoothing: float64?
+    RotationX: float64?
+    RotationY: float64?
+    Perspective: float64?
+    CameraDistance: float64?
+    IsClosed: boolean?
+    IsAntialiased: boolean?
+    FillsWithStroke: boolean?
+    Kind: ShapeKind?
+    Cap: StrokeCap?
+    Join: StrokeJoin?
+    Fill: Gradient?
+    StrokeGradient: Gradient?
+    InnerShadow: Shadow?
+    Pivot: Point?
+    Points: Point*
+    HasShadow: boolean?
+    Title: string?
+    TitleSize: float64?
+    content Children: Node*
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+
+component ImageBase abstract external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    Source: string?
+    Placeholder: string?
+    ErrorSource: string?
+    OverlayColor: string?
+    ZoomX: float64?
+    ZoomY: float64?
+    OffsetX: float64?
+    OffsetY: float64?
+    Blur: float64?
+    LoadDelaySeconds: float64?
+    Brightness: float64?
+    Contrast: float64?
+    Saturation: float64?
+    ParallaxX: float64?
+    ParallaxY: float64?
+    PreloadsSource: boolean?
+    UsesCacheFile: boolean?
+    IsAnimated: boolean?
+    ErasesOnChange: boolean?
+    LoadsOnAppear: boolean?
+    Fit: ImageFit?
+    Quality: ImageQuality?
+    Filter: ColorFilter?
+    HorizontalImageAlign: Align?
+    VerticalImageAlign: Align?
+    Crop: Insets?
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+    Loaded = ImageBase.Loaded
+    Failed = ImageBase.Failed
+
+record ImageBase.Loaded
+
+record ImageBase.Failed
+  message: string required
+
+component Image external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    Source: string?
+    Placeholder: string?
+    ErrorSource: string?
+    OverlayColor: string?
+    ZoomX: float64?
+    ZoomY: float64?
+    OffsetX: float64?
+    OffsetY: float64?
+    Blur: float64?
+    LoadDelaySeconds: float64?
+    Brightness: float64?
+    Contrast: float64?
+    Saturation: float64?
+    ParallaxX: float64?
+    ParallaxY: float64?
+    PreloadsSource: boolean?
+    UsesCacheFile: boolean?
+    IsAnimated: boolean?
+    ErasesOnChange: boolean?
+    LoadsOnAppear: boolean?
+    Fit: ImageFit?
+    Quality: ImageQuality?
+    Filter: ColorFilter?
+    HorizontalImageAlign: Align?
+    VerticalImageAlign: Align?
+    Crop: Insets?
+    AltText: string?
+    CacheKey: string?
+    FadeInSeconds: float64?
+    IsDecorative: boolean?
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+    Loaded = ImageBase.Loaded
+    Failed = ImageBase.Failed
+
+component Icon external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    Source: string?
+    Placeholder: string?
+    ErrorSource: string?
+    OverlayColor: string?
+    ZoomX: float64?
+    ZoomY: float64?
+    OffsetX: float64?
+    OffsetY: float64?
+    Blur: float64?
+    LoadDelaySeconds: float64?
+    Brightness: float64?
+    Contrast: float64?
+    Saturation: float64?
+    ParallaxX: float64?
+    ParallaxY: float64?
+    PreloadsSource: boolean?
+    UsesCacheFile: boolean?
+    IsAnimated: boolean?
+    ErasesOnChange: boolean?
+    LoadsOnAppear: boolean?
+    Fit: ImageFit?
+    Quality: ImageQuality?
+    Filter: ColorFilter?
+    HorizontalImageAlign: Align?
+    VerticalImageAlign: Align?
+    Crop: Insets?
+    Name: string?
+    FontFamily: string?
+    Size: float64?
+    IsFilled: boolean?
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+    Loaded = ImageBase.Loaded
+    Failed = ImageBase.Failed
+
+component Svg external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    Source: string?
+    Placeholder: string?
+    ErrorSource: string?
+    OverlayColor: string?
+    ZoomX: float64?
+    ZoomY: float64?
+    OffsetX: float64?
+    OffsetY: float64?
+    Blur: float64?
+    LoadDelaySeconds: float64?
+    Brightness: float64?
+    Contrast: float64?
+    Saturation: float64?
+    ParallaxX: float64?
+    ParallaxY: float64?
+    PreloadsSource: boolean?
+    UsesCacheFile: boolean?
+    IsAnimated: boolean?
+    ErasesOnChange: boolean?
+    LoadsOnAppear: boolean?
+    Fit: ImageFit?
+    Quality: ImageQuality?
+    Filter: ColorFilter?
+    HorizontalImageAlign: Align?
+    VerticalImageAlign: Align?
+    Crop: Insets?
+    Markup: string?
+    UsesIntrinsicSize: boolean?
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+    Loaded = ImageBase.Loaded
+    Failed = ImageBase.Failed
+
+component Animation external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    Source: string?
+    Placeholder: string?
+    ErrorSource: string?
+    OverlayColor: string?
+    ZoomX: float64?
+    ZoomY: float64?
+    OffsetX: float64?
+    OffsetY: float64?
+    Blur: float64?
+    LoadDelaySeconds: float64?
+    Brightness: float64?
+    Contrast: float64?
+    Saturation: float64?
+    ParallaxX: float64?
+    ParallaxY: float64?
+    PreloadsSource: boolean?
+    UsesCacheFile: boolean?
+    IsAnimated: boolean?
+    ErasesOnChange: boolean?
+    LoadsOnAppear: boolean?
+    Fit: ImageFit?
+    Quality: ImageQuality?
+    Filter: ColorFilter?
+    HorizontalImageAlign: Align?
+    VerticalImageAlign: Align?
+    Crop: Insets?
+    IsPlaying: boolean?
+    AutoPlays: boolean?
+    Reverses: boolean?
+    Repeat: int?
+    StartFrame: int?
+    EndFrame: int?
+    Speed: float64?
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+    Loaded = ImageBase.Loaded
+    Failed = ImageBase.Failed
+    Finished = Animation.Finished
+
+record Animation.Finished
+
+component Avatar external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    Source: string?
+    Placeholder: string?
+    ErrorSource: string?
+    OverlayColor: string?
+    ZoomX: float64?
+    ZoomY: float64?
+    OffsetX: float64?
+    OffsetY: float64?
+    Blur: float64?
+    LoadDelaySeconds: float64?
+    Brightness: float64?
+    Contrast: float64?
+    Saturation: float64?
+    ParallaxX: float64?
+    ParallaxY: float64?
+    PreloadsSource: boolean?
+    UsesCacheFile: boolean?
+    IsAnimated: boolean?
+    ErasesOnChange: boolean?
+    LoadsOnAppear: boolean?
+    Fit: ImageFit?
+    Quality: ImageQuality?
+    Filter: ColorFilter?
+    HorizontalImageAlign: Align?
+    VerticalImageAlign: Align?
+    Crop: Insets?
+    Initials: string?
+    StatusColor: string?
+    ShowsStatus: boolean?
+    Ring: Edge?
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+    Loaded = ImageBase.Loaded
+    Failed = ImageBase.Failed
+
+component InputBase abstract external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    Value: string?
+    Placeholder: string?
+    PlaceholderColor: string?
+    CursorColor: string?
+    SelectionColor: string?
+    TextColor: string?
+    FontFamily: string?
+    FocusGroup: string?
+    Tooltip: string?
+    MaxLength: int?
+    CursorPosition: int?
+    FontSize: float64?
+    IsReadOnly: boolean?
+    IsPassword: boolean?
+    IsSpellChecked: boolean?
+    IsAutoCorrected: boolean?
+    ClearsOnFocus: boolean?
+    SelectsAllOnFocus: boolean?
+    IsFocusable: boolean?
+    AutoCapitalizes: boolean?
+    Keyboard: KeyboardKind?
+    Return: ReturnKey?
+    TextAlign: TextAlign?
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+    Changed = InputBase.Changed
+    Submitted = InputBase.Submitted
+    Focused = InputBase.Focused
+    Blurred = InputBase.Blurred
+
+record InputBase.Changed
+  value: string required
+
+record InputBase.Submitted
+  value: string required
+
+record InputBase.Focused
+
+record InputBase.Blurred
+
+component Entry external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    Value: string?
+    Placeholder: string?
+    PlaceholderColor: string?
+    CursorColor: string?
+    SelectionColor: string?
+    TextColor: string?
+    FontFamily: string?
+    FocusGroup: string?
+    Tooltip: string?
+    MaxLength: int?
+    CursorPosition: int?
+    FontSize: float64?
+    IsReadOnly: boolean?
+    IsPassword: boolean?
+    IsSpellChecked: boolean?
+    IsAutoCorrected: boolean?
+    ClearsOnFocus: boolean?
+    SelectsAllOnFocus: boolean?
+    IsFocusable: boolean?
+    AutoCapitalizes: boolean?
+    Keyboard: KeyboardKind?
+    Return: ReturnKey?
+    TextAlign: TextAlign?
+    ShowsClearButton: boolean?
+    Prefix: string?
+    Suffix: string?
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+    Changed = InputBase.Changed
+    Submitted = InputBase.Submitted
+    Focused = InputBase.Focused
+    Blurred = InputBase.Blurred
+
+component Editor external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    Value: string?
+    Placeholder: string?
+    PlaceholderColor: string?
+    CursorColor: string?
+    SelectionColor: string?
+    TextColor: string?
+    FontFamily: string?
+    FocusGroup: string?
+    Tooltip: string?
+    MaxLength: int?
+    CursorPosition: int?
+    FontSize: float64?
+    IsReadOnly: boolean?
+    IsPassword: boolean?
+    IsSpellChecked: boolean?
+    IsAutoCorrected: boolean?
+    ClearsOnFocus: boolean?
+    SelectsAllOnFocus: boolean?
+    IsFocusable: boolean?
+    AutoCapitalizes: boolean?
+    Keyboard: KeyboardKind?
+    Return: ReturnKey?
+    TextAlign: TextAlign?
+    MinLinesShown: int?
+    MaxLinesShown: int?
+    AutoGrows: boolean?
+    ShowsCounter: boolean?
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+    Changed = InputBase.Changed
+    Submitted = InputBase.Submitted
+    Focused = InputBase.Focused
+    Blurred = InputBase.Blurred
+
+component Search external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    Value: string?
+    Placeholder: string?
+    PlaceholderColor: string?
+    CursorColor: string?
+    SelectionColor: string?
+    TextColor: string?
+    FontFamily: string?
+    FocusGroup: string?
+    Tooltip: string?
+    MaxLength: int?
+    CursorPosition: int?
+    FontSize: float64?
+    IsReadOnly: boolean?
+    IsPassword: boolean?
+    IsSpellChecked: boolean?
+    IsAutoCorrected: boolean?
+    ClearsOnFocus: boolean?
+    SelectsAllOnFocus: boolean?
+    IsFocusable: boolean?
+    AutoCapitalizes: boolean?
+    Keyboard: KeyboardKind?
+    Return: ReturnKey?
+    TextAlign: TextAlign?
+    CancelText: string?
+    IconName: string?
+    DebounceSeconds: float64?
+    ShowsCancel: boolean?
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+    Changed = InputBase.Changed
+    Submitted = InputBase.Submitted
+    Focused = InputBase.Focused
+    Blurred = InputBase.Blurred
+
+component RangeBase abstract external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    TrackColor: string?
+    ActiveColor: string?
+    ThumbColor: string?
+    Value: float64?
+    Step: float64?
+    TrackHeight: float64?
+    ThumbSize: float64?
+    IsContinuous: boolean?
+    ShowsValue: boolean?
+    Minimum: float64 = 0.0
+    Maximum: float64 = 1.0
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+    ValueChanged = RangeBase.ValueChanged
+
+record RangeBase.ValueChanged
+  value: float64 required
+
+component Slider external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    TrackColor: string?
+    ActiveColor: string?
+    ThumbColor: string?
+    Value: float64?
+    Step: float64?
+    TrackHeight: float64?
+    ThumbSize: float64?
+    IsContinuous: boolean?
+    ShowsValue: boolean?
+    Minimum: float64 = 0.0
+    Maximum: float64 = 1.0
+    Kind: SliderKind?
+    UpperValue: float64?
+    TickCount: int?
+    ShowsTicks: boolean?
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+    ValueChanged = RangeBase.ValueChanged
+
+component Progress external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    TrackColor: string?
+    ActiveColor: string?
+    ThumbColor: string?
+    Value: float64?
+    Step: float64?
+    TrackHeight: float64?
+    ThumbSize: float64?
+    IsContinuous: boolean?
+    ShowsValue: boolean?
+    Minimum: float64 = 0.0
+    Maximum: float64 = 1.0
+    Indicator: IndicatorKind?
+    Caption: string?
+    IsIndeterminate: boolean?
+    IsRounded: boolean?
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+    ValueChanged = RangeBase.ValueChanged
+
+component Stepper external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    TrackColor: string?
+    ActiveColor: string?
+    ThumbColor: string?
+    Value: float64?
+    Step: float64?
+    TrackHeight: float64?
+    ThumbSize: float64?
+    IsContinuous: boolean?
+    ShowsValue: boolean?
+    Minimum: float64 = 0.0
+    Maximum: float64 = 1.0
+    WrapsAround: boolean?
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+    ValueChanged = RangeBase.ValueChanged
+
+component ScrollBase abstract external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    ScrollX: float64?
+    ScrollY: float64?
+    Friction: float64?
+    OverscrollDistance: float64?
+    SnapInterval: float64?
+    RefreshThreshold: float64?
+    IsScrollEnabled: boolean?
+    Bounces: boolean?
+    LocksDirection: boolean?
+    IsRefreshing: boolean?
+    ZoomsContent: boolean?
+    Mode: ScrollMode?
+    Snap: SnapMode?
+    Bars: BarVisibility?
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+    Scrolled = ScrollBase.Scrolled
+    Refreshed = ScrollBase.Refreshed
+
+record ScrollBase.Scrolled
+  x: float64 required
+  y: float64 required
+
+record ScrollBase.Refreshed
+
+component Scroll external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    ScrollX: float64?
+    ScrollY: float64?
+    Friction: float64?
+    OverscrollDistance: float64?
+    SnapInterval: float64?
+    RefreshThreshold: float64?
+    IsScrollEnabled: boolean?
+    Bounces: boolean?
+    LocksDirection: boolean?
+    IsRefreshing: boolean?
+    ZoomsContent: boolean?
+    Mode: ScrollMode?
+    Snap: SnapMode?
+    Bars: BarVisibility?
+    ContentWidth: float64?
+    ContentHeight: float64?
+    content Children: Node*
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+    Scrolled = ScrollBase.Scrolled
+    Refreshed = ScrollBase.Refreshed
+
+component List external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    ScrollX: float64?
+    ScrollY: float64?
+    Friction: float64?
+    OverscrollDistance: float64?
+    SnapInterval: float64?
+    RefreshThreshold: float64?
+    IsScrollEnabled: boolean?
+    Bounces: boolean?
+    LocksDirection: boolean?
+    IsRefreshing: boolean?
+    ZoomsContent: boolean?
+    Mode: ScrollMode?
+    Snap: SnapMode?
+    Bars: BarVisibility?
+    ItemSpacing: float64?
+    HeaderText: string?
+    FooterText: string?
+    SeparatorColor: string?
+    InitialItem: int?
+    ShowsSeparators: boolean?
+    content Children: Node*
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+    Scrolled = ScrollBase.Scrolled
+    Refreshed = ScrollBase.Refreshed
+
+component Carousel external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    ScrollX: float64?
+    ScrollY: float64?
+    Friction: float64?
+    OverscrollDistance: float64?
+    SnapInterval: float64?
+    RefreshThreshold: float64?
+    IsScrollEnabled: boolean?
+    Bounces: boolean?
+    LocksDirection: boolean?
+    IsRefreshing: boolean?
+    ZoomsContent: boolean?
+    Mode: ScrollMode?
+    Snap: SnapMode?
+    Bars: BarVisibility?
+    SelectedIndex: int?
+    PeekAmount: float64?
+    AutoAdvanceSeconds: float64?
+    IsLooping: boolean?
+    ShowsIndicators: boolean?
+    content Children: Node*
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+    Scrolled = ScrollBase.Scrolled
+    Refreshed = ScrollBase.Refreshed
+
+component OverlayBase abstract external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    ScrimColor: string?
+    DimAmount: float64?
+    OpenSeconds: float64?
+    IsOpen: boolean?
+    ClosesOnOutsideTap: boolean?
+    IsModal: boolean?
+    AnimatesOpen: boolean?
+    IgnoresSafeArea: boolean?
+    Transition: TransitionKind?
+    Enter: TransitionKind?
+    Exit: TransitionKind?
+    Easing: Easing?
+    Offset: Point?
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+    Opened = OverlayBase.Opened
+    Closed = OverlayBase.Closed
+
+record OverlayBase.Opened
+
+record OverlayBase.Closed
+
+component Drawer external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    ScrimColor: string?
+    DimAmount: float64?
+    OpenSeconds: float64?
+    IsOpen: boolean?
+    ClosesOnOutsideTap: boolean?
+    IsModal: boolean?
+    AnimatesOpen: boolean?
+    IgnoresSafeArea: boolean?
+    Transition: TransitionKind?
+    Enter: TransitionKind?
+    Exit: TransitionKind?
+    Easing: Easing?
+    Offset: Point?
+    Edge: DrawerEdge?
+    HeaderSize: float64?
+    PeekSize: float64?
+    IsSwipeEnabled: boolean?
+    content Children: Node*
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+    Opened = OverlayBase.Opened
+    Closed = OverlayBase.Closed
+
+component Popup external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    ScrimColor: string?
+    DimAmount: float64?
+    OpenSeconds: float64?
+    IsOpen: boolean?
+    ClosesOnOutsideTap: boolean?
+    IsModal: boolean?
+    AnimatesOpen: boolean?
+    IgnoresSafeArea: boolean?
+    Transition: TransitionKind?
+    Enter: TransitionKind?
+    Exit: TransitionKind?
+    Easing: Easing?
+    Offset: Point?
+    Anchor: Point?
+    ArrowSize: float64?
+    Placement: Align?
+    HasArrow: boolean?
+    content Children: Node*
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+    Opened = OverlayBase.Opened
+    Closed = OverlayBase.Closed
+
+component Sheet external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    ScrimColor: string?
+    DimAmount: float64?
+    OpenSeconds: float64?
+    IsOpen: boolean?
+    ClosesOnOutsideTap: boolean?
+    IsModal: boolean?
+    AnimatesOpen: boolean?
+    IgnoresSafeArea: boolean?
+    Transition: TransitionKind?
+    Enter: TransitionKind?
+    Exit: TransitionKind?
+    Easing: Easing?
+    Offset: Point?
+    Detents: float64*
+    InitialDetent: int?
+    ShowsGrabber: boolean?
+    IsDismissable: boolean?
+    content Children: Node*
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+    Opened = OverlayBase.Opened
+    Closed = OverlayBase.Closed
+
+component ToggleBase abstract external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    OnColor: string?
+    OffColor: string?
+    AnimatesChange: boolean?
+    IsOn: boolean = false
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+    Toggled = ToggleBase.Toggled
+
+record ToggleBase.Toggled
+  isOn: boolean required
+
+component Switch external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    OnColor: string?
+    OffColor: string?
+    AnimatesChange: boolean?
+    IsOn: boolean = false
+    ThumbColor: string?
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+    Toggled = ToggleBase.Toggled
+
+component Checkbox external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    OnColor: string?
+    OffColor: string?
+    AnimatesChange: boolean?
+    IsOn: boolean = false
+    CheckColor: string?
+    Caption: string?
+    BoxSize: float64?
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+    Toggled = ToggleBase.Toggled
+
+component Button external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    Text: string?
+    IconName: string?
+    TextColor: string?
+    FontFamily: string?
+    TouchColor: string?
+    Tooltip: string?
+    FontSize: float64?
+    IconSize: float64?
+    LongPressSeconds: float64?
+    IsBusy: boolean?
+    IsPrimary: boolean?
+    Weight: FontWeight?
+    content Children: Node*
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared
+
+component Spinner external
+  props
+    Tag: string?
+    StyleClass: string?
+    BackgroundColor: string?
+    TintColor: string?
+    AutomationId: string?
+    AutomationLabel: string?
+    TransitionName: string?
+    Width: float64?
+    Height: float64?
+    MinWidth: float64?
+    MinHeight: float64?
+    MaxWidth: float64?
+    MaxHeight: float64?
+    Left: float64?
+    Top: float64?
+    Opacity: float64?
+    Rotation: float64?
+    Scale: float64?
+    ScaleX: float64?
+    ScaleY: float64?
+    SkewX: float64?
+    SkewY: float64?
+    TranslateX: float64?
+    TranslateY: float64?
+    AnchorX: float64?
+    AnchorY: float64?
+    ZIndex: float64?
+    AspectRatio: float64?
+    HorizontalFill: float64?
+    VerticalFill: float64?
+    Elevation: float64?
+    HitSlop: float64?
+    FadeSeconds: float64?
+    IsHidden: boolean?
+    ClipsToBounds: boolean?
+    IgnoresInput: boolean?
+    IsGhost: boolean?
+    UsesLayer: boolean?
+    AnimatesLayout: boolean?
+    BlocksGestures: boolean?
+    IsSelected: boolean?
+    HorizontalAlign: Align?
+    VerticalAlign: Align?
+    Visibility: Visibility?
+    Cache: CacheKind?
+    Blend: Blend?
+    Clip: ClipKind?
+    Pointer: PointerMode?
+    Touch: TouchEffect?
+    Margin: Insets?
+    Padding: Insets?
+    Corners: Corners?
+    Shadow: Shadow?
+    Background: Gradient?
+    Border: Edge?
+    IsEnabled: boolean = true
+    Color: string?
+    Size: float64?
+    StrokeWidth: float64?
+    Indicator: IndicatorKind?
+  emits
+    Tapped = View.Tapped
+    LongPressed = View.LongPressed
+    Appeared = View.Appeared
+    Disappeared = View.Disappeared

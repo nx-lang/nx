@@ -1,0 +1,25 @@
+// What a respondent's answer to each kind of question is. A host sends one inside the action it
+// dispatches, typed by its `$type`, and the flow keeps them in its state.
+export abstract type Answer = {
+  questionId:string
+  note?:string
+}
+
+export type TextAnswer extends Answer = { value:string }
+export type NumberAnswer extends Answer = { value:float64 }
+export type IntegerAnswer extends Answer = { value:int }
+export type BooleanAnswer extends Answer = { value:boolean }
+export type ChoiceAnswer extends Answer = { selected:string other?:string }
+export type ChoicesAnswer extends Answer = { selected:string+ }
+export type RangeAnswer extends Answer = { from:string to:string }
+export type MatrixRowAnswer = { row:string column:string }
+export type MatrixAnswer extends Answer = { rows:MatrixRowAnswer+ }
+export type AddressAnswer extends Answer = {
+  street:string
+  city:string
+  postalCode?:string
+  country:string
+}
+export type FileAnswer extends Answer = { name:string bytes:int }
+export type SignatureAnswer extends Answer = { strokes:int signedAt:string }
+export type SkippedAnswer extends Answer = { }

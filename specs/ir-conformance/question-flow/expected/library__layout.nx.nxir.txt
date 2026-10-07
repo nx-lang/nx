@@ -1,0 +1,77 @@
+module library/layout.nx fingerprint 11139573422423982897
+links library/questions.nx version "" fingerprint 14700776180858802568
+links library/answers.nx version "" fingerprint 4710217782950829473
+entrypoints functions [] components [Step Progress Summary Notice Button Screen]
+
+record FlowDefinition @6:1-12:2
+  id: string required
+  title: string required
+  description: string?
+  version: int = 1
+  content questions: library/questions.nx:Question+ required
+
+record SummaryRow @14:1-14:55
+  label: string required
+  value: string required
+
+component Step external @18:1-30:3
+  props
+    question: library/questions.nx:Question required
+  emits
+    TextAnswered = Step.TextAnswered
+    NumberAnswered = Step.NumberAnswered
+    IntegerAnswered = Step.IntegerAnswered
+    BooleanAnswered = Step.BooleanAnswered
+    ChoiceAnswered = Step.ChoiceAnswered
+    ChoicesAnswered = Step.ChoicesAnswered
+    Answered = Step.Answered
+
+record Step.TextAnswered @22:5-22:39
+  answer: library/answers.nx:TextAnswer required
+
+record Step.NumberAnswered @23:5-23:43
+  answer: library/answers.nx:NumberAnswer required
+
+record Step.IntegerAnswered @24:5-24:45
+  answer: library/answers.nx:IntegerAnswer required
+
+record Step.BooleanAnswered @25:5-25:45
+  answer: library/answers.nx:BooleanAnswer required
+
+record Step.ChoiceAnswered @26:5-26:43
+  answer: library/answers.nx:ChoiceAnswer required
+
+record Step.ChoicesAnswered @27:5-27:45
+  answer: library/answers.nx:ChoicesAnswer required
+
+record Step.Answered @28:5-28:31
+  answer: library/answers.nx:Answer required
+
+component Progress external @32:1-32:75
+  props
+    answered: int required
+    total: int required
+
+component Summary external @33:1-33:89
+  props
+    title: string required
+    content rows: SummaryRow+ required
+
+component Notice external @34:1-34:76
+  props
+    title: string required
+    body: string?
+
+component Button external @35:1-35:84
+  props
+    label: string required
+  emits
+    Tapped = Button.Tapped
+
+record Button.Tapped @35:69-35:79
+
+component Screen external @36:1-36:103
+  props
+    title: string required
+    subtitle: string?
+    content children: library/questions.nx:Node+ required

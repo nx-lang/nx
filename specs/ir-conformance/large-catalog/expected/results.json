@@ -1,0 +1,940 @@
+{
+  "input.nx::root": {
+    "$type": "Layout",
+    "BackgroundColor": "#0B1220",
+    "Children": [
+      {
+        "$type": "Row",
+        "AlignsBaselines": true,
+        "Children": [
+          {
+            "$type": "Icon",
+            "IsEnabled": true,
+            "Name": "pulse",
+            "OverlayColor": "#2563EB",
+            "Size": 28.0
+          },
+          {
+            "$type": "Label",
+            "FontSize": 24.0,
+            "IsEnabled": true,
+            "IsHeading": true,
+            "Text": "Service overview",
+            "TextColor": "#F8FAFC",
+            "Weight": "Bold"
+          },
+          {
+            "$type": "Shape",
+            "HorizontalFill": 1.0,
+            "IsEnabled": true,
+            "Kind": "Rectangle",
+            "Opacity": 0.0
+          },
+          {
+            "$type": "Search",
+            "IsEnabled": true,
+            "Keyboard": "Text",
+            "MaxLength": 64,
+            "Placeholder": "Filter services",
+            "Return": "Find",
+            "Width": 220.0
+          },
+          {
+            "$type": "Button",
+            "Corners": {
+              "$type": "Corners",
+              "BottomLeft": 8.0,
+              "BottomRight": 8.0,
+              "TopLeft": 8.0,
+              "TopRight": 8.0
+            },
+            "IsEnabled": true,
+            "IsPrimary": true,
+            "Text": "Refresh",
+            "Touch": "Ripple"
+          },
+          {
+            "$type": "Avatar",
+            "Height": 32.0,
+            "Initials": "NX",
+            "IsEnabled": true,
+            "Ring": {
+              "$type": "Edge",
+              "Color": "#2563EB",
+              "Dash": "",
+              "Width": 2.0
+            },
+            "Width": 32.0
+          }
+        ],
+        "IsEnabled": true,
+        "Spacing": 12.0,
+        "VerticalAlign": "Center"
+      },
+      {
+        "$type": "Scroll",
+        "Bars": "Auto",
+        "Bounces": false,
+        "Children": [
+          {
+            "$type": "Column",
+            "Children": [
+              {
+                "$type": "Grid",
+                "Children": [
+                  {
+                    "$type": "Frame",
+                    "Border": {
+                      "$type": "Edge",
+                      "Color": "#1E293B",
+                      "Dash": "",
+                      "Width": 1.0
+                    },
+                    "Children": [
+                      {
+                        "$type": "Column",
+                        "Children": [
+                          {
+                            "$type": "Row",
+                            "Children": [
+                              {
+                                "$type": "Label",
+                                "Case": "Upper",
+                                "FontSize": 13.0,
+                                "IsEnabled": true,
+                                "LetterSpacing": 0.6,
+                                "Text": "Latency",
+                                "TextColor": "#94A3B8"
+                              },
+                              {
+                                "$type": "Icon",
+                                "IsEnabled": true,
+                                "Name": "check",
+                                "OverlayColor": "#22C55E",
+                                "Size": 14.0
+                              }
+                            ],
+                            "IsEnabled": true,
+                            "Spacing": 8.0
+                          },
+                          {
+                            "$type": "Row",
+                            "AlignsBaselines": true,
+                            "Children": [
+                              {
+                                "$type": "Label",
+                                "FontSize": 34.0,
+                                "IsEnabled": true,
+                                "Text": "42.5",
+                                "TextColor": "#FFFFFF",
+                                "Weight": "SemiBold"
+                              },
+                              {
+                                "$type": "Label",
+                                "FontSize": 14.0,
+                                "IsEnabled": true,
+                                "Text": "ms",
+                                "TextColor": "#94A3B8"
+                              }
+                            ],
+                            "IsEnabled": true,
+                            "Spacing": 4.0
+                          },
+                          {
+                            "$type": "Progress",
+                            "ActiveColor": "#2563EB",
+                            "Indicator": "Bar",
+                            "IsEnabled": true,
+                            "Maximum": 1.0,
+                            "Minimum": 0.0,
+                            "TrackColor": "#1E293B",
+                            "TrackHeight": 6.0,
+                            "Value": 0.42
+                          },
+                          {
+                            "$type": "Label",
+                            "FontSize": 11.0,
+                            "HorizontalTextAlign": "End",
+                            "IsEnabled": true,
+                            "Text": "#0",
+                            "TextColor": "#475569"
+                          }
+                        ],
+                        "IsEnabled": true,
+                        "Padding": {
+                          "$type": "Insets",
+                          "Bottom": 14.0,
+                          "Left": 16.0,
+                          "Right": 16.0,
+                          "Top": 14.0
+                        },
+                        "Spacing": 6.0
+                      }
+                    ],
+                    "Corners": {
+                      "$type": "Corners",
+                      "BottomLeft": 14.0,
+                      "BottomRight": 14.0,
+                      "TopLeft": 14.0,
+                      "TopRight": 14.0
+                    },
+                    "FillColor": "#111A2E",
+                    "HasShadow": true,
+                    "IsEnabled": true,
+                    "Kind": "Rectangle",
+                    "Shadow": {
+                      "$type": "Shadow",
+                      "Blur": 12.0,
+                      "Color": "#00000066",
+                      "X": 0.0,
+                      "Y": 4.0
+                    }
+                  },
+                  {
+                    "$type": "Frame",
+                    "Border": {
+                      "$type": "Edge",
+                      "Color": "#1E293B",
+                      "Dash": "",
+                      "Width": 1.0
+                    },
+                    "Children": [
+                      {
+                        "$type": "Column",
+                        "Children": [
+                          {
+                            "$type": "Row",
+                            "Children": [
+                              {
+                                "$type": "Label",
+                                "Case": "Upper",
+                                "FontSize": 13.0,
+                                "IsEnabled": true,
+                                "LetterSpacing": 0.6,
+                                "Text": "Errors",
+                                "TextColor": "#94A3B8"
+                              },
+                              {
+                                "$type": "Icon",
+                                "IsEnabled": true,
+                                "Name": "check",
+                                "OverlayColor": "#22C55E",
+                                "Size": 14.0
+                              }
+                            ],
+                            "IsEnabled": true,
+                            "Spacing": 8.0
+                          },
+                          {
+                            "$type": "Row",
+                            "AlignsBaselines": true,
+                            "Children": [
+                              {
+                                "$type": "Label",
+                                "FontSize": 34.0,
+                                "IsEnabled": true,
+                                "Text": "0.8",
+                                "TextColor": "#FFFFFF",
+                                "Weight": "SemiBold"
+                              },
+                              {
+                                "$type": "Label",
+                                "FontSize": 14.0,
+                                "IsEnabled": true,
+                                "Text": "%",
+                                "TextColor": "#94A3B8"
+                              }
+                            ],
+                            "IsEnabled": true,
+                            "Spacing": 4.0
+                          },
+                          {
+                            "$type": "Progress",
+                            "ActiveColor": "#2563EB",
+                            "Indicator": "Bar",
+                            "IsEnabled": true,
+                            "Maximum": 1.0,
+                            "Minimum": 0.0,
+                            "TrackColor": "#1E293B",
+                            "TrackHeight": 6.0,
+                            "Value": 0.08
+                          },
+                          {
+                            "$type": "Label",
+                            "FontSize": 11.0,
+                            "HorizontalTextAlign": "End",
+                            "IsEnabled": true,
+                            "Text": "#1",
+                            "TextColor": "#475569"
+                          }
+                        ],
+                        "IsEnabled": true,
+                        "Padding": {
+                          "$type": "Insets",
+                          "Bottom": 14.0,
+                          "Left": 16.0,
+                          "Right": 16.0,
+                          "Top": 14.0
+                        },
+                        "Spacing": 6.0
+                      }
+                    ],
+                    "Corners": {
+                      "$type": "Corners",
+                      "BottomLeft": 14.0,
+                      "BottomRight": 14.0,
+                      "TopLeft": 14.0,
+                      "TopRight": 14.0
+                    },
+                    "FillColor": "#111A2E",
+                    "HasShadow": true,
+                    "IsEnabled": true,
+                    "Kind": "Rectangle",
+                    "Shadow": {
+                      "$type": "Shadow",
+                      "Blur": 12.0,
+                      "Color": "#00000066",
+                      "X": 0.0,
+                      "Y": 4.0
+                    }
+                  },
+                  {
+                    "$type": "Frame",
+                    "Border": {
+                      "$type": "Edge",
+                      "Color": "#B91C1C",
+                      "Dash": "",
+                      "Width": 1.0
+                    },
+                    "Children": [
+                      {
+                        "$type": "Column",
+                        "Children": [
+                          {
+                            "$type": "Row",
+                            "Children": [
+                              {
+                                "$type": "Label",
+                                "Case": "Upper",
+                                "FontSize": 13.0,
+                                "IsEnabled": true,
+                                "LetterSpacing": 0.6,
+                                "Text": "Saturation",
+                                "TextColor": "#94A3B8"
+                              },
+                              {
+                                "$type": "Icon",
+                                "IsEnabled": true,
+                                "Name": "alert",
+                                "OverlayColor": "#EF4444",
+                                "Size": 14.0
+                              }
+                            ],
+                            "IsEnabled": true,
+                            "Spacing": 8.0
+                          },
+                          {
+                            "$type": "Row",
+                            "AlignsBaselines": true,
+                            "Children": [
+                              {
+                                "$type": "Label",
+                                "FontSize": 34.0,
+                                "IsEnabled": true,
+                                "Text": "91",
+                                "TextColor": "#FFFFFF",
+                                "Weight": "SemiBold"
+                              },
+                              {
+                                "$type": "Label",
+                                "FontSize": 14.0,
+                                "IsEnabled": true,
+                                "Text": "%",
+                                "TextColor": "#94A3B8"
+                              }
+                            ],
+                            "IsEnabled": true,
+                            "Spacing": 4.0
+                          },
+                          {
+                            "$type": "Progress",
+                            "ActiveColor": "#2563EB",
+                            "Indicator": "Bar",
+                            "IsEnabled": true,
+                            "Maximum": 1.0,
+                            "Minimum": 0.0,
+                            "TrackColor": "#1E293B",
+                            "TrackHeight": 6.0,
+                            "Value": 0.91
+                          },
+                          {
+                            "$type": "Label",
+                            "FontSize": 11.0,
+                            "HorizontalTextAlign": "End",
+                            "IsEnabled": true,
+                            "Text": "#2",
+                            "TextColor": "#475569"
+                          }
+                        ],
+                        "IsEnabled": true,
+                        "Padding": {
+                          "$type": "Insets",
+                          "Bottom": 14.0,
+                          "Left": 16.0,
+                          "Right": 16.0,
+                          "Top": 14.0
+                        },
+                        "Spacing": 6.0
+                      }
+                    ],
+                    "Corners": {
+                      "$type": "Corners",
+                      "BottomLeft": 14.0,
+                      "BottomRight": 14.0,
+                      "TopLeft": 14.0,
+                      "TopRight": 14.0
+                    },
+                    "FillColor": "#111A2E",
+                    "HasShadow": true,
+                    "IsEnabled": true,
+                    "Kind": "Rectangle",
+                    "Shadow": {
+                      "$type": "Shadow",
+                      "Blur": 12.0,
+                      "Color": "#00000066",
+                      "X": 0.0,
+                      "Y": 4.0
+                    }
+                  },
+                  {
+                    "$type": "Frame",
+                    "Border": {
+                      "$type": "Edge",
+                      "Color": "#1E293B",
+                      "Dash": "",
+                      "Width": 1.0
+                    },
+                    "Children": [
+                      {
+                        "$type": "Column",
+                        "Children": [
+                          {
+                            "$type": "Row",
+                            "Children": [
+                              {
+                                "$type": "Label",
+                                "Case": "Upper",
+                                "FontSize": 13.0,
+                                "IsEnabled": true,
+                                "LetterSpacing": 0.6,
+                                "Text": "Throughput",
+                                "TextColor": "#94A3B8"
+                              },
+                              {
+                                "$type": "Icon",
+                                "IsEnabled": true,
+                                "Name": "check",
+                                "OverlayColor": "#22C55E",
+                                "Size": 14.0
+                              }
+                            ],
+                            "IsEnabled": true,
+                            "Spacing": 8.0
+                          },
+                          {
+                            "$type": "Row",
+                            "AlignsBaselines": true,
+                            "Children": [
+                              {
+                                "$type": "Label",
+                                "FontSize": 34.0,
+                                "IsEnabled": true,
+                                "Text": "1280",
+                                "TextColor": "#FFFFFF",
+                                "Weight": "SemiBold"
+                              },
+                              {
+                                "$type": "Label",
+                                "FontSize": 14.0,
+                                "IsEnabled": true,
+                                "Text": "rps",
+                                "TextColor": "#94A3B8"
+                              }
+                            ],
+                            "IsEnabled": true,
+                            "Spacing": 4.0
+                          },
+                          {
+                            "$type": "Progress",
+                            "ActiveColor": "#2563EB",
+                            "Indicator": "Bar",
+                            "IsEnabled": true,
+                            "Maximum": 1.0,
+                            "Minimum": 0.0,
+                            "TrackColor": "#1E293B",
+                            "TrackHeight": 6.0,
+                            "Value": 0.64
+                          },
+                          {
+                            "$type": "Label",
+                            "FontSize": 11.0,
+                            "HorizontalTextAlign": "End",
+                            "IsEnabled": true,
+                            "Text": "#3",
+                            "TextColor": "#475569"
+                          }
+                        ],
+                        "IsEnabled": true,
+                        "Padding": {
+                          "$type": "Insets",
+                          "Bottom": 14.0,
+                          "Left": 16.0,
+                          "Right": 16.0,
+                          "Top": 14.0
+                        },
+                        "Spacing": 6.0
+                      }
+                    ],
+                    "Corners": {
+                      "$type": "Corners",
+                      "BottomLeft": 14.0,
+                      "BottomRight": 14.0,
+                      "TopLeft": 14.0,
+                      "TopRight": 14.0
+                    },
+                    "FillColor": "#111A2E",
+                    "HasShadow": true,
+                    "IsEnabled": true,
+                    "Kind": "Rectangle",
+                    "Shadow": {
+                      "$type": "Shadow",
+                      "Blur": 12.0,
+                      "Color": "#00000066",
+                      "X": 0.0,
+                      "Y": 4.0
+                    }
+                  }
+                ],
+                "ColumnSpacing": 16.0,
+                "Columns": "*,*",
+                "IsEnabled": true,
+                "MaxColumns": 2,
+                "RowSpacing": 16.0,
+                "Spacing": 0.0
+              },
+              {
+                "$type": "Frame",
+                "Children": [
+                  {
+                    "$type": "Row",
+                    "Children": [
+                      {
+                        "$type": "Animation",
+                        "Height": 48.0,
+                        "IsEnabled": true,
+                        "IsPlaying": true,
+                        "Repeat": 3,
+                        "Source": "deploy.json",
+                        "Speed": 1.5,
+                        "Width": 48.0
+                      },
+                      {
+                        "$type": "Column",
+                        "Children": [
+                          {
+                            "$type": "Label",
+                            "FontSize": 16.0,
+                            "IsEnabled": true,
+                            "Text": "Deploy in progress",
+                            "TextColor": "#FFFFFF",
+                            "Weight": "Medium"
+                          },
+                          {
+                            "$type": "RichText",
+                            "AllowsLinks": false,
+                            "FontSize": 14.0,
+                            "IsEnabled": true,
+                            "Markup": "Rolling out <b>v0.6.0</b> to three regions.",
+                            "TextColor": "#DBEAFE"
+                          }
+                        ],
+                        "HorizontalFill": 1.0,
+                        "IsEnabled": true,
+                        "Spacing": 2.0
+                      },
+                      {
+                        "$type": "Spinner",
+                        "Color": "#FFFFFF",
+                        "Indicator": "Ring",
+                        "IsEnabled": true,
+                        "Size": 20.0
+                      },
+                      {
+                        "$type": "Link",
+                        "FontSize": 14.0,
+                        "IsEnabled": true,
+                        "IsUnderlined": true,
+                        "OpensExternally": true,
+                        "Text": "Details",
+                        "Url": "https://example.com/deploys/42"
+                      }
+                    ],
+                    "IsEnabled": true,
+                    "Padding": {
+                      "$type": "Insets",
+                      "Bottom": 16.0,
+                      "Left": 20.0,
+                      "Right": 20.0,
+                      "Top": 16.0
+                    },
+                    "Spacing": 16.0,
+                    "VerticalAlign": "Center"
+                  }
+                ],
+                "Corners": {
+                  "$type": "Corners",
+                  "BottomLeft": 14.0,
+                  "BottomRight": 14.0,
+                  "TopLeft": 14.0,
+                  "TopRight": 14.0
+                },
+                "Fill": {
+                  "$type": "Gradient",
+                  "Angle": 135.0,
+                  "Colors": [
+                    "#1D4ED8",
+                    "#7C3AED"
+                  ],
+                  "Kind": "Linear",
+                  "Stops": [
+                    0.0,
+                    1.0
+                  ]
+                },
+                "IsEnabled": true,
+                "Kind": "Rectangle"
+              },
+              {
+                "$type": "Label",
+                "Case": "Upper",
+                "FontSize": 13.0,
+                "IsEnabled": true,
+                "Text": "Regions",
+                "TextColor": "#94A3B8"
+              },
+              {
+                "$type": "Wrap",
+                "Children": [
+                  {
+                    "$type": "Button",
+                    "BackgroundColor": "#111A2E",
+                    "IconName": "globe",
+                    "IsEnabled": true,
+                    "Text": "eu-west",
+                    "Touch": "Highlight"
+                  },
+                  {
+                    "$type": "Button",
+                    "BackgroundColor": "#111A2E",
+                    "IconName": "globe",
+                    "IsEnabled": true,
+                    "Text": "us-east",
+                    "Touch": "Highlight"
+                  },
+                  {
+                    "$type": "Button",
+                    "BackgroundColor": "#111A2E",
+                    "IconName": "globe",
+                    "IsEnabled": true,
+                    "Text": "ap-south",
+                    "Touch": "Highlight"
+                  }
+                ],
+                "IsEnabled": true,
+                "LineSpacing": 8.0,
+                "Spacing": 8.0
+              },
+              {
+                "$type": "Curve",
+                "Cap": "Round",
+                "Data": "M0 40 L40 12 L80 28 L120 4",
+                "IsEnabled": true,
+                "Join": "Round",
+                "Kind": "Outline",
+                "Points": [
+                  {
+                    "$type": "Point",
+                    "X": 0.0,
+                    "Y": 40.0
+                  },
+                  {
+                    "$type": "Point",
+                    "X": 40.0,
+                    "Y": 12.0
+                  },
+                  {
+                    "$type": "Point",
+                    "X": 80.0,
+                    "Y": 28.0
+                  },
+                  {
+                    "$type": "Point",
+                    "X": 120.0,
+                    "Y": 4.0
+                  }
+                ],
+                "StrokeColor": "#2563EB",
+                "StrokeWidth": 2.0,
+                "ViewportHeight": 44.0,
+                "ViewportWidth": 120.0
+              },
+              {
+                "$type": "Line",
+                "DashPattern": "4 4",
+                "IsEnabled": true,
+                "StrokeColor": "#1E293B",
+                "StrokeWidth": 1.0,
+                "X1": 0.0,
+                "X2": 320.0,
+                "Y1": 0.0,
+                "Y2": 0.0
+              },
+              {
+                "$type": "Stack",
+                "Children": [
+                  {
+                    "$type": "Row",
+                    "Children": [
+                      {
+                        "$type": "Label",
+                        "FontSize": 15.0,
+                        "HorizontalFill": 1.0,
+                        "IsEnabled": true,
+                        "Text": "Alerts",
+                        "TextColor": "#E2E8F0"
+                      },
+                      {
+                        "$type": "Switch",
+                        "IsEnabled": true,
+                        "IsOn": true,
+                        "OnColor": "#2563EB"
+                      }
+                    ],
+                    "IsEnabled": true,
+                    "Spacing": 12.0,
+                    "VerticalAlign": "Center"
+                  },
+                  {
+                    "$type": "Row",
+                    "Children": [
+                      {
+                        "$type": "Label",
+                        "FontSize": 15.0,
+                        "HorizontalFill": 1.0,
+                        "IsEnabled": true,
+                        "Text": "Weekly digest",
+                        "TextColor": "#E2E8F0"
+                      },
+                      {
+                        "$type": "Checkbox",
+                        "BoxSize": 18.0,
+                        "CheckColor": "#2563EB",
+                        "IsEnabled": true,
+                        "IsOn": false
+                      }
+                    ],
+                    "IsEnabled": true,
+                    "Spacing": 12.0,
+                    "VerticalAlign": "Center"
+                  },
+                  {
+                    "$type": "Row",
+                    "Children": [
+                      {
+                        "$type": "Label",
+                        "FontSize": 15.0,
+                        "IsEnabled": true,
+                        "Text": "Sampling",
+                        "TextColor": "#E2E8F0"
+                      },
+                      {
+                        "$type": "Slider",
+                        "ActiveColor": "#2563EB",
+                        "HorizontalFill": 1.0,
+                        "IsEnabled": true,
+                        "Kind": "Single",
+                        "Maximum": 1.0,
+                        "Minimum": 0.0,
+                        "Step": 0.05,
+                        "Value": 0.25
+                      },
+                      {
+                        "$type": "Stepper",
+                        "IsEnabled": true,
+                        "Maximum": 10.0,
+                        "Minimum": 1.0,
+                        "Step": 1.0,
+                        "Value": 5.0
+                      }
+                    ],
+                    "IsEnabled": true,
+                    "Spacing": 12.0,
+                    "VerticalAlign": "Center"
+                  },
+                  {
+                    "$type": "Entry",
+                    "IsEnabled": true,
+                    "Keyboard": "Url",
+                    "Placeholder": "Webhook URL",
+                    "Return": "Done",
+                    "ShowsClearButton": true
+                  },
+                  {
+                    "$type": "Editor",
+                    "AutoGrows": true,
+                    "IsEnabled": true,
+                    "IsSpellChecked": true,
+                    "MinLinesShown": 3,
+                    "Placeholder": "Notes for the on-call"
+                  }
+                ],
+                "IsEnabled": true,
+                "Spacing": 10.0
+              },
+              {
+                "$type": "Carousel",
+                "Children": [
+                  {
+                    "$type": "Image",
+                    "AltText": "Europe",
+                    "Fit": "Cover",
+                    "IsEnabled": true,
+                    "Quality": "High",
+                    "Source": "eu.png"
+                  },
+                  {
+                    "$type": "Image",
+                    "AltText": "Americas",
+                    "Fit": "Cover",
+                    "IsEnabled": true,
+                    "Quality": "High",
+                    "Source": "us.png"
+                  },
+                  {
+                    "$type": "Svg",
+                    "IsEnabled": true,
+                    "Markup": "<svg viewBox='0 0 8 8'><circle r='4' cx='4' cy='4' /></svg>",
+                    "UsesIntrinsicSize": true
+                  }
+                ],
+                "IsEnabled": true,
+                "IsLooping": true,
+                "PeekAmount": 24.0,
+                "SelectedIndex": 0,
+                "Snap": "Center"
+              },
+              {
+                "$type": "List",
+                "Children": [
+                  {
+                    "$type": "Label",
+                    "FontSize": 13.0,
+                    "IsEnabled": true,
+                    "MaxLines": 1,
+                    "Text": "12:04 deploy started",
+                    "TextColor": "#94A3B8",
+                    "Trim": "Ellipsis"
+                  },
+                  {
+                    "$type": "Label",
+                    "FontSize": 13.0,
+                    "IsEnabled": true,
+                    "MaxLines": 1,
+                    "Text": "12:01 alert resolved",
+                    "TextColor": "#94A3B8",
+                    "Trim": "Ellipsis"
+                  }
+                ],
+                "HeaderText": "Recent events",
+                "IsEnabled": true,
+                "ItemSpacing": 4.0,
+                "Mode": "Vertical"
+              }
+            ],
+            "IsEnabled": true,
+            "Spacing": 20.0
+          }
+        ],
+        "IsEnabled": true,
+        "Mode": "Vertical",
+        "VerticalFill": 1.0
+      },
+      {
+        "$type": "Drawer",
+        "Children": [
+          {
+            "$type": "Label",
+            "FontSize": 18.0,
+            "IsEnabled": true,
+            "Text": "Filters",
+            "Weight": "Bold"
+          }
+        ],
+        "DimAmount": 0.4,
+        "Edge": "Right",
+        "IsEnabled": true,
+        "IsModal": true,
+        "IsOpen": false,
+        "Transition": "Slide"
+      },
+      {
+        "$type": "Popup",
+        "Anchor": {
+          "$type": "Point",
+          "X": 12.0,
+          "Y": 48.0
+        },
+        "ArrowSize": 8.0,
+        "Children": [
+          {
+            "$type": "Label",
+            "FontSize": 14.0,
+            "IsEnabled": true,
+            "Text": "Copied"
+          }
+        ],
+        "IsEnabled": true,
+        "IsOpen": false
+      },
+      {
+        "$type": "Sheet",
+        "Children": [
+          {
+            "$type": "Label",
+            "FontSize": 14.0,
+            "IsEnabled": true,
+            "Text": "Share this view"
+          }
+        ],
+        "Detents": [
+          0.25,
+          0.6,
+          1.0
+        ],
+        "IsEnabled": true,
+        "IsOpen": false,
+        "ShowsGrabber": true
+      }
+    ],
+    "IsEnabled": true,
+    "Kind": "Vertical",
+    "Padding": {
+      "$type": "Insets",
+      "Bottom": 16.0,
+      "Left": 24.0,
+      "Right": 24.0,
+      "Top": 16.0
+    },
+    "Spacing": 16.0
+  }
+}

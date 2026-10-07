@@ -1,0 +1,118 @@
+// A screen compiled against the catalog without an import line, of the size a host's users write:
+// nested layouts, properties of every kind the catalog declares (text, numbers, booleans,
+// enumeration cases, records, lists of records), a `for` over a list and an `if` inside it.
+type Metric = {
+  name:string
+  value:float64
+  unit:string
+  share:float64
+  healthy:boolean
+}
+
+let title = "Service overview"
+let accent = "#2563EB"
+let muted = "#94A3B8"
+let metrics = {
+  <Metric name="Latency" value=42.5 unit="ms" share=0.42 healthy={true} />
+  <Metric name="Errors" value=0.8 unit="%" share=0.08 healthy={true} />
+  <Metric name="Saturation" value=91 unit="%" share=0.91 healthy={false} />
+  <Metric name="Throughput" value=1280 unit="rps" share=0.64 healthy={true} />
+}
+let regions = { "eu-west" "us-east" "ap-south" }
+
+let root() =
+  <Layout Kind=Vertical Spacing=16 BackgroundColor="#0B1220" Padding=<Insets Left=24 Top=16 Right=24 Bottom=16 />>
+    <Row Spacing=12 VerticalAlign=Center AlignsBaselines={true}>
+      <Icon Name="pulse" Size=28 OverlayColor={accent} />
+      <Label Text={title} FontSize=24 Weight=Bold TextColor="#F8FAFC" IsHeading={true} />
+      <Shape Kind=Rectangle HorizontalFill=1 Opacity=0 />
+      <Search Placeholder="Filter services" Keyboard=Text Return=Find MaxLength=64 Width=220 />
+      <Button Text="Refresh" IsPrimary={true} Touch=Ripple Corners=<Corners TopLeft=8 TopRight=8 BottomRight=8 BottomLeft=8 /> />
+      <Avatar Initials="NX" Width=32 Height=32 Ring=<Edge Color={accent} Width=2 /> />
+    </Row>
+    <Scroll Mode=Vertical Bars=Auto Bounces={false} VerticalFill=1>
+      <Column Spacing=20>
+        <Grid Columns="*,*" ColumnSpacing=16 RowSpacing=16 MaxColumns=2>
+          for metric, index in metrics {
+            <Frame Kind=Rectangle FillColor="#111A2E" HasShadow={true}
+              Corners=<Corners TopLeft=14 TopRight=14 BottomRight=14 BottomLeft=14 />
+              Shadow=<Shadow Color="#00000066" Y=4 Blur=12 />
+              Border=<Edge Color={if metric.healthy { "#1E293B" } else { "#B91C1C" }} />>
+              <Column Spacing=6 Padding=<Insets Left=16 Top=14 Right=16 Bottom=14 />>
+                <Row Spacing=8>
+                  <Label Text={metric.name} FontSize=13 TextColor={muted} Case=Upper LetterSpacing=0.6 />
+                  if metric.healthy {
+                    <Icon Name="check" Size=14 OverlayColor="#22C55E" />
+                  } else {
+                    <Icon Name="alert" Size=14 OverlayColor="#EF4444" />
+                  }
+                </Row>
+                <Row Spacing=4 AlignsBaselines={true}>
+                  <Label Text={"" + metric.value} FontSize=34 Weight=SemiBold TextColor="#FFFFFF" />
+                  <Label Text={metric.unit} FontSize=14 TextColor={muted} />
+                </Row>
+                <Progress Value={metric.share} Indicator=Bar TrackHeight=6 ActiveColor={accent} TrackColor="#1E293B" />
+                <Label Text={"#" + index} FontSize=11 TextColor="#475569" HorizontalTextAlign=End />
+              </Column>
+            </Frame>
+          }
+        </Grid>
+        <Frame Kind=Rectangle Fill=<Gradient Kind=Linear Angle=135 Colors={ "#1D4ED8" "#7C3AED" } Stops={ 0 1 } />
+          Corners=<Corners TopLeft=14 TopRight=14 BottomRight=14 BottomLeft=14 />>
+          <Row Spacing=16 Padding=<Insets Left=20 Top=16 Right=20 Bottom=16 /> VerticalAlign=Center>
+            <Animation Source="deploy.json" IsPlaying={true} Repeat=3 Speed=1.5 Width=48 Height=48 />
+            <Column Spacing=2 HorizontalFill=1>
+              <Label Text="Deploy in progress" FontSize=16 Weight=Medium TextColor="#FFFFFF" />
+              <RichText Markup="Rolling out <b>v0.6.0</b> to three regions." AllowsLinks={false} TextColor="#DBEAFE" />
+            </Column>
+            <Spinner Indicator=Ring Size=20 Color="#FFFFFF" />
+            <Link Text="Details" Url="https://example.com/deploys/42" OpensExternally={true} IsUnderlined={true} />
+          </Row>
+        </Frame>
+        <Label Text="Regions" FontSize=13 TextColor={muted} Case=Upper />
+        <Wrap Spacing=8 LineSpacing=8>
+          for region in regions {
+            <Button Text={region} IconName="globe" Touch=Highlight BackgroundColor="#111A2E" />
+          }
+        </Wrap>
+        <Curve Kind=Outline Data="M0 40 L40 12 L80 28 L120 4" StrokeColor={accent} StrokeWidth=2 Cap=Round Join=Round
+          ViewportWidth=120 ViewportHeight=44 Points={ <Point X=0 Y=40 /> <Point X=40 Y=12 /> <Point X=80 Y=28 /> <Point X=120 Y=4 /> } />
+        <Line X1=0 Y1=0 X2=320 Y2=0 StrokeColor="#1E293B" StrokeWidth=1 DashPattern="4 4" />
+        <Stack Spacing=10>
+          <Row Spacing=12 VerticalAlign=Center>
+            <Label Text="Alerts" FontSize=15 TextColor="#E2E8F0" HorizontalFill=1 />
+            <Switch IsOn={true} OnColor={accent} />
+          </Row>
+          <Row Spacing=12 VerticalAlign=Center>
+            <Label Text="Weekly digest" FontSize=15 TextColor="#E2E8F0" HorizontalFill=1 />
+            <Checkbox CheckColor={accent} BoxSize=18 />
+          </Row>
+          <Row Spacing=12 VerticalAlign=Center>
+            <Label Text="Sampling" FontSize=15 TextColor="#E2E8F0" />
+            <Slider Kind=Single Value=0.25 Step=0.05 HorizontalFill=1 ActiveColor={accent} />
+            <Stepper Value=5 Minimum=1 Maximum=10 Step=1 />
+          </Row>
+          <Entry Placeholder="Webhook URL" Keyboard=Url Return=Done ShowsClearButton={true} />
+          <Editor Placeholder="Notes for the on-call" MinLinesShown=3 AutoGrows={true} IsSpellChecked={true} />
+        </Stack>
+        <Carousel SelectedIndex=0 PeekAmount=24 Snap=Center IsLooping={true}>
+          <Image Source="eu.png" AltText="Europe" Fit=Cover Quality=High />
+          <Image Source="us.png" AltText="Americas" Fit=Cover Quality=High />
+          <Svg Markup="<svg viewBox='0 0 8 8'><circle r='4' cx='4' cy='4' /></svg>" UsesIntrinsicSize={true} />
+        </Carousel>
+        <List ItemSpacing=4 HeaderText="Recent events" Mode=Vertical>
+          <Label Text="12:04 deploy started" FontSize=13 TextColor={muted} Trim=Ellipsis MaxLines=1 />
+          <Label Text="12:01 alert resolved" FontSize=13 TextColor={muted} Trim=Ellipsis MaxLines=1 />
+        </List>
+      </Column>
+    </Scroll>
+    <Drawer Edge=Right IsOpen={false} IsModal={true} DimAmount=0.4 Transition=Slide>
+      <Label Text="Filters" FontSize=18 Weight=Bold />
+    </Drawer>
+    <Popup IsOpen={false} Anchor=<Point X=12 Y=48 /> ArrowSize=8>
+      <Label Text="Copied" />
+    </Popup>
+    <Sheet IsOpen={false} Detents={ 0.25 0.6 1 } ShowsGrabber={true}>
+      <Label Text="Share this view" />
+    </Sheet>
+  </Layout>

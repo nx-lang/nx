@@ -1,0 +1,76 @@
+module library/answers.nx fingerprint 4710217782950829473
+entrypoints functions [] components []
+
+record Answer abstract
+  questionId: string required
+  note: string?
+
+record TextAnswer extends Answer
+  questionId: string required
+  note: string?
+  value: string required
+
+record NumberAnswer extends Answer
+  questionId: string required
+  note: string?
+  value: float64 required
+
+record IntegerAnswer extends Answer
+  questionId: string required
+  note: string?
+  value: int required
+
+record BooleanAnswer extends Answer
+  questionId: string required
+  note: string?
+  value: boolean required
+
+record ChoiceAnswer extends Answer
+  questionId: string required
+  note: string?
+  selected: string required
+  other: string?
+
+record ChoicesAnswer extends Answer
+  questionId: string required
+  note: string?
+  selected: string+ required
+
+record RangeAnswer extends Answer
+  questionId: string required
+  note: string?
+  from: string required
+  to: string required
+
+record MatrixRowAnswer
+  row: string required
+  column: string required
+
+record MatrixAnswer extends Answer
+  questionId: string required
+  note: string?
+  rows: MatrixRowAnswer+ required
+
+record AddressAnswer extends Answer
+  questionId: string required
+  note: string?
+  street: string required
+  city: string required
+  postalCode: string?
+  country: string required
+
+record FileAnswer extends Answer
+  questionId: string required
+  note: string?
+  name: string required
+  bytes: int required
+
+record SignatureAnswer extends Answer
+  questionId: string required
+  note: string?
+  strokes: int required
+  signedAt: string required
+
+record SkippedAnswer extends Answer
+  questionId: string required
+  note: string?

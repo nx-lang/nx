@@ -1,0 +1,356 @@
+module library/questions.nx fingerprint 14700776180858802568
+entrypoints functions [] components [Node Question ShortText LongText Email Phone Url Number Integer Currency Percent Slider Rating Nps Scale YesNo Consent SingleChoice MultiChoice Dropdown PictureChoice Ranking Matrix Date Time DateRange Address Country FileUpload Signature Payment Statement Hidden]
+
+union ChoiceLayout
+  case list constant
+  case grid constant
+  case chips constant
+
+union RatingIcon
+  case star constant
+  case heart constant
+  case thumb constant
+
+union DateFormat
+  case iso constant
+  case dayFirst constant
+  case monthFirst constant
+
+record Choice
+  value: string required
+  label: string required
+  description: string?
+  imageUrl: string?
+
+component Node abstract external
+
+component Question abstract external
+  props
+    id: string required
+    label: string required
+    help: string?
+    required: boolean = true
+    requiredMessage: string?
+
+component ShortText external
+  props
+    id: string required
+    label: string required
+    help: string?
+    required: boolean = true
+    requiredMessage: string?
+    placeholder: string?
+    maxLength: int?
+
+component LongText external
+  props
+    id: string required
+    label: string required
+    help: string?
+    required: boolean = true
+    requiredMessage: string?
+    placeholder: string?
+    minLength: int?
+    maxLength: int?
+    rows: int = 4
+
+component Email external
+  props
+    id: string required
+    label: string required
+    help: string?
+    required: boolean = true
+    requiredMessage: string?
+    placeholder: string?
+    allowedDomains: string*
+
+component Phone external
+  props
+    id: string required
+    label: string required
+    help: string?
+    required: boolean = true
+    requiredMessage: string?
+    defaultCountry: string?
+    allowsExtension: boolean = false
+
+component Url external
+  props
+    id: string required
+    label: string required
+    help: string?
+    required: boolean = true
+    requiredMessage: string?
+    placeholder: string?
+    requiresHttps: boolean = true
+
+component Number external
+  props
+    id: string required
+    label: string required
+    help: string?
+    required: boolean = true
+    requiredMessage: string?
+    min: float64?
+    max: float64?
+    step: float64?
+    unit: string?
+
+component Integer external
+  props
+    id: string required
+    label: string required
+    help: string?
+    required: boolean = true
+    requiredMessage: string?
+    min: int?
+    max: int?
+
+component Currency external
+  props
+    id: string required
+    label: string required
+    help: string?
+    required: boolean = true
+    requiredMessage: string?
+    currency: string = "USD"
+    min: float64?
+    max: float64?
+
+component Percent external
+  props
+    id: string required
+    label: string required
+    help: string?
+    required: boolean = true
+    requiredMessage: string?
+    decimals: int = 0
+
+component Slider external
+  props
+    id: string required
+    label: string required
+    help: string?
+    required: boolean = true
+    requiredMessage: string?
+    min: float64 = 0.0
+    max: float64 = 100.0
+    step: float64 = 1.0
+    minLabel: string?
+    maxLabel: string?
+
+component Rating external
+  props
+    id: string required
+    label: string required
+    help: string?
+    required: boolean = true
+    requiredMessage: string?
+    stars: int = 5
+    icon: RatingIcon = RatingIcon.star
+
+component Nps external
+  props
+    id: string required
+    label: string required
+    help: string?
+    required: boolean = true
+    requiredMessage: string?
+    lowLabel: string?
+    highLabel: string?
+
+component Scale external
+  props
+    id: string required
+    label: string required
+    help: string?
+    required: boolean = true
+    requiredMessage: string?
+    points: int = 5
+    lowLabel: string?
+    highLabel: string?
+
+component YesNo external
+  props
+    id: string required
+    label: string required
+    help: string?
+    required: boolean = true
+    requiredMessage: string?
+    yesLabel: string = "Yes"
+    noLabel: string = "No"
+
+component Consent external
+  props
+    id: string required
+    label: string required
+    help: string?
+    required: boolean = true
+    requiredMessage: string?
+    statement: string required
+    linkUrl: string?
+
+component SingleChoice external
+  props
+    id: string required
+    label: string required
+    help: string?
+    required: boolean = true
+    requiredMessage: string?
+    allowsOther: boolean = false
+    layout: ChoiceLayout = ChoiceLayout.list
+    content choices: Choice+ required
+
+component MultiChoice external
+  props
+    id: string required
+    label: string required
+    help: string?
+    required: boolean = true
+    requiredMessage: string?
+    minSelected: int?
+    maxSelected: int?
+    allowsOther: boolean = false
+    layout: ChoiceLayout = ChoiceLayout.list
+    content choices: Choice+ required
+
+component Dropdown external
+  props
+    id: string required
+    label: string required
+    help: string?
+    required: boolean = true
+    requiredMessage: string?
+    searchable: boolean = false
+    content choices: Choice+ required
+
+component PictureChoice external
+  props
+    id: string required
+    label: string required
+    help: string?
+    required: boolean = true
+    requiredMessage: string?
+    columns: int = 2
+    content choices: Choice+ required
+
+component Ranking external
+  props
+    id: string required
+    label: string required
+    help: string?
+    required: boolean = true
+    requiredMessage: string?
+    maxRanked: int?
+    content choices: Choice+ required
+
+component Matrix external
+  props
+    id: string required
+    label: string required
+    help: string?
+    required: boolean = true
+    requiredMessage: string?
+    rows: string+ required
+    columns: string+ required
+    multiplePerRow: boolean = false
+
+component Date external
+  props
+    id: string required
+    label: string required
+    help: string?
+    required: boolean = true
+    requiredMessage: string?
+    format: DateFormat = DateFormat.iso
+    min: string?
+    max: string?
+
+component Time external
+  props
+    id: string required
+    label: string required
+    help: string?
+    required: boolean = true
+    requiredMessage: string?
+    stepMinutes: int = 15
+    uses24Hour: boolean = true
+
+component DateRange external
+  props
+    id: string required
+    label: string required
+    help: string?
+    required: boolean = true
+    requiredMessage: string?
+    format: DateFormat = DateFormat.iso
+    maxDays: int?
+
+component Address external
+  props
+    id: string required
+    label: string required
+    help: string?
+    required: boolean = true
+    requiredMessage: string?
+    countries: string*
+    requiresPostalCode: boolean = true
+
+component Country external
+  props
+    id: string required
+    label: string required
+    help: string?
+    required: boolean = true
+    requiredMessage: string?
+    preferred: string*
+
+component FileUpload external
+  props
+    id: string required
+    label: string required
+    help: string?
+    required: boolean = true
+    requiredMessage: string?
+    accept: string*
+    maxFiles: int = 1
+    maxMegabytes: int = 10
+
+component Signature external
+  props
+    id: string required
+    label: string required
+    help: string?
+    required: boolean = true
+    requiredMessage: string?
+    penColor: string?
+
+component Payment external
+  props
+    id: string required
+    label: string required
+    help: string?
+    required: boolean = true
+    requiredMessage: string?
+    amount: float64 required
+    currency: string = "USD"
+    description: string?
+
+component Statement external
+  props
+    id: string required
+    label: string required
+    help: string?
+    required: boolean = true
+    requiredMessage: string?
+    body: string required
+    buttonLabel: string = "Continue"
+
+component Hidden external
+  props
+    id: string required
+    label: string required
+    help: string?
+    required: boolean = true
+    requiredMessage: string?
+    value: string required

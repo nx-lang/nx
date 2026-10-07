@@ -297,3 +297,53 @@ jobs:
       uses: ./.github/actions/setup-rust-node
     - name: ⏱ Report cases whose time outgrows their count
       run: cargo test --release --locked -p nx-codegen --test cost_differential -- --ignored --nocapture time_report
+
+  # The TypeScript IR runtime's speed. Each call a host makes is timed for a base revision and
+  # for this one, one straight after the other on this runner, and a call is named when this
+  # revision is slower over the rounds. On a pull request the base is the revision the change is
+  # based on. On a push it is the last release, which is what shows several small slowdowns that
+  # no one pull request was named for; the timings of this revision alone follow, as a record. It
+  # needs Node and nothing else: every revision's build and corpus images are committed. A shared
+  # runner is noisy, so the job reports and never fails the workflow.
+  runtime-performance:
+    name: ⏱ Runtime performance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    steps:
+    - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+      with:
+        fetch-depth: 0 # The comparison reads the base revision's build and images from Git.
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+    # On a pull request the checkout is the merge of the change into the base branch, so the tip
+    # of that branch is the revision the checkout is based on.
+    - name: ⏱ Compare with the base revision
+      if: github.event_name == 'pull_request'
+      env:
+        BASE_REF: ${{ github.base_ref }}
+      run: node runtime/typescript/bench/compare.mjs --base "origin/$BASE_REF" --markdown "$GITHUB_STEP_SUMMARY"
+    # A step whose program changed since the release is reported as not comparable. The release
+    # is the last one before this commit, so a commit that is itself a release is compared with
+    # the one before it. A call that is slower than in the release is named in the summary and
+    # does not fail the step (`--report-only`), which would otherwise fail on every push until the
+    # next release; the step fails when the comparison could not be made.
+    - name: ⏱ Compare with the last release
+      if: github.event_name != 'pull_request'
+      run: |
+        release=$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD^)
+        node runtime/typescript/bench/compare.mjs --base "$release" --report-only --markdown "$GITHUB_STEP_SUMMARY"
+    - name: ⏱ Time every call
+      if: github.event_name != 'pull_request' && cancelled() == false
+      shell: bash # For `pipefail`: the step fails when the harness does, not when `tee` does.
+      run: |
+        node runtime/typescript/bench/run.mjs | tee report.txt
+        { echo '## Runtime performance'; echo; echo '```'; cat report.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+    - name: 📢 Upload the timings
+      if: cancelled() == false
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      with:
+        name: runtime-performance
+        path: runtime/typescript/bench/out/*.json

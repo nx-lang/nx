@@ -1,0 +1,460 @@
+module main.nx fingerprint 13435975170582337621
+links library/questions.nx version "" fingerprint 14700776180858802568
+links library/layout.nx version "" fingerprint 11139573422423982897
+links library/answers.nx version "" fingerprint 4710217782950829473
+requires update-records-v1 action-handlers-v1 occurrence-v1
+entrypoints functions [emailQuestion troubleQuestion addressQuestion reviewQuestion definition received] components [Flow]
+
+record Completed
+  respondent: string required
+  answered: int required
+
+value total =
+  30
+
+value nameQuestion =
+  <library/questions.nx:ShortText id="name" label="What should we call you?" maxLength=40 placeholder="First name" />
+
+function emailQuestion(name: string) =
+  <library/questions.nx:Email allowedDomains=["example.com", "example.org"] help="We only write about this survey." id="email" label=(("Thanks, " concat name) concat ". Where can we reach you?") />
+
+value roleQuestion =
+  <library/questions.nx:SingleChoice allowsOther=true id="role" label="Which describes your work best?" layout=library/questions.nx:ChoiceLayout.chips>
+    <library/questions.nx:Choice description="You write or review code most days." label="Engineering" value="engineer" />
+    <library/questions.nx:Choice description="You shape how the product looks and behaves." label="Design" value="designer" />
+    <library/questions.nx:Choice description="You lead people who do one of the above." label="Management" value="manager" />
+    <library/questions.nx:Choice label="Something else" value="other" />
+  </library/questions.nx:SingleChoice>
+
+value languagesQuestion =
+  <library/questions.nx:MultiChoice id="languages" label="Which languages do you work in?" layout=library/questions.nx:ChoiceLayout.grid maxSelected=4 minSelected=1>
+    <library/questions.nx:Choice label="Rust" value="rust" />
+    <library/questions.nx:Choice label="TypeScript" value="typescript" />
+    <library/questions.nx:Choice label="C#" value="csharp" />
+    <library/questions.nx:Choice label="Python" value="python" />
+    <library/questions.nx:Choice label="Go" value="go" />
+    <library/questions.nx:Choice label="Kotlin" value="kotlin" />
+    <library/questions.nx:Choice label="Swift" value="swift" />
+    <library/questions.nx:Choice label="Another" value="other" />
+  </library/questions.nx:MultiChoice>
+
+value designToolQuestion =
+  <library/questions.nx:SingleChoice id="designTool" label="Where do your designs live?" required=false>
+    <library/questions.nx:Choice label="A shared canvas" value="canvas" />
+    <library/questions.nx:Choice label="In code" value="code" />
+    <library/questions.nx:Choice label="On paper, mostly" value="paper" />
+  </library/questions.nx:SingleChoice>
+
+value reportsQuestion =
+  <library/questions.nx:Integer id="reports" label="How many people report to you?" max=500 min=0 />
+
+value teamSizeQuestion =
+  <library/questions.nx:Integer help="Count yourself." id="teamSize" label="How many people are on your team?" max=10000 min=1 />
+
+value departmentQuestion =
+  <library/questions.nx:Dropdown id="department" label="Which department is that team in?" searchable=true>
+    <library/questions.nx:Choice label="Platform" value="platform" />
+    <library/questions.nx:Choice label="Product" value="product" />
+    <library/questions.nx:Choice label="Data" value="data" />
+    <library/questions.nx:Choice label="Security" value="security" />
+    <library/questions.nx:Choice label="Support" value="support" />
+    <library/questions.nx:Choice label="Research" value="research" />
+  </library/questions.nx:Dropdown>
+
+value ciQuestion =
+  <library/questions.nx:YesNo id="usesCi" label="Does your team build every change automatically?" noLabel="Not yet" />
+
+value ciProviderQuestion =
+  <library/questions.nx:SingleChoice allowsOther=true id="ciProvider" label="Where do those builds run?">
+    <library/questions.nx:Choice label="A hosted service" value="hosted" />
+    <library/questions.nx:Choice label="Our own machines" value="own" />
+    <library/questions.nx:Choice label="Both" value="both" />
+  </library/questions.nx:SingleChoice>
+
+value buildMinutesQuestion =
+  <library/questions.nx:Slider id="buildMinutes" label="How long does a build take, in minutes?" max=120.0 maxLabel="Two hours" min=1.0 minLabel="A minute" step=1.0 />
+
+value ratingQuestion =
+  <library/questions.nx:Rating icon=library/questions.nx:RatingIcon.star id="rating" label="How do you rate your tools today?" stars=5 />
+
+function troubleQuestion(rating: int) =
+  <library/questions.nx:LongText id="trouble" label=(("You gave " concat text<int>(rating)) concat " of 5. What gets in your way?") maxLength=2000 minLength=10 placeholder="The slowest or most fragile part of your day" rows=6 />
+
+value npsQuestion =
+  <library/questions.nx:Nps highLabel="Certainly" id="nps" label="How likely are you to recommend your setup to a new teammate?" lowLabel="Not at all" />
+
+value prioritiesQuestion =
+  <library/questions.nx:Ranking id="priorities" label="Put these in the order you would fix them." maxRanked=3>
+    <library/questions.nx:Choice label="Build speed" value="speed" />
+    <library/questions.nx:Choice label="Flaky tests" value="flakiness" />
+    <library/questions.nx:Choice label="Review turnaround" value="review" />
+    <library/questions.nx:Choice label="Documentation" value="docs" />
+    <library/questions.nx:Choice label="Onboarding" value="onboarding" />
+  </library/questions.nx:Ranking>
+
+value frequencyQuestion =
+  <library/questions.nx:Matrix columns=["Daily", "Weekly", "Rarely", "Never"] id="frequency" label="How often do you use each of these?" rows=["Debugger", "Profiler", "Formatter", "Linter"] />
+
+value startDateQuestion =
+  <library/questions.nx:Date format=library/questions.nx:DateFormat.iso id="startDate" label="When did you join the team?" max="2026-12-31" />
+
+value trialQuestion =
+  <library/questions.nx:DateRange format=library/questions.nx:DateFormat.dayFirst id="trial" label="Which two weeks could you try a new setup?" maxDays=14 />
+
+value callTimeQuestion =
+  <library/questions.nx:Time id="callTime" label="What time suits a short call?" stepMinutes=30 />
+
+value countryQuestion =
+  <library/questions.nx:Country id="country" label="Where are you based?" preferred=["FR", "DE", "US", "JP"] />
+
+value parcelQuestion =
+  <library/questions.nx:YesNo id="wantsParcel" label="May we post you a thank-you parcel?" noLabel="No, thanks" yesLabel="Yes, please" />
+
+function addressQuestion(name: string) =
+  <library/questions.nx:Address countries=["FR", "DE", "US", "JP"] id="address" label=(("Where should " concat name) concat "'s parcel go?") />
+
+value phoneQuestion =
+  <library/questions.nx:Phone defaultCountry="FR" id="phone" label="A number for the courier or the call?" required=false />
+
+value repositoryQuestion =
+  <library/questions.nx:Url id="repository" label="Link a repository we may look at." placeholder="https://example.com/team/project" required=false />
+
+value configQuestion =
+  <library/questions.nx:FileUpload accept=[".yml", ".yaml", ".json", ".toml"] id="config" label="Attach your build configuration, if you can share it." maxFiles=3 maxMegabytes=5 required=false />
+
+value budgetQuestion =
+  <library/questions.nx:Currency currency="EUR" id="budget" label="What does your team spend on tools each month?" max=100000.0 min=0.0 />
+
+value coverageQuestion =
+  <library/questions.nx:Percent decimals=1 id="coverage" label="How much of your code do tests cover?" />
+
+value themeQuestion =
+  <library/questions.nx:PictureChoice columns=3 id="theme" label="Which editor theme is closest to yours?">
+    <library/questions.nx:Choice imageUrl="https://example.com/themes/dark.png" label="Dark" value="dark" />
+    <library/questions.nx:Choice imageUrl="https://example.com/themes/light.png" label="Light" value="light" />
+    <library/questions.nx:Choice imageUrl="https://example.com/themes/contrast.png" label="High contrast" value="contrast" />
+  </library/questions.nx:PictureChoice>
+
+value confidenceQuestion =
+  <library/questions.nx:Scale highLabel="Strongly agree" id="confidence" label="I can change any part of our code without fear." lowLabel="Strongly disagree" points=7 />
+
+value commentsQuestion =
+  <library/questions.nx:LongText id="comments" label="Anything else we should know?" maxLength=4000 required=false />
+
+value consentQuestion =
+  <library/questions.nx:Consent id="consent" label="One last thing." linkUrl="https://example.com/privacy" statement="You may store my answers for twelve months." />
+
+value signatureQuestion =
+  <library/questions.nx:Signature id="signature" label="Sign to confirm." penColor="#1D4ED8" />
+
+function reviewQuestion(name: string, role: string, teamSize: int) =
+  <library/questions.nx:Statement body=(((((name concat ", ") concat role) concat " on a team of ") concat text<int>(teamSize)) concat ": your answers are below.") buttonLabel="Send" id="review" label="Ready to send?" />
+
+function definition(): library/layout.nx:FlowDefinition =
+  <library/layout.nx:FlowDefinition description="Thirty questions about how your team builds software." id="tooling-survey" title="Developer tooling survey" version=3>
+    nameQuestion
+    emailQuestion("there")
+    roleQuestion
+    languagesQuestion
+    designToolQuestion
+    reportsQuestion
+    teamSizeQuestion
+    departmentQuestion
+    ciQuestion
+    ciProviderQuestion
+    buildMinutesQuestion
+    ratingQuestion
+    troubleQuestion(0)
+    npsQuestion
+    prioritiesQuestion
+    frequencyQuestion
+    startDateQuestion
+    trialQuestion
+    callTimeQuestion
+    countryQuestion
+    parcelQuestion
+    addressQuestion("your")
+    phoneQuestion
+    repositoryQuestion
+    configQuestion
+    budgetQuestion
+    coverageQuestion
+    themeQuestion
+    confidenceQuestion
+    commentsQuestion
+    consentQuestion
+    signatureQuestion
+    reviewQuestion("You", "respondent", 1)
+    <library/questions.nx:Hidden id="source" label="Source" value="conformance" />
+  </library/layout.nx:FlowDefinition>
+
+function received(answers?: library/answers.nx:Answer+): boolean =
+  answers?
+
+component Flow
+  props
+    respondent: string = "there"
+  state
+    step: int = 0
+    answered: int = 0
+    name: string = respondent
+    role: string = ""
+    teamSize: int = 0
+    rating: int = 0
+    answers: library/answers.nx:Answer*
+  emits
+    Completed = Completed
+  body =
+    <library/layout.nx:Screen title="Developer tooling survey"
+      subtitle=if (step eq 31) then
+        (("Thank you, " concat name) concat ".")
+      else
+        ((("Question " concat text<int>((answered add 1))) concat " of ") concat text<int>(total))
+    >
+      <library/layout.nx:Progress answered=answered total=total />
+      if (step eq 0) then
+        <library/layout.nx:Step question=nameQuestion
+          onTextAnswered=handler library/layout.nx:Step.TextAnswered action@8:library/layout.nx:Step.TextAnswered owner Flow =>
+            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] name=action.answer.value step=1 />
+        >
+        </library/layout.nx:Step>
+      if (step eq 1) then
+        <library/layout.nx:Step question=emailQuestion(name)
+          onTextAnswered=handler library/layout.nx:Step.TextAnswered action@9:library/layout.nx:Step.TextAnswered owner Flow =>
+            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=2 />
+        >
+        </library/layout.nx:Step>
+      if (step eq 2) then
+        <library/layout.nx:Step question=roleQuestion
+          onChoiceAnswered=handler library/layout.nx:Step.ChoiceAnswered action@10:library/layout.nx:Step.ChoiceAnswered owner Flow =>
+            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] role=action.answer.selected step=3 />
+        >
+        </library/layout.nx:Step>
+      if ((step eq 3) and (role eq "engineer")) then
+        <library/layout.nx:Step question=languagesQuestion
+          onChoicesAnswered=handler library/layout.nx:Step.ChoicesAnswered action@11:library/layout.nx:Step.ChoicesAnswered owner Flow =>
+            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=4 />
+        >
+        </library/layout.nx:Step>
+      if ((step eq 3) and (role eq "designer")) then
+        <library/layout.nx:Step question=designToolQuestion
+          onChoiceAnswered=handler library/layout.nx:Step.ChoiceAnswered action@12:library/layout.nx:Step.ChoiceAnswered owner Flow =>
+            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=4 />
+        >
+        </library/layout.nx:Step>
+      if (((step eq 3) and (role ne "engineer")) and (role ne "designer")) then
+        <library/layout.nx:Step question=reportsQuestion
+          onIntegerAnswered=handler library/layout.nx:Step.IntegerAnswered action@13:library/layout.nx:Step.IntegerAnswered owner Flow =>
+            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=4 />
+        >
+        </library/layout.nx:Step>
+      if (step eq 4) then
+        <library/layout.nx:Step question=teamSizeQuestion
+          onIntegerAnswered=handler library/layout.nx:Step.IntegerAnswered action@14:library/layout.nx:Step.IntegerAnswered owner Flow =>
+            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] teamSize=action.answer.value
+              step=if (action.answer.value gt 10) then
+                5
+              else
+                6
+            >
+            </Flow.Update>
+        >
+        </library/layout.nx:Step>
+      if (step eq 5) then
+        <library/layout.nx:Step question=departmentQuestion
+          onChoiceAnswered=handler library/layout.nx:Step.ChoiceAnswered action@15:library/layout.nx:Step.ChoiceAnswered owner Flow =>
+            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=6 />
+        >
+        </library/layout.nx:Step>
+      if (step eq 6) then
+        <library/layout.nx:Step question=ciQuestion
+          onBooleanAnswered=handler library/layout.nx:Step.BooleanAnswered action@16:library/layout.nx:Step.BooleanAnswered owner Flow =>
+            <Flow.Update answered=(answered add 1) answers=[answers, action.answer]
+              step=if action.answer.value then
+                7
+              else
+                9
+            >
+            </Flow.Update>
+        >
+        </library/layout.nx:Step>
+      if (step eq 7) then
+        <library/layout.nx:Step question=ciProviderQuestion
+          onChoiceAnswered=handler library/layout.nx:Step.ChoiceAnswered action@17:library/layout.nx:Step.ChoiceAnswered owner Flow =>
+            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=8 />
+        >
+        </library/layout.nx:Step>
+      if (step eq 8) then
+        <library/layout.nx:Step question=buildMinutesQuestion
+          onNumberAnswered=handler library/layout.nx:Step.NumberAnswered action@18:library/layout.nx:Step.NumberAnswered owner Flow =>
+            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=9 />
+        >
+        </library/layout.nx:Step>
+      if (step eq 9) then
+        <library/layout.nx:Step question=ratingQuestion
+          onIntegerAnswered=handler library/layout.nx:Step.IntegerAnswered action@19:library/layout.nx:Step.IntegerAnswered owner Flow =>
+            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] rating=action.answer.value
+              step=if (action.answer.value le 2) then
+                10
+              else
+                11
+            >
+            </Flow.Update>
+        >
+        </library/layout.nx:Step>
+      if (step eq 10) then
+        <library/layout.nx:Step question=troubleQuestion(rating)
+          onTextAnswered=handler library/layout.nx:Step.TextAnswered action@20:library/layout.nx:Step.TextAnswered owner Flow =>
+            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=11 />
+        >
+        </library/layout.nx:Step>
+      if (step eq 11) then
+        <library/layout.nx:Step question=npsQuestion
+          onIntegerAnswered=handler library/layout.nx:Step.IntegerAnswered action@21:library/layout.nx:Step.IntegerAnswered owner Flow =>
+            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=12 />
+        >
+        </library/layout.nx:Step>
+      if (step eq 12) then
+        <library/layout.nx:Step question=prioritiesQuestion
+          onChoicesAnswered=handler library/layout.nx:Step.ChoicesAnswered action@22:library/layout.nx:Step.ChoicesAnswered owner Flow =>
+            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=13 />
+        >
+        </library/layout.nx:Step>
+      if (step eq 13) then
+        <library/layout.nx:Step question=frequencyQuestion
+          onAnswered=handler library/layout.nx:Step.Answered action@23:library/layout.nx:Step.Answered owner Flow =>
+            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=14 />
+        >
+        </library/layout.nx:Step>
+      if (step eq 14) then
+        <library/layout.nx:Step question=startDateQuestion
+          onTextAnswered=handler library/layout.nx:Step.TextAnswered action@24:library/layout.nx:Step.TextAnswered owner Flow =>
+            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=15 />
+        >
+        </library/layout.nx:Step>
+      if (step eq 15) then
+        <library/layout.nx:Step question=trialQuestion
+          onAnswered=handler library/layout.nx:Step.Answered action@25:library/layout.nx:Step.Answered owner Flow =>
+            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=16 />
+        >
+        </library/layout.nx:Step>
+      if (step eq 16) then
+        <library/layout.nx:Step question=callTimeQuestion
+          onTextAnswered=handler library/layout.nx:Step.TextAnswered action@26:library/layout.nx:Step.TextAnswered owner Flow =>
+            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=17 />
+        >
+        </library/layout.nx:Step>
+      if (step eq 17) then
+        <library/layout.nx:Step question=countryQuestion
+          onChoiceAnswered=handler library/layout.nx:Step.ChoiceAnswered action@27:library/layout.nx:Step.ChoiceAnswered owner Flow =>
+            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=18 />
+        >
+        </library/layout.nx:Step>
+      if (step eq 18) then
+        <library/layout.nx:Step question=parcelQuestion
+          onBooleanAnswered=handler library/layout.nx:Step.BooleanAnswered action@28:library/layout.nx:Step.BooleanAnswered owner Flow =>
+            <Flow.Update answered=(answered add 1) answers=[answers, action.answer]
+              step=if action.answer.value then
+                19
+              else
+                20
+            >
+            </Flow.Update>
+        >
+        </library/layout.nx:Step>
+      if (step eq 19) then
+        <library/layout.nx:Step question=addressQuestion(name)
+          onAnswered=handler library/layout.nx:Step.Answered action@29:library/layout.nx:Step.Answered owner Flow =>
+            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=20 />
+        >
+        </library/layout.nx:Step>
+      if (step eq 20) then
+        <library/layout.nx:Step question=phoneQuestion
+          onTextAnswered=handler library/layout.nx:Step.TextAnswered action@30:library/layout.nx:Step.TextAnswered owner Flow =>
+            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=21 />
+        >
+        </library/layout.nx:Step>
+      if (step eq 21) then
+        <library/layout.nx:Step question=repositoryQuestion
+          onTextAnswered=handler library/layout.nx:Step.TextAnswered action@31:library/layout.nx:Step.TextAnswered owner Flow =>
+            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=22 />
+        >
+        </library/layout.nx:Step>
+      if (step eq 22) then
+        <library/layout.nx:Step question=configQuestion
+          onAnswered=handler library/layout.nx:Step.Answered action@32:library/layout.nx:Step.Answered owner Flow =>
+            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=23 />
+        >
+        </library/layout.nx:Step>
+      if (step eq 23) then
+        <library/layout.nx:Step question=budgetQuestion
+          onNumberAnswered=handler library/layout.nx:Step.NumberAnswered action@33:library/layout.nx:Step.NumberAnswered owner Flow =>
+            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=24 />
+        >
+        </library/layout.nx:Step>
+      if (step eq 24) then
+        <library/layout.nx:Step question=coverageQuestion
+          onNumberAnswered=handler library/layout.nx:Step.NumberAnswered action@34:library/layout.nx:Step.NumberAnswered owner Flow =>
+            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=25 />
+        >
+        </library/layout.nx:Step>
+      if (step eq 25) then
+        <library/layout.nx:Step question=themeQuestion
+          onChoiceAnswered=handler library/layout.nx:Step.ChoiceAnswered action@35:library/layout.nx:Step.ChoiceAnswered owner Flow =>
+            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=26 />
+        >
+        </library/layout.nx:Step>
+      if (step eq 26) then
+        <library/layout.nx:Step question=confidenceQuestion
+          onIntegerAnswered=handler library/layout.nx:Step.IntegerAnswered action@36:library/layout.nx:Step.IntegerAnswered owner Flow =>
+            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=27 />
+        >
+        </library/layout.nx:Step>
+      if (step eq 27) then
+        <library/layout.nx:Step question=commentsQuestion
+          onTextAnswered=handler library/layout.nx:Step.TextAnswered action@37:library/layout.nx:Step.TextAnswered owner Flow =>
+            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=28 />
+        >
+        </library/layout.nx:Step>
+      if (step eq 28) then
+        <library/layout.nx:Step question=consentQuestion
+          onBooleanAnswered=handler library/layout.nx:Step.BooleanAnswered action@38:library/layout.nx:Step.BooleanAnswered owner Flow =>
+            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=29 />
+        >
+        </library/layout.nx:Step>
+      if (step eq 29) then
+        <library/layout.nx:Step question=signatureQuestion
+          onAnswered=handler library/layout.nx:Step.Answered action@39:library/layout.nx:Step.Answered owner Flow =>
+            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=30 />
+        >
+        </library/layout.nx:Step>
+      if (step eq 30) then
+        <library/layout.nx:Step question=reviewQuestion(name, role, teamSize)
+          onAnswered=handler library/layout.nx:Step.Answered action@40:library/layout.nx:Step.Answered owner Flow =>
+            [<Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=31 />, <Completed answered=(answered add 1) respondent=name />]
+        >
+        </library/layout.nx:Step>
+      if (step ge 30) then
+        <library/layout.nx:Summary title="Your answers">
+          <library/layout.nx:SummaryRow label="Name" value=name />
+          <library/layout.nx:SummaryRow label="Role" value=role />
+          <library/layout.nx:SummaryRow label="Team" value=("" concat text<int>(teamSize)) />
+          <library/layout.nx:SummaryRow label="Rating" value=(text<int>(rating) concat " of 5") />
+        </library/layout.nx:Summary>
+      if (step eq 31) then
+        <library/layout.nx:Notice body=(("We have " concat text<int>(answered)) concat " answers from you.") title="Sent" />
+      <library/layout.nx:Button label="Start over"
+        onTapped=handler library/layout.nx:Button.Tapped action@41:library/layout.nx:Button.Tapped owner Flow =>
+          <Flow.Update answered=0 answers={} rating=0 role="" step=0 teamSize=0 />
+      >
+      </library/layout.nx:Button>
+    </library/layout.nx:Screen>
+
+record Flow.Update update of Flow
+  step: int
+  answered: int
+  name: string
+  role: string
+  teamSize: int
+  rating: int
+  answers: library/answers.nx:Answer*

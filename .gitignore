@@ -391,3 +391,6 @@ release/
 
 # Toolchain artifacts fetched on demand (the pinned WASI sysroot)
 /.cache/
+
+# The performance harness's reports
+/runtime/typescript/bench/out/
