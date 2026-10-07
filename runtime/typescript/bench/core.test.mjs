@@ -139,6 +139,8 @@ check("a step is named by the median of its rounds and their agreement", () => {
   const cases = [
     ["a steady 10%", [1.1, 1.09, 1.11, 1.1, 1.12, 1.08, 1.1], "slower"],
     ["10% with one round far the other way", [1.1, 1.09, 0.5, 1.1, 1.12, 1.08, 1.1], "slower"],
+    // Six of seven have to agree, so two contrary rounds hide a slowdown: the limit of the rule.
+    ["15% with two rounds the other way", [1.15, 1.15, 1.15, 1.15, 1.15, 0.5, 0.5], ""],
     ["two wild rounds on an unchanged step", [1.0, 2.5, 0.99, 1.01, 1.9, 1.0, 0.98], ""],
     ["a median just under the threshold", [1.06, 1.06, 1.06, 1.06, 1.06, 1.06, 1.06], ""],
     ["a median over it that three rounds contradict", [1.09, 1.09, 1.09, 1.09, 0.99, 1.0, 1.01], ""],

@@ -59,7 +59,10 @@ for (const { variants, name, ...row } of side.rows) {
   if (row.unavailable !== undefined) {
     continue;
   }
-  Object.assign(row, await measureWarm(side, { ...row, variants }, samples, isolates));
+  // The one cold sample of the isolate the warm times came from is for the comparison; this
+  // report takes its cold times from isolates of their own, below.
+  const { load, first, ...warm } = await measureWarm(side, { ...row, variants }, samples, isolates);
+  Object.assign(row, warm);
   if (coldSamples > 0) {
     const { loads: loaded, ...cold } = await measureCold(side, { variants }, coldSamples);
     loads.push(...loaded);

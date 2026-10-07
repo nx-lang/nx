@@ -2,12 +2,13 @@
  * How the comparison judges a step from the ratios of its rounds, each the working tree's time
  * over the base's.
  *
- * One round's ratio is noisy: between two runs of one build, one warm ratio in ten is more than
- * 10% from 1 and a few are twice or half. The median of seven is not: over 1,200 steps of a build
- * compared with itself, on a desktop and on GitHub runners, it stayed within 10% of 1 and nearly
- * always within 5%. So a step is named when the median of its ratios is beyond the threshold and
- * three quarters of its rounds are beyond half of it the same way, which keeps one or two wild
- * rounds from naming a step and one or two from hiding it. At a threshold of 7% that rule named
+ * One round's ratio is noisy: between two runs of one build, one warm ratio in twelve is more
+ * than 10% from 1 and a few are twice or half. The median of seven is not: over 1,200 steps of a
+ * build compared with itself, on a desktop and on GitHub runners, it stayed between 0.90 and 1.10
+ * and nearly always within 5% of 1. So a step is named when the median of its ratios is beyond
+ * the threshold and three quarters of its rounds are beyond half of it the same way. Of seven
+ * rounds that is six, so one or two wild rounds do not name a step and one does not hide a real
+ * slowdown; two that go the other way do. At a threshold of 7% that rule named
  * none of those 1,200, and names 84% of them when every ratio is made 10% larger and 96% when
  * 15%. A cold time is one sample a round, and at 20% the rule named none of 340.
  */

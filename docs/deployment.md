@@ -79,10 +79,10 @@ Only stable `major.minor.patch` release tags are supported in this implementatio
 8. Publish the GitHub Release.
 9. Approve the `production` environment deployments if reviewers are required.
 10. Confirm publication:
-   - NuGet.org lists `NxLang.Sdk` 1.2.3.
-   - `npm view @nx-lang/sdk-wasm version`, and the same for each package, answers `1.2.3`.
-   - The Visual Studio Marketplace and Open VSX list `nx-lang.nx-language` 1.2.3 for all three
-     platforms.
+    - NuGet.org lists `NxLang.Sdk` 1.2.3.
+    - `npm view @nx-lang/sdk-wasm version`, and the same for each package, answers `1.2.3`.
+    - The Visual Studio Marketplace and Open VSX list `nx-lang.nx-language` 1.2.3 for all three
+      platforms.
 
 The publish job publishes the npm tarballs in dependency order (`scripts/publish-packages.mjs`), so
 a consumer installing a just-published package finds its `@nx-lang/*` dependencies on the registry

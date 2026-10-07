@@ -192,14 +192,15 @@ once for each place it is held: a value that shares one object in many places is
 tree it spells, and `maxInputSize` is what bounds the reading of it, not `maxOperations`.
 
 **What reading costs.** Plain data with nothing to leave out is checked in one pass and used as
-it was passed, with no copy: about 25 ns for a record of three fields, measured by the `input`
-phase of the harness below (*Performance*) on one machine. A value the check does not settle is
-read again by a slower walk that keeps track of where it is and of the objects it is inside, at
-about five times that for each record. Two things send a value there: a member that is
-`undefined`, anywhere in it, and nesting deeper than 32 levels. It is the whole value that takes
-the slower walk, not the part that caused it. A positional argument, an item of content and an
-entry of a batch are each a value of their own; props, a state, a patch and arguments by name are
-each one value, so one `undefined` member anywhere in a state sends the state. None of this is
+it was passed, with no copy: up to about 25 ns for a record of three fields, measured by the
+`input` phase of the harness below (*Performance*) on one machine. A value the check does not
+settle is read again by a slower walk that keeps track of where it is and of the objects it is
+inside, at about 100 ns for each record. Three things send a value there: a member that is
+`undefined`, anywhere in it, nesting deeper than 32 levels, and an object made in another realm,
+a `vm` context or a frame. It is the whole value that takes the slower walk, not the part that
+caused it. A positional argument, an argument by name, an item of content and an entry of a batch
+are each a value of their own; props, a state and a patch are each one value, so one `undefined`
+member anywhere in a state sends the state. None of this is
 noticed on a call of ordinary size, where it is microseconds. A host that passes thousands of
 records on a path that runs often keeps to the fast one by leaving an absent member out instead
 of setting it to `undefined`:
@@ -209,7 +210,7 @@ const row = { id, label, ...(note === undefined ? {} : { note }) }; // not { id,
 ```
 
 The slower walk can be made cheaper, and has not been. `specs/future.md` (*Reading a host value
-costs about 25 ns a record, five times that on the slow path*) lists how: it can drop its set of
+costs up to 25 ns a record, and about 100 on the slow path*) lists how: it can drop its set of
 the objects it is inside when `maxInputSize` has already measured the value, since a value within
 the limit holds nothing that holds itself; it can read an object's members as the fast check does
 instead of listing their names first; and the input measure can report that it met only plain

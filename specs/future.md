@@ -1897,7 +1897,8 @@ tool of a real host has been counted yet.
 
 A budget bounds operations and not time, and a small tool's time is mostly not its operations: the
 5-operation call above takes about 0.4 µs with no limits, of which reading its arguments is about
-0.15, and about 0.8 µs with a budget and an input limit set (*Reading a host value costs about 25 ns a record, five times that on the slow path*, below).
+0.15, and about 0.8 µs with a budget and an input limit set (*Reading a host value costs up to 25 ns a record, and about 100 on the slow path*,
+below).
 
 **What would settle it.** A call reports the operations it used (`usage` in the runtime options,
 and on a tool's result in the agent package). Run ReachMe's function tools and HTTP arguments functions, and the tools of the
@@ -2034,7 +2035,7 @@ check its design against the three conditions and the fourth above.
 
 ## Host Values: What `define-host-values` Left For Later
 
-### Reading a host value costs about 25 ns a record, five times that on the slow path
+### Reading a host value costs up to 25 ns a record, and about 100 on the slow path
 
 **Observed.** The TypeScript IR runtime reads every value a host passes, once in a call, before
 anything is checked (`readHostValue`, `runtime/typescript/src/index.ts`). When the reading was
@@ -2048,29 +2049,34 @@ The performance harness (`runtime/typescript/bench`) measures the same thing on 
 runtime's build differs between `50fc3ea` and the commit after it, `4f78c69`, by the reading
 alone, so comparing the two builds is the reading's cost:
 `node runtime/typescript/bench/compare.mjs --base 50fc3ea`, or, to run today's corpus programs
-under both, `--base-runtime <dist/src of 50fc3ea>`. Four runs on one desktop with Node 24
-(2026-10-06) agree; times are with no limits set, before and after:
+under both, `--base-runtime <dist/src of 50fc3ea>`. Six runs of seven rounds on one desktop with
+Node 24 (2026-10-06); times are with no limits set, before and after, and a range is over the runs:
 
 - **The calls a host makes on a program show no cost.** Rendering the catalog snippet, evaluating
   the flow's definition, and initializing, resuming, evaluating with a state and dispatching to
   the flow are each within 5% either way, which is the noise: 48 µs a dispatch before and after.
-- **A call that is nothing but input shows it.** 10,000 records of three fields passed at `object`
-  and returned, plain data, which the fast check settles: 1.45 to 1.69 ms, 1.09 to 1.18 times
-  over the runs. That is 0.16 to 0.3 ms, about 25 ns a record, and what task 2.2 measured; it is
-  12 to 18% here and was 5% there because this call does less with the records.
-- **The slow path is about five times that.** The same data with one member `undefined` in the
-  last record: 1.43 to 2.66 ms, 1.7 to 1.8 times, about 120 ns a record. Inside 33 objects: 1.62
-  to 2.33 ms, 1.4 to 1.5 times.
+- **A call that is nothing but input shows it, and plain data only just.** 10,000 records of three
+  fields passed at `object` and returned, plain data, which the fast check settles: 0.98 to 1.18
+  times, about 1.6 ms either way, and 1.07 to 1.16 times with limits set. That is from nothing to
+  0.3 ms, up to about 25 ns a record; the two builds timed in pairs in one isolate gave 3 to 18.
+  Task 2.2 measured 0.13 to 0.2 ms. The step's own time moves by a tenth between one comparison
+  and the next, which is as large as the effect, so this is the edge of what the harness
+  resolves.
+- **The slow path is several times that.** The same data with one member `undefined` in the last
+  record: 1.5 to 1.8 times, about 1.6 to 2.7 ms, 80 to 125 ns a record. Inside 33 objects: 1.4 to
+  1.5 times, 70 to 90 ns a record.
 - **Where the records are checked against a type the reading is lost in the check.** 10,000
   records of a declared type: 5.63 to 5.77 ms, 1.02 times. Checking a record against its type is
-  about 0.6 µs a record, twenty times what reading it costs.
+  about 0.6 µs a record, twenty times and more what reading it costs.
 - **A call pays about 0.15 µs however little it does.** A function of two integers called by
-  name: 0.17 to 0.36 µs, twice. One that takes a context record of four fields: 0.60 to 0.74 µs.
+  name: about 0.2 to 0.36 µs, 1.8 to 2.1 times. One that takes a context record of four fields:
+  about 0.6 to 0.75 µs, 1.2 times.
 
-So the reading's cost is what it was measured to be, and it is a large share only of a call that
-does almost nothing else: one that passes a large value through at `object`, on the slow path
-above all, or one that takes a microsecond. With the fast check disabled, plain data takes 1.45
-times as long: the first form of the reading again, seeded to check that the comparison names it.
+So the reading costs about what it was measured to cost when it was written, and it is a large
+share only of a call that does almost nothing else: one that passes a large value through at
+`object`, on the slow path above all, or one that takes a microsecond. With the fast check
+disabled, plain data takes 1.45 times as long: the first form of the reading again, seeded to
+check that the comparison names it.
 
 **The trade-off, and what it was based on.** The 60% is why the reading is in two parts. A check
 written for the usual case, `isReadAsPassed`, answers whether a value has nothing to refuse and
@@ -2092,8 +2098,8 @@ costs what it cost. So:
 Each of these was decided against one number from one machine and one shape of input. The three
 shapes and two small calls are now steps of the harness, and `bench:compare` names one when a
 change makes it slower than the revision it is based on by more than 7% over its rounds. It names
-the reading as it was merged on those steps, the slow path and both small calls in every run and
-plain data in some, and on no step of the two programs.
+the reading as it was merged on those steps, the slow path and the two-integer call in every run
+and plain data and the other small call in some, and on no step of the two programs.
 
 **Why it might matter.** A component host passes its whole state on every call, so input the size
 of the state is the ordinary case and not a stress test. The check that follows the reading
