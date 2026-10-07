@@ -2178,6 +2178,107 @@ host relies on. Either way, add a compiled sample that passes a generated type t
 point, so the two cannot drift apart again; the runtime's README samples are not compiled by any
 test today.
 
+## IR Runtime Performance: What `add-ir-runtime-performance-harness` Found And Left For Later
+
+The harness in `runtime/typescript/bench` times each call a host makes on two programs of
+realistic size and on calls that take a large input. The entries below are what its first runs
+showed and nobody has looked into; the cost of reading a host value is under *Host Values* above.
+The figures are warm medians with no limits set, on one desktop with Node 24 (2026-10-06).
+`pnpm --filter @nx-lang/ir-runtime bench` gives them for another machine, and the operation counts
+beside them are exact everywhere.
+
+### Checking a record against its type costs about 0.6 µs a record
+
+**Observed.** The `input` phase passes 10,000 records to two functions. `held` takes them at
+`object`, where a value is one thing to check, and returns them: 1.76 ms, 40,004 operations, 44 ns
+an operation, the writing of 10,000 records back included. `received` takes them as `Answer+`,
+where each is a `ChoiceAnswer` of two fields checked against its declared type, and returns a
+boolean: 6.06 ms, 30,004 operations, 202 ns an operation. So the check is about 0.6 µs a record,
+some twenty times what reading the record costs and four times what an operation costs anywhere
+else in the report. `Answer` is abstract and each record names its own subtype, so the check
+includes finding the type a `$type` names; the check also builds a record for every record it is
+given.
+
+**Why it might matter.** A component host passes its state on every call and the state is checked
+field by field against the component's declaration, so this is the cost of state as it grows. The
+flow's state after 15 answers is a list of 15 such records, and resuming with it takes 23 µs where
+initializing with none takes 13.
+
+**What would settle it.** Profile `calls / input / received, plain` (`node --cpu-prof` on a
+script that runs that step of `bench/core.mjs`) and see how the time divides between resolving the
+subtype, checking the fields and building the checked record. Time the same records at a
+parameter typed with the concrete record, to see what the subtype costs.
+
+### Setting limits costs half a microsecond a call and about 110 ns a record of input
+
+**Observed.** Every phase that evaluates is timed twice, with no limits and with `maxOperations`,
+`maxInputSize` and `usage` set to values the call does not reach. With limits:
+
+- a tool call of 5 operations takes 0.88 µs where it took 0.37, and one of 8 takes 1.23 where it
+  took 0.75: about 0.5 µs a call, more than the call itself;
+- the flow's component calls take 6 to 19% longer: initialize 12.6 to 13.3 µs, evaluate with a
+  state 23.4 to 25.6, one answer dispatched 49.5 to 53.7, and resume, which is given a state of
+  74 values, 23.4 to 27.9;
+- evaluating with no input is hardly touched: the catalog screen 608 to 616 µs, the flow's
+  definition 93 to 98;
+- a call given 10,000 records at `object` takes 2.89 ms where it took 1.76, 64% longer and about
+  110 ns a record; given the same number of typed records, 6.80 where it took 6.06.
+
+The harness sets the three together, so it does not say how much is counting operations, how
+much is measuring the input, and how much is the usage report. `define-host-values` measured the
+input measure alone at about 0.5 ms for 10,000 records, which would be nearly half of the 1.1 ms.
+
+**Why it might matter.** A host that evaluates code it did not write is told to set these, and
+`@nx-lang/agent` sets them on every tool call. So the cost with limits is the cost such a host
+pays, and for a small tool the limits are most of it.
+
+**What would settle it.** Add variants to the harness that set one option at a time, which says
+which of the three to look at. For the input measure, `specs/future.md` (*Reading a host value
+costs up to 30 ns a record, and about 100 on the slow path*) already notes that the measure and
+the reading walk the same value one after the other and could be one walk.
+
+### Evaluating against a large catalog costs three times as much an operation as a flow does
+
+**Observed.** `root` of `large-catalog`, a screen of 92 elements against a catalog of 45 external
+components, takes 608 µs for 2,263 operations: 269 ns an operation. The definition of
+`question-flow`, 67 elements and records against a library of 31 question kinds, takes 93 µs for
+1,285: 73 ns. A dispatch to the flow is 102 ns an operation and an initialization 47. An element
+of the catalog screen costs about 25 operations and 6.6 µs; one of the flow's definition about 19
+and 1.4 µs. The first time in a fresh isolate, the screen takes 6.6 ms and the definition 3.8.
+
+What differs most between the two is the size of a declaration. A component of the catalog has
+its bases' properties as well as its own, 60 to 100 in all, of which an element sets a handful; a
+question kind has about ten. If constructing an element does work for every property its
+component declares, set or not, that work is not counted as operations and grows with the
+declaration, which would explain a cost per operation that follows the catalog and not the
+program. That is a guess from the two totals; nothing here shows it.
+
+**Why it might matter.** A catalog of this shape is what a UI host has, and it is not the
+program's author who chose its size. The cost model's claim is that a step which is not charged
+does not grow with the size of a value; a step that grows with the size of a declaration is
+beside that claim and nothing checks it.
+
+**What would settle it.** Profile `large-catalog / evaluate / root`. Or change a table of
+`specs/ir-conformance/large-catalog/generate-catalog.mjs` so that the base component declares
+half as many properties, regenerate the program, and see whether the time follows while the
+operations stay where they are.
+
+### What the performance comparison does not see
+
+- **A slowdown under 7% on a pull request.** It is named only when it has added up past 7% since
+  the last release, by the comparison CI runs on a push to `main`. A step whose program changed
+  since the release is not compared there, so the two large programs are covered from the release
+  after 0.6.0.
+- **A cold time less than about 25% slower.** A cold time is one sample a round and is named
+  beyond 20%; a step 30% slower is named nine times in ten.
+- **Any engine but Node's.** A deployed Cloudflare Worker has another build of V8, other limits
+  and a clock that stands still while code runs. `bench/core.mjs` runs there, handed the host's
+  own build; nothing in this repository does it, and no host has yet.
+- **The Rust runtime.** Under *IR Runtime Evaluation Budget* above.
+- **How a failed comparison looks on a pull request.** The job is `continue-on-error` and the
+  seeded slowdowns were named in runs with no pull request, so the mark a named step leaves in a
+  pull request's list of checks has not been looked at.
+
 ## `packages/language-http`: The 413 Test Fails About One Run In Four
 
 **Observed.** `the Node listener answers identically to the handler`
