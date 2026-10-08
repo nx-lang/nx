@@ -47,10 +47,20 @@ compiled images depends on none of the compiler:
 ```
 nx-ir           The image format: constants, kind numbers, the artifact model, the image writer,
                 the validating in-place reader and the explainer. No dependencies.
-nx-ir-runtime   Prepares, links and evaluates images. Depends on nx-ir and nx-value only.
+nx-value        NxValue, the value a host passes to compiled NX and reads back, with its JSON and
+                MessagePack encodings.
+nx-ir-runtime   Prepares, links and evaluates images, and composes component instances into the
+                tree behind a program's output (InstanceTree). Depends on nx-ir and nx-value only.
 nx-codegen      The emitter. Writes images through nx-ir; its tests run them on nx-ir-runtime
                 and compare with nx-interpreter.
 ```
+
+`nx-ir`, `nx-value` and `nx-ir-runtime` are the crates published to crates.io, with every NX
+release and at its version; a Rust host depends on `nx-ir-runtime` and `nx-value` and builds no
+other crate of this workspace. They build for `wasm32-unknown-emscripten` and `wasm32-wasip1` as
+well as natively. Every other crate here is `publish = false`. `scripts/pack-crates.mjs` packages
+the three and `pnpm run verify:crates` checks that a host builds from the packages alone;
+[../docs/deployment.md](../docs/deployment.md) has the release track.
 
 See [nx-ir-runtime/README.md](nx-ir-runtime/README.md) and
 [../docs/nx-ir-format.md](../docs/nx-ir-format.md).

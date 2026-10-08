@@ -7,5 +7,10 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
+description = "The NX IR image format: the constants, the model, the writer and the validating in-place reader of compiled NX modules."
+keywords = ["nx", "ir", "image", "format"]
+categories = ["encoding", "compilers"]
+readme = "README.md"
+include = ["src/**", "README.md", "Cargo.toml"]
 
 [dependencies]

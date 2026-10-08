@@ -46,6 +46,18 @@ pub struct RuntimeOptions {
     /// is looked at, and measuring stops as soon as the size passes the limit. The limit is
     /// separate from the budget: measuring charges no operation.</para>
     pub max_input_size: Option<u64>,
+    /// How much native stack one call may use, measured from where the call began: what the
+    /// calling thread has free. [`NX_DEFAULT_MAX_STACK_BYTES`], one mebibyte, by default.
+    ///
+    /// <para>The evaluator recurses on the native stack, and so do the walks that check a value
+    /// against a type and convert one at the host boundary. A call that would use more than
+    /// this fails with `nx-ir-resource-limit` naming `maxStackBytes` and the budget in force. The
+    /// runtime cannot ask how much stack a thread has, so the host says: a host whose whole
+    /// stack is smaller than the default, as a WebAssembly module's often is, sets what is free
+    /// where it calls the runtime and gets a diagnostic where the default would overrun the
+    /// stack; a host with more to spare may raise it. Expressions nest at most a thousand deep
+    /// whatever the budget is.</para>
+    pub max_stack_bytes: usize,
     /// Where a call reports what it used, when the host wants to know. `None` by default.
     ///
     /// <para>The runtime clears the report when a call begins and fills it when the call ends,
@@ -59,6 +71,13 @@ pub struct RuntimeOptions {
 pub const NX_DEFAULT_MAX_CALL_DEPTH: u32 = 100;
 /// The default of [`RuntimeOptions::max_range_length`].
 pub const NX_DEFAULT_MAX_RANGE_LENGTH: u64 = 1_000_000;
+/// The default of [`RuntimeOptions::max_stack_bytes`]: one mebibyte.
+///
+/// <para>A count of nested nodes bounds the stack only as well as the size of a frame is known,
+/// and an unoptimized build's frames are several times an optimized one's. So the stack actually
+/// used is checked too, and whichever limit is met first ends the evaluation with a
+/// diagnostic.</para>
+pub const NX_DEFAULT_MAX_STACK_BYTES: usize = 1 << 20;
 
 impl Default for RuntimeOptions {
     fn default() -> Self {
@@ -67,6 +86,7 @@ impl Default for RuntimeOptions {
             max_range_length: NX_DEFAULT_MAX_RANGE_LENGTH,
             max_operations: None,
             max_input_size: None,
+            max_stack_bytes: NX_DEFAULT_MAX_STACK_BYTES,
             usage: None,
         }
     }
@@ -80,20 +100,6 @@ impl Default for RuntimeOptions {
 /// image and no option reaches the end of the stack.</para>
 pub(crate) const MAX_NESTING: u32 = 1000;
 
-/// How much native stack one evaluation may use, measured from where it began.
-///
-/// <para>A count of nested nodes bounds the stack only as well as the size of a frame is known,
-/// and an unoptimized build's frames are several times an optimized one's. So the stack actually
-/// used is checked too, and whichever limit is met first ends the evaluation with a diagnostic.
-/// A thread that runs the evaluator needs this much stack free.</para>
-const MAX_STACK_BYTES: usize = 1 << 20;
-
-/// The limit a diagnostic names when an evaluation ran out of native stack.
-pub(crate) const STACK_LIMIT: Limit = Limit {
-    name: "maxStackBytes",
-    value: Some(MAX_STACK_BYTES as u64),
-};
-
 /// The limit a diagnostic names when expressions nested too deeply.
 const NESTING_LIMIT: Limit = Limit {
     name: "maxExpressionNesting",
@@ -105,6 +111,52 @@ const NESTING_LIMIT: Limit = Limit {
 fn stack_position() -> usize {
     let marker = 0u8;
     std::ptr::from_ref(&marker) as usize
+}
+
+/// The native stack one call may use: where the stack stood when the call began, and the
+/// host's budget from there ([`RuntimeOptions::max_stack_bytes`]).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Stack {
+    base: usize,
+    budget: usize,
+}
+
+impl Stack {
+    /// A budget measured from here.
+    pub(crate) fn begin(budget: usize) -> Self {
+        Self {
+            base: stack_position(),
+            budget,
+        }
+    }
+
+    /// Whether the call is still within its budget.
+    #[inline]
+    pub(crate) fn within(&self) -> bool {
+        stack_position().abs_diff(self.base) <= self.budget
+    }
+
+    /// The limit a diagnostic names when the call ran out of native stack.
+    fn limit(&self) -> Limit {
+        Limit {
+            name: "maxStackBytes",
+            value: Some(self.budget as u64),
+        }
+    }
+
+    /// The failure of a walk over a value that would leave the budget. The value need not be a
+    /// deep one: a check of an argument's type far down a recursion is such a walk.
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn value_too_deep<T>(&self) -> Result<T> {
+        crate::error::fail_limit(
+            self.limit(),
+            format!(
+                "Walking a value would take the call past the {} bytes of stack it may use.",
+                self.budget
+            ),
+        )
+    }
 }
 
 /// The most local slots one frame may hold. A slot is a cell of the image, so an altered image
@@ -164,8 +216,8 @@ pub(crate) struct Machine<'p> {
     nesting: Cell<u32>,
     /// The operations the budget has left: `u64::MAX` when the host set none.
     remaining: Cell<u64>,
-    /// Where the native stack stood when the evaluation began.
-    stack_base: usize,
+    /// The native stack the evaluation may use, from where it began.
+    pub stack: Stack,
     /// Whether a default failed, by its expression or by its value not fitting its type. A
     /// failure ends the evaluation, so once this is set the failure that leaves is that one, and
     /// it is not in an argument even when the default was filled in while an argument was checked.
@@ -179,7 +231,7 @@ impl<'p> Machine<'p> {
             options,
             nesting: Cell::new(0),
             remaining: Cell::new(options.max_operations.unwrap_or(u64::MAX)),
-            stack_base: stack_position(),
+            stack: Stack::begin(options.max_stack_bytes),
             default_failed: Cell::new(false),
         }
     }
@@ -288,10 +340,7 @@ impl<'p> Machine<'p> {
     pub(crate) fn eval(&self, cx: Cx, frame: &mut Frame, index: u32) -> Result<Value> {
         let remaining = self.remaining.get();
         let nesting = self.nesting.get();
-        if remaining == 0
-            || nesting >= MAX_NESTING
-            || stack_position().abs_diff(self.stack_base) > MAX_STACK_BYTES
-        {
+        if remaining == 0 || nesting >= MAX_NESTING || !self.stack.within() {
             return self.limit_reached(cx, index);
         }
         self.remaining.set(remaining.wrapping_sub(1));
@@ -340,12 +389,6 @@ impl<'p> Machine<'p> {
         }
     }
 
-    /// Whether the evaluation is still within its share of the native stack. The walks that
-    /// recurse over a value rather than over nodes ask this.
-    pub(crate) fn within_stack(&self) -> bool {
-        stack_position().abs_diff(self.stack_base) <= MAX_STACK_BYTES
-    }
-
     /// Charges `amount` operations, failing before the operation is performed when the budget
     /// does not cover it. The failure names the declaration `cx` is in and, when the charge is
     /// for a node, that node's span.
@@ -391,8 +434,11 @@ impl<'p> Machine<'p> {
         self.fail_limit(
             cx,
             Some(index),
-            STACK_LIMIT,
-            format!("Maximum NX IR expression nesting was exceeded: evaluation used more than {MAX_STACK_BYTES} bytes of stack."),
+            self.stack.limit(),
+            format!(
+                "Maximum NX IR expression nesting was exceeded: evaluation used more than {} bytes of stack.",
+                self.options.max_stack_bytes
+            ),
         )
     }
 
@@ -543,7 +589,12 @@ impl<'p> Machine<'p> {
             for pattern in arm.patterns.iter() {
                 let node = *pattern;
                 let pattern = self.eval_pattern(cx, frame, node)?;
-                if pattern_matches(&scrutinee, &pattern, &self.meter(cx, Some(node)))? {
+                if pattern_matches(
+                    &scrutinee,
+                    &pattern,
+                    &self.meter(cx, Some(node)),
+                    &self.stack,
+                )? {
                     return Ok(Some(arm.body));
                 }
             }
@@ -728,7 +779,7 @@ impl<'p> Machine<'p> {
         }
         // Equality walks its operands, and pays for each pair of values it compares.
         if matches!(op, BinaryOp::Eq | BinaryOp::Ne) {
-            let equal = values_equal(&left, &right, &self.meter(cx, Some(node)))?;
+            let equal = values_equal(&left, &right, &self.meter(cx, Some(node)), &self.stack)?;
             return Ok(Value::Bool(equal == (op == BinaryOp::Eq)));
         }
         match binary(op, &left, &right) {
@@ -1221,14 +1272,14 @@ impl<'p> Machine<'p> {
             depth: cx.depth,
         };
         let fields = if record.update_target.is_some() {
-            self.normalize_patch_fields(declared, &record.fields, &input, name)?
+            self.normalize_patch_fields(declared, &record.fields, &input, &Path::Root(name))?
         } else {
             self.normalize_fields(
                 declared,
                 &record.fields,
                 &input,
                 &mut Vec::new(),
-                name,
+                &Path::Root(name),
                 false,
             )?
         };
@@ -1288,7 +1339,7 @@ impl<'p> Machine<'p> {
             &case.fields,
             &input,
             &mut Vec::new(),
-            &path,
+            &Path::Root(&path),
             false,
         )?;
         Ok(Value::record(Some(path), fields))
@@ -1356,7 +1407,7 @@ impl<'p> Machine<'p> {
             &component.props,
             &props,
             &mut Vec::new(),
-            &path,
+            &Path::Root(&path),
             false,
         )?;
         for (name, handler) in handlers {
@@ -1464,6 +1515,7 @@ impl<'p> Machine<'p> {
                 first,
                 update::record_argument(values.get(1), name)?,
                 &self.meter(cx, Some(node)),
+                &self.stack,
             ),
         }
     }
@@ -1510,7 +1562,12 @@ fn optional_item(value: &Value) -> Option<&Value> {
 /// Whether a match arm's pattern matches the scrutinee. The `{}` pattern matches exactly the
 /// empty value; a record pattern matches by `$type`; anything else by the language's equality,
 /// which is the one of the three that walks the values and so the one `meter` pays for.
-fn pattern_matches(value: &Value, pattern: &Value, meter: &Meter<'_, '_>) -> Result<bool> {
+fn pattern_matches(
+    value: &Value,
+    pattern: &Value,
+    meter: &Meter<'_, '_>,
+    stack: &Stack,
+) -> Result<bool> {
     if pattern.is_empty() || value.is_empty() {
         return Ok(pattern.is_empty() && value.is_empty());
     }
@@ -1519,7 +1576,7 @@ fn pattern_matches(value: &Value, pattern: &Value, meter: &Meter<'_, '_>) -> Res
             return Ok(value.type_name == pattern.type_name);
         }
     }
-    values_equal(value, pattern, meter)
+    values_equal(value, pattern, meter, stack)
 }
 
 /// Binds an element's body to its content field.

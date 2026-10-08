@@ -6,6 +6,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+publish = false
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -13,8 +14,8 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 nx-api = { path = "../nx-api" }
 nx-codegen = { path = "../nx-codegen" }
-nx-ir = { path = "../nx-ir" }
-nx-value = { path = "../nx-value" }
+nx-ir = { workspace = true }
+nx-value = { workspace = true }
 rmp-serde.workspace = true
 serde_json.workspace = true
 serde.workspace = true
@@ -25,5 +26,5 @@ nx-hir = { path = "../nx-hir" }
 nx-interpreter = { path = "../nx-interpreter" }
 nx-syntax = { path = "../nx-syntax" }
 nx-types = { path = "../nx-types" }
-nx-value = { path = "../nx-value" }
+nx-value = { workspace = true }
 tempfile = "3"

@@ -237,6 +237,21 @@ jobs:
     # lockfile this one is meant to check.
     - name: 🧪 Test the Rust workspace
       run: cargo test --workspace --locked
+    # A host that draws NX in a browser builds the runtime for WebAssembly: wasm32-unknown-emscripten
+    # for a host that links C++, wasm32-wasip1 for one that does not. The runtime and the two
+    # crates under it have to build for both with nothing but the target's standard library, which
+    # is all a check needs: no Emscripten SDK, no C toolchain.
+    - name: 🕸 Check the runtime crates for the WebAssembly targets
+      run: |
+        for target in wasm32-unknown-emscripten wasm32-wasip1; do
+          echo "::group::cargo check --target ${target}"
+          if ! cargo check -p nx-ir-runtime --locked --target "${target}"; then
+            echo "::endgroup::"
+            echo "::error::nx-ir-runtime, or nx-ir or nx-value under it, does not build for ${target}."
+            exit 1
+          fi
+          echo "::endgroup::"
+        done
     # The wasm SDK's build produces the module and its tests compare it with the Node SDK's answers,
     # so a divergence between the two bindings fails here rather than reaching a site.
     - name: 🕸 Build the workspace, including the WebAssembly module
@@ -279,6 +294,20 @@ jobs:
       with:
         name: npm-packages
         path: ${{ runner.temp }}/npm-packages/*.tgz
+        if-no-files-found: error
+    # The crates that go to crates.io, packed at this build's version too. Packing builds each
+    # crate from its packaged contents alone, and the verification builds a host project against
+    # the three packages and checks that no crate of the compiler comes with them, so a crate that
+    # cannot publish, or that reaches outside its directory, fails here rather than on a release tag.
+    - name: 📦 Verify and pack the runtime crates
+      run: |
+        pnpm run verify:crates
+        node scripts/pack-crates.mjs "${{ steps.versions.outputs.package_version }}" "${{ runner.temp }}/rust-crates"
+    - name: Upload runtime crates
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      with:
+        name: rust-crates
+        path: ${{ runner.temp }}/rust-crates/*.crate
         if-no-files-found: error
 
   # The time report of the cost validation: every generated case timed at two scales in both IR

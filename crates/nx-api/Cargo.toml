@@ -6,6 +6,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+publish = false
 
 [dependencies]
 nx-diagnostics = { path = "../nx-diagnostics" }
@@ -13,7 +14,7 @@ nx-hir = { path = "../nx-hir" }
 nx-interpreter = { path = "../nx-interpreter" }
 nx-syntax = { path = "../nx-syntax" }
 nx-types = { path = "../nx-types" }
-nx-value = { path = "../nx-value" }
+nx-value = { workspace = true }
 serde.workspace = true
 serde_json.workspace = true
 smol_str.workspace = true

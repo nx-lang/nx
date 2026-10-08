@@ -1327,7 +1327,12 @@ It differs from the TypeScript runtime in what Rust makes possible or necessary:
   by index.
 
 And because a native stack overflow cannot be caught, evaluation is bounded by a fixed
-expression-nesting limit and a stack budget as well as by the host's call-depth limit.
+expression-nesting limit and a stack budget as well as by the host's call-depth limit. The stack
+budget is `RuntimeOptions::max_stack_bytes`: the native stack one call may use from where it
+began, a mebibyte by default, which a host whose stack is smaller sets to what it has free so that
+an evaluation that would overrun the stack ends in a diagnostic naming `maxStackBytes` and the
+budget in force. The crate also composes the instances of nested components into a tree that
+follows the program's output, as `InstanceTree`; the TypeScript runtime leaves that to its host.
 `RuntimeOptions::max_operations` is the operation budget, counted exactly as the TypeScript runtime
 counts it: the same images, input and budget stop at the same node.
 `RuntimeOptions::max_input_size` is the input limit of *Input size*, measured as the TypeScript

@@ -18,7 +18,7 @@ debug-trap = []
 [dependencies]
 nx-api = { path = "../../../crates/nx-api" }
 nx-codegen = { path = "../../../crates/nx-codegen" }
-nx-ir = { path = "../../../crates/nx-ir" }
+nx-ir = { workspace = true }
 nx-diagnostics = { path = "../../../crates/nx-diagnostics" }
 nx-language-service = { path = "../../../crates/nx-language-service" }
 serde.workspace = true

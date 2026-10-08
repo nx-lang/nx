@@ -7,7 +7,17 @@ the same results, handler tokens and diagnostic codes as the TypeScript runtime
 It depends on `nx-ir`, the image format, and `nx-value`, the host value type, and on no part of
 the NX compiler. A host that holds compiled images runs them with this crate alone.
 
-The image format is documented in [`docs/nx-ir-format.md`](../../docs/nx-ir-format.md). Images
+```toml
+[dependencies]
+nx-ir-runtime = "0.7"
+nx-value = "0.7"
+```
+
+The three crates are versioned with the NX release they ship in and require each other at exactly
+that version, so name `nx-value` at the version you name `nx-ir-runtime` at. While NX is `0.x`
+the API may change between minor versions.
+
+The image format is documented in [`docs/nx-ir-format.md`](https://github.com/nx-lang/nx/blob/main/docs/nx-ir-format.md). Images
 come from `nxlang codegen --target nx-ir`, or from `nx_codegen::emit_nx_ir` in process.
 
 ## Prepare, link, evaluate
@@ -169,6 +179,162 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+## Instance tree
+
+A component's rendered output can hold descriptors of other components the entry module declares:
+a `Page` renders a `<Card />`, and what the host is handed is a record whose type is `Card`. Each
+needs an instance of its own, initialized through the instance whose output held it, so that a
+handler the parent bound reaches the child. The lifecycle above renders one instance at a time and
+composes nothing. `InstanceTree` is the composition, made only of `initialize_component` and
+`dispatch_component_actions`, so that a host with nested components does not write it.
+
+The tree does not know what the host does with the output. A host may draw it; it may as well keep
+a document, an index or any other structure derived from it, and update that as the output
+changes. Either way the host names each node by a key of its own choosing for the node's place in
+the output, and the node it was found under by that node's key; it reads what a node rendered,
+interprets the records that are its own, and visits the authored descriptors it finds.
+
+```rust,no_run
+use nx_ir_runtime::{InstanceTree, NxIrRuntimeError, Program, Result, RuntimeOptions};
+use nx_value::NxValue;
+use std::collections::BTreeMap;
+
+/// Walks `value`, visiting every authored descriptor in it. `key` names the value's place in
+/// the output, and `owner` is the node whose rendered output the value is part of.
+fn walk(
+    tree: &mut InstanceTree,
+    value: &NxValue,
+    key: &str,
+    owner: Option<&str>,
+    options: &RuntimeOptions,
+) -> Result<()> {
+    match value {
+        NxValue::Array(items) => {
+            for (index, item) in items.iter().enumerate() {
+                walk(tree, item, &format!("{key}/{index}"), owner, options)?;
+            }
+        }
+        // A component the entry module declares with a body, which is what the lifecycle can
+        // initialize: its node, and what the node rendered, which stands in its place.
+        NxValue::Record { type_name: Some(name), .. } if tree.can_instantiate(name) => {
+            let rendered = tree.visit(key, value, owner, options)?;
+            // Nothing at this node or under it has rendered since the last pass: what the host
+            // made of it still stands, and the pass keeps everything under it unvisited.
+            if !tree.is_settled(key) {
+                // ... update whatever the host keeps for this node from `rendered` ...
+                walk(tree, &rendered, &format!("{key}/body"), Some(key), options)?;
+            }
+        }
+        // Anything else is the host's to interpret. A handler among its properties carries a
+        // token of `owner`'s output: an event on it is `tree.dispatch(owner, token, action, ..)`.
+        NxValue::Record { properties, .. } => {
+            for (name, property) in properties {
+                walk(tree, property, &format!("{key}/{name}"), owner, options)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// One pass, as one change to the tree: a pass that fails leaves it as it was.
+fn pass(tree: &mut InstanceTree, root: &NxValue, options: &RuntimeOptions) -> Result<()> {
+    tree.atomically(|tree| {
+        tree.begin();
+        walk(tree, root, "root", None, options)?;
+        tree.finish();
+        Ok::<_, NxIrRuntimeError>(())
+    })
+}
+
+fn run(program: Program) -> Result<()> {
+    let options = RuntimeOptions::default();
+    let root = program.evaluate_function("root", &[], &options)?;
+    let mut tree = InstanceTree::new(program);
+    pass(&mut tree, &root, &options)?;
+
+    // An event, named by the node whose output held the handler and the token read there.
+    let tapped = NxValue::Record {
+        type_name: Some("Button.Tapped".to_string()),
+        properties: BTreeMap::new(),
+    };
+    for effect in tree.dispatch("root", "h1-1", tapped, &options)? {
+        // What no component above the one that produced it bound a handler for.
+        println!("{} emitted {:?}", effect.component, effect.action);
+    }
+    // Then a pass, before the next event. It walks from the root to the nodes that rendered
+    // and what is under them, and nothing else.
+    pass(&mut tree, &root, &options)
+}
+```
+
+What the tree does:
+
+- **A node is one use of a component at one place.** The first `visit` at a key initializes the
+  component from the descriptor's fields, through the parent's instance. A descriptor of another
+  component at that key, or the same key under another parent, replaces the node, and the nodes
+  under it, with a new one in its initial state.
+- **Props flow down and state stays.** A visit with the descriptor the node was last initialized
+  from, read from the same instance of the parent, does nothing. Any other descriptor initializes
+  the node again with the state it holds. A descriptor from a parent that was initialized again is
+  another descriptor even where it reads the same: a render numbers its tokens from one, so two
+  renders can spell different handlers alike.
+- **An instance lives as long as its place in the output.** `finish` drops what a pass left
+  unvisited under a node it visited that had rendered since the last pass: the host has just
+  walked that node's new output and did not find the place in it. Under a visited node that had
+  not rendered, and under a node the pass never reached, everything is kept, visited or not. A
+  node under no node is dropped unless the pass visits it. `remove` drops a node the output still
+  has a place for and the host no longer wants, such as an item instantiated only while in view.
+  An event may be dispatched while a pass is under way. A visit then counts for what the node held
+  when it was made: a node that rendered again after its visit is still to be walked, and a node
+  under it that was visited only before that was read from output that is gone.
+- **A pass walks only what changed.** `is_settled` says of a node that neither it nor anything
+  under it has rendered since a pass last visited it, so a pass need not go below it. After a
+  dispatch deep in the tree, a pass visits the nodes from the root down to the one that rendered,
+  and then everything under that one. While a node does not render again, `rendered` hands out the
+  same allocation, so `Arc::ptr_eq` tells a host whether what it last read there still stands.
+- **A handler runs where it was bound.** `dispatch` runs the handler against the node whose body
+  created it: the node named, or the ancestor farthest from it that holds the same handler, which
+  is where a handler passed down through content or props came from. A `Page`'s button rendered
+  inside a `Stack`'s output patches the `Page`. The same handler is the very one that was handed
+  down: a component nested under itself, with equal props and state, is still two instances.
+- **Run a pass after every dispatch.** A dispatch gives each node it ran against a new instance,
+  and the nodes under it hold handlers of the old one until a pass visits them again. An event
+  that reaches the tree before that pass, for a handler handed down from an instance since
+  replaced or for an emit whose bound handler was, fails with `nx-ir-handler-token` and changes
+  nothing. A host that queues input runs a pass between two events, or runs one and sends the
+  refused event again. It is never run against a node that was only handed the handler, and its
+  emit is never returned to the host as though no parent had bound it.
+- **An emitted action goes to the handler the parent bound.** Each effect a dispatch returns whose
+  type the node's component emits, and that the parent bound a handler for, is dispatched in turn
+  against the node that created that handler. Every other effect comes back as a `HostEffect`. A
+  node is dispatched against at most once in a chain, with everything routed to it in one batch.
+- **A change is all or nothing.** A `dispatch` that fails anywhere in its chain leaves every node
+  as it was, so the tokens the host holds still name handlers. `atomically` gives a pass, or a
+  dispatch and the pass after it, the same guarantee.
+- **A handler bound outside any component is inert.** A descriptor visited under no node came
+  from pure evaluation, so a handler record in it has no token and names nothing. The tree leaves
+  such a handler out of what it initializes the node from and lists it in `inert()` for the pass,
+  as `Card.onLogged`.
+
+What it does not do:
+
+- **It does not walk.** The tree never looks into rendered output for descriptors, and it holds
+  no node the host did not visit. The host walks, because the host decides what a place is: which
+  records are its own, what key a list item has, and whether an item out of view has an instance
+  at all.
+- **The unit of change is a component.** There is no tracking of which state a body read. A
+  dispatch renders the whole body of each component it runs against. A node that renders hands
+  every node under it a descriptor read from another instance, so each is initialized again, with
+  the state it held, when the pass visits it, and so on down: a render reaches everything under
+  the node that rendered, whether or not the props it handed down changed. What is beside that
+  node, and above it unless an emit carried a change there, does not render.
+
+Every operation that evaluates takes `RuntimeOptions` and passes them to each lifecycle call it
+makes, so the operation budget and the input limit apply to each of those calls, not to the
+operation as a whole. A key that names no node fails with `nx-ir-instance-key`. The tree is plain
+data over shared values: cloning it copies no value, and it is `Send + Sync`.
+
 ## Limits
 
 | Limit | Default | Set by | Name in a diagnostic |
@@ -178,17 +344,86 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 | Call depth | 100 | `RuntimeOptions::max_call_depth` | `maxCallDepth` |
 | Integers one range may hold when a loop iterates it | 1,000,000 | `RuntimeOptions::max_range_length` | `maxRangeLength` |
 | Nested expressions, across every call of one evaluation | 1,000 | fixed | `maxExpressionNesting` |
-| Native stack one evaluation may use | 1 MiB | fixed | `maxStackBytes` |
+| Native stack one call may use, from where it began | 1 MiB | `RuntimeOptions::max_stack_bytes` | `maxStackBytes` |
 | Nesting of a value crossing the host boundary, and of component state after each patch | 256 | fixed | `maxValueNesting` |
 | Nesting of the values of a serialized instance | 1,024 | fixed | |
 | Values one value of a serialized instance holds, written out | 16,777,216 | fixed | |
 
 Exceeding any of them fails with `nx-ir-resource-limit`, or with `nx-ir-component` for a
-serialized instance. The fixed limits are what keep an image, a host value or a raised call depth
-from exhausting the native stack, so the thread that calls the runtime needs 1 MiB of stack free.
-Checking a value against a declared type is under the stack budget as well, so an unoptimized
-build, whose frames are larger, refuses a deeply nested typed value sooner than 256 levels, and
-can meet the stack budget before a thousand expressions nest.
+serialized instance. The nesting limits and the stack budget are what keep an image, a host value
+or a raised call depth from exhausting the native stack, so the thread that calls the runtime
+needs the stack budget free: 1 MiB unless the host says otherwise. Checking a value against a
+declared type and converting one at the host boundary are under the stack budget as well, so an
+unoptimized build, whose frames are larger, refuses a deeply nested value sooner than 256 levels,
+and can meet the stack budget before a thousand expressions nest.
+
+### Small stacks
+
+The runtime recurses on the native stack and cannot ask how much of it a thread has, so the budget
+is the host's statement of what is free where it calls. The default suits a native thread. It does
+not suit a WebAssembly module, whose whole stack is often 1 MiB or less and partly used by the time
+the host calls the runtime: under the default budget the runtime believes it has more than there
+is, and an evaluation that recurses far enough overruns the stack, which ends the module without a
+diagnostic. A host on such a stack does one of two things:
+
+- **States what is free.** Set `max_stack_bytes` to the stack that is free where the call is made,
+  less a margin. An evaluation that needs more then fails with `nx-ir-resource-limit` naming
+  `maxStackBytes` and the budget that was in force. A budget may be lower than a legitimate
+  program needs, in which case that program gets the diagnostic too.
+- **Links a larger stack.** With the deepest evaluation's need free below the deepest point the
+  host calls from, the nesting limit is met before the stack is.
+
+How much the deepest evaluation needs was measured on `wasm32-unknown-emscripten`, in a release
+build linked with a 1 MiB stack and run in Chromium, with a function that recurses until the
+nesting limit stops it:
+
+| Stack free where the call began | Default budget | Budget = free stack less a margin |
+| --- | --- | --- |
+| 162 KiB and more | the nesting diagnostic | the nesting diagnostic |
+| 153 KiB | the page ended | a `maxStackBytes` diagnostic |
+| 100 KiB, then 24, 15, 11, 7 and 2 KiB | the page ended at 100 KiB; not tried below | a `maxStackBytes` diagnostic |
+
+So that evaluation needs a little under 160 KiB in an optimized WebAssembly build, and with the
+budget stated every call came back as a diagnostic, for margins of 8, 16, 32 and 64 KiB. An unoptimized
+build's frames are several times larger: a native debug build meets the default budget of 1 MiB
+before a thousand expressions nest. The numbers are for that function and that build, so read them
+as the size of the need, not as a constant. They were taken with a probe that used up a chosen
+amount of stack in frames of its own and called `evaluate_function` from there, on a fresh page
+for each depth, since an overrun ends the module.
+
+The margin is for what the runtime uses between two checks of its budget, which it makes at every
+expression and every value it walks, and to report a failure, which takes the same stack however
+deep the value it is in. A budget equal to the free
+stack is too large by that much: the check passes on the last frame that fits and the next one
+does not.
+
+On `wasm32-unknown-emscripten` the free stack is one call away:
+
+```rust,ignore
+use nx_ir_runtime::RuntimeOptions;
+
+/// The limits of one call into the runtime, made from here.
+fn options() -> RuntimeOptions {
+    unsafe extern "C" {
+        fn emscripten_stack_get_free() -> usize;
+    }
+    // What the runtime uses between two checks of its budget, and to report that it met it.
+    const MARGIN: usize = 32 << 10;
+    RuntimeOptions {
+        max_stack_bytes: unsafe { emscripten_stack_get_free() }.saturating_sub(MARGIN),
+        ..RuntimeOptions::default()
+    }
+}
+```
+
+Build the options where the call is made, not once at startup: what is free depends on how deep
+the host is when it calls. The budget covers every walk a call that takes options makes:
+evaluation, the check of a value against a type, the conversion at the host boundary, a
+comparison of two values, and the check of how deeply state nests. The calls that take no options
+(`apply`, `merge`, `diff`, `Program::changed`, `restore_component_instance`, and
+`ComponentInstance::same_handler` and `bound_handler_is`) walk under the default budget, so a host
+that cannot give them a mebibyte keeps the values it hands them shallow. The crate itself has no `unsafe` and nothing specific to a platform, so
+it builds for `wasm32-unknown-emscripten` and `wasm32-wasip1` as it is, and CI checks both.
 
 **Set `max_operations` for any code you did not write.** It is the only limit that bounds work and
 allocation: three nested loops over ranges of a thousand run a billion bodies inside the others,
@@ -400,6 +635,7 @@ same argument for the same call, and the conformance corpus holds the two to it.
 | `nx-ir-boundary-type`, `nx-ir-boundary-field`, `nx-ir-schema` | A value does not fit the type of the site it reached. |
 | `nx-ir-state-field`, `nx-ir-state-patch` | A state patch names an unknown field or is another component's update record. |
 | `nx-ir-handler-token`, `nx-ir-handler-result`, `nx-ir-component-action` | A dispatch entry names no handler, a handler returned something that is not a record, or the component does not emit the action. |
+| `nx-ir-instance-key` | An instance tree was asked for a node at a key that names none, or to visit a node under itself. The TypeScript runtime has no instance tree and does not report it. |
 | `nx-ir-division-by-zero`, `nx-ir-number`, `nx-ir-operator`, `nx-ir-type` | An operator met an operand it cannot take. |
 | `nx-ir-member`, `nx-ir-slot`, `nx-ir-for`, `nx-ir-record`, `nx-ir-union`, `nx-ir-intrinsic` | An expression could not be evaluated as written. |
 | `nx-ir-resource-limit` | A limit above was exceeded. |
@@ -413,6 +649,7 @@ tests, and `tests/allocation.rs`, which counts the bytes a refused concatenation
 that the budget is charged before a string is built, and the bytes refused input allocates to show
 that it is measured before it is copied. The tests that compile NX source, including
 the differential run against the interpreter, need the compiler and live in `nx-codegen`
-(`cargo test -p nx-codegen ir_runtime`). So do the cost tests, which run generated host values
+(`cargo test -p nx-codegen ir_runtime`), as do the instance tree's, one for each scenario of its
+specification (`cargo test -p nx-codegen ir_instance_tree`). So do the cost tests, which run generated host values
 through this runtime and the TypeScript one and hold this runtime's allocations to its counts
 (`cargo test -p nx-codegen --test cost_differential` and `--test cost_allocation`).

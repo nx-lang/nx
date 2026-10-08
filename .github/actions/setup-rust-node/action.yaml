@@ -1,6 +1,6 @@
 name: Set up Rust and the pnpm workspace
 description: >
-  Installs pnpm and Node, adds the WebAssembly target and checks for clang, restores the Cargo build
+  Installs pnpm and Node, adds the WebAssembly targets and checks for clang, restores the Cargo build
   cache, and installs the root pnpm workspace, so a job can build and test Rust — native and
   wasm — alongside the repository's own TypeScript runtime and its `tsc`. The Node version for the
   jobs that do that lives here, so bumping it is one edit; the `src/vscode` jobs and
@@ -17,12 +17,12 @@ runs:
     with:
       node-version: '24'
       cache: 'pnpm'
-  # rustup picks the toolchain from rust-toolchain.toml, whose `targets` brings wasm32-wasip1 with
-  # it. Installing it explicitly costs nothing when it is already there and makes the failure
-  # legible when a future toolchain change drops it.
-  - name: Add the WebAssembly target
+  # rustup picks the toolchain from rust-toolchain.toml, whose `targets` brings both WebAssembly
+  # targets with it. Installing them explicitly costs nothing when they are already there and
+  # makes the failure legible when a future toolchain change drops one.
+  - name: Add the WebAssembly targets
     run: |
-      rustup target add wasm32-wasip1
+      rustup target add wasm32-wasip1 wasm32-unknown-emscripten
       rustup show
     shell: bash
   # clang compiles tree-sitter's C sources for wasm32-wasip1. It is on the GitHub runner images; a

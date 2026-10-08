@@ -7,7 +7,8 @@ One-time environment, registry and hosting setup is in [deployment-setup.md](dep
 ## Release Model
 
 Pull requests and `main` builds are artifact-only. They build, verify, and upload NuGet, npm
-(editor assets and the workspace packages), and VSIX artifacts without public registry credentials.
+(editor assets and the workspace packages), Rust crate, and VSIX artifacts without public registry
+credentials.
 
 Production publishing has one reviewed release track. The packages and the VS Code extension are
 released together, from one tag such as `v1.2.3`, at one version: the extension's language server is
@@ -21,28 +22,42 @@ The tag workflow, `release.yml`, creates a draft GitHub Release titled `NX 1.2.3
   `@nx-lang/ir-runtime`, `@nx-lang/sdk-wasm` (with the WebAssembly module inside),
   `@nx-lang/monaco`, `@nx-lang/value-view` and `@nx-lang/agent` (unstable). A workspace package's
   dependency on another is pinned to the release version;
+- one `.crate` file per runtime crate: `nx-ir` (the image format), `nx-value` (the host value) and
+  `nx-ir-runtime` (the runtime), which are what a Rust host needs to run compiled NX. Each
+  requires the others at exactly the release version;
 - one VSIX per extension target (`linux-x64`, `darwin-arm64`, `win32-x64`), each with its
   platform's `nx-lsp`;
 - a release manifest and checksums.
 
 Publishing the GitHub Release is the production gate. It triggers `package-publish.yml`, which
-validates the release assets and publishes the attached files without rebuilding them: NuGet and npm
-in one job, the Visual Studio Marketplace and Open VSX in another, so an outage on one side doesn't
-stop the other.
+validates the release assets and publishes them: NuGet and npm in one job, crates.io in another,
+the Visual Studio Marketplace and Open VSX in a third, so an outage of one registry doesn't stop
+the others. NuGet, npm and the extension registries are sent the attached files, without a rebuild.
+
+crates.io is the exception in mechanism, not in outcome. Cargo has no command that uploads an
+existing `.crate` file: `cargo publish` packages the crate again from the sources. So the
+`publish-crates` job checks out the release's tag, packages the three crates at the release
+version, and compares the SHA-256 of each with the attached file's. It publishes only when all
+three match, and afterwards compares the checksum crates.io recorded for each version with the
+attached file's again. What the registry serves is the reviewed file, byte for byte, or the job
+fails.
 
 Tags of the retired extension-only track, `vscode-v*`, no longer release anything. `vscode-v0.1.0`
 and its GitHub Release stay as history.
 
-Rust tooling publication for `nxlang`, `nx-lsp`, and Rust crates is not part of this release
-pipeline yet.
+The Rust tools `nxlang` and `nx-lsp` are not published by this pipeline, beyond `nx-lsp` shipping
+inside the VSIX files, and neither is any crate but the three runtime crates: every other crate of
+the workspace is marked `publish = false`.
 
 ## Versioning Rules
 
 Version calculation is centralized in `tools/versions/Get-ReleaseVersion.ps1` and uses the local
 MinVer CLI tool.
 
-- `v<major>.<minor>.<patch>` tags produce stable NuGet, npm and VSIX versions with no prerelease
-  suffix, all equal to the tag's version.
+- `v<major>.<minor>.<patch>` tags produce stable NuGet, npm, crate and VSIX versions with no
+  prerelease suffix, all equal to the tag's version. The crates' manifests in the repository keep
+  `0.1.0`; `scripts/pack-crates.mjs` writes the release version into the package, as
+  `pack-packages.mjs` does for npm.
 - Pull request package artifacts use unique prerelease versions such as
   `0.1.0-pr.<pr>.<run>.<attempt>`.
 - `main` package artifacts use CI prerelease versions such as `0.1.0-ci.<run>.<attempt>`.
@@ -71,22 +86,26 @@ Only stable `major.minor.patch` release tags are supported in this implementatio
    ```
 4. Wait for the Release workflow to finish.
 5. Open the draft GitHub Release for `v1.2.3`, titled `NX 1.2.3`.
-6. Inspect the attached `.nupkg`, `.snupkg`, npm `.tgz` files, the three `.vsix` files,
-   `release-manifest.json`, and `release-checksums.txt`.
+6. Inspect the attached `.nupkg`, `.snupkg`, npm `.tgz` files, the three `.crate` files, the three
+   `.vsix` files, `release-manifest.json`, and `release-checksums.txt`.
 7. Confirm the manifest tag, version, commit, artifact names, and checksums match the intended
-   release, and that every VSIX contains publisher `nx-lang`, extension `nx-language`, and version
-   `1.2.3`.
+   release, that every VSIX contains publisher `nx-lang`, extension `nx-language`, and version
+   `1.2.3`, and that `nx-ir-runtime-1.2.3.crate` requires `nx-ir` and `nx-value` at `=1.2.3`.
 8. Publish the GitHub Release.
 9. Approve the `production` environment deployments if reviewers are required.
 10. Confirm publication:
     - NuGet.org lists `NxLang.Sdk` 1.2.3.
     - `npm view @nx-lang/sdk-wasm version`, and the same for each package, answers `1.2.3`.
+    - crates.io lists `nx-ir`, `nx-value` and `nx-ir-runtime` 1.2.3:
+      `cargo info nx-ir-runtime@1.2.3`, or `https://crates.io/crates/nx-ir-runtime/1.2.3`.
     - The Visual Studio Marketplace and Open VSX list `nx-lang.nx-language` 1.2.3 for all three
       platforms.
 
 The publish job publishes the npm tarballs in dependency order (`scripts/publish-packages.mjs`), so
 a consumer installing a just-published package finds its `@nx-lang/*` dependencies on the registry
-already, and skips any version the registry has.
+already, and skips any version the registry has. The crates job does the same
+(`scripts/publish-crates.mjs`): `nx-ir` and `nx-value` before `nx-ir-runtime`, each skipped when
+crates.io already has the version with the attached file's checksum.
 
 ## Pull Request Artifact Testing
 
@@ -121,6 +140,26 @@ npm init -y
 pnpm add ../nx-npm-packages/*.tgz
 ```
 
+Runtime crates test (a pull request's version is not on crates.io, so the project is pointed at
+the three unpacked packages in its place):
+
+```bash
+gh run download <run-id> -R nx-lang/nx -n rust-crates -D nx-rust-crates
+mkdir nx-crates
+for crate in nx-rust-crates/*.crate; do tar -xzf "$crate" -C nx-crates; done
+cargo new nx-runtime-test
+cd nx-runtime-test
+cat >> Cargo.toml <<'TOML'
+nx-ir-runtime = "=<package-version>"
+
+[patch.crates-io]
+nx-ir = { path = "../nx-crates/nx-ir-<package-version>" }
+nx-value = { path = "../nx-crates/nx-value-<package-version>" }
+nx-ir-runtime = { path = "../nx-crates/nx-ir-runtime-<package-version>" }
+TOML
+cargo build
+```
+
 VSIX test:
 
 ```bash
@@ -137,6 +176,8 @@ unzip -l NxLang.Sdk.*.nupkg
 unzip -l NxLang.Sdk.*.snupkg
 tar -tf nx-lang-language-*.tgz
 tar -tf nx-lang-sdk-wasm-*.tgz | grep nx.wasm
+tar -tzf nx-ir-runtime-*.crate
+tar -xzOf nx-ir-runtime-1.2.3.crate nx-ir-runtime-1.2.3/Cargo.toml
 unzip -l nx-language-*.vsix
 sha256sum -c release-checksums.txt
 ```
@@ -145,7 +186,11 @@ For the SDK package, `tools/packaging/Test-NxSdkPackage.ps1` verifies metadata a
 assets. For editor assets, run `pnpm run verify:package` and `pnpm run smoke:package` from
 `src/vscode`. For the workspace packages, `pnpm run verify:packages` at the repository root packs
 each one and installs it into a scratch project, and `node scripts/pack-packages.mjs <version>
-<dir>` packs them all at one version and checks the packed manifests.
+<dir>` packs them all at one version and checks the packed manifests. For the runtime crates,
+`pnpm run verify:crates` packs the three, builds a scratch host project against the packages, and
+fails if a crate of the compiler comes with them, and `node scripts/pack-crates.mjs <version>
+<dir>` packs them at one version and checks the packed manifests. A crate's package holds only its
+`src`, its README and its manifest.
 
 ## Repair A Partial Publish
 
@@ -158,15 +203,34 @@ gh workflow run package-publish.yml --ref main -f release_tag=v1.2.3
 ```
 
 Each publish job validates the release assets before registry writes, and every registry write skips
-a version that is already there: `--skip-duplicate` for NuGet, `publish-packages.mjs` for npm, and
-the VSIX publish script, which checks the Marketplace and Open VSX separately. So a repair fills in
-only what is missing.
+a version that is already there: `--skip-duplicate` for NuGet, `publish-packages.mjs` for npm,
+`publish-crates.mjs` for crates.io, and the VSIX publish script, which checks the Marketplace and
+Open VSX separately. So a repair fills in only what is missing.
+
+A failed crates.io publication is repaired the same way, by rerunning `publish-crates` for the
+release. The job checks out the release's tag whatever branch the run was dispatched from, and
+which of the two failures it was decides what a rerun can do:
+
+- It stopped before publishing, because the crates packaged from the tag were not the attached
+  files. Nothing was published. Rerun it once; if it stops again the runner's toolchain is not
+  packaging the tag as the release run did, which is a defect to fix in `main` and release as a
+  higher version, not something to work around by publishing other bytes.
+- It published some of the three and then failed, on an outage or a rate limit. Rerun it: the
+  crates already there are skipped, after their checksums are compared with the attached files,
+  and the rest are published.
+
+A release made before the crates joined the track has no `.crate` assets, and the job says so and
+publishes nothing.
 
 For a local emergency repair from already-downloaded assets:
 
 ```bash
 dotnet nuget push NxLang.Sdk.*.nupkg --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
 node scripts/publish-packages.mjs <directory-with-the-release-tgz-files> --version 1.2.3
+# From a checkout of the release's tag, with a crates.io token in CARGO_REGISTRY_TOKEN. It
+# publishes only if the crates package to the downloaded files, byte for byte.
+git switch --detach v1.2.3
+node scripts/publish-crates.mjs <directory-with-the-release-crate-files> --version 1.2.3
 # The VSIX scripts publish one file per call, so loop over the three platforms.
 for vsix in <directory-with-the-release-vsix-files>/nx-language-*.vsix; do
   pnpm -C src/vscode run publish:vsce -- "$(realpath "$vsix")"
@@ -185,7 +249,9 @@ Public registry versions are immutable. When a published artifact is bad:
 
 1. Fix the source issue.
 2. Publish a higher version by pushing a new release tag.
-3. Unlist or deprecate the bad NuGet, npm, or extension version where useful.
+3. Unlist or deprecate the bad NuGet, npm, or extension version where useful, and yank the bad
+   crate versions (`cargo yank nx-ir-runtime@1.2.3`), which keeps existing lock files working and
+   stops new projects from selecting them.
 4. Update release notes or documentation to steer users to the fixed version.
 
 ## Website And Playground

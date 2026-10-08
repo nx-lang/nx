@@ -22,3 +22,8 @@ pub use model::{
     NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1, NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
     NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
 };
+
+/// The README's example, compiled as a doc test.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;
