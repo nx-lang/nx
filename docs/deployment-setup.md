@@ -9,7 +9,7 @@ from GitHub Actions, and for hosting the website and playground. The ongoing run
 Create one GitHub environment:
 
 - `production`: used by workflows that publish already-reviewed GitHub Release assets to NuGet.org,
-  npm, the Visual Studio Marketplace, and Open VSX, and by the two workflows that deploy
+  npm, crates.io, the Visual Studio Marketplace, and Open VSX, and by the two workflows that deploy
   `nxlang.org` from `main`.
 
 Recommended protection:
@@ -30,6 +30,12 @@ Set up ownership before enabling publication:
   `@nx-lang/value-view`.
   `scripts/pack-packages.mjs` packs every workspace member that is not `private`, so a package
   joins this list by dropping `private`, and leaves it by adding it back.
+- crates.io: own the crates `nx-ir`, `nx-value` and `nx-ir-runtime`. A crate name is owned by
+  whoever publishes it first and cannot be reserved ahead of that, so the names are taken by the
+  first release that includes them. Add a second owner to each afterwards
+  (`cargo owner --add <github-user-or-team> nx-ir`), so the crates do not depend on one account.
+  `scripts/runtime-crates.mjs` lists the crates that are published; every other member of the
+  Cargo workspace is `publish = false`.
 - Visual Studio Marketplace: own publisher `nx-lang` and extension `nx-language`.
 - Open VSX: own namespace `nx-lang` and extension `nx-language`.
 
@@ -48,8 +54,39 @@ Prefer trusted publishing where the registry supports it:
   the publish job then skips that version as already present and publishes the next release with
   provenance.
 
-Both publish jobs in `package-publish.yml` request GitHub OIDC with `id-token: write`, and run only
-after a GitHub Release is published; each validates the release assets before any registry write.
+- crates.io: create a trusted publisher for each of `nx-ir`, `nx-value` and `nx-ir-runtime`, on the
+  crate's **Settings → Trusted Publishing** page: repository owner `nx-lang`, repository `nx`,
+  workflow file `package-publish.yml`, environment `production`. crates.io, like npm, configures a
+  trusted publisher only on a crate that exists, so the first version of each is published with a
+  token:
+  1. Before the first release that includes the crates, create an API token at
+     `https://crates.io/settings/tokens` with the scopes `publish-new` and `publish-update`, and
+     store it on `production`:
+     ```bash
+     gh secret set CRATES_IO_TOKEN --repo nx-lang/nx --env production
+     ```
+     Run that from your own terminal and paste the token when asked, so that it is never part of a
+     command line.
+  2. Tag and publish the release as usual. The `publish-crates` job finds no trusted publisher,
+     says so in a warning, and publishes the three crates with the token.
+  3. Add the three trusted publishers, then delete the secret and revoke the token:
+     ```bash
+     gh secret delete CRATES_IO_TOKEN --repo nx-lang/nx --env production
+     ```
+  Later releases exchange GitHub's OIDC token for a short-lived crates.io token
+  (`rust-lang/crates-io-auth-action`), which is revoked when the job ends.
+
+  A crate added to the track later needs its first version published by hand. The job would use
+  the trusted token, which the three existing crates' publishers grant and which cannot create a
+  crate name. So after that release's `publish-crates` job has failed at the new crate, publish it
+  from a checkout of the release's tag with a maintainer's token, using the command under *Repair
+  A Partial Publish* in [deployment.md](deployment.md), which publishes only if the crates package
+  to the release's files; add the crate's trusted publisher; then rerun the job, which skips what
+  is there and publishes the crates that depend on the new one.
+
+All three publish jobs in `package-publish.yml` request GitHub OIDC with `id-token: write`, and run
+only after a GitHub Release is published; each validates the release assets before any registry
+write.
 
 The Visual Studio Marketplace also takes GitHub OIDC: the `publish-extension` job signs in as an
 Azure managed identity that is a member of the `nx-lang` publisher (see
@@ -65,6 +102,8 @@ Production environment secrets:
 - `AZURE_CLIENT_ID` and `AZURE_TENANT_ID`: the Marketplace publishing identity's client and tenant
   ids. They identify the identity rather than grant anything; GitHub's OIDC token does that.
 - `OVSX_PAT`: Open VSX token for namespace `nx-lang`.
+- `CRATES_IO_TOKEN`: crates.io API token, present only until the runtime crates' first versions are
+  published and their trusted publishers exist (see [Trusted publishing](#trusted-publishing)).
 - `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`: deploy the website and playground Workers
   (see [Website and playground hosting](#website-and-playground-hosting)).
 
@@ -76,8 +115,9 @@ accepts `release_tag` for manual repair. Set it to a published GitHub Release ta
 the workflow downloads, validates and republishes the attached release assets, packages and VSIX
 files alike, without rebuilding them.
 
-Rust tool publication for `nxlang`, `nx-lsp`, and Rust crates is not part of this deployment setup
-yet; no crates.io token or Rust binary-release credential is required for this release pipeline.
+Rust tool publication for `nxlang` and `nx-lsp` is not part of this deployment setup yet, and no
+Rust binary-release credential is required for this release pipeline. Of the Rust crates only the
+three runtime crates are published.
 
 Never commit registry tokens or write them into tracked configuration files.
 
@@ -131,16 +171,17 @@ artifacts receive unique prerelease versions, while VSIX artifacts use registry-
 ## First Enablement
 
 1. Confirm PR workflows upload `deployables-Complete`, `editor-assets-package`, `npm-packages`,
-   and `vscode-vsix-*` artifacts without public registry credentials.
+   `rust-crates`, and `vscode-vsix-*` artifacts without public registry credentials.
 2. Confirm the trusted PR artifact comment workflow posts download/install commands without checking
    out or executing pull request code.
 3. Push a test tag in a disposable repository or dry-run branch and confirm `release.yml` creates a
-   draft GitHub Release with `.nupkg`, `.snupkg`, one `.tgz` per npm package, one `.vsix` per
-   extension target, manifest, and checksum assets.
+   draft GitHub Release with `.nupkg`, `.snupkg`, one `.tgz` per npm package, one `.crate` per
+   runtime crate, one `.vsix` per extension target, manifest, and checksum assets.
 4. Enable `production` after release asset validation, package inspection, smoke tests, and publish
    workflow validation pass.
 5. Keep `NUGET_API_KEY` empty when NuGet trusted publishing is working. Production npm publishing
-   uses trusted publishing only; do not configure an npm publish token for CI.
+   uses trusted publishing only; do not configure an npm publish token for CI. Remove
+   `CRATES_IO_TOKEN` once the three crates have trusted publishers.
 
 ## Website And Playground Hosting
 

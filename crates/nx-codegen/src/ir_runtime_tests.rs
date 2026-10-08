@@ -15,7 +15,7 @@ use nx_api::{
 };
 use nx_ir_runtime::{
     apply, diff, input_size, merge, record_input_size, ComponentInit, Limit, LinkOptions,
-    NxIrRuntimeError, PreparedModule, Program, RuntimeOptions, Usage,
+    NxIrRuntimeError, PreparedModule, Program, RuntimeOptions, Usage, NX_DEFAULT_MAX_STACK_BYTES,
 };
 use nx_value::NxValue;
 use std::collections::BTreeMap;
@@ -56,7 +56,7 @@ fn link(artifact: &ProgramArtifact, debug: bool) -> Program {
     .expect("links")
 }
 
-fn program(source: &str) -> Program {
+pub(crate) fn program(source: &str) -> Program {
     link(&artifact(source), true)
 }
 
@@ -64,7 +64,7 @@ fn options() -> RuntimeOptions {
     RuntimeOptions::default()
 }
 
-fn json(text: &str) -> NxValue {
+pub(crate) fn json(text: &str) -> NxValue {
     NxValue::from_json_str(text).unwrap_or_else(|error| panic!("{text}: {error}"))
 }
 
@@ -547,7 +547,7 @@ fn unbounded_recursion_ends_in_a_diagnostic() {
     let reached = limit_of(program.evaluate_function("root", &[], &unlimited));
     assert!(
         reached == limit("maxExpressionNesting", 1000)
-            || reached == limit("maxStackBytes", 1 << 20),
+            || reached == limit("maxStackBytes", NX_DEFAULT_MAX_STACK_BYTES as u64),
         "{reached:?}"
     );
 }
@@ -572,7 +572,8 @@ fn expressions_nested_past_the_bound_name_the_nesting_limit() {
                 limit_of(program.evaluate_function("root", &[NxValue::Int(1)], &options()));
             assert!(
                 reached == limit("maxExpressionNesting", 1000)
-                    || (cfg!(debug_assertions) && reached == limit("maxStackBytes", 1 << 20)),
+                    || (cfg!(debug_assertions)
+                        && reached == limit("maxStackBytes", NX_DEFAULT_MAX_STACK_BYTES as u64)),
                 "{reached:?}"
             );
         })
@@ -591,6 +592,224 @@ fn a_value_nested_too_deeply_names_the_value_nesting_limit() {
     assert_eq!(
         limit_of(program.evaluate_function("id", &[value], &options())),
         limit("maxValueNesting", 256)
+    );
+}
+
+/// A function that recurses `n` calls deep, each call several nested expressions.
+const PROBE: &str = "let probe(n:int): int = { if n <= 0 { 0 } else { 1 + probe(n - 1) } }";
+
+#[test]
+fn a_small_stack_budget_ends_deep_recursion_with_a_diagnostic() {
+    let linked = program(PROBE);
+    let deep = RuntimeOptions {
+        max_call_depth: 10_000,
+        ..options()
+    };
+    let small = RuntimeOptions {
+        max_stack_bytes: 64 << 10,
+        ..deep.clone()
+    };
+    let probe = |depth: i64, options: &RuntimeOptions| {
+        linked.evaluate_function("probe", &[NxValue::Int(depth)], options)
+    };
+
+    // The host said it has 64 KiB free: the recursion ends there, naming the budget in force.
+    let error = failure(probe(250, &small));
+    assert_eq!(error.code(), "nx-ir-resource-limit");
+    assert_eq!(
+        error.diagnostics[0].limit,
+        Some(limit("maxStackBytes", 65536))
+    );
+    assert!(error.to_string().contains("65536 bytes"), "{error}");
+    // What fits in the budget still evaluates under it.
+    assert!(same(&probe(5, &small).unwrap(), &NxValue::Int(5)));
+
+    // The same call under the default budget returns, or meets the bound on nesting, which no
+    // budget moves. An unoptimized build's frames are several times larger, so it is given the
+    // stack to hold them: the budget is the host's to raise as well as to lower.
+    let roomy = RuntimeOptions {
+        max_stack_bytes: if cfg!(debug_assertions) {
+            64 << 20
+        } else {
+            NX_DEFAULT_MAX_STACK_BYTES
+        },
+        ..deep
+    };
+    std::thread::Builder::new()
+        .stack_size(128 << 20)
+        .spawn(move || {
+            match program(PROBE).evaluate_function("probe", &[NxValue::Int(250)], &roomy) {
+                Ok(value) => assert!(same(&value, &NxValue::Int(250))),
+                Err(error) => assert_eq!(
+                    error.diagnostics[0].limit,
+                    Some(limit("maxExpressionNesting", 1000))
+                ),
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+#[test]
+fn the_default_stack_budget_is_a_mebibyte() {
+    assert_eq!(NX_DEFAULT_MAX_STACK_BYTES, 1_048_576);
+    assert_eq!(options().max_stack_bytes, 1_048_576);
+}
+
+#[test]
+fn a_deeply_nested_host_value_is_refused_within_the_stack_budget() {
+    let program = program(
+        "type Box = { inner?:Box }\nlet held(box:Box): Box = { box }\nlet id(x:object): object = { x }",
+    );
+    // 200 levels: within what a value may nest, and more than a kibibyte of stack to walk.
+    let mut boxed = json(r#"{ "$type": "Box" }"#);
+    let mut listed = NxValue::Int(1);
+    for _ in 0..200 {
+        boxed = NxValue::Record {
+            type_name: Some("Box".to_string()),
+            properties: BTreeMap::from([("inner".to_string(), boxed)]),
+        };
+        listed = NxValue::Array(vec![listed]);
+    }
+    let tiny = RuntimeOptions {
+        max_stack_bytes: 1 << 10,
+        ..options()
+    };
+    for (function, value) in [("held", &boxed), ("id", &listed)] {
+        let error =
+            failure(program.evaluate_function(function, std::slice::from_ref(value), &tiny));
+        assert_eq!(error.code(), "nx-ir-resource-limit", "{function}");
+        assert_eq!(
+            error.diagnostics[0].limit,
+            Some(limit("maxStackBytes", 1024)),
+            "{function}"
+        );
+    }
+    // The values themselves are ones the runtime takes when the stack is there.
+    assert!(program
+        .evaluate_function("id", &[listed], &options())
+        .is_ok());
+}
+
+/// The scenario's second half, on a real stack: a thread that has the budget and a margin and
+/// no more, so a walk the budget does not bound ends the test run, not just the test.
+#[test]
+fn a_comparison_far_down_a_recursion_stays_within_a_small_stack() {
+    // What the runtime may use past the budget between two checks of it and to report that it
+    // met it: the README's 32 KiB in an optimized build. An unoptimized build's frames are
+    // several times larger, so there both are, to leave room under the budget for the values.
+    const BUDGET: usize = if cfg!(debug_assertions) {
+        1 << 20
+    } else {
+        128 << 10
+    };
+    const MARGIN: usize = if cfg!(debug_assertions) {
+        512 << 10
+    } else {
+        32 << 10
+    };
+    let program = program(
+        "let burnEq(k:int, a:object, b:object): boolean = { if k <= 0 { a == b } else { burnEq(k - 1, a, b) } }",
+    );
+    let nested = || {
+        (0..100).fold(json(r#"{ "leaf": 1 }"#), |inner, _| NxValue::Record {
+            type_name: None,
+            properties: BTreeMap::from([("inner".to_string(), inner)]),
+        })
+    };
+    let (left, right) = (nested(), nested());
+    let options = RuntimeOptions {
+        max_call_depth: 10_000,
+        max_stack_bytes: BUDGET,
+        ..options()
+    };
+    let (equal, out_of_stack) = std::thread::Builder::new()
+        .stack_size(BUDGET + MARGIN + (8 << 10))
+        .spawn(move || {
+            let (mut equal, mut out_of_stack) = (0, 0);
+            for depth in 0..400 {
+                let args = [NxValue::Int(depth), left.clone(), right.clone()];
+                match program.evaluate_function("burnEq", &args, &options) {
+                    Ok(NxValue::Bool(true)) => equal += 1,
+                    Ok(other) => panic!("depth {depth}: {other:?}"),
+                    Err(error) => match error.diagnostics[0].limit {
+                        Some(reached) if reached == limit("maxStackBytes", BUDGET as u64) => {
+                            out_of_stack += 1;
+                        }
+                        Some(reached) if reached == limit("maxExpressionNesting", 1000) => {}
+                        _ => panic!("depth {depth}: {error}"),
+                    },
+                }
+            }
+            (equal, out_of_stack)
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+    // The comparison ran where there was stack for it, and where there was not it said so.
+    assert!(equal > 0 && out_of_stack > 0, "{equal} {out_of_stack}");
+}
+
+/// A value that is wrong at its innermost level is found wrong in the deepest frame of the walk
+/// that checks it, and the diagnostic names where: a path as long as the value is deep. Budgets
+/// are swept across the point where the walk first fits, on a thread that has the budget and a
+/// margin and no more, so reporting the failure may not take stack in proportion to the path.
+#[test]
+fn a_failure_at_the_bottom_of_a_deep_value_is_reported_within_a_small_stack() {
+    const MARGIN: usize = if cfg!(debug_assertions) {
+        512 << 10
+    } else {
+        32 << 10
+    };
+    let program = program("type Box = { inner?:Box n?:int }\nlet held(box:Box): int = { 1 }");
+    let nested = (0..200).fold(json(r#"{ "$type": "Box", "n": "wrong" }"#), |inner, _| {
+        NxValue::Record {
+            type_name: Some("Box".to_string()),
+            properties: BTreeMap::from([("inner".to_string(), inner)]),
+        }
+    });
+
+    let (mut out_of_stack, mut reported) = (0, 0);
+    let mut budget = 16 << 10;
+    // Up from a budget far too small, in steps a frame or two wide, until the walk has fitted
+    // for a while.
+    while reported < 16 && budget < (64 << 20) {
+        let options = RuntimeOptions {
+            max_stack_bytes: budget,
+            ..options()
+        };
+        let (program, value) = (program.clone(), nested.clone());
+        let error = std::thread::Builder::new()
+            .stack_size(budget + MARGIN + (8 << 10))
+            .spawn(move || failure(program.evaluate_function("held", &[value], &options)))
+            .unwrap()
+            .join()
+            .unwrap();
+        match error.code() {
+            "nx-ir-resource-limit" => {
+                assert_eq!(
+                    error.diagnostics[0].limit,
+                    Some(limit("maxStackBytes", budget as u64))
+                );
+                assert_eq!(reported, 0, "a larger budget was enough: {budget}");
+                out_of_stack += 1;
+            }
+            "nx-ir-boundary-type" => {
+                // The whole path, root first: a field and the one value it holds, for each level.
+                let message = &error.diagnostics[0].message;
+                let path = format!("box{}.n", ".inner[0]".repeat(200));
+                assert!(message.contains(&path), "{message}");
+                assert_eq!(error.diagnostics[0].argument.as_deref(), Some("box"));
+                reported += 1;
+            }
+            other => panic!("budget {budget}: {other}: {error}"),
+        }
+        budget += 2 << 10;
+    }
+    assert!(
+        out_of_stack > 0 && reported == 16,
+        "{out_of_stack} {reported}"
     );
 }
 

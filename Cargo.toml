@@ -29,6 +29,11 @@ repository = "https://github.com/nx-lang/nx"
 homepage = "https://nxlang.org"
 
 [workspace.dependencies]
+# The crates published to crates.io, which depend on each other by version as well as by path.
+# `scripts/pack-crates.mjs` pins both to the release's version when it packages them.
+nx-ir = { path = "crates/nx-ir", version = "0.1.0" }
+nx-value = { path = "crates/nx-value", version = "0.1.0" }
+
 # Error reporting
 ariadne = "0.6"
 text-size = "1.1"

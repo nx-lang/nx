@@ -300,6 +300,11 @@ impl From<serde_json::Error> for NxValueIoError {
     }
 }
 
+/// The README's example, compiled as a doc test.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;
+
 #[cfg(test)]
 mod tests {
     use super::*;

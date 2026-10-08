@@ -1,5 +1,6 @@
-# Releases NX from a v<major>.<minor>.<patch> tag: the NuGet package, every npm package and a VSIX
-# per VS Code extension target, all at the tag's version, attached to one draft GitHub Release.
+# Releases NX from a v<major>.<minor>.<patch> tag: the NuGet package, every npm package, the runtime
+# crates and a VSIX per VS Code extension target, all at the tag's version, attached to one draft
+# GitHub Release.
 # Publishing that release runs package-publish.yml.
 
 name: Release
@@ -216,6 +217,40 @@ jobs:
         path: ${{ runner.temp }}/npm-packages/*.tgz
         if-no-files-found: error
 
+  # The crates a Rust host runs compiled NX with. They are packaged from the tag's sources and
+  # nothing else, and package-publish.yml packages them again from the same tag and publishes only
+  # if it gets these bytes, so this job does nothing that could make the result depend on the run.
+  crates:
+    name: Build runtime crates
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: validate
+    steps:
+    - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+      with:
+        ref: ${{ needs.validate.outputs.tag }}
+    - name: Setup Node.js
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      with:
+        node-version: '24'
+    # The toolchain rust-toolchain.toml pins, installed here by name so that a runner image
+    # without it fails at this step and the log says which toolchain packaged the crates.
+    - name: Install the pinned Rust toolchain
+      run: |
+        rustup toolchain install
+        rustup show active-toolchain
+        cargo --version
+    - name: Verify and pack the runtime crates
+      run: |
+        node scripts/verify-crates.mjs
+        node scripts/pack-crates.mjs "${{ needs.validate.outputs.version }}" "${{ runner.temp }}/rust-crates"
+    - name: Upload runtime crates
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      with:
+        name: package-release-crates
+        path: ${{ runner.temp }}/rust-crates/*.crate
+        if-no-files-found: error
+
   vsix:
     needs: validate
     uses: ./.github/workflows/vscode-vsix.yml
@@ -230,6 +265,7 @@ jobs:
     - package
     - editor-assets
     - npm-packages
+    - crates
     - vsix
     permissions:
       actions: read
@@ -250,6 +286,11 @@ jobs:
       with:
         name: package-release-npm
         path: ${{ runner.temp }}/npm-packages
+    - name: Download runtime crate release artifacts
+      uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+      with:
+        name: package-release-crates
+        path: ${{ runner.temp }}/rust-crates
     # One vscode-vsix-<target> artifact per target in vscode-vsix.yml's matrix, each in its own
     # directory, so the check below learns the targets from the matrix instead of repeating them.
     - name: Download VSIX release artifacts
@@ -270,6 +311,7 @@ jobs:
         Get-ChildItem "$env:RUNNER_TEMP/nuget" -File -Include '*.nupkg', '*.snupkg' -Recurse | Copy-Item -Destination $releaseAssets
         Get-ChildItem "$env:RUNNER_TEMP/editor-assets" -File -Filter '*.tgz' -Recurse | Copy-Item -Destination $releaseAssets
         Get-ChildItem "$env:RUNNER_TEMP/npm-packages" -File -Filter '*.tgz' -Recurse | Copy-Item -Destination $releaseAssets
+        Get-ChildItem "$env:RUNNER_TEMP/rust-crates" -File -Filter '*.crate' -Recurse | Copy-Item -Destination $releaseAssets
         Get-ChildItem "$env:RUNNER_TEMP/vsix" -File -Filter '*.vsix' -Recurse | Copy-Item -Destination $releaseAssets
 
         $nupkg = @(Get-ChildItem $releaseAssets -File -Filter '*.nupkg')
@@ -279,6 +321,18 @@ jobs:
 
         if ($nupkg.Count -eq 0 -or $snupkg.Count -eq 0 -or $tgz.Count -lt 2) {
             throw 'Releases require .nupkg, .snupkg, the editor-assets .tgz and the workspace npm .tgz assets.'
+        }
+
+        $crates = @(Get-ChildItem $releaseAssets -File -Filter '*.crate')
+        $expectedCrates = @('nx-ir', 'nx-value', 'nx-ir-runtime') | ForEach-Object { "$_-$env:RELEASE_VERSION.crate" }
+        foreach ($expected in $expectedCrates) {
+            if (!($crates | Where-Object Name -eq $expected)) {
+                throw "Releases require the runtime crate $expected."
+            }
+        }
+
+        if ($crates.Count -ne $expectedCrates.Count) {
+            throw "Releases carry exactly the runtime crates $($expectedCrates -join ', '); found $($crates.Name -join ', ')."
         }
 
         $vsixArtifacts = @(Get-ChildItem "$env:RUNNER_TEMP/vsix" -Directory -Filter 'vscode-vsix-*')
@@ -327,8 +381,8 @@ jobs:
         cat > "${notes}" <<EOF
         Draft release for ${RELEASE_TAG}.
 
-        Review the attached NuGet, symbol, npm (editor assets and workspace packages), VS Code extension VSIX, manifest, and checksum assets before publishing this GitHub Release.
-        Publishing the release publishes them to NuGet, npm, the Visual Studio Marketplace and Open VSX.
+        Review the attached NuGet, symbol, npm (editor assets and workspace packages), Rust crate, VS Code extension VSIX, manifest, and checksum assets before publishing this GitHub Release.
+        Publishing the release publishes them to NuGet, npm, crates.io, the Visual Studio Marketplace and Open VSX.
         EOF
 
         if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then

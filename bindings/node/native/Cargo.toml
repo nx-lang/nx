@@ -16,9 +16,9 @@ napi = { version = "2", features = ["napi8"] }
 napi-derive = "2"
 nx-api = { path = "../../../crates/nx-api" }
 nx-codegen = { path = "../../../crates/nx-codegen" }
-nx-ir = { path = "../../../crates/nx-ir" }
+nx-ir = { workspace = true }
 nx-language-service = { path = "../../../crates/nx-language-service" }
-nx-value = { path = "../../../crates/nx-value" }
+nx-value = { workspace = true }
 rmp-serde.workspace = true
 serde.workspace = true
 serde_json.workspace = true

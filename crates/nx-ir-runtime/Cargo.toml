@@ -7,10 +7,15 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
+description = "Runs compiled NX: prepares NX IR images, links them, evaluates functions and components, and composes nested component instances into a tree that follows their output."
+keywords = ["nx", "runtime", "interpreter", "components", "ui"]
+categories = ["compilers"]
+readme = "README.md"
+include = ["src/**", "README.md", "Cargo.toml"]
 
 [dependencies]
-nx-ir = { path = "../nx-ir" }
-nx-value = { path = "../nx-value" }
+nx-ir = { workspace = true }
+nx-value = { workspace = true }
 serde = { workspace = true, features = ["rc"] }
 
 [dev-dependencies]

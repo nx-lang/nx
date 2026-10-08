@@ -7,13 +7,14 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
+publish = false
 
 [dependencies]
 nx-api = { path = "../nx-api" }
 nx-diagnostics = { path = "../nx-diagnostics" }
 nx-hir = { path = "../nx-hir" }
 nx-interpreter = { path = "../nx-interpreter" }
-nx-ir = { path = "../nx-ir" }
+nx-ir = { workspace = true }
 nx-types = { path = "../nx-types" }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
@@ -22,5 +23,5 @@ smol_str = { workspace = true }
 
 [dev-dependencies]
 nx-ir-runtime = { path = "../nx-ir-runtime" }
-nx-value = { path = "../nx-value" }
+nx-value = { workspace = true }
 tempfile = "3"

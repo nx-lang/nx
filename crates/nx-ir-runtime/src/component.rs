@@ -1,16 +1,19 @@
 //! Components: descriptors, instances, handlers and dispatch.
 
 use crate::error::{fail, Result};
-use crate::eval::{bind, bind_content, Caller, Cx, Frame, Machine, Meter, RuntimeOptions};
+use crate::eval::{
+    bind, bind_content, Caller, Cx, Frame, Machine, Meter, RuntimeOptions, Stack,
+    NX_DEFAULT_MAX_STACK_BYTES,
+};
 use crate::input::Measure;
 use crate::module::{ComponentDecl, DeclarationKind, Node};
 use crate::normalize::{require_record, Labeled, Path};
 use crate::program::{Program, ProgramData};
 use crate::stored::{refuse, Stored};
 use crate::value::{
-    fields_from_host, fields_to_host, from_host, get_field, handlers_equal, to_host, too_deep,
-    Depths, Fields, Handler, Record, Tokens, Value, ACTION_HANDLER_TYPE, HANDLER_INVOCATION_TYPE,
-    MAX_VALUE_DEPTH,
+    fields_from_host, fields_to_host, from_host, get_field, handlers_equal, to_host, token_text,
+    too_deep, Depths, Fields, Handler, Record, Tokens, Value, ACTION_HANDLER_TYPE,
+    HANDLER_INVOCATION_TYPE, MAX_VALUE_DEPTH,
 };
 use nx_value::NxValue;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -89,13 +92,62 @@ impl ComponentInstance {
     }
 }
 
+// What the instance tree reads of an instance. None of it is the host's to read: a host names a
+// handler by its token and never holds one.
+impl ComponentInstance {
+    /// Whether this is the very instance `other` is, not one that holds the same things: a token
+    /// names the same handler in both only then.
+    pub(crate) fn is(&self, other: &ComponentInstance) -> bool {
+        Arc::ptr_eq(&self.data, &other.data)
+    }
+
+    /// The handler the instance's rendered output holds under `token`.
+    pub(crate) fn handler(&self, token: &str) -> Option<&Arc<Handler>> {
+        self.data.handler(token)
+    }
+
+    /// The token under which the instance's rendered output holds `handler`, when it does.
+    ///
+    /// <para>The very handler, not one equal to it. A handler reaches another instance only by
+    /// being handed on, so within a tree of instances the one allocation is the one handler, and
+    /// two instances of a component with equal props and state hold handlers that are equal and
+    /// are not one: a tap on the inner of two such instances is not a tap on the outer.</para>
+    pub(crate) fn token_of(&self, handler: &Arc<Handler>) -> Option<String> {
+        let number = self
+            .data
+            .handlers
+            .iter()
+            .position(|held| Arc::ptr_eq(held, handler))?;
+        Some(token_text(self.data.generation, number.saturating_add(1)))
+    }
+
+    /// The handler a parent bound on the instance under `property` (`onTapped`).
+    pub(crate) fn bound_handler(&self, property: &str) -> Option<&Arc<Handler>> {
+        self.data
+            .handler_props
+            .iter()
+            .find(|(name, _)| &**name == property)
+            .map(|(_, handler)| handler)
+    }
+}
+
 /// Whether two handlers a host holds are one handler. No evaluation pays for the comparison.
 ///
 /// <para>A handler a host was handed and hands back is the same allocation, which is the case
 /// this exists for, so that is asked first: it is not what the language's `==` asks, where a
 /// capture that holds a NaN makes a handler unequal to itself.</para>
+///
+/// <para>The comparison takes no options, so it walks a capture under the default stack budget; a
+/// capture it cannot walk within it is not found equal.</para>
 fn same_handler(left: &Arc<Handler>, right: &Arc<Handler>) -> bool {
-    Arc::ptr_eq(left, right) || handlers_equal(left, right, &Meter::free()).unwrap_or(false)
+    Arc::ptr_eq(left, right)
+        || handlers_equal(
+            left,
+            right,
+            &Meter::free(),
+            &Stack::begin(NX_DEFAULT_MAX_STACK_BYTES),
+        )
+        .unwrap_or(false)
 }
 
 impl Serialize for ComponentInstance {
@@ -151,7 +203,7 @@ pub struct ComponentDispatchResult {
 }
 
 /// The property a parent binds a handler for `emit` under: `onTapped` for `Tapped`.
-fn handler_property(emit: &str) -> String {
+pub(crate) fn handler_property(emit: &str) -> String {
     format!("on{emit}")
 }
 
@@ -168,9 +220,13 @@ fn resolve_parent_handlers(
     parent: Option<&InstanceData>,
     path: &Path<'_>,
     depth: u32,
+    stack: &Stack,
 ) -> Result<Value> {
     if depth > MAX_VALUE_DEPTH {
         return too_deep();
+    }
+    if matches!(value, Value::Seq(_) | Value::Record(_)) && !stack.within() {
+        return stack.value_too_deep();
     }
     let deeper = depth.saturating_add(1);
     match value {
@@ -179,7 +235,7 @@ fn resolve_parent_handlers(
                 .iter()
                 .enumerate()
                 .map(|(index, item)| {
-                    resolve_parent_handlers(item, parent, &Path::Index(path, index), deeper)
+                    resolve_parent_handlers(item, parent, &Path::Index(path, index), deeper, stack)
                 })
                 .collect::<Result<_>>()?,
         )),
@@ -210,7 +266,13 @@ fn resolve_parent_handlers(
                 .map(|(name, item)| {
                     Ok((
                         Arc::clone(name),
-                        resolve_parent_handlers(item, parent, &Path::Field(path, name), deeper)?,
+                        resolve_parent_handlers(
+                            item,
+                            parent,
+                            &Path::Field(path, name),
+                            deeper,
+                            stack,
+                        )?,
                     ))
                 })
                 .collect::<Result<_>>()?,
@@ -350,7 +412,7 @@ impl<'p> Machine<'p> {
                 &record.fields,
                 &input.fields,
                 &mut Vec::new(),
-                path,
+                &Path::Root(path),
                 false,
             )?,
         ))
@@ -503,7 +565,7 @@ impl<'p> Machine<'p> {
             &component.state,
             &merged,
             &mut props_frame(component),
-            &Labeled(name, " state"),
+            &Path::Root(&Labeled(name, " state")),
             true,
         )?;
         // A batch can nest the state one level per entry, and nothing else looks at the state
@@ -514,6 +576,7 @@ impl<'p> Machine<'p> {
         depths.check(
             next.iter()
                 .filter(|(name, _)| get_field(&patch.fields, name).is_some()),
+            &self.stack,
         )?;
         Ok(next)
     }
@@ -631,7 +694,7 @@ impl Program {
                 };
                 let args = args
                     .iter()
-                    .map(|arg| from_host(arg).map(Some))
+                    .map(|arg| from_host(arg, &machine.stack).map(Some))
                     .collect::<Result<_>>()?;
                 entry_result(
                     machine,
@@ -658,7 +721,7 @@ impl Program {
                 input.value(function).record(args);
             },
             |machine| {
-                let Some(function) = crate::normalize::as_function_record(&from_host(function)?)
+                let Some(function) = crate::normalize::as_function_record(&from_host(function, &machine.stack)?)
                 else {
                     return fail(
                         "nx-ir-function-value",
@@ -666,7 +729,7 @@ impl Program {
                     );
                 };
                 let (module, index) = machine.resolve_function(&function, &"call_function")?;
-                let args = fields_from_host(args)?;
+                let args = fields_from_host(args, &machine.stack)?;
                 entry_result(
                     machine,
                     module,
@@ -694,18 +757,25 @@ impl Program {
             |machine| {
                 let (index, declared, component) = machine.component(name)?;
                 let path = Labeled(name, " props");
-                let (mut input, handlers) =
-                    machine.split_handler_properties(0, index, fields_from_host(props)?, &path)?;
+                let (mut input, handlers) = machine.split_handler_properties(
+                    0,
+                    index,
+                    fields_from_host(props, &machine.stack)?,
+                    &path,
+                )?;
                 // A host supplies content as an argument, with no body to have been written or
                 // not, so no content passed means no content and the declared default stands.
-                let content = content.iter().map(from_host).collect::<Result<Vec<_>>>()?;
+                let content = content
+                    .iter()
+                    .map(|value| from_host(value, &machine.stack))
+                    .collect::<Result<Vec<_>>>()?;
                 bind_content(&mut input, &component.props, content, &name, false)?;
                 let mut fields = machine.normalize_fields(
                     entry_cx(index),
                     &component.props,
                     &input,
                     &mut Vec::new(),
-                    &path,
+                    &Path::Root(&path),
                     false,
                 )?;
                 for (name, handler) in handlers {
@@ -715,6 +785,7 @@ impl Program {
                     &Value::record(Some(Arc::clone(declared)), fields),
                     None,
                     &machine.meter(entry_cx(index), None),
+                    &machine.stack,
                 )
             },
         )
@@ -749,12 +820,13 @@ impl Program {
                     belongs(&self.data, &parent.data.program, &parent.data.component)?;
                 }
                 let path = Labeled(name, " props");
-                let supplied = Value::record(None, fields_from_host(props)?);
+                let supplied = Value::record(None, fields_from_host(props, &machine.stack)?);
                 let resolved = resolve_parent_handlers(
                     &supplied,
                     init.parent.map(|parent| &*parent.data),
                     &Path::Root(&path),
                     0,
+                    &machine.stack,
                 )?;
                 let resolved = match resolved {
                     Value::Record(record) => record.fields.clone(),
@@ -769,7 +841,7 @@ impl Program {
                     &component.props,
                     &fields,
                     &mut frame,
-                    &path,
+                    &Path::Root(&path),
                     false,
                 )?;
                 let state_path = Labeled(name, " state");
@@ -779,15 +851,15 @@ impl Program {
                         &component.state,
                         &[],
                         &mut frame,
-                        &state_path,
+                        &Path::Root(&state_path),
                         false,
                     )?,
                     Some(state) => machine.normalize_fields(
                         cx,
                         &component.state,
-                        &fields_from_host(state)?,
+                        &fields_from_host(state, &machine.stack)?,
                         &mut frame,
-                        &state_path,
+                        &Path::Root(&state_path),
                         true,
                     )?,
                 };
@@ -797,10 +869,11 @@ impl Program {
                     &machine.eval(cx, &mut frame, body)?,
                     Some(&mut tokens),
                     &output,
+                    &machine.stack,
                 )?;
                 Ok(ComponentInitResult {
                     rendered,
-                    state: fields_to_host(&state, &output)?,
+                    state: fields_to_host(&state, &output, &machine.stack)?,
                     instance: ComponentInstance {
                         data: Arc::new(InstanceData {
                             program: Arc::clone(&self.data.images),
@@ -839,8 +912,12 @@ impl Program {
                     );
                 };
                 let path = Labeled(name, " props");
-                let (fields, _) =
-                    machine.split_handler_properties(0, index, fields_from_host(props)?, &path)?;
+                let (fields, _) = machine.split_handler_properties(
+                    0,
+                    index,
+                    fields_from_host(props, &machine.stack)?,
+                    &path,
+                )?;
                 let cx = entry_cx(index);
                 let mut frame = Vec::new();
                 machine.normalize_fields(
@@ -848,21 +925,22 @@ impl Program {
                     &component.props,
                     &fields,
                     &mut frame,
-                    &path,
+                    &Path::Root(&path),
                     false,
                 )?;
                 machine.normalize_fields(
                     cx,
                     &component.state,
-                    &fields_from_host(state)?,
+                    &fields_from_host(state, &machine.stack)?,
                     &mut frame,
-                    &Labeled(name, " state"),
+                    &Path::Root(&Labeled(name, " state")),
                     true,
                 )?;
                 to_host(
                     &machine.eval(cx, &mut frame, body)?,
                     None,
                     &machine.meter(cx, None),
+                    &machine.stack,
                 )
             },
         )
@@ -907,7 +985,7 @@ impl Program {
 
                 for (position, entry) in batch.iter().enumerate() {
                     let path = Position("dispatch entry ", position, "");
-                    let entry = from_host(entry)?;
+                    let entry = from_host(entry, &machine.stack)?;
                     let object = require_record(&entry, &path)?;
                     if object.type_name() == Some(HANDLER_INVOCATION_TYPE) {
                         let Some(token) = object.get("token").and_then(Value::as_text) else {
@@ -1016,14 +1094,15 @@ impl Program {
                     &machine.eval(entry_cx(index), &mut frame, body)?,
                     Some(&mut tokens),
                     &output,
+                    &machine.stack,
                 )?;
                 Ok(ComponentDispatchResult {
                     rendered,
                     effects: effects
                         .iter()
-                        .map(|effect| to_host(effect, None, &output))
+                        .map(|effect| to_host(effect, None, &output, &machine.stack))
                         .collect::<Result<_>>()?,
-                    state: fields_to_host(&working, &output)?,
+                    state: fields_to_host(&working, &output, &machine.stack)?,
                     instance: ComponentInstance {
                         data: Arc::new(InstanceData {
                             program: Arc::clone(&instance.program),
@@ -1057,12 +1136,16 @@ impl Program {
                 let state = machine.normalize_fields(
                     entry_cx(index),
                     &component.state,
-                    &fields_from_host(state)?,
+                    &fields_from_host(state, &machine.stack)?,
                     &mut props_frame(component),
-                    &Labeled(name, " state"),
+                    &Path::Root(&Labeled(name, " state")),
                     true,
                 )?;
-                fields_to_host(&state, &machine.meter(entry_cx(index), None))
+                fields_to_host(
+                    &state,
+                    &machine.meter(entry_cx(index), None),
+                    &machine.stack,
+                )
             },
         )
     }
@@ -1087,17 +1170,21 @@ impl Program {
             },
             |machine| {
                 let (index, name, component) = machine.component(name)?;
-                let patch = from_host(patch)?;
+                let patch = from_host(patch, &machine.stack)?;
                 let patch = require_record(&patch, &"the state patch")?;
                 let state = machine.patch_state(
                     index,
                     name,
                     component,
-                    &fields_from_host(current)?,
+                    &fields_from_host(current, &machine.stack)?,
                     patch,
                     &mut Depths::default(),
                 )?;
-                fields_to_host(&state, &machine.meter(entry_cx(index), None))
+                fields_to_host(
+                    &state,
+                    &machine.meter(entry_cx(index), None),
+                    &machine.stack,
+                )
             },
         )
     }
@@ -1135,7 +1222,7 @@ impl Program {
                 &component.props,
                 &data.props,
                 &mut frame,
-                &Labeled(name, " props"),
+                &Path::Root(&Labeled(name, " props")),
                 true,
             )
             .or_else(refuse)?;
@@ -1145,7 +1232,7 @@ impl Program {
                 &component.state,
                 &data.state,
                 &mut frame,
-                &Labeled(name, " state"),
+                &Path::Root(&Labeled(name, " state")),
                 true,
             )
             .or_else(refuse)?;
@@ -1186,7 +1273,7 @@ fn entry_result(machine: &Machine<'_>, module: u32, index: u32, value: Value) ->
         declaration: index,
         depth: 0,
     };
-    to_host(&value, None, &machine.meter(cx, None))
+    to_host(&value, None, &machine.meter(cx, None), &machine.stack)
 }
 
 struct Position(&'static str, usize, &'static str);

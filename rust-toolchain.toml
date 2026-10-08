@@ -1,4 +1,6 @@
 [toolchain]
 channel = "1.98.1"
 components = ["rustfmt", "clippy"]
-targets = ["wasm32-wasip1"]
+# wasm32-wasip1 is what the WebAssembly SDK module is built for. wasm32-unknown-emscripten is what a
+# host that draws NX in a browser builds the runtime crates for; CI checks that they still do.
+targets = ["wasm32-wasip1", "wasm32-unknown-emscripten"]

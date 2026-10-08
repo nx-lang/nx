@@ -1,7 +1,8 @@
 # Publishes a published GitHub Release made by release.yml: the NuGet and npm packages in one job,
-# the VS Code extension to the Marketplace and Open VSX in another, so an outage on one side doesn't
-# stop the other. Every registry write skips a version already there, so rerunning a failed job, or
-# dispatching with release_tag, repairs a partial publish.
+# the runtime crates to crates.io in another, and the VS Code extension to the Marketplace and Open
+# VSX in a third, so an outage of one registry doesn't stop the others. Every registry write skips a
+# version already there, so rerunning a failed job, or dispatching with release_tag, repairs a
+# partial publish.
 
 name: Publish release
 
@@ -194,6 +195,109 @@ jobs:
         }
     - name: Publish npm packages
       run: node scripts/publish-packages.mjs "${RUNNER_TEMP}/release-assets" --version "${RELEASE_VERSION}"
+
+  # crates.io takes no file: `cargo publish` packages the crates again from the sources. So this
+  # job packages them from the release's tag, publishes only when that gives the attached files
+  # byte for byte, and afterwards compares what the registry recorded with them again.
+  publish-crates:
+    name: Publish runtime crates
+    runs-on: ubuntu-latest
+    needs: prepare
+    environment: production
+    env:
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+    permissions:
+      contents: read
+      # For crates.io trusted publishing: GitHub's OIDC token is exchanged for a short-lived one.
+      id-token: write
+    steps:
+    # The tag, whatever started the run: a repair dispatched from a branch must package what the
+    # release was made from.
+    - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+      with:
+        ref: ${{ needs.prepare.outputs.tag }}
+    - name: Download release assets
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+      run: |
+        set -euo pipefail
+        mkdir -p "${RUNNER_TEMP}/release-assets"
+        gh release download "${RELEASE_TAG}" -D "${RUNNER_TEMP}/release-assets" --clobber
+        find "${RUNNER_TEMP}/release-assets" -maxdepth 1 -type f -print | sort
+    # A release made before the crates joined the track attached none, and has none to publish.
+    # One that attached any must attach exactly the three, at the release's version.
+    - name: Validate release assets
+      id: assets
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $assets = Join-Path $env:RUNNER_TEMP 'release-assets'
+        $crates = @(Get-ChildItem $assets -File -Filter '*.crate')
+        if ($crates.Count -eq 0) {
+            Write-Output "::notice::Release $env:RELEASE_TAG has no runtime crates attached; nothing to publish to crates.io."
+            "present=false" >> $env:GITHUB_OUTPUT
+            exit 0
+        }
+
+        tools/packaging/Test-ReleaseAssets.ps1 -Path $assets -Tag $env:RELEASE_TAG -Version $env:RELEASE_VERSION
+
+        $expected = @('nx-ir', 'nx-value', 'nx-ir-runtime') | ForEach-Object { "$_-$env:RELEASE_VERSION.crate" }
+        $missing = @($expected | Where-Object { $_ -notin $crates.Name })
+        if ($missing.Count -ne 0 -or $crates.Count -ne $expected.Count) {
+            throw "Releases must include exactly the runtime crates $($expected -join ', '); found $($crates.Name -join ', ')."
+        }
+
+        "present=true" >> $env:GITHUB_OUTPUT
+    - name: Setup Node.js
+      if: ${{ steps.assets.outputs.present == 'true' }}
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      with:
+        node-version: '24'
+    # The toolchain rust-toolchain.toml pins at the tag, which is the one the release run packaged
+    # the attached files with: the comparison below depends on both runs using it.
+    - name: Install the pinned Rust toolchain
+      if: ${{ steps.assets.outputs.present == 'true' }}
+      run: |
+        rustup toolchain install
+        rustup show active-toolchain
+        cargo --version
+    # Packages the crates from this checkout, compares each with the attached file, and reads the
+    # registry for the versions it already has. Nothing is written, so a release whose crates do
+    # not package to the reviewed bytes stops here with nothing published.
+    - name: Plan crates.io publication
+      if: ${{ steps.assets.outputs.present == 'true' }}
+      run: node scripts/publish-crates.mjs "${RUNNER_TEMP}/release-assets" --version "${RELEASE_VERSION}" --dry-run
+    # crates.io accepts a trusted-publisher policy only for a crate that exists, so the first
+    # version of each crate is published with a token and this step finds no policy to use. Once
+    # the policies exist the token secret is removed; docs/deployment-setup.md has both steps.
+    - name: Request a crates.io trusted publishing token
+      id: crates-io-auth
+      if: ${{ steps.assets.outputs.present == 'true' }}
+      continue-on-error: true
+      uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
+    - name: Check crates.io authentication
+      if: ${{ steps.assets.outputs.present == 'true' }}
+      shell: bash
+      env:
+        TRUSTED_CRATES_IO_TOKEN: ${{ steps.crates-io-auth.outputs.token }}
+        FALLBACK_CRATES_IO_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+      run: |
+        if [ -n "${TRUSTED_CRATES_IO_TOKEN}" ]; then
+          echo "Using crates.io trusted publishing."
+        elif [ -n "${FALLBACK_CRATES_IO_TOKEN}" ]; then
+          echo "::warning::crates.io trusted publishing is not available for these crates; publishing with the CRATES_IO_TOKEN fallback."
+        else
+          echo "::error::crates.io publishing requires a trusted-publisher policy for each runtime crate or the CRATES_IO_TOKEN fallback."
+          exit 1
+        fi
+    - name: Publish runtime crates
+      if: ${{ steps.assets.outputs.present == 'true' }}
+      env:
+        CARGO_REGISTRY_TOKEN: ${{ steps.crates-io-auth.outputs.token || secrets.CRATES_IO_TOKEN }}
+      run: node scripts/publish-crates.mjs "${RUNNER_TEMP}/release-assets" --version "${RELEASE_VERSION}"
 
   publish-extension:
     name: Publish VS Code extension

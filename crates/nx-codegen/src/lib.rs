@@ -49,6 +49,8 @@ mod ir_corpus_tests;
 #[cfg(test)]
 mod ir_image_tests;
 #[cfg(test)]
+mod ir_instance_tree_tests;
+#[cfg(test)]
 mod ir_runtime_sources;
 #[cfg(test)]
 mod ir_runtime_tests;

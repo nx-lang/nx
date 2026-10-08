@@ -4,14 +4,20 @@
 //! schema the image carries: occurrences, records and their discriminators, abstract records,
 //! unions, update records and function values.</para>
 
-use crate::error::{fail, fail_limit, Result};
-use crate::eval::{bind, Cx, Frame, Machine, STACK_LIMIT};
+use crate::error::{fail, Result};
+use crate::eval::{bind, Cx, Frame, Machine};
 use crate::module::{DeclarationKind, Field, Primitive, Ref, Shape, Type};
 use crate::value::{get_field, CaseValue, Fields, FunctionRef, Record, Value, FUNCTION_TYPE};
 use std::fmt;
 use std::sync::Arc;
 
 /// Where a value sits, for a diagnostic. Built on the stack and printed only on failure.
+///
+/// <para>A path is one segment for each level its value is nested, each linked to the one above
+/// it, and it is printed from the deepest frame of the walk that found the failure, where the
+/// stack budget may be all but used. So a walk links every level to the path it was given, never
+/// to a new root that hides it, and printing follows the links in a loop: the stack it takes
+/// does not grow with the path.</para>
 #[derive(Clone, Copy)]
 pub(crate) enum Path<'a> {
     Root(&'a dyn fmt::Display),
@@ -21,11 +27,28 @@ pub(crate) enum Path<'a> {
 
 impl fmt::Display for Path<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Path::Root(root) => root.fmt(formatter),
-            Path::Field(parent, name) => write!(formatter, "{parent}.{name}"),
-            Path::Index(parent, index) => write!(formatter, "{parent}[{index}]"),
+        let mut segments = Vec::new();
+        let mut at = self;
+        loop {
+            match at {
+                Path::Root(root) => {
+                    root.fmt(formatter)?;
+                    break;
+                }
+                Path::Field(parent, _) | Path::Index(parent, _) => {
+                    segments.push(at);
+                    at = parent;
+                }
+            }
         }
+        for segment in segments.iter().rev() {
+            match segment {
+                Path::Field(_, name) => write!(formatter, ".{name}")?,
+                Path::Index(_, index) => write!(formatter, "[{index}]")?,
+                Path::Root(_) => {}
+            }
+        }
+        Ok(())
     }
 }
 
@@ -115,11 +138,8 @@ impl<'p> Machine<'p> {
         value: Value,
         path: &Path<'_>,
     ) -> Result<Value> {
-        if !self.within_stack() {
-            return fail_limit(
-                STACK_LIMIT,
-                "A value nests too deeply to check within the stack an evaluation may use.",
-            );
+        if !self.stack.within() {
+            return self.stack.value_too_deep();
         }
         if let Type::Seq {
             item,
@@ -417,7 +437,7 @@ impl<'p> Machine<'p> {
         fields: &[Field],
         input: &[(Arc<str>, Value)],
         frame: &mut Frame,
-        path: &dyn fmt::Display,
+        path: &Path<'_>,
         require_explicit: bool,
     ) -> Result<Fields> {
         for (key, _) in input {
@@ -428,11 +448,10 @@ impl<'p> Machine<'p> {
                 );
             }
         }
-        let root = Path::Root(path);
         let first_slot = frame.len();
         let mut output = Vec::with_capacity(fields.len());
         for (offset, field) in fields.iter().enumerate() {
-            let at = Path::Field(&root, &field.name);
+            let at = Path::Field(path, &field.name);
             let value = match (get_field(input, &field.name), field.default) {
                 (Some(value), _) => self.normalize(cx, &field.ty, value.clone(), &at)?,
                 (None, Some(default)) if !require_explicit => self
@@ -467,7 +486,7 @@ impl<'p> Machine<'p> {
         cx: Cx,
         fields: &[Field],
         input: &[(Arc<str>, Value)],
-        path: &dyn fmt::Display,
+        path: &Path<'_>,
     ) -> Result<Fields> {
         for (key, _) in input {
             if !fields.iter().any(|field| field.name == *key) {
@@ -477,7 +496,6 @@ impl<'p> Machine<'p> {
                 );
             }
         }
-        let root = Path::Root(path);
         let mut output = Vec::new();
         for field in fields {
             let Some(value) = get_field(input, &field.name) else {
@@ -498,7 +516,7 @@ impl<'p> Machine<'p> {
                     cx,
                     &field.ty,
                     value.clone(),
-                    &Path::Field(&root, &field.name),
+                    &Path::Field(path, &field.name),
                 )?,
             ));
         }
@@ -602,5 +620,26 @@ fn normalize_primitive(primitive: Primitive, value: Value, path: &Path<'_>) -> R
             ),
         },
         Primitive::Object => Ok(value),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_path_prints_its_root_and_then_its_segments_in_order() {
+        let root = Path::Root(&Labeled("Card", " props"));
+        assert_eq!(root.to_string(), "Card props");
+        let items = Path::Field(&root, "items");
+        let third = Path::Index(&items, 2);
+        let name = Path::Field(&third, "name");
+        assert_eq!(name.to_string(), "Card props.items[2].name");
+        // A root that is itself a path prints as that path does.
+        let under = Path::Root(&name);
+        assert_eq!(
+            Path::Index(&under, 0).to_string(),
+            "Card props.items[2].name[0]"
+        );
     }
 }

@@ -7,7 +7,7 @@
 //! encoding spells `null`.</para>
 
 use crate::error::{fail_limit, Limit, Result};
-use crate::eval::{utf16_len, Meter, TEXT_UNITS};
+use crate::eval::{utf16_len, Meter, Stack, TEXT_UNITS};
 use nx_value::NxValue;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -20,7 +20,8 @@ pub(crate) const FUNCTION_TYPE: &str = "Function";
 
 /// How deeply a value crossing the host boundary may nest. The walks over a value recurse, so
 /// this is what keeps a hostile host value, or state a program grew one level per dispatch, from
-/// exhausting the native stack.
+/// exhausting the native stack of a host that has the default stack budget free. A host with
+/// less says so, and the walks that convert a value ask the budget as well.
 pub(crate) const MAX_VALUE_DEPTH: u32 = 256;
 
 #[derive(Debug, Clone)]
@@ -185,14 +186,25 @@ pub(crate) fn remove_field(fields: &mut Fields, name: &str) {
 /// difference between two records as well, which cannot change it; it does not take two values
 /// that are one allocation to be equal, which can, since a value that holds a NaN is not equal
 /// to itself.</para>
-pub(crate) fn values_equal(left: &Value, right: &Value, meter: &Meter<'_, '_>) -> Result<bool> {
+///
+/// <para>The walk recurses once for each level the two values nest, so at each pair that can
+/// hold others it asks `stack` whether the call still has stack for them.</para>
+pub(crate) fn values_equal(
+    left: &Value,
+    right: &Value,
+    meter: &Meter<'_, '_>,
+    stack: &Stack,
+) -> Result<bool> {
     meter.charge(1)?;
+    if (holds_values(left) || holds_values(right)) && !stack.within() {
+        return stack.value_too_deep();
+    }
     Ok(match (left, right) {
         (Value::Seq(left), Value::Seq(right)) => {
             let mut equal = left.len() == right.len();
             if equal {
                 for (left, right) in left.iter().zip(right.iter()) {
-                    if !values_equal(left, right, meter)? {
+                    if !values_equal(left, right, meter, stack)? {
                         equal = false;
                         break;
                     }
@@ -201,11 +213,11 @@ pub(crate) fn values_equal(left: &Value, right: &Value, meter: &Meter<'_, '_>) -
             equal
         }
         (Value::Seq(items), other) => match &**items {
-            [only] => values_equal(only, other, meter)?,
+            [only] => values_equal(only, other, meter, stack)?,
             _ => false,
         },
         (other, Value::Seq(items)) => match &**items {
-            [only] => values_equal(other, only, meter)?,
+            [only] => values_equal(other, only, meter, stack)?,
             _ => false,
         },
         (Value::Bool(left), Value::Bool(right)) => left == right,
@@ -215,8 +227,8 @@ pub(crate) fn values_equal(left: &Value, right: &Value, meter: &Meter<'_, '_>) -
             *integer as f64 == *float
         }
         (Value::Function(left), Value::Function(right)) => left == right,
-        (Value::Handler(left), Value::Handler(right)) => handlers_equal(left, right, meter)?,
-        (Value::Record(left), Value::Record(right)) => records_equal(left, right, meter)?,
+        (Value::Handler(left), Value::Handler(right)) => handlers_equal(left, right, meter, stack)?,
+        (Value::Record(left), Value::Record(right)) => records_equal(left, right, meter, stack)?,
         _ => match (left.as_text(), right.as_text()) {
             (Some(left), Some(right)) => {
                 meter.charge(shared_length_cost(left, right, meter))?;
@@ -258,7 +270,12 @@ fn shared_length_cost(left: &str, right: &str, meter: &Meter<'_, '_>) -> u64 {
 /// declaration are held. Otherwise the fields of `right` are indexed once, so the comparison
 /// takes time proportional to the two widths. A walk nobody pays for answers from the field
 /// counts alone when they differ, and stops at the first difference.</para>
-fn records_equal(left: &Record, right: &Record, meter: &Meter<'_, '_>) -> Result<bool> {
+fn records_equal(
+    left: &Record,
+    right: &Record,
+    meter: &Meter<'_, '_>,
+    stack: &Stack,
+) -> Result<bool> {
     if let (Some(left), Some(right)) = (left.type_name(), right.type_name()) {
         meter.charge(shared_length_cost(left, right, meter))?;
     }
@@ -283,7 +300,7 @@ fn records_equal(left: &Record, right: &Record, meter: &Meter<'_, '_>) -> Result
     let mut equal = same_width;
     if in_step {
         for ((_, value), (_, other)) in left.fields.iter().zip(right.fields.iter()) {
-            if !values_equal(value, other, meter)? {
+            if !values_equal(value, other, meter, stack)? {
                 equal = false;
                 if !charged {
                     break;
@@ -302,7 +319,7 @@ fn records_equal(left: &Record, right: &Record, meter: &Meter<'_, '_>) -> Result
         let same = match index.get_mut(&**name) {
             Some((other, held)) => {
                 *held = true;
-                values_equal(value, other, meter)?
+                values_equal(value, other, meter, stack)?
             }
             None => {
                 meter.charge(1)?;
@@ -328,6 +345,7 @@ pub(crate) fn handlers_equal(
     left: &Arc<Handler>,
     right: &Arc<Handler>,
     meter: &Meter<'_, '_>,
+    stack: &Stack,
 ) -> Result<bool> {
     let mut equal = left.module == right.module
         && left.declaration == right.declaration
@@ -336,7 +354,7 @@ pub(crate) fn handlers_equal(
     if equal {
         for pair in left.captured.iter().zip(right.captured.iter()) {
             let same = match pair {
-                (Some(left), Some(right)) => values_equal(left, right, meter)?,
+                (Some(left), Some(right)) => values_equal(left, right, meter, stack)?,
                 (None, None) => true,
                 _ => false,
             };
@@ -347,6 +365,11 @@ pub(crate) fn handlers_equal(
         }
     }
     Ok(equal)
+}
+
+/// Whether a value can hold other values, so that a walk over it goes a level deeper.
+fn holds_values(value: &Value) -> bool {
+    matches!(value, Value::Seq(_) | Value::Record(_) | Value::Handler(_))
 }
 
 pub(crate) fn too_deep<T>() -> Result<T> {
@@ -375,21 +398,26 @@ pub(crate) struct Depths {
 }
 
 impl Depths {
-    /// Fails when a value of `fields` nests deeper than a value may.
+    /// Fails when a value of `fields` nests deeper than a value may, or when walking it would
+    /// take the call past `stack`.
     pub(crate) fn check<'a>(
         &mut self,
         fields: impl IntoIterator<Item = &'a (Arc<str>, Value)>,
+        stack: &Stack,
     ) -> Result<()> {
         fields
             .into_iter()
-            .try_for_each(|(_, value)| self.levels_of(value, 1).map(|_| ()))
+            .try_for_each(|(_, value)| self.levels_of(value, 1, stack).map(|_| ()))
     }
 
     /// How many levels `value` nests, itself included, having checked that none of them is past
     /// the limit when `value` sits at `depth`.
-    fn levels_of(&mut self, value: &Value, depth: u32) -> Result<u32> {
+    fn levels_of(&mut self, value: &Value, depth: u32, stack: &Stack) -> Result<u32> {
         if depth > MAX_VALUE_DEPTH {
             return too_deep();
+        }
+        if holds_values(value) && !stack.within() {
+            return stack.value_too_deep();
         }
         let (address, holders) = match value {
             Value::Seq(items) => (
@@ -417,17 +445,17 @@ impl Depths {
         match value {
             Value::Seq(items) => {
                 for item in items.iter() {
-                    below = below.max(self.levels_of(item, deeper)?);
+                    below = below.max(self.levels_of(item, deeper, stack)?);
                 }
             }
             Value::Record(record) => {
                 for (_, field) in &record.fields {
-                    below = below.max(self.levels_of(field, deeper)?);
+                    below = below.max(self.levels_of(field, deeper, stack)?);
                 }
             }
             Value::Handler(handler) => {
                 for item in handler.captured.iter().flatten() {
-                    below = below.max(self.levels_of(item, deeper)?);
+                    below = below.max(self.levels_of(item, deeper, stack)?);
                 }
             }
             _ => {}
@@ -442,13 +470,20 @@ impl Depths {
 
 /// Reads a host value. Every `null` is the empty value; nothing else is interpreted until the
 /// value reaches a typed site.
-pub(crate) fn from_host(value: &NxValue) -> Result<Value> {
-    from_host_at(value, 0)
+///
+/// <para>The walk recurses once for each level the value nests, so besides the levels it counts
+/// it asks `stack`, at each value that holds others, whether the call still has stack for
+/// them.</para>
+pub(crate) fn from_host(value: &NxValue, stack: &Stack) -> Result<Value> {
+    from_host_at(value, 0, stack)
 }
 
-fn from_host_at(value: &NxValue, depth: u32) -> Result<Value> {
+fn from_host_at(value: &NxValue, depth: u32, stack: &Stack) -> Result<Value> {
     if depth > MAX_VALUE_DEPTH {
         return too_deep();
+    }
+    if matches!(value, NxValue::Array(_) | NxValue::Record { .. }) && !stack.within() {
+        return stack.value_too_deep();
     }
     let deeper = depth.saturating_add(1);
     Ok(match value {
@@ -462,7 +497,7 @@ fn from_host_at(value: &NxValue, depth: u32) -> Result<Value> {
         NxValue::Array(items) => Value::seq(
             items
                 .iter()
-                .map(|item| from_host_at(item, deeper))
+                .map(|item| from_host_at(item, deeper, stack))
                 .collect::<Result<_>>()?,
         ),
         NxValue::Record {
@@ -470,19 +505,26 @@ fn from_host_at(value: &NxValue, depth: u32) -> Result<Value> {
             properties,
         } => Value::record(
             type_name.as_deref().map(Arc::from),
-            fields_from_host_at(properties, deeper)?,
+            fields_from_host_at(properties, deeper, stack)?,
         ),
     })
 }
 
-pub(crate) fn fields_from_host(properties: &BTreeMap<String, NxValue>) -> Result<Fields> {
-    fields_from_host_at(properties, 1)
+pub(crate) fn fields_from_host(
+    properties: &BTreeMap<String, NxValue>,
+    stack: &Stack,
+) -> Result<Fields> {
+    fields_from_host_at(properties, 1, stack)
 }
 
-fn fields_from_host_at(properties: &BTreeMap<String, NxValue>, depth: u32) -> Result<Fields> {
+fn fields_from_host_at(
+    properties: &BTreeMap<String, NxValue>,
+    depth: u32,
+    stack: &Stack,
+) -> Result<Fields> {
     properties
         .iter()
-        .map(|(name, value)| Ok((Arc::from(name.as_str()), from_host_at(value, depth)?)))
+        .map(|(name, value)| Ok((Arc::from(name.as_str()), from_host_at(value, depth, stack)?)))
         .collect()
 }
 
@@ -502,7 +544,7 @@ impl Tokens {
 }
 
 /// The token of the `number`th handler of a generation's rendered output, counting from one.
-fn token_text(generation: u64, number: usize) -> String {
+pub(crate) fn token_text(generation: u64, number: usize) -> String {
     format!("h{generation}-{number}")
 }
 
@@ -520,22 +562,29 @@ fn token_text(generation: u64, number: usize) -> String {
 /// written. Every value costs one because every value takes a place in what is written: a list
 /// of empty values is as long to copy as a list of numbers. This is where a value held once and reached by
 /// many paths becomes as many copies, so it is where its size as a tree is paid for.</para>
+///
+/// <para>Like [`from_host`], the walk asks `stack` at each value that holds others.</para>
 pub(crate) fn to_host(
     value: &Value,
     tokens: Option<&mut Tokens>,
     meter: &Meter<'_, '_>,
+    stack: &Stack,
 ) -> Result<NxValue> {
     let mut tokens = tokens;
-    to_host_at(value, &mut tokens, 0, meter)
+    to_host_at(value, &mut tokens, 0, meter, stack)
 }
 
 pub(crate) fn fields_to_host(
     fields: &[(Arc<str>, Value)],
     meter: &Meter<'_, '_>,
+    stack: &Stack,
 ) -> Result<BTreeMap<String, NxValue>> {
     let mut output = BTreeMap::new();
     for (name, value) in fields {
-        output.insert(name.to_string(), to_host_at(value, &mut None, 1, meter)?);
+        output.insert(
+            name.to_string(),
+            to_host_at(value, &mut None, 1, meter, stack)?,
+        );
     }
     Ok(output)
 }
@@ -563,9 +612,13 @@ fn to_host_at(
     tokens: &mut Option<&mut Tokens>,
     depth: u32,
     meter: &Meter<'_, '_>,
+    stack: &Stack,
 ) -> Result<NxValue> {
     if depth > MAX_VALUE_DEPTH {
         return too_deep();
+    }
+    if matches!(value, Value::Seq(_) | Value::Record(_)) && !stack.within() {
+        return stack.value_too_deep();
     }
     let deeper = depth.saturating_add(1);
     // Every value is one value, a sequence included, and then its items pay for themselves. A
@@ -587,7 +640,7 @@ fn to_host_at(
         Value::Seq(items) => NxValue::Array(
             items
                 .iter()
-                .map(|item| to_host_at(item, tokens, deeper, meter))
+                .map(|item| to_host_at(item, tokens, deeper, meter, stack))
                 .collect::<Result<_>>()?,
         ),
         Value::Function(function) => NxValue::Record {
@@ -629,7 +682,7 @@ fn to_host_at(
             ordered.sort_by(|left, right| left.0.cmp(&right.0));
             let mut properties = BTreeMap::new();
             for (name, field) in ordered {
-                let written = to_host_at(field, tokens, deeper, meter)?;
+                let written = to_host_at(field, tokens, deeper, meter, stack)?;
                 let written = if is_update && written.is_empty_value() {
                     NxValue::Null
                 } else {
@@ -662,8 +715,79 @@ mod tests {
         vec![(Arc::from("f"), value)]
     }
 
+    /// A stack budget no walk of these tests meets.
+    fn roomy() -> Stack {
+        Stack::begin(crate::NX_DEFAULT_MAX_STACK_BYTES)
+    }
+
+    /// Whether `result` is the failure of a walk that met the stack budget `bytes`.
+    fn met_stack_budget<T: std::fmt::Debug>(result: Result<T>, bytes: u64) -> bool {
+        match result {
+            Err(error) => {
+                let limit = error.diagnostics[0].limit.expect("a limit");
+                assert_eq!((limit.name, limit.value), ("maxStackBytes", Some(bytes)));
+                true
+            }
+            Ok(_) => false,
+        }
+    }
+
+    /// The walks the evaluator makes over values it holds, each over a value 200 levels deep,
+    /// which a value may be: under a budget a few levels use up, each stops with a diagnostic
+    /// where it would otherwise recurse to the end of the value on whatever stack there is.
+    #[test]
+    fn a_comparison_and_the_nesting_walk_stop_at_the_stack_budget() {
+        let (left, right) = (chain(200), chain(200));
+        let free = Meter::free();
+        assert!(matches!(
+            values_equal(&left, &right, &free, &roomy()),
+            Ok(true)
+        ));
+        assert!(met_stack_budget(
+            values_equal(&left, &right, &free, &Stack::begin(1 << 10)),
+            1024
+        ));
+        // A list holding one value is compared with the value itself, another way down.
+        let listed = (0..200).fold(Value::Int(0), |value, _| Value::seq(vec![value]));
+        assert!(met_stack_budget(
+            values_equal(&listed, &Value::Int(1), &free, &Stack::begin(1 << 10)),
+            1024
+        ));
+
+        let capturing = |value: Value| {
+            Arc::new(Handler {
+                module: Arc::from("m"),
+                declaration: Arc::from("d"),
+                node: 0,
+                component: Arc::from("m::C"),
+                component_name: Arc::from("C"),
+                emit: Arc::from("E"),
+                action_name: Arc::from("C.E"),
+                owner: None,
+                captured: vec![Some(value)],
+            })
+        };
+        let (first, second) = (capturing(chain(200)), capturing(chain(200)));
+        assert!(matches!(
+            handlers_equal(&first, &second, &free, &roomy()),
+            Ok(true)
+        ));
+        assert!(met_stack_budget(
+            handlers_equal(&first, &second, &free, &Stack::begin(1 << 10)),
+            1024
+        ));
+
+        assert!(Depths::default()
+            .check(&field(chain(200)), &roomy())
+            .is_ok());
+        assert!(met_stack_budget(
+            Depths::default().check(&field(chain(200)), &Stack::begin(1 << 10)),
+            1024
+        ));
+    }
+
     fn too_deep_for(depths: &mut Depths, value: Value) -> bool {
-        match depths.check(&field(value)) {
+        match depths.check(&field(value), &roomy()) {
             Ok(()) => false,
             Err(error) => {
                 let limit = error.diagnostics[0].limit.expect("a limit");

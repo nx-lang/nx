@@ -211,6 +211,44 @@ jobs:
             printf "pnpm add ../nx-editor-assets/*.tgz\n"
             printf "\`\`\`\n"
           } > "${body_path}"
+
+          # The runtime crates, when the run packed them: a host project that builds against the
+          # three packages in place of crates.io, which does not have a pull request's version.
+          crates_artifact_id="$(artifact_id_by_name "rust-crates")"
+
+          if [ -n "${crates_artifact_id}" ]; then
+            crates_dir="${work_dir}/rust-crates"
+            download_artifact "${crates_artifact_id}" "${crates_dir}"
+            runtime_crate_path="$(first_matching_file "${crates_dir}" "nx-ir-runtime-*.crate")"
+
+            if [ -z "${runtime_crate_path}" ]; then
+              echo "::error::rust-crates is missing the nx-ir-runtime crate."
+              exit 1
+            fi
+
+            crates_version="$(basename "${runtime_crate_path}" .crate)"
+            crates_version="${crates_version#nx-ir-runtime-}"
+            validate_semver "Runtime crates" "${crates_version}"
+
+            {
+              printf "\nRuntime crates version: \`%s\`\n\n" "${crates_version}"
+              printf "\`\`\`bash\n"
+              printf "gh run download %s -R %s -n rust-crates -D nx-rust-crates\n" "${run_id}" "${repository}"
+              printf "mkdir nx-crates\n"
+              printf "for crate in nx-rust-crates/*.crate; do tar -xzf \"\$crate\" -C nx-crates; done\n"
+              printf "cargo new nx-runtime-test\n"
+              printf "cd nx-runtime-test\n"
+              printf "cat >> Cargo.toml <<'TOML'\n"
+              printf "nx-ir-runtime = \"=%s\"\n\n" "${crates_version}"
+              printf "[patch.crates-io]\n"
+              for crate in nx-ir nx-value nx-ir-runtime; do
+                printf "%s = { path = \"../nx-crates/%s-%s\" }\n" "${crate}" "${crate}" "${crates_version}"
+              done
+              printf "TOML\n"
+              printf "cargo build\n"
+              printf "\`\`\`\n"
+            } >> "${body_path}"
+          fi
         else
           vsix_artifact_id="$(artifact_id_by_prefix "vscode-vsix-")"
 
