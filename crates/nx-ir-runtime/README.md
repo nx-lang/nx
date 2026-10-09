@@ -288,6 +288,11 @@ What the tree does:
   An event may be dispatched while a pass is under way. A visit then counts for what the node held
   when it was made: a node that rendered again after its visit is still to be walked, and a node
   under it that was visited only before that was read from output that is gone.
+- **Nesting ends.** A node may be `max_component_depth` deep, 100 unless the host says otherwise,
+  counting itself and the nodes above it. A `visit` for a deeper one fails with
+  `nx-ir-resource-limit` naming `maxComponentDepth` and changes nothing. Each visit is a call of
+  its own, so this is the limit a component that renders itself meets, and a pass run inside
+  `atomically` then leaves the tree as it was.
 - **A pass walks only what changed.** `is_settled` says of a node that neither it nor anything
   under it has rendered since a pass last visited it, so a pass need not go below it. After a
   dispatch deep in the tree, a pass visits the nodes from the root down to the one that rendered,
@@ -305,6 +310,13 @@ What the tree does:
   nothing. A host that queues input runs a pass between two events, or runs one and sends the
   refused event again. It is never run against a node that was only handed the handler, and its
   emit is never returned to the host as though no parent had bound it.
+- **Take the new tokens when the pass ends, even if drawing waits.** The node a dispatch ran
+  against has rendered again, so the tokens its old output carried are retired at once. A host
+  that draws later than it dispatches (after the handler returns, on the next frame) must not also
+  leave the tokens its controls hold until then: a scroll or a drag reports several events within
+  one frame, and the second would name a token the first retired. Read the handlers of the new
+  output into what the controls dispatch with as part of the pass, and leave only the drawing for
+  later.
 - **An emitted action goes to the handler the parent bound.** Each effect a dispatch returns whose
   type the node's component emits, and that the parent bound a handler for, is dispatched in turn
   against the node that created that handler. Every other effect comes back as a `HostEffect`. A
@@ -330,6 +342,81 @@ What it does not do:
   the node that rendered, whether or not the props it handed down changed. What is beside that
   node, and above it unless an emit carried a change there, does not render.
 
+### Cells a host binds outside a pass
+
+A host that draws a virtualized list does not walk the list's cells. Its layout engine realizes a
+cell when it scrolls into view and asks the host to fill it then, between passes. A component in
+that cell cannot be a node of the drawing's tree: no pass visits it, so the next `finish` would
+drop it as a node under no node that the pass did not visit.
+
+Keep those nodes in a second tree over the same program, and never end a pass on it. With no
+`finish`, nothing is dropped: a node lives until the host removes it. Call `begin` before each
+bind all the same. It drops nothing; it empties what the tree recorded since the last one, so
+that `inert` is what this bind found and does not grow for as long as the program stands. The template is a function value, so a
+cell's content comes from `call_function`, and what it returns is visited under no node at a key
+the host makes from the list and the item.
+
+```rust,no_run
+use nx_ir_runtime::{InstanceTree, Program, Result, RuntimeOptions};
+use nx_value::NxValue;
+use std::collections::BTreeMap;
+
+/// The layout engine bound a cell of `list` to item `index`: the template's output for it.
+fn bind(
+    cells: &mut InstanceTree,
+    template: &NxValue,
+    list: &str,
+    index: usize,
+    item: &NxValue,
+    options: &RuntimeOptions,
+) -> Result<NxValue> {
+    let args = BTreeMap::from([
+        ("Item".to_string(), item.clone()),
+        ("Index".to_string(), NxValue::Int(index as i64)),
+    ]);
+    let content = cells.program().call_function(template, &args, options)?;
+    // Not a pass that will end: this empties the tree's record of inert handlers.
+    cells.begin();
+    match &content {
+        // A component: its node is the cell's, and keeps its state while the cell is out of view.
+        NxValue::Record { type_name: Some(name), .. } if cells.can_instantiate(name) => {
+            let rendered = cells.visit(&format!("{list}/{index}"), &content, None, options)?;
+            Ok(rendered.as_ref().clone())
+        }
+        _ => Ok(content),
+    }
+}
+
+fn run(program: Program) {
+    let drawing = InstanceTree::new(program.clone());
+    // The same program, and no pass that ends: `finish` is never called on this one.
+    let mut cells = InstanceTree::new(program);
+    // When the list leaves the drawing or its collection changes, drop what was kept for it.
+    cells.remove("list/0");
+    # let _ = drawing;
+}
+```
+
+- **A cell bound again to the same item is left alone.** The template returns the same descriptor,
+  so the visit does nothing and the node keeps its state. That is what lets a recycled cell show an
+  item it showed before as the user left it.
+- **An event names the cell's node.** `dispatch` against the second tree with the key the node was
+  visited at. A handler the template bound outside any component has no instance to run against;
+  a visit under no node leaves it out and reports it through `inert`.
+- **The host decides how long a cell's state lives.** `remove` drops a node and what is under it.
+  Removing when the collection changes gives a cell the life of its item; removing when the cell
+  scrolls away gives it the life of what is on screen. A `remove` looks at every node of the tree,
+  so where one list's cells are all a tree holds, replace the tree instead of removing them one by
+  one. And nothing but `remove` drops a node here: a component nested in a cell's component stays
+  after its place has left the output, where a pass would have dropped it.
+- **Nothing reaches from one tree to the other.** A component in a cell cannot emit to a component
+  in the drawing: an emit nobody bound in the cell's own tree comes back as a `HostEffect`.
+- **The component depth starts again in every cell.** A cell's content is visited under no node,
+  so `max_component_depth` counts from the cell and knows nothing of the list the cell is in. A
+  template that draws a list of itself nests cells in cells without ever nesting components, and
+  no limit of the tree ends it. A host whose layout puts cells inside cells carries its own depth
+  from a list into the cells it binds.
+
 Every operation that evaluates takes `RuntimeOptions` and passes them to each lifecycle call it
 makes, so the operation budget and the input limit apply to each of those calls, not to the
 operation as a whole. A key that names no node fails with `nx-ir-instance-key`. The tree is plain
@@ -342,6 +429,7 @@ data over shared values: cloning it copies no value, and it is `Send + Sync`.
 | Operations one call may cost | Unlimited | `RuntimeOptions::max_operations` | `maxOperations` |
 | Input one call may be given | Unlimited | `RuntimeOptions::max_input_size` | `maxInputSize` |
 | Call depth | 100 | `RuntimeOptions::max_call_depth` | `maxCallDepth` |
+| Component instances nested in an instance tree, counting the node visited and those above it | 100 | `RuntimeOptions::max_component_depth` | `maxComponentDepth` |
 | Integers one range may hold when a loop iterates it | 1,000,000 | `RuntimeOptions::max_range_length` | `maxRangeLength` |
 | Nested expressions, across every call of one evaluation | 1,000 | fixed | `maxExpressionNesting` |
 | Native stack one call may use, from where it began | 1 MiB | `RuntimeOptions::max_stack_bytes` | `maxStackBytes` |
@@ -372,6 +460,18 @@ diagnostic. A host on such a stack does one of two things:
   program needs, in which case that program gets the diagnostic too.
 - **Links a larger stack.** With the deepest evaluation's need free below the deepest point the
   host calls from, the nesting limit is met before the stack is.
+
+The budget covers one call, from where that call begins. It does not cover the host. A host that
+walks rendered output by recursion and visits components as it goes (the instance tree's `walk`
+above) uses stack between its calls that no call counts, and every `visit` is a call of its own
+with its own call depth, so no single call of a component that renders itself ever goes deep.
+What ends that tree is `max_component_depth`: a `visit` for a node more than that many component
+instances deep fails with `nx-ir-resource-limit` naming `maxComponentDepth`. What a level costs in
+stack is the walk's to say, so lower the limit where the walk's frames are large, and raise it for
+deep data on a stack that has the room. The limit counts component instances only.
+Records the host interprets itself can nest as deeply as a program writes them with no component
+between, so a host that recurses over those bounds that depth itself, and states the stack budget
+where each call is made, not once where the walk began.
 
 How much the deepest evaluation needs was measured on `wasm32-unknown-emscripten`, in a release
 build linked with a 1 MiB stack and run in Chromium, with a function that recurses until the

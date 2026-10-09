@@ -39,9 +39,10 @@ pub struct Diagnostic {
 /// A limit an evaluation reached, as data a host can act on without reading the message.
 ///
 /// <para>A limit the TypeScript runtime also has carries the name of its option there:
-/// `maxOperations`, `maxCallDepth`, `maxRangeLength` and `maxExpressionNesting`. The two only this
-/// runtime has are `maxStackBytes`, the native stack an evaluation may use, and `maxValueNesting`,
-/// how deeply a value may nest at the host boundary or in component state.</para>
+/// `maxOperations`, `maxInputSize`, `maxCallDepth`, `maxRangeLength` and `maxExpressionNesting`.
+/// The three only this runtime has are `maxStackBytes`, the native stack an evaluation may use,
+/// `maxValueNesting`, how deeply a value may nest at the host boundary or in component state, and
+/// `maxComponentDepth`, how deeply an instance tree may nest component instances.</para>
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Limit {
     pub name: &'static str,

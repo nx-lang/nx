@@ -19,7 +19,7 @@
 //! follows changes walks only where something changed.</para>
 
 use crate::component::{handler_property, ComponentInit, ComponentInstance};
-use crate::error::{fail, Result};
+use crate::error::{fail, fail_limit, Limit, Result};
 use crate::eval::{RuntimeOptions, Stack};
 use crate::module::{ComponentDecl, DeclarationKind};
 use crate::program::Program;
@@ -296,6 +296,12 @@ impl InstanceTree {
     /// <para>Under no parent, a handler record without a token names nothing, so it is left out
     /// of the fields the node is initialized from and reported through
     /// [`inert`](Self::inert).</para>
+    ///
+    /// <para>A node may be at most [`RuntimeOptions::max_component_depth`] deep, counting itself
+    /// and the nodes above it. A visit for a deeper one fails with `nx-ir-resource-limit` naming
+    /// `maxComponentDepth` and changes nothing, whether or not the tree holds the node already:
+    /// each visit is a call of its own, so this is the only limit a component that renders
+    /// itself meets.</para>
     pub fn visit(
         &mut self,
         key: &str,
@@ -318,19 +324,32 @@ impl InstanceTree {
                 format!("Expected the value at '{key}' to be a component descriptor: a record with a '$type'."),
             );
         };
+        // How deep the node is, counting itself and the nodes above it.
+        let mut depth: usize = 1;
         let above = match parent {
             None => None,
             Some(parent) => {
                 let (parent, node) = self.node(parent)?;
-                if self.is_under(&parent, &key) {
+                let Some(above) = self.depth_apart_from(&parent, &key) else {
                     return fail(
                         "nx-ir-instance-key",
                         format!("The node at '{key}' cannot be visited under '{parent}', which is that node or one under it."),
                     );
-                }
+                };
+                depth = above.saturating_add(1);
                 Some((parent, node.instance.clone()))
             }
         };
+        let limit = options.max_component_depth;
+        if depth > usize::try_from(limit).unwrap_or(usize::MAX) {
+            return fail_limit(
+                Limit {
+                    name: "maxComponentDepth",
+                    value: Some(u64::from(limit)),
+                },
+                format!("The '{component}' component would be nested more than {limit} component instances deep. A component that renders itself nests without end."),
+            );
+        }
 
         // A descriptor under no instance came from pure evaluation, so a handler record in it
         // has no token and names nothing: it is reported, and left out rather than refused.
@@ -600,16 +619,19 @@ impl InstanceTree {
         depth
     }
 
-    /// Whether the node at `key` is the node at `ancestor` or one under it.
-    fn is_under(&self, key: &str, ancestor: &str) -> bool {
+    /// How deep the node at `key` is, counting itself and the nodes above it; `None` when the
+    /// node at `other` is one of them, so that `key` names that node or one under it.
+    fn depth_apart_from(&self, key: &str, other: &str) -> Option<usize> {
+        let mut depth: usize = 0;
         let mut next = Some(key);
         while let Some(key) = next {
-            if key == ancestor {
-                return true;
+            if key == other {
+                return None;
             }
+            depth = depth.saturating_add(1);
             next = self.nodes.get(key).and_then(|node| node.parent.as_deref());
         }
-        false
+        Some(depth)
     }
 
     /// Drops every node under the node at `key`.

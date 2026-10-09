@@ -1130,6 +1130,46 @@ drawing them. The reason to do step 1 before it is measured to matter is not spe
 a host that follows changes (see above) is told that everything under a changed node changed, and
 has to compare output itself to find out that most of it did not.
 
+### What the first Rust host measured
+
+The DrawnUI fiddle's `nx-rust` language (`nx/rust/` in DrawnUi.FiddleEngine, change
+`add-nx-rust-to-drawnui-fiddle`) is the first host built on the tree. It does not ask
+`is_settled`: after every dispatch it walks the whole render and compares it with what its controls
+were last given. Measured there on 2026-10-09, in a native release build, over the fiddle's own
+templates:
+
+| Template | Controls | Dispatch and pass | Comparing and setting |
+|---|---|---|---|
+| Welcome | 6 | 70 µs | 5 µs |
+| Cards | 16 | 141 µs | 7 µs |
+| UI | 23 | 219 µs | 15 µs |
+| Controls | 65 | 709 µs | 35 µs |
+
+What that says about the two items above:
+
+- **The walk is not what an event costs.** Comparing the whole render with the last one and
+  setting what changed is a twentieth of the time. The rest is the dispatch and the pass, which in
+  these programs is one component rendering its whole body: each template is a single `App`. A
+  runtime-owned tree with a change set would save the twentieth.
+- **Component granularity is what costs.** About 10 µs a control, every control of the component
+  that changed, for one changed label. That is the cost tracked reads would remove, and it is still
+  under a millisecond for the largest template, against a 16.7 ms frame.
+- **A large collection costs outside the tree.** The 100,000-item template takes about 120 ms to
+  load in the browser. Nothing in the collection is visited: the time goes to evaluating it and to
+  the host copying it on the way to the list (the split was not measured). The host had to learn
+  not to walk a collection it hands to a template, which took the load from 170 ms.
+- **Two trees were needed, and were enough.** Cells of a virtualized list are bound during layout,
+  outside any pass, so the host keeps a second tree with no passes for them (the runtime README
+  describes it). Nothing in the tree had to change for that.
+- **Tokens want reading at dispatch time.** The host draws after the handler returns, and at first
+  left its controls holding retired tokens until then; the second event of a scroll was refused. A
+  runtime-owned tree would have made that mistake impossible, which is the strongest argument the
+  fiddle produced for it, and it is about correctness, not speed.
+
+So neither item is pressing on the evidence of this host. The case that would change that is a
+program of many components with large bodies where a small part changes often, which none of the
+fiddle's templates is.
+
 ## Logical operands: the IR runtime coerces, the interpreter demands a boolean
 
 **Observed.** The two runtimes disagree about what a non-boolean operand of `&&` or `||` means. The

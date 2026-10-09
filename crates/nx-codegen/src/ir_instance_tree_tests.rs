@@ -285,6 +285,102 @@ let root() = { <Counter /> }",
     assert!(tree.rendered("root").is_none());
 }
 
+/// Visits the `component` each node renders under that node, from what `root()` renders down,
+/// at the keys `1`, `2` and so on, until a node renders none or a visit fails. Returns how many
+/// nodes it visited and the failure that stopped it.
+fn descend(
+    tree: &mut InstanceTree,
+    component: &str,
+    options: &RuntimeOptions,
+) -> (usize, Option<NxIrRuntimeError>) {
+    let mut descriptor = evaluated(tree, "root");
+    let mut parent: Option<String> = None;
+    let mut visited = 0;
+    loop {
+        let key = (visited + 1).to_string();
+        let output = match tree.visit(&key, &descriptor, parent.as_deref(), options) {
+            Ok(output) => output,
+            Err(error) => return (visited, Some(error)),
+        };
+        visited += 1;
+        match find(&output, component, None) {
+            Some(next) => descriptor = next.clone(),
+            None => return (visited, None),
+        }
+        parent = Some(key);
+    }
+}
+
+#[test]
+fn a_component_that_renders_itself_ends_at_the_component_depth() {
+    let mut tree = linked(
+        "
+component <Loop extends Node /> = { <Stack><Loop /></Stack> }
+let root() = { <Loop /> }",
+    );
+    tree.begin();
+    let (visited, error) = descend(&mut tree, "Loop", &options());
+    let error = error.expect("a tree without end is refused");
+    assert_eq!(visited, 100);
+    assert_eq!(error.code(), "nx-ir-resource-limit");
+    let limit = error.diagnostics[0].limit.expect("a limit");
+    assert_eq!((limit.name, limit.value), ("maxComponentDepth", Some(100)));
+    assert!(
+        error.diagnostics[0].message.contains("'Loop' component"),
+        "{error}"
+    );
+
+    // The visit that was refused changed nothing: the hundred nodes above it stand, and a host
+    // that runs its pass as one change has the tree it began with.
+    assert!(tree.rendered("100").is_some());
+    assert!(tree.rendered("101").is_none());
+    let mut tree = InstanceTree::new(tree.program().clone());
+    let failed = tree.atomically(|tree| {
+        tree.begin();
+        match descend(tree, "Loop", &options()) {
+            (_, Some(error)) => Err(error),
+            (visited, None) => Ok(visited),
+        }
+    });
+    assert_eq!(failed.unwrap_err().code(), "nx-ir-resource-limit");
+    assert!(tree.rendered("1").is_none());
+}
+
+#[test]
+fn a_host_sets_the_component_depth() {
+    let mut tree = linked(
+        "
+component <Level extends Node left:int /> = {
+  <Stack>
+    <Label Text={\"\" + left} />
+    {if left > 0 { <Level left={left - 1} /> }}
+  </Stack>
+}
+let root() = { <Level left={149} /> }",
+    );
+    let depth = |max_component_depth: u32| RuntimeOptions {
+        max_component_depth,
+        ..options()
+    };
+
+    // A hundred and fifty levels of data are past the default and within a limit the host raised.
+    tree.begin();
+    let (visited, error) = descend(&mut tree, "Level", &options());
+    assert_eq!(visited, 100);
+    assert_eq!(error.unwrap().code(), "nx-ir-resource-limit");
+    let (visited, error) = descend(&mut tree, "Level", &depth(150));
+    assert_eq!((visited, error), (150, None));
+    assert!(renders(&tree, "150", "Label", "0"));
+
+    // A lowered limit is the one in force, for a node the tree holds already as for a new one.
+    let before = rendered(&tree, "4");
+    let (visited, error) = descend(&mut tree, "Level", &depth(3));
+    assert_eq!(visited, 3);
+    let limit = error.unwrap().diagnostics[0].limit.expect("a limit");
+    assert_eq!((limit.name, limit.value), ("maxComponentDepth", Some(3)));
+    assert!(Arc::ptr_eq(&before, &rendered(&tree, "4")));
+}
+
 // ------------------------------------------------------------------------------------------------
 // A node is one use of an authored component at one place in the output
 // ------------------------------------------------------------------------------------------------
@@ -1378,4 +1474,80 @@ fn a_descriptor_that_nests_too_deeply_is_refused_within_the_stack_budget() {
     let limit = error.diagnostics[0].limit.expect("a limit");
     assert_eq!((limit.name, limit.value), ("maxStackBytes", Some(1024)));
     assert!(tree.rendered("root/box").is_none());
+}
+
+// ---------------------------------------------------------------- nodes held outside a pass
+
+/// A list whose cells a host binds one at a time, as a layout engine realizes them: the template
+/// is a function value, and what it returns for an item is a component with state of its own.
+const CELLS: &str = "
+component <Row extends Node n:int /> = {
+  state { picks:int = 0 }
+  <Button Text={\"Row \" + n} onTapped=<Update picks={picks + 1} /> />
+}
+let <Cell Item:int Index:int />: Node = <Row n={Item} />
+let template() = { Cell }
+component <Top /> = { <Label Text=\"a list\" /> }
+let root() = { <Top /> }
+";
+
+/// What the template returns for one item: a descriptor no component rendered.
+fn cell(tree: &InstanceTree, item: i64) -> NxValue {
+    let template = evaluated(tree, "template");
+    let args = BTreeMap::from([
+        ("Item".to_owned(), NxValue::Int(item)),
+        ("Index".to_owned(), NxValue::Int(item - 1)),
+    ]);
+    tree.program()
+        .call_function(&template, &args, &options())
+        .unwrap_or_else(|error| panic!("Cell({item}): {error}"))
+}
+
+/// A host that draws a virtualized list visits a cell's component when its layout binds the
+/// cell, not while it walks the output, so no pass of the drawing's tree would see it. It keeps
+/// those nodes in a second tree over the same program and ends no pass there: a node then lives
+/// until the host removes it, a dispatch against it changes it alone, and neither tree knows of
+/// the other.
+#[test]
+fn nodes_a_host_holds_outside_a_pass_stay_until_it_removes_them() {
+    let mut drawing = open(CELLS);
+    drawing.finish();
+    let mut cells = InstanceTree::new(drawing.program().clone());
+
+    // No pass is ever ended here. Each cell is visited under no node, at a key of the host's
+    // choosing, after a `begin` that drops nothing: it empties what the last bind recorded.
+    for item in 1..=3 {
+        let descriptor = cell(&cells, item);
+        cells.begin();
+        cells
+            .visit(&format!("cell/{item}"), &descriptor, None, &options())
+            .unwrap();
+    }
+    tap(&mut cells, "cell/2", "Row 2").unwrap();
+    tap(&mut cells, "cell/2", "Row 2").unwrap();
+    assert_eq!(state(&cells, "cell/1"), json(r#"{ "picks": 0 }"#));
+    assert_eq!(state(&cells, "cell/2"), json(r#"{ "picks": 2 }"#));
+
+    // The cell is bound again, to the same item: the same descriptor leaves the node alone.
+    let again = cell(&cells, 2);
+    let before = generation(&cells, "cell/2");
+    cells.visit("cell/2", &again, None, &options()).unwrap();
+    assert_eq!(generation(&cells, "cell/2"), before);
+    assert_eq!(state(&cells, "cell/2"), json(r#"{ "picks": 2 }"#));
+
+    // Passes over the drawing's tree come and go; the cells are not its nodes.
+    let root = evaluated(&drawing, "root");
+    drawing.begin();
+    drawing.visit("root", &root, None, &options()).unwrap();
+    drawing.finish();
+    assert!(drawing.rendered("cell/2").is_none());
+    assert_eq!(state(&cells, "cell/2"), json(r#"{ "picks": 2 }"#));
+
+    // The list's collection changed: the host drops the nodes it kept for it, by key.
+    assert!(cells.remove("cell/2"));
+    assert!(cells.rendered("cell/2").is_none());
+    assert_eq!(state(&cells, "cell/1"), json(r#"{ "picks": 0 }"#));
+    let fresh = cell(&cells, 2);
+    cells.visit("cell/2", &fresh, None, &options()).unwrap();
+    assert_eq!(state(&cells, "cell/2"), json(r#"{ "picks": 0 }"#));
 }
