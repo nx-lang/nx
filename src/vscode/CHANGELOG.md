@@ -2,6 +2,39 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.7.0
+
+### NX IR runtimes
+- The Rust runtime is on crates.io: `nx-ir-runtime`, with `nx-ir` (the image format) and
+  `nx-value` (the host value) that it needs, all three at the release's version. A Rust host adds
+  `nx-ir-runtime` and runs compiled NX IR images with no checkout of this repository and no
+  compiler. The crates build for `wasm32-unknown-emscripten` and `wasm32-wasip1` as well as for
+  native targets. `crates/nx-ir-runtime/README.md` has the API, the limits and the diagnostic
+  codes.
+- New in `nx-ir-runtime`: `InstanceTree`, which keeps one instance for each use of an authored
+  component in a program's output as that output changes. The lifecycle renders one instance at a
+  time and left composing them to the host. The tree gives each use a node at a key the host
+  chooses, passes props down and keeps state with the node, runs a handler against the node whose
+  body bound it, carries an emitted action to the handler the parent bound, and makes a dispatch
+  all or nothing. `is_settled` says where nothing has rendered since the host last walked, so a
+  pass visits only what changed. It knows nothing of drawing: a host that keeps any structure
+  derived from the output uses it the same way. `@nx-lang/ir-runtime` has no instance tree.
+- A host sets the native stack a call may use: `RuntimeOptions::max_stack_bytes`, one mebibyte by
+  default, which was fixed before. A WebAssembly module's whole stack is often that much or less,
+  so a host there states what it has free and gets `nx-ir-resource-limit` naming `maxStackBytes`
+  where a deep evaluation would have ended the page. The README (*Small stacks*) has the measured
+  need and how to read the free stack under Emscripten.
+- A tree's depth is bounded: `RuntimeOptions::max_component_depth`, 100 by default, is how many
+  component instances an `InstanceTree` may nest. A component that renders itself now ends with
+  `nx-ir-resource-limit` naming `maxComponentDepth`, where it grew until the host ran out of
+  stack.
+- **Breaking**, for a Rust host that writes `RuntimeOptions` out in full: the struct has two new
+  fields. Write `..RuntimeOptions::default()` for the ones you do not set.
+- `@nx-lang/ir-runtime` is unchanged in behavior. Its README corrects how arguments by name are
+  read (one by one, as positional arguments are) and gives measured costs for reading a host
+  value, and the repository gains a performance harness that compares each release with the last
+  (`pnpm --filter @nx-lang/ir-runtime bench`).
+
 ## 0.6.0
 
 ### Doc comments
