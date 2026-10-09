@@ -47,8 +47,8 @@ pub use component::{
 };
 pub use error::{Diagnostic, Limit, NxIrRuntimeError, Result, SourceSpan};
 pub use eval::{
-    RuntimeOptions, NX_DEFAULT_MAX_CALL_DEPTH, NX_DEFAULT_MAX_RANGE_LENGTH,
-    NX_DEFAULT_MAX_STACK_BYTES,
+    RuntimeOptions, NX_DEFAULT_MAX_CALL_DEPTH, NX_DEFAULT_MAX_COMPONENT_DEPTH,
+    NX_DEFAULT_MAX_RANGE_LENGTH, NX_DEFAULT_MAX_STACK_BYTES,
 };
 pub use helpers::{apply, diff, merge};
 pub use input::{input_size, record_input_size};

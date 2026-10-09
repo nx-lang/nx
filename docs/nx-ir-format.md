@@ -1333,14 +1333,17 @@ began, a mebibyte by default, which a host whose stack is smaller sets to what i
 an evaluation that would overrun the stack ends in a diagnostic naming `maxStackBytes` and the
 budget in force. The crate also composes the instances of nested components into a tree that
 follows the program's output, as `InstanceTree`; the TypeScript runtime leaves that to its host.
+`RuntimeOptions::max_component_depth`, 100 by default, is how deeply that tree may nest component
+instances: each visit of the tree is a call of its own, so it is the limit a component that
+renders itself meets.
 `RuntimeOptions::max_operations` is the operation budget, counted exactly as the TypeScript runtime
 counts it: the same images, input and budget stop at the same node.
 `RuntimeOptions::max_input_size` is the input limit of *Input size*, measured as the TypeScript
 runtime measures it, so the same input is refused under the same limit; `RuntimeOptions::usage`
 reports what a call used; and `input_size` and `record_input_size` measure a value and a map of
 named values as the limit does. A resource-limit diagnostic's `limit` uses the TypeScript
-runtime's names for the limits the two share, and adds `maxStackBytes` and `maxValueNesting` for
-the two only this runtime has. A diagnostic's `argument` is the TypeScript runtime's: for the same
+runtime's names for the limits the two share, and adds `maxStackBytes`, `maxValueNesting` and
+`maxComponentDepth` for the three only this runtime has. A diagnostic's `argument` is the TypeScript runtime's: for the same
 image and the same arguments the two name the same parameter, or both name none. The crate's
 `README.md` has the API, the limits and the diagnostic codes.
 

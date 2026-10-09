@@ -23,6 +23,16 @@ use std::sync::Arc;
 pub struct RuntimeOptions {
     /// How deeply function calls may nest. 100 by default.
     pub max_call_depth: u32,
+    /// How deeply an [`InstanceTree`](crate::InstanceTree) may nest component instances, counting
+    /// the node a visit is for and every node above it. 100 by default.
+    ///
+    /// <para>Every [`visit`](crate::InstanceTree::visit) is a call of its own, so no limit on one
+    /// call stops a component that renders itself: each visit is shallow, and the tree grows
+    /// until the host's own walk runs out of stack. A visit that would put a node deeper than
+    /// this fails with `nx-ir-resource-limit` naming `maxComponentDepth`. How much stack a level
+    /// costs is the host's walk's to say, so a host with deep data and stack to spare may raise
+    /// it, and one on a small stack may lower it.</para>
+    pub max_component_depth: u32,
     /// The most integers one range may hold when a loop iterates it. One million by default.
     ///
     /// <para>A range makes an enormous loop one token long, so the count is checked before the
@@ -69,6 +79,8 @@ pub struct RuntimeOptions {
 
 /// The default of [`RuntimeOptions::max_call_depth`].
 pub const NX_DEFAULT_MAX_CALL_DEPTH: u32 = 100;
+/// The default of [`RuntimeOptions::max_component_depth`].
+pub const NX_DEFAULT_MAX_COMPONENT_DEPTH: u32 = 100;
 /// The default of [`RuntimeOptions::max_range_length`].
 pub const NX_DEFAULT_MAX_RANGE_LENGTH: u64 = 1_000_000;
 /// The default of [`RuntimeOptions::max_stack_bytes`]: one mebibyte.
@@ -83,6 +95,7 @@ impl Default for RuntimeOptions {
     fn default() -> Self {
         Self {
             max_call_depth: NX_DEFAULT_MAX_CALL_DEPTH,
+            max_component_depth: NX_DEFAULT_MAX_COMPONENT_DEPTH,
             max_range_length: NX_DEFAULT_MAX_RANGE_LENGTH,
             max_operations: None,
             max_input_size: None,
