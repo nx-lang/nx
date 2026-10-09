@@ -313,11 +313,26 @@ exported helpers, and SHALL evaluate the same four as intrinsic calls inside a p
 
 ### Requirement: Rust runtime bounds evaluation and never panics
 Every evaluation API SHALL accept runtime options holding a maximum call depth, defaulting to 100,
-a maximum range length, defaulting to one million, and an operation budget, absent by default.
-Exceeding the call depth or the range length SHALL fail with `nx-ir-resource-limit` naming the
-limit, and a range above its limit SHALL be refused before its body runs. Every API SHALL report
-every failure as an error value carrying diagnostics. No image that preparation accepted, no host
-value, and no instance SHALL cause the runtime to panic or to exhaust the native stack.
+a maximum range length, defaulting to one million, an operation budget, absent by default, and a
+stack budget, defaulting to one mebibyte. Exceeding the call depth or the range length SHALL fail
+with `nx-ir-resource-limit` naming the limit, and a range above its limit SHALL be refused before
+its body runs. Every API SHALL report every failure as an error value carrying diagnostics. No
+image that preparation accepted, no host value, and no instance SHALL cause the runtime to panic
+or, on a thread with the stack budget free where the call began, to exhaust the native stack.
+
+The stack budget SHALL be the native stack one call of an evaluation API may use, measured from
+where the call began, and SHALL bound every recursion the runtime makes over an image or a value
+on behalf of that call: evaluating nested expressions, checking a value against a type, converting
+a value at the host boundary, comparing two values, and finding how deeply state nests after a
+patch. Reporting a failure SHALL NOT take stack in proportion to how deeply the failing value sits:
+a diagnostic names where the value is, and that path is as long as the value is deep and is
+written where the failure was found, which is where the least stack is left. An API that takes no options, which the update helpers and the comparisons of an instance's
+handlers are, SHALL walk under the default budget. An evaluation that would use more SHALL fail with `nx-ir-resource-limit` naming
+`maxStackBytes` and the budget in force, before the stack is exceeded. The budget is the host's
+statement of what its thread has free: the runtime SHALL honor a budget below the default, so that
+a host whose whole stack is smaller than a mebibyte gets a diagnostic where the default would
+overrun it, and a budget above it. The bound on nested expressions SHALL stay fixed and SHALL apply
+whatever the stack budget is.
 
 The operation budget SHALL be counted as `nx-ir-format` defines an operation, and an absent budget
 SHALL be unlimited. One budget SHALL cover one call of an evaluation API and everything that call
@@ -373,6 +388,40 @@ succeeds, wherever the two runtimes compute the same values.
 - **WHEN** a host dispatches a batch whose handlers together cost more than the operation budget
 - **THEN** dispatch SHALL fail with `nx-ir-resource-limit` naming the operation budget
 - **AND** the instance given SHALL dispatch a later, cheaper batch successfully
+
+#### Scenario: A small stack budget ends deep recursion with a diagnostic
+- **WHEN** a host evaluates a function that recurses several hundred calls deep under a raised
+  call-depth limit and a stack budget of 64 kibibytes
+- **THEN** evaluation SHALL fail with `nx-ir-resource-limit` whose limit is named `maxStackBytes`
+  with the value `65536`
+- **AND** the same call under a stack budget that holds the build's frames, which in an optimized
+  build the default does, SHALL return the function's result or fail for the nesting bound
+
+#### Scenario: The default stack budget is unchanged
+- **WHEN** a host evaluates under default options
+- **THEN** the stack budget in force SHALL be `1048576` bytes
+
+#### Scenario: A deeply nested host value is refused within the stack budget
+- **WHEN** a host passes a value nested 200 levels deep to a parameter of a declared type under a
+  stack budget too small to check it
+- **THEN** the call SHALL fail with `nx-ir-resource-limit` naming `maxStackBytes`
+- **AND** SHALL NOT exhaust the native stack
+
+#### Scenario: A comparison of deep values stops at the stack budget
+- **WHEN** two values nested 200 levels deep are compared, or state that deep is checked after a
+  patch, under a stack budget that a few levels use up
+- **THEN** the walk SHALL fail with `nx-ir-resource-limit` naming `maxStackBytes`
+- **AND** a function that recurses to a depth of its caller's choosing and then compares two host
+  values nested 100 levels deep SHALL, on a thread whose stack is the budget and a margin, return
+  the comparison's result or that diagnostic at every depth, and SHALL NOT exhaust the stack
+
+#### Scenario: A failure at the bottom of a deep value is reported within the stack budget
+- **WHEN** a host passes a record nested 200 levels deep whose innermost field has the wrong type,
+  on a thread whose stack is the budget and a margin, for budgets on both sides of the one the
+  check first fits in
+- **THEN** each call SHALL fail with `nx-ir-resource-limit` naming `maxStackBytes` or with
+  `nx-ir-boundary-type` naming the whole path to the field
+- **AND** no call SHALL exhaust the stack
 
 ### Requirement: Rust runtime diagnostics identify the failing declaration
 A diagnostic the Rust runtime reports SHALL carry a code from the `nx-ir-*` set the TypeScript
@@ -451,10 +500,11 @@ by `Function` record SHALL be unchanged.
 Every diagnostic the Rust runtime reports with the code `nx-ir-resource-limit` SHALL carry the name
 of the limit that was reached and, where the limit is a number, its value, as data beside the
 message. A limit the TypeScript runtime also has SHALL carry the name the TypeScript runtime gives
-it: `maxOperations`, `maxCallDepth`, `maxRangeLength` and `maxExpressionNesting`. The limits only
-the Rust runtime has SHALL be named `maxStackBytes` for the native stack an evaluation may use and
-`maxValueNesting` for the nesting of a value at the host boundary or in component state. A
-diagnostic with any other code SHALL carry no limit.
+it: `maxOperations`, `maxInputSize`, `maxCallDepth`, `maxRangeLength` and `maxExpressionNesting`. The limits only
+the Rust runtime has SHALL be named `maxStackBytes` for the native stack an evaluation may use,
+`maxValueNesting` for the nesting of a value at the host boundary or in component state, and
+`maxComponentDepth` for the nesting of component instances in an instance tree. A diagnostic with
+any other code SHALL carry no limit.
 
 #### Scenario: The operation budget is named
 - **WHEN** an evaluation fails for an exhausted operation budget of five thousand
@@ -467,6 +517,11 @@ diagnostic with any other code SHALL carry no limit.
 #### Scenario: A value nested too deeply names its own limit
 - **WHEN** a host passes a value nested 300 levels deep
 - **THEN** the diagnostic's limit SHALL have the name `maxValueNesting` and the value `256`
+
+#### Scenario: A tree nested too deeply names its own limit
+- **WHEN** a visit of an instance tree is for a node 101 component instances deep under the
+  default options
+- **THEN** the diagnostic's limit SHALL have the name `maxComponentDepth` and the value `100`
 
 ### Requirement: Rust runtime limits the size of host input
 The runtime options every evaluation API accepts SHALL include an input limit, absent by default,
@@ -637,3 +692,22 @@ code SHALL change.
 #### Scenario: A failure inside the function names no argument
 - **WHEN** a host calls a function with arguments that fit its parameters and the body then fails
 - **THEN** the diagnostic SHALL name no argument
+
+### Requirement: Rust runtime builds for the WebAssembly targets hosts use
+The Rust IR runtime crate and the crates it depends on SHALL build for `wasm32-unknown-emscripten`
+and `wasm32-wasip1` without features, patches or a C toolchain, and the repository's continuous
+integration SHALL check both on every pull request. The runtime's documentation SHALL state how
+much stack a release build's deepest permitted evaluation was measured to use on a WebAssembly
+target, and what a host whose stack is smaller than the default budget sets: a stack budget no
+larger than what is free where it calls the runtime, or a larger stack at link time.
+
+#### Scenario: A pull request that breaks a WebAssembly build fails
+- **WHEN** a change makes the runtime crate, the format crate or the value crate fail to compile
+  for `wasm32-unknown-emscripten` or `wasm32-wasip1`
+- **THEN** the pull request's build SHALL fail naming the target
+
+#### Scenario: A host on a small stack finds what to set
+- **WHEN** a host author reads the runtime crate's README
+- **THEN** it SHALL say that the thread calling the runtime needs the stack budget free
+- **AND** it SHALL give the measured stack use on a WebAssembly target and the option that lowers
+  the budget
