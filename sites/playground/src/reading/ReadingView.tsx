@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 import "@nx-lang/viewer";
 import { NX_SELECT_EVENT, type NxSelectDetail, type NxViewerElement } from "@nx-lang/viewer";
-import type { Reading } from "./useSourceTree.ts";
+import type { Reading } from "./reading.ts";
 
 export interface ReadingViewProps {
   readonly reading: Reading;

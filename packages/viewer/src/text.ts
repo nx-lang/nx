@@ -17,14 +17,22 @@ interface Body {
   readonly owners: number[];
 }
 
+/**
+ * What a rendered run says about its node: `original` carries the key, as the one rendering of
+ * the node; `copy` carries it as `data-ref-key`, as a reference's expansion does; `none` carries
+ * nothing, for text that is not a node, such as a doc comment's or a hover's.
+ */
+export type KeyMode = "original" | "copy" | "none";
+
 /** The private-use character an embed stands as while the body is parsed. */
 const EMBED = "";
 
-/** Renders `pieces` as prose, or as markdown when `markdown` is set. */
+/** Renders `pieces` as prose, or as markdown when `markdown` is set, keyed as `keys` says. */
 export function renderText(
   document: Document,
   pieces: readonly TextPiece[],
-  markdown: boolean
+  markdown: boolean,
+  keys: KeyMode
 ): HTMLElement {
   const container = document.createElement("div");
   container.className = markdown ? "text-body markdown" : "text-body";
@@ -46,7 +54,7 @@ export function renderText(
           emitted.add(owner);
         }
       } else {
-        parent.append(runSpan(document, piece, body.chars.slice(at, stop).join(""), !emitted.has(owner)));
+        parent.append(runSpan(document, piece, body.chars.slice(at, stop).join(""), !emitted.has(owner), keys));
         emitted.add(owner);
       }
       at = stop;
@@ -72,7 +80,7 @@ export function renderText(
       if (piece.kind === "embed") {
         container.append(piece.element);
       } else {
-        container.append(runSpan(document, piece, "", true));
+        container.append(runSpan(document, piece, "", true, keys));
       }
     }
   });
@@ -83,17 +91,24 @@ function runSpan(
   document: Document,
   piece: Extract<TextPiece, { kind: "text" }>,
   text: string,
-  first: boolean
+  first: boolean,
+  keys: KeyMode
 ): HTMLElement {
   const span = document.createElement("span");
+  span.textContent = text;
+  if (keys === "none") {
+    span.className = "text";
+    return span;
+  }
   span.className = "n text";
   span.dataset["role"] = "text";
-  if (first) {
-    span.dataset["key"] = piece.key;
-  } else {
+  if (!first) {
     span.dataset["partOf"] = piece.key;
+  } else if (keys === "copy") {
+    span.dataset["refKey"] = piece.key;
+  } else {
+    span.dataset["key"] = piece.key;
   }
-  span.textContent = text;
   return span;
 }
 
@@ -261,7 +276,7 @@ function renderInline(
   let plain = start;
   let at = start;
   while (at < end) {
-    const marker = INLINE_MARKERS.find(({ open }) => matches(body, at, end, open));
+    const marker = INLINE_MARKERS.find(({ open }) => matches(body, at, end, open) && canOpen(body, at, end, open));
     const close = marker === undefined ? -1 : findClose(body, at + marker.open.length, end, marker.open);
     if (marker === undefined || close < 0) {
       at += 1;
@@ -293,10 +308,49 @@ function matches(body: Body, at: number, end: number, text: string): boolean {
   return true;
 }
 
+/** Whether the character at `at` separates words: whitespace, the body's edge, or a folded space. */
+function isSpace(body: Body, at: number, start: number, end: number): boolean {
+  if (at < start || at >= end) {
+    return true;
+  }
+  const char = body.chars[at]!;
+  return char === "" || /\s/.test(char);
+}
+
+function isWordCharacter(body: Body, at: number, start: number, end: number): boolean {
+  return at >= start && at < end && /[\p{L}\p{N}]/u.test(body.chars[at]!);
+}
+
+/**
+ * Whether `marker` at `at` can open emphasis, by CommonMark's flanking rule in its common cases:
+ * an emphasis marker is followed by a non-space, and `_` does not open inside a word, so
+ * `find_plans_for_team` and `2 * 3 * 4` keep their characters. Code spans open anywhere.
+ */
+function canOpen(body: Body, at: number, end: number, marker: string): boolean {
+  if (marker === "`") {
+    return true;
+  }
+  if (isSpace(body, at + marker.length, 0, end)) {
+    return false;
+  }
+  return marker !== "_" || !isWordCharacter(body, at - 1, 0, end);
+}
+
+/** Whether `marker` at `at` can close emphasis: preceded by a non-space, and `_` not inside a word. */
+function canClose(body: Body, at: number, end: number, marker: string): boolean {
+  if (marker === "`") {
+    return true;
+  }
+  if (isSpace(body, at - 1, 0, end)) {
+    return false;
+  }
+  return marker !== "_" || !isWordCharacter(body, at + marker.length, 0, end);
+}
+
 /** Where `marker` closes after `from`, with something between; -1 when it does not. */
 function findClose(body: Body, from: number, end: number, marker: string): number {
   for (let at = from + 1; at + marker.length <= end; at += 1) {
-    if (matches(body, at, end, marker)) {
+    if (matches(body, at, end, marker) && canClose(body, at, end, marker)) {
       return at;
     }
   }

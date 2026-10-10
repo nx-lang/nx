@@ -18,6 +18,8 @@ export interface TreeIndex {
   readonly slots: readonly string[];
   /** Each key's node. */
   readonly byKey: ReadonlyMap<string, number>;
+  /** The node `nodeAtSpan` gives for each exact byte span, keyed `start:end`. */
+  readonly bySpan: ReadonlyMap<string, number>;
   /** The document's text as UTF-8, which ranges' byte offsets count in. */
   readonly bytes: Uint8Array;
 }
@@ -30,14 +32,19 @@ export function indexTree(tree: SourceTree, text: string): TreeIndex {
   const nodes = tree.nodes;
   const children: number[][] = nodes.map(() => []);
   const byKey = new Map<string, number>();
+  const bySpan = new Map<string, number>();
   nodes.forEach((node, index) => {
     if (node.parent !== undefined) {
       children[node.parent]?.push(index);
     }
     byKey.set(node.key, index);
+    const span = `${node.range.startByte}:${node.range.endByte}`;
+    if (prefers(tree, index, bySpan.get(span))) {
+      bySpan.set(span, index);
+    }
   });
   const slots = nodes.map((node) => slotOf(node, node.parent === undefined ? undefined : nodes[node.parent]));
-  return { tree, text, children, slots, byKey, bytes: new TextEncoder().encode(text) };
+  return { tree, text, children, slots, byKey, bySpan, bytes: new TextEncoder().encode(text) };
 }
 
 function slotOf(node: SourceNode, parent: SourceNode | undefined): string {
@@ -88,12 +95,19 @@ export function sourceTextOf(index: TreeIndex, at: number): string {
 export function nodeAtSpan(tree: SourceTree, start: number, end: number): number | undefined {
   let found: number | undefined;
   tree.nodes.forEach((node, index) => {
-    if (node.range.startByte !== start || node.range.endByte !== end) {
-      return;
-    }
-    if (found === undefined || (node.role === "element" && tree.nodes[found]?.role !== "element")) {
+    if (node.range.startByte === start && node.range.endByte === end && prefers(tree, index, found)) {
       found = index;
     }
   });
   return found;
+}
+
+/** `nodeAtSpan` through an index, without scanning the tree. */
+export function indexedNodeAtSpan(index: TreeIndex, start: number, end: number): number | undefined {
+  return index.bySpan.get(`${start}:${end}`);
+}
+
+/** Whether the node at `candidate` wins over `found` for the same span: the first, or an element. */
+function prefers(tree: SourceTree, candidate: number, found: number | undefined): boolean {
+  return found === undefined || (tree.nodes[candidate]?.role === "element" && tree.nodes[found]?.role !== "element");
 }

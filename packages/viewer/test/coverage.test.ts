@@ -57,17 +57,23 @@ async function repositoryTrees(): Promise<{ path: string; fixture: Fixture }[]> 
   }
 }
 
+/** For each file with a node not rendered exactly once, its path and the first such keys. */
+function failuresOf(trees: readonly { path: string; fixture: Fixture }[]): string[] {
+  const failures: string[] = [];
+  for (const { path, fixture } of trees) {
+    const missing = uncovered(fixture);
+    if (missing.length > 0) {
+      failures.push(`${path}: ${missing.slice(0, 5).join(", ")}${missing.length > 5 ? ` and ${missing.length - 5} more` : ""}`);
+    }
+  }
+  return failures;
+}
+
 describe("coverage", () => {
   it("renders every node of every .nx file in the repository exactly once", async () => {
     const trees = await repositoryTrees();
     assert.ok(trees.length > 100, "the repository's .nx files are found");
-    const failures: string[] = [];
-    for (const { path, fixture } of trees) {
-      const missing = uncovered(fixture);
-      if (missing.length > 0) {
-        failures.push(`${path}: ${missing.slice(0, 5).join(", ")}${missing.length > 5 ? ` and ${missing.length - 5} more` : ""}`);
-      }
-    }
+    const failures = failuresOf(trees);
     assert.deepEqual(failures, [], `nodes not rendered exactly once:\n${failures.join("\n")}`);
   });
 
@@ -78,7 +84,9 @@ describe("coverage", () => {
     const renderer = renderers.comment;
     delete renderers.comment;
     try {
-      assert.deepEqual(uncovered(fixture), ["answer:comment[0] (comment, rendered 0 times)"]);
+      assert.deepEqual(failuresOf([{ path: "commented.nx", fixture }]), [
+        "commented.nx: answer:comment[0] (comment, rendered 0 times)"
+      ]);
     } finally {
       if (renderer !== undefined) {
         renderers.comment = renderer;

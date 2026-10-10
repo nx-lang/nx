@@ -9,10 +9,10 @@
  */
 import type { EditorRange, SourceRole, SourceTree } from "@nx-lang/language-protocol";
 
-import { declarationHover, propertyHover } from "./hover.js";
-import { renderDocument, renderNode, valueNodeOf, type RenderContext } from "./render.js";
+import { declarationHover, handlerHover, propertyHover } from "./hover.js";
+import { renderDocument, renderNode, type RenderContext } from "./render.js";
 import { styles } from "./styles.js";
-import { indexTree, nodeOf, sourceTextOf, type TreeIndex } from "./tree.js";
+import { indexedNodeAtSpan, indexTree, nodeOf, sourceTextOf, type TreeIndex } from "./tree.js";
 
 export { nodeAtSpan } from "./tree.js";
 export { inWords, eventWords } from "./words.js";
@@ -70,6 +70,8 @@ export class NxViewerElement extends ElementBase {
   #hovered: HTMLElement | undefined;
   #hoverTimer: ReturnType<typeof setTimeout> | undefined;
   #shownSource: string | undefined;
+  /** The control that opened the source panel from the keyboard or pointer, to return focus to. */
+  #sourceOpener: HTMLElement | undefined;
 
   readonly #frame: HTMLDivElement;
   readonly #toolbar: HTMLDivElement;
@@ -107,10 +109,14 @@ export class NxViewerElement extends ElementBase {
 
     this.#body = document.createElement("div");
     this.#body.className = "body";
+    // The body takes focus so the arrow keys can walk the selection through every node.
+    this.#body.tabIndex = 0;
+    this.#body.setAttribute("aria-label", "Reading view; the up and down arrows select the next node");
 
     this.#hover = document.createElement("div");
     this.#hover.className = "hover";
     this.#hover.setAttribute("role", "tooltip");
+    this.#hover.id = "hover";
     this.#hover.hidden = true;
 
     this.#sourcePanel = document.createElement("div");
@@ -132,17 +138,18 @@ export class NxViewerElement extends ElementBase {
     this.#frame.append(this.#toolbar, this.#body, this.#hover, this.#sourcePanel);
     shadow.append(style, this.#frame);
 
-    close.addEventListener("click", () => this.hideSource());
+    close.addEventListener("click", () => this.#closeSource());
     this.#selectionSource.addEventListener("click", () => {
       if (this.#selection !== undefined) {
-        this.showSource(this.#selection);
+        this.#openSource(this.#selection, this.#selectionSource);
       }
     });
     this.#body.addEventListener("click", (event) => this.#onClick(event));
-    this.#body.addEventListener("keydown", (event) => this.#onKeyDown(event));
+    this.#frame.addEventListener("keydown", (event) => this.#onKeyDown(event));
     this.#body.addEventListener("pointerover", (event) => this.#onPointerOver(event));
     this.#body.addEventListener("pointerleave", () => this.#setHovered(undefined));
     this.#body.addEventListener("focusin", (event) => this.#onFocusIn(event));
+    this.#body.addEventListener("focusout", (event) => this.#onFocusOut(event));
 
     // A property set before the element was defined hides the accessor; set it again through it.
     for (const name of PROPERTIES) {
@@ -191,6 +198,8 @@ export class NxViewerElement extends ElementBase {
 
   set stale(stale: boolean) {
     this.toggleAttribute("stale", stale);
+    // Set during an upgrade, the attribute arrives without `attributeChangedCallback`.
+    this.#badge.hidden = !stale;
   }
 
   /**
@@ -231,8 +240,24 @@ export class NxViewerElement extends ElementBase {
     this.#position(this.#sourcePanel, this.#rendered.get(key));
   }
 
+  /** Shows a node's source for the reader, moving focus into the panel and back when it closes. */
+  #openSource(key: string, opener: HTMLElement): void {
+    this.showSource(key);
+    if (!this.#sourcePanel.hidden) {
+      this.#sourceOpener = opener;
+      this.#sourcePanel.querySelector<HTMLElement>(".source-close")?.focus();
+    }
+  }
+
+  #closeSource(): void {
+    const opener = this.#sourceOpener;
+    this.hideSource();
+    opener?.focus();
+  }
+
   /** Hides the source shown by `showSource`. */
   hideSource(): void {
+    this.#sourceOpener = undefined;
     this.#shownSource = undefined;
     this.#sourcePanel.hidden = true;
   }
@@ -264,6 +289,7 @@ export class NxViewerElement extends ElementBase {
   #select(key: string | undefined, fire: boolean): void {
     for (const element of this.#body.querySelectorAll(".selected")) {
       element.classList.remove("selected");
+      element.removeAttribute("aria-current");
     }
     const index = this.#index;
     const at = key === undefined ? undefined : index?.byKey.get(key);
@@ -276,6 +302,7 @@ export class NxViewerElement extends ElementBase {
     this.#selectionSource.hidden = false;
     const original = this.#rendered.get(key);
     original?.classList.add("selected");
+    original?.setAttribute("aria-current", "true");
     for (const element of this.#body.querySelectorAll<HTMLElement>("[data-ref-key], [data-part-of]")) {
       if (keyOf(element) === key) {
         element.classList.add("selected");
@@ -304,7 +331,7 @@ export class NxViewerElement extends ElementBase {
         if (this.#shownSource === key) {
           this.hideSource();
         } else {
-          this.showSource(key);
+          this.#openSource(key, button);
         }
       } else if (button.classList.contains("expand")) {
         this.#toggleExpansion(button);
@@ -312,7 +339,9 @@ export class NxViewerElement extends ElementBase {
       return;
     }
     // A drag that selected text is a text selection, not a choice of node.
-    const textSelection = this.ownerDocument.getSelection?.();
+    // Chromium reports a selection inside a shadow root only through the root itself.
+    const root = this.shadowRoot as (ShadowRoot & { getSelection?(): Selection | null }) | null;
+    const textSelection = root?.getSelection?.() ?? this.ownerDocument.getSelection?.();
     if (textSelection !== null && textSelection !== undefined && !textSelection.isCollapsed) {
       return;
     }
@@ -323,16 +352,41 @@ export class NxViewerElement extends ElementBase {
   }
 
   #onKeyDown(event: KeyboardEvent): void {
-    if (event.key === "Enter" && !(event.target as Element).closest?.("button")) {
-      const keyed = (event.target as Element).closest?.(KEYED);
+    const target = event.target as Element;
+    const inBody = this.#body.contains(target) && !target.closest?.("button");
+    if (event.key === "Enter" && inBody) {
+      const keyed = target.closest?.(KEYED);
       if (keyed !== null && keyed !== undefined) {
         event.preventDefault();
         this.#select(keyOf(keyed), true);
       }
+    } else if ((event.key === "ArrowDown" || event.key === "ArrowUp") && inBody) {
+      event.preventDefault();
+      this.#step(event.key === "ArrowDown" ? 1 : -1);
     } else if (event.key === "Escape") {
       this.#setHovered(undefined);
-      this.hideSource();
+      if (!this.#sourcePanel.hidden) {
+        this.#closeSource();
+      }
     }
+  }
+
+  /**
+   * Selects the next or previous node in reading order that the reader can see, so every node,
+   * not only the focusable ones, can be selected and its source shown from the keyboard.
+   */
+  #step(direction: 1 | -1): void {
+    const visible = [...this.#body.querySelectorAll<HTMLElement>("[data-key]")].filter(
+      (element) => element.closest("details:not([open]) > :not(summary)") === null
+    );
+    if (visible.length === 0) {
+      return;
+    }
+    const current = this.#selection === undefined ? -1 : visible.indexOf(this.#rendered.get(this.#selection)!);
+    const next = current < 0 ? (direction === 1 ? 0 : visible.length - 1) : current + direction;
+    const element = visible[Math.max(0, Math.min(visible.length - 1, next))]!;
+    this.#select(keyOf(element), true);
+    element.scrollIntoView?.({ block: "nearest" });
   }
 
   /** Shows or hides a reference's target in place, rendered as a copy of its original. */
@@ -356,7 +410,7 @@ export class NxViewerElement extends ElementBase {
       return;
     }
     const context: RenderContext = { document: this.ownerDocument, index, ghosts: this.#ghosts, copy: true };
-    const target = valueNodeOf(context, entry.valueRange);
+    const target = indexedNodeAtSpan(index, entry.valueRange.startByte, entry.valueRange.endByte);
     const rendered = target === undefined ? undefined : renderNode(context, target);
     if (rendered === undefined) {
       return;
@@ -370,7 +424,7 @@ export class NxViewerElement extends ElementBase {
   }
 
   #hoverTarget(target: Element | null): HTMLElement | undefined {
-    const found = target?.closest?.(".label, .ref, .kind");
+    const found = target?.closest?.(".label, .when, .ref, .kind");
     return found === null || found === undefined || !this.#body.contains(found) ? undefined : (found as HTMLElement);
   }
 
@@ -385,11 +439,19 @@ export class NxViewerElement extends ElementBase {
     }
   }
 
+  #onFocusOut(event: FocusEvent): void {
+    const next = event.relatedTarget as Node | null;
+    if (this.#hovered !== undefined && (next === null || !this.#hovered.contains(next))) {
+      this.#setHovered(undefined);
+    }
+  }
+
   #setHovered(target: HTMLElement | undefined, immediately = false): void {
     if (target === this.#hovered) {
       return;
     }
     this.#hovered?.classList.remove("hovered");
+    this.#hovered?.removeAttribute("aria-describedby");
     this.#hovered = target;
     clearTimeout(this.#hoverTimer);
     this.#hover.hidden = true;
@@ -414,12 +476,15 @@ export class NxViewerElement extends ElementBase {
     const owner = target.closest(KEYED);
     const ownerKey = owner === null ? undefined : keyOf(owner);
     const ownerAt = ownerKey === undefined ? undefined : index.byKey.get(ownerKey);
-    if (target.classList.contains("label")) {
+    if (target.dataset["property"] !== undefined) {
       const card = target.closest(".card");
       const cardKey = card === null ? undefined : keyOf(card);
       const element = cardKey === undefined ? undefined : index.byKey.get(cardKey);
       if (element === undefined) {
         return undefined;
+      }
+      if (target.classList.contains("when")) {
+        return handlerHover(document, index, element, target.dataset["property"]);
       }
       // The node the attribute sets the property to, when the row is an attribute's.
       const attribute = ownerAt !== undefined && nodeOf(index, ownerAt).role === "attribute" ? ownerAt : undefined;
@@ -448,6 +513,7 @@ export class NxViewerElement extends ElementBase {
     }
     this.#hover.replaceChildren(content);
     this.#hover.hidden = false;
+    target.setAttribute("aria-describedby", this.#hover.id);
     this.#position(this.#hover, target);
   }
 

@@ -61,6 +61,7 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 .document { display: flex; flex-direction: column; gap: 12px; padding: 4px 2px 12px; }
 :host([stale]) .document { opacity: 0.55; }
 .n { border-radius: 4px; }
+.body:focus-visible { outline: 2px solid var(--blue-soft); outline-offset: 4px; border-radius: 4px; }
 .n.selected { outline: 2px solid var(--blue); outline-offset: 2px; }
 .n.hovered { background: var(--blue-soft); }
 
@@ -94,7 +95,7 @@ code, .type { font-family: var(--mono); font-size: 12.5px; }
 .rows > :not(.row) { grid-column: 1 / -1; }
 .row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: baseline; }
 .row > .label, .row > .when { color: var(--ink-3); font-size: 13px; }
-.row > .label { cursor: help; }
+.row > .label, .row > .when { cursor: help; }
 .row.content-row > .label, .row.handler > .when { align-self: start; }
 .row-value { min-width: 0; overflow-wrap: anywhere; }
 .row.ghost > .label, .ghost-value { color: var(--ink-3); font-style: italic; }

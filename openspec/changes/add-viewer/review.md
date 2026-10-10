@@ -1,0 +1,94 @@
+# Review: add-viewer
+
+## Scope
+**Reviewed artifacts:** proposal.md, design.md, specs/viewer/spec.md, specs/playground/spec.md, tasks.md  
+**Reviewed code:** commit a20b637: `packages/viewer` (src/index.ts, render.ts, text.ts, tree.ts, hover.ts, words.ts, styles.ts; test/*.ts, test/fixtures/sources.json; README.md, package.json, tsconfig.json), `sites/playground` (src/App.tsx, src/reading/ReadingView.tsx, useSourceTree.ts, selection.ts, selection.test.mjs, src/editor/NxEditor.tsx, src/app.css, src/nx-viewer.d.ts, README.md), docs/deployment.md, docs/deployment-setup.md  
+**Checks run:** `pnpm test` in packages/viewer (40/40 pass; question-flow renders in about 200 ms), `pnpm run typecheck` and `selection.test.mjs` in sites/playground (pass), `openspec validate add-viewer --strict` (valid). I confirmed the behavioral findings below with small jsdom scripts that run against the built `dist/`.
+
+## Findings
+
+### 🟡 Fixed - RF1 Expanding a reference copies the original `data-key` of content-bound text, so a key appears twice
+- **Severity:** Medium
+- **Evidence:** In the agent example (`sites/playground/src/examples/nx/agent.nx`), expanding `documents={ refundPolicy }` produces an expansion that still holds `data-key="refundPolicy.value.text[0]"`, which is the original key and not a `data-ref-key`. I confirmed this with a probe. A copy is re-keyed after the fact in two places, `renderElement` (packages/viewer/src/render.ts:453-459) and `renderTextRun` (render.ts:584-589). The content-bound attribute path in `renderAttribute` (render.ts:564-569) calls `appendContent` and never re-keys, so the text runs of an element whose body binds to a `content` property keep their original keys. This breaks the "every key exactly once" invariant as soon as a reader expands a reference. A host that looks nodes up by `data-key` gets two matches, and `#select` does not mark the copy because it only looks at `data-ref-key` and `data-part-of`. The test "expands a question in place" (test/element.test.ts:339-351) asserts that the copy carries no original keys, but its `Integer` target has no content text, so it misses this case. The same key-stripping loop is also written out by hand in `renderDocComment` (render.ts:960-965) and in hover.ts `doc()` (hover.ts:199-208).
+- **Recommendation:** Pass the key mode (`original` / `copy` / `none`) into `renderText`, so that `runSpan` writes `data-key`, `data-ref-key` or nothing directly. Then delete the four post-hoc loops. Add a test that expands `refundPolicy` in the agent fixture and asserts that the expansion holds no `[data-key]`. Ideally the coverage test should also expand every reference before it counts keys.
+- **Fix:** Text runs are keyed as they are rendered: `renderText` takes a `KeyMode` (`original`, `copy` or `none`) and `runSpan` writes `data-key`, `data-ref-key` or nothing, so the four post-hoc re-keying loops are gone (render.ts, hover.ts). New test "keeps every key once when references are expanded" expands every reference in the agent and question-flow fixtures and checks no `data-key` repeats.
+
+### 🟡 Fixed - RF2 The markdown inline parser turns intraword `_` and arithmetic `*` into emphasis and drops those characters
+- **Severity:** Medium
+- **Evidence:** `renderInline` (packages/viewer/src/text.ts:246-282) opens emphasis at any `*` or `_` that has a matching closer later in the text. It ignores word boundaries and whitespace flanking. Probe results:
+  - `Call find_plans_for_team when asked.` renders as `find<em>plans</em>for_team`.
+  - `Price is 2 * 3 * 4 dollars.` renders as `2 <em> 3 </em> 4`.
+
+  Agent prompts are markdown bodies and often name tools with snake_case, so this view would show a reviewer a different identifier than the source holds. That goes against the proposal's "hides syntax and never meaning".
+- **Recommendation:** Follow CommonMark's flanking rules, at least for the common cases. `_` must not open or close inside a word. A `*` or `_` delimiter must not be followed by whitespace when it opens, or preceded by whitespace when it closes. Add tests for snake_case identifiers and for `a * b * c`.
+- **Fix:** `renderInline` now applies CommonMark's flanking rule in its common cases: an emphasis marker must be followed by a non-space to open and preceded by one to close, and `_` neither opens nor closes inside a word (text.ts `canOpen`/`canClose`). New `markdownText` fixture and test: `find_plans_for_team` and `2 * 3 * 4` keep their characters while `*really*`, `_important_` and `**bold**` still style.
+
+### 🟡 Fixed - RF3 Keyboard use is incomplete: focus-shown hovers stick, Escape doesn't reach the source panel, and most nodes can't be selected
+- **Severity:** Medium
+- **Evidence:**
+  - `#onFocusIn` (packages/viewer/src/index.ts:381-386) shows a hover when a `.label`, `.ref` or `.kind` gets focus, but nothing hides it when focus leaves. Moving focus to another card, or out of the element entirely, leaves the tooltip and the `.hovered` highlight on the old label. I confirmed this with a probe. There is no `focusout` handler.
+  - The `keydown` handler only listens on `.body` (index.ts:142, 325-336). Escape pressed while focus is on the source panel's Close button does nothing (confirmed). The panel is `role="dialog"` (index.ts:118) but never receives focus when it opens, so a keyboard user has no way to tell that it appeared.
+  - Only cards, attribute labels and reference names have `tabIndex` (render.ts:397, 512, 561, 673). Declarations, values, conditions, operators, comments and imports can't be focused, so a keyboard user can't select them or open their source. The spec's selection and "every rendered node SHALL offer its source" are effectively mouse-only for those nodes.
+  - Neither the selection nor the hover is exposed to assistive technology: there is no `aria-selected`/`aria-current` on the selected node and no `aria-describedby` from the focused label to the tooltip. Focusable cards are role-less `div`s with no accessible name.
+- **Recommendation:**
+  - Hide the hover on `focusout` when focus leaves the hover target.
+  - Listen for Escape on the frame (or the shadow root) so it works from the panel, and move focus into the source panel when it opens and back to the anchor when it closes.
+  - Give the selected node `aria-current="true"` and link a focus-shown hover with `aria-describedby`.
+  - Make the keyed block renderings (declaration sections at least) focusable, or let arrow keys move the selection between keyed nodes, so that every node can be selected and its source shown from the keyboard.
+  - Add keyboard tests.
+- **Fix:** A `focusout` handler hides a focus-shown hover when focus leaves its target; Escape is handled on the frame, so it closes the source panel from the panel itself; opening the source from a button moves focus to the panel's Close button and closing returns it to the opener. The body takes focus (`tabIndex=0`, labelled) and the up and down arrows walk the selection through every visible keyed node in reading order, firing `nx-select`. The selected original carries `aria-current="true"`, a shown hover is linked by `aria-describedby`, and cards are `role="group"` with their kind as the label. Also answered the shadow-root selection question: the drag guard now reads `shadowRoot.getSelection()` first. Checked in Chromium (arrows, Enter on a source button then Escape, a drag inside the shadow root) and covered by three new keyboard tests plus an `aria-current` test.
+
+### 🟡 Fixed - RF4 The playground's `stale` flag can stick on, and a failed query shows the old tree as if it were current
+- **Severity:** Low
+- **Evidence:** `useSourceTree` (sites/playground/src/reading/useSourceTree.ts:84-117) sets `stale: true` before it schedules the query, but clears it only when a query resolves. The cleanup aborts the query and clears the timer without resetting `stale`. Consider this sequence: Read shows the tree for text A, the visitor picks another example (source B, so stale), then switches back to A within the 350 ms debounce (or switches to Edit, undoes back to A, and returns to Read). The effect then returns early because `source === reading.text`, and the reading stays muted with the "Out of date" badge until the source changes again. On failure the hook sets `stale: false` but keeps the previous `tree`, so the viewer shows a reading of older text, unmarked, under the "unavailable" message. None of `useSourceTree`, `ReadingView` or the mode switch has a test.
+- **Recommendation:** Derive staleness instead of storing it: `stale = tree !== null && text !== source`, with the source passed in. That covers both the aborted case and the failed case. Add a small hook-level test, or extract the state machine into a pure function and test that.
+- **Fix:** Staleness is derived, not stored: `readingOf(answers, source)` in the new `sites/playground/src/reading/reading.ts` marks the tree stale whenever it is of other text, and shows a failure only for the source it was for, so a cancelled query or a return to the shown text clears it and a failed query leaves the older tree muted. `reading.test.mjs` covers the three cases.
+
+### 🟡 Fixed - RF5 Setting `stale` as a property before the element is defined leaves the badge hidden
+- **Severity:** Low
+- **Evidence:** The constructor replays properties that were set before the element was defined (packages/viewer/src/index.ts:147-154). For `stale` that calls `toggleAttribute`, but no `attributeChangedCallback` fires for an attribute added during the upgrade constructor, and `#badge.hidden` is only updated in that callback (index.ts:208-212). A probe shows that after the upgrade `hasAttribute("stale")` is true while `.badge` is still `hidden`. The test meant to cover pre-definition properties (test/element.test.ts:97-102) creates a `div`, assigns two properties and reads one back, so it never upgrades an element and can't catch this.
+- **Recommendation:** Sync the badge from the attribute at the end of the constructor, or in `connectedCallback`. Rewrite the test to create an undefined tag, set `tree`, `text`, `ghosts` and `stale`, define a subclass under that tag, and assert the rendering and the badge.
+- **Fix:** The `stale` setter now syncs the badge itself, so a property replayed during an upgrade shows it. The pre-definition test now creates an undefined tag, sets `text`, `tree`, `ghosts` and `stale`, defines a subclass under the tag and asserts the rendering, the hidden ghosts and the visible badge.
+
+### 🟡 Fixed - RF6 Toggling Edit, Read, Edit without touching anything moves the editor's cursor
+- **Severity:** Low
+- **Evidence:** When the visitor switches to Read, the node at the cursor is selected (sites/playground/src/App.tsx:168-176). When they switch back, the cursor is placed at that node's start (App.tsx:186-199). So a visitor who only glances at Read loses their cursor position: a cursor in the middle of a string literal jumps to its opening quote, and a cursor in a long element jumps to its `<`. The spec scenario that requires the placement is "selects a card in Read and switches to Edit". A round trip with no interaction should not move the cursor.
+- **Recommendation:** Remember the key that the cursor selected on entering Read. On leaving Read, only place the cursor when `selection` differs from that key; otherwise leave the editor's position as it was.
+- **Fix:** App.tsx remembers the key the cursor selected on entering Read and only places the cursor on leaving when the selection changed. Checked in Chromium: a plain Edit, Read, Edit round trip leaves the cursor where it was.
+
+### 🟡 Fixed - RF7 Handler names have no hover, though the spec says hovering an attribute's name explains it
+- **Severity:** Low
+- **Evidence:** A handler attribute's name is rendered as `.when` ("When integer answered", packages/viewer/src/render.ts:546). Hover targets are only `.label, .ref, .kind` (index.ts:373), so a handler property's type, doc comment and default can't be read from the view. The "Hover and peek" requirement does not exempt handlers. The `set … to …` lines (render.ts:531) have the same gap for the state fields they set.
+- **Recommendation:** Give the handler name `data-property` and make it a hover target, then resolve it like `.label` in `hoverFor`. Optionally hover the `slot-name` of a set line against the component's state fields.
+- **Fix:** A handler's name carries `data-property`, takes focus and is a hover target; `handlerHover` (hover.ts) finds the action it answers in the declaration table (`Kind.Event`, or a top-level `Event`) and shows it with its doc and the fields it carries. Test: "explains a handler by the action it answers". The set lines' slot names are left without a hover (optional in the finding).
+
+### 🟡 Fixed - RF8 Several tests don't exercise what their names or scenarios claim
+- **Severity:** Low
+- **Evidence:**
+  - "takes properties set before the element was defined" never involves the element (see RF5).
+  - "keeps its markup and styles in a shadow root" adds hostile page CSS but only asserts that `.card` isn't in the light DOM. It never checks that the rendering is unaffected, for example through the computed `display` of a card in the shadow root.
+  - "mutes and badges a stale tree, and still selects" doesn't check hover, which the scenario requires.
+  - The forgotten-renderer test (test/coverage.test.ts:74-87) calls `uncovered` directly, so the file-naming message of the repository loop that the scenario requires is untested.
+  - There are no tests for keyboard selection, Escape or the hover timer, and none for the playground's Read side beyond `selection.ts` (see RF4).
+- **Recommendation:** Tighten these tests as described, and add the missing ones alongside the fixes for RF3 to RF5.
+- **Fix:** Tightened: the shadow-root test checks the rendering lives in the shadow root and that the page's `display:none` does not reach it; a new test hovers a stale tree; the pre-definition test upgrades a real element (RF5); the forgotten-renderer test goes through the same `failuresOf` the repository loop uses and asserts the message naming the file and key; keyboard tests and the playground's `reading.test.mjs` were added (RF3, RF4).
+
+### 🟡 Fixed - RF9 `valueNodeOf` duplicates `nodeAtSpan` with a different tie-break
+- **Severity:** Low
+- **Evidence:** `valueNodeOf` (packages/viewer/src/render.ts:689-698) and the exported `nodeAtSpan` (tree.ts:88-99) both scan every node for an exact byte span. One takes the first match; the other prefers an element. Expansion therefore resolves a span differently from what hosts are told to use, and every reference scans the whole tree during render.
+- **Recommendation:** Call `nodeAtSpan(index.tree, …)` from the expansion code, or build a span-to-node map once in `indexTree` and have both use it.
+- **Fix:** `indexTree` builds a `bySpan` map once with the same preference rule `nodeAtSpan` uses (a shared `prefers`), and expansion uses `indexedNodeAtSpan`; `valueNodeOf` is removed.
+
+## Questions
+- In Chromium, `document.getSelection()` retargets a selection inside a shadow root to the host, so `isCollapsed` may be true while text inside the viewer is selected. The guard in `#onClick` (index.ts:314-318) that skips selection after a drag may therefore not work there. Was this checked in a real browser? Using `this.shadowRoot.getSelection?.() ?? document.getSelection()` would be safer.
+  - **Answer:** Changed to read the shadow root's selection first, as suggested (part of RF3's fix), and checked in Chromium: dragging across a comment inside the viewer leaves the selection unchanged.
+- Task 2.2 raised the render budget from 100 ms to 1 s after a measurement of about 200 ms. Is a 5x headroom intended, or should the assertion sit closer to the measured value so that regressions show up?
+  - **Answer:** Intended. CI runs the tests on Linux, macOS and Windows runners that are slower and noisier than a local machine, and a timing assertion close to the measurement would fail on load alone. The time is logged on every run, about 150 to 200 ms locally, so a regression shows in the output well before it fails.
+
+## Summary
+- The package is well structured: one renderer per role, enforced by `satisfies Record<SourceRole, Renderer>`, a real repository-wide coverage test, correct UTF-8 slicing for the source panel and UTF-16 positions for the editor, and a clean shadow-DOM element. Most spec scenarios are implemented and tested.
+- The main problems are:
+  - The lossless key invariant breaks after a reference expansion (RF1).
+  - The markdown inline parser alters identifiers in agent prompts (RF2).
+  - Keyboard and assistive-technology support is thin (RF3).
+- Smaller issues are a stuck stale state in the playground (RF4), the property upgrade path for `stale` (RF5), cursor movement on a plain Edit/Read round trip (RF6), a hover gap for handlers (RF7), weak tests (RF8) and a duplicated span lookup (RF9).

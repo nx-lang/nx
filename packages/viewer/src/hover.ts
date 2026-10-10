@@ -23,12 +23,7 @@ function code(document: Document, text: string): HTMLElement {
 
 /** A doc comment rendered as markdown, carrying no keys. */
 function doc(document: Document, markdown: string): HTMLElement {
-  const body = renderText(document, [{ kind: "text", key: "", value: markdown, raw: false }], true);
-  for (const run of body.querySelectorAll<HTMLElement>("[data-key], [data-part-of]")) {
-    delete run.dataset["key"];
-    delete run.dataset["partOf"];
-    run.classList.remove("n");
-  }
+  const body = renderText(document, [{ kind: "text", key: "", value: markdown, raw: false }], true, "none");
   body.classList.add("hover-doc");
   return body;
 }
@@ -87,6 +82,36 @@ export function propertyHover(
   }
   if (property.default !== undefined) {
     hover.append(line(document, "hover-note", "Default: ", code(document, property.default)));
+  }
+  return hover;
+}
+
+/**
+ * The hover for the handler `name` of the element at `element`: the action it answers, found by
+ * name in the declaration table as the element's kind declares it (`SearchBox.ValueChanged`, or a
+ * top-level `SearchSubmitted`), with its doc comment and the fields it carries.
+ */
+export function handlerHover(document: Document, index: TreeIndex, element: number, name: string): HTMLElement {
+  const elementNode = index.tree.nodes[element];
+  const kind = (elementNode === undefined ? undefined : declarationOf(index, elementNode))?.name ?? elementNode?.name ?? "";
+  const event = name.replace(/^on/, "");
+  const action =
+    index.tree.declarations.find((entry) => entry.kind === "action" && entry.name === `${kind}.${event}`) ??
+    index.tree.declarations.find((entry) => entry.kind === "action" && entry.name === event);
+  const hover = document.createElement("div");
+  hover.append(
+    line(document, "hover-head", code(document, name), ` · when ${kind} emits `, code(document, action?.name ?? event))
+  );
+  if (action?.doc !== undefined) {
+    hover.append(doc(document, action.doc));
+  }
+  const fields = action?.properties ?? [];
+  if (fields.length > 0) {
+    const carries = line(document, "hover-note", "Carries ");
+    fields.forEach((field, position) => {
+      carries.append(position === 0 ? "" : ", ", code(document, `${field.name}:${field.type}`));
+    });
+    hover.append(carries);
   }
   return hover;
 }

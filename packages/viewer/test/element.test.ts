@@ -6,7 +6,7 @@ import { after, describe, it } from "node:test";
 import { fixture, nxHost, type Fixture } from "./fixtures.js";
 import type { NxSelectDetail, NxViewerElement } from "../src/index.js";
 
-const { NX_SELECT_EVENT, inWords, eventWords, nodeAtSpan } = await import("../src/index.js");
+const { NX_SELECT_EVENT, NxViewerElement: ViewerClass, inWords, eventWords, nodeAtSpan } = await import("../src/index.js");
 
 const created: NxViewerElement[] = [];
 
@@ -80,6 +80,9 @@ describe("<nx-viewer>", () => {
       const element = show(await fixture("user"));
       assert.equal(document.querySelectorAll(".card, .declaration").length, 0, "nothing leaks into the page");
       assert.ok(root(element).querySelector("style"), "the element's styles are in its shadow root");
+      const declaration = rendered(element, "User");
+      assert.equal(declaration.getRootNode(), root(element), "the rendering lives in the shadow root");
+      assert.notEqual(getComputedStyle(declaration).display, "none", "the page's styles do not reach it");
     } finally {
       style.remove();
     }
@@ -94,11 +97,27 @@ describe("<nx-viewer>", () => {
     assert.equal(element.selection, "User.id");
   });
 
+  it("still hovers a stale tree", async () => {
+    const element = show(await fixture("questionFlow"));
+    element.stale = true;
+    const label = rendered(element, "roleQuestion.value.id").querySelector<HTMLElement>(".label")!;
+    assert.match(read(element.hoverFor(label)!), /^id string/);
+  });
+
   it("takes properties set before the element was defined", async () => {
-    const { tree, text } = await fixture("user");
-    const element = document.createElement("div") as unknown as NxViewerElement;
-    Object.assign(element, { tree, text });
+    const { tree, text } = await fixture("component");
+    const tag = "nx-viewer-defined-late";
+    const element = document.createElement(tag) as NxViewerElement;
+    document.body.append(element);
+    Object.assign(element, { text, tree, ghosts: false, stale: true });
+    customElements.define(tag, class extends ViewerClass {});
+    created.push(element);
+    assert.ok(element instanceof ViewerClass, "the element upgraded");
     assert.equal(element.tree, tree);
+    assert.ok(root(element).querySelectorAll(".card").length > 0, "the tree set early is rendered");
+    assert.equal(root(element).querySelectorAll(".ghost").length, 0, "ghosts set early are hidden");
+    assert.equal(element.hasAttribute("stale"), true);
+    assert.equal(root(element).querySelector<HTMLElement>(".badge")!.hidden, false, "the stale badge shows");
   });
 });
 
@@ -192,6 +211,14 @@ describe("values", () => {
     assert.equal(body.querySelectorAll("li").length, 2);
     assert.equal(body.querySelectorAll(".embed").length, 2);
     assert.match(read(body), /Tasks for owner/);
+  });
+
+  it("keeps underscores inside words and spaced asterisks as written", async () => {
+    const element = show(await fixture("markdownText"));
+    const body = root(element).querySelector(".card .text-body")!;
+    assert.match(read(body), /Call find_plans_for_team when asked\. Price is 2 \* 3 \* 4 dollars\./);
+    assert.deepEqual(Array.from(body.querySelectorAll("em")).map(read), ["really", "important"]);
+    assert.deepEqual(Array.from(body.querySelectorAll("strong")).map(read), ["bold"]);
   });
 
   it("renders an agent's prompt as prose", async () => {
@@ -349,6 +376,31 @@ describe("hover and peek", () => {
     reference.querySelector<HTMLButtonElement>(".expand")!.click();
     assert.equal((expansion as HTMLElement).hidden, true, "expanding again folds it");
   });
+
+  it("keeps every key once when references are expanded", async () => {
+    for (const name of ["agent", "questionFlow"]) {
+      const element = show(await fixture(name));
+      const buttons = root(element).querySelectorAll<HTMLButtonElement>(".expand");
+      assert.ok(buttons.length > 0, `${name} has a reference to expand`);
+      for (const button of buttons) {
+        button.click();
+      }
+      const keys = Array.from(root(element).querySelectorAll<HTMLElement>("[data-key]")).map((run) => run.dataset["key"]!);
+      const repeated = keys.filter((key, position) => keys.indexOf(key) !== position);
+      assert.deepEqual(repeated, [], `${name}: keys rendered twice after expanding`);
+    }
+  });
+
+  it("explains a handler by the action it answers", async () => {
+    const component = await fixture("component");
+    const element = show(component);
+    const key = keyWhere(component, (node) => node.role === "attribute" && node.name === "onValueChanged");
+    const when = rendered(element, key).querySelector<HTMLElement>(".when")!;
+    assert.equal(when.tabIndex, 0, "a handler's name takes focus");
+    const hover = element.hoverFor(when)!;
+    assert.equal(read(hover.querySelector(".hover-head")!), "onValueChanged · when SearchBox emits SearchBox.ValueChanged");
+    assert.equal(read(hover.querySelector(".hover-note")!), "Carries value:string");
+  });
 });
 
 describe("selection", () => {
@@ -385,11 +437,64 @@ describe("selection", () => {
     assert.equal(root(element).querySelectorAll(".selected").length, 0);
   });
 
+  it("marks the selected node for assistive technology", async () => {
+    const element = show(await fixture("user"));
+    element.selection = "User.id";
+    assert.equal(rendered(element, "User.id").getAttribute("aria-current"), "true");
+    element.selection = "User.name";
+    assert.equal(rendered(element, "User.id").hasAttribute("aria-current"), false);
+  });
+
   it("finds the node a value origin names", async () => {
     const flow = await fixture("questionFlow");
     const at = flow.tree.nodes.findIndex((node) => node.key === "roleQuestion.value");
     const { startByte, endByte } = flow.tree.nodes[at]!.range;
     assert.equal(nodeAtSpan(flow.tree, startByte, endByte), at);
     assert.equal(nodeAtSpan(flow.tree, startByte, endByte + 1), undefined);
+  });
+});
+
+describe("the keyboard", () => {
+  function key(target: Element, name: string): void {
+    target.dispatchEvent(new document.defaultView!.KeyboardEvent("keydown", { key: name, bubbles: true, composed: true }));
+  }
+
+  it("walks the selection through every node with the arrow keys", async () => {
+    const element = show(await fixture("user"));
+    const events: string[] = [];
+    element.addEventListener(NX_SELECT_EVENT, (event) => events.push((event as CustomEvent<NxSelectDetail>).detail.key));
+    const body = root(element).querySelector<HTMLElement>(".body")!;
+    assert.equal(body.tabIndex, 0, "the reading takes focus");
+    key(body, "ArrowDown");
+    key(body, "ArrowDown");
+    key(body, "ArrowUp");
+    const order = Array.from(root(element).querySelectorAll<HTMLElement>("[data-key]")).map((run) => run.dataset["key"]!);
+    assert.deepEqual(events, [order[0], order[1], order[0]]);
+    assert.equal(element.selection, order[0]);
+  });
+
+  it("moves focus into the source panel and back, and closes it with Escape", async () => {
+    const element = show(await fixture("user"));
+    const toggle = rendered(element, "User").querySelector<HTMLButtonElement>(".source-toggle")!;
+    toggle.focus();
+    toggle.click();
+    const close = root(element).querySelector<HTMLButtonElement>(".source-close")!;
+    assert.equal(root(element).activeElement, close, "focus moves to the panel");
+    key(close, "Escape");
+    assert.equal(element.shownSource, undefined, "Escape closes the panel");
+    assert.equal(root(element).activeElement, toggle, "focus returns to the source button");
+  });
+
+  it("shows a hover on focus, describes the target with it, and hides it when focus moves on", async () => {
+    const element = show(await fixture("questionFlow"));
+    const label = rendered(element, "roleQuestion.value.id").querySelector<HTMLElement>(".label")!;
+    const hover = root(element).querySelector<HTMLElement>(".hover")!;
+    label.focus();
+    assert.equal(hover.hidden, false, "focus shows the hover at once");
+    assert.equal(label.getAttribute("aria-describedby"), hover.id);
+    rendered(element, "roleQuestion.value").focus();
+    assert.equal(hover.hidden, true, "moving focus on hides it");
+    assert.equal(label.hasAttribute("aria-describedby"), false);
+    assert.equal(label.classList.contains("hovered"), false);
   });
 });

@@ -164,6 +164,8 @@ export function App() {
   const cursorToSelect = useRef<number | null>(null);
   // The selected node's start, carried into Edit until the editor is shown again.
   const cursorToPlace = useRef<number | null>(null);
+  // The node the cursor selected on entering Read: leaving with it still selected leaves the cursor be.
+  const selectedOnEntry = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     const offset = cursorToSelect.current;
@@ -172,7 +174,9 @@ export function App() {
       return;
     }
     cursorToSelect.current = null;
-    setSelection(keyAtOffset(tree, text, offset));
+    const key = keyAtOffset(tree, text, offset);
+    selectedOnEntry.current = key;
+    setSelection(key);
   }, [mode, reading.tree, reading.text, source]);
 
   useEffect(() => {
@@ -189,9 +193,11 @@ export function App() {
     }
     if (next === "read") {
       cursorToSelect.current = editor.current?.cursor() ?? null;
+      selectedOnEntry.current = undefined;
     } else {
       const { tree, text } = reading;
-      if (selection !== undefined && tree !== null && text !== null && text === source) {
+      const moved = selection !== selectedOnEntry.current;
+      if (moved && selection !== undefined && tree !== null && text !== null && text === source) {
         cursorToPlace.current = offsetOfKey(tree, text, selection) ?? null;
       }
     }

@@ -7,8 +7,8 @@
  */
 import type { SourceNode, SourceProperty, SourceRole } from "@nx-lang/language-protocol";
 
-import { renderText, type TextPiece } from "./text.js";
-import { childrenIn, declarationOf, nodeOf, type TreeIndex } from "./tree.js";
+import { renderText, type KeyMode, type TextPiece } from "./text.js";
+import { childrenIn, declarationOf, indexedNodeAtSpan, nodeOf, type TreeIndex } from "./tree.js";
 import {
   BINARY_READINGS,
   eventWords,
@@ -95,6 +95,11 @@ function node(context: RenderContext, at: number): SourceNode {
 
 function has(node: SourceNode, flag: NonNullable<SourceNode["flags"]>[number]): boolean {
   return node.flags?.includes(flag) ?? false;
+}
+
+/** How text rendered in `context` carries its keys. */
+function keysOf(context: RenderContext): KeyMode {
+  return context.copy ? "copy" : "original";
 }
 
 /** An element marked as the rendering of the node at `at`. */
@@ -395,6 +400,8 @@ const renderElement: Renderer = (context, at, options) => {
   const entry = declarationOf(index, source);
   const card = marked(context, at, "div", "card");
   card.tabIndex = 0;
+  card.setAttribute("role", "group");
+  card.setAttribute("aria-label", entry === undefined ? source.name ?? "" : inWords(source.name ?? ""));
 
   const header = document.createElement("div");
   header.className = "card-header";
@@ -450,13 +457,6 @@ const renderElement: Renderer = (context, at, options) => {
   const content = document.createElement("div");
   content.className = "content";
   appendContent(context, content, otherUnits.flat(), source.textType === "markdown");
-  if (context.copy) {
-    // A copy's text runs carry their keys as references to the originals.
-    for (const run of content.querySelectorAll<HTMLElement>("[data-key]")) {
-      run.dataset["refKey"] = run.dataset["key"]!;
-      delete run.dataset["key"];
-    }
-  }
   if (content.childElementCount > 0) {
     card.append(content);
   }
@@ -472,7 +472,7 @@ function appendContent(context: RenderContext, container: HTMLElement, children:
   let pieces: TextPiece[] = [];
   const flushText = () => {
     if (pieces.length > 0) {
-      container.append(renderText(document, pieces, markdown));
+      container.append(renderText(document, pieces, markdown, keysOf(context)));
       pieces = [];
     }
   };
@@ -543,7 +543,11 @@ const renderAttribute: Renderer = (context, at) => {
 
   if (has(source, "handler")) {
     row.classList.add("handler");
-    row.append(span(document, "when", `When ${eventWords(source.name ?? "")}`));
+    const when = span(document, "when", `When ${eventWords(source.name ?? "")}`);
+    // The handler's property, hovered like any attribute's name.
+    when.dataset["property"] = source.name ?? "";
+    when.tabIndex = 0;
+    row.append(when);
     const value = document.createElement("div");
     value.className = "row-value";
     const values = children.filter((child) => !isNote(node(context, child)));
@@ -576,18 +580,12 @@ const renderAttribute: Renderer = (context, at) => {
 
 const renderTextRun: Renderer = (context, at) => {
   const source = node(context, at);
-  const element = renderText(
+  return renderText(
     context.document,
     [{ kind: "text", key: source.key, value: source.value ?? "", raw: has(source, "raw") }],
-    false
+    false,
+    keysOf(context)
   );
-  if (context.copy) {
-    for (const run of element.querySelectorAll<HTMLElement>("[data-key]")) {
-      run.dataset["refKey"] = run.dataset["key"]!;
-      delete run.dataset["key"];
-    }
-  }
-  return element;
 };
 
 const renderEmbed: Renderer = (context, at) => {
@@ -673,7 +671,8 @@ const renderReference: Renderer = (context, at) => {
   name.tabIndex = 0;
   wrapper.append(name);
   const entry = declarationOf(index, source);
-  if (entry?.valueRange !== undefined && !context.copy && valueNodeOf(context, entry.valueRange) !== undefined) {
+  const value = entry?.valueRange === undefined ? undefined : indexedNodeAtSpan(index, entry.valueRange.startByte, entry.valueRange.endByte);
+  if (value !== undefined && !context.copy) {
     const expand = document.createElement("button");
     expand.type = "button";
     expand.className = "expand";
@@ -684,18 +683,6 @@ const renderReference: Renderer = (context, at) => {
   }
   return wrapper;
 };
-
-/** The node whose range is a value declaration's value range, for expanding a reference to it. */
-export function valueNodeOf(context: RenderContext, range: { startByte: number; endByte: number }): number | undefined {
-  const nodes = context.index.tree.nodes;
-  let found: number | undefined;
-  nodes.forEach((candidate, at) => {
-    if (found === undefined && candidate.range.startByte === range.startByte && candidate.range.endByte === range.endByte) {
-      found = at;
-    }
-  });
-  return found;
-}
 
 const renderMemberAccess: Renderer = (context, at) => {
   const { document } = context;
@@ -952,17 +939,13 @@ const renderComment: Renderer = (context, at) => {
 
 const renderDocComment: Renderer = (context, at) => {
   const element = marked(context, at, "div", "doc");
+  // The doc comment is one node; its text is not a node of its own.
   const body = renderText(
     context.document,
-    [{ kind: "text", key: `${node(context, at).key}#text`, value: commentText(node(context, at).value ?? ""), raw: false }],
-    true
+    [{ kind: "text", key: "", value: commentText(node(context, at).value ?? ""), raw: false }],
+    true,
+    "none"
   );
-  // The doc comment is one node; its text is not a node of its own.
-  for (const run of body.querySelectorAll<HTMLElement>("[data-key], [data-part-of]")) {
-    delete run.dataset["key"];
-    delete run.dataset["partOf"];
-    run.classList.remove("n");
-  }
   element.append(...body.childNodes);
   return element;
 };
