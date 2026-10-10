@@ -278,7 +278,7 @@ function renderInline(
   let plain = start;
   let at = start;
   while (at < end) {
-    const marker = INLINE_MARKERS.find(({ open }) => matches(body, at, end, open) && canOpen(body, at, end, open));
+    const marker = INLINE_MARKERS.find(({ open }) => matches(body, at, end, open) && canOpen(body, at, end, open[0]!));
     const close = marker === undefined ? -1 : findClose(body, at + marker.open.length, end, marker.open);
     if (marker === undefined || close < 0) {
       // A run of `*` or `_` that cannot open is skipped whole, so its later characters do not open
@@ -331,36 +331,52 @@ function isWordCharacter(body: Body, at: number, start: number, end: number): bo
   return at >= start && at < end && /[\p{L}\p{N}]/u.test(body.chars[at]!);
 }
 
-/**
- * Whether `marker` at `at` can open emphasis, by CommonMark's flanking rule in its common cases:
- * an emphasis marker is followed by a non-space, and `_` does not open inside a word, so
- * `find_plans_for_team` and `2 * 3 * 4` keep their characters. Code spans open anywhere.
- */
-function canOpen(body: Body, at: number, end: number, marker: string): boolean {
-  if (marker === "`") {
-    return true;
+/** The extent of the run of `char` that holds `at`, as the run's first position and the one after it. */
+function runAround(body: Body, at: number, end: number, char: string): [number, number] {
+  let first = at;
+  while (first > 0 && body.chars[first - 1] === char) {
+    first -= 1;
   }
-  if (isSpace(body, at + marker.length, 0, end)) {
-    return false;
+  let after = at;
+  while (after < end && body.chars[after] === char) {
+    after += 1;
   }
-  return !marker.startsWith("_") || !isWordCharacter(body, at - 1, 0, end);
+  return [first, after];
 }
 
-/** Whether `marker` at `at` can close emphasis: preceded by a non-space, and `_` not inside a word. */
-function canClose(body: Body, at: number, end: number, marker: string): boolean {
-  if (marker === "`") {
+/**
+ * Whether the run of `char` at `at` can open emphasis, by CommonMark's flanking rule in its common
+ * cases, judged on the whole run so `**` and `__` behave as `*` and `_` do: the run is followed by
+ * a non-space, and a run of `_` does not open inside a word. So `find_plans_for_team`,
+ * `2 * 3 * 4` and `x ** y` keep their characters. Code spans open anywhere.
+ */
+function canOpen(body: Body, at: number, end: number, char: string): boolean {
+  if (char === "`") {
     return true;
   }
-  if (isSpace(body, at - 1, 0, end)) {
+  const [first, after] = runAround(body, at, end, char);
+  if (isSpace(body, after, 0, end)) {
     return false;
   }
-  return !marker.startsWith("_") || !isWordCharacter(body, at + marker.length, 0, end);
+  return char !== "_" || !isWordCharacter(body, first - 1, 0, end);
+}
+
+/** Whether the run of `char` at `at` can close emphasis: preceded by a non-space, and `_` not inside a word. */
+function canClose(body: Body, at: number, end: number, char: string): boolean {
+  if (char === "`") {
+    return true;
+  }
+  const [first, after] = runAround(body, at, end, char);
+  if (isSpace(body, first - 1, 0, end)) {
+    return false;
+  }
+  return char !== "_" || !isWordCharacter(body, after, 0, end);
 }
 
 /** Where `marker` closes after `from`, with something between; -1 when it does not. */
 function findClose(body: Body, from: number, end: number, marker: string): number {
   for (let at = from + 1; at + marker.length <= end; at += 1) {
-    if (matches(body, at, end, marker) && canClose(body, at, end, marker)) {
+    if (matches(body, at, end, marker) && canClose(body, at, end, marker[0]!)) {
       return at;
     }
   }

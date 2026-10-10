@@ -216,7 +216,7 @@ describe("values", () => {
   it("keeps underscores inside words and spaced asterisks as written", async () => {
     const element = show(await fixture("markdownText"));
     const body = root(element).querySelector(".card .text-body")!;
-    assert.match(read(body), /Call find_plans_for_team or snake__case__x when asked\. Price is 2 \* 3 \* 4 dollars\./);
+    assert.match(read(body), /Call find_plans_for_team or snake__case__x when asked\. Price is 2 \* 3 \* 4 dollars, or x \*\* y \*\* z and x __ y __ z\./);
     assert.deepEqual(Array.from(body.querySelectorAll("em")).map(read), ["really", "important"]);
     assert.deepEqual(Array.from(body.querySelectorAll("strong")).map(read), ["bold", "strong"]);
   });
