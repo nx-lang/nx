@@ -1,0 +1,23 @@
+{
+  "main.nx::first": [],
+  "main.nx::ints": [
+    {"path": "", "module": "main.nx", "start": 280, "end": 313}
+  ],
+  "main.nx::moved": [
+    {"path": "", "module": "main.nx", "start": 557, "end": 579}
+  ],
+  "main.nx::names": [
+    {"path": "", "module": "main.nx", "start": 328, "end": 377}
+  ],
+  "main.nx::patch": [
+    {"path": "", "module": "main.nx", "start": 510, "end": 540}
+  ],
+  "main.nx::plan": [
+    {"path": "", "module": "main.nx", "start": 646, "end": 688},
+    {"path": "/slots/0", "module": "main.nx", "start": 280, "end": 313}
+  ],
+  "main.nx::root": [
+    {"path": "", "module": "main.nx", "start": 280, "end": 313}
+  ],
+  "main.nx::span": []
+}

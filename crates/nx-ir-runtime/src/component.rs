@@ -405,7 +405,7 @@ impl<'p> Machine<'p> {
             declaration: index,
             depth: 0,
         };
-        Ok(Value::record(
+        Ok(Value::record_from(
             Some(Arc::clone(expected)),
             self.normalize_fields(
                 cx,
@@ -415,6 +415,7 @@ impl<'p> Machine<'p> {
                 &Path::Root(path),
                 false,
             )?,
+            self.carried(input),
         ))
     }
 
@@ -630,9 +631,11 @@ impl Program {
     /// input limit, runs `body`, and reports what the call used, when it asked.
     ///
     /// <para>Every method that takes options and a host value runs through here, so the input is
-    /// refused before the program is looked at and before anything is converted, and the report
-    /// is written however `body` returns. `input` counts the call's host values on the measure
-    /// it is given; it is not called when there is no limit.</para>
+    /// refused before the program is looked at and before anything is converted, and the usage
+    /// report is written however `body` returns. `input` counts the call's host values on the
+    /// measure it is given; it is not called when there is no limit. The origins report is
+    /// cleared first and filled only when `body` succeeds, with what it collected through
+    /// [`Machine::report`].</para>
     fn call<T>(
         &self,
         options: &RuntimeOptions,
@@ -642,6 +645,10 @@ impl Program {
         let usage = options.usage.as_deref();
         if let Some(usage) = usage {
             usage.clear();
+        }
+        let origins = options.origins.as_deref();
+        if let Some(origins) = origins {
+            origins.clear();
         }
         let input_size = match options.max_input_size {
             None => None,
@@ -664,6 +671,9 @@ impl Program {
         let result = body(&machine);
         if let Some(usage) = usage {
             usage.record(machine.used(), input_size);
+        }
+        if let (Some(origins), Ok(_)) = (origins, &result) {
+            origins.record(machine.take_origins());
         }
         result
     }
@@ -865,11 +875,10 @@ impl Program {
                 };
                 let mut tokens = Tokens::new(1);
                 let output = machine.meter(cx, None);
-                let rendered = to_host(
+                let rendered = machine.report(
                     &machine.eval(cx, &mut frame, body)?,
                     Some(&mut tokens),
                     &output,
-                    &machine.stack,
                 )?;
                 Ok(ComponentInitResult {
                     rendered,
@@ -936,11 +945,10 @@ impl Program {
                     &Path::Root(&Labeled(name, " state")),
                     true,
                 )?;
-                to_host(
+                machine.report(
                     &machine.eval(cx, &mut frame, body)?,
                     None,
                     &machine.meter(cx, None),
-                    &machine.stack,
                 )
             },
         )
@@ -1090,11 +1098,10 @@ impl Program {
                 let generation = instance.generation.saturating_add(1);
                 let mut tokens = Tokens::new(generation);
                 let output = machine.meter(entry_cx(index), None);
-                let rendered = to_host(
+                let rendered = machine.report(
                     &machine.eval(entry_cx(index), &mut frame, body)?,
                     Some(&mut tokens),
                     &output,
-                    &machine.stack,
                 )?;
                 Ok(ComponentDispatchResult {
                     rendered,
@@ -1273,7 +1280,7 @@ fn entry_result(machine: &Machine<'_>, module: u32, index: u32, value: Value) ->
         declaration: index,
         depth: 0,
     };
-    to_host(&value, None, &machine.meter(cx, None), &machine.stack)
+    machine.report(&value, None, &machine.meter(cx, None))
 }
 
 struct Position(&'static str, usize, &'static str);

@@ -6,15 +6,18 @@ use crate::module::{
     HandlerNode, Intrinsic, Node, Param, Properties, Ref, TextType, UnaryOp,
 };
 use crate::normalize::{integral, require_record, Labeled, Path};
+use crate::origins::{Collected, Origin, Origins};
 use crate::program::ProgramData;
 use crate::text::{float32_text, float64_text};
 use crate::update;
 use crate::usage::Usage;
 use crate::value::{
-    get_field, set_field, values_equal, CaseValue, Fields, FunctionRef, Handler, Value,
+    get_field, set_field, to_host_reporting, values_equal, CaseValue, Fields, FunctionRef, Handler,
+    Record, Tokens, Value,
 };
 pub(crate) use meter::Meter;
-use std::cell::Cell;
+use nx_value::NxValue;
+use std::cell::{Cell, RefCell};
 use std::fmt;
 use std::sync::Arc;
 
@@ -75,6 +78,20 @@ pub struct RuntimeOptions {
     /// is set, and the input size when [`max_input_size`](Self::max_input_size) is set and the
     /// input was within it. Nothing is counted for the report alone.</para>
     pub usage: Option<Arc<Usage>>,
+    /// Where a call reports the origin of each record of its value, when the host wants to know.
+    /// `None` by default.
+    ///
+    /// <para>The runtime clears the report when a call begins and, when a call of
+    /// [`evaluate_function`](crate::Program::evaluate_function),
+    /// [`call_function`](crate::Program::call_function),
+    /// [`initialize_component`](crate::Program::initialize_component),
+    /// [`evaluate_component`](crate::Program::evaluate_component) or
+    /// [`dispatch_component_actions`](crate::Program::dispatch_component_actions) succeeds, fills
+    /// it with where each record of the function's value or of the rendered output was
+    /// constructed. Only a call given a report keeps track of where records came from, so a call
+    /// given none does no more work than it did before origins existed, and its result is the
+    /// same either way.</para>
+    pub origins: Option<Arc<Origins>>,
 }
 
 /// The default of [`RuntimeOptions::max_call_depth`].
@@ -101,6 +118,7 @@ impl Default for RuntimeOptions {
             max_input_size: None,
             max_stack_bytes: NX_DEFAULT_MAX_STACK_BYTES,
             usage: None,
+            origins: None,
         }
     }
 }
@@ -235,6 +253,9 @@ pub(crate) struct Machine<'p> {
     /// failure ends the evaluation, so once this is set the failure that leaves is that one, and
     /// it is not in an argument even when the default was filled in while an argument was checked.
     default_failed: Cell<bool>,
+    /// The origins of the records of the value the call returns, once it has been written for
+    /// the host; `None` when the host gave no report.
+    collected: RefCell<Option<Collected>>,
 }
 
 impl<'p> Machine<'p> {
@@ -246,7 +267,60 @@ impl<'p> Machine<'p> {
             remaining: Cell::new(options.max_operations.unwrap_or(u64::MAX)),
             stack: Stack::begin(options.max_stack_bytes),
             default_failed: Cell::new(false),
+            collected: RefCell::new(options.origins.as_ref().map(|_| Collected::default())),
         }
+    }
+
+    /// Whether the call keeps track of where records were constructed: only when the host gave a
+    /// report.
+    #[inline]
+    pub(crate) fn tracks_origins(&self) -> bool {
+        self.options.origins.is_some()
+    }
+
+    /// The origin of a record node `node` of the declaration `cx` names constructs, in a call
+    /// that keeps track of origins.
+    #[inline]
+    pub(crate) fn origin(&self, cx: Cx, node: u32) -> Option<Origin> {
+        if !self.tracks_origins() {
+            return None;
+        }
+        self.program.linked(cx.module).map(|linked| Origin {
+            module: Arc::clone(&linked.module),
+            node,
+        })
+    }
+
+    /// The origin `record` carries into a record rebuilt from it, in a call that keeps track of
+    /// origins.
+    #[inline]
+    pub(crate) fn carried(&self, record: &Record) -> Option<Origin> {
+        if !self.tracks_origins() {
+            return None;
+        }
+        record.origin.clone()
+    }
+
+    /// Writes the value a call returns for the host, as `to_host` does, and collects the origins
+    /// of its records when the host gave a report. `tokens` numbers the handlers of a rendered
+    /// output.
+    pub(crate) fn report(
+        &self,
+        value: &Value,
+        tokens: Option<&mut Tokens>,
+        meter: &Meter<'_, 'p>,
+    ) -> Result<NxValue> {
+        let mut collected = self.collected.borrow_mut();
+        to_host_reporting(value, tokens, collected.as_mut(), meter, &self.stack)
+    }
+
+    /// The entries the call collected for its report, taken once it has succeeded.
+    pub(crate) fn take_origins(&self) -> Vec<crate::OriginEntry> {
+        self.collected
+            .borrow_mut()
+            .take()
+            .map(|collected| collected.entries)
+            .unwrap_or_default()
     }
 
     /// Records that a default failed, on the way out with its failure.
@@ -1296,7 +1370,11 @@ impl<'p> Machine<'p> {
                 false,
             )?
         };
-        Ok(Value::record(Some(Arc::clone(name)), fields))
+        Ok(Value::record_from(
+            Some(Arc::clone(name)),
+            fields,
+            self.origin(cx, node),
+        ))
     }
 
     #[inline(never)]
@@ -1355,7 +1433,11 @@ impl<'p> Machine<'p> {
             &Path::Root(&path),
             false,
         )?;
-        Ok(Value::record(Some(path), fields))
+        Ok(Value::record_from(
+            Some(path),
+            fields,
+            self.origin(cx, node),
+        ))
     }
 
     #[inline(never)]
@@ -1377,7 +1459,11 @@ impl<'p> Machine<'p> {
         } else if content.len() > 1 {
             set_field(&mut fields, Arc::from("content"), Value::seq(content));
         }
-        Ok(Value::record(Some(Arc::clone(&element.tag)), fields))
+        Ok(Value::record_from(
+            Some(Arc::clone(&element.tag)),
+            fields,
+            self.origin(cx, node),
+        ))
     }
 
     #[inline(never)]
@@ -1426,7 +1512,11 @@ impl<'p> Machine<'p> {
         for (name, handler) in handlers {
             set_field(&mut fields, name, Value::Handler(handler));
         }
-        Ok(Value::record(Some(Arc::clone(name)), fields))
+        Ok(Value::record_from(
+            Some(Arc::clone(name)),
+            fields,
+            self.origin(cx, node),
+        ))
     }
 
     /// A handler node: the component and emit the handler answers, the action record it accepts
@@ -1514,6 +1604,9 @@ impl<'p> Machine<'p> {
             );
         }
         let first = update::record_argument(values.first(), name)?;
+        // A record `apply`, `merge` or `diff` builds takes the origin of the expression that
+        // applied the intrinsic, which is the code that produced the new value.
+        let origin = self.origin(cx, node);
         match intrinsic {
             Intrinsic::Changed => {
                 if names.is_empty() {
@@ -1522,11 +1615,16 @@ impl<'p> Machine<'p> {
                     update::changed(first, names)
                 }
             }
-            Intrinsic::Apply => update::apply(first, update::record_argument(values.get(1), name)?),
-            Intrinsic::Merge => update::merge(first, update::record_argument(values.get(1), name)?),
+            Intrinsic::Apply => {
+                update::apply(first, update::record_argument(values.get(1), name)?, origin)
+            }
+            Intrinsic::Merge => {
+                update::merge(first, update::record_argument(values.get(1), name)?, origin)
+            }
             Intrinsic::Diff => update::diff(
                 first,
                 update::record_argument(values.get(1), name)?,
+                origin,
                 &self.meter(cx, Some(node)),
                 &self.stack,
             ),

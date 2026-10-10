@@ -1,0 +1,32 @@
+{
+  "main.nx::ada": [
+    {"path": "", "module": "main.nx", "start": 444, "end": 487}
+  ],
+  "main.nx::applied": [
+    {"path": "", "module": "main.nx", "start": 970, "end": 991}
+  ],
+  "main.nx::changedKeys": [],
+  "main.nx::city": [],
+  "main.nx::cover": [],
+  "main.nx::failure": [
+    {"path": "", "module": "main.nx", "start": 593, "end": 631}
+  ],
+  "main.nx::home": [
+    {"path": "", "module": "main.nx", "start": 501, "end": 576},
+    {"path": "/lines/0", "module": "main.nx", "start": 523, "end": 545},
+    {"path": "/lines/1", "module": "main.nx", "start": 545, "end": 566}
+  ],
+  "main.nx::idle": [],
+  "main.nx::key": [],
+  "main.nx::merged": [
+    {"path": "", "module": "main.nx", "start": 1011, "end": 1052}
+  ],
+  "main.nx::patch": [
+    {"path": "", "module": "main.nx", "start": 927, "end": 951}
+  ],
+  "main.nx::root": [
+    {"path": "", "module": "main.nx", "start": 444, "end": 487}
+  ],
+  "main.nx::userAge": [],
+  "main.nx::userName": []
+}

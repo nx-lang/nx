@@ -1,0 +1,11 @@
+{
+  "main.nx::labels": [
+    {"path": "/0", "module": "main.nx", "start": 559, "end": 580},
+    {"path": "/1", "module": "main.nx", "start": 559, "end": 580}
+  ],
+  "main.nx::root": [
+    {"path": "", "module": "main.nx", "start": 598, "end": 664},
+    {"path": "/Children/0", "module": "main.nx", "start": 615, "end": 633},
+    {"path": "/Children/1", "module": "main.nx", "start": 633, "end": 656}
+  ]
+}

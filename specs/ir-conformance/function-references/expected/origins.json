@@ -1,0 +1,24 @@
+{
+  "main.nx::defaulted": [
+    {"path": "", "module": "main.nx", "start": 1072, "end": 1092}
+  ],
+  "main.nx::distinct": [],
+  "main.nx::full": [
+    {"path": "", "module": "main.nx", "start": 1106, "end": 1158}
+  ],
+  "main.nx::identical": [],
+  "main.nx::kit": [
+    {"path": "", "module": "main.nx", "start": 1231, "end": 1261}
+  ],
+  "main.nx::kitExtra": [
+    {"path": "", "module": "main.nx", "start": 1279, "end": 1322}
+  ],
+  "main.nx::passed": [],
+  "main.nx::root": [
+    {"path": "", "module": "main.nx", "start": 1458, "end": 1500}
+  ],
+  "main.nx::typed": [],
+  "main.nx::wrapped": [
+    {"path": "", "module": "main.nx", "start": 880, "end": 895}
+  ]
+}

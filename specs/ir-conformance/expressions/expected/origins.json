@@ -1,0 +1,29 @@
+{
+  "main.nx::andSkipsRight": [],
+  "main.nx::andTakesRight": [],
+  "main.nx::arithmetic": [],
+  "main.nx::bareFailed": [],
+  "main.nx::classified": [],
+  "main.nx::doubled": [],
+  "main.nx::element": [
+    {"path": "", "module": "main.nx", "start": 2528, "end": 2574},
+    {"path": "/content", "module": "main.nx", "start": 2560, "end": 2568}
+  ],
+  "main.nx::failedLoad": [],
+  "main.nx::greeting": [],
+  "main.nx::idleLoad": [],
+  "main.nx::integerDivision": [],
+  "main.nx::integerRemainder": [],
+  "main.nx::logicalNot": [],
+  "main.nx::maybe": [],
+  "main.nx::negation": [],
+  "main.nx::orSkipsRight": [],
+  "main.nx::orTakesRight": [],
+  "main.nx::ordered": [],
+  "main.nx::realDivision": [],
+  "main.nx::realRemainder": [],
+  "main.nx::reviewStage": [],
+  "main.nx::root": [],
+  "main.nx::small": [],
+  "main.nx::squares": []
+}

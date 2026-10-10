@@ -8,8 +8,8 @@
 //! runtime's. A case may be marked as one that fails, and then the code and the argument of the
 //! Rust IR runtime's diagnostic are recorded in place of a result. These tests pin the images
 //! byte for byte, keep the explained text, the expected results, the recorded diagnostics, the
-//! operation counts and the input sizes in step, check that the corpus covers every kind the
-//! schema defines, and hold the size budget. Set
+//! operation counts, the input sizes and the origins reports in step, check that the corpus
+//! covers every kind the schema defines, and hold the size budget. Set
 //! `NX_UPDATE_CORPUS=1` to rewrite the expected files after an intended change, then review the
 //! diff of the explained text.</para>
 
@@ -24,7 +24,8 @@ use nx_api::{
 use nx_ir::{explain_nx_ir, explain_nx_ir_image};
 use nx_ir::{kinds, write_nx_ir_image, NxIrArtifact, NxIrImage};
 use nx_ir_runtime::{
-    ComponentInit, LinkOptions, NxIrRuntimeError, PreparedModule, Program, RuntimeOptions, Usage,
+    ComponentInit, LinkOptions, NxIrRuntimeError, OriginEntry, Origins, PreparedModule, Program,
+    RuntimeOptions, Usage,
 };
 use nx_value::NxValue;
 use serde::Deserialize;
@@ -820,6 +821,170 @@ fn corpus_operation_counts_match_the_rust_runtime() {
     assert!(
         failures.is_empty(),
         "corpus operation counts or input sizes changed (run with NX_UPDATE_CORPUS=1 after an intended change):\n{}",
+        failures.join("\n")
+    );
+}
+
+/// What a call's origins report holds, in the form `origins.json` records it.
+fn origin_entries(entries: &[OriginEntry]) -> Value {
+    entries
+        .iter()
+        .map(|entry| {
+            serde_json::json!({
+                "path": entry.path,
+                "module": entry.source.identity,
+                "start": entry.source.start,
+                "end": entry.source.end,
+            })
+        })
+        .collect()
+}
+
+/// What the Rust runtime's origins report gives for each evaluation of a program, from the images
+/// with their debug sections: each entrypoint's entries, keyed as `results.json` keys it, and for
+/// each lifecycle the entries of initialization and of each batch. A case marked as one that fails
+/// has none: its report is empty.
+fn report_origins(program: &CorpusProgram) -> Value {
+    let modules = prepared_modules(program, true);
+    let origins = Arc::new(Origins::new());
+    let options = RuntimeOptions {
+        origins: Some(Arc::clone(&origins)),
+        ..RuntimeOptions::default()
+    };
+    let mut reports = serde_json::Map::new();
+    for entrypoint in program
+        .manifest
+        .entrypoints
+        .iter()
+        .filter(|entrypoint| !entrypoint.fails)
+    {
+        let key = entrypoint.key();
+        linked_program(&modules, &entrypoint.module)
+            .evaluate_function(&entrypoint.function, &entrypoint.arguments(), &options)
+            .unwrap_or_else(|error| {
+                panic!(
+                    "corpus program '{}' entrypoint {key} fails with an origins report: {error}",
+                    program.name
+                )
+            });
+        reports.insert(key, origin_entries(&origins.entries()));
+    }
+    for lifecycle in &program.manifest.lifecycles {
+        let key = format!("{}::{}", lifecycle.module, lifecycle.component);
+        let label = format!("corpus program '{}' lifecycle {key}", program.name);
+        let linked = linked_program(&modules, &lifecycle.module);
+        let props = lifecycle
+            .props
+            .iter()
+            .map(|(name, value)| (name.clone(), nx_value(value)))
+            .collect::<BTreeMap<_, _>>();
+        let mut instance = linked
+            .initialize_component(
+                &lifecycle.component,
+                &props,
+                &ComponentInit::default(),
+                &options,
+            )
+            .unwrap_or_else(|error| panic!("{label} fails with an origins report: {error}"))
+            .instance;
+        let initial = origin_entries(&origins.entries());
+        let mut batches = Vec::with_capacity(lifecycle.batches.len());
+        for (index, batch) in lifecycle.batches.iter().enumerate() {
+            let entries = batch.iter().map(nx_value).collect::<Vec<_>>();
+            instance = linked
+                .dispatch_component_actions(&instance, &entries, &options)
+                .unwrap_or_else(|error| {
+                    panic!("{label} batch {index} fails with an origins report: {error}")
+                })
+                .instance;
+            batches.push(origin_entries(&origins.entries()));
+        }
+        reports.insert(
+            key,
+            serde_json::json!({ "initial": initial, "batches": batches }),
+        );
+    }
+    Value::Object(reports)
+}
+
+/// `origins.json` as it is written: indented, with each entry on one line, so that a diff names
+/// the entries that moved.
+fn origins_text(value: &Value) -> String {
+    fn write(value: &Value, indent: usize, out: &mut String) {
+        let pad = "  ".repeat(indent + 1);
+        match value {
+            Value::Object(fields) if !fields.contains_key("path") && !fields.is_empty() => {
+                out.push_str("{\n");
+                for (index, (key, item)) in fields.iter().enumerate() {
+                    out.push_str(&pad);
+                    out.push_str(&serde_json::to_string(key).expect("key"));
+                    out.push_str(": ");
+                    write(item, indent + 1, out);
+                    out.push_str(if index + 1 < fields.len() {
+                        ",\n"
+                    } else {
+                        "\n"
+                    });
+                }
+                out.push_str(&"  ".repeat(indent));
+                out.push('}');
+            }
+            Value::Array(items) if !items.is_empty() => {
+                out.push_str("[\n");
+                for (index, item) in items.iter().enumerate() {
+                    out.push_str(&pad);
+                    write(item, indent + 1, out);
+                    out.push_str(if index + 1 < items.len() { ",\n" } else { "\n" });
+                }
+                out.push_str(&"  ".repeat(indent));
+                out.push(']');
+            }
+            // An entry, with its members in the order the report names them.
+            Value::Object(entry) => {
+                let member = |name: &str| serde_json::to_string(&entry[name]).expect("member");
+                out.push_str(&format!(
+                    "{{\"path\": {}, \"module\": {}, \"start\": {}, \"end\": {}}}",
+                    member("path"),
+                    member("module"),
+                    member("start"),
+                    member("end")
+                ));
+            }
+            other => out.push_str(&serde_json::to_string(other).expect("origins")),
+        }
+    }
+    let mut out = String::new();
+    write(value, 0, &mut out);
+    out.push('\n');
+    out
+}
+
+/// Every corpus evaluation's origins report is what the Rust runtime gives; regeneration writes
+/// them. Both runtimes' corpus tests then hold their own reports to these, which is what shows
+/// that the two report the same origins.
+#[test]
+fn corpus_origins_match_the_rust_runtime() {
+    let mut failures = Vec::new();
+    for program in load_programs() {
+        let actual = origins_text(&report_origins(&program));
+        let path = program.dir.join("expected").join("origins.json");
+        if updating() {
+            write_expected(&path, actual.as_bytes());
+            continue;
+        }
+        let expected = fs::read_to_string(&path).unwrap_or_default();
+        if expected != actual {
+            failures.push(format!(
+                "{}: the origins the Rust runtime reports differ from {}:\n{}",
+                program.name,
+                path.display(),
+                explained_difference(&expected, &actual)
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "corpus origins changed (run with NX_UPDATE_CORPUS=1 after an intended change):\n{}",
         failures.join("\n")
     );
 }

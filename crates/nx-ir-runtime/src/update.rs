@@ -2,6 +2,7 @@
 
 use crate::error::{fail, Result};
 use crate::eval::{Meter, Stack};
+use crate::origins::Origin;
 use crate::program::ProgramData;
 use crate::value::{remove_field, set_field, values_equal, Record, Value};
 use std::sync::Arc;
@@ -26,8 +27,8 @@ fn type_name(record: &Record) -> &str {
 
 /// `apply(record, update)`: every present field of the update replaces the record's. A present
 /// empty value clears the field, and a record stores no entry for an empty optional field, so
-/// the entry is removed rather than set to the empty value.
-pub(crate) fn apply(record: &Record, update: &Record) -> Result<Value> {
+/// the entry is removed rather than set to the empty value. The result has `origin`.
+pub(crate) fn apply(record: &Record, update: &Record, origin: Option<Origin>) -> Result<Value> {
     let expected = format!("{}.Update", type_name(record));
     if type_name(update) != expected {
         return fail(
@@ -47,12 +48,12 @@ pub(crate) fn apply(record: &Record, update: &Record) -> Result<Value> {
             set_field(&mut fields, Arc::clone(name), value.clone());
         }
     }
-    Ok(Value::record(record.type_name.clone(), fields))
+    Ok(Value::record_from(record.type_name.clone(), fields, origin))
 }
 
 /// `merge(first, second)`: every field present in either update, the second winning, a cleared
-/// field included.
-pub(crate) fn merge(first: &Record, second: &Record) -> Result<Value> {
+/// field included. The result has `origin`.
+pub(crate) fn merge(first: &Record, second: &Record, origin: Option<Origin>) -> Result<Value> {
     if first.type_name != second.type_name {
         return fail(
             "nx-ir-intrinsic",
@@ -67,16 +68,18 @@ pub(crate) fn merge(first: &Record, second: &Record) -> Result<Value> {
     for (name, value) in &second.fields {
         set_field(&mut fields, Arc::clone(name), value.clone());
     }
-    Ok(Value::record(first.type_name.clone(), fields))
+    Ok(Value::record_from(first.type_name.clone(), fields, origin))
 }
 
 /// `diff(before, after)`: the update carrying exactly the fields whose values differ, each with
 /// its value from `after`. A field either record leaves out is an empty optional there, so a
 /// field only one of them carries still compares, and one `after` leaves out is present and
-/// empty in the result. Each comparison is paid for by `meter`, as any equality is.
+/// empty in the result. Each comparison is paid for by `meter`, as any equality is. The result
+/// has `origin`.
 pub(crate) fn diff(
     before: &Record,
     after: &Record,
+    origin: Option<Origin>,
     meter: &Meter<'_, '_>,
     stack: &Stack,
 ) -> Result<Value> {
@@ -105,9 +108,10 @@ pub(crate) fn diff(
             fields.push((Arc::clone(name), next.clone()));
         }
     }
-    Ok(Value::record(
+    Ok(Value::record_from(
         Some(Arc::from(format!("{}.Update", type_name(before)))),
         fields,
+        origin,
     ))
 }
 

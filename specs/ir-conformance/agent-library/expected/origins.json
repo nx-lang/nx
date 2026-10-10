@@ -1,0 +1,13 @@
+{
+  "main.nx::root": [
+    {"path": "", "module": "main.nx", "start": 1453, "end": 1757},
+    {"path": "/documents/0", "module": "main.nx", "start": 405, "end": 514},
+    {"path": "/limits", "module": "main.nx", "start": 1570, "end": 1596},
+    {"path": "/tools/0", "module": "main.nx", "start": 1080, "end": 1135},
+    {"path": "/tools/1", "module": "main.nx", "start": 1138, "end": 1175},
+    {"path": "/tools/2", "module": "main.nx", "start": 1178, "end": 1293},
+    {"path": "/tools/2/connection", "module": "main.nx", "start": 527, "end": 591},
+    {"path": "/tools/3", "module": "main.nx", "start": 1296, "end": 1428},
+    {"path": "/tools/3/connection", "module": "main.nx", "start": 527, "end": 591}
+  ]
+}

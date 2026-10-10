@@ -2,7 +2,8 @@
 //!
 //! <para>Host input and the program's own constructions go through the same rules, against the
 //! schema the image carries: occurrences, records and their discriminators, abstract records,
-//! unions, update records and function values.</para>
+//! unions, update records and function values. A record normalization rebuilds keeps the origin of
+//! the record it was given.</para>
 
 use crate::error::{fail, Result};
 use crate::eval::{bind, Cx, Frame, Machine};
@@ -270,9 +271,10 @@ impl<'p> Machine<'p> {
                         format!("Expected {path} to be a {display}, got '{discriminator}'."),
                     );
                 }
-                Ok(Value::record(
+                Ok(Value::record_from(
                     Some(Arc::clone(display)),
                     self.normalize_patch_fields(declared, &record.fields, &object.fields, path)?,
+                    self.carried(object),
                 ))
             }
             DeclarationKind::Record(record) => {
@@ -288,7 +290,7 @@ impl<'p> Machine<'p> {
                         declaration: shape.declaration,
                         depth: cx.depth,
                     };
-                    return Ok(Value::record(
+                    return Ok(Value::record_from(
                         object.type_name.clone(),
                         self.normalize_fields(
                             sub,
@@ -298,6 +300,7 @@ impl<'p> Machine<'p> {
                             path,
                             false,
                         )?,
+                        self.carried(object),
                     ));
                 }
                 // Nothing is an instance of an abstract record.
@@ -314,7 +317,7 @@ impl<'p> Machine<'p> {
                         },
                     );
                 }
-                Ok(Value::record(
+                Ok(Value::record_from(
                     Some(Arc::clone(display)),
                     self.normalize_fields(
                         declared,
@@ -324,6 +327,7 @@ impl<'p> Machine<'p> {
                         path,
                         false,
                     )?,
+                    self.carried(object),
                 ))
             }
             DeclarationKind::Union(union) => {
@@ -362,7 +366,7 @@ impl<'p> Machine<'p> {
                         format!("Invalid union case '{type_name}' for {path}."),
                     );
                 };
-                Ok(Value::record(
+                Ok(Value::record_from(
                     object.type_name.clone(),
                     self.normalize_fields(
                         declared,
@@ -372,6 +376,7 @@ impl<'p> Machine<'p> {
                         path,
                         false,
                     )?,
+                    self.carried(object),
                 ))
             }
             _ => Ok(value),

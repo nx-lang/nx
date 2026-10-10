@@ -1,0 +1,13 @@
+{
+  "main.nx::called": [],
+  "main.nx::distinct": [],
+  "main.nx::exact": [],
+  "main.nx::identical": [],
+  "main.nx::root": [
+    {"path": "", "module": "main.nx", "start": 1201, "end": 1272},
+    {"path": "/ItemsSource/0", "module": "main.nx", "start": 835, "end": 857},
+    {"path": "/ItemsSource/1", "module": "main.nx", "start": 858, "end": 880}
+  ],
+  "main.nx::subset": [],
+  "main.nx::template": []
+}

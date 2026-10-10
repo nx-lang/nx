@@ -1,0 +1,8 @@
+{
+  "input.nx::root": [
+    {"path": "", "module": "input.nx", "start": 0, "end": 258},
+    {"path": "/Children/0", "module": "input.nx", "start": 39, "end": 128},
+    {"path": "/Children/1", "module": "input.nx", "start": 131, "end": 215},
+    {"path": "/Children/2", "module": "input.nx", "start": 218, "end": 244}
+  ]
+}

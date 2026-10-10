@@ -1,0 +1,47 @@
+{
+  "main.nx::Tally": {
+    "batches": [
+      [
+        {"path": "", "module": "main.nx", "start": 4585, "end": 4633}
+      ],
+      [
+        {"path": "", "module": "main.nx", "start": 4585, "end": 4633}
+      ]
+    ],
+    "initial": [
+      {"path": "", "module": "main.nx", "start": 4585, "end": 4633}
+    ]
+  },
+  "main.nx::bound": [],
+  "main.nx::checked": [],
+  "main.nx::compared": [],
+  "main.nx::comparedHandlers": [],
+  "main.nx::comparedLists": [],
+  "main.nx::comparedText": [],
+  "main.nx::concat": [],
+  "main.nx::content": [
+    {"path": "", "module": "main.nx", "start": 2036, "end": 2103},
+    {"path": "/content/0", "module": "main.nx", "start": 2042, "end": 2050},
+    {"path": "/content/1", "module": "main.nx", "start": 2050, "end": 2058},
+    {"path": "/content/2", "module": "main.nx", "start": 2075, "end": 2093},
+    {"path": "/content/3", "module": "main.nx", "start": 2075, "end": 2093},
+    {"path": "/content/4", "module": "main.nx", "start": 2075, "end": 2093}
+  ],
+  "main.nx::defaults": [],
+  "main.nx::directCall": [],
+  "main.nx::forItems": [],
+  "main.nx::forRange": [],
+  "main.nx::misaligned": [],
+  "main.nx::patched": [
+    {"path": "", "module": "main.nx", "start": 4503, "end": 4523}
+  ],
+  "main.nx::patterns": [],
+  "main.nx::spliced": [],
+  "main.nx::updated": [],
+  "main.nx::valueCall": [],
+  "main.nx::valueReference": [],
+  "main.nx::written": [
+    {"path": "/0", "module": "main.nx", "start": 3585, "end": 3606},
+    {"path": "/1", "module": "main.nx", "start": 3585, "end": 3606}
+  ]
+}
