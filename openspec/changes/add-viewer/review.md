@@ -114,7 +114,7 @@
 
 ## New Findings Discovered During 2026-10-10 18:50 Verification
 
-### 🟡 Fixed - RF11 An intraword `__` run still drops underscores and italicizes
+### ✅ Verified - RF11 An intraword `__` run still drops underscores and italicizes
 - **Severity:** Low
 - **Evidence:** `canOpen`/`canClose` in packages/viewer/src/text.ts check flanking for each character, not for each delimiter run. In `snake__case__x`, the `__` marker correctly fails to open because a word character precedes it. The scan then tries a single `_` at the second underscore: the character before it is `_`, which is not a word character, so it opens. A single `_` before the next run then closes. Probe: `snake__case__x` renders as `snake_<em>case</em>_x`, which drops two underscores. Under CommonMark it stays literal. The same per-character gap was already there for `_` after RF2's fix; adding `__` makes double-underscore identifiers (`my__var__name`, dunder-like names inside words) the case people will actually hit. Standalone `__init__`, `a __b__ c` and `**a** and __b__ and _c_` render correctly.
 - **Recommendation:** Treat a run of identical delimiter characters as one unit. Find the run's extent, apply the left- and right-flanking checks to the characters outside the run, and when the run cannot open, skip past the whole run instead of advancing one character. Add `snake__case__x` (and `a_b__c`) to the `markdownText` test.
@@ -127,6 +127,12 @@
   Under CommonMark the spaced runs stay literal.
   - **Still needed:** Compute the whole run's extent before choosing a marker. Use the character before the run and the character after the run for the left- and right-flanking (and intraword `_`) checks, for both opening and closing. Only then choose `**`/`__` or `*`/`_` from the run's length. Add `x ** y ** z` and `x __ y __ z` to the markdown test. Nested emphasis such as `*a **b** c*`, which renders as `<em>a *</em>b<em>* c</em>`, is a reasonable follow-up but not required here.
 - **Fix (round 3):** `canOpen` and `canClose` now judge the whole run of `*` or `_` the marker sits in (`runAround`): a run opens only when the character after the run is not a space and, for `_`, the character before it is not a word character, and closes symmetrically. So `x ** y ** z` and `x __ y __ z` keep their characters while `**bold**`, `__strong__`, `__init__` and single emphasis still style. The markdown fixture and test cover both spaced pairs.
+- **Verification (round 3):** Verified on commit aa3e711. `canOpen`/`canClose` now judge the whole run through `runAround`: the space check uses the characters outside the run, and the intraword `_` check uses the characters before and after it. I re-ran all the earlier markdown probes:
+  - Spaced runs now stay literal: `Use __init__ or ** for powers ** here` renders as `Use <strong>init</strong> or ** for powers ** here`, and `x ** y ** z`, `x __ y __ z` and `a **b ** c` are also literal.
+  - The earlier fixes still hold: `snake__case__x`, `a_b__c`, `__a__b`, `find_plans_for_team`, `2 * 3 * 4` and `a * b*` stay literal; `**bold**`, `__strong__`, `*really*`, `_important_`, `foo**bar**`, `**a**b**c**` and `` `a_b_c` `` render as before.
+  - The markdown test now covers the spaced runs, and viewer tests pass 49/49.
+
+  As noted in round 2, nested emphasis is still outside this parser's scope and is not required here: `*a **b** c*` renders as `<em>a **b</em>* c*`, and `***x***` as `<strong>*x</strong>*`.
 
 ## Questions
 - In Chromium, `document.getSelection()` retargets a selection inside a shadow root to the host, so `isCollapsed` may be true while text inside the viewer is selected. The guard in `#onClick` (index.ts:314-318) that skips selection after a drag may therefore not work there. Was this checked in a real browser? Using `this.shadowRoot.getSelection?.() ?? document.getSelection()` would be safer.
@@ -144,3 +150,4 @@
 - **Verification (2026-10-10):** All nine findings (RF1 to RF9) are verified against fix commit d415a46, and my original probes now pass. Both questions have satisfactory answers. One new Low finding is open: RF10, screen-reader feedback for the arrow-key selection.
 - **Verification (2026-10-10, fix commit cb0e389):** RF10 is reopened because the selection announcement reads as run-together text with interface chrome for cards and rows. The `__strong__` support works for standalone runs, but intraword `__` still loses characters, filed as RF11 (Low). Viewer tests: 48/48 pass.
 - **Verification (2026-10-10, fix commit 1757d8b):** RF10 is verified: cards and rows are now announced in words, with only cosmetic spacing left. RF11 is reopened: intraword runs are fixed, but a `**` or `__` run flanked by spaces still opens as a single marker and drops characters. No new findings. Viewer tests: 49/49 pass.
+- **Verification (2026-10-10, fix commit aa3e711):** RF11 is verified. All findings RF1 to RF11 are now verified, and none is open.
