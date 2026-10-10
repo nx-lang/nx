@@ -58,9 +58,9 @@ coverage test below fails until it has one.
 
 ### Lossless by construction, checked over the repository
 
-Every node's rendered DOM carries `data-key` with the node's key. Imports and plain comments between
-declarations fold into a details strip at the top of the document and under each declaration, and
-everything else renders inline. A coverage test computes the source tree of every `.nx` file in the
+Every node's rendered DOM carries `data-key` with the node's key. Imports fold into a details strip
+at the top of the document, and everything else renders inline, comments included: a comment is
+the author talking to the reader, so it reads as a note where it stands. A coverage test computes the source tree of every `.nx` file in the
 repository through `@nx-lang/sdk-wasm`, renders it in jsdom with the details strips open, and checks
 that every node's key appears exactly once. A role the renderer forgets fails the test with the
 file and the key, the way the source tree's own token test fails.

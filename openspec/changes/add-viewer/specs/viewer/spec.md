@@ -31,8 +31,9 @@ element in a registry the host chooses.
 
 ### Requirement: The reading is lossless
 The element SHALL render every node of the tree, either inline or in a details strip that one
-action opens, and the rendering of each node SHALL carry the node's key. Import nodes and comments
-that stand between declarations SHALL be the only nodes folded into a details strip. An `unparsed`
+action opens, and the rendering of each node SHALL carry the node's key. Import nodes SHALL be the
+only nodes folded into a details strip, at the top of the document; comments SHALL read in place.
+An `unparsed`
 node SHALL be shown as its source text, marked as a region that could not be read. Every rendered
 node SHALL offer its source: an action that shows the exact text of the node's range, sliced from
 the document's text by the range's UTF-8 byte offsets.
@@ -186,8 +187,8 @@ when no node has them.
 - **THEN** the element SHALL dispatch `nx-select` with the key of that `label` attribute's literal
 
 #### Scenario: Selecting from the host
-- **WHEN** the host sets `selection` to the key of a card inside a closed details strip
-- **THEN** the strip SHALL open and the card SHALL be marked and scrolled into view
+- **WHEN** the host sets `selection` to the key of an import inside the closed details strip
+- **THEN** the strip SHALL open and the import SHALL be marked and scrolled into view
 
 #### Scenario: From an origin to a node
 - **WHEN** a host holds a value origin whose span is that of a `<SingleChoice … />` element

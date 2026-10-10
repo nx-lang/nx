@@ -198,6 +198,28 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  packages/viewer:
+    dependencies:
+      '@nx-lang/language-protocol':
+        specifier: workspace:*
+        version: link:../language-protocol
+    devDependencies:
+      '@nx-lang/sdk-wasm':
+        specifier: workspace:*
+        version: link:../../bindings/wasm
+      '@types/jsdom':
+        specifier: ^21.1.7
+        version: 21.1.7
+      '@types/node':
+        specifier: ^22.20.0
+        version: 22.20.1
+      jsdom:
+        specifier: ^26.1.0
+        version: 26.1.0
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
   runtime/typescript:
     devDependencies:
       '@types/node':
@@ -227,6 +249,9 @@ importers:
       '@nx-lang/value-view':
         specifier: workspace:*
         version: link:../../packages/value-view
+      '@nx-lang/viewer':
+        specifier: workspace:*
+        version: link:../../packages/viewer
       '@shikijs/monaco':
         specifier: ^4.4.3
         version: 4.4.3

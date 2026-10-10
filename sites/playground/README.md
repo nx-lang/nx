@@ -7,6 +7,12 @@ its output, shown as NX text — the text `nxlang run` prints — by the `<nx-va
 name, property or case in the output shows the same hover its declaration shows in the source.
 Clicking one selects the declaration.
 
+The source pane's Edit and Read switch shows the source itself as a reading view, through the
+`<nx-viewer>` element of [`@nx-lang/viewer`](../../packages/viewer/README.md): elements as cards,
+logic as sentences, for a reader who does not write NX. The reading comes from the worker's
+`sourceTree` query, refreshed when typing pauses, as evaluation is. Switching to Read selects the
+node at the cursor, and switching back puts the cursor at the start of the selected node.
+
 Every part of that runs in the visitor's browser. The compiler and the language service are one
 WebAssembly module, loaded into a Web Worker when the page mounts; nothing is compiled on a server.
 
@@ -143,6 +149,7 @@ so what is checked is what ships, and it keeps the set between 10 and 20 example
 | `src/worker/` | the compiler worker: its module load, its session, and the main thread's channel to it |
 | `src/language/` | the language service the editor and the output's hover ask |
 | `src/editor/` | Monaco through `@nx-lang/monaco` (grammar, highlighting, hover, completion) |
+| `src/reading/` | the source pane's Read side: the source tree query and the selection carried to and from the editor |
 | `src/output/` | the output pane, `<nx-value>` or why there is nothing to show |
 | `src/header/` | the website's header |
 | `src/examples/` | the examples and their expected output |

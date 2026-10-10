@@ -26,8 +26,8 @@ Set up ownership before enabling publication:
 - NuGet.org: reserve or own `NxLang.Sdk`.
 - npm: own the `@nx-lang` scope and every package the publish job pushes: `@nx-lang/language`
   (editor assets) and the workspace packages `@nx-lang/language-protocol`, `@nx-lang/language-core`,
-  `@nx-lang/language-client`, `@nx-lang/ir-runtime`, `@nx-lang/sdk-wasm`, `@nx-lang/monaco` and
-  `@nx-lang/value-view`.
+  `@nx-lang/language-client`, `@nx-lang/ir-runtime`, `@nx-lang/sdk-wasm`, `@nx-lang/monaco`,
+  `@nx-lang/value-view` and `@nx-lang/viewer`.
   `scripts/pack-packages.mjs` packs every workspace member that is not `private`, so a package
   joins this list by dropping `private`, and leaves it by adding it back.
 - crates.io: own the crates `nx-ir`, `nx-value` and `nx-ir-runtime`. A crate name is owned by

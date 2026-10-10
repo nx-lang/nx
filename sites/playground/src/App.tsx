@@ -14,6 +14,9 @@ import {
 } from "./examples";
 import { SiteHeader } from "./header/SiteHeader";
 import { OutputPane } from "./output/OutputPane";
+import { ReadingView } from "./reading/ReadingView";
+import { keyAtOffset, offsetOfKey } from "./reading/selection.ts";
+import { useSourceTree } from "./reading/useSourceTree.ts";
 import { SITE_ROOT } from "./paths.ts";
 import { createAddressKeeper } from "./address.ts";
 import { pathForPayload, routeFromLocation } from "./routes.ts";
@@ -56,6 +59,9 @@ async function openLocation(): Promise<Opened> {
       };
   }
 }
+
+/** Whether the source pane shows the editor or the reading view. */
+type SourceMode = "edit" | "read";
 
 /** The site: the header, the toolbar, and the source and output panes. */
 export function App() {
@@ -151,6 +157,47 @@ export function App() {
     [],
   );
 
+  const [mode, setMode] = useState<SourceMode>("edit");
+  const [selection, setSelection] = useState<string | undefined>(undefined);
+  const reading = useSourceTree(source, mode === "read");
+  // The editor's cursor, carried into Read until a tree of the same text can say what it is on.
+  const cursorToSelect = useRef<number | null>(null);
+  // The selected node's start, carried into Edit until the editor is shown again.
+  const cursorToPlace = useRef<number | null>(null);
+
+  useEffect(() => {
+    const offset = cursorToSelect.current;
+    const { tree, text } = reading;
+    if (mode !== "read" || offset === null || tree === null || text === null || text !== source) {
+      return;
+    }
+    cursorToSelect.current = null;
+    setSelection(keyAtOffset(tree, text, offset));
+  }, [mode, reading.tree, reading.text, source]);
+
+  useEffect(() => {
+    const offset = cursorToPlace.current;
+    if (mode === "edit" && offset !== null) {
+      cursorToPlace.current = null;
+      editor.current?.placeCursor(offset);
+    }
+  }, [mode]);
+
+  const switchTo = (next: SourceMode) => {
+    if (next === mode) {
+      return;
+    }
+    if (next === "read") {
+      cursorToSelect.current = editor.current?.cursor() ?? null;
+    } else {
+      const { tree, text } = reading;
+      if (selection !== undefined && tree !== null && text !== null && text === source) {
+        cursorToPlace.current = offsetOfKey(tree, text, selection) ?? null;
+      }
+    }
+    setMode(next);
+  };
+
   const navigate = (detail: NxValueNavigateDetail) => {
     const current = sourceRef.current;
     if (current === null || current !== evaluation.outcomeSource) {
@@ -219,8 +266,23 @@ export function App() {
           <div className="pane-title">
             <span>Source</span>
             <span className="pane-note">NX</span>
+            <span className="spacer" />
+            <span className="mode-switch" role="group" aria-label="Show the source as">
+              {(["edit", "read"] as const).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  aria-pressed={mode === option}
+                  onClick={() => switchTo(option)}
+                >
+                  {option === "edit" ? "Edit" : "Read"}
+                </button>
+              ))}
+            </span>
           </div>
-          <div className="editor">
+          {mode === "read" && <ReadingView reading={reading} selection={selection} onSelect={setSelection} />}
+          {/* The editor stays mounted while hidden, keeping its undo history and scroll position. */}
+          <div className="editor" hidden={mode === "read"}>
             {source !== null && (
               <NxEditor
                 ref={editor}
