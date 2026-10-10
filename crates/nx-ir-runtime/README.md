@@ -679,6 +679,67 @@ fn budget_for(program: &Program, representative_inputs: &[NxValue]) -> Result<u6
 `RuntimeOptions` is `Clone` and no longer `Copy`, since it can hold the shared report. Calls that
 run at the same time and share one `Usage` overwrite each other; give each its own.
 
+### Where records came from
+
+Share an `Origins` with a call through `RuntimeOptions::origins` and the runtime reports where each
+record of the call's value was constructed, which is what links a preview back to the source:
+clicking a question in the output finds the element that built it. When `evaluate_function`,
+`call_function`, `initialize_component`, `evaluate_component` or `dispatch_component_actions`
+succeeds, `entries()` holds one `OriginEntry` for each record of its value, or of its rendered
+output, that has an origin:
+
+```rust
+use nx_ir_runtime::{ComponentInit, Origins, Program, Result, RuntimeOptions};
+use nx_value::NxValue;
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+fn show_origins(program: &Program, props: &BTreeMap<String, NxValue>) -> Result<()> {
+    let origins = Arc::new(Origins::new());
+    let options = RuntimeOptions {
+        origins: Some(Arc::clone(&origins)),
+        ..RuntimeOptions::default()
+    };
+    program.initialize_component("Greeting", props, &ComponentInit::default(), &options)?;
+    for entry in origins.entries() {
+        // `path` is the record's JSON pointer within the rendered output: "" for the output
+        // itself, "/Children/0" for the first of its `Children`. `source` is the module identity
+        // and the UTF-8 byte span, in that module's source, of the element.
+        let span = &entry.source;
+        println!("{} {}:{}..{}", entry.path, span.identity, span.start, span.end);
+    }
+    Ok(())
+}
+```
+
+A record's origin is the element expression that constructed it, or the range expression for a
+range, and it stays with the record wherever the program takes it: bound to a name, passed as a
+prop or an argument, held in state, placed in a list, returned. So a question a module declares
+once and a component shows through `<Step question={roleQuestion} />` points at its own
+`<SingleChoice … />`, not at the `Step`, and every record a loop builds points at the one element
+in the loop body. A record `apply`, `merge`, `diff` or an update record builds takes the expression
+that built it as its origin. Entries are in the order of the walk that numbers handler tokens:
+depth first, a record before its fields, a list's items in order and a record's fields by name.
+They are the TypeScript runtime's entries for the same call, which the corpus checks.
+
+Spans come from the images' debug sections, so a record of a module whose image was built without
+one has no origin and a report over stripped images stays empty; that is not an error. The report
+is cleared when a call begins and filled when it succeeds, so a call that fails, and every other
+call, leaves it empty. The internal record holds its module and node only during a call given a
+report, so a host that gives none pays nothing, a record built during such a call has no origin
+later, and neither does a record the host passes in; an instance keeps the origins of its state, so
+a host that reports from initialization on sees them after every dispatch. The report changes
+neither a call's operation count nor its value, and records with origins are equal to records
+without. Calls that run at the same time and share one `Origins` overwrite each other; give each
+its own.
+
+The crate has no performance harness, so the cost was measured with a timing loop over the
+`question-flow` lifecycle, initialization and its 30 dispatches, linked once: a release build, the
+median of 61 samples of 20 lifecycles, in three runs alternating with the revision before origins,
+on one Linux x64 machine. A lifecycle took about 1.9 ms. Without a report it took what it took
+before origins, within 2% either way (+0.6%, −0.6%, +2.0%). With a report, over images with their
+debug sections, it took 3% to 6% more (+4.3%, +5.6%, +3.0%).
+
 ## Diagnostics
 
 Every API returns `Result<_, NxIrRuntimeError>`. The error holds one or more diagnostics, each
@@ -743,7 +804,9 @@ same argument for the same call, and the conformance corpus holds the two to it.
 ## Tests
 
 `cargo test -p nx-ir-runtime` runs the conformance corpus in `specs/ir-conformance` (every
-entrypoint and lifecycle, with and without debug sections), the damage runs (every truncation of
+entrypoint and lifecycle, with and without debug sections, with and without an origins report),
+`tests/origins.rs` (the origin of a record built in a loop, shown through a step, built by a
+library or by `apply`, and the report over stripped images and after a failure), the damage runs (every truncation of
 every corpus image, and every cell of one image overwritten), the preparation and linking
 tests, and `tests/allocation.rs`, which counts the bytes a refused concatenation allocates to show
 that the budget is charged before a string is built, and the bytes refused input allocates to show

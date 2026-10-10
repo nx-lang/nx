@@ -9,12 +9,14 @@ program's output back to its source, which is what links a preview to the NX vie
 ### Requirement: A record's origin is the element expression that constructed it
 The origin of a record value SHALL be the identity of the module and the byte span, from the
 image's debug section, of the IR node of the element expression whose evaluation constructed the
-record. A record SHALL keep its origin when it is bound to a name, passed as a prop or an argument,
-stored in or read from component state, placed in a sequence, or returned from a function or a
-component body. A record built by an update record's application or by `apply` SHALL take the
-origin of the expression that applied it. A record built by a node whose image has no debug section
-SHALL have no origin. A value that is not a record SHALL have no origin. Origins SHALL NOT take
-part in value equality.
+record, or of the range expression for a range. A record SHALL keep its origin when it is bound to
+a name, passed as a prop or an argument, stored in or read from component state, placed in a
+sequence, or returned from a function or a component body. A record built by an update record's
+application or by `apply`, `merge` or `diff` SHALL take the origin of the expression that
+applied it. A record built by a node whose image has no debug section SHALL have no origin. A value
+that is not a record SHALL have no origin. Origins SHALL be recorded only during calls given an
+origins report: a record constructed during a call given none, and a record the host passed in,
+SHALL have no origin. Origins SHALL NOT take part in value equality.
 
 #### Scenario: A question shown through a step
 - **WHEN** a module declares `let roleQuestion = <SingleChoice id="role" … />` and a component
@@ -33,16 +35,17 @@ part in value equality.
 - **THEN** the record's origin SHALL name the library module's identity and its span in that module
 
 ### Requirement: An IR runtime reports origins to a host that asks
-An IR runtime's options SHALL accept an origins report, as they accept a usage report. A call of
-`evaluateFunction`, `initializeComponent`, `evaluateComponent` or `dispatchComponentActions` given
-one SHALL clear it when the call begins and, when the call returns, fill it with one entry for each
-record in the value the call returned that has an origin: the function's value, or the rendered
-output. Each entry SHALL name the record by its JSON pointer (RFC 6901) within that value, as the
-host receives the value, and give the origin's module identity and start and end byte offsets.
-Entries SHALL be in the order of a depth-first walk of the value, a record before its fields and
-fields in the order the value lists them. A call that fails SHALL leave the report empty. A call
-given no report SHALL collect nothing, and its result SHALL be exactly what it is without this
-requirement.
+An IR runtime's options SHALL accept an origins report, as they accept a usage report. Every call
+given one SHALL clear it when the call begins. A call of `evaluateFunction`, `callFunction`,
+`initializeComponent`, `evaluateComponent` or `dispatchComponentActions` that succeeds SHALL, when
+it returns, fill it with one entry for each record in the value the call returned that has an
+origin: the function's value, or the rendered output. Each entry SHALL name the record by its JSON
+pointer (RFC 6901) within that value, as the host receives the value, and give the origin's module
+identity and start and end byte offsets. Entries SHALL be in the order of a depth-first walk of the
+value, a record before its fields, a list's items in order and a record's fields by name, the walk
+that numbers action handler tokens. A call that fails, and every other call, SHALL leave the report
+empty. A call given no report SHALL collect nothing, and its result SHALL be exactly what it is
+without this requirement.
 
 #### Scenario: Rendered output with origins
 - **WHEN** a host initializes a component whose body renders `<Screen><Label text="Hi" /></Screen>`

@@ -51,6 +51,7 @@ Each program is a directory:
 | `expected/results.json` | The canonical value of each entrypoint, keyed `identity::function`, as the interpreter evaluates it; of each case, keyed `identity::function#case`, as the Rust IR runtime evaluates it; and each lifecycle's record, keyed `identity::Component`. |
 | `expected/diagnostics.json` | For each case marked as one that fails, keyed as `results.json` keys a case, the `code` of the diagnostic the call fails with and the `argument` it names, as the Rust IR runtime reports them; `argument` is left out when the diagnostic names none. A program with no such case has no such file. |
 | `expected/operations.json` | What each evaluation costs in operations, as `docs/nx-ir-format.md` (*Evaluation cost*) defines them, and, for a program that asks, where smaller budgets stop it and how large the input of each case and lifecycle step is. |
+| `expected/origins.json` | What the origins report gives for each evaluation from the images with their debug sections, as `docs/nx-ir-format.md` (*Where records came from*) defines it, as the Rust IR runtime reports it. |
 
 An entrypoint names a module and a function. It may also name `arguments`, a list of canonical
 values to pass by position, written as a host that read them from JSON holds them, together with
@@ -107,6 +108,16 @@ failures show that they charge in the same order. A diagnostic for a limit names
 wherever the limit is reached, and each of these checks requires that too: the `fifty` case of
 `argument-diagnostics` has a recorded budget that runs out while its argument is checked.
 
+`origins.json` is keyed as `results.json` is: an entrypoint's entries, or a lifecycle's
+`{ "initial", "batches" }`, the entries of initialization and of each batch in order. Each entry
+is the record's JSON pointer within the value, the module identity and the start and end byte
+offsets of the node that constructed it, one entry to a line so that a diff names the record that
+moved. The entries come from the Rust runtime, read from its origins report over the images with
+their debug sections, and are what makes the two runtimes' reports comparable: each runtime
+evaluates every entrypoint and lifecycle with a report and without one, and must give the same
+value both ways, the recorded entries from the debug images, no entries from the stripped ones, and
+an empty report for a case that fails.
+
 A program whose `program.json` sets `recordInputSizes` also gets `inputSizes`, keyed as `counts`
 is: the input size of each case, as `docs/nx-ir-format.md` (*Input size*) defines it, and a
 lifecycle's `{ "initial", "batches" }`, the input size of its initialization, which is its props,
@@ -142,7 +153,8 @@ NX_UPDATE_CORPUS=1 cargo test -p nx-codegen --lib ir_corpus
 ```
 
 then review the diff of the `.txt` files before committing it. A count that changed shows in the
-diff of `operations.json` as a number beside its entrypoint.
+diff of `operations.json` as a number beside its entrypoint, and an origin that moved shows in the
+diff of `origins.json` as a span beside its record's pointer.
 
 ## Generated cases
 

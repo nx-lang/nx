@@ -228,6 +228,7 @@ Every evaluation API takes runtime options:
 | `maxCallDepth` | `100` | The deepest chain of calls one evaluation may make. |
 | `maxRangeLength` | `1_000_000` | The most integers one range may hold when a `for` iterates it. |
 | `usage` | None | An object the runtime reports what the call used to: `operations` and `inputSize`. |
+| `origins` | None | An object the runtime reports where the records of the call's value were constructed to: `entries`. |
 
 **Set `maxOperations` for any code you did not write.** It is the only option that bounds work and
 allocation; the other two do not. Three nested loops over ranges of a thousand run a billion
@@ -407,6 +408,44 @@ stack, a string or an array past what the engine holds — is reported as `nx-ir
 rather than thrown as itself. That failure depends on where the runtime runs, which its limit's
 name, `engine`, says.
 
+### Where records came from
+
+Give a call an `origins` object and the runtime reports where each record of the call's value was
+constructed, which is what links a preview back to the source: clicking a question in the output
+finds the element that built it. When `evaluateFunction`, `callFunction`, `initializeComponent`,
+`evaluateComponent` or `dispatchComponentActions` returns, `origins.entries` holds one entry for
+each record of its value, or of its rendered output, that has an origin:
+
+```ts
+const origins: NxRuntimeOrigins = {};
+const { rendered } = initializeComponent(program, "Greeting", { name: "Ada" }, { origins });
+for (const { path, module, start, end } of origins.entries!) {
+  // `path` is the record's JSON pointer within `rendered`: "" for `rendered` itself,
+  // "/Children/0" for the first of its `Children`. `module` is a module identity, and
+  // `start` and `end` the UTF-8 byte span, in that module's source, of the element.
+}
+```
+
+A record's origin is the element expression that constructed it, or the range expression for a
+range, and it stays with the record wherever the program takes it: bound to a name, passed as a
+prop or an argument, held in state, placed in a list, returned. So a question a module declares
+once and a component shows through `<Step question={roleQuestion} />` points at its own
+`<SingleChoice … />`, not at the `Step`, and every record a loop builds points at the one element
+in the loop body. A record `apply`, `merge`, `diff` or an update record builds takes the expression
+that built it as its origin. Entries are in the order of the walk that numbers handler tokens:
+depth first, a record before its fields, a list's items in order and a record's fields by name.
+
+Spans come from the images' debug sections, so a record of a module whose image was built without
+one has no origin and a report over stripped images stays empty; that is not an error. The runtime
+replaces `entries` with an empty list when a call begins and fills it when the call returns, so a
+call that throws, and every other call, leaves it empty. Nothing is collected for a call given no
+report, so a record built during such a call has no origin later, and neither does a record the
+host passes in; an instance keeps the origins of its state, so a host that reports from
+initialization on sees them after every dispatch. The report changes neither a call's operation
+count nor its value, and records with origins are equal to records without. As with `usage`, the
+object must be one the runtime can write to, or the call is refused with `nx-ir-options` before
+anything runs, and calls that overlap should each have their own.
+
 ## Diagnostics
 
 A runtime diagnostic names the declaration the failing expression belongs to, as
@@ -478,6 +517,7 @@ The Rust runtime names the same argument for the same call.
 | `normalizeComponentState`, `applyComponentStatePatch` | Bring component state into its declared shape and apply a patch. |
 | `measureInputSize` | The size of one value as `maxInputSize` measures it, without a call; given a limit, it stops as soon as the size passes it. |
 | `NxRuntimeOptions`, `NxRuntimeUsage` | The options every evaluation function takes, and the type of the `usage` object among them that the runtime reports a call's `operations` and `inputSize` to. |
+| `NxRuntimeOrigins`, `NxOriginEntry` | The type of the `origins` object among the options, and of each of its `entries`: a record's JSON pointer within the call's value, and the module identity and byte span of the element that constructed it. |
 | `applyUpdate`, `mergeUpdates`, `diffRecords`, `changedFields` | Record update arithmetic over host-held values. |
 | `float32Text` | The canonical text of a `float32` carried as a `number`: the shortest digits that round-trip as a `float32`, which is what a `text` node naming `float32` prints. |
 | `NX_IR_SCHEMA_VERSION`, `NX_IR_RUNTIME_ABI` | The schema and ABI this runtime accepts. |
@@ -636,6 +676,27 @@ pull request against the revision the change is based on, and on every push to `
 the last release (`--base v<x.y.z>`), which is what names several small slowdowns that no one
 pull request was named for. The release steps in `docs/deployment.md` say to read it before a
 tag.
+
+**What an origins report costs.** Measured with `bench:compare` on one Linux x64 machine (Node
+22.22, 7 rounds of 40 samples). Without a report a call costs what it did before origins: against
+the revision before them, the comparison named no step slower or faster, and run again named one,
+`seatCount` with limits, a 2 µs call at 1.09x that the first run had at 0.98x. With a report, over
+images with their debug sections, the warm medians with no limits were:
+
+| Step | Without a report | With one | Ratio |
+| --- | --- | --- | --- |
+| `question-flow` initialize | 48.1 µs | 64.6 µs | 1.40x |
+| `question-flow` dispatch, each of 30 | 148 µs | 178 µs | 1.20x |
+| `question-flow` evaluate with state | 70.6 µs | 101 µs | 1.31x |
+| `question-flow` evaluate `definition` | 331 µs | 457 µs | 1.25x |
+| `large-catalog` evaluate `root` | 2.33 ms | 2.51 ms | 1.09x, not named |
+| `held, plain`: 10,000 records a host passed, which have no origins, returned | 8.05 ms | 8.95 ms | 1.15x |
+
+A report pays for remembering the node of every record a call builds and for writing an entry for
+each record of the value: a fifth to two fifths more on the question flow's calls. That comparison
+ran the build against itself, through a module that adds `origins: {}` to every call's options,
+over a copy of the corpus whose stripped images were replaced by those with debug sections; its
+`load` row, 1.09x, is that extra module and not the runtime.
 
 **Running the steps in another engine.** `bench/core.mjs` builds the steps and is the only part
 a host needs. It loads no module, reads no clock and uses nothing of Node, and it is handed the
