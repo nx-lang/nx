@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createNxLanguageHandler } from "@nx-lang/language-http";
-import type { DiagnosticReport, Hover } from "@nx-lang/language-protocol";
+import type { DiagnosticReport, Hover, SourceTree } from "@nx-lang/language-protocol";
 
 import { createLanguageService } from "../src/language.js";
 import { createNxHost } from "../src/node.js";
@@ -68,6 +68,36 @@ describe("the wasm SDK's in-process language service", () => {
     expect(await service.documentSymbols({ documents, uri })).toEqual(
       await overHttp("documentSymbols", { documents, uri })
     );
+  });
+
+  // Spec: "Parity between Rust and TypeScript". The HTTP handler answers through the Node SDK, the
+  // Rust language service's own serialization; this service answers through the wasm module.
+  it("answers the source tree identically to the HTTP handler, for every document of the corpus", async () => {
+    const corpus = [
+      { uri, source, version: 5 },
+      // A comment, and a line that does not parse.
+      { uri, source: `${source}// a comment\nlet broken = %%%\n`, version: 6 },
+      {
+        uri,
+        source: [
+          "type Card = { title:string content body?:string = \"x\" }",
+          "let card = <Card title={\"😀\" + \"!\"}>Hello</Card>",
+          "let pick(m:Mode) = { if m is { Mode.light => 1 else => 2 } }",
+          "let xs = { 1 2 }",
+          "let total = { for x, i in xs { x + i } }",
+          ""
+        ].join("\n"),
+        version: 7
+      }
+    ];
+    for (const document of corpus) {
+      const request = { documents: [document], uri };
+      const fromWasm = await service.sourceTree(request);
+      const fromRust = await overHttp<SourceTree>("sourceTree", request);
+      expect(JSON.parse(JSON.stringify(fromWasm))).toEqual(fromRust);
+      expect(fromWasm.version).toBe(document.version);
+      expect(fromWasm.nodes.length).toBeGreaterThan(0);
+    }
   });
 
   it("reports a fault in a host document against that document's URI", async () => {

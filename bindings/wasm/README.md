@@ -96,6 +96,7 @@ try {
   const completions = snapshot.completions(uri, { line: 2, character: 7 });
   const report = snapshot.diagnostics();
   const symbols = snapshot.documentSymbols(uri);
+  const tree = snapshot.sourceTree(uri); // unstable
 } finally {
   snapshot.dispose();
 }
@@ -105,6 +106,10 @@ A snapshot is immutable: build a new one when a document changes. Analysis runs 
 and is cached for the snapshot's lifetime, so several queries against unchanged text cost one
 analysis. Positions count UTF-16 code units, the way JavaScript strings and browser editors count,
 and results are the `@nx-lang/language-protocol` shapes, re-exported here.
+
+`sourceTree(uri)` answers every piece of a document as a typed node, with the declarations the nodes
+refer to; the protocol's README describes the answer. It is **unstable**: its shape may change in any
+release until a later one commits to it.
 
 `createLanguageService(host, options)` implements the protocol's `NxLanguageService` over these
 snapshots, with a bounded cache of analyses. A host whose context declarations live in a catalog
@@ -447,12 +452,12 @@ The names and shapes match `@nx-lang/sdk-node`, so code can move between the two
 ## ABI
 
 The module exports `nx_wasm_abi_version`, which the loader checks before any other call and refuses
-when it disagrees, naming both versions. The current version is 6. Version 4 added library
+when it disagrees, naming both versions. The current version is 7. Version 4 added library
 registries (`nx_wasm_registry_new`, `nx_wasm_registry_load`, `nx_wasm_registry_free`), build
 contexts (`nx_wasm_build_context_new`, `nx_wasm_build_context_free`) and
 `nx_wasm_workspace_validate`, and gave `nx_wasm_workspace_build` a build-context handle argument
 (null for none); 5 added `nx_wasm_program_diagnostics`; 6 added `nx_wasm_program_function_schema`
-and `nx_wasm_program_type_schema`.
+and `nx_wasm_program_type_schema`; 7 added `nx_wasm_snapshot_source_tree`.
 
 | Exports | Purpose |
 | ------- | ------- |
@@ -460,7 +465,7 @@ and `nx_wasm_program_type_schema`.
 | `nx_wasm_program_build`, `nx_wasm_workspace_build`, `nx_wasm_workspace_validate` | Building and validating programs |
 | `nx_wasm_program_nx_ir`, `nx_wasm_program_evaluate_nx`, `nx_wasm_program_diagnostics`, `nx_wasm_program_function_schema`, `nx_wasm_program_type_schema`, `nx_wasm_program_free` | A program artifact's operations |
 | `nx_wasm_registry_new`, `nx_wasm_registry_load`, `nx_wasm_registry_free`, `nx_wasm_build_context_new`, `nx_wasm_build_context_free` | Library registries and build contexts |
-| `nx_wasm_snapshot_new`, `nx_wasm_snapshot_hover`, `nx_wasm_snapshot_completions`, `nx_wasm_snapshot_diagnostics`, `nx_wasm_snapshot_document_symbols`, `nx_wasm_snapshot_free` | Language snapshots |
+| `nx_wasm_snapshot_new`, `nx_wasm_snapshot_hover`, `nx_wasm_snapshot_completions`, `nx_wasm_snapshot_diagnostics`, `nx_wasm_snapshot_document_symbols`, `nx_wasm_snapshot_source_tree`, `nx_wasm_snapshot_free` | Language snapshots |
 | `nx_wasm_ir_explain` | Explaining an image |
 
 Arguments cross as UTF-8 JSON in buffers from `nx_wasm_alloc`, or as an image's bytes for

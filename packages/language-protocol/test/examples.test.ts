@@ -17,11 +17,14 @@ import {
   type DiagnosticsRequest,
   type DocumentSymbol,
   type DocumentSymbolsRequest,
+  type EditorRange,
   type Hover,
   type HoverRequest,
   type LanguageQueryAnswers,
   type LanguageQueryRequests,
   type NxLanguageService,
+  type SourceTree,
+  type SourceTreeRequest,
 } from "../src/index.js";
 
 // The examples the README shows, typed against the protocol so the README cannot drift from it.
@@ -97,12 +100,46 @@ export const documentSymbolsAnswer: DocumentSymbol[] = [
   },
 ];
 
+/** The range of `start..end` on line 0 of a document of ASCII text. */
+function range(start: number, end: number): EditorRange {
+  return {
+    start: { line: 0, character: start },
+    end: { line: 0, character: end },
+    startByte: start,
+    endByte: end,
+  };
+}
+
+export const sourceTreeRequest: SourceTreeRequest = { documents, uri: "nx://tenant/ui.nx" };
+
+export const sourceTreeAnswer: SourceTree = {
+  uri: "nx://tenant/ui.nx",
+  identity: "tenant/ui.nx",
+  version: 3,
+  nodes: [
+    { role: "declaration", range: range(0, 47), key: "Button", name: "Button", declaration: 0, flags: ["export"] },
+    { role: "parameter", range: range(19, 31), parent: 0, key: "Button.label", name: "label" },
+    { role: "typeReference", range: range(25, 31), parent: 1, key: "Button.label.type", value: "string" },
+    { role: "element", range: range(37, 47), parent: 0, key: "Button.body", name: "button", type: "button" },
+  ],
+  declarations: [
+    {
+      module: "tenant/ui.nx",
+      name: "Button",
+      kind: "function",
+      range: range(0, 47),
+      properties: [{ name: "label", type: "string" }],
+    },
+  ],
+};
+
 /** An in-process implementation, the shape an editor integration is tested against. */
 export const fakeService: NxLanguageService = {
   hover: async () => hoverAnswer,
   completions: async () => completionsAnswer,
   diagnostics: async () => diagnosticsAnswer,
   documentSymbols: async () => documentSymbolsAnswer,
+  sourceTree: async () => sourceTreeAnswer,
 };
 
 test("every example round-trips through JSON without loss", () => {
@@ -115,6 +152,8 @@ test("every example round-trips through JSON without loss", () => {
     diagnosticsAnswer,
     documentSymbolsRequest,
     documentSymbolsAnswer,
+    sourceTreeRequest,
+    sourceTreeAnswer,
   ]) {
     assert.deepEqual(JSON.parse(JSON.stringify(example)), example);
   }
@@ -126,6 +165,7 @@ test("the request and answer maps name exactly the defined queries", () => {
     completions: true,
     diagnostics: true,
     documentSymbols: true,
+    sourceTree: true,
   };
   const answers: Record<keyof LanguageQueryAnswers, true> = requests;
   assert.deepEqual(Object.keys(answers).sort(), [...LANGUAGE_QUERIES].sort());

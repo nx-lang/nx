@@ -361,6 +361,17 @@ impl NativeNxLanguageSnapshot {
         result_json(&symbols)
     }
 
+    /// Every piece of one document as a typed node, with the declarations the nodes refer to, as
+    /// JSON. Unstable.
+    #[napi]
+    pub fn source_tree(&self, uri: String) -> Result<String> {
+        let snapshot = self.snapshot()?;
+        let tree = snapshot
+            .source_tree(&DocumentUri::new(uri))
+            .map_err(snapshot_error)?;
+        result_json(&tree)
+    }
+
     #[napi]
     pub fn dispose(&mut self) {
         self.snapshot = None;

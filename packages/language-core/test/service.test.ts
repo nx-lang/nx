@@ -7,6 +7,7 @@ import type {
   EditorRange,
   Hover,
   LanguageDocument,
+  SourceTree,
 } from "@nx-lang/language-protocol";
 import { isAbortError } from "@nx-lang/language-protocol";
 
@@ -100,6 +101,22 @@ function fakeSnapshot(
         selectionRange: range(panelLine, 1, 6, queried.indexOf("<Panel mode=light") + 1),
       },
     ],
+    sourceTree: (): SourceTree => ({
+      uri: FORM,
+      identity: "tenant/form.nx",
+      version: 1,
+      nodes: [
+        {
+          role: "element",
+          range: range(panelLine, 0, 30, queried.indexOf("<Panel mode=light")),
+          key: "root",
+          name: "Panel",
+          type: "Panel",
+          declaration: 0,
+        },
+      ],
+      declarations: [{ module: "tenant/catalog.nx", name: "Panel", kind: "function" }],
+    }),
     dispose: () => {},
   };
 }
@@ -243,6 +260,25 @@ test("document symbols through host context are the document's own", async () =>
     symbols.map((symbol) => [symbol.name, symbol.range.start.line, symbol.selectionRange.start.character]),
     [["Panel", 0, 1]],
   );
+});
+
+test("a source tree through host context is the document's own, at this request's version", async () => {
+  const record = newRecord();
+  const service = serviceOver(record);
+
+  const tree = await service.sourceTree({
+    documents: [{ uri: FORM, source: SOURCE, version: 9 }],
+    uri: FORM,
+  });
+
+  assert.equal(tree.version, 9);
+  assert.deepEqual(
+    tree.nodes.map((node) => [node.role, node.name, node.range.start.line]),
+    [["element", "Panel", 0]],
+  );
+  // A declaration the host's context declares is described under the context's identity.
+  assert.equal(tree.declarations[0]!.module, "tenant/catalog.nx");
+  assert.deepEqual(record.implicitImports, [["tenant/catalog.nx"]]);
 });
 
 test("repeated queries over unchanged text analyze once, and each answer carries its own version", async () => {

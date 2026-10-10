@@ -1,5 +1,6 @@
 /**
- * Hover, completions, diagnostics and document symbols, answered in the app's compiler worker.
+ * Hover, completions, diagnostics, document symbols and the source tree, answered in the app's
+ * compiler worker.
  *
  * <para>The same host that evaluates answers these, so a hover range and a diagnostic land on the
  * same line of the visitor's own text. Each query carries the editor's `AbortSignal`: an answer
@@ -15,7 +16,9 @@ import type {
   Hover,
   HoverRequest,
   LanguageQueryName,
-  NxLanguageService
+  NxLanguageService,
+  SourceTree,
+  SourceTreeRequest
 } from "@nx-lang/language-protocol";
 
 import { nxWorkerChannel } from "../worker/index.ts";
@@ -33,6 +36,8 @@ export function createWorkerLanguageService(): NxLanguageService {
     diagnostics: (request: DiagnosticsRequest, signal?: AbortSignal) =>
       ask<DiagnosticReport>("diagnostics", request, signal),
     documentSymbols: (request: DocumentSymbolsRequest, signal?: AbortSignal) =>
-      ask<DocumentSymbol[]>("documentSymbols", request, signal)
+      ask<DocumentSymbol[]>("documentSymbols", request, signal),
+    sourceTree: (request: SourceTreeRequest, signal?: AbortSignal) =>
+      ask<SourceTree>("sourceTree", request, signal)
   };
 }

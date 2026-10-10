@@ -4,6 +4,7 @@ import type {
   DiagnosticReport,
   DocumentSymbol,
   Hover,
+  SourceTree,
   TextPosition
 } from "@nx-lang/language-protocol";
 import {
@@ -64,6 +65,14 @@ export type {
   EditorRange,
   Hover,
   RelatedLocation,
+  SourceCase,
+  SourceDeclaration,
+  SourceDeclarationKind,
+  SourceFlag,
+  SourceNode,
+  SourceProperty,
+  SourceRole,
+  SourceTree,
   TextPosition,
   WorkspaceDiagnostic,
   WorkspaceDiagnosticLabel
@@ -631,6 +640,19 @@ export class NxLanguageSnapshot {
   public documentSymbols(uri: string): DocumentSymbol[] {
     const json = invokeNative(() => getLanguageSnapshotNative(this).documentSymbols(uri));
     return parseResultJson(json) as DocumentSymbol[];
+  }
+
+  /**
+   * Every piece of the document at `uri` as a typed node, with the declarations the nodes refer to.
+   *
+   * Unstable: the answer's shape may change in any release until a later one commits to it.
+   *
+   * @throws NxEvaluationError when `uri` names no document in the snapshot.
+   * @throws NxDisposedResourceError when this snapshot has already been disposed.
+   */
+  public sourceTree(uri: string): SourceTree {
+    const json = invokeNative(() => getLanguageSnapshotNative(this).sourceTree(uri));
+    return parseResultJson(json) as SourceTree;
   }
 
   /**

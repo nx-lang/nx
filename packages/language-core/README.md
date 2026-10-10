@@ -33,7 +33,11 @@ const hover = await service.hover({ documents, uri, position }, signal);
 ```
 
 The result implements `NxLanguageService`, so `@nx-lang/monaco` and any other client of that
-interface takes it without knowing where the analysis happens. `dispose()` releases every cached
+interface takes it without knowing where the analysis happens.
+
+`sourceTree` answers every piece of a document as a typed node, with the declarations the nodes
+refer to; the protocol's README describes the answer. It is **unstable**: its shape may change in
+any release until a later one commits to it. `dispose()` releases every cached
 analysis; the service answers again, analyzing afresh, afterwards.
 
 Answers are produced synchronously on the calling thread, so a cancellation can only be observed
@@ -44,7 +48,8 @@ worker — is what makes a cancel preemptive.
 ## Snapshots and the cache
 
 A `SnapshotLike` is the small surface the dispatcher needs: `hover`, `completions`, `diagnostics`,
-`documentSymbols`, `dispose`. Both SDKs' snapshots satisfy it, and a test can hand over a fake.
+`documentSymbols`, `sourceTree`, `dispose`. Both SDKs' snapshots satisfy it, and a test can hand
+over a fake.
 
 `documentSetKey` keys an analysis by the document set's own content — URI, identity and source, each
 preceded by its length so no two sets can join into the same string. A document's `version` is left

@@ -64,6 +64,14 @@ test("document symbols through the client and handler", async () => {
   assert.deepEqual(symbols[0]!.range.start, { line: 0, character: 0 });
 });
 
+test("the source tree through the client and handler", async () => {
+  const tree = await service.sourceTree({ documents, uri: UI });
+  assert.equal(tree.uri, UI);
+  const declarations = tree.nodes.filter((node) => node.role === "declaration").map((node) => node.name);
+  assert.ok(declarations.includes("Fit") && declarations.includes("Img"), declarations.join(","));
+  assert.ok(tree.nodes.every((node, index) => node.parent === undefined || node.parent < index));
+});
+
 test("identical queries are answered identically regardless of what came between", async () => {
   const first = await service.hover({ documents, uri: FORM, position: { line: 2, character: 2 } });
   await service.diagnostics({ documents: [{ uri: FORM, source: "let other = 2\n" }], uri: FORM });

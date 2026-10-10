@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 
 /// ABI version the loader checks before it makes any other call. Bump it whenever an export's
 /// signature, a status code or a payload shape changes.
-pub const ABI_VERSION: u32 = 6;
+pub const ABI_VERSION: u32 = 7;
 
 /// The operation succeeded; the payload is its JSON result.
 pub const STATUS_OK: u32 = 0;
@@ -453,6 +453,19 @@ pub unsafe extern "C" fn nx_wasm_snapshot_document_symbols(
     into_result(snapshot_document_symbols(&*handle, argument(ptr, len)))
 }
 
+/// The source tree of the document a `{ uri }` argument names, as JSON. Unstable.
+///
+/// # Safety
+/// `handle` must be a live snapshot handle; `ptr` and `len` must describe UTF-8 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn nx_wasm_snapshot_source_tree(
+    handle: *mut WorkspaceSnapshot,
+    ptr: *const u8,
+    len: usize,
+) -> *mut NxWasmResult {
+    into_result(snapshot_source_tree(&*handle, argument(ptr, len)))
+}
+
 /// Releases the snapshot `handle` names.
 ///
 /// # Safety
@@ -743,6 +756,17 @@ fn snapshot_document_symbols(
         .document_symbols(&DocumentUri::new(request.uri))
         .map_err(snapshot_error)?;
     result_json(&symbols)
+}
+
+fn snapshot_source_tree(
+    snapshot: &WorkspaceSnapshot,
+    argument: Result<&str, OperationError>,
+) -> Operation {
+    let request: UriRequest = parse_request(argument?)?;
+    let tree = snapshot
+        .source_tree(&DocumentUri::new(request.uri))
+        .map_err(snapshot_error)?;
+    result_json(&tree)
 }
 
 /// Reads the loader's argument buffer as UTF-8.

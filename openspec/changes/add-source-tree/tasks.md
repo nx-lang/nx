@@ -12,10 +12,10 @@
 
 ## 3. TypeScript exposure
 
-- [ ] 3.1 Export the query from the wasm language snapshot in `bindings/wasm`, add the TypeScript types to `types.ts`, and move the ABI version; verify the wasm SDK tests pass and an older module is refused with the version mismatch error
-- [ ] 3.2 Add `sourceTree` to `LANGUAGE_QUERIES`, the request and answer maps and the service interface in `@nx-lang/language-protocol`; implement it in `@nx-lang/language-core` and route it in `@nx-lang/language-http`; mark it unstable in each README; verify each package's tests pass
-- [ ] 3.3 Add a parity test that the TypeScript and Rust answers are equal after JSON round-trip for the wasm SDK's language-service corpus; verify it passes
+- [x] 3.1 Export the query from the wasm language snapshot in `bindings/wasm`, add the TypeScript types to `@nx-lang/language-protocol`, where the other language answers are typed, re-exported from the wasm SDK (and the Node SDK, which `@nx-lang/language-http` answers through), and move the ABI version; verify the wasm SDK tests pass and an older module is refused with the version mismatch error
+- [x] 3.2 Add `sourceTree` to `LANGUAGE_QUERIES`, the request and answer maps and the service interface in `@nx-lang/language-protocol`; implement it in `@nx-lang/language-core` and route it in `@nx-lang/language-http`; mark it unstable in each README; verify each package's tests pass
+- [x] 3.3 Add a parity test that the TypeScript and Rust answers are equal after JSON round-trip for the wasm SDK's language-service corpus; verify it passes
 
 ## 4. Specs
 
-- [ ] 4.1 Run `openspec validate add-source-tree --strict`; verify it passes
+- [x] 4.1 Run `openspec validate add-source-tree --strict`; verify it passes

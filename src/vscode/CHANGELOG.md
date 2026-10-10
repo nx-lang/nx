@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Source tree (unstable)
+- New language query, `sourceTree`: every piece of one document as a typed node, with the
+  declarations the nodes refer to listed beside them. Each node has a role (`element`,
+  `attribute`, `literal`, `case`, `operator`, `condition`, `comment`, `unparsed` and the rest), a
+  range, its parent, a key that an edit elsewhere in the document does not move, and the type and
+  declaration hover reports inside it; comments and regions that do not parse are nodes too, so
+  every token of the source belongs to one. The language service, the Node and wasm SDKs (wasm ABI
+  version 7), `@nx-lang/language-protocol`, `-core`, `-http` and `-client` answer it. It is
+  unstable: its shape may change in any release until a later one commits to it.
+
 ## 0.7.0
 
 ### NX IR runtimes

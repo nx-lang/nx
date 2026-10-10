@@ -1,7 +1,7 @@
 # @nx-lang/language-http
 
 A stateless, mountable Node handler that answers [`@nx-lang/language-protocol`](../language-protocol)
-queries — hover, completions, diagnostics, document symbols — through
+queries — hover, completions, diagnostics, document symbols, and the unstable source tree — through
 [`@nx-lang/sdk-node`](../../bindings/node). Any Node host offers NX language features by mounting
 one function under a path of its choosing; no sessions, no document lifecycle, no language-server
 process.
@@ -15,7 +15,8 @@ const handler = createNxLanguageHandler();
 
 The handler is Fetch-shaped: it takes a standard `Request` and returns a standard `Response`. It
 routes on the **final path segment** (`.../hover`, `.../completions`, `.../diagnostics`,
-`.../documentSymbols`), so the host chooses the base path. It accepts only `POST` with a JSON body,
+`.../documentSymbols`, `.../sourceTree`), so the host chooses the base path. `sourceTree` is
+**unstable**: its answer's shape may change in any release until a later one commits to it. It accepts only `POST` with a JSON body,
 and every answer — success or failure — is JSON.
 
 ## Mounting
