@@ -336,7 +336,14 @@ function inlineSpans(body: Body, start: number, end: number): InlineSpan[] {
       // A code span closes at the next run of exactly as many backticks; with none, they are text.
       const close = closingBackticks(body, after, end, after - at);
       if (close >= 0) {
-        spans.push({ start: at, end: close + (after - at), innerStart: after, innerEnd: close, tag: "code" });
+        // One space on each side is padding, so a span can start or end with a backtick, as long
+        // as the content is not all spaces.
+        const padded =
+          body.chars[after] === " " &&
+          body.chars[close - 1] === " " &&
+          body.chars.slice(after, close).some((inner) => inner !== " " && inner !== "");
+        const [innerStart, innerEnd] = padded ? [after + 1, close - 1] : [after, close];
+        spans.push({ start: at, end: close + (after - at), innerStart, innerEnd, tag: "code" });
         at = close + (after - at);
       } else {
         at = after;

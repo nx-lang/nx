@@ -136,11 +136,34 @@
 
 ## New Findings Discovered During 2026-10-10 19:15 Follow-up
 
-### 🟡 Fixed - RF12 Nested emphasis renders wrongly
+### ✅ Verified - RF12 Nested emphasis renders wrongly
 - **Severity:** Low
 - **Evidence:** Raised as a remark during RF11's verification: the inline parser matched each marker against the next closer it found, so `*a **b** c*` rendered as `<em>a **b</em>* c*` and `***x***` as `<strong>*x</strong>*`.
 - **Recommendation:** Match emphasis with CommonMark's delimiter algorithm instead of run-by-run scanning.
 - **Fix:** `renderInline` (packages/viewer/src/text.ts) now finds code spans first (a run of backticks closes at the next run of the same length), then collects `*` and `_` delimiter runs with CommonMark's left- and right-flanking rules (including the punctuation cases and `_`'s intraword rule) and pairs them with "process emphasis": nearest eligible opener, the rule of three, two characters for strong when both runs have them, delimiters between a pair dropped. The matched spans nest and render recursively; unmatched delimiters stay text. New `test/text.test.ts` checks 25 cases, most from the CommonMark spec's emphasis examples (`*foo**bar**baz*`, `***foo***`, `foo***bar***baz`, `*(*foo*)*`, `*foo**bar*`, `__foo__bar`, `5*6*78`, `*foo`*``) plus the earlier RF2 and RF11 cases.
+- **Verification:** Verified on commit 475f3ba. I checked the code against CommonMark 0.31, section 6.2:
+  - **Flanking:** `flanking` matches the left- and right-flanking definitions. It counts the edge of the text as whitespace and treats both Unicode P and S characters as punctuation, as 0.31 does. The extra `_` conditions, opening only when not right-flanking or after punctuation and closing symmetrically, are also correct.
+  - **Process emphasis:** `matchEmphasis` follows the spec's loop. It takes the nearest opener of the same character. The rule of three is judged on the original run lengths, as the spec says. It uses two characters for strong only when both runs have two left, and removes the delimiters between a matched pair. It removes an exhausted opener or closer, and stays on a closer that still has characters. When it finds no opener, it drops a closer that cannot open. It omits the `openers_bottom` optimization, but that changes speed, not results.
+
+  I also probed 127 cases against the built `dist/src/text.js` in jsdom, all with the expected output. They cover about 100 of the spec's emphasis examples (excluding links, HTML, autolinks and backslash escapes), including `foo******bar*********baz`, `_____foo_____`, `*foo __bar *baz bim__ bam*`, `**foo **bar baz**`, `__foo, __bar__, baz__`, the Cyrillic intraword cases, `*$*alpha.`/`*€*charlie.` and the multi-line `**foo *bar **baz**\nbim* bop**`. Code-span precedence also holds: ``*a `*`*``, ``_a `_`_`` and ``` `foo``bar`` ``` match the spec.
+
+  The RF2 and RF11 probes all hold. `find_plans_for_team`, `2 * 3 * 4`, `a * b*`, `snake__case__x`, `my__var__name`, `a_b__c`, `__a__b`, `x ** y ** z`, `x __ y __ z` and `a **b ** c` stay literal. `__init__`, `a*b*c`, `**a**b**c**` and `**a** and __b__ and _c_` render as before.
+
+  Keyed runs and embeds still render. Emphasis that spans two runs (`a *b` + ` c* d`) puts each key on exactly one span and `data-part-of` on the rest, inside and outside the `<em>`, and `copy` mode puts `data-ref-key` on the first span of each run. A `**`/`*` pair around an embed wraps the embed, and a run that is only delimiters still emits its empty keyed span. An embed inside a code span is placed once. `x_@{e}_y` stays literal, and a dedented body with list items styles each item.
+
+  Viewer `pnpm test` passes 74/74, including the 25 new `inline markdown` cases. On pathological input the new parser is much faster than the old one on unmatched delimiters (48,000 characters: about 30 ms, down from 12 s). It is somewhat slower on thousands of matched pairs in one paragraph, because `render` scans every span at each level (4,000 pairs: 363 ms, up from 243 ms). That size is unrealistic for a body, so I'm not filing it. One small code-span gap in the new double-backtick support is filed as RF13.
+
+## New Findings Discovered During 2026-10-10 19:17 Verification
+
+### 🟡 Fixed - RF13 Code spans keep their padding spaces, so the double-backtick form shows extra spaces
+- **Severity:** Low
+- **Evidence:** RF12's fix adds code spans of any backtick length (`closingBackticks` in packages/viewer/src/text.ts), but it emits the content between the backtick runs unchanged. CommonMark 6.1 strips one space from each end when the content both begins and ends with a space and is not all spaces. That padding is how a backtick is written inside code. Probes:
+  - The source ``` `` foo ` bar `` ``` renders as `` <code> foo ` bar </code> ``. CommonMark gives `` <code>foo ` bar</code> ``.
+  - A single-backtick span that holds a space, two backticks and a space renders as ``` <code> `` </code> ```. CommonMark gives ``` <code>``</code> ```.
+
+  Only the spacing inside the code chip is wrong. No characters are lost.
+- **Recommendation:** In `inlineSpans`, when a code span's inner range starts and ends with a space and holds a non-space character, narrow `innerStart`/`innerEnd` by one each. Skip characters that folding blanked to `""` when you look for the end spaces, so a collapsed double space still counts. Add both probes to `test/text.test.ts`.
+- **Fix:** A code span whose content starts and ends with a space, and is not all spaces, drops one space from each side (`inlineSpans` in text.ts), so ``` `` foo ` bar `` ``` reads `foo ` bar` and `` ` `` ` `` reads ` `` `. `test/text.test.ts` covers both and a one-sided space that stays. A span of spaces alone is left to the paragraph's whitespace folding, which already collapses runs of spaces outside `raw` text.
 
 ## Questions
 - In Chromium, `document.getSelection()` retargets a selection inside a shadow root to the host, so `isCollapsed` may be true while text inside the viewer is selected. The guard in `#onClick` (index.ts:314-318) that skips selection after a drag may therefore not work there. Was this checked in a real browser? Using `this.shadowRoot.getSelection?.() ?? document.getSelection()` would be safer.
@@ -159,3 +182,4 @@
 - **Verification (2026-10-10, fix commit cb0e389):** RF10 is reopened because the selection announcement reads as run-together text with interface chrome for cards and rows. The `__strong__` support works for standalone runs, but intraword `__` still loses characters, filed as RF11 (Low). Viewer tests: 48/48 pass.
 - **Verification (2026-10-10, fix commit 1757d8b):** RF10 is verified: cards and rows are now announced in words, with only cosmetic spacing left. RF11 is reopened: intraword runs are fixed, but a `**` or `__` run flanked by spaces still opens as a single marker and drops characters. No new findings. Viewer tests: 49/49 pass.
 - **Verification (2026-10-10, fix commit aa3e711):** RF11 is verified. All findings RF1 to RF11 are now verified, and none is open.
+- **Verification (2026-10-10, fix commit 475f3ba):** RF12 is verified. The new delimiter algorithm matches CommonMark 0.31 on all 127 probes, including about 100 spec emphasis examples, and the RF2 and RF11 cases still hold. One new Low finding is open: RF13, code spans keep the padding spaces that CommonMark strips. Viewer tests: 74/74 pass.
