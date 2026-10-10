@@ -62,12 +62,13 @@ Each node SHALL have exactly one of these roles, covering the source shown:
 - `case`: a union case, written bare or qualified, with the case name and the union's declaration.
 - `reference`: a name that refers to a declaration, a parameter, a state field or a local binding;
   `member`: a member access, with the member name and the object as its child.
-- `operator`: a prefix or binary operator, with the operator token as written (`&&`, `!=`, `??`,
-  `..=`) and its operands as children; `call`: a call, with the callee and arguments as children;
-  `sequence`: a braced list of values, with its items as children.
-- `condition`: an `if`, with its test and branches as children; `match`: an `is` expression, with
-  the scrutinee and its arms; `matchArm`: one arm, with its pattern and result; `loop`: a `for`,
-  with its bindings, its iterable and its body.
+- `operator`: a prefix, binary or postfix operator, with the operator token as written (`&&`,
+  `!=`, `??`, `..=`, the `?` of `x?`) and its operands as children; `call`: a call, with the callee
+  and arguments as children; `sequence`: a braced list of values, with its items as children.
+- `condition`: an `if`, with its test and branches, or its arms, as children; `match`: an `is`
+  expression, with the scrutinee and its arms; `matchArm`: one arm of an `is` expression or of a
+  condition list, with its patterns or test and its result; `loop`: a `for`, with its bindings, its
+  iterable and its body; `binding`: a name a `for` binds, its item or its index.
 - `comment` and `docComment`: a comment, with its text.
 - `unparsed`: a region the parser could not read.
 
@@ -122,9 +123,11 @@ says what it is.
 
 ### Requirement: A node's key is stable under edits elsewhere
 Each node SHALL carry a key that identifies it within the document by path rather than by offset:
-the name of the enclosing top-level declaration, then the names of the attributes, members and
-arms on the way to the node, and for an item of a sequence, of element content or of a branch, its
-position among the items. Two nodes of one tree SHALL NOT share a key. Comparing the trees of two
+the name of the enclosing top-level declaration, then the names of the attributes, members, arms
+and slots (a declaration's `value`, an operator's `left`, a condition's `test`) on the way to the
+node, and for an item of a sequence, of element content or of a branch, its position among the
+items. A comment or an unparsed region, which names nothing, SHALL be keyed by the sibling it
+precedes. Two nodes of one tree SHALL NOT share a key. Comparing the trees of two
 versions of a document by key SHALL pair a node that an edit did not touch with itself, whatever
 was inserted or removed in other declarations or in other attributes.
 

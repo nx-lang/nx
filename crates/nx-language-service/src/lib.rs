@@ -2,6 +2,14 @@
 
 mod hover;
 mod positions;
+mod source_tree;
+#[cfg(test)]
+mod source_tree_tests;
+
+pub use source_tree::{
+    SourceCase, SourceDeclaration, SourceDeclarationKind, SourceFlag, SourceNode, SourceProperty,
+    SourceRole, SourceTree,
+};
 
 use nx_api::{
     analyze_workspace_modules, validate_workspace, NxDiagnostic, NxDiagnosticLabel, NxSeverity,
@@ -1129,6 +1137,12 @@ impl WorkspaceSnapshot {
         for module in modules {
             declarations.index_module(module);
         }
+        for document in &self.documents {
+            declarations.sources.insert(
+                document.identity.as_str().to_string(),
+                Arc::clone(&document.source),
+            );
+        }
 
         // A workspace module's import of a library binds names whose origin is a module of that
         // library, and the analysis above returns only the workspace's own modules. The
@@ -1143,6 +1157,11 @@ impl WorkspaceSnapshot {
             for module in &library.modules {
                 if declarations.artifacts.contains_key(&module.file_name) {
                     continue;
+                }
+                if let Some(source) = library.sources.get(&module.file_name) {
+                    declarations
+                        .sources
+                        .insert(module.file_name.clone(), Arc::clone(source));
                 }
                 declarations.index_module(module.clone());
             }
@@ -1701,6 +1720,12 @@ struct WorkspaceDeclarations {
     /// dropped. They are computed once per snapshot under the same `OnceLock`, so this changes
     /// what the snapshot holds, not how often analysis runs.</para>
     artifacts: FxHashMap<String, ModuleArtifact>,
+    /// The source text of each module, keyed by module identity: the workspace's documents and
+    /// the modules of every library indexed beside them.
+    ///
+    /// <para>A source tree describes a declaration's defaults as they were written, in whichever
+    /// module wrote them, and an artifact keeps spans but not the text they index.</para>
+    sources: FxHashMap<String, Arc<str>>,
 }
 
 impl WorkspaceDeclarations {

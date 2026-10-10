@@ -63,7 +63,8 @@ guaranteed.
 The roles are the constructs a reader recognizes (`element`, `attribute`, `condition`), not the
 grammar's nonterminals. The grammar can be refactored without changing the tree, and a renderer
 handles a small closed set. Variations that matter to a renderer and not to the role are flags:
-`braced`, `content`, `handler`, `stateUpdate`, `inherited`.
+`braced`, `parenthesized`, `content`, `handler`, `stateUpdate`, `inherited`, `optional`, `raw`,
+and the declaration modifiers `abstract`, `external`, `export` and `private`.
 
 ### Facts, not wording
 
@@ -73,10 +74,14 @@ change, and other tools are not burdened with it.
 
 ### Keys are name paths, positions only where nothing names an item
 
-`roleQuestion.choices[2].label` survives an edit to another declaration or another attribute,
-which a byte offset does not. Items of sequences and content are keyed by position because nothing
-in the language names them; identity hints on types (a later change) let `choices[2]` become
-`choices[engineer]`.
+`roleQuestion.value.choices[2].label` survives an edit to another declaration or another
+attribute, which a byte offset does not. A construct in a fixed slot of its parent is keyed by the
+slot's name (`value`, `body`, `default`, `test`, `left`, `callee`), so the key reads as the path a
+reader would describe. Items of sequences and content are keyed by position because nothing in the
+language names them; identity hints on types (a later change) let `choices[2]` become
+`choices[engineer]`. A comment or an unparsed region names nothing either, so it is keyed by the
+sibling it precedes (`total:comment[0]`), which an edit elsewhere does not move; the rare key two
+nodes would still share, as two declarations of one name do mid-edit, takes a `#2` suffix.
 
 ### Coverage is tested over the whole repository
 
