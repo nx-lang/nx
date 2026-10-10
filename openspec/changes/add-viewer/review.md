@@ -155,7 +155,7 @@
 
 ## New Findings Discovered During 2026-10-10 19:17 Verification
 
-### 🟡 Fixed - RF13 Code spans keep their padding spaces, so the double-backtick form shows extra spaces
+### ✅ Verified - RF13 Code spans keep their padding spaces, so the double-backtick form shows extra spaces
 - **Severity:** Low
 - **Evidence:** RF12's fix adds code spans of any backtick length (`closingBackticks` in packages/viewer/src/text.ts), but it emits the content between the backtick runs unchanged. CommonMark 6.1 strips one space from each end when the content both begins and ends with a space and is not all spaces. That padding is how a backtick is written inside code. Probes:
   - The source ``` `` foo ` bar `` ``` renders as `` <code> foo ` bar </code> ``. CommonMark gives `` <code>foo ` bar</code> ``.
@@ -164,6 +164,14 @@
   Only the spacing inside the code chip is wrong. No characters are lost.
 - **Recommendation:** In `inlineSpans`, when a code span's inner range starts and ends with a space and holds a non-space character, narrow `innerStart`/`innerEnd` by one each. Skip characters that folding blanked to `""` when you look for the end spaces, so a collapsed double space still counts. Add both probes to `test/text.test.ts`.
 - **Fix:** A code span whose content starts and ends with a space, and is not all spaces, drops one space from each side (`inlineSpans` in text.ts), so ``` `` foo ` bar `` ``` reads `foo ` bar` and `` ` `` ` `` reads ` `` `. `test/text.test.ts` covers both and a one-sided space that stays. A span of spaces alone is left to the paragraph's whitespace folding, which already collapses runs of spaces outside `raw` text.
+- **Verification:** Verified on commit c97f3e2. The padding check in `inlineSpans` needs a space at both ends and a character that is neither a space nor blanked (`""`). Probes against the rebuilt `dist/`:
+  - ``` `` foo ` bar `` ``` renders `` foo ` bar ``, and the space, two backticks and space span renders ```` `` ````, as CommonMark does.
+  - `` `` ` `` `` renders a lone backtick, and `` `\nfoo\n` `` renders `foo`.
+  - All-space spans keep one space, and `` ` a` `` keeps its one-sided space.
+  - Stripping also works in a list item, and when the padding spaces sit in their own keyed runs or around an embed. Every key is still emitted once.
+  - All 127 earlier probes now pass, including the two that showed RF13, and viewer `pnpm test` passes 77/77.
+
+  Uneven padding can't follow CommonMark exactly, because paragraph folding has already merged the double space. `` `  a ` `` renders `a` where CommonMark gives ` a`, and `` ` a  ` `` renders ` a ` where it gives `a `. One space moves, nothing is lost, and such input is unlikely, so I'm not filing it.
 
 ## Questions
 - In Chromium, `document.getSelection()` retargets a selection inside a shadow root to the host, so `isCollapsed` may be true while text inside the viewer is selected. The guard in `#onClick` (index.ts:314-318) that skips selection after a drag may therefore not work there. Was this checked in a real browser? Using `this.shadowRoot.getSelection?.() ?? document.getSelection()` would be safer.
@@ -183,3 +191,4 @@
 - **Verification (2026-10-10, fix commit 1757d8b):** RF10 is verified: cards and rows are now announced in words, with only cosmetic spacing left. RF11 is reopened: intraword runs are fixed, but a `**` or `__` run flanked by spaces still opens as a single marker and drops characters. No new findings. Viewer tests: 49/49 pass.
 - **Verification (2026-10-10, fix commit aa3e711):** RF11 is verified. All findings RF1 to RF11 are now verified, and none is open.
 - **Verification (2026-10-10, fix commit 475f3ba):** RF12 is verified. The new delimiter algorithm matches CommonMark 0.31 on all 127 probes, including about 100 spec emphasis examples, and the RF2 and RF11 cases still hold. One new Low finding is open: RF13, code spans keep the padding spaces that CommonMark strips. Viewer tests: 74/74 pass.
+- **Verification (2026-10-10, fix commit c97f3e2):** RF13 is verified. Code spans now drop their padding spaces as CommonMark does, and no new findings came up. Viewer tests: 77/77 pass. All findings RF1 to RF13 are now verified, and none is open.
