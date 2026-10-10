@@ -63,6 +63,10 @@ pub struct SourceNode {
     /// The node's path within the document, stable under edits elsewhere: the enclosing top-level
     /// declaration's name, then the names of the attributes, members, arms and slots on the way,
     /// and a position in brackets for an item of a sequence, of element content or of a branch.
+    ///
+    /// <para>A key is an identifier to compare for equality, not a path to split: an arm is named
+    /// by its patterns or test as written and an import by its path, and either may hold a dot.
+    /// The tree's structure is in `parent`.</para>
     pub key: String,
     /// The name the construct declares or names: a declaration's, a member's, an attribute's, an
     /// element's tag, a case, a referenced name, an accessed member, a loop binding, an import's
@@ -546,6 +550,9 @@ impl<'a> TreeBuilder<'a> {
                 continue;
             }
             match (field, child.kind()) {
+                // A path or a name the parser invented to recover is not written.
+                (_, SyntaxKind::LIBRARY_PATH | SyntaxKind::SELECTIVE_IMPORT)
+                    if child.span().is_empty() => {}
                 (_, SyntaxKind::LIBRARY_PATH) => {
                     let literal =
                         self.push(SourceRole::Literal, child.span(), Some(import), "path");
@@ -598,7 +605,7 @@ impl<'a> TreeBuilder<'a> {
             );
             self.entry(&origin)
         });
-        self.nodes[index].name = Some(name.clone());
+        self.nodes[index].name = written(name.clone());
 
         let member = match node.kind() {
             SyntaxKind::RECORD_DEFINITION
@@ -654,21 +661,21 @@ impl<'a> TreeBuilder<'a> {
     fn member(&mut self, node: SyntaxNode<'_>, owner: usize, role: SourceRole) {
         let name = field_text(node, "name").unwrap_or_default();
         let index = self.push(role, node.span(), Some(owner), &*name);
-        self.nodes[index].name = Some(name);
+        self.nodes[index].name = written(name);
         if node.child_by_field("optional").is_some() {
             self.nodes[index].flags.push(SourceFlag::Optional);
-        }
-        if node
-            .child_by_field("modifier")
-            .is_some_and(|modifier| modifier.text() == "content")
-        {
-            self.nodes[index].flags.push(SourceFlag::Content);
         }
         for (field, child) in fields(node) {
             if self.trivia(child, Some(index)) {
                 continue;
             }
             match field {
+                Some("modifier") if child.text() == "content" => {
+                    self.nodes[index].flags.push(SourceFlag::Content);
+                }
+                // The parser reads any name before a member's name as a modifier, as a stray word
+                // mid-edit is, and lowering reports every modifier but `content` as an error.
+                Some("modifier") => self.unparsed(child, Some(index)),
                 // `type` itself, the type of a type parameter, is a type as much as `int` is.
                 Some("type") => {
                     self.type_reference(child, Some(index), "type");
@@ -682,18 +689,22 @@ impl<'a> TreeBuilder<'a> {
     fn union_case(&mut self, node: SyntaxNode<'_>, owner: usize) {
         let name = field_text(node, "name").unwrap_or_default();
         let index = self.push(SourceRole::UnionCase, node.span(), Some(owner), &*name);
-        self.nodes[index].name = Some(name);
+        self.nodes[index].name = written(name);
         self.declaration_parts(node, index, SourceRole::Field);
     }
 
     fn emit_definition(&mut self, node: SyntaxNode<'_>, owner: usize) {
         let name = field_text(node, "name").unwrap_or_default();
         let index = self.push(SourceRole::Emit, node.span(), Some(owner), &*name);
-        self.nodes[index].name = Some(name);
+        self.nodes[index].name = written(name);
         self.declaration_parts(node, index, SourceRole::Field);
     }
 
     fn emit_reference(&mut self, node: SyntaxNode<'_>, owner: usize) {
+        // A name the parser invented to recover is not written.
+        if node.span().is_empty() {
+            return;
+        }
         let name = node.child_by_field("name").map(spell).unwrap_or_default();
         let index = self.push(SourceRole::Emit, node.span(), Some(owner), &*name);
         self.nodes[index].declaration = self.type_declaration(&name);
@@ -702,18 +713,16 @@ impl<'a> TreeBuilder<'a> {
     }
 
     /// A type as written: one node, whatever its structure, spelled the way the source spells it.
-    fn type_reference(
-        &mut self,
-        node: SyntaxNode<'_>,
-        parent: Option<usize>,
-        segment: &str,
-    ) -> usize {
+    /// A type the parser invented to recover is not written, so it has no node.
+    fn type_reference(&mut self, node: SyntaxNode<'_>, parent: Option<usize>, segment: &str) {
+        if node.span().is_empty() {
+            return;
+        }
         let index = self.push(SourceRole::TypeReference, node.span(), parent, segment);
         self.nodes[index].value = Some(spell(node));
         self.nodes[index].declaration =
             type_name(node).and_then(|name| self.type_declaration(&name));
         self.nested_trivia(node, index);
-        index
     }
 
     // -----------------------------------------------------------------------------------------
@@ -729,6 +738,10 @@ impl<'a> TreeBuilder<'a> {
     ) {
         if node.raw().is_error() {
             self.unparsed(node, parent);
+            return;
+        }
+        // A name or a value the parser invented to recover is not written, so it has no node.
+        if node.span().is_empty() {
             return;
         }
         match node.kind() {
@@ -753,6 +766,13 @@ impl<'a> TreeBuilder<'a> {
                 let index = self.push_expression(SourceRole::Case, node, parent, segment, flags);
                 self.nodes[index].declaration = self.case_declaration(node.span());
                 self.nodes[index].name = Some(name);
+                // An occurrence suffix is a type's, as in `T=int?`, which `attribute` reads as a
+                // type; on a case, validation and the checker report it.
+                for (field, child) in fields(node) {
+                    if field == Some("suffix") {
+                        self.unparsed(child, Some(index));
+                    }
+                }
             }
             SyntaxKind::VALUES_BRACED_EXPRESSION | SyntaxKind::ELEMENTS_BRACED_EXPRESSION => {
                 self.braced(node, parent, segment, flags)
@@ -826,7 +846,8 @@ impl<'a> TreeBuilder<'a> {
     }
 
     /// `{}` is the empty value, `{x}` is `x` written in braces, and two or more items are a
-    /// sequence.
+    /// sequence. Braces that hold only a region that did not parse are not `{}`: they are one
+    /// unparsed region, braces included, since not every parent owns braces (`{@}.title`).
     fn braced(
         &mut self,
         node: SyntaxNode<'_>,
@@ -839,7 +860,11 @@ impl<'a> TreeBuilder<'a> {
             .iter()
             .filter(|part| matches!(part, Part::Item(_)))
             .count();
+        let unparsed = parts
+            .iter()
+            .any(|part| matches!(part, Part::Trivia(trivia) if trivia.raw().is_error()));
         match items {
+            0 if unparsed => self.unparsed(node, parent),
             0 => {
                 let index = self.push_expression(SourceRole::Empty, node, parent, segment, flags);
                 self.place(parts, index, "");
@@ -963,7 +988,8 @@ impl<'a> TreeBuilder<'a> {
         if node.kind() == SyntaxKind::OPTIONAL_MEMBER_EXPRESSION {
             self.nodes[index].flags.push(SourceFlag::Optional);
         }
-        self.nodes[index].name = Some(member);
+        // `x.` mid-edit is a member access whose member the parser invented: it names nothing.
+        self.nodes[index].name = written(member);
         for (field, child) in fields(node) {
             if self.trivia(child, Some(index)) || !child.raw().is_named() {
                 continue;
@@ -1095,26 +1121,41 @@ impl<'a> TreeBuilder<'a> {
         arm
     }
 
+    /// A pattern: a literal, a case, or `{}`, which holds whatever comments are inside it. A
+    /// pattern that is only a region that did not parse is that region.
     fn pattern(&mut self, node: SyntaxNode<'_>, parent: usize, segment: String) {
-        let mut written = false;
+        let mut item = false;
+        let mut unparsed = false;
+        for child in node.children_with_tokens() {
+            let raw = child.raw();
+            unparsed |= raw.is_error();
+            item |= raw.is_named()
+                && !raw.is_error()
+                && !raw.is_missing()
+                && !child.kind().is_comment();
+        }
+        let owner = if item || unparsed {
+            parent
+        } else {
+            self.push_expression(SourceRole::Empty, node, Some(parent), segment.clone(), &[])
+        };
         for (_, child) in fields(node) {
-            if self.trivia(child, Some(parent)) || !child.raw().is_named() {
+            if self.trivia(child, Some(owner)) || !child.raw().is_named() {
                 continue;
             }
-            written = true;
             match child.kind() {
                 SyntaxKind::QUALIFIED_NAME => self.qualified_case(child, parent, segment.clone()),
                 _ => self.expression(child, Some(parent), segment.clone(), &[]),
             }
-        }
-        if !written {
-            self.push_expression(SourceRole::Empty, node, Some(parent), segment, &[]);
         }
     }
 
     /// A name in a pattern: a case, bare or qualified, or else a reference. A qualified case's
     /// qualifier is a reference to the union, as it is in a value.
     fn qualified_case(&mut self, node: SyntaxNode<'_>, parent: usize, segment: String) {
+        if node.span().is_empty() {
+            return;
+        }
         let names = node
             .children()
             .filter(|child| child.kind() == SyntaxKind::IDENTIFIER)
@@ -1242,6 +1283,11 @@ impl<'a> TreeBuilder<'a> {
     /// The body of an element: its items, under an attribute named for the content property they
     /// bind to when the element's declaration has one.
     fn content(&mut self, node: SyntaxNode<'_>, element: usize, property: Option<&str>) {
+        // A body the parser invented to recover, as `<Note:markdown></Note>` holds, is not
+        // written.
+        if node.span().is_empty() {
+            return;
+        }
         let container = match property {
             Some(property) => {
                 let attribute =
@@ -1317,7 +1363,8 @@ impl<'a> TreeBuilder<'a> {
             self.nodes[index].flags.push(SourceFlag::Handler);
         }
         let type_argument = type_parameters.contains(&name);
-        self.nodes[index].name = Some(name);
+        // A name the parser invented to recover, as in `={x}` mid-edit, names nothing.
+        self.nodes[index].name = written(name);
         for (field, child) in fields(node) {
             if self.trivia(child, Some(index)) || !child.raw().is_named() {
                 continue;
@@ -1895,6 +1942,11 @@ fn parts(node: SyntaxNode<'_>) -> Vec<Part<'_>> {
         }
     }
     parts
+}
+
+/// A name as the source writes it, or none where the parser invented it to recover.
+fn written(name: String) -> Option<String> {
+    (!name.is_empty()).then_some(name)
 }
 
 fn field_text(node: SyntaxNode<'_>, field: &str) -> Option<String> {

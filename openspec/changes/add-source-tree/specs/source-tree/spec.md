@@ -108,10 +108,10 @@ one.
 ### Requirement: Every token belongs to exactly one node
 Every token of a document SHALL lie in the range of at least one node, and SHALL belong to the
 smallest node whose range contains it. The tokens that belong to a node and to none of its children
-SHALL be only the punctuation and keywords of the node's role: angle brackets, `=`, braces,
+SHALL be only the punctuation and keywords of the node's role (angle brackets, `=`, braces,
 parentheses, commas, quotes, the slash of a closing tag, and the keywords that introduce the
-construct. A name, a literal, an operator, a type or a comment SHALL always belong to a node that
-says what it is.
+construct) and the tokens the node carries as its `name`, `value` or `textType`. A name, a literal,
+an operator, a type or a comment SHALL always belong to a node that says what it is.
 
 #### Scenario: Coverage over the repository
 - **WHEN** the conformance test computes the source tree of every `.nx` file in the repository
@@ -127,9 +127,11 @@ the name of the enclosing top-level declaration, then the names of the attribute
 and slots (a declaration's `value`, an operator's `left`, a condition's `test`) on the way to the
 node, and for an item of a sequence, of element content or of a branch, its position among the
 items. A comment or an unparsed region, which names nothing, SHALL be keyed by the sibling it
-precedes. Two nodes of one tree SHALL NOT share a key. Comparing the trees of two
-versions of a document by key SHALL pair a node that an edit did not touch with itself, whatever
-was inserted or removed in other declarations or in other attributes.
+precedes. Two nodes of one tree SHALL NOT share a key. A key is an identifier to compare for
+equality, not a path to split: a segment written from the source, such as an arm's patterns, may
+hold the separator, and the tree's structure is given by parent indices. Comparing the trees of
+two versions of a document by key SHALL pair a node that an edit did not touch with itself,
+whatever was inserted or removed in other declarations or in other attributes.
 
 #### Scenario: An insertion elsewhere does not move a key
 - **WHEN** a document declares `let a = …` and `let b = <Card title="Hi" />`, and an edit inserts a

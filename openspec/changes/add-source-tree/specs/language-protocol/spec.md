@@ -1,6 +1,11 @@
+## RENAMED Requirements
+
+- FROM: `### Requirement: The protocol defines four queries and names the rest`
+- TO: `### Requirement: The protocol defines five queries and names the rest`
+
 ## MODIFIED Requirements
 
-### Requirement: The protocol defines four queries and names the rest
+### Requirement: The protocol defines five queries and names the rest
 The protocol SHALL define the queries `hover`, `completions`, `diagnostics`, `documentSymbols`, and
 `sourceTree`, each with a request shape and an answer shape that round-trip through JSON without
 loss. It SHALL reserve the query names `definition`, `references`, `rename`, `signatureHelp`,

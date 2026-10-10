@@ -325,7 +325,9 @@ export interface SourceNode {
   parent?: number;
   /**
    * The node's path within the document, such as `roleQuestion.value.choices[2].label`: stable
-   * under edits elsewhere, and unique within the tree.
+   * under edits elsewhere, and unique within the tree. Compare keys for equality; do not split
+   * them, since a segment written from the source, such as an arm's pattern, may hold a dot. The
+   * tree's structure is in `parent`.
    */
   key: string;
   /** The name the construct declares or names: a declaration's, an attribute's, a tag, a case. */

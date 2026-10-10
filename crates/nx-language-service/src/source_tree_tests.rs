@@ -199,8 +199,9 @@ fn punctuation(role: SourceRole) -> &'static [&'static str] {
         SourceRole::Attribute => &["=", "{", "}", "(", ")"],
         SourceRole::Embed => &["@{", "}", "{", "(", ")"],
         SourceRole::Empty => &["{", "}"],
-        SourceRole::Case => &["."],
-        SourceRole::Member => &[".", "?."],
+        // A parenthesized object's parentheses, `(a ?? b).title`, as an operator owns its operands'.
+        SourceRole::Case => &[".", "(", ")"],
+        SourceRole::Member => &[".", "?.", "(", ")"],
         SourceRole::Operator | SourceRole::Literal => EXPRESSION,
         SourceRole::Call | SourceRole::Sequence => &["{", "}", "(", ")", ","],
         SourceRole::Condition => &["if", "else", "=>", "{", "}", "(", ")", ","],
@@ -219,19 +220,47 @@ fn punctuation(role: SourceRole) -> &'static [&'static str] {
 }
 
 /// Whether `node` carries `token` as its name, its value or its text type.
+///
+/// <para>A token is carried when it is the name, one of the lexemes of the value, or the text
+/// type. A qualified name, as an element's tag, an attribute's name, an emitted action or an
+/// imported name's alias may be, carries each of its parts and the dots between them. A node that
+/// carries its whole text as its value — a literal, a type, a text run, a comment, an unparsed
+/// region — carries every token inside it.</para>
 fn carries(node: &SourceNode, token: &str) -> bool {
-    let in_name = node.name.as_deref().is_some_and(|name| {
-        name == token || token == "." || name.split('.').any(|part| part == token)
+    let qualified = matches!(
+        node.role,
+        SourceRole::Element | SourceRole::Attribute | SourceRole::Reference | SourceRole::Emit
+    );
+    let names = |text: &str| {
+        text == token
+            || (qualified
+                && (token == "."
+                    || text
+                        .split(|c: char| c == '.' || c.is_whitespace())
+                        .any(|part| part == token)))
+    };
+    let whole = matches!(
+        node.role,
+        SourceRole::Literal
+            | SourceRole::TypeReference
+            | SourceRole::Text
+            | SourceRole::Comment
+            | SourceRole::DocComment
+            | SourceRole::Unparsed
+    );
+    let in_value = node.value.as_deref().is_some_and(|value| {
+        if whole {
+            value.contains(token)
+        } else {
+            value.split_whitespace().any(names)
+        }
     });
-    let in_value = node
-        .value
-        .as_deref()
-        .is_some_and(|value| value.contains(token));
-    in_name || in_value || node.text_type.as_deref() == Some(token)
+    node.name.as_deref().is_some_and(names) || in_value || node.text_type.as_deref() == Some(token)
 }
 
-/// Every way `tree` breaks the rules a source tree keeps: ranges nested and in order, keys unique,
-/// and every token of `source` owned by the smallest node holding it and allowed there.
+/// Every way `tree` breaks the rules a source tree keeps: ranges nested, in order and not empty,
+/// keys unique, and every token of `source` owned by the smallest node holding it and allowed
+/// there.
 fn violations(source: &str, tree: &SourceTree) -> Vec<String> {
     let mut violations = Vec::new();
     let line_of = |byte: usize| source[..byte].matches('\n').count() + 1;
@@ -243,6 +272,10 @@ fn violations(source: &str, tree: &SourceTree) -> Vec<String> {
         let (start, end) = (node.range.start_byte, node.range.end_byte);
         if start > end {
             violations.push(format!("node {index} ends before it starts"));
+        }
+        // A node with nothing in its range stands for something the source does not say.
+        if start == end {
+            violations.push(format!("node {index} `{}` covers no source", node.key));
         }
         if !keys.insert(node.key.as_str()) {
             violations.push(format!("key `{}` is shared", node.key));
@@ -912,6 +945,121 @@ fn a_document_that_does_not_parse() {
     assert_eq!(unparsed.value.as_deref(), Some(text(source, unparsed)));
 }
 
+/// A name before a member's name is read as a modifier, and only `content` is one; anything else,
+/// as a stray word mid-edit is, did not parse as part of the member.
+#[test]
+fn a_stray_modifier_is_unparsed() {
+    let tree = tree_for("action Completed = { respondentring answered:int }");
+    let answered = named(&tree, SourceRole::Field, "answered");
+    assert!(answered.flags.is_empty());
+    let stray = valued(&tree, SourceRole::Unparsed, "respondentring");
+    assert_eq!(parent(&tree, stray).key, "Completed.answered");
+}
+
+/// An occurrence suffix belongs on a type, as in `T=int?`; on a case, which validation and the
+/// checker reject, it is unparsed.
+#[test]
+fn a_suffix_on_a_case_is_unparsed() {
+    let tree = tree_for(
+        "type Mode = light | dark\nlet <Panel mode:Mode /> = <div />\nlet a = <Panel mode=dark? />",
+    );
+    let dark = named(&tree, SourceRole::Case, "dark");
+    let suffix = valued(&tree, SourceRole::Unparsed, "?");
+    assert_eq!(parent(&tree, suffix).key, dark.key);
+}
+
+/// Braces that hold only a region that did not parse are not `{}`: they are part of the region,
+/// which takes the value's place.
+#[test]
+fn braces_around_an_unparsed_region_are_not_empty() {
+    let tree = tree_for("type M = a | b\nlet f(k:M) = { if k is { @ => 1 } }");
+    assert!(
+        nodes(&tree, SourceRole::Empty).is_empty(),
+        "{}",
+        outline(&tree)
+    );
+    let unparsed = &nodes(&tree, SourceRole::Unparsed)[0];
+    assert_eq!(unparsed.value.as_deref(), Some("{ if k is { @ => 1 } }"));
+    assert_eq!(parent(&tree, unparsed).name.as_deref(), Some("f"));
+}
+
+/// The braces and parentheses around a member access's object belong to a node whatever the object
+/// is, though a member access lists no braces: braces around a region that did not parse are part
+/// of that region.
+#[test]
+fn a_wrapped_object_of_a_member_access_is_covered() {
+    let tree = tree_for("let b = 1\nlet c = { {b}.title }\nlet d = { { @ }?.title }");
+    let unparsed = nodes(&tree, SourceRole::Unparsed);
+    let values = unparsed
+        .iter()
+        .map(|node| (node.value.as_deref(), parent(&tree, node).role))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        values,
+        [
+            (Some("{b}"), SourceRole::Member),
+            (Some("{ @ }"), SourceRole::Member)
+        ]
+    );
+    let tree = tree_for("type Mode = light | dark\nlet a = { (1 + 2).x }\nlet b = { (Mode).dark }");
+    assert_eq!(
+        keyed(&tree, "a.value.object").flags,
+        [SourceFlag::Parenthesized]
+    );
+    assert_eq!(keyed(&tree, "b.value").role, SourceRole::Case);
+}
+
+/// A pattern that is only a region that did not parse is that region, and `{}` holds the comments
+/// inside it; either way the arm's children stay in order.
+#[test]
+fn a_pattern_that_did_not_parse_is_unparsed() {
+    let tree = tree_for(
+        "type Mode = light | dark\nlet <Panel title:string /> = <div />\n\
+         let f(k:Mode) = <Panel if k is { light => { title=\"a\" } } />",
+    );
+    assert!(
+        nodes(&tree, SourceRole::Empty).is_empty(),
+        "{}",
+        outline(&tree)
+    );
+    let unparsed = valued(&tree, SourceRole::Unparsed, "title=\"a\" ");
+    assert_eq!(parent(&tree, unparsed).role, SourceRole::MatchArm);
+
+    let tree = tree_for("let f(x:string?) = { if x is { { /* none */ } => 1 else => 2 } }");
+    let comment = valued(&tree, SourceRole::Comment, "/* none */");
+    assert_eq!(parent(&tree, comment).role, SourceRole::Empty);
+}
+
+/// A name, a value or a type the parser invents to recover is not in the source, so no node
+/// stands for it.
+#[test]
+fn what_the_parser_invented_has_no_node() {
+    for source in [
+        "let b = <Card title= />",
+        "let c = { 1 + }",
+        "type UserId = ",
+        "type Q = { a:int }\ncomponent <Integer extends Q max?: />",
+        "let f(x:int) = { if x is { Mode. => 1 else => 2 } }",
+        "let f(x:int) = { if x is { => 1 else => 2 } }",
+        "let f(x:int) = { x. }",
+        "let a = <Card ={1} />",
+        "import \"./a.nx\"\nimport ",
+        "import { , Card } from \"./ui.nx\"",
+        "type M = a | ",
+        "component <C emits {  } />",
+        "type Note = { content body:string }\nlet a = <Note:markdown></Note>",
+    ] {
+        let tree = tree_for(source);
+        for node in &tree.nodes {
+            assert!(
+                node.range.start_byte < node.range.end_byte && node.name.as_deref() != Some(""),
+                "{source}\n{}",
+                outline(&tree)
+            );
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // The declaration table
 // ---------------------------------------------------------------------------------------------
@@ -1018,13 +1166,67 @@ fn a_component_lists_its_state_and_an_alias_its_type() {
 
 #[test]
 fn a_standard_library_declaration_is_described() {
-    let tree = tree_for("let a = { [1, 2].count }");
-    // Whatever the standard library answers, a table entry from another module has no range.
-    for entry in &tree.declarations {
-        if entry.module != "tenant/form.nx" {
-            assert_eq!(entry.range, None);
-        }
-    }
+    let tree = tree_for(
+        "import \"@nx/agent\"\nlet a = <Agent name=\"support\">Be brief.</Agent>\n\
+         let lookup(): string = { \"x\" }\nlet t = <FunctionTool function={lookup} />",
+    );
+    let agent = declaration(&tree, named(&tree, SourceRole::Element, "Agent"));
+    assert_eq!(agent.module, "@nx/agent/agent.nx");
+    assert_eq!(agent.kind, SourceDeclarationKind::Record);
+    // An entry from another module has no range in this document.
+    assert_eq!(agent.range, None);
+    assert!(
+        agent
+            .doc
+            .as_deref()
+            .is_some_and(|doc| doc.starts_with("A reusable definition of an agent")),
+        "{:?}",
+        agent.doc
+    );
+    let property = |entry: &SourceDeclaration, name: &str| {
+        entry
+            .properties
+            .iter()
+            .find(|property| property.name == name)
+            .unwrap_or_else(|| panic!("{name} in {:?}", entry.properties))
+            .clone()
+    };
+    assert_eq!(property(agent, "name").ty, "string");
+    assert_eq!(property(agent, "model").flags, [SourceFlag::Optional]);
+    assert_eq!(property(agent, "instructions").flags, [SourceFlag::Content]);
+    assert!(property(agent, "instructions").doc.is_some());
+    assert_eq!(
+        named(&tree, SourceRole::Attribute, "instructions").flags,
+        [SourceFlag::Content]
+    );
+
+    // A library declaration's bases are library entries too, and its inherited properties come
+    // first.
+    let tool = declaration(&tree, named(&tree, SourceRole::Element, "FunctionTool"));
+    let bases = tool
+        .bases
+        .iter()
+        .map(|base| &tree.declarations[*base as usize])
+        .collect::<Vec<_>>();
+    assert_eq!(bases.len(), 1);
+    assert_eq!(
+        (
+            bases[0].name.as_str(),
+            bases[0].module.as_str(),
+            bases[0].range
+        ),
+        ("Tool", "@nx/agent/agent.nx", None)
+    );
+    let properties = tool
+        .properties
+        .iter()
+        .map(|property| property.name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(properties, ["name", "description", "function"]);
+    assert_eq!(
+        property(tool, "name").flags,
+        [SourceFlag::Optional, SourceFlag::Inherited]
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1064,6 +1266,65 @@ fn every_token_of_every_nx_file_belongs_to_a_node() {
         files.len(),
         failures.join("\n")
     );
+}
+
+/// Spec: "A document that does not parse", for documents mid-edit. The repository's files parse,
+/// so the test above sees no error region; this one checks the same rules on deterministic edits of
+/// a few of them, each cut short or with a token deleted.
+#[test]
+fn every_token_of_an_edited_nx_file_belongs_to_a_node() {
+    let files = [
+        "specs/ir-conformance/question-flow/library/questions.nx",
+        "examples/nx/component.nx",
+        "examples/nx/types.nx",
+    ];
+    let mut failures = Vec::new();
+    let mut count = 0;
+    for file in files {
+        let source = std::fs::read_to_string(repository().join(file)).expect("readable .nx file");
+        for (edit, edited) in edits(&source) {
+            count += 1;
+            let tree = snapshot_for(&edited)
+                .source_tree(&DocumentUri::from(URI))
+                .expect("source tree");
+            for violation in violations(&edited, &tree) {
+                failures.push(format!("{file} with {edit}: {violation}"));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} violations in {count} edits:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+/// Edits of `source` as a document mid-edit holds them: every eleventh token deleted, and the
+/// source cut short before every forty-first. Deleting a token leaves a name, a value or a
+/// separator out, and a cut leaves a construct unclosed.
+fn edits(source: &str) -> Vec<(String, String)> {
+    let syntax = parse_str(source, "edited.nx").tree.expect("a syntax tree");
+    let mut tokens = Vec::new();
+    collect_leaves(syntax.root(), &mut tokens);
+    let mut edits = Vec::new();
+    for (index, token) in tokens.iter().enumerate() {
+        let (start, end) = (token.start_byte(), token.end_byte());
+        if index % 41 == 0 {
+            edits.push((
+                format!("a cut at byte {start}"),
+                source[..start].to_string(),
+            ));
+        }
+        if index % 11 == 0 {
+            let edited = format!("{}{}", &source[..start], &source[end..]);
+            edits.push((
+                format!("`{}` at byte {start} deleted", token.text()),
+                edited,
+            ));
+        }
+    }
+    edits
 }
 
 fn collect_nx_files(directory: &Path, into: &mut Vec<PathBuf>) {

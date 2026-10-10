@@ -86,9 +86,11 @@ nodes would still share, as two declarations of one name do mid-edit, takes a `#
 ### Coverage is tested over the whole repository
 
 The rule "every token belongs to exactly one node, and the only tokens a node owns directly are its
-role's punctuation and keywords" is checked by a test that walks the tree-sitter tokens of every
-`.nx` file in the repository, examples and specs included, against the answer. A construct the
-builder forgets fails the build with the file, the line and the token.
+role's punctuation and keywords and what it carries as its name, value or text type" is checked by
+a test that walks the tree-sitter tokens of every `.nx` file in the repository, examples and specs
+included, against the answer. A construct the builder forgets fails the build with the file, the
+line and the token. Those files parse; a document mid-edit does not, so the same check also runs
+over deterministic truncations and short deletions of a few of them.
 
 ### Exposure follows `documentSymbols`
 

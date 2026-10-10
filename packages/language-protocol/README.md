@@ -183,7 +183,9 @@ the declaration it refers to. A node's type and declaration are what hover repor
 `key` is the node's path within the document, such as `roleQuestion.value.choices[2].label`: the
 top-level declaration's name, then the attributes, members, arms and slots on the way, and positions
 for items. An edit to another declaration or another attribute does not change it, so two versions
-of a document can be compared by key.
+of a document can be compared by key. A key is an identifier to compare for equality, not a path to
+split: an arm is named by its patterns or test as written (`is Mode.dark`, `when x > 1`) and an
+import by its path, and those may hold dots and spaces. Read the tree's structure from `parent`.
 
 `declarations` lists once each declaration a node refers to, from this document, another document
 of the set or a library: its module identity, name and kind, its range when this document declares
