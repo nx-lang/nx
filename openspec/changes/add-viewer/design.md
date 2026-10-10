@@ -44,12 +44,17 @@ a node's range. The element slices the text by the range's UTF-8 byte offsets, s
 non-Latin name cannot shift it. The host fetches the tree itself, from whatever service it has, so
 the package depends only on the protocol's types.
 
-### Render by role, through one function per role
+### One renderer for each role of the source tree
 
-A renderer per role turns a node and its children into DOM, and an element-level renderer is the
-only one that consults the declaration table for order and defaults. A view (one element node read
-through its Viewer) is internal: today every element uses the generic Viewer; the hint change adds
-others without changing the roles' renderers.
+Every node of the source tree has one role, such as `element`, `attribute`, `literal`, `condition`
+or `comment`, from the closed list the `source-tree` capability defines. The viewer has one
+rendering function for each role, which turns a node of that role and its children into DOM: the
+`condition` renderer draws the "Only when" label, the `literal` renderer draws a value without its
+quotes, and so on. Only the `element` renderer consults the declaration table, for property order
+and defaults. A view (one element node read through its Viewer) is internal to the element
+renderer: today every element uses the generic Viewer, and the hint change adds others without
+changing the other roles' renderers. A new role in the source tree needs one new renderer, and the
+coverage test below fails until it has one.
 
 ### Lossless by construction, checked over the repository
 
