@@ -151,7 +151,8 @@ The serialized form is a flat table that holds each value once, however many han
 so its size follows the data and not the number of handlers, and it nests a fixed few levels
 whatever the values do: a deserializer with a recursion limit, such as `serde_json`'s, reads any
 instance the runtime wrote. The layout is the runtime's own and may change between releases; a
-stored instance is for the release and the images that wrote it.
+stored instance is for the release and the images that wrote it. It holds no origins (see *Where
+records came from*), so the state of a restored instance has none.
 
 The check is against mistakes, not against an adversary. Someone who can rewrite a stored instance
 can give it any state the component accepts, or point a token at another handler of the same
@@ -725,10 +726,13 @@ They are the TypeScript runtime's entries for the same call, which the corpus ch
 Spans come from the images' debug sections, so a record of a module whose image was built without
 one has no origin and a report over stripped images stays empty; that is not an error. The report
 is cleared when a call begins and filled when it succeeds, so a call that fails, and every other
-call, leaves it empty. The internal record holds its module and node only during a call given a
-report, so a host that gives none pays nothing, a record built during such a call has no origin
-later, and neither does a record the host passes in; an instance keeps the origins of its state, so
-a host that reports from initialization on sees them after every dispatch. The report changes
+call, leaves it empty. The internal record is given its module and node only in a call given a
+report, so a host that never asks pays nothing, a record built during a call given none has no
+origin later, and neither does a record the host passes in. A record rebuilt from another keeps its
+origin in every call, so an instance keeps the origins of its state through every dispatch,
+reported or not. An instance restored with `restore_component_instance` has none: the serialized
+form does not hold origins, so a record of its state has an origin again only once a call given a
+report builds it again. The report changes
 neither a call's operation count nor its value, and records with origins are equal to records
 without. Calls that run at the same time and share one `Origins` overwrite each other; give each
 its own.
@@ -806,7 +810,9 @@ same argument for the same call, and the conformance corpus holds the two to it.
 `cargo test -p nx-ir-runtime` runs the conformance corpus in `specs/ir-conformance` (every
 entrypoint and lifecycle, with and without debug sections, with and without an origins report),
 `tests/origins.rs` (the origin of a record built in a loop, shown through a step, built by a
-library or by `apply`, and the report over stripped images and after a failure), the damage runs (every truncation of
+library or by `apply`, held in state through a dispatch given no report, passed back by the host
+and restored, a function value passed back from the state, the reports of `call_function` and `evaluate_component`, and the report over
+stripped images and after a failure), the damage runs (every truncation of
 every corpus image, and every cell of one image overwritten), the preparation and linking
 tests, and `tests/allocation.rs`, which counts the bytes a refused concatenation allocates to show
 that the budget is charged before a string is built, and the bytes refused input allocates to show

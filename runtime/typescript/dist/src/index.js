@@ -1487,7 +1487,11 @@ export function evaluateComponent(program, name, props, state, options = {}) {
 export function dispatchComponentActions(program, instance, batch, options = {}) {
     // The entries of the batch, all of them before any runs. The instance is not input.
     return evaluate(options, (input) => measureValues(input, batch), (evaluation) => {
-        const entries = readHostValues(batch, "the dispatched batch", (index) => `dispatch entry ${index}`);
+        // The batch is host input, which has no origin. A host may pass back a record the runtime
+        // handed it, in a state or an instance, which is a key of the lineage, so when the dispatch
+        // keeps origins the batch is read as new objects that no map holds.
+        const fresh = evaluation.origins !== undefined || instanceOrigins.has(instance);
+        const entries = readHostValues(batch, "the dispatched batch", (index) => `dispatch entry ${index}`, fresh);
         return dispatchBatch(programOf(program), instance, entries, evaluation);
     });
 }
@@ -1498,9 +1502,10 @@ function dispatchBatch(linkedProgram, instance, batch, evaluation) {
     }
     const linked = linkedProgram.entry;
     const ownerKey = `${linked.module.identity}::${declaration.name}`;
-    // The records the instance holds keep the origins its lineage recorded for them.
+    // The records the instance holds keep the origins its lineage recorded for them, whether or not
+    // this call records any of its own.
     const lineage = instanceOrigins.get(instance);
-    if (evaluation.origins !== undefined && lineage !== undefined) {
+    if (lineage !== undefined) {
         evaluation.origins = lineage;
     }
     let working = { ...instance.state };
@@ -1574,9 +1579,8 @@ function dispatchBatch(linkedProgram, instance, batch, evaluation) {
         handlers,
         generation,
     });
-    const kept = evaluation.origins ?? lineage;
-    if (kept !== undefined) {
-        instanceOrigins.set(next, kept);
+    if (evaluation.origins !== undefined) {
+        instanceOrigins.set(next, evaluation.origins);
     }
     return {
         rendered,
@@ -1650,14 +1654,18 @@ function componentDeclaration(program, name) {
     return { declaration, component: declaration.kind };
 }
 /**
- * The origins kept for each instance's lineage, so a dispatch given a report finds the origins of
- * the records its state holds. A value a host passes is never in one: a state it stored and passes
- * back is read as host input, which has no origin, as it has none in every runtime.
+ * The origins kept for each instance's lineage, so a dispatch finds the origins of the records its
+ * state holds. A value a host passes is never in one: a dispatch reads its batch as new objects
+ * (see {@link readHostValue}), and every other call starts a map of its own, so a record the host
+ * passes in has no origin, as it has none in every runtime.
  */
 const instanceOrigins = new WeakMap();
-/** Records that node `nodeIndex` of `context` constructed `record`, in a call that keeps track of origins. */
+/** Records that node `nodeIndex` of `context` constructed `record`, in a call given an origins report. */
 function originated(record, context, nodeIndex) {
-    context.evaluation.origins?.set(record, { linked: context.linked, node: nodeIndex });
+    const evaluation = context.evaluation;
+    if (evaluation.recording) {
+        evaluation.origins.set(record, { linked: context.linked, node: nodeIndex });
+    }
     return record;
 }
 /** Gives `record`, rebuilt from `from`, the origin `from` has, in a call that keeps track of origins. */
@@ -1684,9 +1692,23 @@ function carryOrigin(record, from, evaluation) {
  */
 function evaluate(options, input, run) {
     // The reports are cleared before anything else can refuse the call, so that an object the host
-    // gave to an earlier call never shows that call's numbers or entries for this one.
-    const usage = clearedUsage(options.usage);
-    const origins = clearedOrigins(options.origins);
+    // gave to an earlier call never shows that call's numbers or entries for this one. Each is
+    // cleared before either is refused, so one the runtime cannot write to leaves the other cleared.
+    let refusal;
+    const cleared = (clear) => {
+        try {
+            return clear();
+        }
+        catch (error) {
+            refusal ??= error;
+            return undefined;
+        }
+    };
+    const usage = cleared(() => clearedUsage(options.usage));
+    const origins = cleared(() => clearedOrigins(options.origins));
+    if (refusal !== undefined) {
+        throw refusal;
+    }
     const maxOperations = options.maxOperations;
     if (maxOperations !== undefined && !(Number.isSafeInteger(maxOperations) && maxOperations >= 0)) {
         fail("nx-ir-options", `The maxOperations option must be a non-negative safe integer, got ${String(maxOperations)}.`);
@@ -1703,6 +1725,7 @@ function evaluate(options, input, run) {
         nesting: 0,
         defaultFailed: false,
         origins: origins === undefined ? undefined : new WeakMap(),
+        recording: origins !== undefined,
         entries: [],
     };
     let inputSize;
@@ -1980,15 +2003,19 @@ export function measureInputSize(value, limit) {
  *
  * <para>The value returned is the host's own when nothing was left out, which is the usual case.
  * Otherwise the objects and arrays on the way down to a member that was left out are copied
- * without it and the rest is shared, so the host's value is never changed.</para>
+ * without it and the rest is shared, so the host's value is never changed. With `fresh`, every
+ * array and plain object is copied, so that none returned is an object the host holds: a dispatch
+ * reads its batch so when it keeps origins by object, since a host may pass back a record the
+ * runtime handed it, and a record a host passes has no origin. A handler or a function value is
+ * still returned as it is: it is not a record and has no origin.</para>
  *
  * <para>The walk keeps its own stack, as the measure does, so no nesting reaches the engine's. It
  * keeps the objects it is inside, and refuses one found inside itself, which has no finite size;
  * the same object held twice side by side is two values. It charges no operation: it runs once in
  * a call, over input whose size is the host's to limit, and before anything is evaluated.</para>
  */
-function readHostValue(value, path) {
-    if (isReadAsPassed(value, 0)) {
+function readHostValue(value, path, fresh = false) {
+    if (!fresh && isReadAsPassed(value, 0)) {
         return value;
     }
     const frames = [];
@@ -2043,7 +2070,7 @@ function readHostValue(value, path) {
             }
             frames.pop();
             entered.delete(top.source);
-            const read = top.copy ?? top.source;
+            const read = fresh ? copyOf(top) : (top.copy ?? top.source);
             const parent = frames[frames.length - 1];
             if (parent === undefined) {
                 return read;
@@ -2166,13 +2193,13 @@ function readHostRecord(fields, path) {
 /**
  * Reads each of `values`, a call's content or the entries of its batch, as {@link readHostValue}
  * reads any value, by the path `pathOf` gives its index; `path` names the list itself. The list
- * is returned as it is when nothing was left out of any.
+ * is returned as it is when nothing was left out of any, unless `fresh` asks for copies.
  */
-function readHostValues(values, path, pathOf) {
+function readHostValues(values, path, pathOf, fresh = false) {
     requireHostList(values, path);
     let read;
     for (let index = 0; index < values.length; index += 1) {
-        const value = readHostValue(values[index], pathOf(index));
+        const value = readHostValue(values[index], pathOf(index), fresh);
         if (value !== values[index]) {
             (read ??= values.slice())[index] = value;
         }
@@ -3118,7 +3145,7 @@ function pointerToken(name) {
 function reportedOutput(value, generation, payer) {
     const evaluation = payer.evaluation;
     const origins = evaluation.origins;
-    return canonicalizeRendered(value, generation, payer, origins === undefined ? undefined : { origins, entries: evaluation.entries });
+    return canonicalizeRendered(value, generation, payer, evaluation.recording && origins !== undefined ? { origins, entries: evaluation.entries } : undefined);
 }
 /**
  * What writing `item` for the host costs, apart from the values inside it: one for a value, a

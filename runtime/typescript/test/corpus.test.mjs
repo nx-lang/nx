@@ -326,15 +326,22 @@ if (recordedFailures === 0) {
 
 /**
  * Runs `run` with an origins report and without one, and checks that the report gives `recorded`
- * and that `returned` reads the same from both, since a report changes no result. Returns what
- * the run with the report returned.
+ * and that `returned` reads the same from both, and the usage report the same operations, since
+ * an origins report changes neither. Returns what the run with the report returned.
  */
 function checkOrigins(recorded, run, returned) {
   const origins = {};
-  const reported = run({ origins });
-  const plain = run({});
+  const usage = {};
+  const plainUsage = {};
+  // A budget no call reaches, so that the usage report counts operations.
+  const maxOperations = Number.MAX_SAFE_INTEGER;
+  const reported = run({ origins, usage, maxOperations });
+  const plain = run({ usage: plainUsage, maxOperations });
   if (stableJson(returned(reported)) !== stableJson(returned(plain))) {
     throw new Error("gives another value with an origins report than without one");
+  }
+  if (usage.operations !== plainUsage.operations) {
+    throw new Error(`costs ${usage.operations} operations with an origins report and ${plainUsage.operations} without one`);
   }
   if (stableJson(origins.entries) !== stableJson(recorded ?? [])) {
     throw new Error(`the origins report gives ${stableJson(origins.entries)}, and ${stableJson(recorded ?? [])} is recorded`);

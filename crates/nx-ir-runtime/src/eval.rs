@@ -88,9 +88,11 @@ pub struct RuntimeOptions {
     /// [`evaluate_component`](crate::Program::evaluate_component) or
     /// [`dispatch_component_actions`](crate::Program::dispatch_component_actions) succeeds, fills
     /// it with where each record of the function's value or of the rendered output was
-    /// constructed. Only a call given a report keeps track of where records came from, so a call
-    /// given none does no more work than it did before origins existed, and its result is the
-    /// same either way.</para>
+    /// constructed. Only a call given a report gives the records it constructs an origin, so a
+    /// host that never gives one does no more work than it did before origins existed, and a
+    /// call's result is the same either way. A record rebuilt from one that has an origin keeps it
+    /// in any call, so an instance keeps the origins of its state through a dispatch given no
+    /// report. A record the host passes in has none.</para>
     pub origins: Option<Arc<Origins>>,
 }
 
@@ -291,13 +293,11 @@ impl<'p> Machine<'p> {
         })
     }
 
-    /// The origin `record` carries into a record rebuilt from it, in a call that keeps track of
-    /// origins.
+    /// The origin `record` carries into a record rebuilt from it. It is carried in every call, a
+    /// call given no report included, so that a record an instance holds in its state keeps its
+    /// origin through a dispatch that asked for none; only a record built in such a call has none.
     #[inline]
     pub(crate) fn carried(&self, record: &Record) -> Option<Origin> {
-        if !self.tracks_origins() {
-            return None;
-        }
         record.origin.clone()
     }
 

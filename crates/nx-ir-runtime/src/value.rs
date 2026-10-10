@@ -47,8 +47,8 @@ pub(crate) struct Record {
     pub type_name: Option<Arc<str>>,
     /// In the order the fields were written; a name appears once.
     pub fields: Fields,
-    /// The node that constructed the record, held only during calls given an origins report. It
-    /// takes no part in equality.
+    /// The node that constructed the record. It is set only in calls given an origins report, and
+    /// a record rebuilt from this one keeps it in any call. It takes no part in equality.
     pub origin: Option<Origin>,
 }
 

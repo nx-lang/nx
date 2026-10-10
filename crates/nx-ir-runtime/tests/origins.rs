@@ -237,6 +237,223 @@ fn an_origins_report_from_images_without_their_debug_section_is_empty() {
     assert_eq!(reported, plain);
 }
 
+/// The entries of the last call, each with the source text its span covers in `held-records`.
+fn held_entries(origins: &Origins) -> Vec<(String, String)> {
+    origins
+        .entries()
+        .iter()
+        .map(|entry| (entry.path.clone(), origin_text("held-records", entry)))
+        .collect()
+}
+
+/// The source text of the origin of the rendered `Panel`'s item, if it has one.
+fn panel_item(origins: &Origins) -> Option<String> {
+    held_entries(origins)
+        .into_iter()
+        .find(|(path, _)| path == "/children/0/item")
+        .map(|(_, text)| text)
+}
+
+/// A batch that taps the button whose handler has `token`.
+fn tap(token: &str) -> Vec<NxValue> {
+    vec![invocation(
+        token,
+        NxValue::Record {
+            type_name: Some("Button.Tapped".to_string()),
+            properties: BTreeMap::new(),
+        },
+    )]
+}
+
+fn invocation(token: &str, action: NxValue) -> NxValue {
+    NxValue::Record {
+        type_name: Some("ActionHandlerInvocation".to_string()),
+        properties: BTreeMap::from([
+            ("token".to_string(), NxValue::String(token.to_string())),
+            ("action".to_string(), action),
+        ]),
+    }
+}
+
+#[test]
+fn a_record_held_in_state_keeps_its_origin_through_a_dispatch_given_no_report() {
+    let program = linked("held-records", "main.nx", false);
+    let (options, origins) = reporting();
+    let initialized = program
+        .initialize_component(
+            "Holder",
+            &BTreeMap::new(),
+            &ComponentInit::default(),
+            &options,
+        )
+        .expect("initializes");
+    assert_eq!(
+        panel_item(&origins).as_deref(),
+        Some("<Item name=\"first\" />")
+    );
+    // A dispatch that asks for no report re-normalizes the state, and builds nothing.
+    let unreported = program
+        .dispatch_component_actions(
+            &initialized.instance,
+            &tap("h1-1"),
+            &RuntimeOptions::default(),
+        )
+        .expect("dispatches");
+    program
+        .dispatch_component_actions(&unreported.instance, &tap("h2-1"), &options)
+        .expect("dispatches");
+    assert_eq!(
+        panel_item(&origins).as_deref(),
+        Some("<Item name=\"first\" />")
+    );
+}
+
+#[test]
+fn a_record_the_host_passes_back_in_a_dispatch_has_no_origin() {
+    let program = linked("held-records", "main.nx", false);
+    let (options, origins) = reporting();
+    let initialized = program
+        .initialize_component(
+            "Holder",
+            &BTreeMap::new(),
+            &ComponentInit::default(),
+            &options,
+        )
+        .expect("initializes");
+    // The state the runtime returned holds a record the program built.
+    let spare = initialized.state["spare"].clone();
+    let chosen = NxValue::Record {
+        type_name: Some("Chooser.Chosen".to_string()),
+        properties: BTreeMap::from([("item".to_string(), spare)]),
+    };
+    program
+        .dispatch_component_actions(
+            &initialized.instance,
+            &[invocation("h1-4", chosen)],
+            &options,
+        )
+        .expect("dispatches");
+    assert_eq!(panel_item(&origins), None);
+    assert_eq!(held_entries(&origins).len(), 6);
+}
+
+#[test]
+fn a_function_value_the_host_passes_back_from_the_state_is_read_as_it_is() {
+    let program = linked("held-records", "main.nx", false);
+    for (initializing, dispatching) in [(false, false), (true, false), (false, true), (true, true)]
+    {
+        let options = |reports: bool| match reports {
+            true => reporting().0,
+            false => RuntimeOptions::default(),
+        };
+        let initialized = program
+            .initialize_component(
+                "Tool",
+                &BTreeMap::new(),
+                &ComponentInit::default(),
+                &options(initializing),
+            )
+            .expect("initializes");
+        let picked = NxValue::Record {
+            type_name: Some("Picker.Picked".to_string()),
+            properties: BTreeMap::from([("op".to_string(), initialized.state["spare"].clone())]),
+        };
+        let dispatched = program
+            .dispatch_component_actions(
+                &initialized.instance,
+                &[invocation("h1-1", picked)],
+                &options(dispatching),
+            )
+            .expect("dispatches");
+        let value = at_pointer(&dispatched.rendered, "/children/0/value");
+        assert!(
+            matches!(value, NxValue::Int32(6) | NxValue::Int(6)),
+            "{value:?}"
+        );
+    }
+}
+
+#[test]
+fn call_function_reports_the_origins_of_its_value() {
+    let (options, origins) = reporting();
+    let function = NxValue::Record {
+        type_name: Some("Function".to_string()),
+        properties: BTreeMap::from([
+            ("module".to_string(), NxValue::String("main.nx".to_string())),
+            ("name".to_string(), NxValue::String("picked".to_string())),
+        ]),
+    };
+    linked("held-records", "main.nx", false)
+        .call_function(&function, &BTreeMap::new(), &options)
+        .expect("calls");
+    assert_eq!(
+        held_entries(&origins),
+        [(String::new(), "<Item name=\"picked\" />".to_string())]
+    );
+}
+
+#[test]
+fn evaluate_component_reports_the_origins_of_its_rendered_output_and_none_for_the_state_given() {
+    let (options, origins) = reporting();
+    let item = |name: &str| NxValue::Record {
+        type_name: Some("Item".to_string()),
+        properties: BTreeMap::from([("name".to_string(), NxValue::String(name.to_string()))]),
+    };
+    let state = BTreeMap::from([
+        ("held".to_string(), item("given")),
+        ("spare".to_string(), item("other")),
+        ("count".to_string(), NxValue::Int32(3)),
+    ]);
+    linked("held-records", "main.nx", false)
+        .evaluate_component("Holder", &BTreeMap::new(), &state, &options)
+        .expect("evaluates");
+    let paths: Vec<_> = held_entries(&origins)
+        .into_iter()
+        .map(|(path, _)| path)
+        .collect();
+    assert_eq!(
+        paths,
+        [
+            "",
+            "/children/0",
+            "/children/1",
+            "/children/2",
+            "/children/3",
+            "/children/4"
+        ]
+    );
+}
+
+#[test]
+fn a_restored_instance_holds_no_origins() {
+    let program = linked("held-records", "main.nx", false);
+    let (options, origins) = reporting();
+    let initialized = program
+        .initialize_component(
+            "Holder",
+            &BTreeMap::new(),
+            &ComponentInit::default(),
+            &options,
+        )
+        .expect("initializes");
+    let stored = serde_json::to_value(&initialized.instance).expect("an instance serializes");
+    let restored = program
+        .restore_component_instance(stored)
+        .expect("restores");
+    program
+        .dispatch_component_actions(&restored, &tap("h1-1"), &options)
+        .expect("dispatches");
+    assert_eq!(panel_item(&origins), None);
+    // The instance itself keeps them.
+    program
+        .dispatch_component_actions(&initialized.instance, &tap("h1-1"), &options)
+        .expect("dispatches");
+    assert_eq!(
+        panel_item(&origins).as_deref(),
+        Some("<Item name=\"first\" />")
+    );
+}
+
 #[test]
 fn a_call_that_fails_and_a_call_that_renders_nothing_leave_the_origins_report_empty() {
     let program = linked("components", "main.nx", false);

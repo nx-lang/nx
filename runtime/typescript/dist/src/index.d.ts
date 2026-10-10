@@ -486,10 +486,12 @@ export interface NxRuntimeOptions {
      * empty. An object the runtime cannot write to is refused with `nx-ir-options` before anything
      * runs.
      *
-     * <para>Only a call given a report keeps track of where records came from, so a call given none
-     * does no more work than it did before origins existed, and its result is the same either way.
-     * A record has an origin only when the image of the module that constructed it carries its debug
-     * section. Calls that overlap and share one object leave the entries of whichever ended last, so
+     * <para>Only a call given a report gives the records it constructs an origin, so a host that never
+     * gives one does no more work than it did before origins existed, and a call's result is the
+     * same either way. A record rebuilt from one that has an origin keeps it in any call, so an
+     * instance keeps the origins of its state through a dispatch given no report. A record the host
+     * passes in has none. A record has an origin only when the image of the module that constructed
+     * it carries its debug section. Calls that overlap and share one object leave the entries of whichever ended last, so
      * give each call its own.</para>
      */
     readonly origins?: NxRuntimeOrigins;

@@ -1,0 +1,42 @@
+// Held records: a component whose state holds records the program built and renders one of them.
+// Each keeps the origin of the element that built it from dispatch to dispatch, through one that
+// leaves it alone and one that swaps it with the other; one an owned handler builds has the
+// handler's element as its origin, and one the host passes in an action has none.
+abstract external component <Node />
+external component <Stack extends Node content children:Node+ />
+external component <Panel extends Node item:Item count:int />
+external component <Button extends Node label:string emits { Tapped { } } />
+external component <Chooser extends Node emits { Chosen { item:Item } } />
+type Item = { name:string }
+
+let first = <Item name="first" />
+
+component <Holder /> = {
+  state { held:Item = {first} spare:Item = <Item name="spare" /> count:int = 0 }
+  <Stack>
+    <Panel item={held} count={count} />
+    <Button label="Count" onTapped=<Update count={count + 1} /> />
+    <Button label="Swap" onTapped=<Update held={spare} spare={held} /> />
+    <Button label="Fresh" onTapped=<Update held=<Item name="fresh" /> /> />
+    <Chooser onChosen=<Update held={action.item} /> />
+  </Stack>
+}
+
+let picked() = <Item name="picked" />
+
+// Function values held in state, one of which the host passes back in an action: it is a function
+// and not a record, so it has no origin and is read as it is.
+type Op = <function n:int />: int
+external component <Result extends Node value:int />
+external component <Picker extends Node emits { Picked { op:Op } } />
+let double(n:int): int = {n * 2}
+let triple(n:int): int = {n * 3}
+let applied(f:Op): int = <f n={2} />
+
+component <Tool /> = {
+  state { op:Op = {double} spare:Op = {triple} }
+  <Stack>
+    <Result value={applied(op)} />
+    <Picker onPicked=<Update op={action.op} /> />
+  </Stack>
+}

@@ -989,6 +989,83 @@ fn corpus_origins_match_the_rust_runtime() {
     );
 }
 
+/// The `(module, start, end)` of every entry `report` holds, at any depth.
+fn origin_spans(report: &Value, spans: &mut BTreeSet<(String, usize, usize)>) {
+    match report {
+        Value::Array(items) => items.iter().for_each(|item| origin_spans(item, spans)),
+        Value::Object(fields) => {
+            match (fields.get("module"), fields.get("start"), fields.get("end")) {
+                (Some(Value::String(module)), Some(start), Some(end)) => {
+                    let offset = |value: &Value| value.as_u64().expect("a byte offset") as usize;
+                    spans.insert((module.clone(), offset(start), offset(end)));
+                }
+                _ => fields.values().for_each(|item| origin_spans(item, spans)),
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Every origin recorded in the corpus is the byte range of a node of its module's syntax tree,
+/// which the source tree's nodes carry, so a tool finds it by module and offsets: exactly one
+/// element node for a record an element constructed, and an expression node that is no element
+/// for a range or a record `apply`, `merge` or `diff` built.
+#[test]
+fn corpus_origins_are_the_byte_ranges_of_syntax_nodes() {
+    use nx_syntax::{parse_str, SyntaxKind, SyntaxNode};
+
+    fn matching<'tree>(node: SyntaxNode<'tree>, span: (usize, usize), out: &mut Vec<SyntaxKind>) {
+        if node.start_byte() <= span.0 && span.1 <= node.end_byte() {
+            if (node.start_byte(), node.end_byte()) == span {
+                out.push(node.kind());
+            }
+            for child in node.children() {
+                matching(child, span, out);
+            }
+        }
+    }
+
+    let mut failures = Vec::new();
+    let mut checked = 0;
+    for program in load_programs() {
+        let path = program.dir.join("expected").join("origins.json");
+        let report: Value = serde_json::from_str(&fs::read_to_string(&path).expect("origins.json"))
+            .expect("origins.json is JSON");
+        let mut spans = BTreeSet::new();
+        origin_spans(&report, &mut spans);
+        for (module, start, end) in spans {
+            let source = &program.sources[&module];
+            let tree = parse_str(source, &module)
+                .tree
+                .expect("a corpus module parses");
+            let mut kinds = Vec::new();
+            matching(tree.root(), (start, end), &mut kinds);
+            let elements = kinds
+                .iter()
+                .filter(|kind| {
+                    matches!(
+                        kind,
+                        SyntaxKind::ELEMENT
+                            | SyntaxKind::SELF_CLOSING_ELEMENT
+                            | SyntaxKind::TEXT_CHILD_ELEMENT
+                    )
+                })
+                .count();
+            let text = &source[start..end];
+            let expected = usize::from(text.starts_with('<'));
+            if kinds.is_empty() || elements != expected {
+                failures.push(format!(
+                    "{} {module} {start}..{end} `{text}`: nodes of that range are {kinds:?}",
+                    program.name
+                ));
+            }
+            checked += 1;
+        }
+    }
+    assert!(checked > 0, "the corpus records no origins");
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 /// The kinds an artifact uses, by table.
 fn coverage_of(artifact: &NxIrArtifact) -> BTreeMap<&'static str, BTreeSet<String>> {
     let mut coverage: BTreeMap<&'static str, BTreeSet<String>> = BTreeMap::new();

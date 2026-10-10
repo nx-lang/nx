@@ -1048,10 +1048,12 @@ export interface NxRuntimeOptions {
    * empty. An object the runtime cannot write to is refused with `nx-ir-options` before anything
    * runs.
    *
-   * <para>Only a call given a report keeps track of where records came from, so a call given none
-   * does no more work than it did before origins existed, and its result is the same either way.
-   * A record has an origin only when the image of the module that constructed it carries its debug
-   * section. Calls that overlap and share one object leave the entries of whichever ended last, so
+   * <para>Only a call given a report gives the records it constructs an origin, so a host that never
+   * gives one does no more work than it did before origins existed, and a call's result is the
+   * same either way. A record rebuilt from one that has an origin keeps it in any call, so an
+   * instance keeps the origins of its state through a dispatch given no report. A record the host
+   * passes in has none. A record has an origin only when the image of the module that constructed
+   * it carries its debug section. Calls that overlap and share one object leave the entries of whichever ended last, so
    * give each call its own.</para>
    */
   readonly origins?: NxRuntimeOrigins;
@@ -2259,7 +2261,11 @@ export function dispatchComponentActions(
     options,
     (input) => measureValues(input, batch),
     (evaluation) => {
-      const entries = readHostValues(batch, "the dispatched batch", (index) => `dispatch entry ${index}`);
+      // The batch is host input, which has no origin. A host may pass back a record the runtime
+      // handed it, in a state or an instance, which is a key of the lineage, so when the dispatch
+      // keeps origins the batch is read as new objects that no map holds.
+      const fresh = evaluation.origins !== undefined || instanceOrigins.has(instance);
+      const entries = readHostValues(batch, "the dispatched batch", (index) => `dispatch entry ${index}`, fresh);
       return dispatchBatch(programOf(program), instance, entries, evaluation);
     },
   );
@@ -2277,9 +2283,10 @@ function dispatchBatch(
   }
   const linked = linkedProgram.entry;
   const ownerKey = `${linked.module.identity}::${declaration.name}`;
-  // The records the instance holds keep the origins its lineage recorded for them.
+  // The records the instance holds keep the origins its lineage recorded for them, whether or not
+  // this call records any of its own.
   const lineage = instanceOrigins.get(instance);
-  if (evaluation.origins !== undefined && lineage !== undefined) {
+  if (lineage !== undefined) {
     evaluation.origins = lineage;
   }
   let working: Record<string, NxCanonicalValue> = { ...instance.state };
@@ -2364,9 +2371,8 @@ function dispatchBatch(
     handlers,
     generation,
   });
-  const kept = evaluation.origins ?? lineage;
-  if (kept !== undefined) {
-    instanceOrigins.set(next, kept);
+  if (evaluation.origins !== undefined) {
+    instanceOrigins.set(next, evaluation.origins);
   }
   return {
     rendered,
@@ -2510,11 +2516,14 @@ interface Evaluation {
    */
   defaultFailed: boolean;
   /**
-   * Where the records the call constructs were constructed, when the host gave an origins report,
-   * and `undefined` otherwise: then nothing is recorded or carried. A dispatch uses the one its
-   * instance's lineage keeps, so a record held in state keeps its origin from call to call.
+   * The origins of the call's records: a new map when the host gave an origins report, and in a
+   * dispatch the one its instance's lineage keeps, so a record held in state keeps its origin
+   * from call to call, a call given no report included. A record rebuilt from one in it is given
+   * the same origin. `undefined` when there is neither, and then nothing is carried.
    */
   origins: RecordOrigins | undefined;
+  /** Whether the host gave an origins report, and so whether the records the call constructs are given origins. */
+  readonly recording: boolean;
   /** The entries of the call's report, once its value has been written for the host. */
   readonly entries: NxOriginEntry[];
 }
@@ -2534,15 +2543,19 @@ interface RecordOrigin {
 type RecordOrigins = WeakMap<object, RecordOrigin>;
 
 /**
- * The origins kept for each instance's lineage, so a dispatch given a report finds the origins of
- * the records its state holds. A value a host passes is never in one: a state it stored and passes
- * back is read as host input, which has no origin, as it has none in every runtime.
+ * The origins kept for each instance's lineage, so a dispatch finds the origins of the records its
+ * state holds. A value a host passes is never in one: a dispatch reads its batch as new objects
+ * (see {@link readHostValue}), and every other call starts a map of its own, so a record the host
+ * passes in has no origin, as it has none in every runtime.
  */
 const instanceOrigins = new WeakMap<NxComponentInstance, RecordOrigins>();
 
-/** Records that node `nodeIndex` of `context` constructed `record`, in a call that keeps track of origins. */
+/** Records that node `nodeIndex` of `context` constructed `record`, in a call given an origins report. */
 function originated<T extends object>(record: T, context: EvalContext, nodeIndex: number): T {
-  context.evaluation.origins?.set(record, { linked: context.linked, node: nodeIndex });
+  const evaluation = context.evaluation;
+  if (evaluation.recording) {
+    evaluation.origins!.set(record, { linked: context.linked, node: nodeIndex });
+  }
   return record;
 }
 
@@ -2571,9 +2584,22 @@ function carryOrigin<T extends object>(record: T, from: object, evaluation: Eval
  */
 function evaluate<T>(options: NxRuntimeOptions, input: (measure: InputMeasure) => void, run: (evaluation: Evaluation) => T): T {
   // The reports are cleared before anything else can refuse the call, so that an object the host
-  // gave to an earlier call never shows that call's numbers or entries for this one.
-  const usage = clearedUsage(options.usage);
-  const origins = clearedOrigins(options.origins);
+  // gave to an earlier call never shows that call's numbers or entries for this one. Each is
+  // cleared before either is refused, so one the runtime cannot write to leaves the other cleared.
+  let refusal: unknown;
+  const cleared = <R>(clear: () => R): R | undefined => {
+    try {
+      return clear();
+    } catch (error) {
+      refusal ??= error;
+      return undefined;
+    }
+  };
+  const usage = cleared(() => clearedUsage(options.usage));
+  const origins = cleared(() => clearedOrigins(options.origins));
+  if (refusal !== undefined) {
+    throw refusal;
+  }
   const maxOperations = options.maxOperations;
   if (maxOperations !== undefined && !(Number.isSafeInteger(maxOperations) && maxOperations >= 0)) {
     fail("nx-ir-options", `The maxOperations option must be a non-negative safe integer, got ${String(maxOperations)}.`);
@@ -2590,6 +2616,7 @@ function evaluate<T>(options: NxRuntimeOptions, input: (measure: InputMeasure) =
     nesting: 0,
     defaultFailed: false,
     origins: origins === undefined ? undefined : new WeakMap(),
+    recording: origins !== undefined,
     entries: [],
   };
   let inputSize: number | undefined;
@@ -2894,15 +2921,19 @@ interface HostFrame {
  *
  * <para>The value returned is the host's own when nothing was left out, which is the usual case.
  * Otherwise the objects and arrays on the way down to a member that was left out are copied
- * without it and the rest is shared, so the host's value is never changed.</para>
+ * without it and the rest is shared, so the host's value is never changed. With `fresh`, every
+ * array and plain object is copied, so that none returned is an object the host holds: a dispatch
+ * reads its batch so when it keeps origins by object, since a host may pass back a record the
+ * runtime handed it, and a record a host passes has no origin. A handler or a function value is
+ * still returned as it is: it is not a record and has no origin.</para>
  *
  * <para>The walk keeps its own stack, as the measure does, so no nesting reaches the engine's. It
  * keeps the objects it is inside, and refuses one found inside itself, which has no finite size;
  * the same object held twice side by side is two values. It charges no operation: it runs once in
  * a call, over input whose size is the host's to limit, and before anything is evaluated.</para>
  */
-function readHostValue(value: unknown, path: string): NxCanonicalValue {
-  if (isReadAsPassed(value, 0)) {
+function readHostValue(value: unknown, path: string, fresh = false): NxCanonicalValue {
+  if (!fresh && isReadAsPassed(value, 0)) {
     return value as NxCanonicalValue;
   }
   const frames: HostFrame[] = [];
@@ -2957,7 +2988,7 @@ function readHostValue(value: unknown, path: string): NxCanonicalValue {
       }
       frames.pop();
       entered.delete(top.source);
-      const read = top.copy ?? top.source;
+      const read = fresh ? copyOf(top) : (top.copy ?? top.source);
       const parent = frames[frames.length - 1];
       if (parent === undefined) {
         return read as NxCanonicalValue;
@@ -3087,13 +3118,18 @@ function readHostRecord(fields: NxHostRecord, path: string): Record<string, NxCa
 /**
  * Reads each of `values`, a call's content or the entries of its batch, as {@link readHostValue}
  * reads any value, by the path `pathOf` gives its index; `path` names the list itself. The list
- * is returned as it is when nothing was left out of any.
+ * is returned as it is when nothing was left out of any, unless `fresh` asks for copies.
  */
-function readHostValues(values: readonly NxHostValue[], path: string, pathOf: (index: number) => string): readonly NxCanonicalValue[] {
+function readHostValues(
+  values: readonly NxHostValue[],
+  path: string,
+  pathOf: (index: number) => string,
+  fresh = false,
+): readonly NxCanonicalValue[] {
   requireHostList(values, path);
   let read: NxCanonicalValue[] | undefined;
   for (let index = 0; index < values.length; index += 1) {
-    const value = readHostValue(values[index], pathOf(index));
+    const value = readHostValue(values[index], pathOf(index), fresh);
     if (value !== values[index]) {
       (read ??= values.slice() as NxCanonicalValue[])[index] = value;
     }
@@ -4184,7 +4220,7 @@ function reportedOutput(
 ): { value: NxCanonicalValue; handlers: Map<string, ActionHandlerValue> } {
   const evaluation = payer.evaluation;
   const origins = evaluation.origins;
-  return canonicalizeRendered(value, generation, payer, origins === undefined ? undefined : { origins, entries: evaluation.entries });
+  return canonicalizeRendered(value, generation, payer, evaluation.recording && origins !== undefined ? { origins, entries: evaluation.entries } : undefined);
 }
 
 /**

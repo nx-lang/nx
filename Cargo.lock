@@ -784,6 +784,7 @@ dependencies = [
  "nx-interpreter",
  "nx-ir",
  "nx-ir-runtime",
+ "nx-syntax",
  "nx-types",
  "nx-value",
  "rustc-hash 2.1.3",

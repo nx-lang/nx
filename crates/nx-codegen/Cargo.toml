@@ -23,5 +23,6 @@ smol_str = { workspace = true }
 
 [dev-dependencies]
 nx-ir-runtime = { path = "../nx-ir-runtime" }
+nx-syntax = { path = "../nx-syntax" }
 nx-value = { workspace = true }
 tempfile = "3"

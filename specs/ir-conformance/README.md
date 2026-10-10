@@ -8,7 +8,10 @@ refuse every truncation of them and every cell overwrite of the small ones; anot
 here. Together the programs cover every node, type,
 constant and declaration kind of the schema, every binary operator and intrinsic, a program
 spanning two images, derived declarations, a snippet compiled against an implicitly imported
-catalog, a document that is a single trailing element, components that bind action handlers, two
+catalog, a document that is a single trailing element, components that bind action handlers,
+`held-records`, a component that holds records it built in its state and renders one, whose origins
+must survive every dispatch and which takes a record from the host in an action (the program
+also holds function values in state, which the runtimes' own tests pass back), two
 programs that import the standard library `@nx/agent` and emit its image beside their own (the
 library's worked example, and tool functions that take a host context by its subtype or its base),
 a program that declares a function type, passes functions as values and calls them by name, one
@@ -115,7 +118,7 @@ offsets of the node that constructed it, one entry to a line so that a diff name
 moved. The entries come from the Rust runtime, read from its origins report over the images with
 their debug sections, and are what makes the two runtimes' reports comparable: each runtime
 evaluates every entrypoint and lifecycle with a report and without one, and must give the same
-value both ways, the recorded entries from the debug images, no entries from the stripped ones, and
+value and the same operation count both ways, the recorded entries from the debug images, no entries from the stripped ones, and
 an empty report for a case that fails.
 
 A program whose `program.json` sets `recordInputSizes` also gets `inputSizes`, keyed as `counts`

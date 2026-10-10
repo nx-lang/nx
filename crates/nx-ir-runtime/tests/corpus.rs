@@ -395,25 +395,42 @@ fn recorded_entries(origins: &Origins) -> serde_json::Value {
 }
 
 /// Runs `run` with an origins report and without one, and checks that the report gives
-/// `recorded` and that the value is the same either way, since a report changes no result.
-/// Returns what is wrong, if anything, and the value from the run with the report.
+/// `recorded` and that the value and the operations the usage report counts are the same
+/// either way, since an origins report changes neither. Returns what is wrong, if anything, and
+/// the value from the run with the report.
 fn check_origins<T>(
     recorded: &serde_json::Value,
     run: impl Fn(&RuntimeOptions) -> Result<T, NxIrRuntimeError>,
     same: impl Fn(&T, &T) -> bool,
 ) -> (Option<String>, Option<T>) {
     let origins = Arc::new(Origins::new());
-    let reporting = RuntimeOptions {
-        origins: Some(Arc::clone(&origins)),
+    let (usage, plain_usage) = (Arc::new(Usage::new()), Arc::new(Usage::new()));
+    // A budget no call reaches, so that the usage report counts operations.
+    let plain = RuntimeOptions {
+        max_operations: Some(u64::MAX),
+        usage: Some(Arc::clone(&plain_usage)),
         ..RuntimeOptions::default()
     };
-    let (with, without) = match (run(&reporting), run(&RuntimeOptions::default())) {
+    let reporting = RuntimeOptions {
+        origins: Some(Arc::clone(&origins)),
+        usage: Some(Arc::clone(&usage)),
+        ..plain.clone()
+    };
+    let (with, without) = match (run(&reporting), run(&plain)) {
         (Ok(with), Ok(without)) => (with, without),
         (Err(error), _) | (_, Err(error)) => return (Some(error.to_string()), None),
     };
     if !same(&with, &without) {
         let problem = "gives another value with an origins report than without one";
         return (Some(problem.to_string()), None);
+    }
+    if usage.operations() != plain_usage.operations() {
+        let problem = format!(
+            "costs {:?} operations with an origins report and {:?} without one",
+            usage.operations(),
+            plain_usage.operations()
+        );
+        return (Some(problem), None);
     }
     let actual = recorded_entries(&origins);
     let problem = (actual != *recorded)

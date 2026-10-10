@@ -958,11 +958,13 @@ The report is cleared when a call begins. A call of `evaluateFunction`, `callFun
 with an entry for each record of its value, or of its rendered output, that has an origin; a call
 that fails, and every other call, leaves it empty. Entries are in the order of the walk that numbers
 action handler tokens: depth first, a record before its fields, a list's items in order and a
-record's fields by name. Origins are kept only during a call given a report, so a host that does
-not ask pays nothing, a record built during a call given none has no origin later, and a record the
-host passes in has none. An instance keeps the origins of its state, so a host that reports from
-initialization on sees state records with their origins after every dispatch. Asking for a report
-changes neither a call's operation count nor what it returns, and origins take no part in equality.
+record's fields by name. Origins are given only in a call given a report, so a host that never
+asks pays nothing, a record built during a call given none has no origin later, and a record the
+host passes in has none, even one the runtime handed it earlier. A record rebuilt from another keeps
+its origin in every call, so an instance keeps the origins of its state through every dispatch,
+reported or not; a Rust instance restored from its serialized form has none, since that form does
+not hold them. Asking for a report changes neither a call's operation count nor what it returns, and
+origins take no part in equality.
 
 ### Validation against generated host values
 
@@ -1402,7 +1404,8 @@ the lifecycles, check every count by evaluating under it and under one less, and
 truncation of them and every cell overwrite of the small ones; and the corpus is where another
 runtime starts. It covers
 every node, type and declaration kind, a program spanning two images, derived declarations, a
-document that is a single trailing element, and components that bind action handlers. Two of its
+document that is a single trailing element, components that bind action handlers, and one that
+holds records it built in its state, whose origins every runtime must keep. Two of its
 programs are of the size a host runs, a snippet against a catalog of 45 external components and a
 question flow with state over a library of 31 question kinds, and they are what the TypeScript
 runtime's performance harness times. It also holds

@@ -66,7 +66,7 @@ impl Origins {
 }
 
 /// The node that constructed a record: the module it belongs to and its index in that module's
-/// node table. Held on a record only during calls given a report.
+/// node table. Set on a record only in calls given a report.
 #[derive(Clone)]
 pub(crate) struct Origin {
     pub module: Arc<ModuleData>,

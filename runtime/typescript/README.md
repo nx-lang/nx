@@ -439,9 +439,10 @@ Spans come from the images' debug sections, so a record of a module whose image 
 one has no origin and a report over stripped images stays empty; that is not an error. The runtime
 replaces `entries` with an empty list when a call begins and fills it when the call returns, so a
 call that throws, and every other call, leaves it empty. Nothing is collected for a call given no
-report, so a record built during such a call has no origin later, and neither does a record the
-host passes in; an instance keeps the origins of its state, so a host that reports from
-initialization on sees them after every dispatch. The report changes neither a call's operation
+report, so a host that never asks pays nothing and a record built during such a call has no origin
+later. Neither does a record the host passes in, even one the runtime handed it in a state earlier.
+A record rebuilt from another keeps its origin in every call, so an instance keeps the origins of
+its state through every dispatch, reported or not. The report changes neither a call's operation
 count nor its value, and records with origins are equal to records without. As with `usage`, the
 object must be one the runtime can write to, or the call is refused with `nx-ir-options` before
 anything runs, and calls that overlap should each have their own.
