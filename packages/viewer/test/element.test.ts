@@ -216,7 +216,7 @@ describe("values", () => {
   it("keeps underscores inside words and spaced asterisks as written", async () => {
     const element = show(await fixture("markdownText"));
     const body = root(element).querySelector(".card .text-body")!;
-    assert.match(read(body), /Call find_plans_for_team when asked\. Price is 2 \* 3 \* 4 dollars\./);
+    assert.match(read(body), /Call find_plans_for_team or snake__case__x when asked\. Price is 2 \* 3 \* 4 dollars\./);
     assert.deepEqual(Array.from(body.querySelectorAll("em")).map(read), ["really", "important"]);
     assert.deepEqual(Array.from(body.querySelectorAll("strong")).map(read), ["bold", "strong"]);
   });
@@ -436,6 +436,19 @@ describe("selection", () => {
     element.selection = "Nothing.here";
     assert.equal(element.selection, undefined);
     assert.equal(root(element).querySelectorAll(".selected").length, 0);
+  });
+
+  it("announces a selected card by its kind and a row as name and value", async () => {
+    const flow = await fixture("questionFlow");
+    const element = show(flow);
+    const status = root(element).querySelector('[role="status"]')!;
+    rendered(element, "roleQuestion.value").click();
+    assert.equal(status.textContent, "Selected Single choice card, roleQuestion");
+    rendered(element, "roleQuestion.value.layout").click();
+    assert.equal(status.textContent, "Selected layout: chips");
+    const choice = keyWhere(flow, (node) => node.role === "element" && node.name === "Choice");
+    rendered(element, choice).click();
+    assert.equal(status.textContent, "Selected Choice card");
   });
 
   it("marks the selected node for assistive technology", async () => {

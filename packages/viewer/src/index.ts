@@ -47,6 +47,38 @@ const ElementBase = (typeof HTMLElement === "undefined" ? class {} : HTMLElement
 /** The attributes that carry a rendered node's key: an original, a copy, a later part of a run. */
 const KEYED = "[data-key], [data-ref-key], [data-part-of]";
 
+/**
+ * What `element` reads as, word by word: its text with pieces kept apart, an image by its label,
+ * and without the controls and tags that only decorate it.
+ */
+function spoken(element: Element | null): string {
+  const words: string[] = [];
+  const walk = (node: Node) => {
+    if (node.nodeType === 3) {
+      words.push(node.textContent ?? "");
+      return;
+    }
+    if (node.nodeType !== 1) {
+      return;
+    }
+    const child = node as Element;
+    if (child.tagName === "BUTTON" || child.classList.contains("tag") || child.classList.contains("expansion")) {
+      return;
+    }
+    const label = child.getAttribute("role") === "img" ? child.getAttribute("aria-label") : null;
+    if (label !== null) {
+      words.push(label);
+      return;
+    }
+    child.childNodes.forEach(walk);
+    words.push(" ");
+  };
+  if (element !== null) {
+    walk(element);
+  }
+  return words.join("").replace(/\s+/g, " ").replace(/ ([,.!?;:])/g, "$1").trim();
+}
+
 function keyOf(element: Element): string | undefined {
   const data = (element as HTMLElement).dataset;
   return data["key"] ?? data["refKey"] ?? data["partOf"];
@@ -401,12 +433,25 @@ export class NxViewerElement extends ElementBase {
     element.scrollIntoView?.({ block: "nearest" });
   }
 
-  /** Tells a screen reader what is selected: the node's role and what it reads as. */
+  /**
+   * Tells a screen reader what is selected, in words: a card by its kind and name, an attribute
+   * as "name: value", anything else by its role and what it reads as.
+   */
   #announce(element: HTMLElement): void {
-    const role = inWords(element.dataset["role"] ?? "").toLowerCase();
-    const reading = (element.textContent ?? "").replace(/\s+/g, " ").trim();
-    const short = reading.length > 120 ? `${reading.slice(0, 119)}…` : reading;
-    this.#announcer.textContent = short === "" ? `Selected ${role}` : `Selected ${role}: ${short}`;
+    const role = element.dataset["role"] ?? "";
+    let words: string;
+    if (element.classList.contains("card")) {
+      const kind = spoken(element.querySelector(":scope > .card-header > .kind"));
+      const name = spoken(element.querySelector(":scope > .card-header > .card-name"));
+      words = `${kind} card${name === "" ? "" : `, ${name}`}`;
+    } else if (role === "attribute") {
+      const name = spoken(element.querySelector(":scope > .label, :scope > .when"));
+      words = `${name}: ${spoken(element.querySelector(":scope > .row-value"))}`;
+    } else {
+      const reading = spoken(element);
+      words = reading === "" ? inWords(role).toLowerCase() : `${inWords(role).toLowerCase()}: ${reading}`;
+    }
+    this.#announcer.textContent = `Selected ${words.length > 140 ? `${words.slice(0, 139)}…` : words}`;
   }
 
   /** Shows or hides a reference's target in place, rendered as a copy of its original. */

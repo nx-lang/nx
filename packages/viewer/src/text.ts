@@ -281,7 +281,15 @@ function renderInline(
     const marker = INLINE_MARKERS.find(({ open }) => matches(body, at, end, open) && canOpen(body, at, end, open));
     const close = marker === undefined ? -1 : findClose(body, at + marker.open.length, end, marker.open);
     if (marker === undefined || close < 0) {
+      // A run of `*` or `_` that cannot open is skipped whole, so its later characters do not open
+      // either: `snake__case__x` keeps its underscores.
+      const char = body.chars[at];
       at += 1;
+      if (char === "*" || char === "_") {
+        while (at < end && body.chars[at] === char) {
+          at += 1;
+        }
+      }
       continue;
     }
     emit(parent, plain, at);
