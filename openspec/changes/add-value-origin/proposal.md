@@ -3,47 +3,47 @@
 The planned NX previewer shows a program's output beside the NX viewer, and the two share one
 selection: clicking a question in the preview selects the NX that produced it, and selecting an
 element in the viewer highlights what it produced. Neither direction is possible today, because an
-evaluated value does not say where it came from. The annotated text `evaluateNx()` returns says,
-for each node, where its *type* is declared, which is the same for every `SingleChoice` in a survey.
-The TypeScript runtime's rendered output carries no source information at all, although an image
-built with its debug section holds a source span for every IR node.
+evaluated value does not say where it came from. The IR runtimes' results carry no source
+information, although an image built with its debug section holds a source span for every IR node,
+which the runtimes already use to put spans on diagnostics.
+
+The interpreter is being retired in favour of the IR runtimes, so origins are built in the
+runtimes only, the same way in Rust and TypeScript.
 
 ## What Changes
 
-- Each record node of the annotated text `evaluateNx()` returns gains an `origin`: the module
-  identity and source span of the element expression that constructed the record. A record passed
-  through props, stored in state or returned from a function keeps the origin of its construction.
-- The TypeScript IR runtime gains an option, `origins`, under which its evaluation and component
-  lifecycle results carry a list of origins for the records in the value they return, each naming
-  the record by its JSON pointer in that value and giving the module identity and the byte span of
-  the IR node that constructed it. An image without its debug section yields no origins and is not
-  an error. Without the option the results are unchanged.
+- Both IR runtimes gain an origins report a host can pass in its options, beside the existing
+  usage report. When a call ends, the report lists the origin of each record in the value the call
+  returned: the record's JSON pointer within that value, and the module identity and byte span of
+  the IR node that constructed it, read from the image's debug section.
+- A record keeps the origin of its construction when it is bound, passed as a prop or argument,
+  stored in state or returned. Records from an image without its debug section have no origin, and
+  that is not an error.
+- Without the report nothing changes: no result type, signature or value differs, and nothing is
+  collected.
+- The two runtimes report the same origins for the same call, checked over the conformance corpus.
 - Origins are byte spans, so a tool matches them to the source tree's nodes by module and byte
   offsets.
 
-The chain of call sites a value passed through, and origins in the Rust IR runtime, are not part of
-this change.
+The chain of call sites a value passed through is not part of this change. Neither is `origin` on
+the annotated text `evaluateNx()` returns: that follows when `evaluateNx()` moves from the
+interpreter onto an IR runtime, as a mapping from this report.
 
 ## Capabilities
 
 ### New Capabilities
 
 - `value-origin`: what an origin is, which values carry one, how it survives being passed around,
-  and how a tool matches it to source.
+  how a runtime reports it, and how a tool matches it to source.
 
 ### Modified Capabilities
 
-- `sdk-wasm`: annotated record nodes carry their origin.
-- `typescript-ir-runtime`: the `origins` option and the origin list on results.
+- `typescript-ir-runtime`: the `origins` option and its report object.
+- `rust-ir-runtime`: `RuntimeOptions::origins` and its report type.
 
 ## Impact
 
-- `crates/nx-interpreter`: a record value records the range of the element expression that
-  constructed it; `crates/nx-api/src/nx_text.rs` writes it on record nodes. The printed text is
-  unchanged.
-- `bindings/wasm`: `NxValueNode.origin` in the TypeScript types.
-- `runtime/typescript`: the option, the result field, and the bookkeeping that keeps a record's
-  constructing node with the record.
-- `packages/value-view`: the element passes `origin` through on its navigation event, so a host
-  can select the construction rather than the type declaration.
-- No change to the IR format, the wire format or evaluation results.
+- `runtime/typescript`: the option, the report type, and keeping each record's constructing node
+  with the record.
+- `crates/nx-ir-runtime`: the same, with the constructing node held on the internal `Record`.
+- No change to the IR format, the wire format, the compiler or the interpreter.
