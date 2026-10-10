@@ -1,0 +1,364 @@
+{
+  "main.nx::Holder": {
+    "batches": [
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Stack",
+          "children": [
+            {
+              "$type": "Panel",
+              "count": 1,
+              "item": {
+                "$type": "Item",
+                "name": "first"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Count",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h2-1"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Swap",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h2-2"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Fresh",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h2-3"
+              }
+            },
+            {
+              "$type": "Chooser",
+              "onChosen": {
+                "$type": "ActionHandler",
+                "action": "Chooser.Chosen",
+                "token": "h2-4"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Stack",
+          "children": [
+            {
+              "$type": "Panel",
+              "count": 1,
+              "item": {
+                "$type": "Item",
+                "name": "spare"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Count",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h3-1"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Swap",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h3-2"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Fresh",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h3-3"
+              }
+            },
+            {
+              "$type": "Chooser",
+              "onChosen": {
+                "$type": "ActionHandler",
+                "action": "Chooser.Chosen",
+                "token": "h3-4"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Stack",
+          "children": [
+            {
+              "$type": "Panel",
+              "count": 2,
+              "item": {
+                "$type": "Item",
+                "name": "spare"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Count",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h4-1"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Swap",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h4-2"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Fresh",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h4-3"
+              }
+            },
+            {
+              "$type": "Chooser",
+              "onChosen": {
+                "$type": "ActionHandler",
+                "action": "Chooser.Chosen",
+                "token": "h4-4"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Stack",
+          "children": [
+            {
+              "$type": "Panel",
+              "count": 2,
+              "item": {
+                "$type": "Item",
+                "name": "fresh"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Count",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h5-1"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Swap",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h5-2"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Fresh",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h5-3"
+              }
+            },
+            {
+              "$type": "Chooser",
+              "onChosen": {
+                "$type": "ActionHandler",
+                "action": "Chooser.Chosen",
+                "token": "h5-4"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Stack",
+          "children": [
+            {
+              "$type": "Panel",
+              "count": 2,
+              "item": {
+                "$type": "Item",
+                "name": "picked"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Count",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h6-1"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Swap",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h6-2"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Fresh",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h6-3"
+              }
+            },
+            {
+              "$type": "Chooser",
+              "onChosen": {
+                "$type": "ActionHandler",
+                "action": "Chooser.Chosen",
+                "token": "h6-4"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Stack",
+          "children": [
+            {
+              "$type": "Panel",
+              "count": 2,
+              "item": {
+                "$type": "Item",
+                "name": "picked"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Count",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h7-1"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Swap",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h7-2"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Fresh",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h7-3"
+              }
+            },
+            {
+              "$type": "Chooser",
+              "onChosen": {
+                "$type": "ActionHandler",
+                "action": "Chooser.Chosen",
+                "token": "h7-4"
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "initial": {
+      "$type": "Stack",
+      "children": [
+        {
+          "$type": "Panel",
+          "count": 0,
+          "item": {
+            "$type": "Item",
+            "name": "first"
+          }
+        },
+        {
+          "$type": "Button",
+          "label": "Count",
+          "onTapped": {
+            "$type": "ActionHandler",
+            "action": "Button.Tapped",
+            "token": "h1-1"
+          }
+        },
+        {
+          "$type": "Button",
+          "label": "Swap",
+          "onTapped": {
+            "$type": "ActionHandler",
+            "action": "Button.Tapped",
+            "token": "h1-2"
+          }
+        },
+        {
+          "$type": "Button",
+          "label": "Fresh",
+          "onTapped": {
+            "$type": "ActionHandler",
+            "action": "Button.Tapped",
+            "token": "h1-3"
+          }
+        },
+        {
+          "$type": "Chooser",
+          "onChosen": {
+            "$type": "ActionHandler",
+            "action": "Chooser.Chosen",
+            "token": "h1-4"
+          }
+        }
+      ]
+    }
+  },
+  "main.nx::picked": {
+    "$type": "Item",
+    "name": "picked"
+  }
+}

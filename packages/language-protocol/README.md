@@ -51,7 +51,7 @@ document's UTF-8 text, which is what the language service measured.
 
 ## Queries
 
-Four queries are defined; each has a request and an answer type that round-trip through JSON. The
+Five queries are defined; each has a request and an answer type that round-trip through JSON. The
 examples below are compiled in `test/examples.test.ts`, so they cannot drift from the types.
 
 ### `hover`
@@ -146,6 +146,54 @@ const answer: DocumentSymbol[] = [
 `kind` is one of `Function`, `Value`, `TypeAlias`, `Record`, `Action`, `Union`, `Component`,
 `Element`.
 
+### `sourceTree` (unstable)
+
+**Unstable:** the answer's shape may change in any release until a later one commits to it. It is
+published for the NX viewer and a structural change view to build on.
+
+```ts
+const request: SourceTreeRequest = { documents, uri: "nx://tenant/ui.nx" };
+
+const answer: SourceTree = {
+  uri: "nx://tenant/ui.nx",
+  identity: "tenant/ui.nx",
+  version: 3,
+  nodes: [
+    { role: "declaration", range: range(0, 47), key: "Button", name: "Button", declaration: 0, flags: ["export"] },
+    { role: "parameter", range: range(19, 31), parent: 0, key: "Button.label", name: "label" },
+    { role: "typeReference", range: range(25, 31), parent: 1, key: "Button.label.type", value: "string" },
+    { role: "element", range: range(37, 47), parent: 0, key: "Button.body", name: "button", type: "button" },
+  ],
+  declarations: [
+    { module: "tenant/ui.nx", name: "Button", kind: "function", range: range(0, 47), properties: [{ name: "label", type: "string" }] },
+  ],
+};
+```
+
+(`range(start, end)` stands for the `EditorRange` of those bytes on line 0.)
+
+Every piece of the document is a node, comments and regions that did not parse included, and every
+token belongs to exactly one node: the smallest whose range holds it. Nodes are listed in order of
+start offset, each parent before its children, with the index of the parent. A node has a `role`
+(`element`, `attribute`, `literal`, `case`, `operator`, `condition`, `comment`, `unparsed` and the
+rest of `SourceRole`), and carries what it says as written in `name`, `value` and `textType`, its
+type spelled in NX in `type` when the type checker gave it one, and in `declaration` the index of
+the declaration it refers to. A node's type and declaration are what hover reports inside it.
+
+`key` is the node's path within the document, such as `roleQuestion.value.choices[2].label`: the
+top-level declaration's name, then the attributes, members, arms and slots on the way, and positions
+for items. An edit to another declaration or another attribute does not change it, so two versions
+of a document can be compared by key. A key is an identifier to compare for equality, not a path to
+split: an arm is named by its patterns or test as written (`is Mode.dark`, `when x > 1`) and an
+import by its path, and those may hold dots and spaces. Read the tree's structure from `parent`.
+
+`declarations` lists once each declaration a node refers to, from this document, another document
+of the set or a library: its module identity, name and kind, its range when this document declares
+it, its doc comment, its properties in declaration order with inherited ones first (each with its
+type, its default as written, and whether it is optional, content or inherited), its bases, a
+component's state, a union's cases, an alias's type, and a value's type and the range of its value.
+Optional properties of a node or a declaration are absent rather than `null` when they do not apply.
+
 ### Reserved names
 
 `definition`, `references`, `rename`, `signatureHelp`, `inlayHints` and `semanticTokens` are
@@ -161,6 +209,7 @@ interface NxLanguageService {
   completions(request: CompletionsRequest, signal?: AbortSignal): Promise<CompletionList>;
   diagnostics(request: DiagnosticsRequest, signal?: AbortSignal): Promise<DiagnosticReport>;
   documentSymbols(request: DocumentSymbolsRequest, signal?: AbortSignal): Promise<DocumentSymbol[]>;
+  sourceTree(request: SourceTreeRequest, signal?: AbortSignal): Promise<SourceTree>; // unstable
 }
 ```
 

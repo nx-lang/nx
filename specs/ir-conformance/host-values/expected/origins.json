@@ -1,0 +1,25 @@
+{
+  "main.nx::Counter": {
+    "batches": [
+      [
+        {"path": "", "module": "main.nx", "start": 4118, "end": 4183}
+      ],
+      [
+        {"path": "", "module": "main.nx", "start": 4118, "end": 4183}
+      ]
+    ],
+    "initial": [
+      {"path": "", "module": "main.nx", "start": 4118, "end": 4183}
+    ]
+  },
+  "main.nx::bound#list": [],
+  "main.nx::greeting#long": [],
+  "main.nx::held#longName": [],
+  "main.nx::held#record": [],
+  "main.nx::held#text": [],
+  "main.nx::held#wideInteger": [],
+  "main.nx::listed#one": [],
+  "main.nx::listed#three": [],
+  "main.nx::same#firstItem": [],
+  "main.nx::same#unlikeNames": []
+}

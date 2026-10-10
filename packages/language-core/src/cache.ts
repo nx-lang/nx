@@ -6,6 +6,7 @@ export interface SnapshotLike {
   completions(uri: string, position: { line: number; character: number }): unknown;
   diagnostics(): unknown;
   documentSymbols(uri: string): unknown;
+  sourceTree(uri: string): unknown;
   dispose(): void;
 }
 

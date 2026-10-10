@@ -1,0 +1,26 @@
+{
+  "app/main.nx::Panel": {
+    "batches": [
+      [
+        {"path": "", "module": "app/main.nx", "start": 631, "end": 687}
+      ]
+    ],
+    "initial": [
+      {"path": "", "module": "app/main.nx", "start": 631, "end": 687}
+    ]
+  },
+  "app/main.nx::card": [
+    {"path": "", "module": "app/main.nx", "start": 249, "end": 287}
+  ],
+  "app/main.nx::local": [
+    {"path": "", "module": "app/main.nx", "start": 302, "end": 321}
+  ],
+  "app/main.nx::root": [
+    {"path": "", "module": "app/main.nx", "start": 367, "end": 398}
+  ],
+  "app/main.nx::total": [],
+  "app/main.nx::user": [
+    {"path": "", "module": "shared/model.nx", "start": 371, "end": 399}
+  ],
+  "shared/model.nx::answer": []
+}

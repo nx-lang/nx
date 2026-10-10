@@ -938,6 +938,34 @@ value measured alone has the size it adds to a call that is given it as one of t
 supplies. A list of positional arguments, of content or of batch entries measured as one value is
 one more than its entries add to a call, since a call counts the entries and not the list.
 
+### Where records came from
+
+A runtime may also report where the records of one call's value were constructed: `origins` in the
+TypeScript runtime's options, an object the runtime writes `entries` to, and
+`RuntimeOptions::origins` in the Rust runtime, an `Origins` the host shares with it. A record's
+origin is the node of the element expression that constructed it, or of the range expression for a
+range, and the record keeps it wherever it goes: bound to a name, passed as a prop or an argument,
+held in state, placed in a list, returned. A record that `apply`, `merge`, `diff` or an update
+record's application builds takes the node of the expression that built it, and a record that
+normalization rebuilds, to fill a default or convert a field, keeps the origin of the one it
+rebuilt. Each entry is the record's JSON pointer (RFC 6901) within the value the host received,
+`""` for the value itself, with the module identity and the `(start, end)` byte span of the node
+from that module's debug section. A record of a module whose image has no debug section has no
+origin, so a report over images without one stays empty.
+
+The report is cleared when a call begins. A call of `evaluateFunction`, `callFunction`,
+`initializeComponent`, `evaluateComponent` or `dispatchComponentActions` that succeeds fills it
+with an entry for each record of its value, or of its rendered output, that has an origin; a call
+that fails, and every other call, leaves it empty. Entries are in the order of the walk that numbers
+action handler tokens: depth first, a record before its fields, a list's items in order and a
+record's fields by name. Origins are given only in a call given a report, so a host that never
+asks pays nothing, a record built during a call given none has no origin later, and a record the
+host passes in has none, even one the runtime handed it earlier. A record rebuilt from another keeps
+its origin in every call, so an instance keeps the origins of its state through every dispatch,
+reported or not; a Rust instance restored from its serialized form has none, since that form does
+not hold them. Asking for a report changes neither a call's operation count nor what it returns, and
+origins take no part in equality.
+
 ### Validation against generated host values
 
 The cost model's claim, that work which is not charged does not grow with the size of a value, is
@@ -1276,8 +1304,9 @@ state of its own, and a dispatch that fails leaves the instance it was given usa
 
 Every evaluation function takes options: `maxCallDepth` (100 by default), `maxRangeLength` (one
 million), `maxOperations`, the budget of *Evaluation cost*, and `maxInputSize`, the limit of
-*Input size*, each of the last two unlimited unless set, and `usage`, an object the runtime reports
-what the call used to. One budget covers one call, a dispatch's whole batch and the render after it
+*Input size*, each of the last two unlimited unless set, `usage`, an object the runtime reports
+what the call used to, and `origins`, one it reports where the records of the call's value came
+from to. One budget covers one call, a dispatch's whole batch and the render after it
 included. Expressions nest at most 1,000 deep, and a `RangeError` the JavaScript engine raises
 during evaluation is reported as a diagnostic. Every `nx-ir-resource-limit` diagnostic carries
 `limit`, the name and value of the limit reached: `maxOperations`, `maxInputSize`, `maxCallDepth`,
@@ -1340,7 +1369,8 @@ renders itself meets.
 counts it: the same images, input and budget stop at the same node.
 `RuntimeOptions::max_input_size` is the input limit of *Input size*, measured as the TypeScript
 runtime measures it, so the same input is refused under the same limit; `RuntimeOptions::usage`
-reports what a call used; and `input_size` and `record_input_size` measure a value and a map of
+reports what a call used; `RuntimeOptions::origins` reports where the records of a call's value
+came from, with the same entries as the TypeScript runtime; and `input_size` and `record_input_size` measure a value and a map of
 named values as the limit does. A resource-limit diagnostic's `limit` uses the TypeScript
 runtime's names for the limits the two share, and adds `maxStackBytes`, `maxValueNesting` and
 `maxComponentDepth` for the three only this runtime has. A diagnostic's `argument` is the TypeScript runtime's: for the same
@@ -1364,15 +1394,18 @@ checks a count, at the size and at one less. A case may be marked as one that fa
 its diagnostic and the argument the diagnostic names, as the Rust runtime reports them, are then
 recorded in `diagnostics.json` in place of a result, and every runtime must fail the case with
 that code and name that argument, or none. `argument-diagnostics` holds those cases, and a case
-whose recorded budget runs out while its argument is checked, a failure that names none. The
-emitter's tests pin
+whose recorded budget runs out while its argument is checked, a failure that names none.
+`origins.json` records each evaluation's origins report from the images with their debug sections,
+which every runtime that reports origins must give, and give with an equal result. The emitter's
+tests pin
 the images byte for byte and check that each committed text is the explanation of its committed
 image; the TypeScript runtime's tests and the Rust runtime's tests each evaluate the images, drive
 the lifecycles, check every count by evaluating under it and under one less, and refuse every
 truncation of them and every cell overwrite of the small ones; and the corpus is where another
 runtime starts. It covers
 every node, type and declaration kind, a program spanning two images, derived declarations, a
-document that is a single trailing element, and components that bind action handlers. Two of its
+document that is a single trailing element, components that bind action handlers, and one that
+holds records it built in its state, whose origins every runtime must keep. Two of its
 programs are of the size a host runs, a snippet against a catalog of 45 external components and a
 question flow with state over a library of 31 question kinds, and they are what the TypeScript
 runtime's performance harness times. It also holds

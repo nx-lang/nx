@@ -14,6 +14,7 @@ import type {
   Hover,
   LanguageDocument,
   LanguageQueryName,
+  SourceTree,
   TextPosition
 } from "@nx-lang/language-protocol";
 
@@ -143,5 +144,7 @@ export function answerQuery(
     }
     case "documentSymbols":
       return snapshot.documentSymbols(request.uri) as DocumentSymbol[];
+    case "sourceTree":
+      return withVersion(snapshot.sourceTree(request.uri) as SourceTree);
   }
 }

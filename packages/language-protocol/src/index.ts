@@ -81,8 +81,21 @@ export type DiagnosticsRequest = LanguageQuery;
 /** Top-level symbols of one document. */
 export type DocumentSymbolsRequest = LanguageQuery;
 
+/**
+ * Every piece of one document as a typed node, with the declarations the nodes refer to.
+ *
+ * Unstable: the answer's shape may change until a later release commits to it.
+ */
+export type SourceTreeRequest = LanguageQuery;
+
 /** The queries this protocol defines. */
-export const LANGUAGE_QUERIES = ["hover", "completions", "diagnostics", "documentSymbols"] as const;
+export const LANGUAGE_QUERIES = [
+  "hover",
+  "completions",
+  "diagnostics",
+  "documentSymbols",
+  "sourceTree",
+] as const;
 
 /** A query name this protocol defines. */
 export type LanguageQueryName = (typeof LANGUAGE_QUERIES)[number];
@@ -111,6 +124,7 @@ export interface LanguageQueryRequests {
   completions: CompletionsRequest;
   diagnostics: DiagnosticsRequest;
   documentSymbols: DocumentSymbolsRequest;
+  sourceTree: SourceTreeRequest;
 }
 
 /** The answer shape of each defined query. */
@@ -119,6 +133,7 @@ export interface LanguageQueryAnswers {
   completions: CompletionList;
   diagnostics: DiagnosticReport;
   documentSymbols: DocumentSymbol[];
+  sourceTree: SourceTree;
 }
 
 /** Returns whether `name` is a query this protocol defines. */
@@ -247,6 +262,155 @@ export interface DocumentSymbol {
   selectionRange: EditorRange;
 }
 
+/**
+ * What a source node is: a construct a reader recognizes rather than a grammar production.
+ *
+ * `binding` is a name a `for` binds; `matchArm` is an arm of an `is` expression or of a condition
+ * list; `unparsed` is a region the parser could not read.
+ */
+export type SourceRole =
+  | "import"
+  | "declaration"
+  | "parameter"
+  | "stateField"
+  | "field"
+  | "unionCase"
+  | "emit"
+  | "typeReference"
+  | "element"
+  | "attribute"
+  | "text"
+  | "embed"
+  | "literal"
+  | "empty"
+  | "case"
+  | "reference"
+  | "member"
+  | "operator"
+  | "call"
+  | "sequence"
+  | "condition"
+  | "match"
+  | "matchArm"
+  | "loop"
+  | "binding"
+  | "comment"
+  | "docComment"
+  | "unparsed";
+
+/** A variation of a construct that matters to a renderer and not to its role. */
+export type SourceFlag =
+  | "braced"
+  | "parenthesized"
+  | "content"
+  | "handler"
+  | "stateUpdate"
+  | "inherited"
+  | "optional"
+  | "raw"
+  | "abstract"
+  | "external"
+  | "export"
+  | "private";
+
+/**
+ * One piece of the source. Every token of the document belongs to exactly one node, the smallest
+ * whose range holds it.
+ */
+export interface SourceNode {
+  role: SourceRole;
+  /** The range the construct covers, children included. */
+  range: EditorRange;
+  /** The index of the enclosing node in `nodes`; absent for a top-level node. */
+  parent?: number;
+  /**
+   * The node's path within the document, such as `roleQuestion.value.choices[2].label`: stable
+   * under edits elsewhere, and unique within the tree. Compare keys for equality; do not split
+   * them, since a segment written from the source, such as an arm's pattern, may hold a dot. The
+   * tree's structure is in `parent`.
+   */
+  key: string;
+  /** The name the construct declares or names: a declaration's, an attribute's, a tag, a case. */
+  name?: string;
+  /** What the construct says as written: a literal, an operator's token, a type, a text run, a comment. */
+  value?: string;
+  /** The text type of a typed body, as `markdown` in `<Note:markdown>`. */
+  textType?: string;
+  /** The construct's type spelled in NX, wherever the type checker gave it one. */
+  type?: string;
+  /** The index in `declarations` of what the construct refers to; for a declaration, its own entry. */
+  declaration?: number;
+  flags?: SourceFlag[];
+}
+
+/** The kinds of declaration a source tree's declaration table describes. */
+export type SourceDeclarationKind =
+  | "record"
+  | "action"
+  | "union"
+  | "alias"
+  | "component"
+  | "function"
+  | "value";
+
+/** One property of a declaration, or one field of a union case or of a component's state. */
+export interface SourceProperty {
+  name: string;
+  /** The declared type spelled in NX. */
+  type: string;
+  /** The source text of the default, when the property has one. */
+  default?: string;
+  /** The doc comment, rendered as hover renders it. */
+  doc?: string;
+  /** `optional`, `content` and `inherited`, where they apply. */
+  flags?: SourceFlag[];
+}
+
+/** One case of a union. */
+export interface SourceCase {
+  name: string;
+  doc?: string;
+  properties?: SourceProperty[];
+}
+
+/** One declaration a source node refers to, from this module or any other. */
+export interface SourceDeclaration {
+  /** The identity of the declaring module. */
+  module: string;
+  name: string;
+  kind: SourceDeclarationKind;
+  /** The whole declaration, when the queried document declares it. */
+  range?: EditorRange;
+  /** The doc comment, rendered as hover renders it. */
+  doc?: string;
+  /** Properties in declaration order, inherited ones first. */
+  properties?: SourceProperty[];
+  /** A component's state fields. */
+  state?: SourceProperty[];
+  /** The indices in `declarations` of the declaration's bases, nearest first. */
+  bases?: number[];
+  /** A union's cases. */
+  cases?: SourceCase[];
+  /** The type an alias names, or a value's type, spelled in NX. */
+  type?: string;
+  /** The range of a value declaration's value, when the queried document declares it. */
+  valueRange?: EditorRange;
+}
+
+/**
+ * The answer to a source tree query: the document's nodes in order of start offset, each parent
+ * before its children, and the declarations they refer to.
+ *
+ * Unstable: the shape may change until a later release commits to it.
+ */
+export interface SourceTree {
+  uri: string;
+  identity: string;
+  version: number | null;
+  nodes: SourceNode[];
+  declarations: SourceDeclaration[];
+}
+
 // ---------------------------------------------------------------------------------------------
 // Service interface
 // ---------------------------------------------------------------------------------------------
@@ -263,6 +427,8 @@ export interface NxLanguageService {
   completions(request: CompletionsRequest, signal?: AbortSignal): Promise<CompletionList>;
   diagnostics(request: DiagnosticsRequest, signal?: AbortSignal): Promise<DiagnosticReport>;
   documentSymbols(request: DocumentSymbolsRequest, signal?: AbortSignal): Promise<DocumentSymbol[]>;
+  /** Unstable: the answer's shape may change until a later release commits to it. */
+  sourceTree(request: SourceTreeRequest, signal?: AbortSignal): Promise<SourceTree>;
 }
 
 // ---------------------------------------------------------------------------------------------

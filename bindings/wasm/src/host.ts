@@ -3,6 +3,7 @@ import type {
   DiagnosticReport,
   DocumentSymbol,
   Hover,
+  SourceTree,
   TextPosition
 } from "@nx-lang/language-protocol";
 
@@ -312,6 +313,13 @@ export interface NxLanguageSnapshot {
    * Top-level symbols of the document at `uri`.
    */
   documentSymbols(uri: string): DocumentSymbol[];
+
+  /**
+   * Every piece of the document at `uri` as a typed node, with the declarations the nodes refer to.
+   *
+   * Unstable: the answer's shape may change in any release until a later one commits to it.
+   */
+  sourceTree(uri: string): SourceTree;
 
   /**
    * Releases the snapshot inside the module. Calling `dispose` more than once is allowed.
@@ -880,6 +888,15 @@ class WasmLanguageSnapshot implements NxLanguageSnapshot {
       "nx_wasm_snapshot_document_symbols",
       (exports, pointer, length) =>
         exports.nx_wasm_snapshot_document_symbols(handle, pointer, length),
+      { uri }
+    );
+  }
+
+  sourceTree(uri: string): SourceTree {
+    const handle = this.#live();
+    return this.#host.callWithArgument<SourceTree>(
+      "nx_wasm_snapshot_source_tree",
+      (exports, pointer, length) => exports.nx_wasm_snapshot_source_tree(handle, pointer, length),
       { uri }
     );
   }

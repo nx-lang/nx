@@ -25,7 +25,7 @@ pub fn apply(target: &NxValue, update: &NxValue) -> Result<NxValue> {
     let stack = host_stack();
     let (target, update) = (from_host(target, &stack)?, from_host(update, &stack)?);
     to_host(
-        &update::apply(record(&target, "apply")?, record(&update, "apply")?)?,
+        &update::apply(record(&target, "apply")?, record(&update, "apply")?, None)?,
         None,
         &Meter::free(),
         &stack,
@@ -38,7 +38,7 @@ pub fn merge(first: &NxValue, second: &NxValue) -> Result<NxValue> {
     let stack = host_stack();
     let (first, second) = (from_host(first, &stack)?, from_host(second, &stack)?);
     to_host(
-        &update::merge(record(&first, "merge")?, record(&second, "merge")?)?,
+        &update::merge(record(&first, "merge")?, record(&second, "merge")?, None)?,
         None,
         &Meter::free(),
         &stack,
@@ -56,6 +56,7 @@ pub fn diff(before: &NxValue, after: &NxValue) -> Result<NxValue> {
         &update::diff(
             record(&before, "diff")?,
             record(&after, "diff")?,
+            None,
             &Meter::free(),
             &stack,
         )?,

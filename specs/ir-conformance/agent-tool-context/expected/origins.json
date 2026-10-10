@@ -1,0 +1,8 @@
+{
+  "main.nx::root": [
+    {"path": "", "module": "main.nx", "start": 416, "end": 619},
+    {"path": "/tools/0", "module": "main.nx", "start": 480, "end": 514},
+    {"path": "/tools/1", "module": "main.nx", "start": 519, "end": 555},
+    {"path": "/tools/2", "module": "main.nx", "start": 560, "end": 597}
+  ]
+}

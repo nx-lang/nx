@@ -1,0 +1,17 @@
+{
+  "app/main.nx::equal": [],
+  "app/main.nx::imported": [],
+  "app/main.nx::none": [],
+  "app/main.nx::pages": [],
+  "app/main.nx::passedAlong": [
+    {"path": "", "module": "shared/bounds.nx", "start": 291, "end": 299}
+  ],
+  "app/main.nx::root": [],
+  "app/main.nx::squares": [],
+  "shared/bounds.nx::closed": [
+    {"path": "", "module": "shared/bounds.nx", "start": 177, "end": 182}
+  ],
+  "shared/bounds.nx::half": [
+    {"path": "", "module": "shared/bounds.nx", "start": 130, "end": 134}
+  ]
+}

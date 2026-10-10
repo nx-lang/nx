@@ -52,6 +52,10 @@ pub struct CorpusProgram {
     /// What each evaluation costs, where recorded budgets below that stop it, and, for a program
     /// that records them, the input size of each case and lifecycle step.
     pub operations: serde_json::Value,
+    /// What the origins report gives for each evaluation from the images with their debug
+    /// sections, keyed as `results` is: an entrypoint's entries, or a lifecycle's
+    /// `{ "initial", "batches" }`.
+    pub origins: serde_json::Value,
 }
 
 pub fn corpus_root() -> PathBuf {
@@ -188,6 +192,7 @@ pub fn load_corpus() -> Vec<CorpusProgram> {
                     .filter(|path| path.exists())
                     .map_or(serde_json::json!({}), read_json),
                 operations: read_json(dir.join("expected").join("operations.json")),
+                origins: read_json(dir.join("expected").join("origins.json")),
                 name,
             }
         })

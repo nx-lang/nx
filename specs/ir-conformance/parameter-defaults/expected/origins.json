@@ -1,0 +1,12 @@
+{
+  "app/main.nx::allArguments": [],
+  "app/main.nx::elementDefaults": [],
+  "app/main.nx::elementSkip": [],
+  "app/main.nx::emptyOptional": [],
+  "app/main.nx::importedAll": [],
+  "app/main.nx::importedDefault": [],
+  "app/main.nx::liftedDefault": [],
+  "app/main.nx::oneArgument": [],
+  "app/main.nx::skipMiddle": [],
+  "app/main.nx::twoArguments": []
+}

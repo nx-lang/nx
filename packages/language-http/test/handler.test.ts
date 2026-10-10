@@ -12,6 +12,7 @@ import type {
   Hover,
   LanguageDocument,
   LanguageServiceErrorBody,
+  SourceTree,
 } from "@nx-lang/language-protocol";
 import { NxLibraryRegistry } from "@nx-lang/sdk-node";
 import {
@@ -230,6 +231,7 @@ test("an evicted snapshot is disposed and the cache never exceeds its size", asy
         completions: () => ({ uri: FORM, identity: "tenant/form.nx", version: null, items: [] }),
         diagnostics: () => ({ documents: [], workspace: [] }),
         documentSymbols: () => [],
+        sourceTree: () => ({ uri: FORM, identity: "tenant/form.nx", version: null, nodes: [], declarations: [] }),
         dispose: () => disposed.push(source),
       };
     },
@@ -346,6 +348,19 @@ test("document symbols through host context are the document's own", async () =>
   assert.equal(symbols[0]!.range.startByte, 0);
 });
 
+test("a source tree through host context is the document's own, its declarations the context's", async () => {
+  const source = '<Panel mode=light title="x" />\n';
+  const tree = await json<SourceTree>(
+    await contextHandler(post("sourceTree", { documents: [{ uri: FORM, source, version: 6 }], uri: FORM })),
+  );
+  assert.equal(tree.uri, FORM);
+  assert.equal(tree.version, 6);
+  const element = tree.nodes.find((node) => node.role === "element")!;
+  assert.equal(element.name, "Panel");
+  assert.equal(element.range.startByte, 0);
+  assert.equal(tree.declarations[element.declaration!]!.module, "tenant/catalog.nx");
+});
+
 test("a request cannot replace a context document, and says what collided", async () => {
   const response = await contextHandler(
     post("diagnostics", { documents: [{ uri: CATALOG, source: "let mine = 1\n" }], uri: CATALOG }),
@@ -408,6 +423,7 @@ test("a sibling's related location keeps the coordinates the analysis gave it", 
         workspace: [],
       }),
       documentSymbols: () => [],
+      sourceTree: () => ({ uri: FORM, identity: "tenant/form.nx", version: null, nodes: [], declarations: [] }),
       dispose: () => undefined,
     }),
   });

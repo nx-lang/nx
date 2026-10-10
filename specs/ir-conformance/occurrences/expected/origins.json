@@ -1,0 +1,46 @@
+{
+  "main.nx::ada": [
+    {"path": "", "module": "main.nx", "start": 560, "end": 581}
+  ],
+  "main.nx::anonymous": [],
+  "main.nx::cleared": [
+    {"path": "", "module": "main.nx", "start": 1502, "end": 1527}
+  ],
+  "main.nx::clearedNick": [
+    {"path": "", "module": "main.nx", "start": 1594, "end": 1642}
+  ],
+  "main.nx::has": [],
+  "main.nx::hasNot": [],
+  "main.nx::isNotTagged": [],
+  "main.nx::isTagged": [],
+  "main.nx::lone": [
+    {"path": "", "module": "main.nx", "start": 1410, "end": 1433},
+    {"path": "/items/0", "module": "main.nx", "start": 1415, "end": 1427}
+  ],
+  "main.nx::name": [],
+  "main.nx::named": [],
+  "main.nx::noName": [],
+  "main.nx::noNick": [],
+  "main.nx::renamed": [
+    {"path": "", "module": "main.nx", "start": 1544, "end": 1571}
+  ],
+  "main.nx::root": [
+    {"path": "", "module": "main.nx", "start": 601, "end": 649},
+    {"path": "/author", "module": "main.nx", "start": 560, "end": 581}
+  ],
+  "main.nx::several": [
+    {"path": "", "module": "main.nx", "start": 1450, "end": 1485},
+    {"path": "/items/0", "module": "main.nx", "start": 1455, "end": 1467},
+    {"path": "/items/1", "module": "main.nx", "start": 1467, "end": 1479}
+  ],
+  "main.nx::withAuthor": [
+    {"path": "", "module": "main.nx", "start": 601, "end": 649},
+    {"path": "/author", "module": "main.nx", "start": 560, "end": 581}
+  ],
+  "main.nx::withoutAuthor": [
+    {"path": "", "module": "main.nx", "start": 672, "end": 690}
+  ],
+  "main.nx::writtenEmpty": [
+    {"path": "", "module": "main.nx", "start": 712, "end": 748}
+  ]
+}

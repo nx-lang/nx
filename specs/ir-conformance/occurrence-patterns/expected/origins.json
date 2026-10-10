@@ -1,0 +1,12 @@
+{
+  "main.nx::described": [],
+  "main.nx::root": [],
+  "main.nx::undescribed": [],
+  "main.nx::withAuthor": [
+    {"path": "", "module": "main.nx", "start": 296, "end": 345},
+    {"path": "/author", "module": "main.nx", "start": 320, "end": 341}
+  ],
+  "main.nx::withoutAuthor": [
+    {"path": "", "module": "main.nx", "start": 368, "end": 386}
+  ]
+}

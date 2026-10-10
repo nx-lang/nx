@@ -1,0 +1,43 @@
+{
+  "main.nx::absentName": [],
+  "main.nx::absentRead": [],
+  "main.nx::aliasContent": [
+    {"path": "", "module": "main.nx", "start": 962, "end": 989},
+    {"path": "/items/0", "module": "main.nx", "start": 969, "end": 981}
+  ],
+  "main.nx::aliasItem": [
+    {"path": "", "module": "main.nx", "start": 872, "end": 893}
+  ],
+  "main.nx::argument": [],
+  "main.nx::clearedNick": [],
+  "main.nx::clearedRead": [],
+  "main.nx::declaredFallback": [],
+  "main.nx::declaredMany": [],
+  "main.nx::declaredOne": [],
+  "main.nx::declaredValue": [],
+  "main.nx::differentNicks": [],
+  "main.nx::emptyNicks": [],
+  "main.nx::fallbackArgument": [],
+  "main.nx::fallbackItem": [],
+  "main.nx::fallbackLifted": [
+    {"path": "", "module": "main.nx", "start": 1187, "end": 1214}
+  ],
+  "main.nx::fallbackLoop": [],
+  "main.nx::noInts": [],
+  "main.nx::noString": [],
+  "main.nx::noneInferred": [],
+  "main.nx::optionalAliasItem": [
+    {"path": "", "module": "main.nx", "start": 920, "end": 940}
+  ],
+  "main.nx::otherPeople": [],
+  "main.nx::presentLifted": [],
+  "main.nx::presentWidened": [],
+  "main.nx::root": [
+    {"path": "", "module": "main.nx", "start": 872, "end": 893}
+  ],
+  "main.nx::rowWith": [],
+  "main.nx::rowWithout": [],
+  "main.nx::samePeople": [],
+  "main.nx::updatedName": [],
+  "main.nx::updatedNick": []
+}

@@ -111,6 +111,8 @@ function answerLanguage(
       return service.documentSymbols(
         request as Parameters<SnapshotLanguageService["documentSymbols"]>[0]
       );
+    case "sourceTree":
+      return service.sourceTree(request as Parameters<SnapshotLanguageService["sourceTree"]>[0]);
     default:
       return Promise.reject(new Error(`Unknown language query '${String(query)}'.`));
   }

@@ -43,7 +43,9 @@ import {
   type NxComponentInstance,
   type NxHostRecord,
   type NxHostValue,
+  type NxOriginEntry,
   type NxPreparedModule,
+  type NxRuntimeOrigins,
   type NxPreparedProgram,
   type NxRecordObject,
 } from "../src/index.js";
@@ -2411,6 +2413,241 @@ test("an agent library image of another version fails linking unless the host al
 
   const program = linkNxIrProgram(entry, { resolve: () => library, allowVersionMismatch: true });
   assertEqual(evaluateFunction(program, "root"), 1);
+});
+
+// Origins: where the records of a call's value were constructed. The images are the corpus's, with
+// their debug sections, since a span comes from there; the corpus test holds every report of every
+// program to what the Rust runtime reports.
+
+const decoder = new TextDecoder();
+
+/** A corpus program's image of `identity`, with its debug section unless `stripped`. */
+function corpusImage(program: string, identity: string, stripped = false): Uint8Array {
+  const file = `${identity.replaceAll("/", "__")}${stripped ? ".stripped" : ""}.nxir`;
+  return new Uint8Array(readFileSync(fileURLToPath(new URL(`../../../../specs/ir-conformance/${program}/expected/${file}`, import.meta.url))));
+}
+
+/** A corpus program's entry linked against its other modules. */
+function corpusProgram(program: string, entry: string, others: readonly string[] = [], stripped = false): NxPreparedProgram {
+  const modules = new Map([entry, ...others].map((identity) => [identity, prepareNxIrModule(corpusImage(program, identity, stripped))]));
+  return linkNxIrProgram(modules.get(entry)!, { resolve: (identity) => modules.get(identity) });
+}
+
+/** The source text an origin entry's span covers, read from the corpus program's module. */
+function originText(program: string, entry: NxOriginEntry): string {
+  const source = readFileSync(fileURLToPath(new URL(`../../../../specs/ir-conformance/${program}/${entry.module}`, import.meta.url)));
+  return decoder.decode(source.subarray(entry.start, entry.end));
+}
+
+/** The value a JSON pointer names in `value`. */
+function atPointer(value: NxCanonicalValue, pointer: string): NxCanonicalValue {
+  return pointer
+    .split("/")
+    .slice(1)
+    .map((token) => token.replaceAll("~1", "/").replaceAll("~0", "~"))
+    .reduce<NxCanonicalValue>((held, token) => (Array.isArray(held) ? held[Number(token)]! : fields(held)[token]!), value);
+}
+
+test("an origins report names the element that constructed each record of the rendered output", () => {
+  const program = corpusProgram("components", "main.nx");
+  const origins: NxRuntimeOrigins = {};
+  const { rendered } = initializeComponent(program, "Greeting", { name: "Ada" }, { origins });
+  const entries = origins.entries!;
+  assertEqual(
+    entries.map((entry) => [entry.path, entry.module, originText("components", entry)]),
+    [
+      ["", "main.nx", `<Stack>\n    <Label Text={"Hello " + name} />\n    <Label Text="!" FontSize={count + 20} />\n  </Stack>`],
+      ["/Children/0", "main.nx", `<Label Text={"Hello " + name} />`],
+      ["/Children/1", "main.nx", `<Label Text="!" FontSize={count + 20} />`],
+    ],
+  );
+  // Each pointer names a record of the value the host received.
+  assertEqual(entries.map((entry) => fields(atPointer(rendered, entry.path)).$type), ["Stack", "Label", "Label"]);
+});
+
+test("each record a loop builds has the one element of the loop body as its origin", () => {
+  const origins: NxRuntimeOrigins = {};
+  evaluateFunction(corpusProgram("components", "main.nx"), "labels", [], { origins });
+  assertEqual(
+    origins.entries!.map((entry) => [entry.path, originText("components", entry)]),
+    [
+      ["/0", "<Label Text={text} />"],
+      ["/1", "<Label Text={text} />"],
+    ],
+  );
+});
+
+test("a question shown through a step has the origin of its element in the value that declares it", () => {
+  const program = corpusProgram("question-flow", "main.nx", ["library/answers.nx", "library/layout.nx", "library/questions.nx"]);
+  const lifecycle = JSON.parse(
+    readFileSync(fileURLToPath(new URL("../../../../specs/ir-conformance/question-flow/program.json", import.meta.url)), "utf8"),
+  ).lifecycles[0] as { component: string; props: NxHostRecord; batches: NxHostValue[][] };
+  const origins: NxRuntimeOrigins = {};
+  let { instance } = initializeComponent(program, lifecycle.component, lifecycle.props, { origins });
+  const source = decoder.decode(readFileSync(fileURLToPath(new URL("../../../../specs/ir-conformance/question-flow/main.nx", import.meta.url))));
+  const declared = new TextEncoder().encode(source.slice(0, source.indexOf("let roleQuestion ="))).length;
+  let shown = 0;
+  for (const batch of lifecycle.batches) {
+    const dispatched = dispatchComponentActions(program, instance, batch, { origins });
+    instance = dispatched.instance;
+    for (const entry of origins.entries!) {
+      const record = fields(atPointer(dispatched.rendered, entry.path));
+      if (record.$type === "SingleChoice" && record.id === "role") {
+        shown += 1;
+        const text = originText("question-flow", entry);
+        assertEqual(entry.start > declared && text.startsWith(`<SingleChoice id="role"`) && text.endsWith("</SingleChoice>"), true);
+      }
+    }
+  }
+  assertEqual(shown > 0, true);
+});
+
+test("a record a library function constructs has its origin in the library's module", () => {
+  const origins: NxRuntimeOrigins = {};
+  evaluateFunction(corpusProgram("ranges", "app/main.nx", ["shared/bounds.nx"]), "passedAlong", [], { origins });
+  assertEqual(
+    origins.entries!.map((entry) => [entry.path, entry.module, originText("ranges", entry)]),
+    [["", "shared/bounds.nx", "0.0..1.5"]],
+  );
+});
+
+test("a record apply builds has the origin of the expression that applied it", () => {
+  const origins: NxRuntimeOrigins = {};
+  evaluateFunction(corpusProgram("records", "main.nx"), "applied", [], { origins });
+  assertEqual(origins.entries!.map((entry) => [entry.path, originText("records", entry)]), [["", "apply(ada(), patch())"]]);
+});
+
+test("an origins report from images without their debug section is empty, and the result is unchanged", () => {
+  const stripped = corpusProgram("components", "main.nx", [], true);
+  const origins: NxRuntimeOrigins = {};
+  const reported = evaluateFunction(stripped, "root", [], { origins });
+  assertEqual(origins.entries, []);
+  assertEqual(reported, evaluateFunction(corpusProgram("components", "main.nx"), "root"));
+});
+
+test("a call that fails, and a call that renders nothing, leave the origins report empty", () => {
+  const program = corpusProgram("components", "main.nx");
+  const origins: NxRuntimeOrigins = {};
+  evaluateFunction(program, "root", [], { origins });
+  assertEqual(origins.entries!.length, 3);
+  assertThrows(() => evaluateFunction(program, "missing", [], { origins }), "was not found");
+  assertEqual(origins.entries, []);
+  evaluateFunction(program, "root", [], { origins });
+  normalizeComponentState(program, "Greeting", { count: 1 }, { origins });
+  assertEqual(origins.entries, []);
+});
+
+/** The entries of the last call, each with the source text its span covers in `held-records`. */
+function heldEntries(origins: NxRuntimeOrigins): [string, string][] {
+  return origins.entries!.map((entry) => [entry.path, originText("held-records", entry)]);
+}
+
+/** The source text of the origin of the rendered `Panel`'s item, if it has one. */
+function panelItem(origins: NxRuntimeOrigins): string | undefined {
+  return heldEntries(origins).find(([path]) => path === "/children/0/item")?.[1];
+}
+
+/** A batch that taps the button whose handler has `token`. */
+function tap(token: string): NxHostValue[] {
+  return [{ $type: "ActionHandlerInvocation", token, action: { $type: "Button.Tapped" } }];
+}
+
+test("a record held in state keeps its origin through a dispatch given no report", () => {
+  const program = corpusProgram("held-records", "main.nx");
+  const origins: NxRuntimeOrigins = {};
+  const { instance } = initializeComponent(program, "Holder", {}, { origins });
+  assertEqual(panelItem(origins), `<Item name="first" />`);
+  // A dispatch that asks for no report re-normalizes the state, and builds nothing.
+  const unreported = dispatchComponentActions(program, instance, tap("h1-1"));
+  dispatchComponentActions(program, unreported.instance, tap("h2-1"), { origins });
+  assertEqual(panelItem(origins), `<Item name="first" />`);
+});
+
+test("a record the host passes back in a dispatch has no origin, even one the runtime handed it", () => {
+  const program = corpusProgram("held-records", "main.nx");
+  const origins: NxRuntimeOrigins = {};
+  const initialized = initializeComponent(program, "Holder", {}, { origins });
+  // The very object the runtime returned in the state, which the program built.
+  const spare = initialized.state.spare as NxHostValue;
+  const chosen = { $type: "ActionHandlerInvocation", token: "h1-4", action: { $type: "Chooser.Chosen", item: spare } };
+  dispatchComponentActions(program, initialized.instance, [chosen], { origins });
+  assertEqual(panelItem(origins), undefined);
+  assertEqual(origins.entries!.length, 6);
+});
+
+test("a function value the host passes back from the state is read as it is, whatever asks for origins", () => {
+  const program = corpusProgram("held-records", "main.nx");
+  for (const [initializing, dispatching] of [
+    [false, false],
+    [true, false],
+    [false, true],
+    [true, true],
+  ]) {
+    const initialized = initializeComponent(program, "Tool", {}, initializing ? { origins: {} } : {});
+    // The very function value the runtime returned in the state.
+    const picked = { $type: "ActionHandlerInvocation", token: "h1-1", action: { $type: "Picker.Picked", op: initialized.state.spare as NxHostValue } };
+    const { rendered } = dispatchComponentActions(program, initialized.instance, [picked], dispatching ? { origins: {} } : {});
+    assertEqual(fields((fields(rendered).children as NxCanonicalValue[])[0]!).value, 6);
+  }
+});
+
+test("deep input a dispatch keeping origins reads fails as it does without them", () => {
+  const program = corpusProgram("held-records", "main.nx");
+  let deep: NxHostValue = [];
+  for (let depth = 0; depth < 200_000; depth += 1) {
+    deep = [deep];
+  }
+  const tapped = { $type: "ActionHandlerInvocation", token: "h1-1", action: { $type: "Button.Tapped", extra: deep } };
+  for (const [initializing, dispatching] of [
+    [false, false],
+    [true, false],
+    [true, true],
+  ]) {
+    const { instance } = initializeComponent(program, "Holder", {}, initializing ? { origins: {} } : {});
+    const error = assertThrows(() => dispatchComponentActions(program, instance, [tapped], dispatching ? { origins: {} } : {}), "extra");
+    assertEqual(error.diagnostics[0]!.code, "nx-ir-boundary-field");
+  }
+});
+
+test("callFunction reports the origins of its value", () => {
+  const origins: NxRuntimeOrigins = {};
+  callFunction(corpusProgram("held-records", "main.nx"), { $type: "Function", module: "main.nx", name: "picked" }, {}, { origins });
+  assertEqual(heldEntries(origins), [["", `<Item name="picked" />`]]);
+});
+
+test("evaluateComponent reports the origins of its rendered output, and none for the state it is given", () => {
+  const origins: NxRuntimeOrigins = {};
+  const state = { held: { $type: "Item", name: "given" }, spare: { $type: "Item", name: "other" }, count: 3 };
+  evaluateComponent(corpusProgram("held-records", "main.nx"), "Holder", {}, state, { origins });
+  assertEqual(
+    heldEntries(origins).map(([path]) => path),
+    ["", "/children/0", "/children/1", "/children/2", "/children/3", "/children/4"],
+  );
+});
+
+test("an origins report the runtime cannot write to is refused before anything runs", () => {
+  const program = corpusProgram("components", "main.nx");
+  // The function does not exist, so a call that ran anything would fail on that instead.
+  for (const origins of [Object.freeze({}), Object.preventExtensions({}), 5, null]) {
+    const error = assertThrows(
+      () => evaluateFunction(program, "missing", [], { origins: origins as NxRuntimeOrigins }),
+      "The origins option must be an object the runtime can write to",
+    );
+    assertEqual(error.diagnostics[0]!.code, "nx-ir-options");
+  }
+});
+
+test("a usage report the runtime cannot write to still leaves the origins report cleared", () => {
+  const program = corpusProgram("components", "main.nx");
+  const origins: NxRuntimeOrigins = {};
+  evaluateFunction(program, "root", [], { origins });
+  assertEqual(origins.entries!.length, 3);
+  const error = assertThrows(
+    () => evaluateFunction(program, "root", [], { origins, usage: Object.freeze({}) }),
+    "The usage option must be an object the runtime can write to",
+  );
+  assertEqual(error.diagnostics[0]!.code, "nx-ir-options");
+  assertEqual(origins.entries, []);
 });
 
 /** `root` is `depth - 1` negations around a literal: `depth` nodes, each nested in the one before. */

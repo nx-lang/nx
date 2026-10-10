@@ -1,0 +1,16 @@
+{
+  "counts": {
+    "main.nx::Holder": {
+      "batches": [
+        63,
+        65,
+        63,
+        64,
+        65,
+        53
+      ],
+      "initial": 66
+    },
+    "main.nx::picked": 5
+  }
+}

@@ -8,6 +8,7 @@
 
 use crate::error::{fail_limit, Limit, Result};
 use crate::eval::{utf16_len, Meter, Stack, TEXT_UNITS};
+use crate::origins::{Collected, Origin};
 use nx_value::NxValue;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -46,6 +47,9 @@ pub(crate) struct Record {
     pub type_name: Option<Arc<str>>,
     /// In the order the fields were written; a name appears once.
     pub fields: Fields,
+    /// The node that constructed the record. It is set only in calls given an origins report, and
+    /// a record rebuilt from this one keeps it in any call. It takes no part in equality.
+    pub origin: Option<Origin>,
 }
 
 #[derive(Debug, Clone)]
@@ -100,7 +104,20 @@ impl Value {
     }
 
     pub(crate) fn record(type_name: Option<Arc<str>>, fields: Fields) -> Value {
-        Value::Record(Arc::new(Record { type_name, fields }))
+        Value::record_from(type_name, fields, None)
+    }
+
+    /// A record with the origin of the node that constructed it, if it has one.
+    pub(crate) fn record_from(
+        type_name: Option<Arc<str>>,
+        fields: Fields,
+        origin: Option<Origin>,
+    ) -> Value {
+        Value::Record(Arc::new(Record {
+            type_name,
+            fields,
+            origin,
+        }))
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -570,8 +587,28 @@ pub(crate) fn to_host(
     meter: &Meter<'_, '_>,
     stack: &Stack,
 ) -> Result<NxValue> {
-    let mut tokens = tokens;
-    to_host_at(value, &mut tokens, 0, meter, stack)
+    to_host_reporting(value, tokens, None, meter, stack)
+}
+
+/// Writes a value as [`to_host`] does and, when `origins` is given, collects the origin of each
+/// record written, in the order the walk writes them: a record before its fields, a list's items
+/// in order and a record's fields by name.
+pub(crate) fn to_host_reporting(
+    value: &Value,
+    tokens: Option<&mut Tokens>,
+    origins: Option<&mut Collected>,
+    meter: &Meter<'_, '_>,
+    stack: &Stack,
+) -> Result<NxValue> {
+    let mut walk = Walk { tokens, origins };
+    to_host_at(value, &mut walk, 0, meter, stack)
+}
+
+/// What a walk that writes a value for the host gathers on the way: the handlers it numbers, and
+/// the origins of the records it writes.
+struct Walk<'a> {
+    tokens: Option<&'a mut Tokens>,
+    origins: Option<&'a mut Collected>,
 }
 
 pub(crate) fn fields_to_host(
@@ -581,9 +618,13 @@ pub(crate) fn fields_to_host(
 ) -> Result<BTreeMap<String, NxValue>> {
     let mut output = BTreeMap::new();
     for (name, value) in fields {
+        let mut walk = Walk {
+            tokens: None,
+            origins: None,
+        };
         output.insert(
             name.to_string(),
-            to_host_at(value, &mut None, 1, meter, stack)?,
+            to_host_at(value, &mut walk, 1, meter, stack)?,
         );
     }
     Ok(output)
@@ -609,7 +650,7 @@ fn record_cost(record: &Record) -> u64 {
 
 fn to_host_at(
     value: &Value,
-    tokens: &mut Option<&mut Tokens>,
+    walk: &mut Walk<'_>,
     depth: u32,
     meter: &Meter<'_, '_>,
     stack: &Stack,
@@ -637,12 +678,20 @@ fn to_host_at(
         Value::Float(value) => NxValue::Float(*value),
         Value::Str(value) => NxValue::String(value.to_string()),
         Value::Case(case) => NxValue::String(case.case.to_string()),
-        Value::Seq(items) => NxValue::Array(
-            items
-                .iter()
-                .map(|item| to_host_at(item, tokens, deeper, meter, stack))
-                .collect::<Result<_>>()?,
-        ),
+        Value::Seq(items) => {
+            let mut written = Vec::with_capacity(items.len());
+            for (index, item) in items.iter().enumerate() {
+                let entered = walk
+                    .origins
+                    .as_mut()
+                    .map(|origins| origins.enter_item(index));
+                written.push(to_host_at(item, walk, deeper, meter, stack)?);
+                if let (Some(origins), Some(before)) = (walk.origins.as_mut(), entered) {
+                    origins.leave(before);
+                }
+            }
+            NxValue::Array(written)
+        }
         Value::Function(function) => NxValue::Record {
             type_name: Some(FUNCTION_TYPE.to_string()),
             properties: BTreeMap::from([
@@ -661,7 +710,7 @@ fn to_host_at(
                 "action".to_string(),
                 NxValue::String(handler.action_name.to_string()),
             )]);
-            if let Some(tokens) = tokens {
+            if let Some(tokens) = walk.tokens.as_mut() {
                 tokens.handlers.push(Arc::clone(handler));
                 properties.insert(
                     "token".to_string(),
@@ -674,6 +723,9 @@ fn to_host_at(
             }
         }
         Value::Record(record) => {
+            if let Some(origins) = walk.origins.as_mut() {
+                origins.record(record.origin.as_ref());
+            }
             let is_update = record
                 .type_name()
                 .is_some_and(|name| name.ends_with(".Update"));
@@ -682,7 +734,14 @@ fn to_host_at(
             ordered.sort_by(|left, right| left.0.cmp(&right.0));
             let mut properties = BTreeMap::new();
             for (name, field) in ordered {
-                let written = to_host_at(field, tokens, deeper, meter, stack)?;
+                let entered = walk
+                    .origins
+                    .as_mut()
+                    .map(|origins| origins.enter_field(name));
+                let written = to_host_at(field, walk, deeper, meter, stack)?;
+                if let (Some(origins), Some(before)) = (walk.origins.as_mut(), entered) {
+                    origins.leave(before);
+                }
                 let written = if is_update && written.is_empty_value() {
                     NxValue::Null
                 } else {

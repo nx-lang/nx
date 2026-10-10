@@ -34,6 +34,7 @@ mod helpers;
 mod input;
 mod module;
 mod normalize;
+mod origins;
 mod program;
 mod stored;
 mod text;
@@ -54,6 +55,7 @@ pub use helpers::{apply, diff, merge};
 pub use input::{input_size, record_input_size};
 pub use module::PreparedModule;
 pub use nx_ir::{NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION};
+pub use origins::{OriginEntry, Origins};
 pub use program::{LinkOptions, Program, NX_PRELUDE_MODULE_IDENTITY};
 pub use text::float32_text;
 pub use tree::{HostEffect, InstanceTree};
@@ -79,5 +81,6 @@ mod tests {
         shareable::<NxIrRuntimeError>();
         shareable::<RuntimeOptions>();
         shareable::<Usage>();
+        shareable::<Origins>();
     }
 }

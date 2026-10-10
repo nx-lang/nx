@@ -9,7 +9,9 @@
  * budget stops it, and have exactly the input size recorded for it, where one is; and the usage
  * report must give the recorded numbers. A case marked as one that fails must fail with the code
  * the Rust runtime's diagnostic had and name the argument it named, or none; and a call a limit
- * refuses names no argument.
+ * refuses names no argument. Every evaluation's origins report must give the entries the Rust
+ * runtime's report recorded, which is what shows that the two report the same origins, and the
+ * report must change nothing the call returns.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -47,7 +49,8 @@ function loadCorpus() {
       // Only a program with a case marked as one that fails has recorded diagnostics.
       const diagnosticsPath = join(dir, "expected", "diagnostics.json");
       const diagnostics = existsSync(diagnosticsPath) ? JSON.parse(readFileSync(diagnosticsPath, "utf8")) : {};
-      return { name, manifest, artifacts, strippedArtifacts, results, diagnostics, operations };
+      const origins = JSON.parse(readFileSync(join(dir, "expected", "origins.json"), "utf8"));
+      return { name, manifest, artifacts, strippedArtifacts, results, diagnostics, operations, origins };
     });
 }
 
@@ -319,6 +322,98 @@ for (const program of loadCorpus()) {
 if (recordedFailures === 0) {
   failures += 1;
   console.log("not ok - the corpus records no failures");
+}
+
+/**
+ * Runs `run` with an origins report and without one, and checks that the report gives `recorded`
+ * and that `returned` reads the same from both, and the usage report the same operations, since
+ * an origins report changes neither. Returns what the run with the report returned.
+ */
+function checkOrigins(recorded, run, returned) {
+  const origins = {};
+  const usage = {};
+  const plainUsage = {};
+  // A budget no call reaches, so that the usage report counts operations.
+  const maxOperations = Number.MAX_SAFE_INTEGER;
+  const reported = run({ origins, usage, maxOperations });
+  const plain = run({ usage: plainUsage, maxOperations });
+  if (stableJson(returned(reported)) !== stableJson(returned(plain))) {
+    throw new Error("gives another value with an origins report than without one");
+  }
+  if (usage.operations !== plainUsage.operations) {
+    throw new Error(`costs ${usage.operations} operations with an origins report and ${plainUsage.operations} without one`);
+  }
+  if (stableJson(origins.entries) !== stableJson(recorded ?? [])) {
+    throw new Error(`the origins report gives ${stableJson(origins.entries)}, and ${stableJson(recorded ?? [])} is recorded`);
+  }
+  return reported;
+}
+
+// Every evaluation's origins report gives the entries the Rust runtime's report recorded from the
+// images with their debug sections, and nothing from the stripped ones; a call that fails leaves
+// it empty.
+for (const program of loadCorpus()) {
+  for (const [variant, sources, debug] of [
+    ["with debug", program.artifacts, true],
+    ["stripped", program.strippedArtifacts, false],
+  ]) {
+    const modules = new Map([...sources].map(([identity, image]) => [identity, prepareNxIrModule(image)]));
+    const resolve = (identity) => modules.get(identity);
+    const recorded = (key) => (debug ? program.origins[key] : []);
+    for (const entrypoint of program.manifest.entrypoints) {
+      const key = entrypointKey(program, entrypoint);
+      const label = `${program.name} (${variant}) ${key} origins`;
+      try {
+        const linked = linkNxIrProgram(modules.get(entrypoint.module), { resolve });
+        const run = (options) => evaluateFunction(linked, entrypoint.function, entrypoint.arguments ?? [], options);
+        if (entrypoint.fails) {
+          const origins = { entries: [{ path: "", module: "an earlier call", start: 0, end: 0 }] };
+          try {
+            run({ origins });
+          } catch {
+            // Expected; what the report holds is checked below.
+          }
+          if (origins.entries.length !== 0) {
+            throw new Error("the failed call left entries");
+          }
+        } else {
+          checkOrigins(recorded(key), run, (value) => value);
+        }
+        console.log(`ok - ${label}`);
+      } catch (error) {
+        failures += 1;
+        console.log(`not ok - ${label}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    for (const lifecycle of program.manifest.lifecycles ?? []) {
+      const key = `${lifecycle.module}::${lifecycle.component}`;
+      const label = `${program.name} (${variant}) ${key} lifecycle origins`;
+      try {
+        const linked = linkNxIrProgram(modules.get(lifecycle.module), { resolve });
+        const expected = recorded(key);
+        let { instance } = checkOrigins(
+          expected?.initial,
+          (options) => initializeComponent(linked, lifecycle.component, lifecycle.props ?? {}, options),
+          ({ rendered, state }) => ({ rendered, state }),
+        );
+        lifecycle.batches.forEach((batch, index) => {
+          try {
+            ({ instance } = checkOrigins(
+              expected?.batches?.[index],
+              (options) => dispatchComponentActions(linked, instance, batch, options),
+              ({ rendered, effects, state }) => ({ rendered, effects, state }),
+            ));
+          } catch (error) {
+            throw new Error(`batch ${index}: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        });
+        console.log(`ok - ${label}`);
+      } catch (error) {
+        failures += 1;
+        console.log(`not ok - ${label}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
 }
 
 // Damage: every corpus image cut at every four-byte boundary, and every cell of the smallest one

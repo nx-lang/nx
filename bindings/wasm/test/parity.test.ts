@@ -216,6 +216,22 @@ describe("language answer parity with the Node SDK", () => {
     expect(wasmSnapshot.documentSymbols(uri)).toEqual(nodeSnapshot.documentSymbols(uri));
   });
 
+  it("answers the source tree identically for every source of the corpus", () => {
+    for (const [name, source] of Object.entries(sources)) {
+      const corpus = [{ uri, source, identity: "demo/input.nx", version: 7 }];
+      const fromNode = new NodeLanguageSnapshot(corpus);
+      const fromWasm = host.createLanguageSnapshot(corpus);
+      try {
+        expect(JSON.parse(JSON.stringify(fromWasm.sourceTree(uri))), name).toEqual(
+          fromNode.sourceTree(uri)
+        );
+      } finally {
+        fromWasm.dispose();
+        fromNode.dispose();
+      }
+    }
+  });
+
   it("answers hover and completions identically at every line start", () => {
     const lineCount = sources.component.split("\n").length;
 

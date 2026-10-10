@@ -1,0 +1,113 @@
+module main.nx fingerprint 13005845147897737361
+requires update-records-v1 action-handlers-v1 function-values-v1
+entrypoints functions [picked double triple applied] components [Node Stack Panel Button Chooser Holder Result Picker Tool]
+
+component Node abstract external
+
+component Stack external
+  props
+    content children: Node+ required
+
+component Panel external
+  props
+    item: Item required
+    count: int required
+
+component Button external
+  props
+    label: string required
+  emits
+    Tapped = Button.Tapped
+
+record Button.Tapped
+
+component Chooser external
+  emits
+    Chosen = Chooser.Chosen
+
+record Chooser.Chosen
+  item: Item required
+
+record Item
+  name: string required
+
+value first =
+  <Item name="first" />
+
+component Holder
+  state
+    held: Item = first
+    spare: Item = <Item name="spare" />
+    count: int = 0
+  body =
+    <Stack>
+      <Panel count=count item=held />
+      <Button label="Count"
+        onTapped=handler Button.Tapped action@3:Button.Tapped owner Holder =>
+          <Holder.Update count=(count add 1) />
+      >
+      </Button>
+      <Button label="Swap"
+        onTapped=handler Button.Tapped action@4:Button.Tapped owner Holder =>
+          <Holder.Update held=spare spare=held />
+      >
+      </Button>
+      <Button label="Fresh"
+        onTapped=handler Button.Tapped action@5:Button.Tapped owner Holder =>
+          <Holder.Update held=<Item name="fresh" /> />
+      >
+      </Button>
+      <Chooser
+        onChosen=handler Chooser.Chosen action@6:Chooser.Chosen owner Holder =>
+          <Holder.Update held=action.item />
+      >
+      </Chooser>
+    </Stack>
+
+function picked() =
+  <Item name="picked" />
+
+alias Op
+
+component Result external
+  props
+    value: int required
+
+component Picker external
+  emits
+    Picked = Picker.Picked
+
+record Picker.Picked
+  op: <function n:int />: int required
+
+function double(n: int): int =
+  (n mul 2)
+
+function triple(n: int): int =
+  (n mul 3)
+
+function applied(f: <function n:int />: int): int =
+  <f n=2 />
+
+component Tool
+  state
+    op: <function n:int />: int = double
+    spare: <function n:int />: int = triple
+  body =
+    <Stack>
+      <Result value=applied(op) />
+      <Picker
+        onPicked=handler Picker.Picked action@2:Picker.Picked owner Tool =>
+          <Tool.Update op=action.op />
+      >
+      </Picker>
+    </Stack>
+
+record Holder.Update update of Holder
+  held: Item
+  spare: Item
+  count: int
+
+record Tool.Update update of Tool
+  op: <function n:int />: int
+  spare: <function n:int />: int

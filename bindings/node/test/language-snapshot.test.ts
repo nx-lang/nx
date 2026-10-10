@@ -10,7 +10,8 @@ import {
   type CompletionList,
   type DiagnosticReport,
   type DocumentSymbol,
-  type Hover
+  type Hover,
+  type SourceTree
 } from "../src/index.js";
 
 const FORM = "nx://tenant/form.nx";
@@ -44,6 +45,34 @@ describe("NxLanguageSnapshot", () => {
       const symbols = snapshot.documentSymbols(FORM);
       expect(symbols.map((symbol) => symbol.name)).toContain("Panel");
       expect(snapshot.documentSymbols("nx://tenant/other.nx").map((symbol) => symbol.name)).toEqual(["other"]);
+    } finally {
+      snapshot.dispose();
+    }
+  });
+
+  it("answers the source tree of a document, its nodes typed and their declarations described", () => {
+    const source = 'type Card = { title:string }\nlet card = <Card title="Hi" />\n';
+    const snapshot = new NxLanguageSnapshot([{ uri: FORM, source, version: 3 }]);
+    try {
+      const tree = snapshot.sourceTree(FORM);
+      expect(tree.version).toBe(3);
+      expect(tree.nodes.map((node) => [node.role, node.key])).toEqual([
+        ["declaration", "Card"],
+        ["field", "Card.title"],
+        ["typeReference", "Card.title.type"],
+        ["declaration", "card"],
+        ["element", "card.value"],
+        ["attribute", "card.value.title"],
+        ["literal", "card.value.title.value"]
+      ]);
+      const element = tree.nodes[4]!;
+      expect(element.type).toBe("Card");
+      expect(tree.declarations[element.declaration!]).toMatchObject({
+        name: "Card",
+        kind: "record",
+        properties: [{ name: "title", type: "string" }]
+      });
+      expect(() => snapshot.sourceTree("nx://tenant/missing.nx")).toThrow(NxEvaluationError);
     } finally {
       snapshot.dispose();
     }
@@ -193,7 +222,8 @@ describe("protocol parity", () => {
     diagnosticReport: ["documents", "workspace"],
     documentDiagnostics: ["diagnostics", "identity", "uri", "version"],
     editorDiagnostic: ["code", "message", "range", "related", "severity"],
-    documentSymbol: ["kind", "name", "range", "selectionRange"]
+    documentSymbol: ["kind", "name", "range", "selectionRange"],
+    sourceTree: ["declarations", "identity", "nodes", "uri", "version"]
   } as const;
 
   const sortedKeys = (value: object): string[] => Object.keys(value).sort();
@@ -257,6 +287,10 @@ describe("protocol parity", () => {
       const symbols: DocumentSymbol[] = snapshot.documentSymbols(FORM);
       expect(symbols.length).toBeGreaterThan(0);
       expect(sortedKeys(symbols[0] as object)).toEqual([...protocolKeys.documentSymbol]);
+
+      const tree: SourceTree = snapshot.sourceTree(FORM);
+      expect(sortedKeys(tree)).toEqual([...protocolKeys.sourceTree]);
+      expect(sortedKeys(tree.nodes[0]!.range)).toEqual([...protocolKeys.range]);
     } finally {
       snapshot.dispose();
     }

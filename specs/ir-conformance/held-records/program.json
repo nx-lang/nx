@@ -1,0 +1,40 @@
+{
+  "entry": "main.nx",
+  "emit": [
+    "main.nx"
+  ],
+  "entrypoints": [
+    {
+      "module": "main.nx",
+      "function": "picked"
+    }
+  ],
+  "lifecycles": [
+    {
+      "module": "main.nx",
+      "component": "Holder",
+      "batches": [
+        [
+          { "$type": "ActionHandlerInvocation", "token": "h1-1", "action": { "$type": "Button.Tapped" } }
+        ],
+        [
+          { "$type": "ActionHandlerInvocation", "token": "h2-2", "action": { "$type": "Button.Tapped" } }
+        ],
+        [
+          { "$type": "ActionHandlerInvocation", "token": "h3-1", "action": { "$type": "Button.Tapped" } }
+        ],
+        [
+          { "$type": "ActionHandlerInvocation", "token": "h4-3", "action": { "$type": "Button.Tapped" } }
+        ],
+        [
+          {
+            "$type": "ActionHandlerInvocation",
+            "token": "h5-4",
+            "action": { "$type": "Chooser.Chosen", "item": { "$type": "Item", "name": "picked" } }
+          }
+        ],
+        []
+      ]
+    }
+  ]
+}

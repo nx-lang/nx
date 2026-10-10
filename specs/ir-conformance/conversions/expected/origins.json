@@ -1,0 +1,44 @@
+{
+  "main.nx::enabled": [],
+  "main.nx::float32Compared": [],
+  "main.nx::float32Product": [],
+  "main.nx::float32StepsOf": [],
+  "main.nx::float32Tenth": [],
+  "main.nx::float32Widened": [],
+  "main.nx::fractionalFloat": [],
+  "main.nx::fullName": [
+    {"path": "", "module": "main.nx", "start": 2104, "end": 2133}
+  ],
+  "main.nx::integerDivisionOf": [],
+  "main.nx::integralFloat": [],
+  "main.nx::joinedArmDivision": [],
+  "main.nx::joinedFloat32Product": [],
+  "main.nx::joinedIf": [],
+  "main.nx::joinedIntegerDivision": [],
+  "main.nx::joinedList": [],
+  "main.nx::joinedListDivision": [],
+  "main.nx::joinedMatch": [],
+  "main.nx::label": [
+    {"path": "", "module": "main.nx", "start": 2020, "end": 2060}
+  ],
+  "main.nx::largeFloat": [],
+  "main.nx::leftAssociative": [],
+  "main.nx::markdownNote": [
+    {"path": "", "module": "main.nx", "start": 2261, "end": 2340}
+  ],
+  "main.nx::mixedDivision": [],
+  "main.nx::mixedEqual": [],
+  "main.nx::mixedLess": [],
+  "main.nx::mixedSumOf": [],
+  "main.nx::negativeInt": [],
+  "main.nx::negativeZero": [],
+  "main.nx::onTheLeft": [],
+  "main.nx::reorder": [],
+  "main.nx::root": [],
+  "main.nx::smallFloat": [],
+  "main.nx::stringFirst": [],
+  "main.nx::total": [],
+  "main.nx::widened": [
+    {"path": "", "module": "main.nx", "start": 4109, "end": 4165}
+  ]
+}

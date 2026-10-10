@@ -17,7 +17,9 @@ import type {
   HoverRequest,
   LanguageDocument,
   LanguageQueryName,
-  NxLanguageService
+  NxLanguageService,
+  SourceTree,
+  SourceTreeRequest
 } from "@nx-lang/language-protocol";
 
 import {
@@ -123,6 +125,9 @@ export function createSnapshotLanguageService(
     },
     documentSymbols(request: DocumentSymbolsRequest, signal?: AbortSignal): Promise<DocumentSymbol[]> {
       return answer("documentSymbols", toAnswerRequest(request, undefined), signal);
+    },
+    sourceTree(request: SourceTreeRequest, signal?: AbortSignal): Promise<SourceTree> {
+      return answer("sourceTree", toAnswerRequest(request, undefined), signal);
     },
     dispose(): void {
       cache.clear();

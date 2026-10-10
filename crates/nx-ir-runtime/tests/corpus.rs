@@ -7,12 +7,13 @@
 //! recorded failures say a smaller budget stops it, and have exactly the input size recorded for
 //! it, where one is; and the usage report must give the recorded numbers. A case marked as one
 //! that fails must fail with the recorded code and name the recorded argument, or none; and a
-//! call a limit refuses names no argument.
+//! call a limit refuses names no argument. Every evaluation's origins report must give the
+//! entries recorded for it, and change nothing it returns.
 
 mod common;
 
 use common::{canonical_eq, json, link, load_corpus, prepare_all, value};
-use nx_ir_runtime::{ComponentInit, NxIrRuntimeError, RuntimeOptions, Usage};
+use nx_ir_runtime::{ComponentInit, NxIrRuntimeError, Origins, RuntimeOptions, Usage};
 use nx_value::NxValue;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -372,6 +373,172 @@ fn every_recorded_failure_stops_at_its_recorded_node() {
     assert!(
         failures.is_empty(),
         "{} of {checked} failed:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+/// The entries of an origins report in the form `origins.json` records them.
+fn recorded_entries(origins: &Origins) -> serde_json::Value {
+    origins
+        .entries()
+        .into_iter()
+        .map(|entry| {
+            serde_json::json!({
+                "path": entry.path,
+                "module": entry.source.identity,
+                "start": entry.source.start,
+                "end": entry.source.end,
+            })
+        })
+        .collect()
+}
+
+/// Runs `run` with an origins report and without one, and checks that the report gives
+/// `recorded` and that the value and the operations the usage report counts are the same
+/// either way, since an origins report changes neither. Returns what is wrong, if anything, and
+/// the value from the run with the report.
+fn check_origins<T>(
+    recorded: &serde_json::Value,
+    run: impl Fn(&RuntimeOptions) -> Result<T, NxIrRuntimeError>,
+    same: impl Fn(&T, &T) -> bool,
+) -> (Option<String>, Option<T>) {
+    let origins = Arc::new(Origins::new());
+    let (usage, plain_usage) = (Arc::new(Usage::new()), Arc::new(Usage::new()));
+    // A budget no call reaches, so that the usage report counts operations.
+    let plain = RuntimeOptions {
+        max_operations: Some(u64::MAX),
+        usage: Some(Arc::clone(&plain_usage)),
+        ..RuntimeOptions::default()
+    };
+    let reporting = RuntimeOptions {
+        origins: Some(Arc::clone(&origins)),
+        usage: Some(Arc::clone(&usage)),
+        ..plain.clone()
+    };
+    let (with, without) = match (run(&reporting), run(&plain)) {
+        (Ok(with), Ok(without)) => (with, without),
+        (Err(error), _) | (_, Err(error)) => return (Some(error.to_string()), None),
+    };
+    if !same(&with, &without) {
+        let problem = "gives another value with an origins report than without one";
+        return (Some(problem.to_string()), None);
+    }
+    if usage.operations() != plain_usage.operations() {
+        let problem = format!(
+            "costs {:?} operations with an origins report and {:?} without one",
+            usage.operations(),
+            plain_usage.operations()
+        );
+        return (Some(problem), None);
+    }
+    let actual = recorded_entries(&origins);
+    let problem = (actual != *recorded)
+        .then(|| format!("the origins report gives {actual}, and {recorded} is recorded"));
+    (problem, Some(with))
+}
+
+/// Every corpus evaluation's origins report gives the entries recorded for it from the images
+/// with their debug sections, and nothing from the stripped ones, and the value is the same with
+/// a report as without one. The TypeScript runtime's corpus test holds its report to the same
+/// entries, which is what shows that the two runtimes report the same origins. A call that fails
+/// leaves the report empty.
+#[test]
+fn every_corpus_origins_report_gives_its_recorded_entries() {
+    let mut failures = Vec::new();
+    let mut checked = 0;
+    let none = serde_json::json!([]);
+    for program in load_corpus() {
+        for (variant, images, debug) in [
+            ("with debug", &program.images, true),
+            ("stripped", &program.stripped_images, false),
+        ] {
+            let modules = prepare_all(images);
+            // A key's module identity may hold a `/`, which a pointer escapes.
+            let recorded = |key: &str, rest: &str| {
+                let pointer = format!("/{}{rest}", key.replace('~', "~0").replace('/', "~1"));
+                match debug {
+                    true => program.origins.pointer(&pointer).unwrap_or(&none),
+                    false => &none,
+                }
+            };
+            for entrypoint in &program.entrypoints {
+                let key = entrypoint.key();
+                let label = format!("{} ({variant}) {key}", program.name);
+                let linked = link(&modules, &entrypoint.module);
+                let run = |options: &RuntimeOptions| {
+                    linked.evaluate_function(&entrypoint.function, &entrypoint.arguments, options)
+                };
+                checked += 1;
+                if entrypoint.fails {
+                    let origins = Arc::new(Origins::new());
+                    let options = RuntimeOptions {
+                        origins: Some(Arc::clone(&origins)),
+                        ..RuntimeOptions::default()
+                    };
+                    if run(&options).is_ok() || !origins.entries().is_empty() {
+                        failures.push(format!("{label}: the failed call left entries"));
+                    }
+                    continue;
+                }
+                if let (Some(problem), _) =
+                    check_origins(recorded(&key, ""), run, |left, right| left == right)
+                {
+                    failures.push(format!("{label}: {problem}"));
+                }
+            }
+            for lifecycle in &program.lifecycles {
+                let key = format!("{}::{}", lifecycle.module, lifecycle.component);
+                let label = format!("{} ({variant}) {key} lifecycle", program.name);
+                let linked = link(&modules, &lifecycle.module);
+                checked += 1;
+                let initialize = |options: &RuntimeOptions| {
+                    linked.initialize_component(
+                        &lifecycle.component,
+                        &lifecycle.props,
+                        &ComponentInit::default(),
+                        options,
+                    )
+                };
+                let (problem, initialized) =
+                    check_origins(recorded(&key, "/initial"), initialize, |left, right| {
+                        left.rendered == right.rendered && left.state == right.state
+                    });
+                if let Some(problem) = problem {
+                    failures.push(format!("{label}: initialization {problem}"));
+                }
+                let Some(initialized) = initialized else {
+                    continue;
+                };
+                let mut instance = initialized.instance;
+                for (index, batch) in lifecycle.batches.iter().enumerate() {
+                    let dispatch = |options: &RuntimeOptions| {
+                        linked.dispatch_component_actions(&instance, batch, options)
+                    };
+                    let (problem, dispatched) = check_origins(
+                        recorded(&key, &format!("/batches/{index}")),
+                        dispatch,
+                        |left, right| {
+                            left.rendered == right.rendered
+                                && left.effects == right.effects
+                                && left.state == right.state
+                        },
+                    );
+                    if let Some(problem) = problem {
+                        failures.push(format!("{label}: batch {index} {problem}"));
+                    }
+                    let Some(dispatched) = dispatched else {
+                        break;
+                    };
+                    instance = dispatched.instance;
+                }
+            }
+        }
+    }
+    assert!(checked > 0, "the corpus is empty");
+    assert!(
+        failures.is_empty(),
+        "{} problems in {checked} evaluations:\n{}",
         failures.len(),
         failures.join("\n")
     );
