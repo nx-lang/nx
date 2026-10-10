@@ -477,6 +477,44 @@ export interface NxRuntimeOptions {
      * give each call its own.</para>
      */
     readonly usage?: NxRuntimeUsage;
+    /**
+     * An object of the host's that the runtime reports where the records of the call's value were
+     * constructed to. The runtime sets its `entries` to an empty list when the call begins and, when
+     * a call of `evaluateFunction`, `callFunction`, `initializeComponent`, `evaluateComponent` or
+     * `dispatchComponentActions` returns, to one entry for each record of the function's value or of
+     * the rendered output that has an origin. A call that throws, and every other call, leaves it
+     * empty. An object the runtime cannot write to is refused with `nx-ir-options` before anything
+     * runs.
+     *
+     * <para>Only a call given a report keeps track of where records came from, so a call given none
+     * does no more work than it did before origins existed, and its result is the same either way.
+     * A record has an origin only when the image of the module that constructed it carries its debug
+     * section. Calls that overlap and share one object leave the entries of whichever ended last, so
+     * give each call its own.</para>
+     */
+    readonly origins?: NxRuntimeOrigins;
+}
+/** Where the records of one call's value were constructed, as {@link NxRuntimeOptions.origins} reports it. */
+export interface NxRuntimeOrigins {
+    /**
+     * One entry for each record of the value that has an origin, in the order of a depth-first walk
+     * of the value: a record before its fields, a list's items in order and a record's fields by
+     * name, the walk that numbers handler tokens.
+     */
+    entries?: NxOriginEntry[];
+}
+/** One record of a call's value and where it was constructed. */
+export interface NxOriginEntry {
+    /**
+     * The record's JSON pointer (RFC 6901) within the value the host received: `""` for the value
+     * itself, `/content/0` for the first item of its `content` field.
+     */
+    readonly path: string;
+    /** The identity of the module whose source the span indexes. */
+    readonly module: string;
+    /** The UTF-8 byte offsets, in that module's source, of the element expression that constructed the record. */
+    readonly start: number;
+    readonly end: number;
 }
 /** What one call of an evaluation function used, as {@link NxRuntimeOptions.usage} reports it. */
 export interface NxRuntimeUsage {

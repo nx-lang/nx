@@ -1039,6 +1039,46 @@ export interface NxRuntimeOptions {
    * give each call its own.</para>
    */
   readonly usage?: NxRuntimeUsage;
+  /**
+   * An object of the host's that the runtime reports where the records of the call's value were
+   * constructed to. The runtime sets its `entries` to an empty list when the call begins and, when
+   * a call of `evaluateFunction`, `callFunction`, `initializeComponent`, `evaluateComponent` or
+   * `dispatchComponentActions` returns, to one entry for each record of the function's value or of
+   * the rendered output that has an origin. A call that throws, and every other call, leaves it
+   * empty. An object the runtime cannot write to is refused with `nx-ir-options` before anything
+   * runs.
+   *
+   * <para>Only a call given a report keeps track of where records came from, so a call given none
+   * does no more work than it did before origins existed, and its result is the same either way.
+   * A record has an origin only when the image of the module that constructed it carries its debug
+   * section. Calls that overlap and share one object leave the entries of whichever ended last, so
+   * give each call its own.</para>
+   */
+  readonly origins?: NxRuntimeOrigins;
+}
+
+/** Where the records of one call's value were constructed, as {@link NxRuntimeOptions.origins} reports it. */
+export interface NxRuntimeOrigins {
+  /**
+   * One entry for each record of the value that has an origin, in the order of a depth-first walk
+   * of the value: a record before its fields, a list's items in order and a record's fields by
+   * name, the walk that numbers handler tokens.
+   */
+  entries?: NxOriginEntry[];
+}
+
+/** One record of a call's value and where it was constructed. */
+export interface NxOriginEntry {
+  /**
+   * The record's JSON pointer (RFC 6901) within the value the host received: `""` for the value
+   * itself, `/content/0` for the first item of its `content` field.
+   */
+  readonly path: string;
+  /** The identity of the module whose source the span indexes. */
+  readonly module: string;
+  /** The UTF-8 byte offsets, in that module's source, of the element expression that constructed the record. */
+  readonly start: number;
+  readonly end: number;
 }
 
 /** What one call of an evaluation function used, as {@link NxRuntimeOptions.usage} reports it. */
@@ -2127,7 +2167,7 @@ export function initializeComponent(
         ? normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.state, {}, frame, `${name} state`, false, evaluation)
         : normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.state, { ...readState }, frame, `${name} state`, true, evaluation);
     const output = declarationContext(linkedProgram, linkedProgram.entry, declaration, evaluation);
-    const { value: rendered, handlers } = canonicalizeRendered(
+    const { value: rendered, handlers } = reportedOutput(
       evalNode(component.body, {
         program: linkedProgram,
         linked: linkedProgram.entry,
@@ -2149,6 +2189,9 @@ export function initializeComponent(
       handlers,
       generation: 1,
     });
+    if (evaluation.origins !== undefined) {
+      instanceOrigins.set(instance, evaluation.origins);
+    }
     return { rendered, state: { ...state }, instance };
   });
 }
@@ -2178,7 +2221,7 @@ export function evaluateComponent(
     normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.props, fields, frame, path, false, evaluation);
     normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.state, readState, frame, `${name} state`, true, evaluation);
     return {
-      rendered: canonicalizeRendered(
+      rendered: reportedOutput(
         evalNode(component.body, {
           program: linkedProgram,
           linked: linkedProgram.entry,
@@ -2234,6 +2277,11 @@ function dispatchBatch(
   }
   const linked = linkedProgram.entry;
   const ownerKey = `${linked.module.identity}::${declaration.name}`;
+  // The records the instance holds keep the origins its lineage recorded for them.
+  const lineage = instanceOrigins.get(instance);
+  if (evaluation.origins !== undefined && lineage !== undefined) {
+    evaluation.origins = lineage;
+  }
   let working: Record<string, NxCanonicalValue> = { ...instance.state };
   const effects: NxCanonicalValue[] = [];
 
@@ -2300,7 +2348,7 @@ function dispatchBatch(
   });
   const generation = instance.generation + 1;
   const output = declarationContext(linkedProgram, linked, declaration, evaluation);
-  const { value: rendered, handlers } = canonicalizeRendered(
+  const { value: rendered, handlers } = reportedOutput(
     evalNode(component.body, { program: linkedProgram, linked, declaration, frame, evaluation, depth: 0 }),
     generation,
     output,
@@ -2316,6 +2364,10 @@ function dispatchBatch(
     handlers,
     generation,
   });
+  const kept = evaluation.origins ?? lineage;
+  if (kept !== undefined) {
+    instanceOrigins.set(next, kept);
+  }
   return {
     rendered,
     effects: writtenEffects,
@@ -2457,6 +2509,53 @@ interface Evaluation {
    * in an argument even when the default was filled in while an argument was checked.
    */
   defaultFailed: boolean;
+  /**
+   * Where the records the call constructs were constructed, when the host gave an origins report,
+   * and `undefined` otherwise: then nothing is recorded or carried. A dispatch uses the one its
+   * instance's lineage keeps, so a record held in state keeps its origin from call to call.
+   */
+  origins: RecordOrigins | undefined;
+  /** The entries of the call's report, once its value has been written for the host. */
+  readonly entries: NxOriginEntry[];
+}
+
+/** The node that constructed a record: the module it belongs to and its index in that module's node table. */
+interface RecordOrigin {
+  readonly linked: LinkedModule;
+  readonly node: number;
+}
+
+/**
+ * The origins of the records of one lineage of calls, by record object: those of one call, or of
+ * an instance and the instances dispatch made from it. A record object is never changed once
+ * built, so its origin stays what it was; the map holds nothing alive and changes no object, so an
+ * origin takes no part in equality.
+ */
+type RecordOrigins = WeakMap<object, RecordOrigin>;
+
+/**
+ * The origins kept for each instance's lineage, so a dispatch given a report finds the origins of
+ * the records its state holds. A value a host passes is never in one: a state it stored and passes
+ * back is read as host input, which has no origin, as it has none in every runtime.
+ */
+const instanceOrigins = new WeakMap<NxComponentInstance, RecordOrigins>();
+
+/** Records that node `nodeIndex` of `context` constructed `record`, in a call that keeps track of origins. */
+function originated<T extends object>(record: T, context: EvalContext, nodeIndex: number): T {
+  context.evaluation.origins?.set(record, { linked: context.linked, node: nodeIndex });
+  return record;
+}
+
+/** Gives `record`, rebuilt from `from`, the origin `from` has, in a call that keeps track of origins. */
+function carryOrigin<T extends object>(record: T, from: object, evaluation: Evaluation): T {
+  const origins = evaluation.origins;
+  if (origins !== undefined) {
+    const origin = origins.get(from);
+    if (origin !== undefined) {
+      origins.set(record, origin);
+    }
+  }
+  return record;
 }
 
 /**
@@ -2471,9 +2570,10 @@ interface Evaluation {
  * call ends, what it used is written to the `usage` object the host gave, if it gave one.
  */
 function evaluate<T>(options: NxRuntimeOptions, input: (measure: InputMeasure) => void, run: (evaluation: Evaluation) => T): T {
-  // The report is cleared before anything else can refuse the call, so that an object the host
-  // gave to an earlier call never shows that call's numbers for this one.
+  // The reports are cleared before anything else can refuse the call, so that an object the host
+  // gave to an earlier call never shows that call's numbers or entries for this one.
   const usage = clearedUsage(options.usage);
+  const origins = clearedOrigins(options.origins);
   const maxOperations = options.maxOperations;
   if (maxOperations !== undefined && !(Number.isSafeInteger(maxOperations) && maxOperations >= 0)) {
     fail("nx-ir-options", `The maxOperations option must be a non-negative safe integer, got ${String(maxOperations)}.`);
@@ -2489,6 +2589,8 @@ function evaluate<T>(options: NxRuntimeOptions, input: (measure: InputMeasure) =
     remaining: maxOperations ?? Infinity,
     nesting: 0,
     defaultFailed: false,
+    origins: origins === undefined ? undefined : new WeakMap(),
+    entries: [],
   };
   let inputSize: number | undefined;
   try {
@@ -2500,7 +2602,16 @@ function evaluate<T>(options: NxRuntimeOptions, input: (measure: InputMeasure) =
       }
       inputSize = measure.size;
     }
-    return run(evaluation);
+    const result = run(evaluation);
+    if (origins !== undefined) {
+      // As for `usage` below: a write to the host's object that fails is dropped.
+      try {
+        origins.entries = evaluation.entries;
+      } catch {
+        // Dropped.
+      }
+    }
+    return result;
   } catch (error) {
     if (error instanceof RangeError) {
       throw new NxIrRuntimeError([
@@ -2553,6 +2664,28 @@ function clearedUsage(usage: unknown): NxRuntimeUsage | undefined {
     delete sink.inputSize;
   } catch {
     fail("nx-ir-options", "The usage option must be an object the runtime can write to: its members could not be set and removed.");
+  }
+  return sink;
+}
+
+/**
+ * The `origins` object of a call's options with its `entries` set to an empty list, ready for the
+ * call's report, or `undefined` when the host gave none. Setting the member is the test that the
+ * object is one the runtime can write to: a value that is no object, or on which it throws, is
+ * refused.
+ */
+function clearedOrigins(origins: unknown): NxRuntimeOrigins | undefined {
+  if (origins === undefined) {
+    return undefined;
+  }
+  if (typeof origins !== "object" || origins === null) {
+    fail("nx-ir-options", `The origins option must be an object the runtime can write to, got ${origins === null ? "null" : typeof origins}.`);
+  }
+  const sink = origins as NxRuntimeOrigins;
+  try {
+    sink.entries = [];
+  } catch {
+    fail("nx-ir-options", "The origins option must be an object the runtime can write to: its entries could not be set.");
   }
   return sink;
 }
@@ -3565,7 +3698,7 @@ function evalNodeKind(index: number, context: EvalContext): NxCanonicalValue {
       } else if (content.length > 1) {
         properties.content = content;
       }
-      return { $type: image.string(entry[2]!), ...properties };
+      return originated({ $type: image.string(entry[2]!), ...properties }, context, index);
     }
     case nodeKinds.component:
       return evalComponentDescriptor(context, index, entry);
@@ -3773,7 +3906,7 @@ export function callFunction(
 function entryResult(context: EvalContext, value: NxCanonicalValue): NxCanonicalValue {
   const declaration = context.declaration;
   const isOptionalResult = declaration.kind.tag === "function" && declaration.kind.isOptionalResult;
-  return isOptionalResult && isEmptyValue(value) ? null : canonicalizeRendered(value, undefined, context).value;
+  return isOptionalResult && isEmptyValue(value) ? null : reportedOutput(value, undefined, context).value;
 }
 
 function evalRecord(context: EvalContext, nodeIndex: number, entry: Uint32Array): NxCanonicalValue {
@@ -3792,7 +3925,7 @@ function evalRecord(context: EvalContext, nodeIndex: number, entry: Uint32Array)
     record.updateTarget !== undefined
       ? normalizePatchFields({ ...context, linked, declaration, frame: [] }, record.fields, properties, name)
       : normalizeFields(context.program, linked, declaration, record.fields, properties, [], name, false, context.evaluation);
-  return { $type: name, ...normalized };
+  return originated({ $type: name, ...normalized }, context, nodeIndex);
 }
 
 function evalUnionCase(context: EvalContext, nodeIndex: number, entry: Uint32Array): NxCanonicalValue {
@@ -3817,7 +3950,7 @@ function evalUnionCase(context: EvalContext, nodeIndex: number, entry: Uint32Arr
   const contentField = unionCase.fields.find((field) => field.isContent)?.name;
   applyContentBinding(properties, contentField, unionCase.fields, content, path, hasBodyAt(entry, next));
   const normalized = normalizeFields(context.program, linked, declaration, unionCase.fields, properties, [], path, false, context.evaluation);
-  return { $type: path, ...normalized };
+  return originated({ $type: path, ...normalized }, context, nodeIndex);
 }
 
 function evalComponentDescriptor(context: EvalContext, nodeIndex: number, entry: Uint32Array): NxCanonicalValue {
@@ -3834,7 +3967,7 @@ function evalComponentDescriptor(context: EvalContext, nodeIndex: number, entry:
   const contentField = component.props.find((field) => field.isContent)?.name;
   applyContentBinding(props, contentField, component.props, content, name, hasBodyAt(entry, next));
   const normalized = normalizeFields(context.program, linked, declaration, component.props, props, [], `${name} props`, false, context.evaluation);
-  return { $type: name, ...normalized, ...handlerObject(handlers) };
+  return originated({ $type: name, ...normalized, ...handlerObject(handlers) }, context, nodeIndex);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -3963,15 +4096,21 @@ function canonicalizeRendered(
   value: NxCanonicalValue,
   generation?: number,
   payer?: EvalContext,
+  report?: { readonly origins: RecordOrigins; readonly entries: NxOriginEntry[] },
 ): { value: NxCanonicalValue; handlers: Map<string, ActionHandlerValue> } {
   const handlers = new Map<string, ActionHandlerValue>();
   const paid = budgeted(payer);
-  const walk = (item: NxCanonicalValue): NxCanonicalValue => {
+  // `path` is the JSON pointer of `item`, kept only while a report is collected.
+  const walk = (item: NxCanonicalValue, path: string | undefined): NxCanonicalValue => {
     if (paid !== undefined) {
       charge(paid, undefined, writtenCost(item));
     }
     if (Array.isArray(item)) {
-      return item.map(walk);
+      const output: NxCanonicalValue[] = [];
+      for (let index = 0; index < item.length; index += 1) {
+        output.push(walk(item[index]!, path === undefined ? undefined : `${path}/${index}`));
+      }
+      return output;
     }
     if (!isObject(item)) {
       return item;
@@ -3988,12 +4127,19 @@ function canonicalizeRendered(
     if (isFunctionReference(item)) {
       return functionRecord(item);
     }
+    if (report !== undefined && path !== undefined) {
+      const origin = report.origins.get(item);
+      const span = origin?.linked.module.artifact.nodeSpan(origin.node);
+      if (origin !== undefined && span !== undefined) {
+        report.entries.push({ path, module: origin.linked.module.identity, start: span[0], end: span[1] });
+      }
+    }
     // Keys are visited in sorted order so the numbering matches, and written back in their own
     // order so the output reads as the declaration does.
     const canonical = new Map<string, NxCanonicalValue>();
     for (const key of Object.keys(item).sort()) {
       // The discriminator is the record's type, not a value it holds.
-      canonical.set(key, key === "$type" ? item[key]! : walk(item[key]!));
+      canonical.set(key, key === "$type" ? item[key]! : walk(item[key]!, path === undefined ? undefined : `${path}/${pointerToken(key)}`));
     }
     // An update record is the one place the canonical encoding writes `null`: a present empty
     // field is a cleared one, and key presence is what carries that, so the value is `null`
@@ -4006,7 +4152,27 @@ function canonicalizeRendered(
     }
     return output;
   };
-  return { value: walk(value), handlers };
+  return { value: walk(value, report === undefined ? undefined : ""), handlers };
+}
+
+/** A field name as one token of a JSON pointer: `~` is written `~0` and `/` is written `~1`. */
+function pointerToken(name: string): string {
+  return name.replaceAll("~", "~0").replaceAll("/", "~1");
+}
+
+/**
+ * Writes the value a call returns for the host, as {@link canonicalizeRendered} does, and, when
+ * the host gave an origins report, collects the origin of each record written into the call's
+ * entries: the function's value, or the rendered output.
+ */
+function reportedOutput(
+  value: NxCanonicalValue,
+  generation: number | undefined,
+  payer: EvalContext,
+): { value: NxCanonicalValue; handlers: Map<string, ActionHandlerValue> } {
+  const evaluation = payer.evaluation;
+  const origins = evaluation.origins;
+  return canonicalizeRendered(value, generation, payer, origins === undefined ? undefined : { origins, entries: evaluation.entries });
 }
 
 /**
@@ -4101,7 +4267,11 @@ function normalizeActionInput(
   if (discriminator !== undefined && discriminator !== expected) {
     fail("nx-ir-type", `Expected ${path} to be a '${expected}' action, got '${String(discriminator)}'.`);
   }
-  return { $type: expected, ...normalizeFields(program, action.linked, action.declaration, kind.fields, rest, [], path, false, evaluation) };
+  return carryOrigin(
+    { $type: expected, ...normalizeFields(program, action.linked, action.declaration, kind.fields, rest, [], path, false, evaluation) },
+    input,
+    evaluation,
+  );
 }
 
 /**
@@ -4205,16 +4375,22 @@ function evalIntrinsic(context: EvalContext, nodeIndex: number, entry: Uint32Arr
       fail("nx-ir-intrinsic", `Intrinsic '${intrinsic}' expects ${arity} arguments, got ${args.length}.`, context, nodeIndex);
     }
   };
+  // A record `apply`, `merge` or `diff` builds takes the origin of the expression that applied the
+  // intrinsic, which is the code that produced the new value.
   switch (intrinsic) {
     case "apply":
       expectArity(2);
-      return applyRecordUpdate(intrinsicRecord(args[0]!, intrinsic), intrinsicRecord(args[1]!, intrinsic));
+      return originated(applyRecordUpdate(intrinsicRecord(args[0]!, intrinsic), intrinsicRecord(args[1]!, intrinsic)), context, nodeIndex);
     case "merge":
       expectArity(2);
-      return mergeUpdateRecords(intrinsicRecord(args[0]!, intrinsic), intrinsicRecord(args[1]!, intrinsic));
+      return originated(mergeUpdateRecords(intrinsicRecord(args[0]!, intrinsic), intrinsicRecord(args[1]!, intrinsic)), context, nodeIndex);
     case "diff":
       expectArity(2);
-      return diffRecordValues(intrinsicRecord(args[0]!, intrinsic), intrinsicRecord(args[1]!, intrinsic), context, nodeIndex);
+      return originated(
+        diffRecordValues(intrinsicRecord(args[0]!, intrinsic), intrinsicRecord(args[1]!, intrinsic), context, nodeIndex),
+        context,
+        nodeIndex,
+      );
     case "changed": {
       expectArity(1);
       const update = intrinsicRecord(args[0]!, intrinsic);
@@ -4793,7 +4969,7 @@ function normalizeNominalValue(
       fail("nx-ir-boundary-type", `Expected ${path} to be a ${display}, got '${String(discriminator)}'.`);
     }
     const declaringContext: EvalContext = { ...context, linked, declaration, frame: [] };
-    return { $type: display, ...normalizePatchFields(declaringContext, kind.fields, rest, path) };
+    return carryOrigin({ $type: display, ...normalizePatchFields(declaringContext, kind.fields, rest, path) }, object, context.evaluation);
   }
   if (kind.tag === "record") {
     const object = requireObject(value, path);
@@ -4806,20 +4982,24 @@ function normalizeNominalValue(
     if (discriminator !== undefined && discriminator !== display) {
       const subtype = resolveSubtype(context.program, String(discriminator), key, display, path);
       const { $type: _derived, ...derived } = object;
-      return {
-        $type: subtype.discriminator,
-        ...normalizeFields(
-          context.program,
-          subtype.linked,
-          subtype.linked.module.declarationsByName.get(subtype.discriminator) ?? declaration,
-          subtype.fields,
-          derived,
-          [],
-          path,
-          false,
-          context.evaluation,
-        ),
-      };
+      return carryOrigin(
+        {
+          $type: subtype.discriminator,
+          ...normalizeFields(
+            context.program,
+            subtype.linked,
+            subtype.linked.module.declarationsByName.get(subtype.discriminator) ?? declaration,
+            subtype.fields,
+            derived,
+            [],
+            path,
+            false,
+            context.evaluation,
+          ),
+        },
+        object,
+        context.evaluation,
+      );
     }
     // Nothing is an instance of an abstract record.
     if (kind.isAbstract) {
@@ -4831,10 +5011,14 @@ function normalizeNominalValue(
       );
     }
     const { $type: _discard, ...rest } = object;
-    return {
-      $type: display,
-      ...normalizeFields(context.program, linked, declaration, kind.fields, rest, [], path, false, context.evaluation),
-    };
+    return carryOrigin(
+      {
+        $type: display,
+        ...normalizeFields(context.program, linked, declaration, kind.fields, rest, [], path, false, context.evaluation),
+      },
+      object,
+      context.evaluation,
+    );
   }
   if (kind.tag === "union") {
     // A constant case arrives as its bare name rather than as a `$type` object.
@@ -4860,10 +5044,14 @@ function normalizeNominalValue(
       fail("nx-ir-boundary-type", `Invalid union case '${typeName}' for ${path}.`);
     }
     const { $type: _discard, ...rest } = object;
-    return {
-      $type: typeName,
-      ...normalizeFields(context.program, linked, declaration, unionCase.fields, rest, [], path, false, context.evaluation),
-    };
+    return carryOrigin(
+      {
+        $type: typeName,
+        ...normalizeFields(context.program, linked, declaration, unionCase.fields, rest, [], path, false, context.evaluation),
+      },
+      object,
+      context.evaluation,
+    );
   }
   return value;
 }

@@ -2029,6 +2029,112 @@ test("an agent library image of another version fails linking unless the host al
     const program = linkNxIrProgram(entry, { resolve: () => library, allowVersionMismatch: true });
     assertEqual(evaluateFunction(program, "root"), 1);
 });
+// Origins: where the records of a call's value were constructed. The images are the corpus's, with
+// their debug sections, since a span comes from there; the corpus test holds every report of every
+// program to what the Rust runtime reports.
+const decoder = new TextDecoder();
+/** A corpus program's image of `identity`, with its debug section unless `stripped`. */
+function corpusImage(program, identity, stripped = false) {
+    const file = `${identity.replaceAll("/", "__")}${stripped ? ".stripped" : ""}.nxir`;
+    return new Uint8Array(readFileSync(fileURLToPath(new URL(`../../../../specs/ir-conformance/${program}/expected/${file}`, import.meta.url))));
+}
+/** A corpus program's entry linked against its other modules. */
+function corpusProgram(program, entry, others = [], stripped = false) {
+    const modules = new Map([entry, ...others].map((identity) => [identity, prepareNxIrModule(corpusImage(program, identity, stripped))]));
+    return linkNxIrProgram(modules.get(entry), { resolve: (identity) => modules.get(identity) });
+}
+/** The source text an origin entry's span covers, read from the corpus program's module. */
+function originText(program, entry) {
+    const source = readFileSync(fileURLToPath(new URL(`../../../../specs/ir-conformance/${program}/${entry.module}`, import.meta.url)));
+    return decoder.decode(source.subarray(entry.start, entry.end));
+}
+/** The value a JSON pointer names in `value`. */
+function atPointer(value, pointer) {
+    return pointer
+        .split("/")
+        .slice(1)
+        .map((token) => token.replaceAll("~1", "/").replaceAll("~0", "~"))
+        .reduce((held, token) => (Array.isArray(held) ? held[Number(token)] : fields(held)[token]), value);
+}
+test("an origins report names the element that constructed each record of the rendered output", () => {
+    const program = corpusProgram("components", "main.nx");
+    const origins = {};
+    const { rendered } = initializeComponent(program, "Greeting", { name: "Ada" }, { origins });
+    const entries = origins.entries;
+    assertEqual(entries.map((entry) => [entry.path, entry.module, originText("components", entry)]), [
+        ["", "main.nx", `<Stack>\n    <Label Text={"Hello " + name} />\n    <Label Text="!" FontSize={count + 20} />\n  </Stack>`],
+        ["/Children/0", "main.nx", `<Label Text={"Hello " + name} />`],
+        ["/Children/1", "main.nx", `<Label Text="!" FontSize={count + 20} />`],
+    ]);
+    // Each pointer names a record of the value the host received.
+    assertEqual(entries.map((entry) => fields(atPointer(rendered, entry.path)).$type), ["Stack", "Label", "Label"]);
+});
+test("each record a loop builds has the one element of the loop body as its origin", () => {
+    const origins = {};
+    evaluateFunction(corpusProgram("components", "main.nx"), "labels", [], { origins });
+    assertEqual(origins.entries.map((entry) => [entry.path, originText("components", entry)]), [
+        ["/0", "<Label Text={text} />"],
+        ["/1", "<Label Text={text} />"],
+    ]);
+});
+test("a question shown through a step has the origin of its element in the value that declares it", () => {
+    const program = corpusProgram("question-flow", "main.nx", ["library/answers.nx", "library/layout.nx", "library/questions.nx"]);
+    const lifecycle = JSON.parse(readFileSync(fileURLToPath(new URL("../../../../specs/ir-conformance/question-flow/program.json", import.meta.url)), "utf8")).lifecycles[0];
+    const origins = {};
+    let { instance } = initializeComponent(program, lifecycle.component, lifecycle.props, { origins });
+    const source = decoder.decode(readFileSync(fileURLToPath(new URL("../../../../specs/ir-conformance/question-flow/main.nx", import.meta.url))));
+    const declared = new TextEncoder().encode(source.slice(0, source.indexOf("let roleQuestion ="))).length;
+    let shown = 0;
+    for (const batch of lifecycle.batches) {
+        const dispatched = dispatchComponentActions(program, instance, batch, { origins });
+        instance = dispatched.instance;
+        for (const entry of origins.entries) {
+            const record = fields(atPointer(dispatched.rendered, entry.path));
+            if (record.$type === "SingleChoice" && record.id === "role") {
+                shown += 1;
+                const text = originText("question-flow", entry);
+                assertEqual(entry.start > declared && text.startsWith(`<SingleChoice id="role"`) && text.endsWith("</SingleChoice>"), true);
+            }
+        }
+    }
+    assertEqual(shown > 0, true);
+});
+test("a record a library function constructs has its origin in the library's module", () => {
+    const origins = {};
+    evaluateFunction(corpusProgram("ranges", "app/main.nx", ["shared/bounds.nx"]), "passedAlong", [], { origins });
+    assertEqual(origins.entries.map((entry) => [entry.path, entry.module, originText("ranges", entry)]), [["", "shared/bounds.nx", "0.0..1.5"]]);
+});
+test("a record apply builds has the origin of the expression that applied it", () => {
+    const origins = {};
+    evaluateFunction(corpusProgram("records", "main.nx"), "applied", [], { origins });
+    assertEqual(origins.entries.map((entry) => [entry.path, originText("records", entry)]), [["", "apply(ada(), patch())"]]);
+});
+test("an origins report from images without their debug section is empty, and the result is unchanged", () => {
+    const stripped = corpusProgram("components", "main.nx", [], true);
+    const origins = {};
+    const reported = evaluateFunction(stripped, "root", [], { origins });
+    assertEqual(origins.entries, []);
+    assertEqual(reported, evaluateFunction(corpusProgram("components", "main.nx"), "root"));
+});
+test("a call that fails, and a call that renders nothing, leave the origins report empty", () => {
+    const program = corpusProgram("components", "main.nx");
+    const origins = {};
+    evaluateFunction(program, "root", [], { origins });
+    assertEqual(origins.entries.length, 3);
+    assertThrows(() => evaluateFunction(program, "missing", [], { origins }), "was not found");
+    assertEqual(origins.entries, []);
+    evaluateFunction(program, "root", [], { origins });
+    normalizeComponentState(program, "Greeting", { count: 1 }, { origins });
+    assertEqual(origins.entries, []);
+});
+test("an origins report the runtime cannot write to is refused before anything runs", () => {
+    const program = corpusProgram("components", "main.nx");
+    // The function does not exist, so a call that ran anything would fail on that instead.
+    for (const origins of [Object.freeze({}), Object.preventExtensions({}), 5, null]) {
+        const error = assertThrows(() => evaluateFunction(program, "missing", [], { origins: origins }), "The origins option must be an object the runtime can write to");
+        assertEqual(error.diagnostics[0].code, "nx-ir-options");
+    }
+});
 /** `root` is `depth - 1` negations around a literal: `depth` nodes, each nested in the one before. */
 function nestedNegations(depth) {
     const b = new ArtifactBuilder("main.nx");
