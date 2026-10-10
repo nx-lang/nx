@@ -331,6 +331,24 @@ describe("declarations, references and comments", () => {
     assert.ok(note.classList.contains("comment"));
   });
 
+  it("reads a comment written over several lines as one note", async () => {
+    const element = show(await fixture("notesAndLists"));
+    const notes = Array.from(root(element).querySelectorAll(".document > .notes, .document > .comment"));
+    assert.deepEqual(
+      notes.map((note) => Array.from(note.matches(".notes") ? note.children : [note], read)),
+      [["The first line of a note", "and its second line."], ["A note of its own."], ["About a."], ["About b."]],
+      "consecutive line comments join; a blank line, or a comment trailing code, keeps notes apart"
+    );
+    assert.ok(Array.from(notes[0]!.children).every((line) => line.matches(".comment[data-key]")));
+  });
+
+  it("separates the items of a list", async () => {
+    const element = show(await fixture("notesAndLists"));
+    const list = root(element).querySelector<HTMLElement>(".sequence");
+    assert.ok(list);
+    assert.equal(read(list), "red, green, blue");
+  });
+
   it("shows a reference as a link naming its target", async () => {
     const element = show(await fixture("questionFlow"));
     const reference = root(element).querySelector<HTMLElement>(".reference .ref")!;

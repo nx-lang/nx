@@ -130,9 +130,51 @@ function span(document: Document, className: string, text: string): HTMLSpanElem
 
 function appendNode(context: RenderContext, parent: HTMLElement, at: number, options: RenderOptions = {}): void {
   const rendered = renderNode(context, at, options);
-  if (rendered !== undefined) {
-    parent.append(rendered);
+  if (rendered === undefined) {
+    return;
   }
+  const source = node(context, at);
+  if (!isLineComment(source) || !standsAlone(context, source)) {
+    parent.append(rendered);
+    return;
+  }
+  // A comment written over several lines is a run of line comments that each stand alone on their
+  // line: they read as one note.
+  const previous = parent.lastElementChild;
+  const previousLine = previous === null ? undefined : noteEndLines.get(previous);
+  if (previous !== null && previousLine !== undefined && previousLine + 1 === source.range.start.line) {
+    let notes = previous;
+    if (!previous.classList.contains("notes")) {
+      notes = context.document.createElement("div");
+      notes.className = "notes";
+      previous.replaceWith(notes);
+      notes.append(previous);
+    }
+    notes.append(rendered);
+    noteEndLines.set(notes, source.range.end.line);
+    return;
+  }
+  parent.append(rendered);
+  noteEndLines.set(rendered, source.range.end.line);
+}
+
+/** The last source line of each rendered line comment, or run of them, that a next line comment may join. */
+const noteEndLines = new WeakMap<Element, number>();
+
+/** Whether only whitespace comes before the node on its line, so it does not trail other code. */
+function standsAlone(context: RenderContext, source: SourceNode): boolean {
+  const { bytes } = context.index;
+  for (let at = source.range.startByte - 1; at >= 0 && bytes[at] !== 0x0a; at--) {
+    if (bytes[at] !== 0x20 && bytes[at] !== 0x09 && bytes[at] !== 0x0d) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isLineComment(source: SourceNode): boolean {
+  const text = source.value ?? "";
+  return source.role === "comment" && text.startsWith("//") && !text.startsWith("///");
 }
 
 function appendAll(context: RenderContext, parent: HTMLElement, children: readonly number[], options: RenderOptions = {}): void {
@@ -654,8 +696,14 @@ const renderSequence: Renderer = (context, at) => {
   const { index } = context;
   const children = index.children[at] ?? [];
   const blocks = children.some((child) => isBlockRole(node(context, child).role));
-  const element = marked(context, at, "div", blocks ? "sequence blocks" : "sequence");
-  appendAll(context, element, children);
+  if (blocks) {
+    const element = marked(context, at, "div", "sequence blocks");
+    appendAll(context, element, children);
+    return element;
+  }
+  // Items in a line read as a list: "a, b, c".
+  const element = marked(context, at, "span", "sequence");
+  appendJoined(context, element, children, ", ");
   return element;
 };
 

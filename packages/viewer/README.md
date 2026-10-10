@@ -113,8 +113,8 @@ a value it shows.
 - **Elements** read as cards headed by their kind in sentence case (`SingleChoice` reads "Single
   choice"), with properties in declaration order and the defaults the tag leaves out as ghost rows.
   A kind that names no declaration is shown as written and marked unresolved.
-- **Values**: strings lose their quotes, booleans read ✓ and ✗, union cases read as pills, and text
-  content whose type is markdown is rendered as markdown.
+- **Values**: strings lose their quotes, booleans read ✓ and ✗, union cases read as pills, a list
+  on one line reads with commas, and text content whose type is markdown is rendered as markdown.
 - **Logic**: `if` reads "Only when … / Otherwise", a `match` as a table of its arms, a `for` as "For
   each … in …", and operators as school math (`= ≠ < > ≤ ≥ + − × ÷`) or words where programmers have
   a convention (`and`, `or`, `not`, "otherwise" for `??`, "is given" for `x?`, "through" for `..=`).
@@ -122,7 +122,7 @@ a value it shows.
 - **Handlers** read "When integer answered →" with one "set … to …" line per state change.
 - **Declarations** read as headed sections (Type, Action, One of, Component, Function, Value) with
   their members, and doc comments as prose. Imports fold into a strip at the top. Comments read as
-  notes where they stand.
+  notes where they stand, and line comments standing alone on consecutive lines read as one note.
 - **Hover** on a property's name shows its type, doc and default, and every case of a union with the
   current one marked; hover on a handler shows the action it answers and what that carries; hover
   on a reference or a kind shows the declaration. All of it comes from the

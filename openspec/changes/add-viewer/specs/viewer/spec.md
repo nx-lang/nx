@@ -79,15 +79,20 @@ list their items under the property's name, and nested elements SHALL be nested 
 ### Requirement: Values have a style and lose their quotes
 The element SHALL show a string literal without its quotes in a value style, a number in tabular
 figures, a boolean as a check or a cross with its value as its accessible name, a `case` node as a
-pill holding the case name, `{}` as an empty marker, and a `sequence` as a list of its items. It
-SHALL show a `text` node as prose, rendering it as markdown when its text type is `markdown`, and an
-`embed` inside text as a slot. A string and a name that read alike SHALL remain distinguishable by
-style.
+pill holding the case name, `{}` as an empty marker, and a `sequence` as a list of its items. A
+sequence none of whose items is a block, such as an element or a comment, SHALL read on one line
+with its items separated by commas. It SHALL show a `text` node as prose, rendering it as markdown
+when its text type is `markdown`, and an `embed` inside text as a slot. A string and a name that
+read alike SHALL remain distinguishable by style.
 
 #### Scenario: A string and a case
 - **WHEN** an element sets `label="Design"` and `layout=chips`
 - **THEN** the label row SHALL show `Design` without quotes in the value style
 - **AND** the layout row SHALL show a `chips` pill
+
+#### Scenario: A list on one line
+- **WHEN** an element sets `items={ "red" "green" "blue" }`
+- **THEN** the items row SHALL read `red, green, blue`
 
 #### Scenario: Markdown text
 - **WHEN** an element has a body typed `markdown` holding a paragraph with emphasis
@@ -149,12 +154,19 @@ each with its name, its type as NX spells it, its default when it has one and it
 union as the list of its cases. It SHALL render a function declaration with its parameters in the
 same form above its body. It SHALL show a `reference` as a link naming its target, a `member` as its
 object followed by the member name, and a `call` as its callee with its arguments. It SHALL show a
-doc comment as prose above what it documents and a comment as a muted note where it stands.
+doc comment as prose above what it documents and a comment as a muted note where it stands. Line
+comments that stand alone on consecutive lines SHALL read as one note; a comment that trails code on
+its line SHALL not join them.
 
 #### Scenario: A record type
 - **WHEN** a document declares `type User = { id:string name:string? }` with a doc comment on `name`
 - **THEN** the element SHALL show a table with the rows `id` of type `string` and `name` of type
   `string?` with its doc comment
+
+#### Scenario: A comment over several lines
+- **WHEN** a document has the comment lines `// The first line of a note` and
+  `// and its second line.` one after the other, then a blank line and `// A note of its own.`
+- **THEN** the element SHALL show the first two lines as one note and the third as a note of its own
 
 ### Requirement: Hover and peek explain what a node refers to
 Hovering an attribute's name SHALL show, from the declaration table, the property's type, doc

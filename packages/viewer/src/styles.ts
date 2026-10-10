@@ -76,6 +76,7 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 .declaration-name { font-weight: 600; font-family: var(--mono); font-size: 13px; }
 .declaration-header .source-toggle, .card-header .source-toggle { margin-left: auto; opacity: 0.7; }
 .declaration-body { display: flex; flex-direction: column; gap: 4px; padding-left: 12px; border-left: 2px solid var(--rule); }
+.declaration-body > .type { align-self: flex-start; }
 .group-label { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
 .member { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
 .member-name { font-family: var(--mono); font-size: 13px; font-weight: 500; }
@@ -114,7 +115,8 @@ code, .type { font-family: var(--mono); font-size: 12.5px; }
 .pill.case { color: var(--blue); border-color: var(--blue); }
 .pill.current { color: var(--blue); border-color: var(--blue); background: var(--blue-soft); font-weight: 600; }
 .qualifier { color: var(--ink-3); }
-.sequence { display: inline-flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
+.sequence { display: inline; }
+.sequence > .reference { display: inline-block; vertical-align: top; }
 .sequence.blocks { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
 
 .reference .ref { font-family: var(--mono); font-size: 12.5px; color: var(--blue); border-bottom: 1px dashed var(--blue); cursor: pointer; }
@@ -139,6 +141,7 @@ code, .type { font-family: var(--mono); font-size: 12.5px; }
 .arrow { color: var(--ink-3); }
 
 .comment { color: var(--ink-3); font-size: 13px; font-style: italic; white-space: pre-wrap; }
+.notes { display: flex; flex-direction: column; }
 .doc { color: var(--ink-2); font-size: 13.5px; }
 .doc p, .text-body p { margin: 0; }
 .text-body { display: flex; flex-direction: column; gap: 6px; }
