@@ -4100,15 +4100,20 @@ function canonicalizeRendered(
 ): { value: NxCanonicalValue; handlers: Map<string, ActionHandlerValue> } {
   const handlers = new Map<string, ActionHandlerValue>();
   const paid = budgeted(payer);
-  // `path` is the JSON pointer of `item`, kept only while a report is collected.
-  const walk = (item: NxCanonicalValue, path: string | undefined): NxCanonicalValue => {
+  // The item indices and field names from the value to the item walked, while a report is
+  // collected. They are joined into a JSON pointer only for a record with an origin, so a walk
+  // over records without one, a host's own data say, builds no strings.
+  const path: (string | number)[] | undefined = report === undefined ? undefined : [];
+  const walk = (item: NxCanonicalValue): NxCanonicalValue => {
     if (paid !== undefined) {
       charge(paid, undefined, writtenCost(item));
     }
     if (Array.isArray(item)) {
       const output: NxCanonicalValue[] = [];
       for (let index = 0; index < item.length; index += 1) {
-        output.push(walk(item[index]!, path === undefined ? undefined : `${path}/${index}`));
+        path?.push(index);
+        output.push(walk(item[index]!));
+        path?.pop();
       }
       return output;
     }
@@ -4127,11 +4132,12 @@ function canonicalizeRendered(
     if (isFunctionReference(item)) {
       return functionRecord(item);
     }
-    if (report !== undefined && path !== undefined) {
+    if (report !== undefined) {
       const origin = report.origins.get(item);
       const span = origin?.linked.module.artifact.nodeSpan(origin.node);
       if (origin !== undefined && span !== undefined) {
-        report.entries.push({ path, module: origin.linked.module.identity, start: span[0], end: span[1] });
+        const pointer = path!.map((segment) => `/${typeof segment === "number" ? segment : pointerToken(segment)}`).join("");
+        report.entries.push({ path: pointer, module: origin.linked.module.identity, start: span[0], end: span[1] });
       }
     }
     // Keys are visited in sorted order so the numbering matches, and written back in their own
@@ -4139,7 +4145,13 @@ function canonicalizeRendered(
     const canonical = new Map<string, NxCanonicalValue>();
     for (const key of Object.keys(item).sort()) {
       // The discriminator is the record's type, not a value it holds.
-      canonical.set(key, key === "$type" ? item[key]! : walk(item[key]!, path === undefined ? undefined : `${path}/${pointerToken(key)}`));
+      if (key === "$type") {
+        canonical.set(key, item[key]!);
+        continue;
+      }
+      path?.push(key);
+      canonical.set(key, walk(item[key]!));
+      path?.pop();
     }
     // An update record is the one place the canonical encoding writes `null`: a present empty
     // field is a cleared one, and key presence is what carries that, so the value is `null`
@@ -4152,7 +4164,7 @@ function canonicalizeRendered(
     }
     return output;
   };
-  return { value: walk(value, report === undefined ? undefined : ""), handlers };
+  return { value: walk(value), handlers };
 }
 
 /** A field name as one token of a JSON pointer: `~` is written `~0` and `/` is written `~1`. */
