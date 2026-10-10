@@ -218,7 +218,7 @@ describe("values", () => {
     const body = root(element).querySelector(".card .text-body")!;
     assert.match(read(body), /Call find_plans_for_team when asked\. Price is 2 \* 3 \* 4 dollars\./);
     assert.deepEqual(Array.from(body.querySelectorAll("em")).map(read), ["really", "important"]);
-    assert.deepEqual(Array.from(body.querySelectorAll("strong")).map(read), ["bold"]);
+    assert.deepEqual(Array.from(body.querySelectorAll("strong")).map(read), ["bold", "strong"]);
   });
 
   it("renders an agent's prompt as prose", async () => {
@@ -413,6 +413,7 @@ describe("selection", () => {
     assert.equal(events.length, 1);
     assert.equal(events[0]!.key, key);
     assert.equal(events[0]!.role, "literal");
+    assert.match(root(element).querySelector('[role="status"]')!.textContent ?? "", /^Selected literal: /);
     assert.ok(rendered(element, key).classList.contains("selected"));
   });
 
@@ -471,6 +472,10 @@ describe("the keyboard", () => {
     const order = Array.from(root(element).querySelectorAll<HTMLElement>("[data-key]")).map((run) => run.dataset["key"]!);
     assert.deepEqual(events, [order[0], order[1], order[0]]);
     assert.equal(element.selection, order[0]);
+    assert.equal(body.getAttribute("role"), "region");
+    const announcer = root(element).querySelector('[role="status"]')!;
+    assert.equal(announcer.getAttribute("aria-live"), "polite");
+    assert.equal(announcer.textContent, "Selected doc comment: A person the survey is about.", "the selection is announced");
   });
 
   it("moves focus into the source panel and back, and closes it with Escape", async () => {

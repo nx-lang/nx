@@ -61,6 +61,7 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 .document { display: flex; flex-direction: column; gap: 12px; padding: 4px 2px 12px; }
 :host([stale]) .document { opacity: 0.55; }
 .n { border-radius: 4px; }
+.announcer { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .body:focus-visible { outline: 2px solid var(--blue-soft); outline-offset: 4px; border-radius: 4px; }
 .n.selected { outline: 2px solid var(--blue); outline-offset: 2px; }
 .n.hovered { background: var(--blue-soft); }

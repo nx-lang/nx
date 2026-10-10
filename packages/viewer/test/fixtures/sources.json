@@ -41,7 +41,7 @@
     "source": "type Shape = circle | square\n\nlet describe(shape:Shape) = {\n  if shape is {\n    circle => \"round\"\n    else => \"angular\"\n  }\n}\n\nlet doubled(items:int*) = {\n  for item in items { item * 2 }\n}\n\n// A note about the next declaration.\nlet answer = 42\n"
   },
   "markdownText": {
-    "source": "type Note = { content text:string }\n\n<Note:markdown>\n  Call find_plans_for_team when asked. Price is 2 * 3 * 4 dollars.\n  This is *really* _important_, and **bold**.\n</Note>\n"
+    "source": "type Note = { content text:string }\n\n<Note:markdown>\n  Call find_plans_for_team when asked. Price is 2 * 3 * 4 dollars.\n  This is *really* _important_, and **bold** and __strong__.\n</Note>\n"
   },
   "unparsed": {
     "source": "let a = 1\nlet b = = =\n"

@@ -10,6 +10,7 @@
 import type { EditorRange, SourceRole, SourceTree } from "@nx-lang/language-protocol";
 
 import { declarationHover, handlerHover, propertyHover } from "./hover.js";
+import { inWords } from "./words.js";
 import { renderDocument, renderNode, type RenderContext } from "./render.js";
 import { styles } from "./styles.js";
 import { indexedNodeAtSpan, indexTree, nodeOf, sourceTextOf, type TreeIndex } from "./tree.js";
@@ -78,6 +79,8 @@ export class NxViewerElement extends ElementBase {
   readonly #badge: HTMLSpanElement;
   readonly #selectionSource: HTMLButtonElement;
   readonly #body: HTMLDivElement;
+  /** Says what the arrow keys selected, for a screen reader, since focus stays on the body. */
+  readonly #announcer: HTMLDivElement;
   readonly #hover: HTMLDivElement;
   readonly #sourcePanel: HTMLDivElement;
   readonly #sourceTitle: HTMLSpanElement;
@@ -111,6 +114,7 @@ export class NxViewerElement extends ElementBase {
     this.#body.className = "body";
     // The body takes focus so the arrow keys can walk the selection through every node.
     this.#body.tabIndex = 0;
+    this.#body.setAttribute("role", "region");
     this.#body.setAttribute("aria-label", "Reading view; the up and down arrows select the next node");
 
     this.#hover = document.createElement("div");
@@ -135,7 +139,12 @@ export class NxViewerElement extends ElementBase {
     this.#sourceText = document.createElement("pre");
     this.#sourcePanel.append(bar, this.#sourceText);
 
-    this.#frame.append(this.#toolbar, this.#body, this.#hover, this.#sourcePanel);
+    this.#announcer = document.createElement("div");
+    this.#announcer.className = "announcer";
+    this.#announcer.setAttribute("role", "status");
+    this.#announcer.setAttribute("aria-live", "polite");
+
+    this.#frame.append(this.#toolbar, this.#body, this.#hover, this.#sourcePanel, this.#announcer);
     shadow.append(style, this.#frame);
 
     close.addEventListener("click", () => this.#closeSource());
@@ -309,6 +318,9 @@ export class NxViewerElement extends ElementBase {
       }
     }
     if (fire) {
+      if (original !== undefined) {
+        this.#announce(original);
+      }
       const node = nodeOf(index, at);
       const detail: NxSelectDetail = { key, role: node.role, range: node.range };
       this.dispatchEvent(new CustomEvent(NX_SELECT_EVENT, { detail, bubbles: true, composed: true }));
@@ -387,6 +399,14 @@ export class NxViewerElement extends ElementBase {
     const element = visible[Math.max(0, Math.min(visible.length - 1, next))]!;
     this.#select(keyOf(element), true);
     element.scrollIntoView?.({ block: "nearest" });
+  }
+
+  /** Tells a screen reader what is selected: the node's role and what it reads as. */
+  #announce(element: HTMLElement): void {
+    const role = inWords(element.dataset["role"] ?? "").toLowerCase();
+    const reading = (element.textContent ?? "").replace(/\s+/g, " ").trim();
+    const short = reading.length > 120 ? `${reading.slice(0, 119)}…` : reading;
+    this.#announcer.textContent = short === "" ? `Selected ${role}` : `Selected ${role}: ${short}`;
   }
 
   /** Shows or hides a reference's target in place, rendered as a copy of its original. */

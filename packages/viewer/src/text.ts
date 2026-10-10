@@ -209,7 +209,8 @@ type Emit = (parent: HTMLElement, start: number, end: number) => void;
 
 /**
  * The block structure of a markdown body: headings, bulleted and numbered lists, and paragraphs,
- * separated by blank lines. Inline, `**strong**`, `*emphasis*`, `_emphasis_` and `` `code` ``.
+ * separated by blank lines. Inline, `**strong**`, `__strong__`, `*emphasis*`, `_emphasis_` and
+ * `` `code` ``.
  */
 function renderMarkdown(document: Document, container: HTMLElement, body: Body, emit: Emit): void {
   const lines = splitLines(body);
@@ -260,6 +261,7 @@ function renderMarkdown(document: Document, container: HTMLElement, body: Body, 
 
 const INLINE_MARKERS: readonly { readonly open: string; readonly tag: string }[] = [
   { open: "**", tag: "strong" },
+  { open: "__", tag: "strong" },
   { open: "`", tag: "code" },
   { open: "*", tag: "em" },
   { open: "_", tag: "em" },
@@ -333,7 +335,7 @@ function canOpen(body: Body, at: number, end: number, marker: string): boolean {
   if (isSpace(body, at + marker.length, 0, end)) {
     return false;
   }
-  return marker !== "_" || !isWordCharacter(body, at - 1, 0, end);
+  return !marker.startsWith("_") || !isWordCharacter(body, at - 1, 0, end);
 }
 
 /** Whether `marker` at `at` can close emphasis: preceded by a non-space, and `_` not inside a word. */
@@ -344,7 +346,7 @@ function canClose(body: Body, at: number, end: number, marker: string): boolean 
   if (isSpace(body, at - 1, 0, end)) {
     return false;
   }
-  return marker !== "_" || !isWordCharacter(body, at + marker.length, 0, end);
+  return !marker.startsWith("_") || !isWordCharacter(body, at + marker.length, 0, end);
 }
 
 /** Where `marker` closes after `from`, with something between; -1 when it does not. */

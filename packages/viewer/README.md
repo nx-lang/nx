@@ -101,8 +101,8 @@ the tree does not hold clears it.
 
 From the keyboard, the reading takes focus and the up and down arrows walk the selection through
 every node in reading order; Enter selects a focused card or name, and Escape closes a hover or the
-source panel. The selected node carries `aria-current`, and a hover is linked to what it describes
-with `aria-describedby`.
+source panel. The selected node carries `aria-current`, a polite live region says what was selected,
+and a hover is linked to what it describes with `aria-describedby`.
 
 `nodeAtSpan(tree, startByte, endByte)` finds the node whose range is exactly that span, preferring an
 element. A value origin from the IR runtime carries such a span, so a host can select the source of
