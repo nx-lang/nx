@@ -259,14 +259,32 @@ function renderMarkdown(document: Document, container: HTMLElement, body: Body, 
   flushParagraph();
 }
 
-const INLINE_MARKERS: readonly { readonly open: string; readonly tag: string }[] = [
-  { open: "**", tag: "strong" },
-  { open: "__", tag: "strong" },
-  { open: "`", tag: "code" },
-  { open: "*", tag: "em" },
-  { open: "_", tag: "em" },
-];
+/** A styled stretch of inline text: its whole extent, the part between its markers, and its tag. */
+interface InlineSpan {
+  readonly start: number;
+  readonly end: number;
+  readonly innerStart: number;
+  readonly innerEnd: number;
+  readonly tag: "strong" | "em" | "code";
+}
 
+/** A run of `*` or `_` while emphasis is matched: where it is, how much is left, and its flanking. */
+interface Delimiter {
+  readonly char: string;
+  readonly length: number;
+  /** The run's unused characters are `start` to `end`; openers use theirs from the end. */
+  start: number;
+  end: number;
+  readonly canOpen: boolean;
+  readonly canClose: boolean;
+}
+
+/**
+ * Inline markdown between `start` and `end`: code spans, then `*` and `_` emphasis and strong
+ * emphasis matched by CommonMark's delimiter algorithm, so nested emphasis (`*a **b** c*`,
+ * `***x***`) and literal asterisks and underscores (`2 * 3`, `snake_case`) read as CommonMark
+ * renders them. Backslash escapes and links are not markdown a body uses, and stay as written.
+ */
 function renderInline(
   document: Document,
   parent: HTMLElement,
@@ -275,110 +293,177 @@ function renderInline(
   end: number,
   emit: Emit
 ): void {
-  let plain = start;
+  const spans = inlineSpans(body, start, end);
+  // Matched spans nest, so the outermost first, and each renders what it holds.
+  spans.sort((a, b) => a.start - b.start || b.end - a.end);
+  const render = (into: HTMLElement, from: number, to: number) => {
+    let at = from;
+    for (const span of spans) {
+      if (span.start < at || span.end > to) {
+        continue;
+      }
+      emit(into, at, span.start);
+      const styled = document.createElement(span.tag);
+      if (span.tag === "code") {
+        emit(styled, span.innerStart, span.innerEnd);
+      } else {
+        render(styled, span.innerStart, span.innerEnd);
+      }
+      into.append(styled);
+      at = span.end;
+    }
+    emit(into, at, to);
+  };
+  render(parent, start, end);
+}
+
+/** The code spans and emphasis between `start` and `end`. */
+function inlineSpans(body: Body, start: number, end: number): InlineSpan[] {
+  const spans: InlineSpan[] = [];
+  const delimiters: Delimiter[] = [];
   let at = start;
   while (at < end) {
-    const marker = INLINE_MARKERS.find(({ open }) => matches(body, at, end, open) && canOpen(body, at, end, open[0]!));
-    const close = marker === undefined ? -1 : findClose(body, at + marker.open.length, end, marker.open);
-    if (marker === undefined || close < 0) {
-      // A run of `*` or `_` that cannot open is skipped whole, so its later characters do not open
-      // either: `snake__case__x` keeps its underscores.
-      const char = body.chars[at];
+    const char = body.chars[at]!;
+    if (char !== "`" && char !== "*" && char !== "_") {
       at += 1;
-      if (char === "*" || char === "_") {
-        while (at < end && body.chars[at] === char) {
-          at += 1;
-        }
+      continue;
+    }
+    let after = at;
+    while (after < end && body.chars[after] === char) {
+      after += 1;
+    }
+    if (char === "`") {
+      // A code span closes at the next run of exactly as many backticks; with none, they are text.
+      const close = closingBackticks(body, after, end, after - at);
+      if (close >= 0) {
+        spans.push({ start: at, end: close + (after - at), innerStart: after, innerEnd: close, tag: "code" });
+        at = close + (after - at);
+      } else {
+        at = after;
       }
       continue;
     }
-    emit(parent, plain, at);
-    const styled = document.createElement(marker.tag);
-    if (marker.tag === "code") {
-      emit(styled, at + marker.open.length, close);
-    } else {
-      renderInline(document, styled, body, at + marker.open.length, close, emit);
+    delimiters.push({ char, length: after - at, start: at, end: after, ...flanking(body, at, after, start, end, char) });
+    at = after;
+  }
+  matchEmphasis(delimiters, spans);
+  return spans;
+}
+
+function closingBackticks(body: Body, from: number, end: number, length: number): number {
+  let at = from;
+  while (at < end) {
+    if (body.chars[at] !== "`") {
+      at += 1;
+      continue;
     }
-    parent.append(styled);
-    at = close + marker.open.length;
-    plain = at;
-  }
-  emit(parent, plain, end);
-}
-
-function matches(body: Body, at: number, end: number, text: string): boolean {
-  if (at + text.length > end) {
-    return false;
-  }
-  for (let offset = 0; offset < text.length; offset += 1) {
-    if (body.chars[at + offset] !== text[offset]) {
-      return false;
+    let after = at;
+    while (after < end && body.chars[after] === "`") {
+      after += 1;
     }
+    if (after - at === length) {
+      return at;
+    }
+    at = after;
   }
-  return true;
-}
-
-/** Whether the character at `at` separates words: whitespace, the body's edge, or a folded space. */
-function isSpace(body: Body, at: number, start: number, end: number): boolean {
-  if (at < start || at >= end) {
-    return true;
-  }
-  const char = body.chars[at]!;
-  return char === "" || /\s/.test(char);
-}
-
-function isWordCharacter(body: Body, at: number, start: number, end: number): boolean {
-  return at >= start && at < end && /[\p{L}\p{N}]/u.test(body.chars[at]!);
-}
-
-/** The extent of the run of `char` that holds `at`, as the run's first position and the one after it. */
-function runAround(body: Body, at: number, end: number, char: string): [number, number] {
-  let first = at;
-  while (first > 0 && body.chars[first - 1] === char) {
-    first -= 1;
-  }
-  let after = at;
-  while (after < end && body.chars[after] === char) {
-    after += 1;
-  }
-  return [first, after];
+  return -1;
 }
 
 /**
- * Whether the run of `char` at `at` can open emphasis, by CommonMark's flanking rule in its common
- * cases, judged on the whole run so `**` and `__` behave as `*` and `_` do: the run is followed by
- * a non-space, and a run of `_` does not open inside a word. So `find_plans_for_team`,
- * `2 * 3 * 4` and `x ** y` keep their characters. Code spans open anywhere.
+ * Whether the run from `first` to `after` can open and close emphasis, by CommonMark's flanking
+ * rules: a run opens when followed by neither whitespace nor, unless after whitespace or
+ * punctuation, punctuation, and closes symmetrically; a run of `_` also does not open or close
+ * inside a word.
  */
-function canOpen(body: Body, at: number, end: number, char: string): boolean {
-  if (char === "`") {
-    return true;
+function flanking(
+  body: Body,
+  first: number,
+  after: number,
+  start: number,
+  end: number,
+  char: string
+): { canOpen: boolean; canClose: boolean } {
+  const before = classOf(body, first - 1, start, end);
+  const next = classOf(body, after, start, end);
+  const left = next !== "space" && (next !== "punctuation" || before !== "word");
+  const right = before !== "space" && (before !== "punctuation" || next !== "word");
+  if (char === "*") {
+    return { canOpen: left, canClose: right };
   }
-  const [first, after] = runAround(body, at, end, char);
-  if (isSpace(body, after, 0, end)) {
-    return false;
-  }
-  return char !== "_" || !isWordCharacter(body, first - 1, 0, end);
+  return {
+    canOpen: left && (!right || before === "punctuation"),
+    canClose: right && (!left || next === "punctuation"),
+  };
 }
 
-/** Whether the run of `char` at `at` can close emphasis: preceded by a non-space, and `_` not inside a word. */
-function canClose(body: Body, at: number, end: number, char: string): boolean {
-  if (char === "`") {
-    return true;
+/** What the character at `at` is for flanking: whitespace (the edge of the text counts), punctuation, or part of a word. */
+function classOf(body: Body, at: number, start: number, end: number): "space" | "punctuation" | "word" {
+  if (at < start || at >= end) {
+    return "space";
   }
-  const [first, after] = runAround(body, at, end, char);
-  if (isSpace(body, first - 1, 0, end)) {
-    return false;
+  const char = body.chars[at]!;
+  // A folded space is blanked to an empty string, and an embed stands as a private-use character.
+  if (char === "" || /\s/u.test(char)) {
+    return "space";
   }
-  return char !== "_" || !isWordCharacter(body, after, 0, end);
+  return /[\p{P}\p{S}]/u.test(char) ? "punctuation" : "word";
 }
 
-/** Where `marker` closes after `from`, with something between; -1 when it does not. */
-function findClose(body: Body, from: number, end: number, marker: string): number {
-  for (let at = from + 1; at + marker.length <= end; at += 1) {
-    if (matches(body, at, end, marker) && canClose(body, at, end, marker[0]!)) {
-      return at;
+/**
+ * Pairs openers and closers as CommonMark's "process emphasis" does: each closer, left to right,
+ * takes the nearest opener of the same character that the rule of three allows, two characters
+ * from each for strong emphasis when both have two, else one; delimiters between them can no longer
+ * match. What no closer takes stays text.
+ */
+function matchEmphasis(delimiters: Delimiter[], spans: InlineSpan[]): void {
+  const stack = delimiters.slice();
+  let closerIndex = 0;
+  while (closerIndex < stack.length) {
+    const closer = stack[closerIndex]!;
+    if (!closer.canClose) {
+      closerIndex += 1;
+      continue;
+    }
+    let openerIndex = closerIndex - 1;
+    while (openerIndex >= 0) {
+      const opener = stack[openerIndex]!;
+      const ruleOfThree =
+        (opener.canClose || closer.canOpen) &&
+        (opener.length + closer.length) % 3 === 0 &&
+        !(opener.length % 3 === 0 && closer.length % 3 === 0);
+      if (opener.char === closer.char && opener.canOpen && !ruleOfThree) {
+        break;
+      }
+      openerIndex -= 1;
+    }
+    if (openerIndex < 0) {
+      if (!closer.canOpen) {
+        stack.splice(closerIndex, 1);
+      } else {
+        closerIndex += 1;
+      }
+      continue;
+    }
+    const opener = stack[openerIndex]!;
+    const used = opener.end - opener.start >= 2 && closer.end - closer.start >= 2 ? 2 : 1;
+    spans.push({
+      start: opener.end - used,
+      end: closer.start + used,
+      innerStart: opener.end,
+      innerEnd: closer.start,
+      tag: used === 2 ? "strong" : "em",
+    });
+    opener.end -= used;
+    closer.start += used;
+    // Delimiters between the two are inside the span and can no longer match across it.
+    stack.splice(openerIndex + 1, closerIndex - openerIndex - 1);
+    closerIndex = openerIndex + 1;
+    if (opener.end === opener.start) {
+      stack.splice(openerIndex, 1);
+      closerIndex -= 1;
+    }
+    if (closer.end === closer.start) {
+      stack.splice(closerIndex, 1);
     }
   }
-  return -1;
 }

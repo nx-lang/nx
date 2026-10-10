@@ -134,6 +134,14 @@
 
   As noted in round 2, nested emphasis is still outside this parser's scope and is not required here: `*a **b** c*` renders as `<em>a **b</em>* c*`, and `***x***` as `<strong>*x</strong>*`.
 
+## New Findings Discovered During 2026-10-10 19:15 Follow-up
+
+### 🟡 Fixed - RF12 Nested emphasis renders wrongly
+- **Severity:** Low
+- **Evidence:** Raised as a remark during RF11's verification: the inline parser matched each marker against the next closer it found, so `*a **b** c*` rendered as `<em>a **b</em>* c*` and `***x***` as `<strong>*x</strong>*`.
+- **Recommendation:** Match emphasis with CommonMark's delimiter algorithm instead of run-by-run scanning.
+- **Fix:** `renderInline` (packages/viewer/src/text.ts) now finds code spans first (a run of backticks closes at the next run of the same length), then collects `*` and `_` delimiter runs with CommonMark's left- and right-flanking rules (including the punctuation cases and `_`'s intraword rule) and pairs them with "process emphasis": nearest eligible opener, the rule of three, two characters for strong when both runs have them, delimiters between a pair dropped. The matched spans nest and render recursively; unmatched delimiters stay text. New `test/text.test.ts` checks 25 cases, most from the CommonMark spec's emphasis examples (`*foo**bar**baz*`, `***foo***`, `foo***bar***baz`, `*(*foo*)*`, `*foo**bar*`, `__foo__bar`, `5*6*78`, `*foo`*``) plus the earlier RF2 and RF11 cases.
+
 ## Questions
 - In Chromium, `document.getSelection()` retargets a selection inside a shadow root to the host, so `isCollapsed` may be true while text inside the viewer is selected. The guard in `#onClick` (index.ts:314-318) that skips selection after a drag may therefore not work there. Was this checked in a real browser? Using `this.shadowRoot.getSelection?.() ?? document.getSelection()` would be safer.
   - **Answer:** Changed to read the shadow root's selection first, as suggested (part of RF3's fix), and checked in Chromium: dragging across a comment inside the viewer leaves the selection unchanged.
