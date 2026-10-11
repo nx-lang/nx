@@ -281,9 +281,9 @@ const renderDeclaration: Renderer = (context, at) => {
     if (MEMBER_ROLES.has(childNode.role)) {
       groupName = memberGroup(childNode.role, entry?.kind);
     } else if (slot === "type") {
-      groupName = entry?.kind === "alias" ? "Is" : "Gives";
+      groupName = typeGroup(entry?.kind);
     } else if (!isNote(childNode)) {
-      groupName = slot === "body" ? (entry?.kind === "component" ? "Shows" : "Gives") : "Is";
+      groupName = slot === "body" ? (entry?.kind === "component" ? "Shows" : "Returns") : "Is";
     }
     if (groupName !== undefined && groupName !== group) {
       body.append(label(document, groupName));
@@ -294,6 +294,18 @@ const renderDeclaration: Renderer = (context, at) => {
   section.append(body);
   return section;
 };
+
+/** The heading over a declaration's type: what an alias is, what a function returns, a value's type. */
+function typeGroup(kind: string | undefined): string {
+  switch (kind) {
+    case "alias":
+      return "Is";
+    case "function":
+      return "Returns";
+    default:
+      return "Type";
+  }
+}
 
 function memberGroup(role: SourceRole, kind: string | undefined): string {
   switch (role) {

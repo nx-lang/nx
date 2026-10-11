@@ -46,6 +46,9 @@
   "unparsed": {
     "source": "let a = 1\nlet b = = =\n"
   },
+  "headings": {
+    "source": "let total(a:int, b:int): int = { a + b }\nlet answer:int = 42\ntype Count = int\n"
+  },
   "notesAndLists": {
     "source": "// The first line of a note\n// and its second line.\n\n// A note of its own.\nlet tags = <Tags items={ \"red\" \"green\" \"blue\" } />\nlet a = 1 // About a.\n// About b.\nlet b = 2\n"
   }

@@ -121,7 +121,8 @@ a value it shows.
   String concatenation reads as a sentence with its slots marked.
 - **Handlers** read "When integer answered →" with one "set … to …" line per state change.
 - **Declarations** read as headed sections (Type, Action, One of, Component, Function, Value) with
-  their members, and doc comments as prose. Imports fold into a strip at the top. Comments read as
+  their members, and doc comments as prose. A function reads "Takes" over its parameters and
+  "Returns" over what it gives back. Imports fold into a strip at the top. Comments read as
   notes where they stand, and line comments standing alone on consecutive lines read as one note.
 - **Hover** on a property's name shows its type, doc and default, and every case of a union with the
   current one marked; hover on a handler shows the action it answers and what that carries; hover

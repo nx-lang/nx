@@ -331,6 +331,14 @@ describe("declarations, references and comments", () => {
     assert.ok(note.classList.contains("comment"));
   });
 
+  it("heads a function's parts Takes and Returns, a typed value's Type and Is, and an alias's Is", async () => {
+    const element = show(await fixture("headings"));
+    const headings = (key: string): string[] => Array.from(rendered(element, key).querySelectorAll(".group-label"), read);
+    assert.deepEqual(headings("total"), ["Takes", "Returns"]);
+    assert.deepEqual(headings("answer"), ["Type", "Is"]);
+    assert.deepEqual(headings("Count"), ["Is"]);
+  });
+
   it("reads a comment written over several lines as one note", async () => {
     const element = show(await fixture("notesAndLists"));
     const notes = Array.from(root(element).querySelectorAll(".document > .notes, .document > .comment"));
