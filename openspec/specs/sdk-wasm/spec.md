@@ -127,10 +127,10 @@ document to exist on a filesystem.
 - **AND** disposing twice SHALL be allowed
 
 ### Requirement: A trapped module is reported, not reused
-Because the module cannot unwind, a panic or an out-of-bounds access inside it ends the instance.
-The SDK SHALL surface that as a crashed-host error on the call that trapped, SHALL refuse every
-later call on the same host with the same error, and SHALL let the caller load a fresh host from
-the already-compiled module without fetching it again.
+The SDK SHALL surface a trap inside the module as a crashed-host error on the call that trapped.
+Because the module cannot unwind, a panic or an out-of-bounds access inside it ends the instance,
+so the SDK SHALL refuse every later call on the same host with the same error, and SHALL let the
+caller load a fresh host from the already-compiled module without fetching it again.
 
 #### Scenario: A trap is reported on the call that caused it
 - **WHEN** a call into the module traps
