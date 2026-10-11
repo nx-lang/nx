@@ -8,9 +8,9 @@ the given props and returns a session whose first tick holds the result. It SHAL
 `programFromImages(images, entry)`, which prepares and links a list of `{ identity, bytes }` IR
 images into a program whose entry module is `entry`. A session's options SHALL include the
 runtime's limits, `maxOperations`, `maxInputSize`, `maxCallDepth` and `maxRangeLength`, passed to
-every call the session makes, with `maxInputSize` bounding the props and batches the host gives
-and not the state a session passes back to the runtime, SHALL include whether to report origins, on by default, and SHALL
-include `maxTicks`, the most ticks the session keeps, 1,000 by default.
+every call the session makes; whether to report origins, on by default; and `maxTicks`, the most
+ticks the session keeps, 1,000 by default. `maxInputSize` SHALL bound the props and batches the
+host gives, not a state the session passes back to the runtime.
 
 #### Scenario: Starting the question flow
 - **WHEN** a host links the question-flow conformance program's images with `programFromImages` and

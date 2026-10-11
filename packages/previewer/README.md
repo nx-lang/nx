@@ -104,9 +104,14 @@ token at all.
 - `failed`: the props no longer render, or rendering reached one of the session's limits. The
   session keeps the old program and the current tick.
 
-A reload never drops a tick of the path it started from, whatever `maxTicks` says, so a host can
-show the two runs side by side. A tick keeps the program that rendered it: going back to a tick
-from before a reload and dispatching runs the old program.
+The reload itself drops no tick of the path it started from, whatever `maxTicks` says. After it,
+`maxTicks` applies as usual. The old path is off the current one, and the session drops a tick
+only once it has no children, so once the session is past the limit, later calls drop the old path
+from its last tick backward, starting with the tick the reload started from. A host that compares
+long runs side by side should raise `maxTicks` to fit both.
+
+A tick keeps the program that rendered it: going back to a tick from before a reload and
+dispatching runs the old program.
 
 ## Origins
 
