@@ -1,0 +1,46 @@
+{
+  "name": "@nx-lang/previewer",
+  "version": "0.1.0",
+  "description": "Unstable. Runs one NX component as a headless preview session on @nx-lang/ir-runtime: a timeline of ticks with branches, dispatch by handler, scenarios and hot reload. No UI and no framework.",
+  "license": "MIT",
+  "homepage": "https://nxlang.org",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nx-lang/nx.git",
+    "directory": "packages/previewer"
+  },
+  "type": "module",
+  "files": [
+    "dist",
+    "!dist/test",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    }
+  },
+  "types": "./dist/src/index.d.ts",
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.json && node --no-warnings --test \"dist/test/**/*.test.js\"",
+    "prepack": "pnpm run build",
+    "verify:package": "node ../../scripts/verify-package.mjs"
+  },
+  "dependencies": {
+    "@nx-lang/ir-runtime": "workspace:*"
+  },
+  "devDependencies": {
+    "@nx-lang/sdk-wasm": "workspace:*",
+    "@types/node": "^22.20.0",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
