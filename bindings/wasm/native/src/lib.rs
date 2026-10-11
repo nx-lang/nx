@@ -16,11 +16,10 @@ use std::ptr;
 use nx_api::{
     build_workspace_program_artifact, diagnostics_to_api_with_source_entries,
     eval_program_artifact_nx_text_with_limits, format_program_artifact_value,
-    load_program_artifact_from_source,
-    program_artifact_function_schema_json, program_artifact_type_schema_json, validate_workspace,
-    LibraryRegistry, NxDiagnostic, NxLibraryModule, NxLibrarySource, NxSeverity, NxWorkspace,
-    FormatValueError, NxWorkspaceModule, ProgramArtifact, ProgramBuildContext, ResourceLimits,
-    SchemaQueryError,
+    load_program_artifact_from_source, program_artifact_function_schema_json,
+    program_artifact_type_schema_json, validate_workspace, FormatValueError, LibraryRegistry,
+    NxDiagnostic, NxLibraryModule, NxLibrarySource, NxSeverity, NxWorkspace, NxWorkspaceModule,
+    ProgramArtifact, ProgramBuildContext, ResourceLimits, SchemaQueryError,
 };
 use nx_codegen::{emit_nx_ir, write_nx_ir_bundle, NxIrEmitOptions};
 use nx_ir::explain_nx_ir_image;
