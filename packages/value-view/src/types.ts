@@ -45,6 +45,21 @@ export interface NxValueNode {
   readonly count?: number;
   /** Where the program declares what the node is, if it does. */
   readonly declaration?: NxValueSpan;
+  /**
+   * The JSON pointer of the node's value in the value's canonical JSON, `""` for the whole value,
+   * as the SDK gives it. A property's is its value's.
+   */
+  readonly pointer?: string;
+}
+
+/** One button a host puts on a node: what it says, and the id its `nx-value-action` carries. */
+export interface NxValueAction {
+  /** Reported with the press, so the host knows which of a node's actions was pressed. */
+  readonly id: string;
+  /** The button's text. */
+  readonly label: string;
+  /** A longer description, the button's tooltip and accessible name. */
+  readonly title?: string;
 }
 
 /**

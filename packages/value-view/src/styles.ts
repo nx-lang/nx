@@ -92,6 +92,21 @@ code { font: inherit; }
   line-height: 1.1;
   cursor: pointer;
 }
+.action {
+  margin: 0 2px 0 6px;
+  padding: 0 6px;
+  border: 1px solid var(--nx-value-action-border, light-dark(#0969da80, #388bfd99));
+  border-radius: 10px;
+  background: var(--nx-value-action-background, light-dark(#ddf4ff, #121d2f));
+  color: var(--nx-value-action-foreground, light-dark(#0550ae, #79c0ff));
+  font: 12px/1.4 system-ui, sans-serif;
+  vertical-align: 1px;
+  cursor: pointer;
+  user-select: none;
+}
+.action:hover:not(:disabled), .action:focus-visible { background: var(--nx-value-action-hover-background, light-dark(#b6e3ff, #1f3a5f)); }
+.action:disabled { opacity: 0.5; cursor: default; }
+:host([stale]) .action { opacity: 0.5; }
 .notice {
   margin: 0;
   padding: 4px 12px 8px 24px;

@@ -7,8 +7,8 @@
 
 ## 2. Actions on values
 
-- [ ] 2.1 Add `pointer` to `@nx-lang/value-view`'s `NxValueNode`, the `actions` property, the buttons and the `nx-value-action` event; verify with the scenarios of `A host can attach actions to nodes`
-- [ ] 2.2 Document `actions` in the value-view README with an example
+- [x] 2.1 Add `pointer` to `@nx-lang/value-view`'s `NxValueNode`, the `actions` property, the buttons and the `nx-value-action` event; verify with the scenarios of `A host can attach actions to nodes`
+- [x] 2.2 Document `actions` in the value-view README with an example
 
 ## 3. Preview in the worker
 

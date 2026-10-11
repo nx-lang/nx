@@ -14,7 +14,8 @@
           "startColumn": 1,
           "endLine": 1,
           "endColumn": 38
-        }
+        },
+        "pointer": ""
       },
       {
         "start": 6,
@@ -30,7 +31,8 @@
           "startColumn": 15,
           "endLine": 1,
           "endColumn": 24
-        }
+        },
+        "pointer": "/id"
       },
       {
         "start": 13,
@@ -46,7 +48,8 @@
           "startColumn": 25,
           "endLine": 1,
           "endColumn": 36
-        }
+        },
+        "pointer": "/name"
       }
     ]
   },
@@ -65,7 +68,8 @@
           "startColumn": 1,
           "endLine": 1,
           "endColumn": 46
-        }
+        },
+        "pointer": ""
       },
       {
         "start": 6,
@@ -82,7 +86,8 @@
           "startColumn": 28,
           "endLine": 1,
           "endColumn": 44
-        }
+        },
+        "pointer": "/subtitle"
       },
       {
         "start": 19,
@@ -98,7 +103,8 @@
           "startColumn": 15,
           "endLine": 1,
           "endColumn": 27
-        }
+        },
+        "pointer": "/title"
       }
     ]
   },
@@ -117,7 +123,8 @@
           "startColumn": 1,
           "endLine": 2,
           "endColumn": 43
-        }
+        },
+        "pointer": ""
       },
       {
         "start": 10,
@@ -133,7 +140,8 @@
           "startColumn": 29,
           "endLine": 2,
           "endColumn": 41
-        }
+        },
+        "pointer": "/home"
       },
       {
         "start": 15,
@@ -148,7 +156,8 @@
           "startColumn": 1,
           "endLine": 1,
           "endColumn": 31
-        }
+        },
+        "pointer": "/home"
       },
       {
         "start": 24,
@@ -164,7 +173,8 @@
           "startColumn": 18,
           "endLine": 1,
           "endColumn": 29
-        }
+        },
+        "pointer": "/home/city"
       },
       {
         "start": 43,
@@ -180,7 +190,8 @@
           "startColumn": 17,
           "endLine": 2,
           "endColumn": 28
-        }
+        },
+        "pointer": "/name"
       }
     ]
   },
@@ -192,7 +203,8 @@
         "end": 201,
         "role": "sequence",
         "type": "Task*",
-        "count": 3
+        "count": 3,
+        "pointer": ""
       },
       {
         "start": 0,
@@ -207,7 +219,8 @@
           "startColumn": 1,
           "endLine": 2,
           "endColumn": 63
-        }
+        },
+        "pointer": "/0"
       },
       {
         "start": 8,
@@ -223,7 +236,8 @@
           "startColumn": 28,
           "endLine": 2,
           "endColumn": 48
-        }
+        },
+        "pointer": "/0/done"
       },
       {
         "start": 21,
@@ -239,7 +253,8 @@
           "startColumn": 49,
           "endLine": 2,
           "endColumn": 61
-        }
+        },
+        "pointer": "/0/owner"
       },
       {
         "start": 27,
@@ -254,7 +269,8 @@
           "startColumn": 1,
           "endLine": 1,
           "endColumn": 30
-        }
+        },
+        "pointer": "/0/owner"
       },
       {
         "start": 35,
@@ -270,7 +286,8 @@
           "startColumn": 17,
           "endLine": 1,
           "endColumn": 28
-        }
+        },
+        "pointer": "/0/owner/name"
       },
       {
         "start": 51,
@@ -286,7 +303,8 @@
           "startColumn": 15,
           "endLine": 2,
           "endColumn": 27
-        }
+        },
+        "pointer": "/0/title"
       },
       {
         "start": 68,
@@ -301,7 +319,8 @@
           "startColumn": 1,
           "endLine": 2,
           "endColumn": 63
-        }
+        },
+        "pointer": "/1"
       },
       {
         "start": 76,
@@ -317,7 +336,8 @@
           "startColumn": 28,
           "endLine": 2,
           "endColumn": 48
-        }
+        },
+        "pointer": "/1/done"
       },
       {
         "start": 89,
@@ -333,7 +353,8 @@
           "startColumn": 49,
           "endLine": 2,
           "endColumn": 61
-        }
+        },
+        "pointer": "/1/owner"
       },
       {
         "start": 95,
@@ -348,7 +369,8 @@
           "startColumn": 1,
           "endLine": 1,
           "endColumn": 30
-        }
+        },
+        "pointer": "/1/owner"
       },
       {
         "start": 103,
@@ -364,7 +386,8 @@
           "startColumn": 17,
           "endLine": 1,
           "endColumn": 28
-        }
+        },
+        "pointer": "/1/owner/name"
       },
       {
         "start": 119,
@@ -380,7 +403,8 @@
           "startColumn": 15,
           "endLine": 2,
           "endColumn": 27
-        }
+        },
+        "pointer": "/1/title"
       },
       {
         "start": 135,
@@ -395,7 +419,8 @@
           "startColumn": 1,
           "endLine": 2,
           "endColumn": 63
-        }
+        },
+        "pointer": "/2"
       },
       {
         "start": 143,
@@ -411,7 +436,8 @@
           "startColumn": 28,
           "endLine": 2,
           "endColumn": 48
-        }
+        },
+        "pointer": "/2/done"
       },
       {
         "start": 156,
@@ -427,7 +453,8 @@
           "startColumn": 49,
           "endLine": 2,
           "endColumn": 61
-        }
+        },
+        "pointer": "/2/owner"
       },
       {
         "start": 162,
@@ -442,7 +469,8 @@
           "startColumn": 1,
           "endLine": 1,
           "endColumn": 30
-        }
+        },
+        "pointer": "/2/owner"
       },
       {
         "start": 170,
@@ -458,7 +486,8 @@
           "startColumn": 17,
           "endLine": 1,
           "endColumn": 28
-        }
+        },
+        "pointer": "/2/owner/name"
       },
       {
         "start": 186,
@@ -474,7 +503,8 @@
           "startColumn": 15,
           "endLine": 2,
           "endColumn": 27
-        }
+        },
+        "pointer": "/2/title"
       }
     ]
   },
@@ -485,7 +515,8 @@
         "start": 0,
         "end": 247,
         "role": "record",
-        "type": "ul"
+        "type": "ul",
+        "pointer": ""
       },
       {
         "start": 6,
@@ -493,7 +524,8 @@
         "role": "property",
         "parent": 0,
         "type": "li*",
-        "name": "content"
+        "name": "content",
+        "pointer": "/content"
       },
       {
         "start": 14,
@@ -501,14 +533,16 @@
         "role": "sequence",
         "parent": 1,
         "type": "li*",
-        "count": 2
+        "count": 2,
+        "pointer": "/content"
       },
       {
         "start": 15,
         "end": 128,
         "role": "record",
         "parent": 2,
-        "type": "li"
+        "type": "li",
+        "pointer": "/content/0"
       },
       {
         "start": 23,
@@ -516,14 +550,16 @@
         "role": "property",
         "parent": 3,
         "type": "div",
-        "name": "content"
+        "name": "content",
+        "pointer": "/content/0/content"
       },
       {
         "start": 31,
         "end": 123,
         "role": "record",
         "parent": 4,
-        "type": "div"
+        "type": "div",
+        "pointer": "/content/0/content"
       },
       {
         "start": 42,
@@ -531,7 +567,8 @@
         "role": "property",
         "parent": 5,
         "type": "string",
-        "name": "class"
+        "name": "class",
+        "pointer": "/content/0/content/class"
       },
       {
         "start": 61,
@@ -539,7 +576,8 @@
         "role": "property",
         "parent": 5,
         "type": "object*",
-        "name": "content"
+        "name": "content",
+        "pointer": "/content/0/content/content"
       },
       {
         "start": 69,
@@ -547,14 +585,16 @@
         "role": "sequence",
         "parent": 7,
         "type": "object*",
-        "count": 2
+        "count": 2,
+        "pointer": "/content/0/content/content"
       },
       {
         "start": 70,
         "end": 90,
         "role": "record",
         "parent": 8,
-        "type": "h3"
+        "type": "h3",
+        "pointer": "/content/0/content/content/0"
       },
       {
         "start": 74,
@@ -562,14 +602,16 @@
         "role": "property",
         "parent": 9,
         "type": "string",
-        "name": "content"
+        "name": "content",
+        "pointer": "/content/0/content/content/0/content"
       },
       {
         "start": 91,
         "end": 115,
         "role": "record",
         "parent": 8,
-        "type": "p"
+        "type": "p",
+        "pointer": "/content/0/content/content/1"
       },
       {
         "start": 94,
@@ -577,14 +619,16 @@
         "role": "property",
         "parent": 11,
         "type": "string",
-        "name": "content"
+        "name": "content",
+        "pointer": "/content/0/content/content/1/content"
       },
       {
         "start": 129,
         "end": 243,
         "role": "record",
         "parent": 2,
-        "type": "li"
+        "type": "li",
+        "pointer": "/content/1"
       },
       {
         "start": 137,
@@ -592,14 +636,16 @@
         "role": "property",
         "parent": 13,
         "type": "div",
-        "name": "content"
+        "name": "content",
+        "pointer": "/content/1/content"
       },
       {
         "start": 145,
         "end": 238,
         "role": "record",
         "parent": 14,
-        "type": "div"
+        "type": "div",
+        "pointer": "/content/1/content"
       },
       {
         "start": 156,
@@ -607,7 +653,8 @@
         "role": "property",
         "parent": 15,
         "type": "string",
-        "name": "class"
+        "name": "class",
+        "pointer": "/content/1/content/class"
       },
       {
         "start": 175,
@@ -615,7 +662,8 @@
         "role": "property",
         "parent": 15,
         "type": "object*",
-        "name": "content"
+        "name": "content",
+        "pointer": "/content/1/content/content"
       },
       {
         "start": 183,
@@ -623,14 +671,16 @@
         "role": "sequence",
         "parent": 17,
         "type": "object*",
-        "count": 2
+        "count": 2,
+        "pointer": "/content/1/content/content"
       },
       {
         "start": 184,
         "end": 206,
         "role": "record",
         "parent": 18,
-        "type": "h3"
+        "type": "h3",
+        "pointer": "/content/1/content/content/0"
       },
       {
         "start": 188,
@@ -638,14 +688,16 @@
         "role": "property",
         "parent": 19,
         "type": "string",
-        "name": "content"
+        "name": "content",
+        "pointer": "/content/1/content/content/0/content"
       },
       {
         "start": 207,
         "end": 230,
         "role": "record",
         "parent": 18,
-        "type": "p"
+        "type": "p",
+        "pointer": "/content/1/content/content/1"
       },
       {
         "start": 210,
@@ -653,7 +705,8 @@
         "role": "property",
         "parent": 21,
         "type": "string",
-        "name": "content"
+        "name": "content",
+        "pointer": "/content/1/content/content/1/content"
       }
     ]
   },
@@ -664,7 +717,8 @@
         "start": 0,
         "end": 5,
         "role": "scalar",
-        "type": "string"
+        "type": "string",
+        "pointer": ""
       }
     ]
   }

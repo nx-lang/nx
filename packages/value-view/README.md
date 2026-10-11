@@ -57,7 +57,7 @@ declare module "react" {
   namespace JSX {
     interface IntrinsicElements {
       "nx-value": React.DetailedHTMLProps<React.HTMLAttributes<NxValueElement>, NxValueElement> &
-        Partial<Pick<NxValueElement, "value" | "stale" | "truncated" | "describe" | "highlighter">>;
+        Partial<Pick<NxValueElement, "value" | "stale" | "truncated" | "describe" | "actions" | "highlighter">>;
     }
   }
 }
@@ -71,6 +71,7 @@ declare module "react" {
 | `truncated`   | property and attribute  | A notice after the text says the rest was cut                              |
 | `stale`       | property and attribute  | The text is muted and badged "Out of date"; hover and folding still work   |
 | `describe`    | property                | The host's hover for a node; see below                                     |
+| `actions`     | property                | The host's buttons for a node; see below                                   |
 | `highlighter` | property                | A Shiki highlighter to share, with the NX grammar and both themes loaded   |
 | `themes`      | property                | `{ light, dark }` Shiki theme names; default `github-light`, `github-dark` |
 
@@ -132,6 +133,28 @@ element.addEventListener("nx-value-navigate", (event) => {
 });
 ```
 
+## Buttons on nodes
+
+A host can put buttons on the value with `actions`, a function from a node, its index and the value
+to a list of `{ id, label, title? }`, or `undefined` for none. Each button sits at the end of its
+node's first line, stays visible when the node is folded, and fires `nx-value-action` with
+`{ node, index, id }` when pressed, by click or from the keyboard. The buttons are not part of the
+text, so copying leaves them out, and while the value is `stale` they are disabled.
+
+The playground's preview puts one on each action handler in a component's output, found by the
+record type the SDK's `formatValue` spells a handler with, and dispatches through the node's
+`pointer`:
+
+```ts
+element.actions = (node) =>
+  node.role === "record" && node.type === "ActionHandler"
+    ? [{ id: "dispatch", label: "Tapped", title: "Dispatch Button.Tapped" }]
+    : undefined;
+element.addEventListener("nx-value-action", (event) => {
+  session.dispatchHandler(event.detail.node.pointer, { $type: "Button.Tapped" });
+});
+```
+
 ## Styling
 
 The element follows the page's `color-scheme`: token colors use `light-dark()`, so a page that sets
@@ -148,6 +171,10 @@ The element follows the page's `color-scheme`: token colors use `light-dark()`, 
 | `--nx-value-border`                  | a light or dark gray        |
 | `--nx-value-hover-background`        | a light or dark blue tint   |
 | `--nx-value-hover-popup-background`  | white, or a dark gray       |
+| `--nx-value-action-background`       | a light or dark blue        |
+| `--nx-value-action-foreground`       | a dark or light blue        |
+| `--nx-value-action-border`           | a translucent blue          |
+| `--nx-value-action-hover-background` | a deeper blue               |
 
 ## Development
 
