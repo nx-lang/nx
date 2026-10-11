@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: A session runs one component of a prepared program
-The repository SHALL publish `@nx-lang/preview`, a package with no UI and no framework dependency
+The repository SHALL publish `@nx-lang/previewer`, a package with no UI and no framework dependency
 that depends on `@nx-lang/ir-runtime` alone. It SHALL export `createPreviewSession(program,
 component, props, options)`, which initializes the named component of an `NxPreparedProgram` with
 the given props and returns a session whose first tick holds the result. It SHALL export

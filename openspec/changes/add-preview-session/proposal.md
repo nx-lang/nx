@@ -15,7 +15,7 @@ calls the preview session (lane 3, stage 1).
 
 ## What Changes
 
-- A new framework-free package, `@nx-lang/preview`, runs one component of a prepared program as a
+- A new framework-free package, `@nx-lang/previewer`, runs one component of a prepared program as a
   headless preview session on `@nx-lang/ir-runtime`. It has no UI; the playground and ReachMe build
   theirs on it.
 - The session keeps a timeline. Each tick holds the batch or the props that produced it, the state,
@@ -50,7 +50,7 @@ None.
 
 ## Impact
 
-- `packages/preview`: the new package and its tests, which run the question-flow conformance
+- `packages/previewer`: the new package and its tests, which run the question-flow conformance
   program's lifecycle through a session and compare with its expected results and origins.
 - `docs/deployment.md` and `docs/deployment-setup.md`: the new package is published with the
   others.

@@ -47,9 +47,16 @@ See proposal.md for why. What shapes the approach:
 
 ## Decisions
 
+### Naming: the previewer, a preview, a session
+
+As with the viewer and a view, the previewer is the tool (`@nx-lang/previewer`), a preview is what
+it shows, and a session is one run of one component in it (`createPreviewSession`). The capability
+is named for the session, which is all this change builds; the previewer's UI comes later in the
+same package or beside it.
+
 ### A package of its own on the IR runtime
 
-`@nx-lang/preview` depends on `@nx-lang/ir-runtime` and nothing else. The session takes an
+`@nx-lang/previewer` depends on `@nx-lang/ir-runtime` and nothing else. The session takes an
 `NxPreparedProgram`, not source text, so compiling stays the host's: the playground builds images
 with `@nx-lang/sdk-wasm`, and ReachMe may load images it built ahead of time. A helper,
 `programFromImages(images, entry)`, prepares and links a list of `{ identity, bytes }` images, the
