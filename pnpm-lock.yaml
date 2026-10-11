@@ -247,6 +247,9 @@ importers:
 
   sites/playground:
     dependencies:
+      '@nx-lang/ir-runtime':
+        specifier: workspace:*
+        version: link:../../runtime/typescript
       '@nx-lang/language':
         specifier: file:../../src/vscode
         version: nx-language@file:src/vscode
@@ -259,6 +262,9 @@ importers:
       '@nx-lang/monaco':
         specifier: workspace:*
         version: link:../../packages/monaco
+      '@nx-lang/previewer':
+        specifier: workspace:*
+        version: link:../../packages/previewer
       '@nx-lang/sdk-wasm':
         specifier: workspace:*
         version: link:../../bindings/wasm

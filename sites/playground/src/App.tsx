@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { NxValueDescribe, NxValueNavigateDetail } from "@nx-lang/value-view";
+import type { NxValueDescribe, NxValueNavigateDetail, NxValueNode } from "@nx-lang/value-view";
 import "./app.css";
 import { evaluateInBrowser, type Diagnostic } from "./compile";
 import { NxEditor, languageService, MODEL_URI, type NxEditorHandle } from "./editor/NxEditor";
-import { declaredName, positionAt } from "./editor/positions.ts";
+import { declaredName, offsetOf, positionAt } from "./editor/positions.ts";
 import {
   DEFAULT_EXAMPLE,
   EXAMPLE_GROUPS,
@@ -13,7 +13,9 @@ import {
   type Example,
 } from "./examples";
 import { SiteHeader } from "./header/SiteHeader";
-import { OutputPane } from "./output/OutputPane";
+import { OutputPane, type OutputView } from "./output/OutputPane";
+import { PreviewView } from "./preview/PreviewView";
+import { usePreview } from "./preview/usePreview.ts";
 import { ReadingView } from "./reading/ReadingView";
 import { keyAtOffset, offsetOfKey } from "./reading/selection.ts";
 import { useSourceTree } from "./reading/useSourceTree.ts";
@@ -21,6 +23,7 @@ import { SITE_ROOT } from "./paths.ts";
 import { createAddressKeeper } from "./address.ts";
 import { pathForPayload, routeFromLocation } from "./routes.ts";
 import { decodeSource, encodeSource } from "./share/codec.ts";
+import type { PreviewReloadNotice, PreviewState } from "./preview/protocol.ts";
 import { useSiteTheme } from "./theme.ts";
 import { useEvaluation } from "./useEvaluation.ts";
 import { startNxWorker } from "./worker/index.ts";
@@ -136,24 +139,26 @@ export function App() {
     setTimeout(() => setShareState("idle"), 2000);
   };
 
+  const [view, setView] = useState<OutputView>("output");
+  const preview = usePreview(view === "preview", evaluation.outcomeSource);
+  // The source the preview's spans index, read by its hover callback.
+  const previewSourceRef = useRef<string | null>(null);
+  previewSourceRef.current = preview.state?.source ?? null;
+  // The preview runs older source than the editor holds: the edit does not compile, or the session
+  // could not run it and kept the program before.
+  const previewSource = preview.state?.source ?? null;
+  const previewStale =
+    evaluation.stale ||
+    (preview.pending === null && previewSource !== null && preview.asked === evaluation.outcomeSource && previewSource !== preview.asked);
+
   /** The output's hover: the language service's hover at the node's declaration, while it lines up. */
   const describe = useCallback<NxValueDescribe>(
-    async (node) => {
-      const current = sourceRef.current;
-      if (node.declaration === undefined || current === null || current !== evaluationSourceRef.current) {
-        return undefined;
-      }
-      const name = declaredName(node, current);
-      if (name === null) {
-        return undefined;
-      }
-      const hover = await languageService.hover({
-        documents: [{ uri: MODEL_URI, source: current }],
-        uri: MODEL_URI,
-        position: positionAt(current, name.start),
-      });
-      return hover?.contents;
-    },
+    (node) => hoverAt(node, sourceRef.current, evaluationSourceRef.current),
+    [],
+  );
+  /** The preview's hover, over the source the session's spans index. */
+  const describePreview = useCallback<NxValueDescribe>(
+    (node) => hoverAt(node, sourceRef.current, previewSourceRef.current),
     [],
   );
 
@@ -214,6 +219,31 @@ export function App() {
       editor.current?.select(name.start, name.end);
     }
   };
+
+  /** Selects where a preview's record was built, or a node's declaration when it was not. */
+  const navigatePreview = (detail: NxValueNavigateDetail, built: boolean) => {
+    const current = sourceRef.current;
+    if (current === null || current !== preview.state?.source) {
+      return;
+    }
+    const span = detail.declaration;
+    const range = built
+      ? {
+          start: offsetOf(current, span.startLine, span.startColumn),
+          end: offsetOf(current, span.endLine, span.endColumn),
+        }
+      : declaredName(detail.node, current);
+    if (range !== null) {
+      editor.current?.select(range.start, range.end);
+    }
+  };
+
+  // While Preview shows, the editor also marks where a failed step or start points.
+  const previewDiagnostics = view === "preview" ? previewMarks(preview.state, preview.notice) : [];
+  const marked =
+    previewDiagnostics.length > 0 && preview.state?.source === evaluation.diagnosticsSource
+      ? [...evaluation.diagnostics, ...previewDiagnostics]
+      : evaluation.diagnostics;
 
   return (
     <div className="app">
@@ -297,7 +327,7 @@ export function App() {
                   address.edited(next);
                   setSource(next);
                 }}
-                diagnostics={evaluation.diagnostics}
+                diagnostics={marked}
                 diagnosticsSource={evaluation.diagnosticsSource}
                 theme={theme}
               />
@@ -305,10 +335,55 @@ export function App() {
           </div>
           <Diagnostics diagnostics={evaluation.diagnostics} evaluating={evaluation.evaluating} />
         </section>
-        <OutputPane evaluation={evaluation} describe={describe} onNavigate={navigate} />
+        <OutputPane
+          evaluation={evaluation}
+          view={view}
+          onViewChange={setView}
+          preview={
+            <PreviewView
+              preview={preview}
+              doesNotCompile={evaluation.outcomeSource === null && evaluation.diagnostics.length > 0}
+              stale={previewStale}
+              describe={describePreview}
+              onNavigate={navigatePreview}
+            />
+          }
+          describe={describe}
+          onNavigate={navigate}
+        />
       </main>
     </div>
   );
+}
+
+/**
+ * The hover at a node's declaration, from the language service, while the editor still holds the
+ * source whose spans the node carries.
+ */
+async function hoverAt(node: NxValueNode, current: string | null, spansSource: string | null) {
+  if (node.declaration === undefined || current === null || current !== spansSource) {
+    return undefined;
+  }
+  const name = declaredName(node, current);
+  if (name === null) {
+    return undefined;
+  }
+  const hover = await languageService.hover({
+    documents: [{ uri: MODEL_URI, source: current }],
+    uri: MODEL_URI,
+    position: positionAt(current, name.start),
+  });
+  return hover?.contents;
+}
+
+/** The diagnostics of the preview's failed start, step or reload that point into the source. */
+function previewMarks(state: PreviewState | null, notice: PreviewReloadNotice | null): Diagnostic[] {
+  const problem = state?.problem;
+  const diagnostics = [
+    ...(problem?.kind === "startFailed" || problem?.kind === "dispatchFailed" ? problem.diagnostics : []),
+    ...(notice === null ? [] : notice.diagnostics),
+  ];
+  return diagnostics.filter((diagnostic) => diagnostic.span !== null);
 }
 
 /** The compile diagnostics, listed under the editor as well as marked in it. */

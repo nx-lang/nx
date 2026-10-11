@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import "@nx-lang/value-view";
 import {
   NX_VALUE_NAVIGATE_EVENT,
@@ -10,8 +10,15 @@ import type { Diagnostic } from "../compile";
 import { outputNotice, type Evaluation } from "../evaluation.ts";
 import { EDITOR_THEMES } from "../theme.ts";
 
+/** What the output pane shows: what `root` returns, or a component running. */
+export type OutputView = "output" | "preview";
+
 export interface OutputPaneProps {
   readonly evaluation: Evaluation;
+  readonly view: OutputView;
+  readonly onViewChange: (view: OutputView) => void;
+  /** The preview, shown in place of the output while `view` is `preview`. */
+  readonly preview: ReactNode;
   /** The hover for a node of the value, from the language service. */
   readonly describe: NxValueDescribe;
   /** Shows a declaration in the source pane. */
@@ -26,7 +33,7 @@ export interface OutputPaneProps {
  * with whatever theme that is, so a shared one would recolor the source from the wrong palette.
  * </para>
  */
-export function OutputPane({ evaluation, describe, onNavigate }: OutputPaneProps) {
+export function OutputPane({ evaluation, view, onViewChange, preview, describe, onNavigate }: OutputPaneProps) {
   const element = useRef<NxValueElement>(null);
   const latestNavigate = useRef(onNavigate);
   latestNavigate.current = onNavigate;
@@ -47,14 +54,32 @@ export function OutputPane({ evaluation, describe, onNavigate }: OutputPaneProps
   const notice = outputNotice(evaluation);
 
   return (
-    <section className="pane pane-output" aria-label="Output">
+    <section className="pane pane-output" aria-label={view === "output" ? "Output" : "Preview"}>
       <div className="pane-title">
-        <span>Output</span>
+        <span>{view === "output" ? "Output" : "Preview"}</span>
         <span className="pane-note">
-          what <code>root</code> returns
+          {view === "output" ? (
+            <>
+              what <code>root</code> returns
+            </>
+          ) : (
+            "a component, running"
+          )}
+        </span>
+        <span className="spacer" />
+        <span className="mode-switch" role="group" aria-label="Show">
+          {(["output", "preview"] as const).map((option) => (
+            <button key={option} type="button" aria-pressed={view === option} onClick={() => onViewChange(option)}>
+              {option === "output" ? "Output" : "Preview"}
+            </button>
+          ))}
         </span>
       </div>
-      <div className="output-body">
+      {/* The preview stays mounted while Output shows, so switching back finds the session as it was. */}
+      <div className="output-body" hidden={view !== "preview"}>
+        {preview}
+      </div>
+      <div className="output-body" hidden={view !== "output"}>
         {failure !== null && <p className="output-message fault">{failure}</p>}
         {notice === "evaluating" && <p className="output-message quiet">Evaluating…</p>}
         {notice === "doesNotCompile" && (

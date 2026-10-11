@@ -7,7 +7,7 @@
  * `scripts/check-examples.mjs` calls it with a host over the same module under Node, so what the
  * examples are checked against is what the site ships.</para>
  */
-import { NxEvaluationError, type NxHost, type NxValueText } from "@nx-lang/sdk-wasm";
+import { NxEvaluationError, type NxHost, type NxProgramArtifact, type NxValueText } from "@nx-lang/sdk-wasm";
 
 import type { Diagnostic, DiagnosticOrigin, EvaluateResult, Outcome, SdkDiagnostic } from "./types.ts";
 
@@ -26,13 +26,18 @@ export const MAX_OUTPUT_CHARACTERS = 100_000;
 export const FILE_NAME = "playground.nx";
 
 /**
- * Compiles `source` and evaluates its `root` through `host`.
+ * Compiles `source` and evaluates its `root` through `host`. When the source compiles, `keep` is
+ * handed the artifact and owns it from then on; without `keep`, the artifact is disposed here.
  *
  * @throws TypeError when `source` is not a string, RangeError when it is over the size limit, and
  * `NxHostCrashedError` when the module traps — a crash is the caller's to recover from by replacing
  * the host, not something to report as an authoring error.
  */
-export function evaluateSource(host: NxHost, source: string): EvaluateResult {
+export function evaluateSource(
+  host: NxHost,
+  source: string,
+  keep?: (artifact: NxProgramArtifact) => void
+): EvaluateResult {
   if (typeof source !== "string") {
     throw new TypeError("source must be a string");
   }
@@ -64,7 +69,11 @@ export function evaluateSource(host: NxHost, source: string): EvaluateResult {
       : { kind: "error", diagnostics };
     return { diagnostics: warnings, outcome };
   } finally {
-    artifact.dispose();
+    if (keep === undefined) {
+      artifact.dispose();
+    } else {
+      keep(artifact);
+    }
   }
 }
 

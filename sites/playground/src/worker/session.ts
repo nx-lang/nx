@@ -11,6 +11,7 @@ import { NxHostCrashedError, createLanguageService, createNxHost, type NxHost } 
 
 import { evaluateSource } from "../compile/evaluate.ts";
 import type { EvaluateResult } from "../compile/types.ts";
+import { PreviewWorkbench } from "../preview/workbench.ts";
 import type { WorkerRequest } from "./protocol.ts";
 
 /** What `createNxSession` accepts. */
@@ -21,7 +22,7 @@ export interface NxSessionOptions {
   readonly createHost?: (module: WebAssembly.Module) => NxHost;
 }
 
-/** The worker's compiler and language service, with one host behind both. */
+/** The worker's compiler, language service and preview, with one host behind them. */
 export interface NxSession {
   /** Answers one request. Rejects with the failure the caller should see. */
   answer(request: WorkerRequest): Promise<unknown>;
@@ -37,6 +38,7 @@ export function createNxSession(options: NxSessionOptions): NxSession {
   let host: NxHost = createHost(options.module);
   let language: SnapshotLanguageService = createLanguageService(host);
   let replacements = 0;
+  const preview = new PreviewWorkbench();
 
   /**
    * Abandons the crashed host and starts a fresh one from the module already compiled.
@@ -46,6 +48,8 @@ export function createNxSession(options: NxSessionOptions): NxSession {
    */
   function replaceHost(): void {
     replacements += 1;
+    // The preview's artifact went with the old host's memory; its session needs no compiler.
+    preview.forgetBuild();
     host = createHost(options.module);
     language = createLanguageService(host);
   }
@@ -53,9 +57,14 @@ export function createNxSession(options: NxSessionOptions): NxSession {
   return {
     async answer(request: WorkerRequest): Promise<unknown> {
       try {
-        return request.kind === "evaluate"
-          ? (evaluateSource(host, request.source) satisfies EvaluateResult)
-          : await answerLanguage(language, request.query, request.request);
+        switch (request.kind) {
+          case "evaluate":
+            return evaluateSource(host, request.source, (artifact) => preview.keepBuild(request.source, artifact)) satisfies EvaluateResult;
+          case "preview":
+            return preview.answer(request.call);
+          case "language":
+            return await answerLanguage(language, request.query, request.request);
+        }
       } catch (error) {
         // A trap ended the instance. The caller is told what happened to its request, and the next
         // request is answered by a replacement, so one crash costs one request rather than the
@@ -73,6 +82,7 @@ export function createNxSession(options: NxSessionOptions): NxSession {
       return replacements;
     },
     dispose(): void {
+      preview.dispose();
       language.dispose();
       host.dispose();
     }
