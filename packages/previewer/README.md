@@ -19,7 +19,7 @@ however it likes, in a browser, a worker or Node.
 - **A tree.** Going back to a tick runs nothing. Dispatching from a tick that already has children
   adds another child, so both continuations stay and the host can return to either.
 - **Handlers by pointer.** A host dispatches to the `ActionHandler` record it found in the output,
-  by its JSON pointer, and the session finds the token. Hosts never track token numbering.
+  by its JSON pointer, and the session finds the token, so the host never tracks token numbering.
 - **Scenarios.** The current path saves as a `program.json` lifecycle with a name and each entry's
   handler pointer, and replays in any session of the same component, after an edit too.
 - **Hot reload.** Given a new program, the session keeps the state when the new program accepts it,
@@ -76,8 +76,22 @@ the question-flow conformance program in `specs/ir-conformance/question-flow`.
 - `setProps(props)` renders the current state with new props.
 
 Each of these adds a child of the current tick and makes it current. A call that fails throws an
-`NxIrRuntimeError` with the runtime's diagnostics, or the session's own (`nx-preview-handler`,
-`nx-preview-scenario`, `nx-preview-tick`), and adds no tick.
+`NxIrRuntimeError` and adds no tick. Its diagnostics are the runtime's (`nx-ir-*`), or the
+session's own:
+
+- `nx-preview-handler`: an entry names no handler in the current output, a handler for another
+  action, or a token the output does not hold;
+- `nx-preview-batch`: a batch is not a list;
+- `nx-preview-scenario`: a scenario is malformed or for another component or module, or a path
+  with a props change is exported;
+- `nx-preview-tick`: a tick is not one the session keeps;
+- `nx-preview-options`: `maxTicks` is not a positive integer;
+- `nx-preview-program`: `programFromImages` was given two images for one identity, or none for
+  the entry.
+
+`setProps` and a reload render again from the start, so the runtime numbers the new output's tokens
+afresh (`h1-1`, …). Read a token from the current tick only, or dispatch by pointer, which needs no
+token at all.
 
 ## Hot reload
 
@@ -87,7 +101,12 @@ Each of these adds a child of the current tick and makes it current. A call that
   reload tick, a child of the current one.
 - `replayed`: the state no longer fits, so the current path ran again under the new program, from a
   new root. `completed` and `stopped` say how far it got.
-- `failed`: the props no longer render. The session keeps the old program and the current tick.
+- `failed`: the props no longer render, or rendering reached one of the session's limits. The
+  session keeps the old program and the current tick.
+
+A reload never drops a tick of the path it started from, whatever `maxTicks` says, so a host can
+show the two runs side by side. A tick keeps the program that rendered it: going back to a tick
+from before a reload and dispatching runs the old program.
 
 ## Origins
 
@@ -100,6 +119,8 @@ records to have origins. Pass `{ origins: false }` to turn the reports off.
 
 `createPreviewSession(program, component, props, options)` takes the runtime's limits,
 `maxOperations`, `maxInputSize`, `maxCallDepth` and `maxRangeLength`, which apply to every call the
-session makes; a preview runs code a model may have written, so set them. `maxTicks` (1,000 by
-default) bounds the tree: past it, the oldest ticks off the current path that have no children are
-dropped.
+session makes; a preview runs code a model may have written, so set them. `maxInputSize` bounds what
+the host passes, the props and the batches; the state that `setProps` and a reload pass back is the
+runtime's own and is not measured. `maxTicks` (1,000 by default) bounds the tree: past it, the
+oldest ticks off the current path that have no children are dropped, and a current path longer
+than the limit is kept whole.

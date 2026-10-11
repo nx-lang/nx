@@ -141,8 +141,15 @@ stable key for a preview, and origins remain available to map a tick back to sou
 3. If the replay stops, keep the ticks it made and report the step it stopped at.
 
 If the props themselves do not render under the new program, the session keeps the old program and
-reports the failure, so an edit that breaks the props never loses the timeline. The old ticks
-remain in the tree in every case, so a host can compare.
+reports the failure, so an edit that breaks the props never loses the timeline. So does a first
+attempt that fails on a limit: a limit says nothing about whether the state fits, and a replay
+would reach it again. The reload drops none of the ticks of the path it started from, even past
+`maxTicks`, so a host can compare.
+
+The state the session passes back in a reload or a props change is the runtime's own output, which
+only grew by batches the input limit already admitted, so `maxInputSize` bounds the props of those
+calls and not the state. Otherwise a limit sized for what a host sends would refuse a long run's
+state, and every reload would fall through to a replay.
 
 ### Origins on every call
 

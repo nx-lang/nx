@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { createPreviewSession, type PreviewSession } from "../src/index.js";
-import { expected, lifecycle, program, replaceOnce } from "./fixtures.js";
+import { createPreviewSession, replayScenario, type PreviewSession } from "../src/index.js";
+import { expected, lifecycle, program, renamedRating, replaceOnce } from "./fixtures.js";
 
 const flow = program();
 
@@ -50,11 +50,7 @@ describe("hot reload keeps the reviewer where they were", () => {
     const session = onQuestion(10);
     const before = session.current;
     const count = session.ticks.length;
-    const renamed = program((modules) => {
-      const source = modules.get("main.nx")!;
-      const at = source.indexOf("component <Flow");
-      modules.set("main.nx", source.slice(0, at) + source.slice(at).replace(/\brating\b/g, "score"));
-    });
+    const renamed = renamedRating();
     const result = session.reload(renamed);
     assert.equal(result.outcome, "replayed");
     assert.ok(result.outcome === "replayed");
@@ -77,11 +73,7 @@ describe("hot reload keeps the reviewer where they were", () => {
     session.dispatch([
       { handler: "/children/1/onChoiceAnswered", action: (lifecycle.batches[2]![0] as { action: { $type: string } }).action },
     ]);
-    const renamed = program((modules) => {
-      const source = modules.get("main.nx")!;
-      const at = source.indexOf("component <Flow");
-      modules.set("main.nx", source.slice(0, at) + source.slice(at).replace(/\brating\b/g, "score"));
-    });
+    const renamed = renamedRating();
     const result = session.reload(renamed);
     assert.ok(result.outcome === "replayed");
     assert.equal(result.completed, true);
@@ -107,5 +99,50 @@ describe("hot reload keeps the reviewer where they were", () => {
     assert.equal(session.current, before);
     assert.equal(session.ticks.length, count);
     assert.equal(session.program, flow);
+  });
+});
+
+describe("ticks from before a reload", () => {
+  const fixedRole = (): ReturnType<typeof program> =>
+    program((modules) => replaceOnce(modules, "main.nx", "Which describes your work best?", "What is your role?"));
+
+  it("run the program that rendered them", () => {
+    const session = onQuestion(3);
+    const before = session.current;
+    const fixed = fixedRole();
+    assert.equal(session.reload(fixed).outcome, "kept");
+    assert.equal(label(session.current.rendered), "What is your role?");
+
+    session.goTo(before);
+    const old = session.dispatch(lifecycle.batches[2]!);
+    assert.equal(old.program, flow);
+    assert.deepEqual(old.rendered, expected.batches[2]!.rendered);
+  });
+
+  it("export a scenario that replays by its pointers under either program", () => {
+    const session = onQuestion(3);
+    const fixed = fixedRole();
+    session.reload(fixed);
+    // Tokens restart with the reload's render, so read each from the current output.
+    for (const batch of [2, 3]) {
+      const action = (lifecycle.batches[batch]![0] as { action: { $type: string } }).action;
+      const pointer = `/children/1/on${action.$type.slice("Step.".length)}`;
+      const token = (session.current.rendered as { children: { [key: string]: { token?: string } }[] }).children[1]![
+        pointer.split("/")[3]!
+      ]!.token;
+      session.dispatch([{ $type: "ActionHandlerInvocation", token: token!, action }]);
+    }
+    const scenario = session.scenario();
+    assert.deepEqual(scenario.handlers, [
+      ["/children/1/onTextAnswered"],
+      ["/children/1/onTextAnswered"],
+      ["/children/1/onChoiceAnswered"],
+      ["/children/1/onChoicesAnswered"],
+    ]);
+    for (const under of [flow, fixed]) {
+      const { result } = replayScenario(under, scenario);
+      assert.equal(result.completed, true);
+      assert.deepEqual(result.tick.state, session.current.state);
+    }
   });
 });

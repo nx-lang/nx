@@ -2,6 +2,7 @@ import {
   NxIrRuntimeError,
   dispatchComponentActions,
   initializeComponent,
+  measureInputSize,
   type NxCanonicalValue,
   type NxHostRecord,
   type NxHostValue,
@@ -63,7 +64,8 @@ export interface PreviewSession {
   dispatchHandler(pointer: string, action: NxHostRecord): PreviewTick;
   /**
    * Renders the current tick's state with new props, under the program that rendered it. The
-   * runtime validates the state as complete for the component.
+   * runtime validates the state as complete for the component. `maxInputSize` bounds the props;
+   * the state, which the runtime returned, is not measured.
    */
   setProps(props: NxHostRecord): PreviewTick;
   /**
@@ -86,8 +88,9 @@ export interface PreviewSession {
    * Runs the component under a new program, keeping the reviewer where they were. It first renders
    * the current tick's props and state under the new program, as a reload child of the current
    * tick. When that fails but the props alone render, it replays the current path under the new
-   * program, as a new root. When the props do not render, it keeps the old program and the current
-   * tick. The old ticks stay in the tree in every case.
+   * program, as a new root. When the props do not render, or the first attempt reaches one of the
+   * session's limits, it keeps the old program and the current tick. The reload drops none of the
+   * ticks of the path it started from, whatever `maxTicks` says.
    */
   reload(program: NxPreparedProgram): PreviewReloadResult;
   /** The origin of the record at `pointer` in a tick's rendered output, or `undefined`. */
@@ -132,8 +135,15 @@ export function replayScenario(
 
 /** A step of a replay after its first render. */
 type ReplayStep =
-  | { readonly kind: "batch"; readonly batch: readonly NxHostValue[]; readonly handlers: readonly (string | null)[] | undefined }
+  | {
+      readonly kind: "batch";
+      readonly batch: readonly NxHostValue[];
+      readonly handlers: readonly (string | null)[] | undefined;
+    }
   | { readonly kind: "props"; readonly props: NxHostRecord };
+
+/** A step of the current path, with the tick it was read from. */
+type PathStep = ReplayStep & { readonly tick: PreviewTick };
 
 /** A failure to place one entry of a batch. */
 class PlacementError extends NxIrRuntimeError {
@@ -157,6 +167,8 @@ class Session implements PreviewSession {
   readonly #origins: boolean;
   readonly #maxTicks: number;
   #nextId = 1;
+  /** Ticks no pruning drops while a replay runs: the path that was current when it began. */
+  #kept: ReadonlySet<PreviewTick> | undefined;
 
   public constructor(program: NxPreparedProgram, component: string, options: PreviewSessionOptions) {
     this.component = component;
@@ -237,30 +249,21 @@ class Session implements PreviewSession {
   }
 
   public scenario(name?: string): PreviewScenario {
-    const [root, ...rest] = this.path;
-    if (root === undefined || root.cause.kind !== "initial") {
-      throw new Error("The current path does not start with a first render.");
-    }
+    const { root, props, steps } = this.#pathSteps();
     const batches: (readonly NxHostValue[])[] = [];
     const handlers: (readonly (string | null)[])[] = [];
-    for (const tick of rest) {
-      if (tick.cause.kind === "batch") {
-        batches.push(tick.cause.batch);
-        handlers.push(tick.cause.handlers);
-      } else if (tick.cause.kind === "props") {
-        throw new NxIrRuntimeError([
-          previewDiagnostic(
-            "nx-preview-scenario",
-            `The current path changes the props at tick ${tick.id}, which a scenario cannot hold.`,
-          ),
-        ]);
+    for (const step of steps) {
+      if (step.kind === "props") {
+        throw scenarioError(`The current path changes the props at tick ${step.tick.id}, which a scenario cannot hold.`);
       }
+      batches.push(step.batch);
+      handlers.push(step.handlers ?? step.batch.map(() => null));
     }
     return frozenCopy({
       ...(name === undefined ? {} : { name }),
       module: root.program.entry.module.identity,
       component: this.component,
-      props: root.cause.props,
+      props,
       batches,
       handlers,
     });
@@ -293,6 +296,10 @@ class Session implements PreviewSession {
       if (!(error instanceof NxIrRuntimeError)) {
         throw error;
       }
+      // A limit says nothing about whether the state fits, and a replay would reach it again.
+      if (error.diagnostics.some((diagnostic) => diagnostic.code === "nx-ir-resource-limit")) {
+        return { outcome: "failed", diagnostics: error.diagnostics };
+      }
     }
     // The state did not render under the new program. Whether the props do is what decides
     // between replaying the path and keeping the old program.
@@ -304,20 +311,9 @@ class Session implements PreviewSession {
       }
       throw error;
     }
-    const [root, ...rest] = this.path;
-    if (root === undefined || root.cause.kind !== "initial") {
-      throw new Error("The current path does not start with a first render.");
-    }
-    const steps: ReplayStep[] = [];
-    for (const step of rest) {
-      if (step.cause.kind === "batch") {
-        steps.push({ kind: "batch", batch: step.cause.batch, handlers: step.cause.handlers });
-      } else if (step.cause.kind === "props") {
-        steps.push({ kind: "props", props: step.cause.props });
-      }
-    }
+    const { props, steps } = this.#pathSteps();
     try {
-      const replayed = this.#replay(program, root.cause.props, steps);
+      const replayed = this.#replay(program, props, steps);
       this.#program = program;
       return { outcome: "replayed", ...replayed };
     } catch (error) {
@@ -334,10 +330,40 @@ class Session implements PreviewSession {
   }
 
   /**
+   * The current path as a replay: its root, the root's props, and a step for each batch and props
+   * change after it. A reload tick changes the program, not the run, so it is no step.
+   */
+  #pathSteps(): { readonly root: PreviewTick; readonly props: NxHostRecord; readonly steps: readonly PathStep[] } {
+    const [root, ...rest] = this.path;
+    if (root === undefined || root.cause.kind !== "initial") {
+      throw new Error("The current path does not start with a first render.");
+    }
+    const steps: PathStep[] = [];
+    for (const tick of rest) {
+      if (tick.cause.kind === "batch") {
+        steps.push({ kind: "batch", batch: tick.cause.batch, handlers: tick.cause.handlers, tick });
+      } else if (tick.cause.kind === "props") {
+        steps.push({ kind: "props", props: tick.cause.props, tick });
+      }
+    }
+    return { root, props: root.cause.props, steps };
+  }
+
+  /**
    * Replays from a new root: the first render from `props`, which throws when it fails, then each
-   * step in turn until one fails.
+   * step in turn until one fails. The path that was current when the replay began is kept whatever
+   * `maxTicks` says, so a host can compare the two runs.
    */
   #replay(program: NxPreparedProgram, props: NxHostRecord, steps: readonly ReplayStep[]): PreviewReplayResult {
+    this.#kept = new Set(this.#current === undefined ? [] : this.path);
+    try {
+      return this.#replaySteps(program, props, steps);
+    } finally {
+      this.#kept = undefined;
+    }
+  }
+
+  #replaySteps(program: NxPreparedProgram, props: NxHostRecord, steps: readonly ReplayStep[]): PreviewReplayResult {
     let tick = this.#initialize(program, { kind: "initial", props: frozenCopy(props) }, undefined, undefined);
     let batch = 0;
     for (const step of steps) {
@@ -375,10 +401,11 @@ class Session implements PreviewSession {
   ): PreviewTick {
     const props = cause.kind === "initial" || cause.kind === "props" ? cause.props : parent?.props ?? {};
     const report: NxRuntimeOrigins = {};
-    const result = initializeComponent(program, this.component, props, {
-      ...this.#options(report),
-      ...(state === undefined ? {} : { state }),
-    });
+    const options = this.#options(report);
+    const result =
+      state === undefined
+        ? initializeComponent(program, this.component, props, options)
+        : initializeComponent(program, this.component, props, { ...withoutInputLimit(props, options), state });
     return this.#add({
       cause,
       parent,
@@ -532,7 +559,7 @@ class Session implements PreviewSession {
     if (this.#ticks.size <= this.#maxTicks) {
       return;
     }
-    const onPath = new Set(this.path);
+    const onPath = new Set([...this.path, ...(this.#kept ?? [])]);
     while (this.#ticks.size > this.#maxTicks) {
       let dropped: PreviewTick | undefined;
       for (const tick of this.#ticks.values()) {
@@ -558,6 +585,26 @@ class Session implements PreviewSession {
       throw new NxIrRuntimeError([previewDiagnostic("nx-preview-tick", "The tick is not one this session keeps.")]);
     }
   }
+}
+
+/**
+ * The options for a call that passes back a state the runtime returned: `maxInputSize` bounds what
+ * the host gives, so it is checked against the props alone, as the runtime would check them, and
+ * the state, which only ever grew by batches the limit already admitted, is not measured.
+ */
+function withoutInputLimit(props: NxHostRecord, options: NxRuntimeOptions): NxRuntimeOptions {
+  const { maxInputSize, ...rest } = options;
+  if (maxInputSize !== undefined && measureInputSize(props, maxInputSize) > maxInputSize) {
+    throw new NxIrRuntimeError([
+      {
+        severity: "error",
+        code: "nx-ir-resource-limit",
+        message: `The call's input is larger than its limit of ${maxInputSize}.`,
+        limit: { name: "maxInputSize", value: maxInputSize },
+      },
+    ]);
+  }
+  return rest;
 }
 
 function previewDiagnostic(code: string, message: string): NxIrDiagnostic {

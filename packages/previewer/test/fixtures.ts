@@ -3,10 +3,11 @@
  * lifecycle, results and origins its `program.json` and `expected/` files record. Only the tests
  * use the compiler: the package itself takes prepared programs.
  */
+import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import type { NxCanonicalValue, NxHostValue, NxOriginEntry, NxPreparedProgram } from "@nx-lang/ir-runtime";
+import { NxIrRuntimeError, type NxCanonicalValue, type NxHostValue, type NxOriginEntry, type NxPreparedProgram } from "@nx-lang/ir-runtime";
 import { compileNxModule, createNxHost } from "@nx-lang/sdk-wasm";
 
 import { programFromImages, type PreviewImage } from "../src/index.js";
@@ -121,4 +122,24 @@ export function handlerFor(rendered: NxCanonicalValue, action: string, pointer =
 export function actionOf(batch: number): { readonly $type: string; readonly [key: string]: NxHostValue } {
   const entry = lifecycle.batches[batch]![0] as { readonly action: { readonly $type: string } };
   return entry.action as { readonly $type: string; readonly [key: string]: NxHostValue };
+}
+
+/** The program with `Flow`'s `rating` state field renamed to `score`, which the old state does not fit. */
+export function renamedRating(): NxPreparedProgram {
+  return program((modules) => {
+    const source = modules.get("main.nx")!;
+    const at = source.indexOf("component <Flow");
+    modules.set("main.nx", source.slice(0, at) + source.slice(at).replace(/\brating\b/g, "score"));
+  });
+}
+
+/** The error a call fails with, which must be the runtime's error type. */
+export function failure(call: () => unknown): NxIrRuntimeError {
+  try {
+    call();
+  } catch (error) {
+    assert.ok(error instanceof NxIrRuntimeError, `expected an NxIrRuntimeError, got ${String(error)}`);
+    return error;
+  }
+  assert.fail("expected the call to fail");
 }

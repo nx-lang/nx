@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { NxIrRuntimeError, type NxHostValue } from "@nx-lang/ir-runtime";
+import type { NxHostValue } from "@nx-lang/ir-runtime";
 
 import { createPreviewSession, programFromImages, type PreviewSession } from "../src/index.js";
-import { actionOf, entry, expected, handlerFor, images, lifecycle, program } from "./fixtures.js";
+import { actionOf, entry, expected, failure, handlerFor, images, lifecycle, program } from "./fixtures.js";
 
 const flow = program();
 
@@ -19,16 +19,6 @@ function run(session: PreviewSession, to: number, from = 0): void {
   }
 }
 
-/** The diagnostics a call fails with. */
-function failure(call: () => unknown): NxIrRuntimeError {
-  try {
-    call();
-  } catch (error) {
-    assert.ok(error instanceof NxIrRuntimeError, `expected an NxIrRuntimeError, got ${String(error)}`);
-    return error;
-  }
-  assert.fail("expected the call to fail");
-}
 
 describe("a session runs one component of a prepared program", () => {
   it("starts the question flow with the recorded first render", () => {

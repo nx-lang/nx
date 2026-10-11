@@ -1,10 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { NxIrRuntimeError } from "@nx-lang/ir-runtime";
-
 import { createPreviewSession, replayScenario, type PreviewScenario, type PreviewSession } from "../src/index.js";
-import { actionOf, expected, handlerFor, lifecycle, program, replaceOnce } from "./fixtures.js";
+import { actionOf, expected, failure, handlerFor, lifecycle, program, replaceOnce } from "./fixtures.js";
 
 const flow = program();
 
@@ -22,15 +20,6 @@ function designer(session: PreviewSession): void {
   }
 }
 
-function failure(call: () => unknown): NxIrRuntimeError {
-  try {
-    call();
-  } catch (error) {
-    assert.ok(error instanceof NxIrRuntimeError, `expected an NxIrRuntimeError, got ${String(error)}`);
-    return error;
-  }
-  assert.fail("expected the call to fail");
-}
 
 describe("a run saves and replays as a scenario", () => {
   it("replays the conformance lifecycle to the recorded outputs", () => {
@@ -117,6 +106,19 @@ describe("a run saves and replays as a scenario", () => {
     assert.equal(result.stopped?.batch, 2);
     assert.equal(result.stopped?.entry, undefined);
     assert.equal(result.stopped?.diagnostics[0]?.code, "nx-ir-resource-limit");
+  });
+
+  it("records no handler for an action the component emits, and replays it", () => {
+    const session = createPreviewSession(flow, "Flow", lifecycle.props);
+    const completed = { $type: "Completed", respondent: "friend", answered: 0 };
+    const tick = session.dispatch([completed]);
+    assert.deepEqual(tick.cause, { kind: "batch", batch: [completed], handlers: [null] });
+    // No parent bound a handler, so the action changes nothing.
+    assert.deepEqual(tick.state, session.ticks[0]!.state);
+    const scenario = session.scenario();
+    assert.deepEqual(scenario.handlers, [[null]]);
+    const { result } = replayScenario(flow, scenario);
+    assert.equal(result.completed, true);
   });
 
   it("refuses a path that changed the props", () => {

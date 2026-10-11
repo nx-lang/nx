@@ -8,7 +8,8 @@ the given props and returns a session whose first tick holds the result. It SHAL
 `programFromImages(images, entry)`, which prepares and links a list of `{ identity, bytes }` IR
 images into a program whose entry module is `entry`. A session's options SHALL include the
 runtime's limits, `maxOperations`, `maxInputSize`, `maxCallDepth` and `maxRangeLength`, passed to
-every call the session makes, SHALL include whether to report origins, on by default, and SHALL
+every call the session makes, with `maxInputSize` bounding the props and batches the host gives
+and not the state a session passes back to the runtime, SHALL include whether to report origins, on by default, and SHALL
 include `maxTicks`, the most ticks the session keeps, 1,000 by default.
 
 #### Scenario: Starting the question flow
@@ -125,9 +126,10 @@ component under the new program with the current tick's props and state, and on 
 result as a child of the current tick whose cause is a reload. When that fails but the current
 props render under the new program, it SHALL replay the current path's batches and props changes
 under the new program from a new root, as a scenario replay does, and report how far it got. When
-the props do not render under the new program, it SHALL keep the old program and the current tick
-and report the failure. The result SHALL say which of these happened, and the old ticks SHALL stay
-in the tree in every case.
+the props do not render under the new program, or the first attempt fails on one of the session's
+limits, it SHALL keep the old program and the current tick and report the failure. The result SHALL
+say which of these happened, and the reload SHALL drop none of the ticks of the path it started
+from, whatever `maxTicks` says.
 
 #### Scenario: A label fixed on question 22
 - **WHEN** a host is on question 22 of the flow and reloads with a program that changes only a
