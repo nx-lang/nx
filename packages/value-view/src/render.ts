@@ -3,10 +3,16 @@
  * inside colored by the ranges the highlighter produced.
  */
 import type { ColoredRange } from "./highlight.js";
-import type { NxValueNode, NxValueText } from "./types.js";
+import type { NxValueAction, NxValueNode, NxValueText } from "./types.js";
 
 /** Roles whose text can span several lines and so can fold. */
 const foldableRoles: ReadonlySet<string> = new Set(["record", "property", "sequence"]);
+
+/** What a host puts on the nodes: each node's actions, by node index, and whether they work. */
+export interface RenderedActions {
+  readonly byNode: readonly (readonly NxValueAction[] | undefined)[];
+  readonly disabled: boolean;
+}
 
 /** What rendering a value produced. */
 export interface RenderedValue {
@@ -40,7 +46,8 @@ export function startsLine(value: NxValueText, node: NxValueNode): boolean {
 export function renderValue(
   document: Document,
   value: NxValueText,
-  colors: readonly ColoredRange[]
+  colors: readonly ColoredRange[],
+  actions?: RenderedActions
 ): RenderedValue {
   const children: number[][] = value.nodes.map(() => []);
   const roots: number[] = [];
@@ -60,6 +67,49 @@ export function renderValue(
       startsLine(value, node)
   );
   const elements: HTMLElement[] = new Array(value.nodes.length);
+
+  // A node's actions sit at the end of its first line: after its text when it fits on one line,
+  // and after the `<Tag` that opens it when it spans several. Each is placed once, in whichever
+  // stretch of text reaches that offset first, so it shows where the reader sees that line end
+  // even when a child node holds the line break.
+  const markers = new Map<number, number[]>();
+  actions?.byNode.forEach((list, index) => {
+    const node = value.nodes[index];
+    if (list === undefined || list.length === 0 || node === undefined) {
+      return;
+    }
+    const lineEnd = value.text.indexOf("\n", node.start);
+    const offset = lineEnd === -1 || lineEnd > node.end ? node.end : lineEnd;
+    markers.set(offset, [...(markers.get(offset) ?? []), index]);
+  });
+
+  const appendButtons = (parent: HTMLElement, index: number) => {
+    for (const action of actions?.byNode[index] ?? []) {
+      parent.append(actionButton(document, action, index, actions?.disabled === true));
+    }
+  };
+
+  // Stretches of text are appended in text order, so one pass over the sorted offsets places them.
+  const offsets = [...markers.keys()].sort((a, b) => a - b);
+  let next = 0;
+
+  /** Appends `text.slice(start, end)`, with the actions of any line end it reaches. */
+  const appendText = (parent: HTMLElement, start: number, end: number) => {
+    while (next < offsets.length && offsets[next]! <= start) {
+      next += 1;
+    }
+    let cursor = start;
+    while (next < offsets.length && offsets[next]! <= end) {
+      const offset = offsets[next]!;
+      next += 1;
+      appendColored(document, parent, value.text, cursor, offset, colors);
+      for (const index of markers.get(offset)!) {
+        appendButtons(parent, index);
+      }
+      cursor = offset;
+    }
+    appendColored(document, parent, value.text, cursor, end, colors);
+  };
 
   const renderNode = (index: number): HTMLElement => {
     const node = value.nodes[index]!;
@@ -94,6 +144,8 @@ export function renderValue(
       folded.hidden = true;
       const lineEnd = value.text.indexOf("\n", node.start);
       appendColored(document, folded, value.text, node.start, lineEnd, colors);
+      // A folded node keeps its own buttons: the line they sit on is the one still showing.
+      appendButtons(folded, index);
       folded.append(document.createTextNode(" "));
       const ellipsis = document.createElement("button");
       ellipsis.className = "ellipsis";
@@ -119,11 +171,11 @@ export function renderValue(
     let cursor = start;
     for (const child of childIndices) {
       const node = value.nodes[child]!;
-      appendColored(document, parent, value.text, cursor, node.start, colors);
+      appendText(parent, cursor, node.start);
       parent.append(renderNode(child));
       cursor = node.end;
     }
-    appendColored(document, parent, value.text, cursor, end, colors);
+    appendText(parent, cursor, end);
   };
 
   const root = document.createElement("code");
@@ -199,6 +251,26 @@ function firstRangeEndingAfter(colors: readonly ColoredRange[], offset: number):
     }
   }
   return low;
+}
+
+function actionButton(
+  document: Document,
+  action: NxValueAction,
+  index: number,
+  disabled: boolean
+): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.className = "action";
+  button.type = "button";
+  button.disabled = disabled;
+  button.dataset["actionNode"] = String(index);
+  button.dataset["actionId"] = action.id;
+  button.textContent = action.label;
+  if (action.title !== undefined) {
+    button.title = action.title;
+    button.setAttribute("aria-label", action.title);
+  }
+  return button;
 }
 
 function describeForLabel(node: NxValueNode): string {

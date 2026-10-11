@@ -12,10 +12,14 @@
  */
 import type { LanguageQueryName } from "@nx-lang/language-protocol";
 
+import type { PreviewCall } from "../preview/protocol.ts";
+
 /** A request from the main thread, before the channel gives it its id. */
 export type WorkerCall =
   | { readonly kind: "evaluate"; readonly source: string }
-  | { readonly kind: "language"; readonly query: LanguageQueryName; readonly request: unknown };
+  | { readonly kind: "language"; readonly query: LanguageQueryName; readonly request: unknown }
+  /** A call to the preview, which runs a session on the latest build `evaluate` made. */
+  | { readonly kind: "preview"; readonly call: PreviewCall };
 
 /** A request from the main thread, as the worker receives it. */
 export type WorkerRequest = WorkerCall & { readonly id: number };

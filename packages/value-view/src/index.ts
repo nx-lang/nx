@@ -19,9 +19,9 @@ import {
 import { renderMarkdown } from "./markdown.js";
 import { renderValue, type RenderedValue } from "./render.js";
 import { styles } from "./styles.js";
-import type { NxValueNode, NxValueSpan, NxValueText } from "./types.js";
+import type { NxValueAction, NxValueNode, NxValueSpan, NxValueText } from "./types.js";
 
-export type { NxValueNode, NxValueRole, NxValueSpan, NxValueText } from "./types.js";
+export type { NxValueAction, NxValueNode, NxValueRole, NxValueSpan, NxValueText } from "./types.js";
 export {
   DEFAULT_THEMES,
   NX_LANGUAGE_ID,
@@ -47,6 +47,29 @@ export interface NxValueNavigateDetail {
   readonly declaration: NxValueSpan;
 }
 
+/** The event fired when the visitor presses one of the buttons a host put on a node. */
+export const NX_VALUE_ACTION_EVENT = "nx-value-action";
+
+/** What the `nx-value-action` event carries. */
+export interface NxValueActionDetail {
+  /** The node the button is on. */
+  readonly node: NxValueNode;
+  /** Its index in the value's `nodes`. */
+  readonly index: number;
+  /** The id of the action pressed. */
+  readonly id: string;
+}
+
+/**
+ * The host's buttons for a node, shown at the end of the node's first line, or nothing for none.
+ * Called for every node each time the value or the function changes.
+ */
+export type NxValueActions = (
+  node: NxValueNode,
+  index: number,
+  value: NxValueText
+) => readonly NxValueAction[] | undefined;
+
 /**
  * The host's hover for a node: markdown, or nothing for the element's default. It may answer
  * asynchronously; an answer that arrives after the pointer has moved on is dropped.
@@ -58,7 +81,7 @@ export type NxValueDescribe = (
 ) => string | undefined | Promise<string | undefined>;
 
 /** The element's properties, which a host may set before the element is defined. */
-const PROPERTIES = ["value", "describe", "highlighter", "themes", "truncated", "stale"] as const;
+const PROPERTIES = ["value", "describe", "actions", "highlighter", "themes", "truncated", "stale"] as const;
 
 /**
  * The longest text the element colors. Coloring runs Shiki over the whole text on the main thread,
@@ -80,13 +103,14 @@ const ElementBase = (
  * The `<nx-value>` element.
  *
  * <para>Attributes `truncated` and `stale` mirror the properties of the same names. Everything else
- * is a property: `value`, `describe`, `highlighter` and `themes`.</para>
+ * is a property: `value`, `describe`, `actions`, `highlighter` and `themes`.</para>
  */
 export class NxValueElement extends ElementBase {
   static observedAttributes = ["truncated", "stale"];
 
   #value: NxValueText | undefined;
   #describe: NxValueDescribe | undefined;
+  #actions: NxValueActions | undefined;
   #highlighter: NxValueHighlighter | undefined;
   #loadedHighlighter: NxValueHighlighter | undefined;
   #themes: NxValueThemes = DEFAULT_THEMES;
@@ -207,6 +231,20 @@ export class NxValueElement extends ElementBase {
   }
 
   /**
+   * The host's buttons for each node. A press dispatches `nx-value-action`; while the value is
+   * stale the buttons are disabled. The buttons are not part of the value's text, so copying
+   * leaves them out.
+   */
+  get actions(): NxValueActions | undefined {
+    return this.#actions;
+  }
+
+  set actions(actions: NxValueActions | undefined) {
+    this.#actions = actions;
+    this.#render(true);
+  }
+
+  /**
    * A Shiki highlighter with the NX grammar and both of `themes` loaded, to color with. Without one
    * the element loads its own, shared by every element on the page. Not one behind a Monaco editor:
    * coloring switches the highlighter's current theme, which `@shikijs/monaco` tokenizes with.
@@ -236,6 +274,9 @@ export class NxValueElement extends ElementBase {
       this.#notice.hidden = !this.truncated;
     } else if (name === "stale") {
       this.#badge.hidden = !this.stale;
+      for (const button of this.#pre.querySelectorAll<HTMLButtonElement>("button.action")) {
+        button.disabled = this.stale;
+      }
     }
   }
 
@@ -288,7 +329,15 @@ export class NxValueElement extends ElementBase {
     } else {
       this.#load(value);
     }
-    this.#rendered = renderValue(this.ownerDocument, value, colors);
+    const actions = this.#actions;
+    this.#rendered = renderValue(
+      this.ownerDocument,
+      value,
+      colors,
+      actions === undefined
+        ? undefined
+        : { byNode: value.nodes.map((node, index) => actions(node, index, value)), disabled: this.stale }
+    );
     this.#pre.append(this.#rendered.root);
     for (const index of folded) {
       this.setFolded(index, true);
@@ -340,6 +389,10 @@ export class NxValueElement extends ElementBase {
   #onClick(event: MouseEvent): void {
     const target = event.target as Element;
     const button = target.closest?.("button");
+    if (button?.classList.contains("action") === true) {
+      this.#act(button as HTMLButtonElement);
+      return;
+    }
     if (button !== null && button !== undefined) {
       const index = this.#nodeIndexAt(button);
       if (index !== undefined) {
@@ -359,6 +412,10 @@ export class NxValueElement extends ElementBase {
   }
 
   #onKeyDown(event: KeyboardEvent): void {
+    // A focused button answers Enter and Space itself, with a click.
+    if ((event.target as Element | null)?.closest?.("button.action")) {
+      return;
+    }
     const elements = this.#visibleNodeElements();
     const focused = this.#nodeIndexAt(this.shadowRoot?.activeElement ?? null);
     const position = focused === undefined ? -1 : elements.findIndex((element) => Number(element.dataset["node"]) === focused);
@@ -397,6 +454,17 @@ export class NxValueElement extends ElementBase {
     return Array.from(this.#pre.querySelectorAll<HTMLElement>(".node")).filter(
       (element) => element.closest("[hidden]") === null
     );
+  }
+
+  #act(button: HTMLButtonElement): void {
+    const index = Number(button.dataset["actionNode"]);
+    const node = this.#value?.nodes[index];
+    const id = button.dataset["actionId"];
+    if (button.disabled || this.stale || node === undefined || id === undefined) {
+      return;
+    }
+    const detail: NxValueActionDetail = { node, index, id };
+    this.dispatchEvent(new CustomEvent(NX_VALUE_ACTION_EVENT, { detail, bubbles: true, composed: true }));
   }
 
   #navigate(index: number): void {

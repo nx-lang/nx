@@ -9,10 +9,10 @@ import githubDark from "shiki/themes/github-dark.mjs";
 import githubLight from "shiki/themes/github-light.mjs";
 
 import { card, greeting, nested, person, tasks, user } from "./fixtures.js";
-import type { NxValueElement, NxValueHighlighter, NxValueNavigateDetail } from "../src/index.js";
+import type { NxValueActionDetail, NxValueElement, NxValueHighlighter, NxValueNavigateDetail } from "../src/index.js";
 
 const elementModule = await import("../src/index.js");
-const { NX_VALUE_NAVIGATE_EVENT, nxShikiLanguage, DEFAULT_THEMES } = elementModule;
+const { NX_VALUE_ACTION_EVENT, NX_VALUE_NAVIGATE_EVENT, nxShikiLanguage, DEFAULT_THEMES } = elementModule;
 const { loadHighlighter } = await import("../src/highlight.js");
 
 const created: NxValueElement[] = [];
@@ -423,5 +423,105 @@ describe("the element marks cut, stale and copied values", () => {
     copy.click();
     await until(() => copy.textContent === "Copied", "the confirmation");
     assert.equal(clipboardWrites.at(-1), user.text);
+  });
+});
+
+describe("a host can attach actions to nodes", () => {
+  const address = person.nodes.findIndex((node) => node.role === "record" && node.type === "Address");
+  const taskRecords = tasks.nodes.flatMap((node, index) => (node.role === "record" && node.type === "Task" ? [index] : []));
+
+  function withActions(value = person, on = address): NxValueElement {
+    const element = show(value);
+    element.actions = (_node, index) => (index === on ? [{ id: "tap", label: "Tapped", title: "Dispatch Tapped" }] : undefined);
+    return element;
+  }
+
+  function actionButtons(element: NxValueElement): HTMLButtonElement[] {
+    return Array.from(shadow(element).querySelectorAll<HTMLButtonElement>("button.action"));
+  }
+
+  function actions(element: NxValueElement): NxValueActionDetail[] {
+    const events: NxValueActionDetail[] = [];
+    element.addEventListener(NX_VALUE_ACTION_EVENT, (event) => events.push((event as CustomEvent<NxValueActionDetail>).detail));
+    return events;
+  }
+
+  it("shows a button at the end of a one-line node and reports a press", () => {
+    const element = withActions();
+    const [button] = actionButtons(element);
+    assert.ok(button);
+    assert.equal(button.textContent, "Tapped");
+    assert.equal(button.getAttribute("aria-label"), "Dispatch Tapped");
+    // The button follows the node's text on its own line.
+    const line = visibleText(code(element)).split("\n")[1];
+    assert.equal(line, '  home=<Address city="London" />');
+    assert.ok(nodeElement(element, address).contains(button));
+
+    const events = actions(element);
+    button.click();
+    assert.equal(events.length, 1);
+    assert.equal(events[0]!.index, address);
+    assert.equal(events[0]!.id, "tap");
+    assert.equal(events[0]!.node.type, "Address");
+  });
+
+  it("puts a multi-line node's buttons at the end of its first line", () => {
+    const element = withActions(tasks, taskRecords[1]!);
+    const [button] = actionButtons(element);
+    const record = nodeElement(element, taskRecords[1]!);
+    const full = record.querySelector<HTMLElement>(":scope > .full")!;
+    // `<Task`, the button, then the line break.
+    assert.ok(full.contains(button!));
+    assert.match(full.textContent!, /^<TaskTapped\n/);
+  });
+
+  it("keeps a folded node's buttons on the line still showing", () => {
+    const element = withActions(tasks, taskRecords[1]!);
+    element.setFolded(taskRecords[1]!, true);
+    const visible = actionButtons(element).filter((button) => button.closest("[hidden]") === null);
+    assert.equal(visible.length, 1);
+    const events = actions(element);
+    visible[0]!.click();
+    assert.equal(events[0]?.index, taskRecords[1]);
+  });
+
+  it("shows no buttons without actions, and leaves the text and the copy alone", async () => {
+    assert.equal(actionButtons(show(person)).length, 0);
+    const element = withActions();
+    assert.equal(visibleText(code(element)), person.text);
+    const copy = shadow(element).querySelector<HTMLButtonElement>(".copy")!;
+    copy.click();
+    await until(() => copy.textContent === "Copied", "the confirmation");
+    assert.equal(clipboardWrites.at(-1), person.text);
+  });
+
+  it("disables the buttons of a stale value and reports no press", () => {
+    const element = withActions();
+    const events = actions(element);
+    element.stale = true;
+    const [button] = actionButtons(element);
+    assert.equal(button!.disabled, true);
+    button!.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    assert.equal(events.length, 0);
+    element.stale = false;
+    assert.equal(actionButtons(element)[0]!.disabled, false);
+  });
+
+  it("leaves Enter on a focused button to the button, not navigation", () => {
+    const element = withActions(user, 0);
+    let navigated = 0;
+    element.addEventListener(NX_VALUE_NAVIGATE_EVENT, () => (navigated += 1));
+    const [button] = actionButtons(element);
+    button!.focus();
+    button!.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    assert.equal(navigated, 0);
+  });
+
+  it("does not navigate when a button is clicked", () => {
+    const element = withActions(user, 0);
+    let navigated = 0;
+    element.addEventListener(NX_VALUE_NAVIGATE_EVENT, () => (navigated += 1));
+    actionButtons(element)[0]!.click();
+    assert.equal(navigated, 0);
   });
 });

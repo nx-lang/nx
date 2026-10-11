@@ -384,6 +384,7 @@ Each node has:
 | `optional`    | `true` for a property declared optional, as `subtitle?:string` is                  |
 | `count`       | A sequence's length                                                               |
 | `declaration` | Where the entry module declares the record, component, case, property or function, if it does |
+| `pointer`     | The JSON pointer of the node's value in the value's canonical JSON: `""` for the whole value, `/content/0` for an item; a property's is its value's |
 
 A number, string, boolean or `{}` written directly as a property's value has no node of its own; the
 property's node describes it. A sequence's type is its items' common type with `*`, or `object*`.
@@ -398,6 +399,47 @@ Calls nest at most 200 deep when the module evaluates, a fifth of the interprete
 a browser keeps the module's frames on a native stack the module cannot size: in a Chromium worker
 it ran out between 325 and 517 calls. Runaway recursion therefore ends in a `runtime-error` naming
 the limit rather than a trapped host.
+
+## Spelling a runtime value
+
+The IR runtimes return values in canonical JSON. `artifact.formatValue(value, options)` spells such
+a value as `{ text, nodes }` against the artifact's program, from the formatter `evaluateNx()` uses,
+so a host that runs a program on `@nx-lang/ir-runtime` shows its values as the command line would.
+The program is not evaluated.
+
+```ts
+const artifact = host.buildProgramArtifact(`external component <Button label:string emits { Tapped { } } />
+type Size = { width:float64 }`);
+try {
+  artifact.formatValue({ $type: "Size", width: 3 }).text; // <Size width=3.0 />
+  artifact.formatValue({
+    $type: "Button",
+    label: "Add",
+    onTapped: { $type: "ActionHandler", action: "Button.Tapped", token: "h1-1" }
+  }).text;
+  // <Button
+  //   label="Add"
+  //   onTapped=<ActionHandler action="Button.Tapped" token="h1-1" />
+  // />
+} finally {
+  artifact.dispose();
+}
+```
+
+An `ActionHandler` record, which the runtimes return where a handler is bound, is spelled as that
+record; `evaluateNx()` refuses one, since an interpreter handler has no token. Canonical JSON writes
+a whole `float64` as it writes an `int`, and a constant union case as a bare string, so each number
+and string is read by the type its record declares for it: `width=3.0` above. For a value with no
+record around it, `options.type` gives its type (`formatValue(3, { type: "float64" })` is `3.0`). The
+records may be declared in the entry module or in a library the program links. A field typed by a
+type parameter is read as an `int` when whole, since the value does not carry the type argument.
+`options.state` names a component, and the value is that component's state, spelled one
+`name=value` per line in declaration order, each declared at its state field.
+
+A value outside the canonical format throws `NxEvaluationError` with code `nx-value-invalid`, and
+one with no NX spelling, a sequence directly in a sequence, `nx-text-unspellable`; either names the
+pointer of the value at fault. The artifact stays usable. `undefined`, which JSON cannot carry,
+throws `TypeError`; the empty value is `null` or `[]`.
 
 ## The image
 
@@ -452,18 +494,19 @@ The names and shapes match `@nx-lang/sdk-node`, so code can move between the two
 ## ABI
 
 The module exports `nx_wasm_abi_version`, which the loader checks before any other call and refuses
-when it disagrees, naming both versions. The current version is 7. Version 4 added library
+when it disagrees, naming both versions. The current version is 8. Version 4 added library
 registries (`nx_wasm_registry_new`, `nx_wasm_registry_load`, `nx_wasm_registry_free`), build
 contexts (`nx_wasm_build_context_new`, `nx_wasm_build_context_free`) and
 `nx_wasm_workspace_validate`, and gave `nx_wasm_workspace_build` a build-context handle argument
 (null for none); 5 added `nx_wasm_program_diagnostics`; 6 added `nx_wasm_program_function_schema`
-and `nx_wasm_program_type_schema`; 7 added `nx_wasm_snapshot_source_tree`.
+and `nx_wasm_program_type_schema`; 7 added `nx_wasm_snapshot_source_tree`; 8 added
+`nx_wasm_program_format_value` and a `pointer` on every value node.
 
 | Exports | Purpose |
 | ------- | ------- |
 | `nx_wasm_abi_version`, `nx_wasm_alloc`, `nx_wasm_free`, `nx_wasm_result_free` | The version check and the module's memory |
 | `nx_wasm_program_build`, `nx_wasm_workspace_build`, `nx_wasm_workspace_validate` | Building and validating programs |
-| `nx_wasm_program_nx_ir`, `nx_wasm_program_evaluate_nx`, `nx_wasm_program_diagnostics`, `nx_wasm_program_function_schema`, `nx_wasm_program_type_schema`, `nx_wasm_program_free` | A program artifact's operations |
+| `nx_wasm_program_nx_ir`, `nx_wasm_program_evaluate_nx`, `nx_wasm_program_diagnostics`, `nx_wasm_program_function_schema`, `nx_wasm_program_type_schema`, `nx_wasm_program_format_value`, `nx_wasm_program_free` | A program artifact's operations |
 | `nx_wasm_registry_new`, `nx_wasm_registry_load`, `nx_wasm_registry_free`, `nx_wasm_build_context_new`, `nx_wasm_build_context_free` | Library registries and build contexts |
 | `nx_wasm_snapshot_new`, `nx_wasm_snapshot_hover`, `nx_wasm_snapshot_completions`, `nx_wasm_snapshot_diagnostics`, `nx_wasm_snapshot_document_symbols`, `nx_wasm_snapshot_source_tree`, `nx_wasm_snapshot_free` | Language snapshots |
 | `nx_wasm_ir_explain` | Explaining an image |

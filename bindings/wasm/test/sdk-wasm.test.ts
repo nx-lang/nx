@@ -411,3 +411,100 @@ let root() = { <SearchBox onSearchRequested=<DoSearch query={action.query} /> />
     expect(() => artifact.evaluateNx()).toThrow(NxDisposedResourceError);
   });
 });
+
+describe("spelling runtime values", () => {
+  let host: NxHost;
+
+  beforeAll(() => {
+    host = createNxHost(nxModule);
+  });
+
+  const counterSource = `external component <Button label:string emits { Tapped { } } />
+type Size = { width:float64 }
+type Status = active | paused
+component <Counter start:int = 0 /> = {
+  state { count:int = {start} ratio:float64 = 1 }
+  <Row>
+    <Label text={"Count: " + count} size=<Size width=3 /> status=paused />
+    <Button label="Add" onTapped=<Update count={count + 1} /> />
+  </Row>
+}
+<Counter start=3 />`;
+
+  function withArtifact<T>(source: string, use: (artifact: ReturnType<NxHost["buildProgramArtifact"]>) => T): T {
+    const artifact = host.buildProgramArtifact(source, { fileName: "playground.nx" });
+    try {
+      return use(artifact);
+    } finally {
+      artifact.dispose();
+    }
+  }
+
+  it("spells a handler as the record the runtime returns, with each node's pointer", () => {
+    withArtifact(counterSource, (artifact) => {
+      const value = artifact.formatValue({
+        $type: "Button",
+        label: "Add",
+        onTapped: { $type: "ActionHandler", action: "Button.Tapped", token: "h1-1" }
+      });
+      expect(value.text).toBe('<Button\n  label="Add"\n  onTapped=<ActionHandler action="Button.Tapped" token="h1-1" />\n/>');
+      expect(value.nodes[0]).toMatchObject({ role: "record", type: "Button", pointer: "" });
+      expect(value.nodes[0]!.declaration).toMatchObject({ startLine: 1 });
+      const handler = value.nodes.find((node) => node.type === "ActionHandler" && node.role === "record");
+      expect(handler?.pointer).toBe("/onTapped");
+    });
+  });
+
+  it("reads numbers and cases by their declared types, as root's text does", () => {
+    withArtifact(
+      `type Size = { width:float64 }
+type Status = active | paused
+type Job = { status:Status size:Size }
+<Job status=paused size=<Size width=3 /> />`,
+      (artifact) => {
+        const ir = artifact.generateNxIr({ debug: true })[0]!;
+        const value = evaluateFunction(prepareNxIrProgram(ir.bytes), "root");
+        expect(value).toEqual({ $type: "Job", size: { $type: "Size", width: 3 }, status: "paused" });
+        expect(artifact.formatValue(value)).toEqual(artifact.evaluateNx());
+      }
+    );
+  });
+
+  it("spells a component's state one field per line, by its declarations", () => {
+    withArtifact(counterSource, (artifact) => {
+      const value = artifact.formatValue({ ratio: 1, count: 4 }, { state: "Counter" });
+      expect(value.text).toBe("count=4\nratio=1.0");
+      expect(value.nodes.map((node) => [node.name, node.pointer, node.declaration?.startLine])).toEqual([
+        ["count", "/count", 5],
+        ["ratio", "/ratio", 5]
+      ]);
+    });
+  });
+
+  it("types a whole value by the type it is given", () => {
+    withArtifact("type Status = active | paused", (artifact) => {
+      expect(artifact.formatValue(3, { type: "float64" }).text).toBe("3.0");
+      expect(artifact.formatValue(3).text).toBe("3");
+      expect(artifact.formatValue("paused", { type: "Status" }).nodes[0]?.role).toBe("case");
+    });
+  });
+
+  it("names where a value leaves the canonical format, and stays usable", () => {
+    withArtifact("type Size = { width:float64 }", (artifact) => {
+      expect(() => artifact.formatValue({ items: [{ $type: 7 }] })).toThrow(/`\/items\/0\/\$type`/);
+      try {
+        artifact.formatValue({ items: [{ $type: 7 }] });
+      } catch (error) {
+        expect((error as NxEvaluationError).diagnostics[0]?.code).toBe("nx-value-invalid");
+      }
+      expect(artifact.formatValue({ $type: "Size", width: 2 }).text).toBe("<Size width=2.0 />");
+      expect(() => artifact.formatValue(undefined)).toThrow(TypeError);
+    });
+  });
+
+  it("gives evaluateNx's nodes pointers too", () => {
+    withArtifact('type User = { id:string name:string }\n<User id="1" name="Ada" />', (artifact) => {
+      expect(artifact.evaluateNx().nodes.map((node) => node.pointer)).toEqual(["", "/id", "/name"]);
+    });
+  });
+});

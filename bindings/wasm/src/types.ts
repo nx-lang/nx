@@ -131,6 +131,12 @@ export interface NxValueNode {
    * property or function. Absent when the entry module does not declare it.
    */
   readonly declaration?: NxTextSpan;
+
+  /**
+   * The RFC 6901 JSON pointer of the node's value within the value's canonical JSON form: `""` for
+   * the whole value, `/content/0` for the first item of its `content`. A property's is its value's.
+   */
+  readonly pointer: string;
 }
 
 /**
@@ -581,6 +587,24 @@ export interface NxParameterSchema {
  * which always carries it.
  */
 export type NxSchemaDirection = "input" | "output";
+
+/**
+ * Options for {@link NxProgramArtifact.formatValue}.
+ */
+export interface NxFormatValueOptions {
+  /**
+   * The NX type of the whole value, such as `float64` or `Status?`. Canonical JSON writes a whole
+   * `float64` as it writes an `int`, and a constant union case as a bare string, so a number or a
+   * string with no declared property around it is read by this type.
+   */
+  readonly type?: string;
+
+  /**
+   * The component whose state the value is: an object of its state fields, spelled one
+   * `name=value` per line in declaration order, each typed and declared by its field.
+   */
+  readonly state?: string;
+}
 
 /**
  * Options for {@link NxProgramArtifact.typeSchema}.

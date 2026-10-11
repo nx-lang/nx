@@ -12,7 +12,10 @@
 //! always the text the command line prints.</para>
 
 use crate::diagnostics::{text_range_to_span, LineIndex, NxTextSpan};
-use nx_hir::{ast::spell_type_ref, Item, LoweredModule, Name, RecordField, UnionDef};
+use nx_hir::{
+    ast::{spell_type_ref, TypeRef},
+    Item, LoweredModule, Name, RecordField, UnionDef,
+};
 use nx_interpreter::Value;
 use rustc_hash::FxHashMap;
 use serde::Serialize;
@@ -61,6 +64,9 @@ pub struct NxValueNode {
     /// property or function. `None` when the entry module does not declare it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub declaration: Option<NxTextSpan>,
+    /// The RFC 6901 JSON pointer of the node's value within the value's canonical JSON form: the
+    /// empty string for the whole value. A property's is its value's.
+    pub pointer: String,
 }
 
 /// The kinds of thing an [`NxValueNode`] can be.
@@ -110,11 +116,12 @@ pub fn format_nx_text(value: &Value) -> Result<String, String> {
 pub(crate) fn annotate_nx_text(
     value: &Value,
     module: &LoweredModule,
+    libraries: &[&LoweredModule],
     source: &str,
 ) -> Result<NxValueText, String> {
     let mut writer = Writer::default();
     writer.value(value, 0)?;
-    let declarations = Declarations::new(module, source);
+    let declarations = Declarations::new(module, libraries, source);
     let utf16 = Utf16Offsets::new(&writer.output);
     let nodes = writer
         .nodes
@@ -136,14 +143,24 @@ struct RawNode {
     ty: Option<String>,
     count: Option<usize>,
     key: DeclarationKey,
+    pointer: String,
 }
 
 /// What a node's declaration would be, if the entry module declares it.
 enum DeclarationKey {
     None,
     Record(Name),
-    Property { owner: Name, name: SmolStr },
-    Case { union: Name, case: SmolStr },
+    /// A property of the record or component `owner`, or, with `state`, a state field of the
+    /// component `owner`.
+    Property {
+        owner: Name,
+        name: SmolStr,
+        state: bool,
+    },
+    Case {
+        union: Name,
+        case: SmolStr,
+    },
     Function(SmolStr),
 }
 
@@ -153,6 +170,8 @@ struct Writer {
     output: String,
     nodes: Vec<RawNode>,
     open: Vec<usize>,
+    /// The JSON pointer of the value being written.
+    pointer: String,
 }
 
 impl Writer {
@@ -172,8 +191,24 @@ impl Writer {
             ty,
             count,
             key,
+            pointer: self.pointer.clone(),
         });
         self.open.push(index);
+    }
+
+    /// Writes `write` with the pointer extended by one reference token, `token`.
+    fn within<T>(
+        &mut self,
+        token: &str,
+        write: impl FnOnce(&mut Self) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let length = self.pointer.len();
+        push_token(&mut self.pointer, token);
+        let result = write(self);
+        if result.is_ok() {
+            self.pointer.truncate(length);
+        }
+        result
     }
 
     fn end(&mut self) {
@@ -260,7 +295,7 @@ impl Writer {
                     if matches!(elem, Value::Array(_)) {
                         return Err(unspellable_nested_list());
                     }
-                    self.value(elem, indent)?;
+                    self.within(&i.to_string(), |writer| writer.value(elem, indent))?;
                 }
                 self.end();
             }
@@ -323,6 +358,33 @@ impl Writer {
         value: &Value,
         indent: usize,
     ) -> Result<(), String> {
+        self.within(key.as_str(), |writer| {
+            writer.keyed_property(owner, key, value, indent, false)
+        })
+    }
+
+    /// Emits the state fields of the component `owner`, one `key=value` per line, in order.
+    fn state_fields(&mut self, owner: &Name, fields: &[(SmolStr, Value)]) -> Result<(), String> {
+        for (index, (key, value)) in fields.iter().enumerate() {
+            if index > 0 {
+                self.output.push('\n');
+            }
+            self.within(key.as_str(), |writer| {
+                writer.keyed_property(owner, key, value, 0, true)
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Emits a property whose value's pointer is already the current one.
+    fn keyed_property(
+        &mut self,
+        owner: &Name,
+        key: &SmolStr,
+        value: &Value,
+        indent: usize,
+        state: bool,
+    ) -> Result<(), String> {
         // The value's own type stands in until the declaration, if there is one, replaces it.
         self.begin(
             NxValueRole::Property,
@@ -331,6 +393,7 @@ impl Writer {
             DeclarationKey::Property {
                 owner: owner.clone(),
                 name: key.clone(),
+                state,
             },
         );
         self.output.push_str(key.as_str());
@@ -399,19 +462,22 @@ impl Writer {
                         return Err(unspellable_nested_list());
                     }
                     // An item is not a property's value, so a scalar item is a node of its own.
-                    let scalar = is_scalar(element);
-                    if scalar {
-                        self.begin(
-                            NxValueRole::Scalar,
-                            value_type(element),
-                            None,
-                            DeclarationKey::None,
-                        );
-                    }
-                    self.property_value(element, indent)?;
-                    if scalar {
-                        self.end();
-                    }
+                    self.within(&i.to_string(), |writer| {
+                        let scalar = is_scalar(element);
+                        if scalar {
+                            writer.begin(
+                                NxValueRole::Scalar,
+                                value_type(element),
+                                None,
+                                DeclarationKey::None,
+                            );
+                        }
+                        writer.property_value(element, indent)?;
+                        if scalar {
+                            writer.end();
+                        }
+                        Ok(())
+                    })?;
                 }
                 self.output.push('}');
                 self.end();
@@ -488,62 +554,83 @@ struct Shape<'a> {
     span: TextRange,
     fields: &'a [RecordField],
     base: Option<&'a Name>,
+    /// Declared in the entry module, whose source the spans index. A library's declarations give
+    /// types but no spans.
+    local: bool,
 }
 
 /// The entry module's records, components, unions and functions, by name, and a way to spell their
-/// spans.
+/// spans, with the declarations of the libraries it links for their types.
 struct Declarations<'a> {
     shapes: FxHashMap<&'a str, Shape<'a>>,
-    unions: FxHashMap<&'a str, &'a UnionDef>,
+    /// Each component's state fields, by the component's name.
+    states: FxHashMap<&'a str, &'a [RecordField]>,
+    aliases: FxHashMap<&'a str, &'a TypeRef>,
+    /// Each union, and whether the entry module declares it.
+    unions: FxHashMap<&'a str, (&'a UnionDef, bool)>,
     functions: FxHashMap<&'a str, TextRange>,
     source: &'a str,
     lines: LineIndex,
 }
 
 impl<'a> Declarations<'a> {
-    fn new(module: &'a LoweredModule, source: &'a str) -> Self {
-        let mut shapes = FxHashMap::default();
-        let mut unions = FxHashMap::default();
-        let mut functions = FxHashMap::default();
+    /// Indexes `module`, whose source is `source`, and then `libraries` for what `module` does not
+    /// declare itself: a name the entry module declares is the entry module's.
+    fn new(module: &'a LoweredModule, libraries: &[&'a LoweredModule], source: &'a str) -> Self {
+        let mut declarations = Self {
+            shapes: FxHashMap::default(),
+            states: FxHashMap::default(),
+            aliases: FxHashMap::default(),
+            unions: FxHashMap::default(),
+            functions: FxHashMap::default(),
+            source,
+            lines: LineIndex::new(source),
+        };
+        declarations.index(module, true);
+        for library in libraries {
+            declarations.index(library, false);
+        }
+        declarations
+    }
+
+    fn index(&mut self, module: &'a LoweredModule, local: bool) {
         for item in module.items() {
             match item {
                 Item::Record(record) => {
-                    shapes.insert(
-                        record.name.as_str(),
-                        Shape {
-                            span: record.span,
-                            fields: &record.properties,
-                            base: record.base.as_ref(),
-                        },
-                    );
+                    self.shapes.entry(record.name.as_str()).or_insert(Shape {
+                        span: record.span,
+                        fields: &record.properties,
+                        base: record.base.as_ref(),
+                        local,
+                    });
                 }
                 // External components too: their props are declared in this source even though
                 // their body lives in the host.
                 Item::Component(component) => {
-                    shapes.insert(
-                        component.name.as_str(),
-                        Shape {
-                            span: component.span,
-                            fields: &component.props,
-                            base: component.base.as_ref(),
-                        },
-                    );
+                    if local {
+                        self.states
+                            .insert(component.name.as_str(), component.state.as_slice());
+                    }
+                    self.shapes.entry(component.name.as_str()).or_insert(Shape {
+                        span: component.span,
+                        fields: &component.props,
+                        base: component.base.as_ref(),
+                        local,
+                    });
                 }
                 Item::Union(union) => {
-                    unions.insert(union.name.as_str(), union);
+                    self.unions
+                        .entry(union.name.as_str())
+                        .or_insert((union, local));
                 }
-                Item::Function(function) => {
-                    functions.insert(function.name.as_str(), function.span);
+                Item::TypeAlias(alias) => {
+                    self.aliases.entry(alias.name.as_str()).or_insert(&alias.ty);
+                }
+                Item::Function(function) if local => {
+                    self.functions.insert(function.name.as_str(), function.span);
                 }
                 _ => {}
             }
-        }
-        Self {
-            shapes,
-            unions,
-            functions,
-            source,
-            lines: LineIndex::new(source),
         }
     }
 
@@ -564,6 +651,7 @@ impl<'a> Declarations<'a> {
             optional: false,
             count: node.count.map(|count| count as u32),
             declaration: None,
+            pointer: node.pointer,
         };
 
         match node.key {
@@ -571,13 +659,24 @@ impl<'a> Declarations<'a> {
             DeclarationKey::Record(name) => {
                 annotated.declaration = self
                     .shape(&name)
-                    .map(|shape| shape.span)
+                    .map(|shape| {
+                        if shape.local {
+                            shape.span
+                        } else {
+                            TextRange::default()
+                        }
+                    })
                     .or_else(|| self.payload_case(&name).map(|(_, case)| case))
                     .and_then(|range| self.span(range));
             }
-            DeclarationKey::Property { owner, name } => {
+            DeclarationKey::Property { owner, name, state } => {
                 annotated.name = Some(name.to_string());
-                if let Some(field) = self.field(&owner, &name) {
+                let field = if state {
+                    self.state_field(&owner, &name)
+                } else {
+                    self.field(&owner, &name)
+                };
+                if let Some(field) = field {
                     annotated.ty = Some(field.ty);
                     annotated.optional = field.optional;
                     annotated.declaration = self.span(field.span);
@@ -587,7 +686,8 @@ impl<'a> Declarations<'a> {
                 annotated.declaration = self
                     .unions
                     .get(union.as_str())
-                    .and_then(|union| union.cases.iter().find(|c| c.name.as_str() == case))
+                    .filter(|(_, local)| *local)
+                    .and_then(|(union, _)| union.cases.iter().find(|c| c.name.as_str() == case))
                     .and_then(|case| self.span(case.span));
             }
             DeclarationKey::Function(name) => {
@@ -607,18 +707,25 @@ impl<'a> Declarations<'a> {
     }
 
     /// The union and the case a record type name like `LoadState.failed` names: a union case that
-    /// declares fields, whose values are records.
+    /// declares fields, whose values are records. The case's span is empty for a library's union.
     fn payload_case(&self, name: &Name) -> Option<(&'a UnionDef, TextRange)> {
         let (union, case) = name.as_str().split_once('.')?;
-        let union = self.unions.get(union).copied()?;
+        let (union, local) = self.unions.get(union).copied()?;
         let case = union.cases.iter().find(|c| c.name.as_str() == case)?;
-        Some((union, case.span))
+        Some((
+            union,
+            if local {
+                case.span
+            } else {
+                TextRange::default()
+            },
+        ))
     }
 
     /// The declared property `name` of the record type or component `owner`, its own or one it
     /// inherits.
-    fn field(&self, owner: &Name, name: &str) -> Option<DeclaredField> {
-        if let Some((union, _)) = self.payload_case(owner) {
+    fn field(&self, owner: &Name, name: &str) -> Option<DeclaredField<'a>> {
+        if let Some((union, case_span)) = self.payload_case(owner) {
             let case_name = owner.as_str().split_once('.')?.1;
             let case = union.cases.iter().find(|c| c.name.as_str() == case_name)?;
             return case
@@ -627,8 +734,13 @@ impl<'a> Declarations<'a> {
                 .find(|field| field.name.as_str() == name)
                 .map(|field| DeclaredField {
                     ty: spell_type_ref(&field.ty),
+                    ty_ref: &field.ty,
                     optional: field.optional,
-                    span: field.span,
+                    span: if case_span.is_empty() {
+                        TextRange::default()
+                    } else {
+                        field.span
+                    },
                 });
         }
 
@@ -642,11 +754,11 @@ impl<'a> Declarations<'a> {
                 .iter()
                 .find(|field| field.name.as_str() == name)
             {
-                return Some(DeclaredField {
-                    ty: spell_type_ref(&field.ty),
-                    optional: field.optional,
-                    span: field.span,
-                });
+                let mut found = declared(field);
+                if !current.local {
+                    found.span = TextRange::default();
+                }
+                return Some(found);
             }
             visited += 1;
             if visited > self.shapes.len() {
@@ -656,12 +768,311 @@ impl<'a> Declarations<'a> {
         }
         None
     }
+
+    /// The state field `name` of the component `owner`.
+    fn state_field(&self, owner: &Name, name: &str) -> Option<DeclaredField<'a>> {
+        self.states
+            .get(owner.as_str())?
+            .iter()
+            .find(|field| field.name.as_str() == name)
+            .map(declared)
+    }
+
+    /// What a number or string at a site declared `ty` is: the primitive or union `ty` names,
+    /// through aliases and occurrence suffixes.
+    fn expect(&self, ty: &'a TypeRef, depth: usize) -> Expected<'a> {
+        match ty {
+            TypeRef::Name(name) => self.expect_name(name.as_str(), depth),
+            TypeRef::Seq { inner, .. } => self.expect(inner, depth),
+            _ => Expected::Any,
+        }
+    }
+
+    fn expect_name(&self, name: &str, depth: usize) -> Expected<'a> {
+        if let Some(primitive) = NUMERIC_PRIMITIVES.iter().find(|p| **p == name) {
+            return Expected::Primitive(primitive);
+        }
+        if let Some((union, _)) = self.unions.get(name) {
+            return Expected::Union(union);
+        }
+        // An alias cycle is the checker's to report; stop following one rather than loop.
+        match self.aliases.get(name) {
+            Some(target) if depth < self.aliases.len() => self.expect(target, depth + 1),
+            _ => Expected::Any,
+        }
+    }
+
+    /// Converts a canonical JSON value, as the IR runtimes return it, to the interpreter's value,
+    /// reading what a number or a string is from `expected` and from the declarations of the
+    /// records it holds.
+    fn canonical(
+        &self,
+        json: &serde_json::Value,
+        expected: Expected<'a>,
+        pointer: &mut String,
+    ) -> Result<Value, FormatError> {
+        Ok(match json {
+            serde_json::Value::Null => Value::empty(),
+            serde_json::Value::Bool(value) => Value::Boolean(*value),
+            serde_json::Value::Number(number) => canonical_number(number, expected),
+            serde_json::Value::String(text) => match expected {
+                Expected::Union(union)
+                    if union
+                        .cases
+                        .iter()
+                        .any(|case| case.name.as_str() == text && case.fields.is_empty()) =>
+                {
+                    Value::UnionCase {
+                        union: union.name.clone(),
+                        case: SmolStr::new(text),
+                    }
+                }
+                _ => Value::String(SmolStr::new(text)),
+            },
+            serde_json::Value::Array(items) => {
+                let mut values = Vec::with_capacity(items.len());
+                for (index, item) in items.iter().enumerate() {
+                    values.push(within_pointer(pointer, &index.to_string(), |pointer| {
+                        self.canonical(item, expected, pointer)
+                    })?);
+                }
+                Value::Array(values)
+            }
+            serde_json::Value::Object(properties) => self.canonical_record(properties, pointer)?,
+        })
+    }
+
+    fn canonical_record(
+        &self,
+        properties: &serde_json::Map<String, serde_json::Value>,
+        pointer: &mut String,
+    ) -> Result<Value, FormatError> {
+        let type_name = match properties.get("$type") {
+            None => "object",
+            Some(serde_json::Value::String(type_name)) => type_name.as_str(),
+            Some(_) => {
+                return Err(FormatError::invalid(
+                    "A record's `$type` must be a string",
+                    &format!("{pointer}/$type"),
+                ))
+            }
+        };
+
+        // A function value is the record that names its declaration.
+        if type_name == "Function" {
+            if let (
+                Some(serde_json::Value::String(module)),
+                Some(serde_json::Value::String(name)),
+            ) = (properties.get("module"), properties.get("name"))
+            {
+                return Ok(Value::Function {
+                    module: SmolStr::new(module),
+                    name: SmolStr::new(name),
+                });
+            }
+        }
+
+        let owner = Name::new(type_name);
+        let mut fields = FxHashMap::default();
+        for (key, value) in properties {
+            if key == "$type" {
+                continue;
+            }
+            let expected = self
+                .field(&owner, key)
+                .map_or(Expected::Any, |field| self.expect(field.ty_ref, 0));
+            let value = within_pointer(pointer, key, |pointer| {
+                self.canonical(value, expected, pointer)
+            })?;
+            fields.insert(SmolStr::new(key), value);
+        }
+        Ok(Value::Record {
+            type_name: owner,
+            fields,
+        })
+    }
 }
 
-struct DeclaredField {
+fn declared(field: &RecordField) -> DeclaredField<'_> {
+    DeclaredField {
+        ty: spell_type_ref(&field.ty),
+        ty_ref: &field.ty,
+        optional: field.optional,
+        span: field.span,
+    }
+}
+
+struct DeclaredField<'a> {
     ty: String,
+    ty_ref: &'a TypeRef,
     optional: bool,
     span: TextRange,
+}
+
+/// The primitives whose values canonical JSON writes as numbers.
+const NUMERIC_PRIMITIVES: [&str; 5] = ["int", "int32", "int64", "float32", "float64"];
+
+/// What a site declares a number or a string to be.
+#[derive(Clone, Copy)]
+enum Expected<'a> {
+    /// Nothing the formatter can use: a number is an `int` when whole, a string is a string.
+    Any,
+    /// A numeric primitive.
+    Primitive(&'static str),
+    /// A union, whose constant cases canonical JSON writes as bare strings.
+    Union(&'a UnionDef),
+}
+
+/// A number from canonical JSON, which does not tell a whole `float64` from an `int`: the site's
+/// type does.
+fn canonical_number(number: &serde_json::Number, expected: Expected<'_>) -> Value {
+    let primitive = match expected {
+        Expected::Primitive(primitive) => primitive,
+        _ => "",
+    };
+    if let Some(whole) = number.as_i64() {
+        return match primitive {
+            "float32" => Value::Float32(whole as f32),
+            "float64" => Value::Float(whole as f64),
+            "int32" => i32::try_from(whole).map_or(Value::Int(whole), Value::Int32),
+            _ => Value::Int(whole),
+        };
+    }
+    let real = number.as_f64().unwrap_or(f64::NAN);
+    match primitive {
+        "float32" => Value::Float32(real as f32),
+        _ => Value::Float(real),
+    }
+}
+
+/// Runs `write` with `pointer` extended by the reference token `token`, and restores it after a
+/// success, so that after a failure it still names where the failure was.
+fn within_pointer<T>(
+    pointer: &mut String,
+    token: &str,
+    write: impl FnOnce(&mut String) -> Result<T, FormatError>,
+) -> Result<T, FormatError> {
+    let length = pointer.len();
+    push_token(pointer, token);
+    let result = write(pointer);
+    if result.is_ok() {
+        pointer.truncate(length);
+    }
+    result
+}
+
+fn push_token(pointer: &mut String, token: &str) {
+    pointer.push('/');
+    pointer.push_str(&token.replace('~', "~0").replace('/', "~1"));
+}
+
+/// Why a canonical value could not be spelled, and where in it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FormatError {
+    /// `nx-value-invalid` for a value outside the canonical format, `nx-text-unspellable` for one
+    /// NX text cannot spell.
+    pub code: &'static str,
+    pub message: String,
+    /// The JSON pointer of the value at fault.
+    pub pointer: String,
+}
+
+impl FormatError {
+    fn invalid(message: &str, pointer: &str) -> Self {
+        Self {
+            code: "nx-value-invalid",
+            message: message.to_string(),
+            pointer: pointer.to_string(),
+        }
+    }
+}
+
+/// How a host asks for a canonical value to be spelled.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct FormatOptions {
+    /// The NX type of the whole value, such as `float64` or `Status?`, when the host knows it.
+    pub ty: Option<String>,
+    /// The component whose state the value is: an object of its state fields, spelled one
+    /// `name=value` per line in declaration order.
+    pub state: Option<String>,
+}
+
+/// Spells a value in canonical JSON, as the IR runtimes return it, as annotated NX text, taking
+/// types and declarations from `module`, whose source is `source`.
+///
+/// <para>An `ActionHandler` record is spelled as the record it is. A number or a string is read
+/// by its site's declared type, since canonical JSON writes a whole `float64` as it writes an
+/// `int`, and a constant union case as a bare string.</para>
+pub(crate) fn annotate_canonical_nx_text(
+    value: &serde_json::Value,
+    options: &FormatOptions,
+    module: &LoweredModule,
+    libraries: &[&LoweredModule],
+    source: &str,
+) -> Result<NxValueText, FormatError> {
+    let declarations = Declarations::new(module, libraries, source);
+    let mut pointer = String::new();
+    let mut writer = Writer::default();
+    let written = if let Some(component) = &options.state {
+        let state = declarations.states.get(component.as_str()).ok_or_else(|| {
+            FormatError::invalid(
+                &format!("The program declares no component `{component}`"),
+                "",
+            )
+        })?;
+        let serde_json::Value::Object(properties) = value else {
+            return Err(FormatError::invalid(
+                "A component's state must be an object",
+                "",
+            ));
+        };
+        // Declared fields in declaration order, then any the declaration does not know, by name.
+        let mut keys: Vec<&str> = state
+            .iter()
+            .map(|field| field.name.as_str())
+            .filter(|name| properties.contains_key(*name))
+            .collect();
+        let mut unknown: Vec<&str> = properties
+            .keys()
+            .map(String::as_str)
+            .filter(|key| !keys.contains(key))
+            .collect();
+        unknown.sort_unstable();
+        keys.extend(unknown);
+        let owner = Name::new(component);
+        let mut fields = Vec::with_capacity(keys.len());
+        for key in keys {
+            let expected = declarations
+                .state_field(&owner, key)
+                .map_or(Expected::Any, |field| declarations.expect(field.ty_ref, 0));
+            let value = within_pointer(&mut pointer, key, |pointer| {
+                declarations.canonical(&properties[key], expected, pointer)
+            })?;
+            fields.push((SmolStr::new(key), value));
+        }
+        writer.state_fields(&owner, &fields)
+    } else {
+        let expected = options.ty.as_deref().map_or(Expected::Any, |ty| {
+            declarations.expect_name(ty.trim_end_matches(['?', '*', '+']), 0)
+        });
+        let value = declarations.canonical(value, expected, &mut pointer)?;
+        writer.value(&value, 0)
+    };
+    written.map_err(|message| FormatError {
+        code: "nx-text-unspellable",
+        message,
+        pointer: writer.pointer.clone(),
+    })?;
+    let utf16 = Utf16Offsets::new(&writer.output);
+    let nodes = writer
+        .nodes
+        .into_iter()
+        .map(|node| declarations.annotate(node, &utf16))
+        .collect();
+    Ok(NxValueText {
+        text: writer.output,
+        nodes,
+    })
 }
 
 /// UTF-16 offsets for every byte offset of a text, so a node's byte range converts in O(1).
@@ -1229,7 +1640,7 @@ mod tests {
         /// Annotates a value against an empty module, so nothing has a declaration.
         fn annotated(value: &Value) -> NxValueText {
             let module = nx_hir::LoweredModule::new(nx_hir::SourceId::new(0));
-            annotate_nx_text(value, &module, "").expect("value should have an NX spelling")
+            annotate_nx_text(value, &module, &[], "").expect("value should have an NX spelling")
         }
 
         /// The text a node covers, sliced by its UTF-16 offsets as JavaScript would slice it.
@@ -1401,13 +1812,15 @@ mod tests {
             let json = serde_json::to_value(&text).unwrap();
             assert_eq!(
                 json["nodes"][0],
-                serde_json::json!({ "start": 0, "end": 15, "role": "record", "type": "User" })
+                serde_json::json!({
+                    "start": 0, "end": 15, "role": "record", "type": "User", "pointer": ""
+                })
             );
             assert_eq!(
                 json["nodes"][1],
                 serde_json::json!({
                     "start": 6, "end": 12, "parent": 0, "role": "property", "type": "string",
-                    "name": "id"
+                    "name": "id", "pointer": "/id"
                 })
             );
         }
@@ -1598,6 +2011,261 @@ mod tests {
                 "{}",
                 diagnostic.message
             );
+        }
+    }
+
+    /// Values in canonical JSON, as the IR runtimes return them, spelled against a program.
+    mod canonical {
+        use crate::{
+            eval_program_artifact_nx_text, format_program_artifact_value, FormatValueError,
+            NxValueRole, NxValueText, ProgramBuildContext,
+        };
+        use serde_json::json;
+
+        const BUTTON: &str = "external component <Button label:string emits { Tapped { } } />\n";
+
+        fn program(source: &str) -> crate::ProgramArtifact {
+            crate::load_program_artifact_from_source(
+                source,
+                "playground.nx",
+                &ProgramBuildContext::empty(),
+            )
+            .unwrap_or_else(|diagnostics| panic!("{diagnostics:?}"))
+        }
+
+        fn format(source: &str, request: serde_json::Value) -> NxValueText {
+            format_program_artifact_value(&program(source), &request.to_string())
+                .unwrap_or_else(|error| panic!("{error:?}"))
+        }
+
+        fn failure(source: &str, request: serde_json::Value) -> crate::NxDiagnostic {
+            match format_program_artifact_value(&program(source), &request.to_string()) {
+                Err(FormatValueError::Value(diagnostics)) => diagnostics[0].clone(),
+                other => panic!("expected a value error, got {other:?}"),
+            }
+        }
+
+        fn rendered_row() -> serde_json::Value {
+            json!({ "$type": "Row", "content": [{
+                "$type": "Button",
+                "label": "Add",
+                "onTapped": { "$type": "ActionHandler", "action": "Button.Tapped", "token": "h1-1" }
+            }] })
+        }
+
+        #[test]
+        fn a_library_union_and_record_spell_as_root_does() {
+            let source = "import \"@nx/agent\"\n\
+                          type Call = { method:HttpMethod limits:AgentLimits }\n\
+                          let root() = <Call method=post limits=<AgentLimits maxSteps=6 /> />\n";
+            let expected = eval_program_artifact_nx_text(&program(source))
+                .unwrap_or_else(|diagnostics| panic!("{diagnostics:?}"));
+            let value = json!({
+                "$type": "Call",
+                "method": "post",
+                "limits": { "$type": "AgentLimits", "maxSteps": 6 }
+            });
+            let text = format(source, json!({ "value": value }));
+            assert_eq!(text.text, expected.text);
+            assert!(text.text.contains("method=post"), "{}", text.text);
+            let case = text
+                .nodes
+                .iter()
+                .find(|node| node.role == NxValueRole::Case)
+                .expect("the method should be a case");
+            assert_eq!(case.ty.as_deref(), Some("HttpMethod"));
+            assert!(
+                case.declaration.is_none(),
+                "a library's spans index another source"
+            );
+            let limits = text
+                .nodes
+                .iter()
+                .find(|node| {
+                    node.ty.as_deref() == Some("AgentLimits") && node.role == NxValueRole::Record
+                })
+                .expect("the limits record");
+            assert!(limits.declaration.is_none());
+            let steps = text
+                .nodes
+                .iter()
+                .find(|node| node.name.as_deref() == Some("maxSteps"))
+                .expect("the maxSteps property");
+            assert_eq!(steps.ty.as_deref(), Some("int"));
+            assert!(steps.optional);
+            assert!(steps.declaration.is_none());
+            assert_eq!(text.nodes, expected.nodes);
+        }
+
+        #[test]
+        fn a_rendered_component_spells_its_handler_as_a_record() {
+            let text = format(BUTTON, json!({ "value": rendered_row() }));
+            assert_eq!(
+                text.text,
+                "<Row\n  content={<Button\n    label=\"Add\"\n    onTapped=<ActionHandler \
+                 action=\"Button.Tapped\" token=\"h1-1\" />\n  />}\n/>"
+            );
+            let button = text
+                .nodes
+                .iter()
+                .find(|node| {
+                    node.ty.as_deref() == Some("Button") && node.role == NxValueRole::Record
+                })
+                .expect("a Button node");
+            assert_eq!(
+                button.declaration.as_ref().map(|span| span.start_line),
+                Some(1)
+            );
+        }
+
+        #[test]
+        fn nodes_carry_their_values_pointers() {
+            let text = format(BUTTON, json!({ "value": rendered_row() }));
+            let pointers = |role: NxValueRole, ty: &str| -> Vec<String> {
+                text.nodes
+                    .iter()
+                    .filter(|node| node.role == role && node.ty.as_deref() == Some(ty))
+                    .map(|node| node.pointer.clone())
+                    .collect()
+            };
+            assert_eq!(pointers(NxValueRole::Record, "Row"), [""]);
+            assert_eq!(pointers(NxValueRole::Record, "Button"), ["/content/0"]);
+            assert_eq!(
+                pointers(NxValueRole::Record, "ActionHandler"),
+                ["/content/0/onTapped"]
+            );
+            let on_tapped = text
+                .nodes
+                .iter()
+                .find(|node| node.name.as_deref() == Some("onTapped"))
+                .expect("the onTapped property");
+            assert_eq!(on_tapped.pointer, "/content/0/onTapped");
+        }
+
+        #[test]
+        fn a_pointer_token_escapes_tilde_and_slash() {
+            let text = format("", json!({ "value": { "$type": "Odd", "a/b~c": 1 } }));
+            assert_eq!(text.nodes[1].pointer, "/a~1b~0c");
+        }
+
+        #[test]
+        fn a_number_is_spelled_by_its_declared_type() {
+            let source = "type Size = { width:float64 height?:float32 count:int32 }";
+            let text = format(
+                source,
+                json!({ "value": { "$type": "Size", "width": 3, "height": 2, "count": 4 } }),
+            );
+            assert_eq!(text.text, "<Size count=4 height=2.0 width=3.0 />");
+        }
+
+        #[test]
+        fn the_type_option_types_the_whole_value() {
+            assert_eq!(
+                format("", json!({ "value": 3, "type": "float64" })).text,
+                "3.0"
+            );
+            assert_eq!(format("", json!({ "value": 3 })).text, "3");
+            assert_eq!(
+                format("", json!({ "value": [1, 2], "type": "float64*" })).text,
+                "1.0\n2.0"
+            );
+        }
+
+        #[test]
+        fn a_constant_case_is_read_from_its_union() {
+            let source = "type Status = active | paused\ntype Job = { status:Status name:string }";
+            let text = format(
+                source,
+                json!({ "value": { "$type": "Job", "status": "paused", "name": "paused" } }),
+            );
+            assert_eq!(text.text, "<Job name=\"paused\" status=paused />");
+            assert!(text.nodes.iter().any(|node| node.role == NxValueRole::Case));
+        }
+
+        #[test]
+        fn a_components_state_is_one_field_per_line_in_declaration_order() {
+            let source = "component <Counter /> = {\n  state { total:int = 0 average:float64 = 0 }\n  <Label />\n}";
+            let text = format(
+                source,
+                json!({ "value": { "average": 2, "total": 4 }, "state": "Counter" }),
+            );
+            assert_eq!(text.text, "total=4\naverage=2.0");
+            let total = &text.nodes[0];
+            assert_eq!(total.role, NxValueRole::Property);
+            assert_eq!(total.pointer, "/total");
+            assert_eq!(total.ty.as_deref(), Some("int"));
+            assert_eq!(
+                total.declaration.as_ref().map(|span| span.start_line),
+                Some(2)
+            );
+        }
+
+        #[test]
+        fn a_type_that_is_not_a_string_is_invalid_and_named() {
+            let diagnostic = failure("", json!({ "value": { "items": [{ "$type": 3 }] } }));
+            assert_eq!(diagnostic.code.as_deref(), Some("nx-value-invalid"));
+            assert!(
+                diagnostic.message.contains("`/items/0/$type`"),
+                "{}",
+                diagnostic.message
+            );
+        }
+
+        #[test]
+        fn a_nested_list_is_unspellable_and_named() {
+            let diagnostic = failure("", json!({ "value": { "$type": "Grid", "rows": [[1]] } }));
+            assert_eq!(diagnostic.code.as_deref(), Some("nx-text-unspellable"));
+            assert!(
+                diagnostic.message.contains("`/rows`"),
+                "{}",
+                diagnostic.message
+            );
+        }
+
+        #[test]
+        fn a_malformed_request_is_a_request_error() {
+            let error = format_program_artifact_value(&program(""), "{\"values\": 1}").unwrap_err();
+            assert!(matches!(error, FormatValueError::Request(_)), "{error:?}");
+        }
+
+        /// What root evaluates to, converted to canonical JSON and spelled again, reads as
+        /// `evaluateNx` spells it.
+        #[test]
+        fn the_text_is_root_s_text() {
+            let source = "type Status = active | paused\n\
+                          type Size = { width:float64 }\n\
+                          type Job = { status:Status name:string size:Size tags?:string+ }\n\
+                          <Job status=paused name=\"Ada\" size=<Size width=3 /> tags={\"a\" \"b\"} />";
+            let artifact = program(source);
+            let expected = eval_program_artifact_nx_text(&artifact).expect("root evaluates");
+            let crate::EvalResult::Ok(value) = crate::eval_program_artifact(&artifact) else {
+                panic!("root evaluates");
+            };
+            let value: serde_json::Value =
+                serde_json::from_str(&value.to_json_string().unwrap()).unwrap();
+            let request = json!({ "value": as_javascript(value) });
+            let text = format_program_artifact_value(&artifact, &request.to_string()).unwrap();
+            assert_eq!(text, expected);
+        }
+
+        /// A value as JavaScript's `JSON.stringify` writes it, where a whole number has no `.0`.
+        fn as_javascript(value: serde_json::Value) -> serde_json::Value {
+            match value {
+                serde_json::Value::Number(number) => match number.as_f64() {
+                    Some(real) if number.is_f64() && real.fract() == 0.0 => json!(real as i64),
+                    _ => serde_json::Value::Number(number),
+                },
+                serde_json::Value::Array(items) => {
+                    serde_json::Value::Array(items.into_iter().map(as_javascript).collect())
+                }
+                serde_json::Value::Object(properties) => serde_json::Value::Object(
+                    properties
+                        .into_iter()
+                        .map(|(key, value)| (key, as_javascript(value)))
+                        .collect(),
+                ),
+                other => other,
+            }
         }
     }
 }

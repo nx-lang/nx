@@ -13,6 +13,30 @@ logic as sentences, for a reader who does not write NX. The reading comes from t
 `sourceTree` query, refreshed when typing pauses, as evaluation is. Switching to Read selects the
 node at the cursor, and switching back puts the cursor at the start of the selected node.
 
+The output pane's Output and Preview switch runs a component instead. Preview starts a preview
+session of [`@nx-lang/previewer`](../../packages/previewer/README.md) in the worker, on the IR
+runtime: for the component whose element `root` returns, with that element's props, or for the
+first component the source declares, and a picker lists the rest. Every action handler in the
+output carries a button named for its action; pressing one runs the handler, or opens a form built
+from the action's input schema when the action has fields. A timeline keeps every step, so the
+visitor can go back, take another branch, and follow either one again. Under the output are the
+component's state and the actions the step emitted to its host. Each edit that compiles reloads the
+session: the state is kept when the new program accepts it, the run is replayed when it does not,
+and new props in `root`'s element are rendered on the state as it stands. Clicking a record's type
+name selects the element expression that built it. The "A counter to click" example previews at
+once.
+
+```nx
+external component <Button label:string emits { Tapped { } } />
+
+component <Counter start:int = 0 /> = {
+  state { count:int = {start} }
+  <Button label={"Count: " + count} onTapped=<Update count={count + 1} /> />
+}
+
+<Counter start=3 />
+```
+
 Every part of that runs in the visitor's browser. The compiler and the language service are one
 WebAssembly module, loaded into a Web Worker when the page mounts; nothing is compiled on a server.
 
@@ -28,7 +52,9 @@ One worker, one host: evaluating and answering hover share an instance, so a dia
 range land on the same line of the visitor's text. A request that traps or overruns its deadline
 costs that one request — the worker is replaced and the editor stays live. Runaway recursion and
 endless loops end sooner, at the interpreter's own limits, as runtime errors. In the browser, calls
-nest at most 200 deep, a limit set below what a browser worker's stack can hold.
+nest at most 200 deep, a limit set below what a browser worker's stack can hold. Preview runs every
+call under the IR runtime's limits, the same depth and a budget of operations, so a handler that
+never stops ends with the runtime's message and the session is unchanged.
 
 To see NX draw interfaces, use the [DrawnUI fiddle](https://fiddle.drawnui.net), which the toolbar
 links to.
@@ -150,7 +176,8 @@ so what is checked is what ships, and it keeps the set between 10 and 20 example
 | `src/language/` | the language service the editor and the output's hover ask |
 | `src/editor/` | Monaco through `@nx-lang/monaco` (grammar, highlighting, hover, completion) |
 | `src/reading/` | the source pane's Read side: the source tree query and the selection carried to and from the editor |
-| `src/output/` | the output pane, `<nx-value>` or why there is nothing to show |
+| `src/output/` | the output pane, `<nx-value>` or why there is nothing to show, and its Output and Preview switch |
+| `src/preview/` | Preview: the worker's session (`workbench.ts`), the calls to it, and the page's timeline, buttons, forms and state |
 | `src/header/` | the website's header |
 | `src/examples/` | the examples and their expected output |
 | `src/theme.ts` | light or dark, following the website's choice |

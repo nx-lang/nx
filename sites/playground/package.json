@@ -13,10 +13,12 @@
     "check-examples": "node --no-warnings --experimental-transform-types scripts/check-examples.mjs"
   },
   "dependencies": {
+    "@nx-lang/ir-runtime": "workspace:*",
     "@nx-lang/language": "file:../../src/vscode",
     "@nx-lang/language-core": "workspace:*",
     "@nx-lang/language-protocol": "workspace:*",
     "@nx-lang/monaco": "workspace:*",
+    "@nx-lang/previewer": "workspace:*",
     "@nx-lang/sdk-wasm": "workspace:*",
     "@nx-lang/value-view": "workspace:*",
     "@nx-lang/viewer": "workspace:*",

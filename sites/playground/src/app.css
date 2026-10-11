@@ -385,6 +385,214 @@ nx-value {
   opacity: 0.55;
 }
 
+/* Preview: a component running, with its timeline, its handlers' buttons and its state. */
+.preview {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.preview-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--sl-color-hairline);
+  font-size: var(--sl-text-xs);
+}
+
+.preview-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--sl-color-gray-3);
+}
+
+.preview select,
+.preview input,
+.preview textarea {
+  min-width: 0;
+  padding: 0.2rem 0.4rem;
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 0.25rem;
+  background: var(--pane-background);
+  color: var(--pane-foreground);
+  font: inherit;
+}
+
+.preview-button {
+  padding: 0.15rem 0.6rem;
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 0.25rem;
+  background: transparent;
+  color: var(--pane-foreground);
+  font: inherit;
+  cursor: pointer;
+}
+
+.preview-button.primary {
+  border-color: var(--sl-color-accent);
+  background: var(--sl-color-accent);
+  color: #ffffff;
+}
+
+.preview-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.timeline {
+  display: flex;
+  flex: 1 1 16rem;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.timeline-steps {
+  display: flex;
+  flex: 1;
+  gap: 0.25rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0 0 2px;
+  overflow-x: auto;
+  list-style: none;
+  scrollbar-width: thin;
+}
+
+.timeline-step {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.timeline-step > button {
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--pane-foreground);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.timeline-step.kind-reload > button,
+.timeline-step.kind-props > button {
+  border-style: dashed;
+}
+
+.timeline-step > button[aria-current="step"] {
+  border-color: var(--sl-color-accent);
+  background: var(--sl-color-accent);
+  color: #ffffff;
+}
+
+.timeline-number {
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+
+.preview select.timeline-branches {
+  max-width: 7rem;
+  padding: 0.05rem 0.2rem;
+  font-size: var(--sl-text-xs);
+}
+
+.action-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem 0.75rem;
+  margin: 0.75rem 1rem 0;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--sl-color-accent);
+  border-radius: 0.375rem;
+  font-size: var(--sl-text-sm);
+}
+
+.action-form-title {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.action-form .output-message {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.field-check {
+  flex-direction: row;
+  align-items: center;
+}
+
+.field-name {
+  color: var(--sl-color-gray-3);
+  font-family: var(--sl-font-system-mono);
+  font-size: var(--sl-text-xs);
+}
+
+.field [aria-invalid="true"] {
+  border-color: var(--error);
+}
+
+.action-form-error {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--error);
+}
+
+.action-form-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.preview-panels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  border-top: 1px solid var(--sl-color-hairline);
+}
+
+.preview-panel {
+  min-width: 0;
+  padding: 0.5rem 0;
+}
+
+.preview-panel + .preview-panel {
+  border-left: 1px solid var(--sl-color-hairline);
+}
+
+.preview-panel h3 {
+  margin: 0;
+  padding: 0 1rem;
+  color: var(--sl-color-gray-3);
+  font-size: var(--sl-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.preview-empty {
+  margin: 0.5rem 1rem;
+  color: var(--sl-color-gray-3);
+  font-size: var(--sl-text-sm);
+}
+
+nx-value.panel-value {
+  --nx-value-padding: 6px 16px;
+}
+
 /* A phone: the panes stack, the source above the output, and the page scrolls. */
 @media (max-width: 767px) {
   .app {
@@ -417,5 +625,10 @@ nx-value {
 
   .output-body {
     min-height: 40vh;
+  }
+
+  .preview-panel + .preview-panel {
+    border-left: 0;
+    border-top: 1px solid var(--sl-color-hairline);
   }
 }

@@ -3,7 +3,7 @@ use crate::artifacts::{
     ProgramArtifact, ProgramBuildContext,
 };
 use crate::diagnostics::{diagnostics_to_api, diagnostics_to_api_with_sources};
-use crate::nx_text::{annotate_nx_text, NxValueText};
+use crate::nx_text::{annotate_canonical_nx_text, annotate_nx_text, FormatOptions, NxValueText};
 use crate::value::entry_result_to_nx_value;
 use crate::NxDiagnostic;
 use nx_diagnostics::{Diagnostic, Label, Severity};
@@ -245,12 +245,88 @@ pub fn eval_program_artifact_nx_text_with_limits(
 ) -> Result<NxValueText, Vec<NxDiagnostic>> {
     let source = program_root_source(program);
     let root = evaluate_root(program, &source, limits)?;
-    annotate_nx_text(&root.value, root.module, &source).map_err(|message| {
+    let libraries = library_modules(program, root.module);
+    annotate_nx_text(&root.value, root.module, &libraries, &source).map_err(|message| {
         let diag = Diagnostic::error("nx-text-unspellable")
             .with_message(message)
             .build();
         diagnostics_to_api(&[diag], &source)
     })
+}
+
+/// Why a program artifact could not spell a value.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FormatValueError {
+    /// The request was not a `{ value, type?, state? }` object, or the artifact has no entry
+    /// module to read declarations from.
+    Request(String),
+    /// The value is not in the canonical format, or has no NX spelling: an `nx-value-invalid` or
+    /// `nx-text-unspellable` diagnostic that names the value's pointer.
+    Value(Vec<NxDiagnostic>),
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FormatValueRequest {
+    value: serde_json::Value,
+    #[serde(rename = "type")]
+    ty: Option<String>,
+    state: Option<String>,
+}
+
+/// Spells a value in canonical JSON, as the IR runtimes return it, as NX text annotated against
+/// the artifact's entry module, from a `{ value, type?, state? }` JSON request.
+///
+/// <para>The text is what [`eval_program_artifact_nx_text`] returns for the same value, from the
+/// same formatter, except that an `ActionHandler` record is spelled as the record it is rather
+/// than refused. `type` names the NX type of the whole value; `state` names the component whose
+/// state the value is, which is spelled one `name=value` per line. The program is not
+/// evaluated.</para>
+pub fn format_program_artifact_value(
+    program: &ProgramArtifact,
+    request: &str,
+) -> Result<NxValueText, FormatValueError> {
+    let request: FormatValueRequest = serde_json::from_str(request).map_err(|error| {
+        FormatValueError::Request(format!("Format request is not valid: {error}"))
+    })?;
+    let module = program
+        .entry_module_id
+        .and_then(|id| program.resolved_program.module(id))
+        .map(|module| module.lowered_module.as_ref())
+        .ok_or_else(|| FormatValueError::Request("The artifact has no entry module".to_string()))?;
+    let source = program_root_source(program);
+    let options = FormatOptions {
+        ty: request.ty,
+        state: request.state,
+    };
+    let libraries = library_modules(program, module);
+    annotate_canonical_nx_text(&request.value, &options, module, &libraries, &source).map_err(
+        |error| {
+            let at = if error.pointer.is_empty() {
+                "the value".to_string()
+            } else {
+                format!("`{}`", error.pointer)
+            };
+            let diag = Diagnostic::error(error.code)
+                .with_message(format!("{} (at {at})", error.message))
+                .build();
+            FormatValueError::Value(diagnostics_to_api(&[diag], &source))
+        },
+    )
+}
+
+/// Every module of the program but `entry`: where the declarations of what `entry` imports are.
+fn library_modules<'a>(
+    program: &'a ProgramArtifact,
+    entry: &LoweredModule,
+) -> Vec<&'a LoweredModule> {
+    program
+        .resolved_program
+        .modules()
+        .iter()
+        .map(|module| module.lowered_module.as_ref())
+        .filter(|module| !std::ptr::eq(*module, entry))
+        .collect()
 }
 
 /// The declared or inferred result type of the function `name` in the source-provider module

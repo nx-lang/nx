@@ -1,0 +1,18 @@
+// A counter to click. Switch the pane from Output to Preview to run it: each
+// button's handler updates the component's state, and the timeline keeps every
+// step, so you can go back and try another branch. Edit the source while it
+// runs, and the preview keeps the count.
+
+external component <Button label:string emits { Tapped { } } />
+
+component <Counter start:int = 0 emits { Finished { total:int } } /> = {
+  state { count:int = {start} }
+  <Row>
+    <Label text={"Count: " + count} />
+    <Button label="Add one" onTapped=<Update count={count + 1} /> />
+    <Button label="Reset" onTapped=<Update count={start} /> />
+    <Button label="Finish" onTapped=<Counter.Finished total={count} /> />
+  </Row>
+}
+
+<Counter start=3 />
