@@ -15,10 +15,12 @@ use std::ptr;
 
 use nx_api::{
     build_workspace_program_artifact, diagnostics_to_api_with_source_entries,
-    eval_program_artifact_nx_text_with_limits, load_program_artifact_from_source,
+    eval_program_artifact_nx_text_with_limits, format_program_artifact_value,
+    load_program_artifact_from_source,
     program_artifact_function_schema_json, program_artifact_type_schema_json, validate_workspace,
     LibraryRegistry, NxDiagnostic, NxLibraryModule, NxLibrarySource, NxSeverity, NxWorkspace,
-    NxWorkspaceModule, ProgramArtifact, ProgramBuildContext, ResourceLimits, SchemaQueryError,
+    FormatValueError, NxWorkspaceModule, ProgramArtifact, ProgramBuildContext, ResourceLimits,
+    SchemaQueryError,
 };
 use nx_codegen::{emit_nx_ir, write_nx_ir_bundle, NxIrEmitOptions};
 use nx_ir::explain_nx_ir_image;
@@ -29,7 +31,7 @@ use serde::{Deserialize, Serialize};
 
 /// ABI version the loader checks before it makes any other call. Bump it whenever an export's
 /// signature, a status code or a payload shape changes.
-pub const ABI_VERSION: u32 = 7;
+pub const ABI_VERSION: u32 = 8;
 
 /// The operation succeeded; the payload is its JSON result.
 pub const STATUS_OK: u32 = 0;
@@ -382,6 +384,22 @@ pub unsafe extern "C" fn nx_wasm_program_type_schema(
     into_result(program_type_schema(&*handle, argument(ptr, len)))
 }
 
+/// Spells a value in canonical JSON as NX text annotated against the artifact `handle` names, from
+/// `{ value, type?, state? }` JSON, and answers with `{ text, nodes }`. A value outside the
+/// canonical format or with no NX spelling answers with diagnostics naming its pointer.
+///
+/// # Safety
+/// `handle` must be a live handle from [`nx_wasm_program_build`] or [`nx_wasm_workspace_build`];
+/// `ptr` and `len` must describe UTF-8 bytes in the module's memory.
+#[no_mangle]
+pub unsafe extern "C" fn nx_wasm_program_format_value(
+    handle: *mut ProgramArtifact,
+    ptr: *const u8,
+    len: usize,
+) -> *mut NxWasmResult {
+    into_result(program_format_value(&*handle, argument(ptr, len)))
+}
+
 /// Releases the artifact `handle` names.
 ///
 /// # Safety
@@ -662,6 +680,17 @@ fn program_type_schema(
     program_artifact_type_schema_json(program, argument?)
         .map(String::into_bytes)
         .map_err(schema_query_error)
+}
+
+fn program_format_value(
+    program: &ProgramArtifact,
+    argument: Result<&str, OperationError>,
+) -> Operation {
+    match format_program_artifact_value(program, argument?) {
+        Ok(text) => result_json(&text),
+        Err(FormatValueError::Request(message)) => Err(internal_error(message)),
+        Err(FormatValueError::Value(diagnostics)) => Err(evaluation_error(diagnostics)),
+    }
 }
 
 fn schema_query_error(error: SchemaQueryError) -> OperationError {
@@ -1221,6 +1250,38 @@ mod tests {
             "{payload}"
         );
         unsafe { nx_wasm_registry_free(registry) };
+    }
+
+    #[test]
+    fn a_program_formats_a_canonical_value() {
+        let (status, payload) = call(
+            nx_wasm_program_build,
+            r#"{"source":"type Size = { width:float64 }","fileName":"size.nx"}"#,
+        );
+        assert_eq!(status, STATUS_OK, "{payload}");
+        let program = handle_from(&payload) as *mut ProgramArtifact;
+
+        let (status, payload) = call_on(
+            program,
+            nx_wasm_program_format_value,
+            r#"{"value":{"$type":"Size","width":3}}"#,
+        );
+        assert_eq!(status, STATUS_OK, "{payload}");
+        let answer: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(answer["text"], "<Size width=3.0 />");
+        assert_eq!(answer["nodes"][1]["pointer"], "/width");
+
+        let (status, payload) = call_on(
+            program,
+            nx_wasm_program_format_value,
+            r#"{"value":{"$type":7}}"#,
+        );
+        assert_eq!(status, STATUS_EVALUATION_ERROR, "{payload}");
+        assert!(payload.contains("nx-value-invalid"), "{payload}");
+
+        let (status, _) = call_on(program, nx_wasm_program_format_value, r#"{"values":1}"#);
+        assert_eq!(status, STATUS_INTERNAL_ERROR);
+        unsafe { nx_wasm_program_free(program) };
     }
 
     #[test]

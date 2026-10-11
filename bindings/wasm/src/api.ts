@@ -23,6 +23,7 @@ export type {
   NxDeclarationRef,
   NxDiagnostic,
   NxDiagnosticLabel,
+  NxFormatValueOptions,
   NxFunctionSchema,
   NxFunctionSchemaOptions,
   NxGeneratedNxIr,

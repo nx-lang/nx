@@ -30,6 +30,7 @@ import type {
   NxDeclarationRef,
   NxDiagnostic,
   NxDiagnosticLabel,
+  NxFormatValueOptions,
   NxFunctionSchema,
   NxFunctionSchemaOptions,
   NxGeneratedNxIr,
@@ -239,6 +240,25 @@ export interface NxProgramArtifact {
    * @throws NxHostCrashedError when the module traps, or has already trapped.
    */
   evaluateNx(): NxValueText;
+
+  /**
+   * Spells a value in canonical JSON, as the IR runtimes return it, as NX text annotated against
+   * this program: the text {@link evaluateNx} would return for the same value, from the same
+   * formatter. An `ActionHandler` record, which the runtimes return for a handler, is spelled as
+   * that record.
+   *
+   * <para>Canonical JSON writes a whole `float64` as it writes an `int`, and a constant union case
+   * as a bare string, so each number and string is read by the type its record declares for it,
+   * or by `options.type` for the whole value. The program is not evaluated, and the artifact stays
+   * usable whether the call succeeds or not.</para>
+   *
+   * @throws NxEvaluationError when the value is not in the canonical format (code
+   * `nx-value-invalid`) or has no NX spelling (code `nx-text-unspellable`), naming the value's
+   * pointer, or when `options.state` names no component.
+   * @throws NxDisposedResourceError when this artifact has already been disposed.
+   * @throws NxHostCrashedError when the module traps, or has already trapped.
+   */
+  formatValue(value: unknown, options?: NxFormatValueOptions): NxValueText;
 
   /**
    * The diagnostics the build reported without failing — warnings, info and hints — each against
@@ -669,6 +689,20 @@ class WasmProgramArtifact implements NxProgramArtifact {
     const handle = this.#live();
     const raw = this.#host.call<unknown>("nx_wasm_program_evaluate_nx", (exports) =>
       exports.nx_wasm_program_evaluate_nx(handle)
+    );
+    return normalizeValueText(raw);
+  }
+
+  formatValue(value: unknown, options: NxFormatValueOptions = {}): NxValueText {
+    const handle = this.#live();
+    const raw = this.#host.callWithArgument<unknown>(
+      "nx_wasm_program_format_value",
+      (exports, pointer, length) => exports.nx_wasm_program_format_value(handle, pointer, length),
+      {
+        value,
+        ...(options.type === undefined ? {} : { type: options.type }),
+        ...(options.state === undefined ? {} : { state: options.state })
+      }
     );
     return normalizeValueText(raw);
   }
@@ -1193,7 +1227,8 @@ function normalizeValueNode(raw: unknown): NxValueNode {
     ...(typeof value["count"] === "number" ? { count: value["count"] } : {}),
     ...(value["declaration"] === undefined || value["declaration"] === null
       ? {}
-      : { declaration: normalizeTextSpan(value["declaration"]) })
+      : { declaration: normalizeTextSpan(value["declaration"]) }),
+    pointer: typeof value["pointer"] === "string" ? value["pointer"] : ""
   };
 }
 

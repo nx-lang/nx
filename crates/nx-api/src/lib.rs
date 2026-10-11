@@ -67,8 +67,9 @@ pub use diagnostics::{
 };
 pub use eval::{
     eval_program_artifact, eval_program_artifact_function, eval_program_artifact_nx_text,
-    eval_program_artifact_nx_text_with_limits, eval_source, load_library_artifact_from_directory,
-    load_program_artifact_from_source, EvalResult,
+    eval_program_artifact_nx_text_with_limits, eval_source, format_program_artifact_value,
+    load_library_artifact_from_directory, load_program_artifact_from_source, EvalResult,
+    FormatValueError,
 };
 pub use nx_interpreter::ResourceLimits;
 pub use nx_text::{format_nx_text, NxValueNode, NxValueRole, NxValueText};

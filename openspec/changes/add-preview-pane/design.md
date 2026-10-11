@@ -95,11 +95,12 @@ record the runtimes return, `<ActionHandler action="Button.Tapped" token="h1-1" 
 true to what the host sees and gives the action's name. `evaluateNx()` keeps refusing, since an
 interpreter handler has no token.
 
-Canonical JSON loses one thing the formatter needs: a whole `float` arrives as the same number
-as an `int`. The formatter already knows each property's declared type, so a number is spelled by
-its position's type, and `options.type` gives the type of the whole value when the host knows it.
-The worker formats each state field with the type the component's `state` block declares for
-it, and each emitted action as a record, whose fields declare their own.
+Canonical JSON loses one thing the formatter needs: a whole `float64` arrives as the same number as
+an `int`. The formatter already knows each property's declared type, so a number is spelled by its
+position's type, and `options.type` gives the type of the whole value when the host knows it. The
+state has no record type around it, so `options.state` names the component instead: the state is
+spelled one `name=value` per line in declaration order, each field read by its declared type and
+declared at its state field. Emitted actions are records, whose fields declare their own types.
 
 Each node gains `pointer`, the JSON pointer of its value in the canonical form, so a host can go
 from what the visitor points at to the value: the previewer's dispatch and `originOf` both take

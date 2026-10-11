@@ -44,12 +44,12 @@ the two SHALL keep the session.
 In Preview, every `ActionHandler` record in the output SHALL carry a button named for the action it
 handles, through `<nx-value>`'s `actions`. Pressing it SHALL dispatch the action to that handler by
 its pointer, and the output, state and timeline SHALL show the new tick. An action with no fields
-SHALL dispatch at once. An action with fields SHALL open a form with one input per field, built
-from the action's input schema (`typeSchema` with `direction: "input"`): a text field for a string,
-a number field for an `int` or a `float`, a checkbox for a `boolean`, a list of cases for a
-constant union, and a JSON field for any other type, each starting from the field's default when it
-has one. A dispatch that fails SHALL add no tick and SHALL show the failure's message beside the
-form or button.
+SHALL dispatch at once. An action with fields SHALL open a form with one input per field, built from
+the action's input schema (`typeSchema` with `direction: "input"`): a text field for a string, a
+number field for an integer or a `float32` or `float64`, a checkbox for a `boolean`, a list of cases
+for a constant union, and a JSON field for any other type, each starting from the field's default
+when it has one. A dispatch that fails SHALL add no tick and SHALL show the failure's message beside
+the form or button.
 
 #### Scenario: Pressing a button
 - **WHEN** a visitor previews the counter, whose `Button` binds `onTapped=<Update count={count +
@@ -87,14 +87,14 @@ last SHALL add a branch, keeping the steps that followed it.
   run with two taps
 
 ### Requirement: The preview shows state and what was emitted
-Preview SHALL show the current tick's state as one row per state field, its name beside its value
-spelled as NX text through `<nx-value>`, and say so when the component keeps no state. It SHALL
-list the actions the current tick emitted to its host, the effects no handler of the component
-consumed, each spelled as NX text.
+Preview SHALL show the current tick's state through `<nx-value>`, one `name=value` line per state
+field as the artifact's `formatValue` spells a component's state, and say so when the component
+keeps no state. It SHALL list the actions the current tick emitted to its host, the effects no
+handler of the component consumed, each spelled as NX text.
 
 #### Scenario: State
 - **WHEN** the counter's current tick holds a `count` of 4
-- **THEN** the state panel SHALL show a `count` row whose value is `4`
+- **THEN** the state panel SHALL show `count=4`
 
 #### Scenario: Emitted actions
 - **WHEN** a handler returns an action the component emits to its host

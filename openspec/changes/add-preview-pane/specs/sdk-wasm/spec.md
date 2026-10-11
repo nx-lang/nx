@@ -7,12 +7,14 @@ a value in the canonical JSON output format, as the IR runtimes return it, and r
 The text SHALL be what `evaluateNx()` would return for the same value, from the same formatter. An
 `ActionHandler` record, which the runtimes return for a handler, SHALL be spelled as that record,
 with its `action` and `token` properties, rather than refused. Canonical JSON does not tell a whole
-`float` from an `int`, so a number SHALL be spelled by the type its position declares, a record's
+`float64` from an `int`, so a number SHALL be spelled by the type its position declares, a record's
 property or the type `options.type` names for the whole value, and as an `int` when it is whole and
-no position declares its type. A value that is not in the canonical format, or that has no NX
-spelling for another reason, SHALL fail with an `NxEvaluationError` whose diagnostic says where in
-the value the problem is, and the artifact SHALL remain usable afterwards. The program is not
-evaluated.
+no position declares its type. `options.state` SHALL name a component of the entry module whose
+state the value is, and the value SHALL then be spelled one `name=value` per line, in the order the
+component declares its state fields, each read by its field's type and declared at that field. A
+value that is not in the canonical format, or that has no NX spelling for another reason, SHALL fail
+with an `NxEvaluationError` whose diagnostic says where in the value the problem is, and the
+artifact SHALL remain usable afterwards. The program is not evaluated.
 
 #### Scenario: A rendered component
 - **WHEN** a host builds a program declaring `external component <Button label:string emits {
@@ -29,13 +31,19 @@ evaluated.
 - **THEN** the text SHALL equal what `evaluateNx()` returns for the same program
 
 #### Scenario: A whole float
-- **WHEN** a program declares `type Size = { width:float }` and a host formats
+- **WHEN** a program declares `type Size = { width:float64 }` and a host formats
   `{ "$type": "Size", "width": 3 }`
 - **THEN** the text SHALL be `<Size width=3.0 />`
 
 #### Scenario: A number with its type given
-- **WHEN** a host formats `3` with `{ type: "float" }`, and `3` with no options
+- **WHEN** a host formats `3` with `{ type: "float64" }`, and `3` with no options
 - **THEN** the texts SHALL be `3.0` and `3`
+
+#### Scenario: A component's state
+- **WHEN** a program declares `component <Counter />` with `state { count:int = 0 ratio:float64 =
+  1 }` and a host formats `{ "ratio": 1, "count": 4 }` with `{ state: "Counter" }`
+- **THEN** the text SHALL be `count=4` and `ratio=1.0` on two lines, each a property node declared
+  at its state field
 
 #### Scenario: A value outside the canonical format
 - **WHEN** a host calls `formatValue` with a record whose `$type` is not a string

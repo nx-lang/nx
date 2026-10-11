@@ -1,9 +1,9 @@
 ## 1. Spelling runtime values
 
-- [ ] 1.1 In `crates/nx-api`, add a formatter entry that takes a canonical JSON value, converts it with `ActionHandler` records kept as records, and returns annotated `NxValueText` from the formatter `evaluateNx` uses; verify with Rust tests for a rendered component, an invalid value and parity with `evaluateNx` text
-- [ ] 1.2 Give every `NxValueText` node the JSON pointer of its value, from both entries; verify with the scenario `Pointers into a rendered output`
-- [ ] 1.3 Export it from `bindings/wasm/native` as `nx_wasm_program_format_value`, add `NxProgramArtifact.formatValue` and `NxValueNode.pointer`, and move the ABI version to 8; verify with the wrapper's tests and the scenario `The ABI version moves with the new export`
-- [ ] 1.4 Document `formatValue` and `pointer` in the sdk-wasm README; verify the README's examples still type-check
+- [x] 1.1 In `crates/nx-api`, add a formatter entry that takes a canonical JSON value, converts it with `ActionHandler` records kept as records, and returns annotated `NxValueText` from the formatter `evaluateNx` uses; verify with Rust tests for a rendered component, an invalid value and parity with `evaluateNx` text
+- [x] 1.2 Give every `NxValueText` node the JSON pointer of its value, from both entries; verify with the scenario `Pointers into a rendered output`
+- [x] 1.3 Export it from `bindings/wasm/native` as `nx_wasm_program_format_value`, add `NxProgramArtifact.formatValue` and `NxValueNode.pointer`, and move the ABI version to 8; verify with the wrapper's tests and the scenario `The ABI version moves with the new export`
+- [x] 1.4 Document `formatValue` and `pointer` in the sdk-wasm README; verify the README's examples still type-check
 
 ## 2. Actions on values
 
