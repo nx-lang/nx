@@ -7,9 +7,11 @@ a value in the canonical JSON output format, as the IR runtimes return it, and r
 The text SHALL be what `evaluateNx()` would return for the same value, from the same formatter. An
 `ActionHandler` record, which the runtimes return for a handler, SHALL be spelled as that record,
 with its `action` and `token` properties, rather than refused. Canonical JSON does not tell a whole
-`float64` from an `int`, so a number SHALL be spelled by the type its position declares, a record's
-property or the type `options.type` names for the whole value, and as an `int` when it is whole and
-no position declares its type. `options.state` SHALL name a component of the entry module whose
+`float64` from an `int`, nor a constant union case from a string, so a number or a string SHALL be
+read by the type its position declares, a record's property, in the entry module or a library the
+program links, or the type `options.type` names for the whole value. A whole number SHALL be an
+`int` when no position declares its type or the position's type is a type parameter, which the
+value does not carry. `options.state` SHALL name a component of the entry module whose
 state the value is, and the value SHALL then be spelled one `name=value` per line, in the order the
 component declares its state fields, each read by its field's type and declared at that field. A
 value that is not in the canonical format, or that has no NX spelling for another reason, SHALL fail
@@ -28,6 +30,7 @@ artifact SHALL remain usable afterwards. The program is not evaluated.
 #### Scenario: The same text as root's
 - **WHEN** a host evaluates a program's `root` through an IR runtime and passes the result to
   `formatValue`, and that value holds no action handler and no number outside a declared property
+  or in a property typed by a type parameter
 - **THEN** the text SHALL equal what `evaluateNx()` returns for the same program
 
 #### Scenario: A whole float

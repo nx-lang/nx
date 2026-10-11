@@ -15,7 +15,7 @@ READMEs
 
 ## Findings
 
-### 🟡 Fixed - RF1 Preview cannot run any source that uses a declaration from a library (`import "@nx/agent"`)
+### ✅ Verified - RF1 Preview cannot run any source that uses a declaration from a library (`import "@nx/agent"`)
 - **Severity:** Medium
 - **Confidence:** High
 - **Evidence:** `sites/playground/src/preview/workbench.ts:142` calls `build.artifact.generateNxIr({ debug: true })`
@@ -31,8 +31,9 @@ READMEs
   change the agent example links and runs (verified by probe). Add a workbench test with an imported library.
   Also map a link failure to its own problem message, not to "would not start".
 - **Fix:** `#programFor` emits every module (`generateNxIr({ debug: true, modules: [] })`). A program that does not prepare or link is now its own problem, `programFailed`, headed "The program could not be prepared to run" and marked in the editor. Test: `runs a source that imports a library` (workbench.test.mjs).
+- **Verification:** Confirmed. `#programFor` emits every module and maps a prepare or link failure to `programFailed`, which the page shows and marks. A probe component that imports `@nx/agent` and renders an `HttpTool` and `AgentLimits` now starts with no problem, and its output reads `method=post`. The new workbench test passes.
 
-### 🟡 Fixed - RF2 After a host crash or a replaced worker, Preview reports "does not compile" for a compiling program and stays stuck
+### ✅ Verified - RF2 After a host crash or a replaced worker, Preview reports "does not compile" for a compiling program and stays stuck
 - **Severity:** Medium
 - **Confidence:** High
 - **Evidence:**
@@ -54,8 +55,9 @@ READMEs
   `start`/`reload` carry the source so the worker can build it when it has no matching build. Add tests for
   `forgetBuild` and for a fresh session that receives `start` first.
 - **Fix:** The workbench takes a `compile` callback (worker/session.ts builds with the current host) and builds a source it holds no build of. It keeps the latest evaluation build plus one other: the build the session's current step runs, so `#state()` formats each step with its own program's declarations (this also answers the second open question). After `forgetBuild` the session stays visible and its source is rebuilt on demand; a fresh worker's `start` builds the source itself, so "Start again" works. Test: `keeps showing the session after its host's builds are lost, and starts in a fresh worker`.
+- **Verification:** Confirmed. In a probe, after `forgetBuild` a `goTo` still returns the session (state `count=4`, no problem) because the running source is rebuilt through the `compile` callback. A fresh `PreviewWorkbench` answers `start` with a running session. A source that does not compile still answers `doesNotCompile`. The page's `sessionLost` and "Start again" paths therefore recover. Steps are also formatted with their own program's build, which settles the second open question: a probe of a failed reload kept `w=2.0` under the old `float64` declaration.
 
-### 🟡 Fixed - RF3 A failed `setProps` is recorded as applied, so later edits run with the old props without any notice
+### ✅ Verified - RF3 A failed `setProps` is recorded as applied, so later edits run with the old props without any notice
 - **Severity:** Medium
 - **Confidence:** High
 - **Evidence:** `workbench.ts:227` sets `this.#rootProps = props` before `session.setProps(root.props)` at line
@@ -72,8 +74,9 @@ READMEs
   them on every reload until they succeed. Treat the failed props as stale in `PreviewState` so the page marks the
   output out of date. Add a test.
 - **Fix:** `#rootProps` is updated only after `setProps` succeeds, so every later reload tries the failed props again and answers a `failed` notice each time. The page now marks the preview out of date whenever the last reload's notice is `failed` (App.tsx `previewStale`). Test: `tries props that failed again on every reload, and says so each time`.
+- **Verification:** Confirmed. `#rootProps` changes only after `setProps` succeeds. In a probe, start=5 → 0 gave `failed`, and a following label edit gave `failed` again with no stale success. Changing to start=4 then added a `Props` step with the new label. `previewStale` now includes a `failed` notice, so the output is marked out of date while props fail. The new test passes.
 
-### 🟡 Fixed - RF4 `formatValue` reads declarations from the entry module only, so library unions and generic fields lose their spelling
+### ✅ Verified - RF4 `formatValue` reads declarations from the entry module only, so library unions and generic fields lose their spelling
 - **Severity:** Low
 - **Confidence:** High
 - **Evidence:**
@@ -93,8 +96,9 @@ READMEs
   record-level `T` binding when the IR has it. Add parity tests that cover a library union and a generic float
   field.
 - **Fix:** `Declarations` now indexes every module of the resolved program, the entry module first so its names win, for both `evaluateNx` and `formatValue`. A library's declarations give types, unions and optionality but no spans, since spans index the entry source. Test: `a_library_union_and_record_spell_as_root_does` (nx_text.rs) checks text and node parity with `evaluateNx` for a library union and a library record. The generic-record part is not fixed: canonical JSON carries no type argument (`<Rng T=float64 …>` has no `T` in the value), so a whole `float64` held by a field typed `T` cannot be told from an `int`. Fixing it needs the IR runtime to report type arguments; left as a known gap.
+- **Verification:** Confirmed for library declarations. `Declarations` indexes every module with the entry module first, and library spans are dropped, so they cannot point into the wrong source. The new Rust test checks text and node parity for a library union and record, and the earlier `HttpTool` probe now reads `method=post`. The generic-record part is accepted as a known limitation: the IR runtime's value carries no type argument, so it cannot be fixed in the formatter. The `The same text as root's` scenario could exclude fields typed by a type parameter so the spec states this.
 
-### 🟡 Fixed - RF5 Forward forgets which branch the visitor left once any step is dispatched or reloaded
+### ✅ Verified - RF5 Forward forgets which branch the visitor left once any step is dispatched or reloaded
 - **Severity:** Low
 - **Confidence:** Medium
 - **Evidence:** `workbench.ts:220` and `workbench.ts:244` clear the whole `#left` map on every reload and every
@@ -106,8 +110,9 @@ READMEs
 - **Recommendation:** Do not clear `#left` on dispatch or reload. A new tick only changes the entry of its own
   parent, which `#goTo` already overwrites when the visitor leaves. Drop entries only for ticks the session pruned.
 - **Fix:** `#left` is no longer cleared on dispatch or reload, only on start and stop; a stale entry is harmless because Forward checks it against the step's children. Test: `Forward remembers the branch left, whatever ran since`.
+- **Verification:** Confirmed. `#left` is cleared only on start and stop, and Forward checks the remembered child against the step's current children, so a stale or pruned entry falls back to the newest child. The new test covers the dispatch-elsewhere scenario.
 
-### 🟡 Fixed - RF6 Placing action buttons re-sorts every pending marker for every text stretch
+### ✅ Verified - RF6 Placing action buttons re-sorts every pending marker for every text stretch
 - **Severity:** Low
 - **Confidence:** Medium
 - **Evidence:** `packages/value-view/src/render.ts:95` does `[...markers].sort(...)` inside `appendText`, which
@@ -119,8 +124,9 @@ READMEs
 - **Recommendation:** Sort the marker offsets once into an array. Keep a cursor into it: stretches are visited in
   increasing text order, so each marker is reached once. That makes placement linear overall.
 - **Fix:** `renderValue` sorts the marker offsets once and walks them with a cursor as stretches are appended in text order, so placement is linear. value-view's 37 tests pass.
+- **Verification:** Confirmed. Offsets are sorted once and consumed with a cursor. Stretches are appended in non-decreasing text order, so skipping offsets `<= start` matches the old placement: a marker at a stretch's start was already placed by the stretch that ended there. value-view tests pass (37/37).
 
-### 🟡 Fixed - RF7 `formatValue(undefined)` fails with an internal "Format request is not valid" error
+### ✅ Verified - RF7 `formatValue(undefined)` fails with an internal "Format request is not valid" error
 - **Severity:** Low
 - **Confidence:** High
 - **Evidence:** `bindings/wasm/src/host.ts:696` sends `{ value }`. `JSON.stringify` drops an `undefined`
@@ -133,14 +139,16 @@ READMEs
 - **Recommendation:** Reject `undefined` in the wrapper with a `TypeError`. Alternatively, mark `value` with
   `#[serde(default)]` so it reads as `null` (the empty value). Document whichever is chosen.
 - **Fix:** `formatValue(undefined)` throws `TypeError` in the wrapper before calling the module; documented in the doc comment and the README, with a test.
+- **Verification:** Confirmed. The wrapper throws `TypeError` for `undefined` before calling the module. This is documented in the doc comment and the README, and a test covers it.
 
-### 🟡 Fixed - RF8 Task 6.1 is unchecked although validation passes
+### ✅ Verified - RF8 Task 6.1 is unchecked although validation passes
 - **Severity:** Low
 - **Confidence:** High
 - **Evidence:** `tasks.md:37` still shows `- [ ] 6.1 Run openspec validate add-preview-pane --strict`.
   Running it now reports "Change 'add-preview-pane' is valid".
 - **Recommendation:** Check the task off, since it is verified.
 - **Fix:** Task 6.1 checked off; `openspec validate add-preview-pane --strict` passes.
+- **Verification:** Confirmed. Task 6.1 is checked, and `openspec validate add-preview-pane --strict` passes.
 
 ## Questions
 - `bindings/wasm` `recursion-stack.test.ts` ("forLoop within the limit" traps under a 0.5 MB worker stack)
@@ -153,6 +161,9 @@ READMEs
   tick?
   - **Answer:** Not intended. With the RF2 fix the workbench formats each step with the build of the source its
     program came from, compiled on demand when it is not kept.
+
+## Verification Summary (2026-10-11)
+- All 8 findings were verified against commit 420590b. Checks: `cargo test -p nx-api` and `-p nx-sdk-wasm-native`, value-view and playground tests, `tsc --noEmit` and `openspec validate --strict` pass. The wasm SDK passes apart from the environment-specific `recursion-stack` test. Probes covered RF1–RF3 and the failed-reload formatting. No new findings.
 
 ## Summary
 - The SDK formatter entry, pointers, ABI bump and value-view actions are solid and well tested. Parity with

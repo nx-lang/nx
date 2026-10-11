@@ -430,7 +430,9 @@ An `ActionHandler` record, which the runtimes return where a handler is bound, i
 record; `evaluateNx()` refuses one, since an interpreter handler has no token. Canonical JSON writes
 a whole `float64` as it writes an `int`, and a constant union case as a bare string, so each number
 and string is read by the type its record declares for it: `width=3.0` above. For a value with no
-record around it, `options.type` gives its type (`formatValue(3, { type: "float64" })` is `3.0`).
+record around it, `options.type` gives its type (`formatValue(3, { type: "float64" })` is `3.0`). The
+records may be declared in the entry module or in a library the program links. A field typed by a
+type parameter is read as an `int` when whole, since the value does not carry the type argument.
 `options.state` names a component, and the value is that component's state, spelled one
 `name=value` per line in declaration order, each declared at its state field.
 
