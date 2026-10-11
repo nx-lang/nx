@@ -8,7 +8,8 @@ the given props and returns a session whose first tick holds the result. It SHAL
 `programFromImages(images, entry)`, which prepares and links a list of `{ identity, bytes }` IR
 images into a program whose entry module is `entry`. A session's options SHALL include the
 runtime's limits, `maxOperations`, `maxInputSize`, `maxCallDepth` and `maxRangeLength`, passed to
-every call the session makes, and SHALL include whether to report origins, on by default.
+every call the session makes, SHALL include whether to report origins, on by default, and SHALL
+include `maxTicks`, the most ticks the session keeps, 1,000 by default.
 
 #### Scenario: Starting the question flow
 - **WHEN** a host links the question-flow conformance program's images with `programFromImages` and
@@ -21,10 +22,13 @@ every call the session makes, and SHALL include whether to report origins, on by
 - **THEN** `createPreviewSession` SHALL fail with the runtime's diagnostics and return no session
 
 ### Requirement: Each tick keeps what made it and what it rendered
-Every tick SHALL hold its cause (the initial props, a batch, new props, or a reload), the component
-instance, the state, the rendered output, the effects the batch's handlers returned, and its parent
-tick. Ticks SHALL be immutable. A session SHALL have a current tick, and its `path` SHALL be the
-ticks from the first to the current one, in order.
+Every tick SHALL hold its cause (the initial props, a batch, new props, or a reload), the program
+that rendered it, its props, the component instance, the state, the rendered output, the effects
+the batch's handlers returned, and its parent tick. Ticks SHALL be immutable. A session SHALL have a
+current tick, and its `path` SHALL be the ticks from the current tick's root to the current one, in
+order. A dispatch or a props change from a tick SHALL run under the program that rendered it. When a
+new tick takes the session past `maxTicks`, the session SHALL drop the oldest ticks that are off the
+current path and have no children until it is within the limit or no such tick is left.
 
 #### Scenario: A tick after an answer
 - **WHEN** a host dispatches the first batch of the question-flow lifecycle
@@ -50,7 +54,10 @@ entries naming tokens. It SHALL also dispatch by handler: given the JSON pointer
 `ActionHandler` record in the current tick's rendered output and an action record, it SHALL use the
 token the record carries, after checking that the action's `$type` is the action the record names.
 A pointer that names no `ActionHandler` record, or an action of another type, SHALL fail without
-dispatching. The new tick SHALL record each entry's pointer, or none for an entry given by token.
+dispatching, and so SHALL an entry by token whose token the current output does not hold. The new
+tick SHALL record, for each entry, the pointer of the handler it invoked: the pointer it was given,
+or for an entry by token, the pointer of the record that carries the token. An entry that is an
+action the component emits invokes no handler in the output and SHALL record none.
 
 #### Scenario: Answering through the step's handler
 - **WHEN** the current output's step renders an `ActionHandler` record for `Step.TextAnswered` at
@@ -78,20 +85,23 @@ with the new props and the current tick's state, and add the result as a child t
 the new props.
 
 #### Scenario: A new respondent
-- **WHEN** a host is on the fifth question of the flow and sets the props to
+- **WHEN** a host is on the first question of the flow and sets the props to
   `{ respondent: "Grace" }`
 - **THEN** the new tick SHALL hold the new props and the same state as the tick it came from,
-  including the `name` the first render took from the old respondent
+  including the `name` "friend" that the first render took from the old respondent
 
 ### Requirement: A run saves and replays as a scenario
 A scenario SHALL be a `program.json` lifecycle, with `module`, `component`, `props` and `batches`,
 and two optional members: `name`, and `handlers`, which holds for each entry of each batch the
-pointer it was dispatched by or `null`. A session SHALL export its current path as a scenario.
-Replaying a scenario SHALL start a new path from the scenario's props and dispatch each batch in
-turn, using the current token at an entry's pointer when it has one and the recorded token
-otherwise. A replay SHALL stop at the first entry whose pointer names no handler for the recorded
-action, or whose token the current output does not hold, keep the ticks before it, and report the
-batch and the entry it stopped at.
+pointer of the handler it invoked or `null`. A session SHALL export its current path as a
+scenario, in which a reload tick adds nothing; a path that changes the props SHALL fail to export,
+since a lifecycle cannot hold a props change. Replaying a scenario SHALL start a new root from the
+scenario's props and dispatch each batch in turn, using the current token at an entry's pointer
+when it has one and the recorded entry otherwise. A replay SHALL stop at the first entry whose
+pointer names no handler for the recorded action, or whose token the current output does not hold,
+and at a batch the runtime fails; it SHALL keep the ticks before it and report the batch, and the
+entry when one could not be placed. The package SHALL also export `replayScenario(program,
+scenario, options)`, which starts a session by replaying a scenario.
 
 #### Scenario: Replaying the conformance lifecycle
 - **WHEN** a host replays the question-flow program's lifecycle from `program.json` as a scenario
@@ -112,11 +122,12 @@ batch and the entry it stopped at.
 ### Requirement: Hot reload keeps the reviewer where they were
 A session SHALL accept a new program for the same component. It SHALL first initialize the
 component under the new program with the current tick's props and state, and on success add the
-result as a child of the current tick whose cause is a reload. When the state does not validate
-under the new program, it SHALL replay the current path's batches under the new program, as a
-scenario replay does, and report how far it got. When the props do not validate under the new
-program, it SHALL keep the old program and the current tick and report the failure. The result
-SHALL say which of these happened.
+result as a child of the current tick whose cause is a reload. When that fails but the current
+props render under the new program, it SHALL replay the current path's batches and props changes
+under the new program from a new root, as a scenario replay does, and report how far it got. When
+the props do not render under the new program, it SHALL keep the old program and the current tick
+and report the failure. The result SHALL say which of these happened, and the old ticks SHALL stay
+in the tree in every case.
 
 #### Scenario: A label fixed on question 22
 - **WHEN** a host is on question 22 of the flow and reloads with a program that changes only a
@@ -129,6 +140,12 @@ SHALL say which of these happened.
   `rating` state field to `score`
 - **THEN** the session SHALL replay the path under the new program, complete it, and report that it
   replayed rather than kept the state
+
+#### Scenario: A required prop added
+- **WHEN** a host reloads with a program whose `Flow` adds a required prop that the current props do
+  not give
+- **THEN** the session SHALL keep the old program and the current tick, add no tick, and report the
+  failure with the runtime's diagnostics
 
 ### Requirement: Each tick knows where its records came from
 When origins are on, every call a session makes SHALL pass an origins report, and each tick SHALL

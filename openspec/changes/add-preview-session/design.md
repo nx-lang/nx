@@ -67,10 +67,15 @@ evaluate one call, and it has no notion of history; a session is a host-side pol
 
 ### The timeline is a tree of ticks
 
-Each tick holds what produced it (the initial props, a batch, or new props), the instance, the
-state, the rendered output, its origin entries and the effects. Ticks are immutable and know their
-parent. The session has a current tick, and `path` is the list of ticks from the first to the
-current one.
+Each tick holds what produced it (the initial props, a batch, new props, or a reload), the program
+that rendered it, its props, the instance, the state, the rendered output, its origin entries and
+the effects. Ticks are immutable and know their parent. The session has a current tick, and `path`
+is the list of ticks from the current tick's root to the current one. A session can have several
+roots: its first render, and the first tick of each replay.
+
+A tick keeps its program because an instance belongs to the program that made it: after a reload,
+going back to a tick from before it and dispatching runs the old program, which is what lets a
+reviewer compare the two.
 
 Going back moves the current tick and runs nothing, since an instance stays valid. Dispatching from
 a tick that already has children adds another child: a branch. The old continuation stays in the
@@ -88,6 +93,11 @@ is where a UI found the handler it is about to call, and the action record. The 
 token at that pointer, checks that the action's `$type` is the one the record names, and builds the
 invocation. The tick records both the invocation and the pointer.
 
+An entry by token gets a pointer too: the session finds the record that carries the token in the
+current output, and fails the entry when there is none. So every invocation a session dispatched
+has a pointer, whichever way the host gave it, and only an action the component emits, which runs
+the handler a parent bound and has no record in the output, has none.
+
 This keeps hosts from depending on token numbering, and it is what makes a scenario survive an
 edit: a pointer such as `/children/1/onChoiceAnswered` still names the same handler after the
 tokens are renumbered, as long as the output keeps its shape there.
@@ -99,11 +109,20 @@ optional members: a `name`, and `handlers`, which holds for each entry of each b
 the handler it invoked, or `null` for an entry dispatched by token. A conformance runner ignores the
 extra members, and a lifecycle with neither member is a valid scenario.
 
-`scenario()` exports the current path. `replay(scenario)` starts from the scenario's props and
-dispatches each batch in turn. For an entry with a pointer, it reads the current token at that
-pointer; for one without, it uses the recorded token. A step whose pointer no longer names a handler
-for the same action, or whose token the current output does not hold, stops the replay: the ticks
-before it stay, and the result names the batch and the entry that could not be placed.
+`scenario()` exports the current path. A reload tick on it adds nothing, since it changes the
+program and not the run. A props change cannot be said in a lifecycle, which has one set of props,
+so a path that holds one fails to export rather than export a run that replays differently.
+
+`replay(scenario)` starts a new root from the scenario's props and dispatches each batch in turn.
+For an entry with a pointer, it reads the current token at that pointer; for one without, it uses
+the recorded entry. A step whose pointer no longer names a handler for the same action, or whose
+token the current output does not hold, stops the replay: the ticks before it stay, and the result
+names the batch and the entry that could not be placed. A batch the runtime fails stops it the same
+way, with the batch and the runtime's diagnostics. `replayScenario(program, scenario)` starts a
+session that way, for a host that opens a shared scenario.
+
+Because every recorded invocation has a pointer, a scenario exported across a reload still
+replays, though its tokens after the reload are the reloaded render's: the pointers place them.
 
 Alternatives considered: addressing a handler by the source span of the element that bound it,
 through origins. Spans move with every edit above them, so a pointer into the output is the more
@@ -116,11 +135,13 @@ stable key for a preview, and origins remain available to map a tick back to sou
 1. Initialize with the current tick's props and state. The runtime validates the state as complete
    for the component, so a program whose state shape is unchanged keeps the reviewer exactly where
    they were. The result is a new tick, a child of the current one, marked as a reload.
-2. If the state does not validate, replay the current path's batches from the initial props.
+2. If that fails but the current props render alone, replay the current path under the new program
+   from a new root: its batches, and its props changes, which an internal replay can hold though a
+   scenario cannot.
 3. If the replay stops, keep the ticks it made and report the step it stopped at.
 
-If the props themselves do not validate under the new program, the session keeps the old program
-and reports the failure, so an edit that breaks the props never loses the timeline. The old ticks
+If the props themselves do not render under the new program, the session keeps the old program and
+reports the failure, so an edit that breaks the props never loses the timeline. The old ticks
 remain in the tree in every case, so a host can compare.
 
 ### Origins on every call
@@ -141,7 +162,9 @@ code a model wrote.
 
 - [Memory grows with the tree] → Each tick holds a rendered output and a state. A survey of 30
   questions is small, but a long session of a large UI is not. Mitigation: a `maxTicks` option drops
-  the oldest ticks that are not on the current path, and the default is generous (1,000).
+  the oldest ticks that are not on the current path and have no children, so every kept tick keeps
+  its parent, and the default is generous (1,000). A current path longer than the limit is kept
+  whole.
 - [A pointer can name a different handler after an edit] → If an edit moves a handler for the same
   action into the pointer's place, replay dispatches to it. The action type check catches most
   cases, and a stage 2 timeline can show a reloaded tick beside the original for the reviewer to
