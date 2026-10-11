@@ -1,0 +1,59 @@
+## ADDED Requirements
+
+### Requirement: Program artifacts spell runtime values as annotated NX text
+A program artifact built by the wasm SDK SHALL offer `formatValue(value, options)`, which SHALL take
+a value in the canonical JSON output format, as the IR runtimes return it, and return an
+`NxValueText` annotated against the artifact's program as `evaluateNx()` annotates `root`'s value.
+The text SHALL be what `evaluateNx()` would return for the same value, from the same formatter. An
+`ActionHandler` record, which the runtimes return for a handler, SHALL be spelled as that record,
+with its `action` and `token` properties, rather than refused. Canonical JSON does not tell a whole
+`float` from an `int`, so a number SHALL be spelled by the type its position declares, a record's
+property or the type `options.type` names for the whole value, and as an `int` when it is whole and
+no position declares its type. A value that is not in the canonical format, or that has no NX
+spelling for another reason, SHALL fail with an `NxEvaluationError` whose diagnostic says where in
+the value the problem is, and the artifact SHALL remain usable afterwards. The program is not
+evaluated.
+
+#### Scenario: A rendered component
+- **WHEN** a host builds a program declaring `external component <Button label:string emits {
+  Tapped { } } />` and calls `formatValue` with `{ "$type": "Row", "content": [{ "$type":
+  "Button", "label": "Add", "onTapped": { "$type": "ActionHandler", "action": "Button.Tapped",
+  "token": "h1-1" } }] }`
+- **THEN** the text SHALL spell the `Row` element holding a `Button` element whose `onTapped`
+  property is `<ActionHandler action="Button.Tapped" token="h1-1" />`
+- **AND** the `Button` node's declaration SHALL be the span of its declaration
+
+#### Scenario: The same text as root's
+- **WHEN** a host evaluates a program's `root` through an IR runtime and passes the result to
+  `formatValue`, and that value holds no action handler and no number outside a declared property
+- **THEN** the text SHALL equal what `evaluateNx()` returns for the same program
+
+#### Scenario: A whole float
+- **WHEN** a program declares `type Size = { width:float }` and a host formats
+  `{ "$type": "Size", "width": 3 }`
+- **THEN** the text SHALL be `<Size width=3.0 />`
+
+#### Scenario: A number with its type given
+- **WHEN** a host formats `3` with `{ type: "float" }`, and `3` with no options
+- **THEN** the texts SHALL be `3.0` and `3`
+
+#### Scenario: A value outside the canonical format
+- **WHEN** a host calls `formatValue` with a record whose `$type` is not a string
+- **THEN** it SHALL throw an `NxEvaluationError` naming the value's pointer
+- **AND** the artifact SHALL answer later calls
+
+### Requirement: Annotated text nodes carry their value's pointer
+Every node of an `NxValueText` the wasm SDK returns, from `evaluateNx()` or `formatValue()`, SHALL
+carry `pointer`: the RFC 6901 JSON pointer of its value within the value's canonical JSON form. A
+property node SHALL carry the pointer of the property's value, the whole value's pointer SHALL be
+the empty string, and an item of a sequence SHALL be addressed by its index.
+
+#### Scenario: Pointers into a rendered output
+- **WHEN** a host formats the `Row` of the previous requirement
+- **THEN** the `Button` record's node SHALL carry `/content/0`, the `onTapped` property's node and
+  the `ActionHandler` record's node SHALL both carry `/content/0/onTapped`, and the `Row` node SHALL
+  carry the empty string
+
+#### Scenario: The ABI version moves with the new export
+- **WHEN** the wrapper for this version loads a module built before `formatValue` existed
+- **THEN** loading SHALL fail with the version mismatch error, naming versions 8 and 7
