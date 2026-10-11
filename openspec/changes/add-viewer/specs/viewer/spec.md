@@ -155,9 +155,9 @@ union as the list of its cases. It SHALL render a function declaration with its 
 same form above its body, headed "Takes" over the parameters and "Returns" over its return type and
 body; a value declaration's type SHALL be headed "Type" and its value "Is". It SHALL show a
 `reference` as a link naming its target, a `member` as its object followed by the member name, and a
-`call` as its callee with its arguments. It SHALL show a doc comment as prose above what it documents and a comment as a muted note where it stands. Line
-comments that stand alone on consecutive lines SHALL read as one note; a comment that trails code on
-its line SHALL not join them.
+`call` as its callee with its arguments. It SHALL show a doc comment as prose above what it
+documents and a comment as a muted note where it stands. Line comments that stand alone on
+consecutive lines SHALL read as one note; a comment that trails code on its line SHALL not join them.
 
 #### Scenario: A record type
 - **WHEN** a document declares `type User = { id:string name:string? }` with a doc comment on `name`
