@@ -7,9 +7,15 @@
  */
 import type { SnapshotLanguageService } from "@nx-lang/language-core";
 import type { LanguageQueryName } from "@nx-lang/language-protocol";
-import { NxHostCrashedError, createLanguageService, createNxHost, type NxHost } from "@nx-lang/sdk-wasm";
+import {
+  NxEvaluationError,
+  NxHostCrashedError,
+  createLanguageService,
+  createNxHost,
+  type NxHost
+} from "@nx-lang/sdk-wasm";
 
-import { evaluateSource } from "../compile/evaluate.ts";
+import { FILE_NAME, evaluateSource } from "../compile/evaluate.ts";
 import type { EvaluateResult } from "../compile/types.ts";
 import { PreviewWorkbench } from "../preview/workbench.ts";
 import type { WorkerRequest } from "./protocol.ts";
@@ -38,7 +44,18 @@ export function createNxSession(options: NxSessionOptions): NxSession {
   let host: NxHost = createHost(options.module);
   let language: SnapshotLanguageService = createLanguageService(host);
   let replacements = 0;
-  const preview = new PreviewWorkbench();
+  // The preview builds a source itself when it holds no build of it: in a fresh worker, or for a
+  // step an edit has since replaced.
+  const preview = new PreviewWorkbench((source) => {
+    try {
+      return host.buildProgramArtifact(source, { fileName: FILE_NAME });
+    } catch (error) {
+      if (error instanceof NxEvaluationError) {
+        return undefined;
+      }
+      throw error;
+    }
+  });
 
   /**
    * Abandons the crashed host and starts a fresh one from the module already compiled.

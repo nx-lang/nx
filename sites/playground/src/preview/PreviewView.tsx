@@ -107,6 +107,9 @@ export function PreviewView({ preview, doesNotCompile, stale, describe, onNaviga
           its handlers.
         </p>
       )}
+      {problem?.kind === "programFailed" && (
+        <Failure heading="The program could not be prepared to run" diagnostics={problem.diagnostics} />
+      )}
       {problem?.kind === "startFailed" && (
         <Failure
           heading={`${state?.component ?? "The component"} would not start`}

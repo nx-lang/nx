@@ -255,6 +255,8 @@ export interface NxProgramArtifact {
    * @throws NxEvaluationError when the value is not in the canonical format (code
    * `nx-value-invalid`) or has no NX spelling (code `nx-text-unspellable`), naming the value's
    * pointer, or when `options.state` names no component.
+   * @throws TypeError when `value` is `undefined`, which JSON cannot carry. The empty value is
+   * `null` or `[]`.
    * @throws NxDisposedResourceError when this artifact has already been disposed.
    * @throws NxHostCrashedError when the module traps, or has already trapped.
    */
@@ -695,6 +697,9 @@ class WasmProgramArtifact implements NxProgramArtifact {
 
   formatValue(value: unknown, options: NxFormatValueOptions = {}): NxValueText {
     const handle = this.#live();
+    if (value === undefined) {
+      throw new TypeError("formatValue needs a value; the empty value is null or [].");
+    }
     const raw = this.#host.callWithArgument<unknown>(
       "nx_wasm_program_format_value",
       (exports, pointer, length) => exports.nx_wasm_program_format_value(handle, pointer, length),

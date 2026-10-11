@@ -89,18 +89,23 @@ export function renderValue(
     }
   };
 
+  // Stretches of text are appended in text order, so one pass over the sorted offsets places them.
+  const offsets = [...markers.keys()].sort((a, b) => a - b);
+  let next = 0;
+
   /** Appends `text.slice(start, end)`, with the actions of any line end it reaches. */
   const appendText = (parent: HTMLElement, start: number, end: number) => {
+    while (next < offsets.length && offsets[next]! <= start) {
+      next += 1;
+    }
     let cursor = start;
-    for (const [offset, indices] of [...markers].sort(([a], [b]) => a - b)) {
-      if (offset <= start || offset > end) {
-        continue;
-      }
+    while (next < offsets.length && offsets[next]! <= end) {
+      const offset = offsets[next]!;
+      next += 1;
       appendColored(document, parent, value.text, cursor, offset, colors);
-      for (const index of indices) {
+      for (const index of markers.get(offset)!) {
         appendButtons(parent, index);
       }
-      markers.delete(offset);
       cursor = offset;
     }
     appendColored(document, parent, value.text, cursor, end, colors);

@@ -32,6 +32,8 @@ export type PreviewProblem =
   | { readonly kind: "doesNotCompile" }
   /** The source declares no component to run, or only external ones. */
   | { readonly kind: "noComponent" }
+  /** The program's NX IR would not prepare or link, with the runtime's diagnostics. */
+  | { readonly kind: "programFailed"; readonly diagnostics: readonly Diagnostic[] }
   /** The component would not start, with the runtime's diagnostics; `missingProp` when a prop is required. */
   | { readonly kind: "startFailed"; readonly diagnostics: readonly Diagnostic[]; readonly missingProp: boolean }
   /** The last dispatch failed and added no step. */

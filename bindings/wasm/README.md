@@ -436,7 +436,8 @@ record around it, `options.type` gives its type (`formatValue(3, { type: "float6
 
 A value outside the canonical format throws `NxEvaluationError` with code `nx-value-invalid`, and
 one with no NX spelling, a sequence directly in a sequence, `nx-text-unspellable`; either names the
-pointer of the value at fault. The artifact stays usable.
+pointer of the value at fault. The artifact stays usable. `undefined`, which JSON cannot carry,
+throws `TypeError`; the empty value is `null` or `[]`.
 
 ## The image
 

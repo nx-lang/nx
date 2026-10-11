@@ -65,9 +65,19 @@ interface RootElement {
   readonly props: Record<string, NxCanonicalValue>;
 }
 
+/** Compiles a source the worker has no build of, or answers undefined when it does not compile. */
+export type PreviewCompile = (source: string) => NxProgramArtifact | undefined;
+
 /** Runs the preview in the worker. One per worker. */
 export class PreviewWorkbench {
-  #build: Build | undefined;
+  /** The latest build evaluation made. */
+  #latest: Build | undefined;
+  /**
+   * One build of another source, compiled here: the one a step of the session ran before an edit,
+   * or one a fresh worker was asked to run. Every other build is disposed.
+   */
+  #other: Build | undefined;
+  readonly #compile: PreviewCompile | undefined;
   #session: PreviewSession | undefined;
   #component: string | null = null;
   /** The components of the build the preview last linked. */
@@ -84,22 +94,39 @@ export class PreviewWorkbench {
   #notice: PreviewReloadNotice | null = null;
 
   /**
-   * Takes the artifact of a build that compiled, for the preview's next call. The workbench owns it
-   * from now on and disposes the one before.
+   * @param compile builds a source the workbench holds no build of: one a fresh worker is asked to
+   * run, or the one an older step of the session ran. Without it, only kept builds run.
    */
-  keepBuild(source: string, artifact: NxProgramArtifact): void {
-    if (this.#build !== undefined && this.#build.artifact !== artifact) {
-      this.#build.artifact.dispose();
-    }
-    this.#build = { source, artifact, actions: new Map() };
+  constructor(compile?: PreviewCompile) {
+    this.#compile = compile;
   }
 
   /**
-   * Forgets the build without disposing it: its host crashed, and the artifact went with it. The
-   * session needs no compiler and keeps running; the next build brings back what does.
+   * Takes the artifact of a build that compiled, for the preview's next call. The workbench owns it
+   * from now on, and disposes the builds it no longer needs.
+   */
+  keepBuild(source: string, artifact: NxProgramArtifact): void {
+    const previous = this.#latest;
+    this.#latest = { source, artifact, actions: new Map() };
+    if (previous === undefined || previous.artifact === artifact) {
+      return;
+    }
+    // The session's current step may still run the build an edit replaced.
+    if (previous.source !== source && previous.source === this.#runningSource()) {
+      this.#other?.artifact.dispose();
+      this.#other = previous;
+    } else {
+      previous.artifact.dispose();
+    }
+  }
+
+  /**
+   * Forgets the builds without disposing them: their host crashed, and the artifacts went with it.
+   * The session needs no compiler and keeps running; what it needs one for is built again.
    */
   forgetBuild(): void {
-    this.#build = undefined;
+    this.#latest = undefined;
+    this.#other = undefined;
   }
 
   answer(call: PreviewCall): PreviewState {
@@ -127,22 +154,51 @@ export class PreviewWorkbench {
   }
 
   dispose(): void {
-    this.#build?.artifact.dispose();
-    this.#build = undefined;
+    this.#latest?.artifact.dispose();
+    this.#other?.artifact.dispose();
+    this.forgetBuild();
     this.#session = undefined;
+  }
+
+  /** The source of the program the session's current step runs. */
+  #runningSource(): string | undefined {
+    const session = this.#session;
+    return session === undefined ? undefined : this.#sources.get(session.current.program);
+  }
+
+  /** The build of `source`: kept, or compiled now when the workbench can. */
+  #buildOf(source: string): Build | undefined {
+    const kept = [this.#latest, this.#other].find((build) => build?.source === source);
+    if (kept !== undefined || this.#compile === undefined) {
+      return kept;
+    }
+    const artifact = this.#compile(source);
+    if (artifact === undefined) {
+      return undefined;
+    }
+    this.#other?.artifact.dispose();
+    this.#other = { source, artifact, actions: new Map() };
+    return this.#other;
+  }
+
+  /** The build the session's current step runs, or the latest when that cannot be built. */
+  #runningBuild(): Build | undefined {
+    const running = this.#runningSource();
+    return (running === undefined ? undefined : this.#buildOf(running)) ?? this.#latest;
   }
 
   /** The build of `source`, linked, or why there is none. */
   #programFor(source: string): { build: Build; program: NxPreparedProgram } | PreviewProblem {
-    const build = this.#build;
-    if (build === undefined || build.source !== source) {
+    const build = this.#buildOf(source);
+    if (build === undefined) {
       return { kind: "doesNotCompile" };
     }
     try {
-      build.program ??= programFromImages(build.artifact.generateNxIr({ debug: true }), FILE_NAME);
+      // Every module, so a source that imports a library links against it.
+      build.program ??= programFromImages(build.artifact.generateNxIr({ debug: true, modules: [] }), FILE_NAME);
     } catch (error) {
       rethrowCrash(error);
-      return { kind: "startFailed", diagnostics: this.#diagnostics(error, build), missingProp: false };
+      return { kind: "programFailed", diagnostics: this.#diagnostics(error, build) };
     }
     this.#sources.set(build.program, source);
     return { build, program: build.program };
@@ -217,16 +273,16 @@ export class PreviewWorkbench {
         diagnostics: (result.stopped?.diagnostics ?? []).map((diagnostic) => this.#diagnostic(diagnostic, build))
       };
     }
-    this.#left.clear();
 
     // `root`'s element names the component: new props in it render the state the reload kept.
     if (root?.component === component) {
       this.#fromRoot = true;
+      // Props that fail stay unapplied, so every later reload tries them again and says so.
       const props = JSON.stringify(root.props);
       if (props !== this.#rootProps) {
-        this.#rootProps = props;
         try {
           session.setProps(root.props);
+          this.#rootProps = props;
         } catch (error) {
           this.#notice = { kind: "failed", diagnostics: this.#diagnostics(error, build) };
         }
@@ -241,9 +297,8 @@ export class PreviewWorkbench {
     }
     try {
       session.dispatchHandler(handler, action);
-      this.#left.clear();
     } catch (error) {
-      this.#problem = { kind: "dispatchFailed", diagnostics: this.#diagnostics(error, this.#build) };
+      this.#problem = { kind: "dispatchFailed", diagnostics: this.#diagnostics(error, this.#runningBuild()) };
     }
   }
 
@@ -263,11 +318,11 @@ export class PreviewWorkbench {
   }
 
   #state(): PreviewState {
-    const build = this.#build;
     const session = this.#session;
+    const build = session === undefined ? this.#latest : this.#runningBuild();
     const view = session === undefined || build === undefined ? null : this.#view(session, build);
     return {
-      source: session === undefined ? (build?.source ?? null) : (this.#sources.get(session.current.program) ?? null),
+      source: session === undefined ? (build?.source ?? null) : (this.#runningSource() ?? null),
       components: this.#components,
       component: this.#component,
       problem: this.#problem,
@@ -288,8 +343,8 @@ export class PreviewWorkbench {
     const left = this.#left.get(current.id);
     const forward = children.find((child) => child.id === left)?.id ?? children.at(-1)?.id ?? null;
 
-    // Spans index the source the current tick's program was built from, which is the latest build
-    // unless an edit since failed to reload.
+    // Spans index the source the current tick's program was built from. The build is that source's
+    // unless it no longer compiles here, which only a replaced host without the source can cause.
     const sameSource = this.#sources.get(current.program) === build.source;
     let output: PreviewSessionView["output"];
     const built: number[] = [];

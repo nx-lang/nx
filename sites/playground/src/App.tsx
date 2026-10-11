@@ -144,12 +144,9 @@ export function App() {
   // The source the preview's spans index, read by its hover callback.
   const previewSourceRef = useRef<string | null>(null);
   previewSourceRef.current = preview.state?.source ?? null;
-  // The preview runs older source than the editor holds: the edit does not compile, or the session
-  // could not run it and kept the program before.
-  const previewSource = preview.state?.source ?? null;
-  const previewStale =
-    evaluation.stale ||
-    (preview.pending === null && previewSource !== null && preview.asked === evaluation.outcomeSource && previewSource !== preview.asked);
+  // The preview is behind the editor: the edit does not compile, or the session could not run it
+  // (its props, or its program, failed) and kept what it had.
+  const previewStale = evaluation.stale || preview.notice?.kind === "failed";
 
   /** The output's hover: the language service's hover at the node's declaration, while it lines up. */
   const describe = useCallback<NxValueDescribe>(
@@ -380,7 +377,9 @@ async function hoverAt(node: NxValueNode, current: string | null, spansSource: s
 function previewMarks(state: PreviewState | null, notice: PreviewReloadNotice | null): Diagnostic[] {
   const problem = state?.problem;
   const diagnostics = [
-    ...(problem?.kind === "startFailed" || problem?.kind === "dispatchFailed" ? problem.diagnostics : []),
+    ...(problem?.kind === "startFailed" || problem?.kind === "dispatchFailed" || problem?.kind === "programFailed"
+      ? problem.diagnostics
+      : []),
     ...(notice === null ? [] : notice.diagnostics),
   ];
   return diagnostics.filter((diagnostic) => diagnostic.span !== null);

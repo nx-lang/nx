@@ -245,7 +245,8 @@ pub fn eval_program_artifact_nx_text_with_limits(
 ) -> Result<NxValueText, Vec<NxDiagnostic>> {
     let source = program_root_source(program);
     let root = evaluate_root(program, &source, limits)?;
-    annotate_nx_text(&root.value, root.module, &source).map_err(|message| {
+    let libraries = library_modules(program, root.module);
+    annotate_nx_text(&root.value, root.module, &libraries, &source).map_err(|message| {
         let diag = Diagnostic::error("nx-text-unspellable")
             .with_message(message)
             .build();
@@ -298,17 +299,34 @@ pub fn format_program_artifact_value(
         ty: request.ty,
         state: request.state,
     };
-    annotate_canonical_nx_text(&request.value, &options, module, &source).map_err(|error| {
-        let at = if error.pointer.is_empty() {
-            "the value".to_string()
-        } else {
-            format!("`{}`", error.pointer)
-        };
-        let diag = Diagnostic::error(error.code)
-            .with_message(format!("{} (at {at})", error.message))
-            .build();
-        FormatValueError::Value(diagnostics_to_api(&[diag], &source))
-    })
+    let libraries = library_modules(program, module);
+    annotate_canonical_nx_text(&request.value, &options, module, &libraries, &source).map_err(
+        |error| {
+            let at = if error.pointer.is_empty() {
+                "the value".to_string()
+            } else {
+                format!("`{}`", error.pointer)
+            };
+            let diag = Diagnostic::error(error.code)
+                .with_message(format!("{} (at {at})", error.message))
+                .build();
+            FormatValueError::Value(diagnostics_to_api(&[diag], &source))
+        },
+    )
+}
+
+/// Every module of the program but `entry`: where the declarations of what `entry` imports are.
+fn library_modules<'a>(
+    program: &'a ProgramArtifact,
+    entry: &LoweredModule,
+) -> Vec<&'a LoweredModule> {
+    program
+        .resolved_program
+        .modules()
+        .iter()
+        .map(|module| module.lowered_module.as_ref())
+        .filter(|module| !std::ptr::eq(*module, entry))
+        .collect()
 }
 
 /// The declared or inferred result type of the function `name` in the source-provider module

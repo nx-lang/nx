@@ -6,9 +6,9 @@
 import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import { after, describe, test } from "node:test";
-import { loadNxModule } from "@nx-lang/sdk-wasm";
+import { NxEvaluationError, createNxHost, loadNxModule } from "@nx-lang/sdk-wasm";
 import { createNxSession } from "../worker/session.ts";
-import { PREVIEW_LIMITS } from "./workbench.ts";
+import { PREVIEW_LIMITS, PreviewWorkbench } from "./workbench.ts";
 
 const module = await loadNxModule();
 const session = createNxSession({ module });
@@ -152,6 +152,86 @@ describe("a preview of the counter example", () => {
     assert.equal(state.problem, null);
     assert.equal(state.source, counter);
     assert.deepEqual(labels(state), ["Start", "Tapped"]);
+  });
+});
+
+describe("recovering and remembering", () => {
+  test("runs a source that imports a library", async () => {
+    const source = `import "@nx/agent"
+component <Limits /> = {
+  state { steps:int = 6 }
+  <AgentLimits maxSteps={steps} />
+}
+`;
+    const state = await run({ op: "start", source });
+    assert.equal(state.problem, null, JSON.stringify(state.problem));
+    assert.equal(text(state.session.output), "<AgentLimits maxSteps=6 />");
+  });
+
+  test("keeps showing the session after its host's builds are lost, and starts in a fresh worker", () => {
+    const host = createNxHost(module);
+    const compile = (source) => {
+      try {
+        return host.buildProgramArtifact(source, { fileName: "playground.nx" });
+      } catch (error) {
+        if (error instanceof NxEvaluationError) {
+          return undefined;
+        }
+        throw error;
+      }
+    };
+    try {
+      // A fresh worker: asked to start before any evaluation, it builds the source itself.
+      const workbench = new PreviewWorkbench(compile);
+      let state = workbench.answer({ op: "start", source: counter });
+      assert.equal(state.problem, null, JSON.stringify(state.problem));
+      const first = state.session.current;
+      state = workbench.answer({ op: "dispatch", handler: handlerOf(state, "Add one"), action: { $type: "Button.Tapped" } });
+
+      // The host crashed: its builds are gone, the session is not.
+      workbench.forgetBuild();
+      state = workbench.answer({ op: "goTo", tick: first });
+      assert.notEqual(state.session, null);
+      assert.equal(text(state.session.state), "count=3");
+      assert.equal(state.source, counter);
+      workbench.dispose();
+    } finally {
+      host.dispose();
+    }
+  });
+
+  test("tries props that failed again on every reload, and says so each time", async () => {
+    const divides = counter.replace('"Count: " + count', '"Share: " + 60 / start');
+    let state = await run({ op: "start", source: divides });
+    assert.equal(state.problem, null, JSON.stringify(state.problem));
+    state = await run({ op: "reload", source: divides.replace("start=3", "start=0") });
+    assert.equal(state.notice?.kind, "failed");
+    state = await run({ op: "reload", source: divides.replace("start=3", "start=0").replace("Share", "Part") });
+    assert.equal(state.notice?.kind, "failed", "the props are tried again");
+    state = await run({ op: "reload", source: divides.replace("start=3", "start=4") });
+    assert.equal(state.notice, null);
+    assert.equal(labels(state).at(-1), "Props");
+    assert.match(text(state.session.output), /Share: 15/);
+  });
+
+  test("Forward remembers the branch left, whatever ran since", async () => {
+    let state = await run({ op: "start", source: counter });
+    const first = state.session.current;
+    state = await press(state, "Add one");
+    const second = state.session.current;
+    state = await press(state, "Add one");
+    const third = state.session.current;
+    state = await preview({ op: "goTo", tick: second });
+    state = await press(state, "Reset");
+    const newest = state.session.current;
+    // Back from the third step to the first, leaving step 2 through step 3.
+    state = await preview({ op: "goTo", tick: third });
+    state = await preview({ op: "goTo", tick: first });
+    // A dispatch elsewhere does not forget it.
+    state = await press(state, "Reset");
+    state = await preview({ op: "goTo", tick: second });
+    assert.deepEqual(state.session.path.at(-1).children.map((child) => child.id), [third, newest]);
+    assert.equal(state.session.forward, third);
   });
 });
 

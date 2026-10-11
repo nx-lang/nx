@@ -116,11 +116,12 @@ pub fn format_nx_text(value: &Value) -> Result<String, String> {
 pub(crate) fn annotate_nx_text(
     value: &Value,
     module: &LoweredModule,
+    libraries: &[&LoweredModule],
     source: &str,
 ) -> Result<NxValueText, String> {
     let mut writer = Writer::default();
     writer.value(value, 0)?;
-    let declarations = Declarations::new(module, source);
+    let declarations = Declarations::new(module, libraries, source);
     let utf16 = Utf16Offsets::new(&writer.output);
     let nodes = writer
         .nodes
@@ -553,73 +554,83 @@ struct Shape<'a> {
     span: TextRange,
     fields: &'a [RecordField],
     base: Option<&'a Name>,
+    /// Declared in the entry module, whose source the spans index. A library's declarations give
+    /// types but no spans.
+    local: bool,
 }
 
 /// The entry module's records, components, unions and functions, by name, and a way to spell their
-/// spans.
+/// spans, with the declarations of the libraries it links for their types.
 struct Declarations<'a> {
     shapes: FxHashMap<&'a str, Shape<'a>>,
     /// Each component's state fields, by the component's name.
     states: FxHashMap<&'a str, &'a [RecordField]>,
     aliases: FxHashMap<&'a str, &'a TypeRef>,
-    unions: FxHashMap<&'a str, &'a UnionDef>,
+    /// Each union, and whether the entry module declares it.
+    unions: FxHashMap<&'a str, (&'a UnionDef, bool)>,
     functions: FxHashMap<&'a str, TextRange>,
     source: &'a str,
     lines: LineIndex,
 }
 
 impl<'a> Declarations<'a> {
-    fn new(module: &'a LoweredModule, source: &'a str) -> Self {
-        let mut shapes = FxHashMap::default();
-        let mut states = FxHashMap::default();
-        let mut aliases = FxHashMap::default();
-        let mut unions = FxHashMap::default();
-        let mut functions = FxHashMap::default();
+    /// Indexes `module`, whose source is `source`, and then `libraries` for what `module` does not
+    /// declare itself: a name the entry module declares is the entry module's.
+    fn new(module: &'a LoweredModule, libraries: &[&'a LoweredModule], source: &'a str) -> Self {
+        let mut declarations = Self {
+            shapes: FxHashMap::default(),
+            states: FxHashMap::default(),
+            aliases: FxHashMap::default(),
+            unions: FxHashMap::default(),
+            functions: FxHashMap::default(),
+            source,
+            lines: LineIndex::new(source),
+        };
+        declarations.index(module, true);
+        for library in libraries {
+            declarations.index(library, false);
+        }
+        declarations
+    }
+
+    fn index(&mut self, module: &'a LoweredModule, local: bool) {
         for item in module.items() {
             match item {
                 Item::Record(record) => {
-                    shapes.insert(
-                        record.name.as_str(),
-                        Shape {
-                            span: record.span,
-                            fields: &record.properties,
-                            base: record.base.as_ref(),
-                        },
-                    );
+                    self.shapes.entry(record.name.as_str()).or_insert(Shape {
+                        span: record.span,
+                        fields: &record.properties,
+                        base: record.base.as_ref(),
+                        local,
+                    });
                 }
                 // External components too: their props are declared in this source even though
                 // their body lives in the host.
                 Item::Component(component) => {
-                    states.insert(component.name.as_str(), component.state.as_slice());
-                    shapes.insert(
-                        component.name.as_str(),
-                        Shape {
-                            span: component.span,
-                            fields: &component.props,
-                            base: component.base.as_ref(),
-                        },
-                    );
+                    if local {
+                        self.states
+                            .insert(component.name.as_str(), component.state.as_slice());
+                    }
+                    self.shapes.entry(component.name.as_str()).or_insert(Shape {
+                        span: component.span,
+                        fields: &component.props,
+                        base: component.base.as_ref(),
+                        local,
+                    });
                 }
                 Item::Union(union) => {
-                    unions.insert(union.name.as_str(), union);
+                    self.unions
+                        .entry(union.name.as_str())
+                        .or_insert((union, local));
                 }
                 Item::TypeAlias(alias) => {
-                    aliases.insert(alias.name.as_str(), &alias.ty);
+                    self.aliases.entry(alias.name.as_str()).or_insert(&alias.ty);
                 }
-                Item::Function(function) => {
-                    functions.insert(function.name.as_str(), function.span);
+                Item::Function(function) if local => {
+                    self.functions.insert(function.name.as_str(), function.span);
                 }
                 _ => {}
             }
-        }
-        Self {
-            shapes,
-            states,
-            aliases,
-            unions,
-            functions,
-            source,
-            lines: LineIndex::new(source),
         }
     }
 
@@ -648,7 +659,13 @@ impl<'a> Declarations<'a> {
             DeclarationKey::Record(name) => {
                 annotated.declaration = self
                     .shape(&name)
-                    .map(|shape| shape.span)
+                    .map(|shape| {
+                        if shape.local {
+                            shape.span
+                        } else {
+                            TextRange::default()
+                        }
+                    })
                     .or_else(|| self.payload_case(&name).map(|(_, case)| case))
                     .and_then(|range| self.span(range));
             }
@@ -669,7 +686,8 @@ impl<'a> Declarations<'a> {
                 annotated.declaration = self
                     .unions
                     .get(union.as_str())
-                    .and_then(|union| union.cases.iter().find(|c| c.name.as_str() == case))
+                    .filter(|(_, local)| *local)
+                    .and_then(|(union, _)| union.cases.iter().find(|c| c.name.as_str() == case))
                     .and_then(|case| self.span(case.span));
             }
             DeclarationKey::Function(name) => {
@@ -689,18 +707,25 @@ impl<'a> Declarations<'a> {
     }
 
     /// The union and the case a record type name like `LoadState.failed` names: a union case that
-    /// declares fields, whose values are records.
+    /// declares fields, whose values are records. The case's span is empty for a library's union.
     fn payload_case(&self, name: &Name) -> Option<(&'a UnionDef, TextRange)> {
         let (union, case) = name.as_str().split_once('.')?;
-        let union = self.unions.get(union).copied()?;
+        let (union, local) = self.unions.get(union).copied()?;
         let case = union.cases.iter().find(|c| c.name.as_str() == case)?;
-        Some((union, case.span))
+        Some((
+            union,
+            if local {
+                case.span
+            } else {
+                TextRange::default()
+            },
+        ))
     }
 
     /// The declared property `name` of the record type or component `owner`, its own or one it
     /// inherits.
     fn field(&self, owner: &Name, name: &str) -> Option<DeclaredField<'a>> {
-        if let Some((union, _)) = self.payload_case(owner) {
+        if let Some((union, case_span)) = self.payload_case(owner) {
             let case_name = owner.as_str().split_once('.')?.1;
             let case = union.cases.iter().find(|c| c.name.as_str() == case_name)?;
             return case
@@ -711,7 +736,11 @@ impl<'a> Declarations<'a> {
                     ty: spell_type_ref(&field.ty),
                     ty_ref: &field.ty,
                     optional: field.optional,
-                    span: field.span,
+                    span: if case_span.is_empty() {
+                        TextRange::default()
+                    } else {
+                        field.span
+                    },
                 });
         }
 
@@ -725,7 +754,11 @@ impl<'a> Declarations<'a> {
                 .iter()
                 .find(|field| field.name.as_str() == name)
             {
-                return Some(declared(field));
+                let mut found = declared(field);
+                if !current.local {
+                    found.span = TextRange::default();
+                }
+                return Some(found);
             }
             visited += 1;
             if visited > self.shapes.len() {
@@ -759,7 +792,7 @@ impl<'a> Declarations<'a> {
         if let Some(primitive) = NUMERIC_PRIMITIVES.iter().find(|p| **p == name) {
             return Expected::Primitive(primitive);
         }
-        if let Some(union) = self.unions.get(name) {
+        if let Some((union, _)) = self.unions.get(name) {
             return Expected::Union(union);
         }
         // An alias cycle is the checker's to report; stop following one rather than loop.
@@ -974,9 +1007,10 @@ pub(crate) fn annotate_canonical_nx_text(
     value: &serde_json::Value,
     options: &FormatOptions,
     module: &LoweredModule,
+    libraries: &[&LoweredModule],
     source: &str,
 ) -> Result<NxValueText, FormatError> {
-    let declarations = Declarations::new(module, source);
+    let declarations = Declarations::new(module, libraries, source);
     let mut pointer = String::new();
     let mut writer = Writer::default();
     let written = if let Some(component) = &options.state {
@@ -1606,7 +1640,7 @@ mod tests {
         /// Annotates a value against an empty module, so nothing has a declaration.
         fn annotated(value: &Value) -> NxValueText {
             let module = nx_hir::LoweredModule::new(nx_hir::SourceId::new(0));
-            annotate_nx_text(value, &module, "").expect("value should have an NX spelling")
+            annotate_nx_text(value, &module, &[], "").expect("value should have an NX spelling")
         }
 
         /// The text a node covers, sliced by its UTF-16 offsets as JavaScript would slice it.
@@ -2017,6 +2051,50 @@ mod tests {
                 "label": "Add",
                 "onTapped": { "$type": "ActionHandler", "action": "Button.Tapped", "token": "h1-1" }
             }] })
+        }
+
+        #[test]
+        fn a_library_union_and_record_spell_as_root_does() {
+            let source = "import \"@nx/agent\"\n\
+                          type Call = { method:HttpMethod limits:AgentLimits }\n\
+                          let root() = <Call method=post limits=<AgentLimits maxSteps=6 /> />\n";
+            let expected = eval_program_artifact_nx_text(&program(source))
+                .unwrap_or_else(|diagnostics| panic!("{diagnostics:?}"));
+            let value = json!({
+                "$type": "Call",
+                "method": "post",
+                "limits": { "$type": "AgentLimits", "maxSteps": 6 }
+            });
+            let text = format(source, json!({ "value": value }));
+            assert_eq!(text.text, expected.text);
+            assert!(text.text.contains("method=post"), "{}", text.text);
+            let case = text
+                .nodes
+                .iter()
+                .find(|node| node.role == NxValueRole::Case)
+                .expect("the method should be a case");
+            assert_eq!(case.ty.as_deref(), Some("HttpMethod"));
+            assert!(
+                case.declaration.is_none(),
+                "a library's spans index another source"
+            );
+            let limits = text
+                .nodes
+                .iter()
+                .find(|node| {
+                    node.ty.as_deref() == Some("AgentLimits") && node.role == NxValueRole::Record
+                })
+                .expect("the limits record");
+            assert!(limits.declaration.is_none());
+            let steps = text
+                .nodes
+                .iter()
+                .find(|node| node.name.as_deref() == Some("maxSteps"))
+                .expect("the maxSteps property");
+            assert_eq!(steps.ty.as_deref(), Some("int"));
+            assert!(steps.optional);
+            assert!(steps.declaration.is_none());
+            assert_eq!(text.nodes, expected.nodes);
         }
 
         #[test]

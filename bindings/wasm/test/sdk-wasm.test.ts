@@ -498,6 +498,7 @@ type Job = { status:Status size:Size }
         expect((error as NxEvaluationError).diagnostics[0]?.code).toBe("nx-value-invalid");
       }
       expect(artifact.formatValue({ $type: "Size", width: 2 }).text).toBe("<Size width=2.0 />");
+      expect(() => artifact.formatValue(undefined)).toThrow(TypeError);
     });
   });
 

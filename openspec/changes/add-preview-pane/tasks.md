@@ -34,4 +34,4 @@
 
 ## 6. Specs
 
-- [ ] 6.1 Run `openspec validate add-preview-pane --strict`; verify it passes
+- [x] 6.1 Run `openspec validate add-preview-pane --strict`; verify it passes
