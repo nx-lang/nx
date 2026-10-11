@@ -36,6 +36,13 @@ const registration = registerNxLanguage(monaco, {
 export interface NxEditorHandle {
   /** Selects `start` to `end`, UTF-16 offsets into the text, scrolls it into view and focuses it. */
   select(start: number, end: number): void;
+  /** The UTF-16 offset of the cursor, or null before the editor exists. */
+  cursor(): number | null;
+  /**
+   * Puts the cursor at `offset`, a UTF-16 offset into the text, reveals it and focuses the editor.
+   * For an editor that has just been shown again, so it is laid out first.
+   */
+  placeCursor(offset: number): void;
 }
 
 export interface NxEditorProps {
@@ -76,6 +83,27 @@ export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, them
       const range = new monaco.Range(from.lineNumber, from.column, to.lineNumber, to.column);
       instance.setSelection(range);
       instance.revealRangeInCenterIfOutsideViewport(range);
+      instance.focus();
+    },
+    cursor() {
+      const instance = editor.current;
+      const model = instance?.getModel();
+      const position = instance?.getPosition();
+      if (model === null || model === undefined || position === null || position === undefined) {
+        return null;
+      }
+      return model.getOffsetAt(position);
+    },
+    placeCursor(offset) {
+      const instance = editor.current;
+      const model = instance?.getModel();
+      if (instance === null || instance === undefined || model === null || model === undefined) {
+        return;
+      }
+      instance.layout();
+      const position = model.getPositionAt(offset);
+      instance.setPosition(position);
+      instance.revealPositionInCenterIfOutsideViewport(position);
       instance.focus();
     },
   }));

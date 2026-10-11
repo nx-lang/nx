@@ -1,0 +1,55 @@
+{
+  "questionFlow": {
+    "files": [
+      "specs/ir-conformance/question-flow/main.nx",
+      "specs/ir-conformance/question-flow/library/answers.nx",
+      "specs/ir-conformance/question-flow/library/questions.nx",
+      "specs/ir-conformance/question-flow/library/layout.nx"
+    ]
+  },
+  "agent": {
+    "files": ["sites/playground/src/examples/nx/agent.nx"]
+  },
+  "typedText": {
+    "files": ["sites/playground/src/examples/nx/typed-text.nx"]
+  },
+  "component": {
+    "files": ["examples/nx/component.nx"]
+  },
+  "user": {
+    "source": "/// A person the survey is about.\ntype User = {\n  id:string\n  /// What to call them.\n  name:string?\n}\n"
+  },
+  "guardedStep": {
+    "source": "type Step = { title:string }\n\nlet steps(step:int, role:string) = {\n  if step == 3 && role != \"engineer\" { <Step title=\"Reports\" /> }\n}\n"
+  },
+  "sentence": {
+    "source": "type Label = { text:string }\n\nlet thanks(name:string) = <Label text={\"Thanks, \" + name + \". Where can we reach you?\"} />\n"
+  },
+  "fallback": {
+    "source": "type Label = { text:string }\n\nlet byline(nickname:string?) = <Label text={nickname ?? \"Anonymous\"} />\n"
+  },
+  "operators": {
+    "source": "let sum(a:int, b:int) = { (a + b) * 2 - a / b }\nlet rest(a:int, b:int) = { a % b }\nlet compare(a:int, b:int) = { a <= b || a >= b && !(a < b) }\nlet given(s:string?) = { s? }\nlet negative(a:int) = { -a }\nlet upTo(a:int) = { 1..a }\nlet through(a:int) = { 1..=a }\n"
+  },
+  "emoji": {
+    "source": "type Label = { text:string title:string }\n\nlet wave = <Label text=\"😀 hello\" title=\"after\" />\n"
+  },
+  "unknownKind": {
+    "source": "let mystery = <Mystery size=1 />\n"
+  },
+  "logic": {
+    "source": "type Shape = circle | square\n\nlet describe(shape:Shape) = {\n  if shape is {\n    circle => \"round\"\n    else => \"angular\"\n  }\n}\n\nlet doubled(items:int*) = {\n  for item in items { item * 2 }\n}\n\n// A note about the next declaration.\nlet answer = 42\n"
+  },
+  "markdownText": {
+    "source": "type Note = { content text:string }\n\n<Note:markdown>\n  Call find_plans_for_team or snake__case__x when asked. Price is 2 * 3 * 4 dollars, or x ** y ** z and x __ y __ z.\n  This is *really* _important_, and **bold** and __strong__.\n</Note>\n"
+  },
+  "unparsed": {
+    "source": "let a = 1\nlet b = = =\n"
+  },
+  "headings": {
+    "source": "let total(a:int, b:int): int = { a + b }\nlet answer:int = 42\ntype Count = int\n"
+  },
+  "notesAndLists": {
+    "source": "// The first line of a note\n// and its second line.\n\n// A note of its own.\nlet tags = <Tags items={ \"red\" \"green\" \"blue\" } />\nlet a = 1 // About a.\n// About b.\nlet b = 2\n"
+  }
+}

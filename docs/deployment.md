@@ -20,8 +20,9 @@ The tag workflow, `release.yml`, creates a draft GitHub Release titled `NX 1.2.3
 - one npm tarball per package: the `@nx-lang/language` editor assets and the workspace packages
   `@nx-lang/language-protocol`, `@nx-lang/language-core`, `@nx-lang/language-client`,
   `@nx-lang/ir-runtime`, `@nx-lang/sdk-wasm` (with the WebAssembly module inside),
-  `@nx-lang/monaco`, `@nx-lang/value-view` and `@nx-lang/agent` (unstable). A workspace package's
-  dependency on another is pinned to the release version;
+  `@nx-lang/monaco`, `@nx-lang/value-view`, `@nx-lang/viewer` (unstable, as the source tree it
+  reads is) and `@nx-lang/agent` (unstable). A workspace package's dependency on another is pinned
+  to the release version;
 - one `.crate` file per runtime crate: `nx-ir` (the image format), `nx-value` (the host value) and
   `nx-ir-runtime` (the runtime), which are what a Rust host needs to run compiled NX. Each
   requires the others at exactly the release version;

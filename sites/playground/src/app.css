@@ -259,6 +259,54 @@ code {
   min-height: 0;
 }
 
+.mode-switch {
+  display: inline-flex;
+  border: 1px solid var(--sl-color-hairline-shade);
+  border-radius: 0.25rem;
+  overflow: hidden;
+}
+
+.mode-switch button {
+  padding: 0.05rem 0.6rem;
+  border: 0;
+  background: transparent;
+  color: var(--sl-color-gray-3);
+  font: inherit;
+  letter-spacing: 0;
+  text-transform: none;
+  cursor: pointer;
+}
+
+.mode-switch button[aria-pressed="true"] {
+  background: var(--sl-color-accent);
+  color: #ffffff;
+}
+
+.reading {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+nx-viewer {
+  --nx-viewer-foreground: var(--pane-foreground);
+  padding: 8px 16px;
+}
+
+.reading-message {
+  margin: 1rem;
+  font-size: var(--sl-text-sm);
+}
+
+.reading-message.quiet {
+  color: var(--sl-color-gray-3);
+}
+
+.reading-message.fault {
+  color: var(--error);
+}
+
 .monaco-host {
   width: 100%;
   height: 100%;
@@ -361,7 +409,8 @@ nx-value {
     border-bottom: 1px solid var(--sl-color-hairline-shade);
   }
 
-  .pane-source .editor {
+  .pane-source .editor,
+  .pane-source .reading {
     flex: none;
     height: 55vh;
   }

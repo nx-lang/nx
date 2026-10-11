@@ -19,6 +19,7 @@
     "@nx-lang/monaco": "workspace:*",
     "@nx-lang/sdk-wasm": "workspace:*",
     "@nx-lang/value-view": "workspace:*",
+    "@nx-lang/viewer": "workspace:*",
     "@shikijs/monaco": "^4.4.3",
     "monaco-editor": "^0.56.0",
     "react": "^19.2.0",
