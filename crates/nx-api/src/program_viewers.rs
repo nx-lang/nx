@@ -111,6 +111,9 @@ pub struct ProgramViewer {
     pub via: Option<TextSpan>,
     /// The value, read without evaluating it.
     pub value: ViewerValue,
+    /// Whether analysis reported no error inside the declaration. One that is not clean still
+    /// counts as one of two duplicates, but never applies.
+    pub clean: bool,
 }
 
 impl ProgramViewer {
@@ -124,9 +127,11 @@ impl ProgramViewer {
 /// target resolved in its own module.
 ///
 /// <para>A viewer declaration whose target does not resolve to a declaration that can have a
-/// viewer, whose value is not the viewer record for that target, or that has any other error is
-/// left out whole: its module's analysis reports it. So is the second of two viewer declarations
-/// of one target in one module, which analysis reports as `duplicate-viewer`.</para>
+/// viewer, or whose value is not the viewer record for that target, is left out: its module's
+/// analysis reports it. So is the second of two viewer declarations of one target in one module,
+/// which analysis reports as `duplicate-viewer` whether or not the first has errors. A declaration
+/// with any other error is kept but not `clean`, so it still counts as a duplicate across modules
+/// and never applies.</para>
 pub fn program_viewers<'a>(
     modules: &[ProgramModule],
     artifact_of: impl Fn(&str) -> Option<&'a ModuleArtifact>,
@@ -147,13 +152,15 @@ pub fn program_viewers<'a>(
             let Ok(target) = nx_hir::resolve_viewer_target(prepared, &viewer.target) else {
                 continue;
             };
+            // The first viewer declaration of a target claims it, as analysis decides, even when
+            // it has errors.
+            if !targets.insert(target.origin.clone()) {
+                continue;
+            }
             let Some(value) = read_viewer_value(lowered, viewer.value) else {
                 continue;
             };
-            if value.record != target.record
-                || has_errors_within(artifact, &module.identity, viewer.span)
-                || !targets.insert(target.origin.clone())
-            {
+            if value.record != target.record {
                 continue;
             }
             viewers.push(ProgramViewer {
@@ -164,6 +171,7 @@ pub fn program_viewers<'a>(
                 span: viewer.span,
                 via: module.via,
                 value,
+                clean: !has_errors_within(artifact, &module.identity, viewer.span),
             });
         }
     }

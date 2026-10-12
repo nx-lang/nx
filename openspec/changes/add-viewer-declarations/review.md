@@ -18,7 +18,7 @@ through the wasm SDK's language snapshot and `<nx-viewer>` under jsdom, and the 
 
 ## Findings
 
-### 🟡 Fixed - RF1 Viewer declarations that fail type checking still apply, so type-invalid values reach the source tree
+### ✅ Verified - RF1 Viewer declarations that fail type checking still apply, so type-invalid values reach the source tree
 - **Severity:** Medium (confidence: high, reproduced)
 - **Evidence:** `program_viewers` (`crates/nx-api/src/program_viewers.rs:130`) keeps every viewer declaration
   whose target resolves and whose tag *spelling* matches the record, and `read_viewer_value` /
@@ -50,8 +50,9 @@ through the wasm SDK's language snapshot and `<nx-viewer>` under jsdom, and the 
   `place` or `format` value outside the protocol's unions (`is_known_value`). Test
   `a_viewer_declaration_with_an_error_does_not_apply` covers a host module with `title=lable` (the library's
   name stands) and a quoted `layout="inline"` / `format="image"` (neither applies).
+- **Verification:** Re-ran the original probes against the rebuilt wasm. The host module with `title=lable` / `of=valu` no longer overrides the library: `name` stays "Lib". The quoted `layout="row bogus"` / `format="image"` declaration and the one with an unknown `whatever` attribute now contribute nothing. An error elsewhere in the module, outside the viewer's span, does not drop the viewer. `is_known_value` also filters `layout`, `place` and `format` in `apply` and `merge_child`. `a_viewer_declaration_with_an_error_does_not_apply` passes. Applying the rule before duplicate detection opens a new gap, filed as RF8.
 
-### 🟡 Fixed - RF2 An unknown format makes the viewer render a string literal as an empty span, losing its text
+### ✅ Verified - RF2 An unknown format makes the viewer render a string literal as an empty span, losing its text
 - **Severity:** Low (confidence: high, reproduced)
 - **Evidence:** `formatted()` (`packages/viewer/src/render.ts:855`) switches over the known formats with no
   default branch, so any other `format` value leaves the marked span empty. With
@@ -67,8 +68,9 @@ through the wasm SDK's language snapshot and `<nx-viewer>` under jsdom, and the 
   plain text, as `text` does, and `renderElement` reads any layout other than `row` or `inline` as `card`.
   Test "shows a value whose format or layout it does not know as plain text in a card" rewrites the survey
   tree's viewers to `layout: "bogus"` and `format: "bogus"`; it fails without the fix.
+- **Verification:** Probed `<nx-viewer>` with a real tree whose viewer was rewritten to `layout: "bogus"` and `format: "bogus"`. The value `SECRET-TEXT` is rendered as plain text, and the element is a plain `card` with no `-layout` class. The new viewer test passes (94/94).
 
-### 🟡 Fixed - RF3 The `inline` layout keeps the subtitle, badge and image in the line instead of the details strip
+### ✅ Verified - RF3 The `inline` layout keeps the subtitle, badge and image in the line instead of the details strip
 - **Severity:** Low (confidence: high, reproduced)
 - **Evidence:** The spec (viewer, "Viewers shape a card") says an `inline` layout "SHALL show the element …
   as its heading and title, with every other row in its details strip"; the website page and the
@@ -83,8 +85,9 @@ through the wasm SDK's language snapshot and `<nx-viewer>` under jsdom, and the 
   and image attributes fall through to rows in the details strip. The `inlineTag` fixture now sets
   `subtitle=note badge=code`, and the inline test asserts the line holds no subtitle or badge part and the
   details strip holds `note` and `code` rows; it fails without the fix.
+- **Verification:** Re-ran the `Tag` probe with `layout=inline title=name subtitle=note badge=code`. The line now holds only the kind and the `title` part. `note` and `code` read as labelled rows in the details strip, and their keys are kept.
 
-### 🟡 Fixed - RF4 `typegen` rejects any exported type that names a type called `Props` through a namespace
+### ✅ Verified - RF4 `typegen` rejects any exported type that names a type called `Props` through a namespace
 - **Severity:** Low (confidence: high, reproduced)
 - **Evidence:** `props_record_reference` / `reject_props_record_references`
   (`crates/nx-cli/src/typegen/model.rs:1257`, `:1271`) decide by spelling (`is_props_record_name`: any
@@ -102,8 +105,9 @@ through the wasm SDK's language snapshot and `<nx-viewer>` under jsdom, and the 
   `RecordKind::Props` (raw item or imported interface item); a name that does not resolve is still judged
   by its spelling. CLI test `test_cli_typegen_accepts_a_namespaced_type_named_props` uses the two-library
   layout from the probe; the existing `Card.Props` rejection test still passes.
+- **Verification:** Re-ran the `nxlang typegen` probe. `shared.Props` imported through `import "../shared" as shared` now generates `p: shared_Props`. `ui.Card.Props` from another library is still rejected with the props-record message, so the resolution reaches imported `RecordKind::Props` interface items. The nx-cli typegen tests pass (216).
 
-### 🟡 Fixed - RF5 A second `PropertyViewer` for the same property in one viewer declaration is silently dropped
+### ✅ Verified - RF5 A second `PropertyViewer` for the same property in one viewer declaration is silently dropped
 - **Severity:** Low (confidence: high, reproduced)
 - **Evidence:** In `ResolvedViewer::apply` (`crates/nx-language-service/src/viewers.rs:203`–`:220`), the
   second child with the same `of` starts from an empty `ResolvedChild` (the first was already moved out of
@@ -116,8 +120,9 @@ through the wasm SDK's language snapshot and `<nx-viewer>` under jsdom, and the 
 - **Fix:** In `ResolvedViewer::apply`, a later `PropertyViewer` whose `of` is already in the resolved
   properties merges into that entry, attribute by attribute, as `CaseViewer`s do. Test
   `two_property_viewers_of_one_property_in_one_viewer_merge` asserts `label: "First"` and `place: details`.
+- **Verification:** Re-ran the probe. `<PropertyViewer of=label label="First" /><PropertyViewer of=label place=details />` now resolves to `label: "First", place: "details"`, and the entry is listed once at the first one's position. `two_property_viewers_of_one_property_in_one_viewer_merge` passes.
 
-### 🟡 Fixed - RF6 Forgetting `import "@nx/viewer"` gives a self-contradictory diagnostic
+### ✅ Verified - RF6 Forgetting `import "@nx/viewer"` gives a self-contradictory diagnostic
 - **Severity:** Low (confidence: high, reproduced)
 - **Evidence:** Without the import, `viewer Choice = <ElementViewer title=label />` reports only
   `viewer-record-mismatch`: "The viewer of record 'Choice' must be a 'ElementViewer' from "@nx/viewer", not
@@ -133,8 +138,9 @@ through the wasm SDK's language snapshot and `<nx-viewer>` under jsdom, and the 
   'ElementViewer' is not that one", followed by "; add `import "@nx/viewer"`" when the module does not
   import the library; the article is chosen by the name (`article`). Test
   `a_viewer_without_the_library_imported_says_to_import_it` asserts the exact message.
+- **Verification:** Re-ran the probe without the import. It now reads: "The viewer of record 'Choice' must be an 'ElementViewer' from "@nx/viewer", and this 'ElementViewer' is not that one; add `import "@nx/viewer"`". The component case reads the same way. The article is right, and the import hint is given only when the import is missing.
 
-### 🟡 Fixed - RF7 The "union a property uses comes along" test does not exercise the case it is named for
+### ✅ Verified - RF7 The "union a property uses comes along" test does not exercise the case it is named for
 - **Severity:** Low (confidence: medium)
 - **Evidence:** The source-tree scenario requires `ChoiceLayout` to be listed when "no node of the document
   names `ChoiceLayout`". `the_union_a_property_uses_comes_along`
@@ -145,6 +151,37 @@ through the wasm SDK's language snapshot and `<nx-viewer>` under jsdom, and the 
   `MultiChoice`) and assert `ChoiceLayout` still carries its case viewers.
 - **Fix:** `the_union_a_property_uses_comes_along` now uses a form that leaves `layout` unset, asserts no
   node names `ChoiceLayout`, and checks `ChoiceLayout` still carries its three case viewers.
+- **Verification:** The test now uses a `SingleChoice` that leaves `layout` unset. It asserts that no node refers to `ChoiceLayout` and that `ChoiceLayout` still carries its three case viewers, so it exercises the property-type path in `attach_viewers`. It passes.
+
+## New Findings Discovered During 2026-10-12 18:40 Verification
+
+### 🟡 Fixed - RF8 Dropping an erroneous viewer declaration before duplicate detection lets a reported duplicate apply, and hides a cross-module duplicate
+- **Severity:** Low (confidence: high, reproduced)
+- **Evidence:** In `program_viewers` (`crates/nx-api/src/program_viewers.rs`), `has_errors_within` is checked
+  before `targets.insert(...)`, and the cross-module duplicate check (`duplicate_program_viewers`) runs over
+  that filtered list. RF1's fix introduced this. Two probes:
+  - **Same module:** `viewer Choice = <ElementViewer name="One" title=lable />` followed by
+    `viewer Choice = <ElementViewer name="Two" />`. Analysis reports `duplicate-viewer` at the second
+    declaration, yet the resolved viewer has `name: "Two"`. The skipped first declaration never claimed the
+    target, so the second one applies even though it carries an error. That contradicts the spec ("a
+    duplicate-viewer error at the second") and the function's own doc comment ("So is the second ... left
+    out"). It also breaks RF1's answer that a declaration with any error contributes nothing.
+  - **Across modules:** two modules each declare `viewer Choice`, and the one in `a.nx` has `title=lable`.
+    The program reports no `duplicate-viewer`, and the resolved viewer takes `b.nx`'s `name: "B"`. The spec
+    says two program modules that both declare a viewer for a target are a `duplicate-viewer` error and
+    neither applies. Fixing the typo in `a.nx` would then make a duplicate error appear and remove the
+    viewer the reader had been seeing.
+- **Recommendation:** Run duplicate detection over every viewer declaration whose target resolves and
+  whose record matches, before the error filter. In one module, call `targets.insert` before checking
+  `has_errors_within`. Across modules, compute duplicates on the unfiltered list. After that, leave out
+  the declarations that have errors and both members of any duplicate. Add tests for both probes.
+- **Fix:** In `program_viewers`, the first viewer declaration whose target resolves now claims the target
+  before anything else is checked, as analysis decides, so a second one in the module never applies. A
+  declaration with errors is kept with `clean: false` (new `ProgramViewer::clean`), so
+  `duplicate_program_viewers` and the `duplicate-viewer` diagnostic count it; `ProgramViewers::gather`
+  applies only clean declarations, after removing duplicates, for the program and for host modules. Tests
+  `the_second_of_two_viewers_in_one_module_does_not_apply_when_the_first_has_errors` and
+  `a_duplicate_with_errors_still_conflicts` fail without the fix.
 
 ## Questions
 - RF1: should a viewer declaration with errors contribute nothing (all-or-nothing per declaration), or

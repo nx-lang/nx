@@ -28,7 +28,8 @@ impl ProgramViewers {
     /// viewer modules named in `hosts`.
     ///
     /// <para>Two viewer declarations of one target in two program modules that do not declare it
-    /// are a `duplicate-viewer` error, which analysis reports, and neither applies.</para>
+    /// are a `duplicate-viewer` error, which analysis reports, and neither applies. A viewer
+    /// declaration with errors counts as one of two such, and never applies itself.</para>
     pub fn gather(
         workspace: &WorkspaceDeclarations,
         entry: &str,
@@ -57,11 +58,15 @@ impl ProgramViewers {
         let (declaring, others): (Vec<_>, Vec<_>) = viewers
             .into_iter()
             .partition(ProgramViewer::is_in_declaring_module);
-        for viewer in declaring.into_iter().chain(
-            others
-                .into_iter()
-                .filter(|viewer| !duplicates.contains(&viewer.target.origin)),
-        ) {
+        for viewer in declaring
+            .into_iter()
+            .chain(
+                others
+                    .into_iter()
+                    .filter(|viewer| !duplicates.contains(&viewer.target.origin)),
+            )
+            .filter(|viewer| viewer.clean)
+        {
             gathered
                 .program
                 .entry(origin_of(&viewer))
@@ -79,6 +84,8 @@ impl ProgramViewers {
                 via: None,
             }];
             for viewer in nx_api::program_viewers(&module, |identity| workspace.artifact(identity))
+                .into_iter()
+                .filter(|viewer| viewer.clean)
             {
                 gathered
                     .host

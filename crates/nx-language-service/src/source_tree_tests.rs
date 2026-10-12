@@ -1750,6 +1750,57 @@ export let b = 1
 }
 
 #[test]
+fn the_second_of_two_viewers_in_one_module_does_not_apply_when_the_first_has_errors() {
+    let host = r#"import "@nx/viewer"
+import "./survey.nx"
+viewer Choice = <ElementViewer name="One" title=lable />
+viewer Choice = <ElementViewer name="Two" />
+"#;
+    let snapshot = survey_snapshot(&[("nx://tenant/host.nx", host)]);
+    let tree = with_viewers(&snapshot, &["tenant/host.nx"]);
+    assert_eq!(viewer(&tree, "Choice").name, None);
+}
+
+#[test]
+fn a_duplicate_with_errors_still_conflicts() {
+    let a = r#"import "@nx/viewer"
+import "./survey.nx"
+viewer Choice = <ElementViewer name="A" title=lable />
+export let a = 1
+"#;
+    let b = r#"import "@nx/viewer"
+import "./survey.nx"
+viewer Choice = <ElementViewer name="B" />
+export let b = 1
+"#;
+    let form = format!("import \"./a.nx\"\nimport \"./b.nx\"\n{SURVEY_FORM}");
+    let snapshot = WorkspaceSnapshot::from_documents(
+        Option::<PathBuf>::None,
+        vec![
+            DocumentInput::new(SURVEY_URI, SURVEY).with_version(1),
+            DocumentInput::new("nx://tenant/a.nx", a).with_version(1),
+            DocumentInput::new("nx://tenant/b.nx", b).with_version(1),
+            DocumentInput::new(URI, form.as_str()).with_version(1),
+        ],
+    )
+    .expect("snapshot");
+    let tree = with_viewers(&snapshot, &[]);
+    assert_eq!(viewer(&tree, "Choice").name, None);
+    let report = snapshot.diagnostics().expect("diagnostics");
+    let form_diagnostics = report
+        .iter()
+        .find(|document| document.uri.as_str() == URI)
+        .expect("form diagnostics");
+    assert!(
+        form_diagnostics
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code.as_deref() == Some("duplicate-viewer")),
+        "{form_diagnostics:#?}"
+    );
+}
+
+#[test]
 fn viewers_round_trip_through_json() {
     let tree = with_viewers(&survey_snapshot(&[]), &[]);
     let json = serde_json::to_string(&tree).expect("serialize");
