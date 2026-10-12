@@ -37,8 +37,9 @@ than kept as aliases.
 
 - Changing the host-owned state snapshot that runtime bindings pass in and out. It stays a field
   map keyed by state field name, with no `$type`.
-- Typing the previewer's `setProps`, or any other host API, as `T.Update`. That can follow once the
-  type exists.
+- Typing the previewer's `setProps`, or any other host API, by a props patch. That can follow the
+  future props record (perhaps `T.Properties.Update`), not `T.Update`, which a component no longer
+  has.
 - Letting a component change its own props. Props stay owned by the parent.
 - Any derived type for a component's props, or a function's parameters. A props record and its
   update record are left for a later change.

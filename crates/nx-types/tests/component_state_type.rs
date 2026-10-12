@@ -482,3 +482,36 @@ fn an_unknown_derived_name_passed_to_an_intrinsic_is_reported_once() {
         )]
     );
 }
+
+#[test]
+fn unknown_derived_records_passed_to_record_and_update_intrinsics_are_reported_once_each() {
+    for (source, expected) in [
+        (
+            r#"
+            component <Form /> = { <Panel /> }
+            let d = {diff(<Form.State />, <Form.State />)}
+            "#,
+            vec![
+                "Unknown type 'Form.State': component 'Form' declares no state, so it has no state record",
+                "Unknown type 'Form.State': component 'Form' declares no state, so it has no state record",
+            ],
+        ),
+        (
+            r#"
+            component <Counter step:int = 1 /> = { state { count:int = 0 } <Label /> }
+            let m = {merge(<Counter.Update step=1 />, <Counter.Update step=2 />)}
+            "#,
+            vec![
+                "Unknown type 'Counter.Update': component 'Counter' is not a record, so it has no update record; write 'Counter.State.Update' to patch its state",
+                "Unknown type 'Counter.Update': component 'Counter' is not a record, so it has no update record; write 'Counter.State.Update' to patch its state",
+            ],
+        ),
+    ] {
+        let result = check_str(source, "intrinsic-unknown.nx");
+        let messages = diagnostics(&result)
+            .into_iter()
+            .map(|(_, message)| message)
+            .collect::<Vec<_>>();
+        assert_eq!(messages, expected, "{source}");
+    }
+}

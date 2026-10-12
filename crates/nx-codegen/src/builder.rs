@@ -2848,11 +2848,11 @@ fn record_literal_shape(
 }
 
 /// The type parameters of the component `record` derives from, when it is the derived state record
-/// of a generic component or the update record of such a component or of its state; the record's
-/// own parameters when it is a generic record; empty for every other record.
+/// of a generic component or that state record's update record; the record's own parameters when
+/// it is a generic record; empty for every other record.
 ///
-/// <para>A derived record copies its component's prop or state annotations, and such a field may
-/// be typed by a type parameter. Outside the component that parameter is not a type, and no host names the
+/// <para>A derived record copies its component's state annotations, and such a field may be typed
+/// by a type parameter. Outside the component that parameter is not a type, and no host names the
 /// instantiation of an update — it was fixed at an NX use site — so the record's fields erase it
 /// the way the component's own state schema does.</para>
 fn erased_record_type_params(
@@ -2871,8 +2871,8 @@ fn erased_record_type_params(
             .map(|param| param.name.clone())
             .collect();
     }
-    // A state record copies its component's state annotations, and the update of a component or
-    // of its state record copies props or state; each erases the component's parameters.
+    // A state record copies its component's state annotations, and so does its update record;
+    // each erases the component's parameters.
     let component_name = match (record.state_component(), record.update_target()) {
         (Some(component), _) => component.clone(),
         (None, Some(target)) => match lowered_module.find_item(target.as_str()) {
@@ -2880,7 +2880,7 @@ fn erased_record_type_params(
                 Some(component) => component.clone(),
                 None => return Vec::new(),
             },
-            _ => target.clone(),
+            _ => return Vec::new(),
         },
         (None, None) => return Vec::new(),
     };

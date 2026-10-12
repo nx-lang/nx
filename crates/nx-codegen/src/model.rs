@@ -154,8 +154,8 @@ pub enum CodegenDeclarationKind {
         cases: Vec<CodegenUnionCase>,
         /// The union's abstract bases, nearest first, inherited by every case.
         bases: Vec<CodegenReference>,
-        /// The record, action, or component a derived `<Target>.Property` union names the fields
-        /// of. Present only on property unions, whose cases are all constant.
+        /// The record, action, or component state record a derived `<Target>.Property` union
+        /// names the fields of. Present only on property unions, whose cases are all constant.
         property_target: Option<CodegenReference>,
     },
     /// A type alias. TypeScript output declares it as a type alias of its own; JavaScript and

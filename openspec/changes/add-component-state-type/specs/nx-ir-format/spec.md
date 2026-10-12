@@ -189,8 +189,8 @@ as IR build diagnostics.
 ### Requirement: NX IR erases component type parameters
 NX IR SHALL NOT carry component type parameters. A component's prop schema and state schema in IR
 SHALL describe each field with the type parameter replaced by the top type `object`, keeping the
-field's occurrence around the erased type, the component's derived update record SHALL describe
-each field the same way, and a component descriptor in IR SHALL NOT include a property for a type
+field's occurrence around the erased type, the component's derived state record and that record's
+update record SHALL describe each field the same way, and a component descriptor in IR SHALL NOT include a property for a type
 argument the source bound. IR emitted for a program with generic components SHALL remain
 deterministic and boundary-clean.
 

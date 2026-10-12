@@ -166,3 +166,150 @@ with the same cross-library linkage a reference to `T` itself would produce.
 - **THEN** generation SHALL emit a warning about the `User_property` naming conflict
 - **AND** SHALL omit the generated companion
 - **AND** SHALL preserve the explicit exported declaration `User_property`
+
+### Requirement: C# generation emits typed property keys beside each property companion
+C# generation SHALL emit a typed key per field for every declaration that gets a `<Name>_property`
+companion and whose fields are reachable on a generated plain type. A key SHALL carry the
+field's wire name, its value type, and read and write access to that field on the plain generated
+type. A key for an optional field (`name?:T`) SHALL carry a nullable value type. Generation SHALL
+provide a mapping from each `<Name>_property` case to its key, so the property companion remains
+the single naming of a declaration's fields and no second spelling of those names is introduced.
+
+Where a declaration has a property companion but no instantiable generated plain type carrying its
+fields, such as an abstract record, generation SHALL emit the property companion alone and SHALL
+NOT emit keys. A component's state record `T.State` has its generated `<Name>_state` contract as
+its plain type, so every exported component with declared state, external or not, SHALL get keys
+over `<Name>_state`; an external component's props contract is never the plain type of its state
+companions.
+
+The key table's generated name SHALL follow the companion collision rule: when an exported
+declaration already owns that name, generation SHALL warn naming the table and the companion,
+SHALL omit the table, and SHALL emit the update companion without keys.
+
+#### Scenario: Record gets a key per field
+- **WHEN** source contains `export type User = { name:string email?:string }`
+- **THEN** C# generation SHALL emit a typed key for `name` whose value type is the C# spelling of `string`, and one for `email` whose value type is nullable
+- **AND** each key SHALL be able to read and write that field of a generated `User` instance
+- **AND** generation SHALL emit a mapping from each `User_property` case to its key
+
+#### Scenario: Abstract record gets a property companion but no keys
+- **WHEN** source contains `export abstract type Named = { name:string }`
+- **THEN** C# generation SHALL emit `Named_property` with the single case `name`
+- **AND** SHALL NOT emit keys for it, since no instance of `Named` can be constructed to apply a patch to
+
+#### Scenario: External component state gets keys over its state record
+- **WHEN** source contains `export external component <Ticker step:int /> = { state { count:int = 0 } }`
+- **THEN** C# generation SHALL emit a typed key for `count` over the generated `Ticker_state`
+- **AND** `Ticker_state_update` SHALL apply to and diff `Ticker_state` values
+- **AND** SHALL NOT emit `Ticker_update`, since a component has no update record of its own
+- **AND** SHALL NOT emit keys over the `Ticker` props contract
+
+#### Scenario: Key table name collision warns and skips
+- **WHEN** source contains `export type User = { name:string }` and `export type UserProperties = { x:string }`
+- **THEN** generation SHALL emit a warning naming `UserProperties` and `User_update`
+- **AND** SHALL preserve the explicit exported declaration `UserProperties`
+- **AND** SHALL emit `User_update` without keys
+
+#### Scenario: Component state gets keys over its state contract
+- **WHEN** source contains `export component <Counter step:int /> = { state { count:int = 0 } <Label /> }`
+- **THEN** C# generation SHALL emit `Counter_state_property` with the single case `count` and a typed key for `count` over the generated `Counter_state`
+- **AND** SHALL NOT emit `Counter_property`, since a component has no property union of its own
+
+### Requirement: Generated contracts erase component type parameters in C# and carry them generically in TypeScript
+The C# `typegen` emitter SHALL map a component type parameter to `object` wherever an exported
+contract references it, SHALL NOT declare a generic parameter on the generated record, and SHALL
+NOT include a member for the type parameter. The TypeScript `typegen` emitter SHALL declare the
+exported contract type with one generic parameter per component type parameter, each defaulting
+to `unknown`, SHALL reference the parameter by name inside the type, and SHALL NOT include a
+member for it. An occurrence on a type-parameter reference, and the optional mark on the property
+that carries it, SHALL be preserved around the erased or generic type as "Generated type surfaces
+map occurrences" maps them. The exported contract's parameter list SHALL be the component's
+effective one, including parameters inherited from an abstract base declared in another module of
+the library. A generic component's `<Name>_state` contract and its `<Name>_state_update` companion
+SHALL erase a state field's type parameter in both languages — to `object`
+in C# and `unknown` in TypeScript — with no generic parameter, because no host names that
+instantiation: an NX use site fixed it.
+
+#### Scenario: C# external contract erases the parameter
+- **WHEN** NX source declares `export external component <SkiaLayout TItem:type itemsSource?:TItem+ />`
+- **AND** a caller requests C# output
+- **THEN** the generated `SkiaLayout` record SHALL declare `itemsSource` as a nullable list of `object`
+- **AND** SHALL NOT declare a generic type parameter or a `TItem` property
+
+#### Scenario: TypeScript external contract is generic with an unknown default
+- **WHEN** NX source declares `export external component <SkiaLayout TItem:type itemsSource?:TItem+ />`
+- **AND** a caller requests TypeScript output
+- **THEN** the generated type SHALL be declared as `SkiaLayout<TItem = unknown>` with `itemsSource` as an optional property whose type is an array of `TItem`
+- **AND** SHALL NOT declare a `TItem` property
+- **AND** a caller writing `SkiaLayout` with no argument SHALL get `itemsSource` typed as an optional array of `unknown`
+
+#### Scenario: Derived contract carries a parameter inherited across modules
+- **WHEN** a library's `base.nx` declares `export abstract external component <ItemsBase TItem:type items?:TItem+ />`
+- **AND** its `derived.nx` declares `export external component <ContactList extends ItemsBase extra?:TItem+ />`
+- **THEN** the generated TypeScript SHALL declare `ContactList<TItem = unknown>` extending `ItemsBase<TItem>` with `extra` as an optional array of `TItem`
+- **AND** the generated C# `ContactList` SHALL declare `extra` as a nullable list of `object` with no `TItem` anywhere
+
+#### Scenario: State contract and its update companion erase the parameter
+- **WHEN** NX source declares `export external component <Picker TItem:type items?:TItem+ /> = { state { sel?:TItem } }`
+- **THEN** the generated TypeScript `Picker_state` SHALL type `sel` as the optional property `sel?: unknown` and `Picker_state_update` SHALL type it as `sel?: unknown | null`, since `sel` is clearable
+- **AND** the generated C# `Picker_state` SHALL declare `Sel` as nullable `object` and `Picker_state_update` SHALL expose it as `NxOptional<object?>`
+- **AND** neither language's output SHALL declare a `TItem` member on either type
+
+### Requirement: Generated contracts carry a generic record as a generic type in both languages
+The C# and TypeScript `typegen` emitters SHALL declare an exported generic record with one generic
+parameter per record type parameter, in declaration order and under the parameter's authored name,
+SHALL type each field that mentions a parameter with that generic parameter, and SHALL NOT emit a
+member for a type parameter. Both emitters SHALL render an applied type as the instantiation of
+that generic type, with arguments in the record's declaration order regardless of the order the
+source wrote them, and with each argument mapped as that language maps the same type anywhere else.
+Unlike a component contract, a C# generic record SHALL NOT be erased, because a host names the
+concrete instantiation at its own deserialization site. An applied type whose argument is a
+component type parameter SHALL follow the component rule for that argument: `object` in C#, the
+generic parameter in TypeScript. A generic record's `<Name>_update` companion SHALL declare the
+same generic parameters the record does and SHALL type each of its fields as the record types the
+field it patches, so that a patch of one instantiation is usable at that instantiation; in C# it
+SHALL extend `NxUpdate<Name<T, …>>` and its `<Name>Properties` key table SHALL declare the same
+parameters. A component's state companion SHALL continue to erase the *component's* type
+parameters, because the type it patches is concrete. Neither companion SHALL put a type argument
+on the wire: the discriminator and the field names are unchanged by the parameters.
+
+#### Scenario: C# declares a generic record
+- **WHEN** NX source declares `export type Range = { T:type start:T end:T endInclusive:boolean }`
+- **AND** a caller requests C# output
+- **THEN** the generated record SHALL be declared as `Range<T>` with `Start` and `End` typed `T` and `EndInclusive` typed `bool`
+- **AND** SHALL NOT declare a `T` property
+
+#### Scenario: TypeScript declares a generic record
+- **WHEN** NX source declares `export type Range = { T:type start:T end:T endInclusive:boolean }`
+- **AND** a caller requests TypeScript output
+- **THEN** the generated type SHALL be declared as `Range<T>` with `start` and `end` typed `T`
+- **AND** SHALL NOT declare a `T` property
+
+#### Scenario: An applied type is rendered as the instantiation
+- **WHEN** NX source declares `export type Range = { T:type start:T end:T }` and `export type Slider = { range:<Range T=float64/> marks?:<Range T=int/>+ }`
+- **THEN** the generated C# `Slider` SHALL declare `Range` as `Range<double>` and `Marks` as a nullable list of `Range<long>`
+- **AND** the generated TypeScript `Slider` SHALL declare `range` as `Range<number>` and `marks` as an optional property whose type is an array of `Range<number>`
+
+#### Scenario: Arguments are emitted in declaration order
+- **WHEN** NX source declares `export type Pair = { TKey:type TValue:type key:TKey value:TValue }` and `export type Entry = { p:<Pair TValue=int TKey=string/> }`
+- **THEN** the generated C# SHALL type `P` as `Pair<string, long>` and the generated TypeScript SHALL type `p` as `Pair<string, number>`
+
+#### Scenario: A component type parameter as an argument follows the component rule
+- **WHEN** NX source declares `export type Range = { T:type start:T end:T }` and `export external component <Slider TValue:type range?:<Range T=TValue/> />`
+- **THEN** the generated C# `Slider` SHALL declare `Range` as a nullable `Range<object>`
+- **AND** the generated TypeScript `Slider<TValue = unknown>` SHALL declare `range` as the optional property `range?: Range<TValue>`
+
+#### Scenario: The update companion of a generic record carries the parameter
+- **WHEN** NX source declares `export type Range = { T:type start:T end:T }`
+- **THEN** the generated TypeScript SHALL declare `Range_update<T>` with `start` typed as optional `T`
+- **AND** the generated C# SHALL declare `Range_update<T> : NxUpdate<Range<T>>` with `Start` typed `NxOptional<T>`, `Diff(Range<T>, Range<T>)` returning `Range_update<T>`, and a `RangeProperties<T>` key table
+- **AND** the serialized patch SHALL carry `"$type": "Range.Update"` and the field names alone, with no type argument
+
+#### Scenario: A patch of a generic record applies to the instantiation it came from
+- **WHEN** a C# host diffs two `Range<long>` values, serializes the patch and reads it back through either serializer
+- **THEN** applying the patch SHALL produce a `Range<long>` carrying the changed fields
+- **AND** reading a patched field SHALL give the record's field type rather than an untyped value
+
+#### Scenario: A component's state companion still erases the component's parameters
+- **WHEN** NX source declares `export external component <Picker TItem:type /> = { state { sel?:TItem } <Label /> }`
+- **THEN** the generated `Picker_state_update` SHALL declare no generic parameter, and SHALL type `sel` as `sel?: unknown | null` in TypeScript and `NxOptional<object?>` in C#

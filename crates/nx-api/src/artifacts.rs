@@ -2832,8 +2832,8 @@ fn add_workspace_import_bindings(
 }
 
 /// The suffixes of the declarations derived from a record, action, or component, which an import
-/// of the target brings into scope with it: its update record and property union, and for a
-/// component with state its state record with that record's own two.
+/// of the target brings into scope with it: a record's or action's update record and property
+/// union, and a component's state record with that record's own two, when it declares state.
 const DERIVED_DECLARATION_SUFFIXES: [&str; 5] = [
     nx_hir::UPDATE_RECORD_SUFFIX,
     nx_hir::PROPERTY_UNION_SUFFIX,
@@ -4712,6 +4712,40 @@ let k: Counter.State.Property = {Counter.State.Property.count}"#;
             !has_error_diagnostics(&artifact.diagnostics),
             "Expected the imported component's derived declarations to resolve: {:?}",
             artifact.diagnostics
+        );
+    }
+
+    /// A component imported through a workspace has no update record of its own, and the
+    /// diagnostic for one points at its state's.
+    #[test]
+    fn update_record_of_a_workspace_imported_component_suggests_its_state_update() {
+        let workspace = workspace(vec![
+            workspace_module(
+                "counter.nx",
+                r#"export component <Counter step:int = 1 /> = { state { count:int = 0 } <Label /> }"#,
+            ),
+            workspace_module(
+                "main.nx",
+                r#"import { Counter } from "./counter.nx"
+let root() = <Box patch=<Counter.Update step=2 /> />"#,
+            ),
+        ]);
+        let Err(diagnostics) =
+            build_workspace_program_artifact(&workspace, "main.nx", &ProgramBuildContext::empty())
+        else {
+            panic!("Expected the unknown update record to fail the build");
+        };
+        let errors = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == crate::NxSeverity::Error)
+            .map(|diagnostic| (diagnostic.code.clone(), diagnostic.message.clone()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            errors,
+            vec![(
+                Some("unknown-update-record".to_string()),
+                "Unknown type 'Counter.Update': component 'Counter' is not a record, so it has no update record; write 'Counter.State.Update' to patch its state".to_string()
+            )]
         );
     }
 

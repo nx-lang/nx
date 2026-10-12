@@ -49,7 +49,9 @@ is left for a later change.
 - `component-syntax`: the reserved emitted-action names gain `State`.
 - `nx-ir-format`: a component names its state record, and a state patch targets that record.
 - `cli-code-generation`: a component has no update or property companion of its own, and state
-  gains update and property companions.
+  gains update and property companions, with keys over `<Name>_state` for every component with state.
+- `dotnet-binding`: the "no plain record type" update DTO example moves from a component to an
+  abstract record.
 - `typescript-ir-runtime`: the state-patch operation takes `<Component>.State.Update`. The rest of
   its scenarios change spelling only.
 - `component-type-parameters`: the generic-component scenario covers the state's property union.
@@ -70,4 +72,5 @@ is left for a later change.
   with six website pages, `docs/nx-ir-format.md` and the playground's counter example.
 - **Not changed:** the host-owned state snapshot the runtime bindings pass in and out stays a field
   map, so hosts that hold state don't change. The previewer's `setProps` keeps its current shape;
-  typing it as `T.Update` is a possible follow-up.
+  typing it by the future props record's update (perhaps `T.Properties.Update`) is a possible
+  follow-up.

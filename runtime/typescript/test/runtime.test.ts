@@ -971,7 +971,7 @@ test("initializes, evaluates and patches a component's host-owned state", () => 
   assertEqual(applyComponentStatePatch(program, "Card", { count: 1 }, { count: 5 }), { count: 5 });
   assertEqual(applyComponentStatePatch(program, "Card", { count: 1 }, { $type: "Card.State.Update", count: 6 }), { count: 6 });
   assertThrows(() => applyComponentStatePatch(program, "Card", { count: 1 }, { $type: "Other.Update" }), "only 'Card.State.Update' patches it");
-  // The component's own update record patches its props, not its state.
+  // A component has no update record of its own, so a `Card.Update` patches nothing.
   assertThrows(() => applyComponentStatePatch(program, "Card", { count: 1 }, { $type: "Card.Update", count: 6 }), "only 'Card.State.Update' patches it");
   assertThrows(() => applyComponentStatePatch(program, "Card", { count: 1 }, { size: 2 }), "Unknown Card state field 'size'");
 });
