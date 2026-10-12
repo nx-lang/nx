@@ -20,6 +20,7 @@ import {
   type LanguageQueryName,
   type LanguageServiceErrorBody,
   type LanguageServiceErrorCode,
+  type SourceTreeViewersOption,
   type TextPosition,
 } from "@nx-lang/language-protocol";
 import {
@@ -123,7 +124,7 @@ export function createNxLanguageHandler(options: NxLanguageHandlerOptions = {}):
     if ("problem" in validated) {
       return errorResponse(400, "invalid-request", validated.problem, query);
     }
-    const { documents, uri, position } = validated;
+    const { documents, uri, position, viewers } = validated;
     const collision = contextCollision(documents, context);
     if (collision !== undefined) {
       return errorResponse(
@@ -135,7 +136,7 @@ export function createNxLanguageHandler(options: NxLanguageHandlerOptions = {}):
     }
 
     try {
-      const answer = answerQuery(query, { documents, uri, position }, context, (analyzed) =>
+      const answer = answerQuery(query, { documents, uri, position, viewers }, context, (analyzed) =>
         cache.getOrCreate(documentSetKey(analyzed), () => createSnapshot(analyzed, snapshotOptions)),
       );
       return jsonResponse(200, answer);
@@ -211,7 +212,12 @@ async function readJsonBody(request: Request, maxBodyBytes: number): Promise<unk
 }
 
 type ValidatedQuery =
-  | { documents: LanguageDocument[]; uri: string; position: TextPosition | undefined }
+  | {
+      documents: LanguageDocument[];
+      uri: string;
+      position: TextPosition | undefined;
+      viewers?: SourceTreeViewersOption;
+    }
   | { problem: string };
 
 /** Checks the body has what the query needs, naming the first thing missing. */
@@ -272,6 +278,25 @@ function validateQuery(query: LanguageQueryName, body: unknown): ValidatedQuery 
       return { problem: `The '${query}' query needs 'position', { line, character } with non-negative integers.` };
     }
     position = { line: candidate.line as number, character: candidate.character as number };
+  }
+  if (query === "sourceTree" && record.viewers !== undefined) {
+    const viewers = record.viewers as Record<string, unknown> | null;
+    const modules = viewers?.modules;
+    if (
+      typeof viewers !== "object" ||
+      viewers === null ||
+      Array.isArray(viewers) ||
+      (modules !== undefined &&
+        (!Array.isArray(modules) || modules.some((module) => typeof module !== "string")))
+    ) {
+      return { problem: "'viewers' must be an object whose optional 'modules' is an array of module identities." };
+    }
+    return {
+      documents,
+      uri,
+      position,
+      viewers: modules === undefined ? {} : { modules: modules as string[] },
+    };
   }
   return { documents, uri, position };
 }

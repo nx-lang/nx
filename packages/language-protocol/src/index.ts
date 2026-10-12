@@ -86,7 +86,23 @@ export type DocumentSymbolsRequest = LanguageQuery;
  *
  * Unstable: the answer's shape may change until a later release commits to it.
  */
-export type SourceTreeRequest = LanguageQuery;
+export interface SourceTreeRequest extends LanguageQuery {
+  /**
+   * Resolve the viewer declarations that apply to the document's program, and attach each
+   * declaration's resolved viewer to its entry in the answer's declaration table. Absent, the
+   * answer carries no viewers.
+   */
+  viewers?: SourceTreeViewersOption;
+}
+
+/** Which viewer declarations a source-tree request resolves. */
+export interface SourceTreeViewersOption {
+  /**
+   * Further viewer modules the host supplies, by module identity, applied after the program's own
+   * viewer declarations in the order named.
+   */
+  modules?: string[];
+}
 
 /** The queries this protocol defines. */
 export const LANGUAGE_QUERIES = [
@@ -311,7 +327,8 @@ export type SourceFlag =
   | "abstract"
   | "external"
   | "export"
-  | "private";
+  | "private"
+  | "viewer";
 
 /**
  * One piece of the source. Every token of the document belongs to exactly one node, the smallest
@@ -395,6 +412,70 @@ export interface SourceDeclaration {
   type?: string;
   /** The range of a value declaration's value, when the queried document declares it. */
   valueRange?: EditorRange;
+  /**
+   * How a viewer presents the declaration, resolved from every viewer declaration that applies to
+   * it; present only when the request asked for `viewers`.
+   */
+  viewer?: SourceViewer;
+}
+
+/**
+ * A declaration's resolved viewer. A record, an action or a component has its heading parts, its
+ * layout and every property once, in the order to show them; a union every case once; an alias of
+ * a primitive type its format.
+ */
+export interface SourceViewer {
+  /** The kind's name as readers see it. */
+  name?: string;
+  /** The property whose value is the element's title. */
+  title?: string;
+  /** The property whose value reads under the title. */
+  subtitle?: string;
+  /** The property whose value shows as a badge. */
+  badge?: string;
+  /** The property whose value is the URL of the element's picture. */
+  image?: string;
+  /** How a record's, action's or component's element is laid out. */
+  layout?: SourceViewerLayout;
+  /** Every property, in the order to show them. */
+  properties?: SourcePropertyViewer[];
+  /** Every case of a union, in declaration order. */
+  cases?: SourceCaseViewer[];
+  /** How an alias's string values are shown. */
+  format?: SourceValueFormat;
+}
+
+/** How an element is laid out. */
+export type SourceViewerLayout = "card" | "row" | "inline";
+
+/** How a string value is shown. A format changes how the value looks, never what it is. */
+export type SourceValueFormat = "text" | "markdown" | "url" | "image" | "color" | "email" | "phone";
+
+/** How one property of a declaration reads. */
+export interface SourcePropertyViewer {
+  name: string;
+  /** The label to show in place of the name. */
+  label?: string;
+  /** What a boolean property reads as when it is true. */
+  whenTrue?: string;
+  /** What a boolean property reads as when it is false. */
+  whenFalse?: string;
+  /**
+   * How the property's string value is shown: from its property viewer, or else from the viewer
+   * of the alias its type names.
+   */
+  format?: SourceValueFormat;
+  /** Where the property is shown: among the element's rows, or in its details strip. */
+  place: "body" | "details";
+}
+
+/** How one case of a union reads. */
+export interface SourceCaseViewer {
+  name: string;
+  /** The label to show in place of the name. */
+  label?: string;
+  /** A short example of what the case looks like. */
+  example?: string;
 }
 
 /**
@@ -409,6 +490,8 @@ export interface SourceTree {
   version: number | null;
   nodes: SourceNode[];
   declarations: SourceDeclaration[];
+  /** The host viewer modules the request named that the analyzed documents do not include. */
+  missingViewerModules?: string[];
 }
 
 // ---------------------------------------------------------------------------------------------

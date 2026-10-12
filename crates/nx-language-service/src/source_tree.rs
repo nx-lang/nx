@@ -16,6 +16,7 @@
 //! <para>The shape is unstable: it is published for the viewer and the change view to build on,
 //! and a later change commits to it.</para>
 
+use crate::viewers::{ProgramViewers, ResolvedViewer};
 use crate::{
     is_unresolved_type, type_ref_display, DeclarationOrigin, DocumentScope, DocumentUri,
     DocumentVersion, EditorRange, LineIndex, ModuleAnalysis, NxIdentity, SnapshotError,
@@ -43,6 +44,29 @@ pub struct SourceTree {
     pub nodes: Vec<SourceNode>,
     /// Each declaration a node refers to, listed once, from this module or any other.
     pub declarations: Vec<SourceDeclaration>,
+    /// The host viewer modules the request named that the snapshot does not hold.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub missing_viewer_modules: Vec<String>,
+}
+
+/// What a source-tree request asks for beyond the tree itself.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceTreeOptions {
+    /// Resolve the viewer declarations that apply to the document's program, and attach each
+    /// declaration's resolved viewer to its table entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewers: Option<SourceTreeViewers>,
+}
+
+/// The viewer declarations a source-tree request asks to have resolved.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceTreeViewers {
+    /// Further viewer modules the host supplies, by module identity, applied after the program's
+    /// own viewer declarations in the order named.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub modules: Vec<String>,
 }
 
 /// One piece of the source: a construct a reader recognizes, with the range it covers.
@@ -99,7 +123,8 @@ pub struct SourceNode {
 pub enum SourceRole {
     /// An import statement.
     Import,
-    /// A `let`, `type`, `action`, `component` or function declaration, with its name.
+    /// A `let`, `type`, `action`, `component`, `viewer` or function declaration, with its name; a
+    /// `viewer` declaration's name is its target as written.
     Declaration,
     /// A parameter of a function or a property of a component.
     Parameter,
@@ -184,6 +209,8 @@ pub enum SourceFlag {
     Export,
     /// The declaration is `private`.
     Private,
+    /// The declaration is a `viewer` declaration, named by its target.
+    Viewer,
 }
 
 /// One declaration a node refers to.
@@ -221,6 +248,84 @@ pub struct SourceDeclaration {
     /// The range of a value declaration's value, when this document declares it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value_range: Option<EditorRange>,
+    /// How a viewer presents the declaration, resolved from every viewer declaration that applies
+    /// to it; present only when the request asked for viewers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewer: Option<SourceViewer>,
+}
+
+/// A declaration's resolved viewer.
+///
+/// <para>For a record, an action or a component it holds the heading parts, the layout and every
+/// property once, in the order to show them; for a union, every case once; for an alias of a
+/// primitive type, the format.</para>
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceViewer {
+    /// The kind's name as readers see it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The property whose value is the element's title.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// The property whose value reads under the title.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subtitle: Option<String>,
+    /// The property whose value shows as a badge.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub badge: Option<String>,
+    /// The property whose value is the URL of the element's picture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+    /// `card`, `row` or `inline`, for a record, an action or a component.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout: Option<String>,
+    /// Every property, in the order to show them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub properties: Vec<SourcePropertyViewer>,
+    /// Every case of a union, in declaration order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cases: Vec<SourceCaseViewer>,
+    /// How an alias's string values are shown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
+}
+
+/// How one property of a declaration reads.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourcePropertyViewer {
+    /// The property's name.
+    pub name: String,
+    /// The label to show in place of the name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// What a boolean property reads as when it is true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub when_true: Option<String>,
+    /// What a boolean property reads as when it is false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub when_false: Option<String>,
+    /// How the property's string value is shown: from its property viewer, or else from the
+    /// viewer of the alias its type names.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
+    /// `body` or `details`.
+    pub place: String,
+}
+
+/// How one case of a union reads.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceCaseViewer {
+    /// The case's name.
+    pub name: String,
+    /// The label to show in place of the name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// A short example of what the case looks like.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub example: Option<String>,
 }
 
 /// The kinds of declaration the table describes.
@@ -285,6 +390,19 @@ impl WorkspaceSnapshot {
     /// declaration are what hover reports inside it. A document that does not fully parse still
     /// has a tree; what did not parse is an `unparsed` node.</para>
     pub fn source_tree(&self, uri: &DocumentUri) -> Result<SourceTree, SnapshotError> {
+        self.source_tree_with_options(uri, &SourceTreeOptions::default())
+    }
+
+    /// Returns the source tree of the requested document, with what `options` asks for besides.
+    ///
+    /// <para>With `viewers`, each declaration entry with a resolved viewer carries it, and the
+    /// table also lists each union and alias with a viewer that types a listed property, so a
+    /// reader needs no second query. Without it the answer is the plain source tree.</para>
+    pub fn source_tree_with_options(
+        &self,
+        uri: &DocumentUri,
+        options: &SourceTreeOptions,
+    ) -> Result<SourceTree, SnapshotError> {
         let document = self
             .document(uri)
             .ok_or_else(|| SnapshotError::UnknownDocument(uri.to_string()))?;
@@ -298,6 +416,19 @@ impl WorkspaceSnapshot {
         if let Some(tree) = parse_str(document.source(), identity).tree {
             builder.module(tree.root());
         }
+        let mut missing_viewer_modules = Vec::new();
+        if let Some(request) = &options.viewers {
+            let workspace = Arc::clone(&builder.scope.workspace);
+            let viewers = ProgramViewers::gather(
+                &workspace,
+                identity,
+                |identity| self.has_identity(identity),
+                self.build_context(),
+                &request.modules,
+            );
+            builder.attach_viewers(&viewers);
+            missing_viewer_modules = viewers.missing;
+        }
         let (nodes, declarations) = builder.finish();
 
         Ok(SourceTree {
@@ -306,6 +437,7 @@ impl WorkspaceSnapshot {
             version: document.version,
             nodes,
             declarations,
+            missing_viewer_modules,
         })
     }
 }
@@ -505,6 +637,7 @@ impl<'a> TreeBuilder<'a> {
                     | SyntaxKind::VALUE_DEFINITION
                     | SyntaxKind::FUNCTION_DEFINITION
                     | SyntaxKind::COMPONENT_DEFINITION
+                    | SyntaxKind::VIEWER_DEFINITION
             );
             let part = !error
                 && (declaration
@@ -577,6 +710,10 @@ impl<'a> TreeBuilder<'a> {
     }
 
     fn declaration(&mut self, node: SyntaxNode<'_>) {
+        if node.kind() == SyntaxKind::VIEWER_DEFINITION {
+            self.viewer_declaration(node);
+            return;
+        }
         let name_node = node.child_by_field("name").or_else(|| {
             node.child_by_field("signature")
                 .and_then(|signature| signature.child_by_field("name"))
@@ -618,6 +755,36 @@ impl<'a> TreeBuilder<'a> {
             _ => self.component.take(),
         };
         self.declaration_parts(node, index, member);
+        self.component = enclosing;
+    }
+
+    /// A `viewer Target = Value` declaration: named by its target as written, keyed apart from the
+    /// target's own declaration, and referring to the target's entry.
+    fn viewer_declaration(&mut self, node: SyntaxNode<'_>) {
+        let target = node.child_by_field("target").map(spell).unwrap_or_default();
+        let index = self.push(
+            SourceRole::Declaration,
+            node.span(),
+            None,
+            format!("viewer {target}"),
+        );
+        self.nodes[index].flags.push(SourceFlag::Viewer);
+        if let Some(visibility) = node.child_by_field("visibility") {
+            self.unparsed(visibility, Some(index));
+        }
+        self.nodes[index].declaration = self
+            .visible_declaration(&target)
+            .or_else(|| self.type_declaration(&target));
+        self.nodes[index].name = written(target);
+        let enclosing = self.component.take();
+        for (field, child) in fields(node) {
+            if self.trivia(child, Some(index)) || !child.raw().is_named() {
+                continue;
+            }
+            if field == Some("value") {
+                self.expression(child, Some(index), "value".to_string(), &[]);
+            }
+        }
         self.component = enclosing;
     }
 
@@ -1623,6 +1790,7 @@ impl<'a> TreeBuilder<'a> {
             cases: Vec::new(),
             ty: None,
             value_range: None,
+            viewer: None,
         });
 
         let chain = base_chain(&workspace, origin);
@@ -1723,6 +1891,138 @@ impl<'a> TreeBuilder<'a> {
         Some(index)
     }
 
+    // -----------------------------------------------------------------------------------------
+    // Viewers
+    // -----------------------------------------------------------------------------------------
+
+    /// Attaches each listed declaration's resolved viewer, and lists each union and alias with a
+    /// viewer that types a property of a listed declaration.
+    fn attach_viewers(&mut self, viewers: &ProgramViewers) {
+        let workspace = Arc::clone(&self.scope.workspace);
+        let mut index = 0;
+        while index < self.table.len() {
+            let Some(origin) = self
+                .table_index
+                .iter()
+                .find(|(_, entry)| **entry as usize == index)
+                .map(|(origin, _)| origin.clone())
+            else {
+                index += 1;
+                continue;
+            };
+            let chain = base_chain(&workspace, &origin);
+            let resolved = viewers.resolve(&origin, &chain);
+            let viewer = match self.table[index].kind {
+                SourceDeclarationKind::Record
+                | SourceDeclarationKind::Action
+                | SourceDeclarationKind::Component => {
+                    let types = property_types(&workspace, &origin, &chain);
+                    // A property typed by a union or an alias with a viewer brings that declaration
+                    // into the table, so a reader can read the property's cases or format.
+                    for (_, _, typed) in &types {
+                        if let Some(typed) = typed {
+                            let chain = base_chain(&workspace, typed);
+                            if viewers.resolve(typed, &chain).is_some() {
+                                self.entry(typed);
+                            }
+                        }
+                    }
+                    self.element_viewer(index, resolved, &types, viewers)
+                }
+                SourceDeclarationKind::Union => resolved.map(|resolved| SourceViewer {
+                    cases: self.table[index]
+                        .cases
+                        .iter()
+                        .map(|case| {
+                            let merged =
+                                resolved.cases.iter().find(|merged| merged.of == case.name);
+                            SourceCaseViewer {
+                                name: case.name.clone(),
+                                label: merged
+                                    .and_then(|merged| merged.get("label"))
+                                    .map(str::to_string),
+                                example: merged
+                                    .and_then(|merged| merged.get("example"))
+                                    .map(str::to_string),
+                            }
+                        })
+                        .collect(),
+                    ..SourceViewer::default()
+                }),
+                SourceDeclarationKind::Alias => resolved.map(|resolved| SourceViewer {
+                    format: resolved.format,
+                    ..SourceViewer::default()
+                }),
+                SourceDeclarationKind::Function | SourceDeclarationKind::Value => None,
+            };
+            self.table[index].viewer = viewer;
+            index += 1;
+        }
+    }
+
+    /// The viewer of a record, an action or a component: its heading parts, its layout and every
+    /// property once, those its property viewers name first in their resolved order and the rest
+    /// in declaration order. A declaration with no viewer of its own still has one when a property
+    /// takes a format from its type.
+    fn element_viewer(
+        &self,
+        index: usize,
+        resolved: Option<ResolvedViewer>,
+        types: &[(String, String, Option<DeclarationOrigin>)],
+        viewers: &ProgramViewers,
+    ) -> Option<SourceViewer> {
+        let workspace = &self.scope.workspace;
+        let type_format = |name: &str| {
+            let (_, _, typed) = types.iter().find(|(property, _, _)| property == name)?;
+            alias_format(workspace, typed.as_ref()?, viewers)
+        };
+        let names = self.table[index]
+            .properties
+            .iter()
+            .map(|property| property.name.clone())
+            .collect::<Vec<_>>();
+        if resolved.is_none() && !names.iter().any(|name| type_format(name).is_some()) {
+            return None;
+        }
+        let resolved = resolved.unwrap_or_default();
+        let mut properties = resolved
+            .properties
+            .iter()
+            .filter(|merged| names.contains(&merged.of))
+            .map(|merged| SourcePropertyViewer {
+                name: merged.of.clone(),
+                label: merged.get("label").map(str::to_string),
+                when_true: merged.get("whenTrue").map(str::to_string),
+                when_false: merged.get("whenFalse").map(str::to_string),
+                format: merged
+                    .get("format")
+                    .map(str::to_string)
+                    .or_else(|| type_format(&merged.of)),
+                place: merged.get("place").unwrap_or("body").to_string(),
+            })
+            .collect::<Vec<_>>();
+        for name in names {
+            if !properties.iter().any(|property| property.name == name) {
+                properties.push(SourcePropertyViewer {
+                    format: type_format(&name),
+                    name,
+                    place: "body".to_string(),
+                    ..SourcePropertyViewer::default()
+                });
+            }
+        }
+        Some(SourceViewer {
+            name: resolved.name,
+            title: resolved.title,
+            subtitle: resolved.subtitle,
+            badge: resolved.badge,
+            image: resolved.image,
+            layout: Some(resolved.layout.unwrap_or_else(|| "card".to_string())),
+            properties,
+            ..SourceViewer::default()
+        })
+    }
+
     /// The properties a declaration writes itself.
     fn own_properties(
         &self,
@@ -1763,6 +2063,91 @@ impl<'a> TreeBuilder<'a> {
                 .collect(),
             Item::Value(_) | Item::TypeAlias(_) | Item::Union(_) => Vec::new(),
         }
+    }
+}
+
+/// Each property of the declaration at `origin`, whose bases are `chain`, with the module that
+/// declared it and the declaration its type names as written, through occurrence suffixes.
+fn property_types(
+    workspace: &WorkspaceDeclarations,
+    origin: &DeclarationOrigin,
+    chain: &[DeclarationOrigin],
+) -> Vec<(String, String, Option<DeclarationOrigin>)> {
+    let mut types: Vec<(String, String, Option<DeclarationOrigin>)> = Vec::new();
+    for declaring in chain.iter().rev().chain(std::iter::once(origin)) {
+        let fields: Vec<(&nx_hir::Name, &nx_hir::ast::TypeRef)> =
+            match item_at(workspace, declaring) {
+                Some(Item::Record(record)) => record
+                    .properties
+                    .iter()
+                    .map(|field| (&field.name, &field.ty))
+                    .collect(),
+                Some(Item::Component(component)) => component
+                    .props
+                    .iter()
+                    .map(|field| (&field.name, &field.ty))
+                    .collect(),
+                _ => Vec::new(),
+            };
+        let module = declaring.0.as_str();
+        for (name, ty) in fields {
+            let typed = written_type_name(ty).and_then(|type_name| {
+                workspace
+                    .type_namespaces
+                    .get(module)?
+                    .get(type_name.as_str())
+                    .cloned()
+            });
+            let property = (name.as_str().to_string(), module.to_string(), typed);
+            match types.iter_mut().find(|existing| existing.0 == property.0) {
+                Some(existing) => *existing = property,
+                None => types.push(property),
+            }
+        }
+    }
+    types
+}
+
+/// The name a type is written with, under its occurrence suffixes: `ImageUrl` for `ImageUrl?`.
+fn written_type_name(ty: &nx_hir::ast::TypeRef) -> Option<&nx_hir::Name> {
+    match ty {
+        nx_hir::ast::TypeRef::Name(name) => Some(name),
+        nx_hir::ast::TypeRef::Seq { inner, .. } => written_type_name(inner),
+        _ => None,
+    }
+}
+
+/// The format of the alias at `origin`: its own viewer's, or else that of the alias it names, as
+/// written.
+fn alias_format(
+    workspace: &WorkspaceDeclarations,
+    origin: &DeclarationOrigin,
+    viewers: &ProgramViewers,
+) -> Option<String> {
+    let mut current = origin.clone();
+    let mut seen = Vec::new();
+    loop {
+        let Some(Item::TypeAlias(alias)) = item_at(workspace, &current) else {
+            return None;
+        };
+        if let Some(format) = viewers
+            .resolve(&current, &[])
+            .and_then(|resolved| resolved.format)
+        {
+            return Some(format);
+        }
+        seen.push(current.clone());
+        let next = written_type_name(&alias.ty).and_then(|name| {
+            workspace
+                .type_namespaces
+                .get(&current.0)?
+                .get(name.as_str())
+                .cloned()
+        })?;
+        if seen.contains(&next) {
+            return None;
+        }
+        current = next;
     }
 }
 

@@ -34,12 +34,12 @@
 
 ## 5. Resolution and the source tree
 
-- [ ] 5.1 Gather viewer declarations for a document's program (entry module, its imports, the standard libraries) and for host viewer modules named in the request
-- [ ] 5.2 Resolve viewer declarations along inheritance and across sources, merging attributes, `PropertyViewer`s and `CaseViewer`s by `of`, ordering properties, not inheriting `name`, and resolving formats through aliases as written
-- [ ] 5.3 Report cross-module `duplicate-viewer` on each document whose program loads both viewer declarations
-- [ ] 5.4 Add the `viewers` option and the `viewer` values to `crates/nx-language-service/src/source_tree.rs`, list unions and aliases with viewers that type listed properties, mark viewer declarations, and report missing host modules
-- [ ] 5.5 Add the option and types to `@nx-lang/language-protocol`, carry them through the wasm snapshot and `@nx-lang/language-core`, and extend the Rust/TypeScript parity test with a document with viewer declarations
-- [ ] 5.6 Add tests for every scenario in the `source-tree` delta
+- [x] 5.1 Gather viewer declarations for a document's program (entry module, its imports, the standard libraries) and for host viewer modules named in the request
+- [x] 5.2 Resolve viewer declarations along inheritance and across sources, merging attributes, `PropertyViewer`s and `CaseViewer`s by `of`, ordering properties, not inheriting `name`, and resolving formats through aliases as written
+- [x] 5.3 Report cross-module `duplicate-viewer` on each document whose program loads both viewer declarations
+- [x] 5.4 Add the `viewers` option and the `viewer` values to `crates/nx-language-service/src/source_tree.rs`, list unions and aliases with viewers that type listed properties, mark viewer declarations, and report missing host modules
+- [x] 5.5 Add the option and types to `@nx-lang/language-protocol`, carry them through the wasm snapshot and `@nx-lang/language-core`, and extend the Rust/TypeScript parity test with a document with viewer declarations
+- [x] 5.6 Add tests for every scenario in the `source-tree` delta
 
 ## 6. Viewer and playground
 

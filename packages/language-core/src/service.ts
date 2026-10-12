@@ -127,7 +127,12 @@ export function createSnapshotLanguageService(
       return answer("documentSymbols", toAnswerRequest(request, undefined), signal);
     },
     sourceTree(request: SourceTreeRequest, signal?: AbortSignal): Promise<SourceTree> {
-      return answer("sourceTree", toAnswerRequest(request, undefined), signal);
+      const answerRequest = toAnswerRequest(request, undefined);
+      return answer(
+        "sourceTree",
+        request.viewers === undefined ? answerRequest : { ...answerRequest, viewers: request.viewers },
+        signal
+      );
     },
     dispose(): void {
       cache.clear();

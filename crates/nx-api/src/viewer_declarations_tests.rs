@@ -512,3 +512,104 @@ let root(): Card.Props = {{ <Card.Props label=\"Q\" title=\"Hi\" /> }}"
         artifact.diagnostics
     );
 }
+
+// --- Viewer declarations across a program ----------------------------------------------------
+
+const CHOICE_LIBRARY: (&str, &str) = ("lib.nx", "export type Choice = { label:string }");
+
+fn rewording(name: &str) -> String {
+    format!(
+        "import \"@nx/viewer\"\nimport {{ Choice }} from \"./lib.nx\"\nviewer Choice = <ElementViewer name=\"{name}\" />\nexport let marker = 1"
+    )
+}
+
+fn duplicates_in(diagnostics: &[NxDiagnostic], file: &str) -> Vec<NxDiagnostic> {
+    diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic.code.as_deref() == Some("duplicate-viewer")
+                && diagnostic
+                    .labels
+                    .first()
+                    .is_some_and(|label| label.file == file)
+        })
+        .cloned()
+        .collect()
+}
+
+#[test]
+fn two_program_modules_declare_a_viewer_for_the_same_target() {
+    let a = rewording("A");
+    let b = rewording("B");
+    let diagnostics = diagnostics(&[
+        (
+            "main.nx",
+            "import \"./a.nx\"\nimport \"./b.nx\"\nlet root() = { 1 }",
+        ),
+        ("a.nx", &a),
+        ("b.nx", &b),
+        CHOICE_LIBRARY,
+    ]);
+    let main = duplicates_in(&diagnostics, "main.nx");
+    assert_eq!(main.len(), 1, "{diagnostics:#?}");
+    assert!(
+        main[0].message.contains("'a.nx' and 'b.nx'"),
+        "{:#?}",
+        main[0]
+    );
+    // Each of the two modules loads only its own viewer declaration.
+    assert!(duplicates_in(&diagnostics, "a.nx").is_empty());
+    assert!(duplicates_in(&diagnostics, "b.nx").is_empty());
+}
+
+#[test]
+fn a_document_holding_one_of_two_duplicates_is_told_at_its_own() {
+    let a = rewording("A");
+    let main = format!("import \"./a.nx\"\n{}", rewording("Main"));
+    let diagnostics = diagnostics(&[("main.nx", &main), ("a.nx", &a), CHOICE_LIBRARY]);
+    let main_duplicates = duplicates_in(&diagnostics, "main.nx");
+    assert_eq!(main_duplicates.len(), 1, "{diagnostics:#?}");
+    let viewer_line = main.find("viewer Choice").expect("the viewer declaration");
+    assert_eq!(
+        main_duplicates[0].labels[0].span.start_byte as usize, viewer_line,
+        "{:#?}",
+        main_duplicates[0]
+    );
+}
+
+#[test]
+fn the_declaring_modules_viewer_never_conflicts() {
+    let a = rewording("A");
+    let diagnostics = diagnostics(&[
+        ("main.nx", "import \"./a.nx\"\nlet root() = { 1 }"),
+        ("a.nx", &a),
+        (
+            "lib.nx",
+            "import \"@nx/viewer\"\nexport type Choice = { label:string }\nviewer Choice = <ElementViewer title=label />",
+        ),
+    ]);
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code.as_deref() != Some("duplicate-viewer")),
+        "{diagnostics:#?}"
+    );
+}
+
+#[test]
+fn an_unloaded_modules_viewer_does_not_count() {
+    let a = rewording("A");
+    let c = rewording("C");
+    let diagnostics = diagnostics(&[
+        ("main.nx", "import \"./a.nx\"\nlet root() = { 1 }"),
+        ("a.nx", &a),
+        ("c.nx", &c),
+        CHOICE_LIBRARY,
+    ]);
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code.as_deref() != Some("duplicate-viewer")),
+        "{diagnostics:#?}"
+    );
+}

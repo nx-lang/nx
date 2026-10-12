@@ -4,8 +4,15 @@ import type {
   DocumentSymbol,
   Hover,
   SourceTree,
+  SourceTreeViewersOption,
   TextPosition
 } from "@nx-lang/language-protocol";
+
+/** What a source-tree query asks for besides the tree. */
+export interface SourceTreeOptions {
+  /** Resolve viewer declarations and attach each declaration's resolved viewer. */
+  viewers?: SourceTreeViewersOption;
+}
 
 import {
   abiVersion,
@@ -340,8 +347,10 @@ export interface NxLanguageSnapshot {
    * Every piece of the document at `uri` as a typed node, with the declarations the nodes refer to.
    *
    * Unstable: the answer's shape may change in any release until a later one commits to it.
+   *
+   * With `options.viewers`, each declaration entry with a resolved viewer carries it.
    */
-  sourceTree(uri: string): SourceTree;
+  sourceTree(uri: string, options?: SourceTreeOptions): SourceTree;
 
   /**
    * Releases the snapshot inside the module. Calling `dispose` more than once is allowed.
@@ -931,12 +940,12 @@ class WasmLanguageSnapshot implements NxLanguageSnapshot {
     );
   }
 
-  sourceTree(uri: string): SourceTree {
+  sourceTree(uri: string, options?: SourceTreeOptions): SourceTree {
     const handle = this.#live();
     return this.#host.callWithArgument<SourceTree>(
       "nx_wasm_snapshot_source_tree",
       (exports, pointer, length) => exports.nx_wasm_snapshot_source_tree(handle, pointer, length),
-      { uri }
+      options?.viewers === undefined ? { uri } : { uri, viewers: options.viewers }
     );
   }
 

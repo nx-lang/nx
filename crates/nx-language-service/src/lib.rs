@@ -5,10 +5,12 @@ mod positions;
 mod source_tree;
 #[cfg(test)]
 mod source_tree_tests;
+mod viewers;
 
 pub use source_tree::{
-    SourceCase, SourceDeclaration, SourceDeclarationKind, SourceFlag, SourceNode, SourceProperty,
-    SourceRole, SourceTree,
+    SourceCase, SourceCaseViewer, SourceDeclaration, SourceDeclarationKind, SourceFlag, SourceNode,
+    SourceProperty, SourcePropertyViewer, SourceRole, SourceTree, SourceTreeOptions,
+    SourceTreeViewers, SourceViewer,
 };
 
 use nx_api::{
@@ -312,6 +314,16 @@ impl WorkspaceSnapshot {
     /// Returns one document by URI.
     pub fn document(&self, uri: &DocumentUri) -> Option<&DocumentSnapshot> {
         self.by_uri.get(uri).map(|index| &self.documents[*index])
+    }
+
+    /// Whether the snapshot holds a document with this NX identity.
+    fn has_identity(&self, identity: &str) -> bool {
+        self.by_identity.contains_key(identity)
+    }
+
+    /// The libraries every query in this snapshot can see.
+    fn build_context(&self) -> &ProgramBuildContext {
+        &self.build_context
     }
 
     /// Computes editor diagnostics for every submitted document.

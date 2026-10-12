@@ -15,6 +15,7 @@ import type {
   LanguageDocument,
   LanguageQueryName,
   SourceTree,
+  SourceTreeViewersOption,
   TextPosition
 } from "@nx-lang/language-protocol";
 
@@ -37,6 +38,8 @@ export interface AnswerRequest {
   documents: LanguageDocument[];
   uri: string;
   position: TextPosition | undefined;
+  /** What a source-tree query asks to have resolved besides the tree. */
+  viewers?: SourceTreeViewersOption | undefined;
 }
 
 /**
@@ -145,6 +148,10 @@ export function answerQuery(
     case "documentSymbols":
       return snapshot.documentSymbols(request.uri) as DocumentSymbol[];
     case "sourceTree":
-      return withVersion(snapshot.sourceTree(request.uri) as SourceTree);
+      return withVersion(
+        (request.viewers === undefined
+          ? snapshot.sourceTree(request.uri)
+          : snapshot.sourceTree(request.uri, { viewers: request.viewers })) as SourceTree
+      );
   }
 }

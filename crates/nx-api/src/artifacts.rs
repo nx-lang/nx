@@ -683,6 +683,20 @@ impl ProgramBuildContext {
         self.registry.get_loaded_library(root)
     }
 
+    /// The library an import's resolved target identity names: a standard library, or a library
+    /// this context can see whose logical root it is.
+    pub(crate) fn library_for_import_target(&self, identity: &str) -> Option<Arc<LibraryArtifact>> {
+        match self.visible_library_by_logical_identity(identity) {
+            LogicalLibraryResolution::Found(_, library) => Some(library),
+            _ => None,
+        }
+    }
+
+    /// The loaded library at `root`, as a library's dependency names it.
+    pub(crate) fn library_for_root(&self, root: &Path) -> Option<Arc<LibraryArtifact>> {
+        self.registry.get_loaded_library(root)
+    }
+
     /// Every loaded library this context makes visible, ordered by root path.
     ///
     /// This is the set an import in this context can select from; a tool that describes what a
@@ -1344,7 +1358,7 @@ fn is_reserved_identity(identity: &str) -> bool {
 
 /// The identity a workspace import names: a standard library's root as written, or the path
 /// resolved against the importing module.
-fn workspace_import_target_identity(
+pub(crate) fn workspace_import_target_identity(
     importer_identity: &str,
     library_path: &str,
 ) -> Result<String, crate::workspace::WorkspaceIdentityError> {
@@ -2038,12 +2052,74 @@ fn analyze_logical_module_graph(
         build_context,
         &libraries,
     ));
+    add_duplicate_viewer_diagnostics(&mut modules, &libraries, build_context);
 
     LogicalProgramAnalysis {
         modules,
         libraries,
         source_map,
         program_diagnostics,
+    }
+}
+
+/// Reports, on each workspace module, the viewer declarations two other modules of its program
+/// declare for one target, which neither then applies.
+///
+/// <para>Each workspace module is the entry of the program a host would build from it, so each is
+/// told about the duplicates its own program loads. Nothing is walked when no module the analysis
+/// holds declares a viewer.</para>
+fn add_duplicate_viewer_diagnostics(
+    modules: &mut [ModuleArtifact],
+    libraries: &[Arc<LibraryArtifact>],
+    build_context: &ProgramBuildContext,
+) {
+    let library_modules = libraries
+        .iter()
+        .flat_map(|library| library.modules.iter())
+        .collect::<Vec<_>>();
+    let has_viewers = |module: &ModuleArtifact| {
+        module
+            .lowered_module
+            .as_deref()
+            .is_some_and(|lowered| !lowered.viewers().is_empty())
+    };
+    if !modules.iter().any(has_viewers) && !library_modules.iter().any(|module| has_viewers(module))
+    {
+        return;
+    }
+
+    let by_identity = modules
+        .iter()
+        .chain(library_modules.iter().copied())
+        .map(|module| (module.file_name.as_str(), module))
+        .collect::<FxHashMap<_, _>>();
+    let workspace = modules
+        .iter()
+        .map(|module| (module.file_name.as_str(), module))
+        .collect::<FxHashMap<_, _>>();
+    let found = modules
+        .iter()
+        .enumerate()
+        .filter_map(|(index, module)| {
+            let program = crate::program_viewers::program_modules(
+                &module.file_name,
+                |identity| {
+                    workspace
+                        .get(identity)
+                        .map(|module| module.imports.as_slice())
+                },
+                build_context,
+            );
+            let viewers = crate::program_viewers::program_viewers(&program, |identity| {
+                by_identity.get(identity).copied()
+            });
+            let diagnostics =
+                crate::program_viewers::duplicate_viewer_diagnostics(&module.file_name, &viewers);
+            (!diagnostics.is_empty()).then_some((index, diagnostics))
+        })
+        .collect::<Vec<_>>();
+    for (index, diagnostics) in found {
+        modules[index].diagnostics.extend(diagnostics);
     }
 }
 

@@ -168,6 +168,7 @@ fn punctuation(role: SourceRole) -> &'static [&'static str] {
         SourceRole::Import => &["import", "from", "as", "{", "}", ","],
         SourceRole::Declaration => &[
             "let",
+            "viewer",
             "type",
             "action",
             "component",
@@ -229,7 +230,11 @@ fn punctuation(role: SourceRole) -> &'static [&'static str] {
 fn carries(node: &SourceNode, token: &str) -> bool {
     let qualified = matches!(
         node.role,
-        SourceRole::Element | SourceRole::Attribute | SourceRole::Reference | SourceRole::Emit
+        SourceRole::Element
+            | SourceRole::Attribute
+            | SourceRole::Reference
+            | SourceRole::Emit
+            | SourceRole::Declaration
     );
     let names = |text: &str| {
         text == token
@@ -1373,4 +1378,320 @@ fn measure_question_flow_source_tree() {
         cold.as_secs_f64() * 1000.0,
         warm.as_secs_f64() * 1000.0
     );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Viewer declarations
+// ---------------------------------------------------------------------------------------------
+
+/// A survey library with viewers, and a document that constructs one of its kinds.
+const SURVEY: &str = r#"import "@nx/viewer"
+
+export type ImageUrl = string
+export type ChoiceLayout = list | grid | chips
+export type Choice = { value:string label:string imageUrl?:ImageUrl }
+
+export abstract component <Question id:string label:string help?:string required:boolean = true />
+export component <SingleChoice extends Question layout:ChoiceLayout = list allowsOther:boolean = false
+  content choices:Choice+ /> = { <Panel /> }
+export component <MultiChoice extends Question /> = { <Panel /> }
+
+viewer ImageUrl = <ValueViewer format=image />
+viewer ChoiceLayout = <UnionViewer><CaseViewer of=list label="a list" /><CaseViewer of=chips label="chips" example="A B" /></UnionViewer>
+viewer Choice = <ElementViewer layout=row title=label badge=value />
+viewer Question = <ElementViewer name="Question" title=label subtitle=help>
+  <PropertyViewer of=required whenTrue="Required" whenFalse="Optional" />
+  <PropertyViewer of=id label="Key" place=details />
+</ElementViewer>
+viewer SingleChoice = <ElementViewer name="Single choice">
+  <PropertyViewer of=layout label="Shown as" />
+  <PropertyViewer of=allowsOther whenTrue="Allows other" />
+</ElementViewer>
+"#;
+
+const SURVEY_FORM: &str = r#"import "./survey.nx"
+
+let root() = {
+  <SingleChoice id="role" label="Your role" layout=chips>
+    <Choice value="eng" label="Engineer" />
+  </SingleChoice>
+}
+"#;
+
+const SURVEY_URI: &str = "nx://tenant/survey.nx";
+
+fn survey_snapshot(extra: &[(&str, &str)]) -> WorkspaceSnapshot {
+    let mut documents = vec![
+        DocumentInput::new(SURVEY_URI, SURVEY).with_version(1),
+        DocumentInput::new(URI, SURVEY_FORM).with_version(1),
+    ];
+    for (uri, source) in extra {
+        documents.push(DocumentInput::new(*uri, *source).with_version(1));
+    }
+    WorkspaceSnapshot::from_documents(Option::<PathBuf>::None, documents).expect("snapshot")
+}
+
+fn with_viewers(snapshot: &WorkspaceSnapshot, modules: &[&str]) -> SourceTree {
+    snapshot
+        .source_tree_with_options(
+            &DocumentUri::from(URI),
+            &SourceTreeOptions {
+                viewers: Some(SourceTreeViewers {
+                    modules: modules.iter().map(|module| module.to_string()).collect(),
+                }),
+            },
+        )
+        .expect("source tree")
+}
+
+fn entry<'t>(tree: &'t SourceTree, name: &str) -> &'t SourceDeclaration {
+    tree.declarations
+        .iter()
+        .find(|declaration| declaration.name == name)
+        .unwrap_or_else(|| panic!("no entry for {name}: {:#?}", tree.declarations))
+}
+
+fn viewer<'t>(tree: &'t SourceTree, name: &str) -> &'t SourceViewer {
+    entry(tree, name)
+        .viewer
+        .as_ref()
+        .unwrap_or_else(|| panic!("{name} has no viewer: {:#?}", entry(tree, name)))
+}
+
+fn property_names(viewer: &SourceViewer) -> Vec<&str> {
+    viewer
+        .properties
+        .iter()
+        .map(|property| property.name.as_str())
+        .collect()
+}
+
+#[test]
+fn a_viewer_declaration_is_a_declaration_node() {
+    let source = "import \"@nx/viewer\"\ntype Choice = { label:string }\nviewer Choice = <ElementViewer title=label />\n";
+    let tree = tree_for(source);
+    let viewer = keyed(&tree, "viewer Choice");
+    assert_eq!(viewer.role, SourceRole::Declaration);
+    assert_eq!(viewer.name.as_deref(), Some("Choice"));
+    assert!(viewer.flags.contains(&SourceFlag::Viewer), "{viewer:?}");
+    assert_eq!(declaration(&tree, viewer).name, "Choice");
+    let element = named(&tree, SourceRole::Element, "ElementViewer");
+    assert_eq!(declaration(&tree, element).name, "ElementViewer");
+    let title = named(&tree, SourceRole::Attribute, "title");
+    let label = named(&tree, SourceRole::Case, "label");
+    assert_eq!(parent(&tree, label), title);
+    assert_eq!(declaration(&tree, label).name, "Choice.Property");
+}
+
+#[test]
+fn a_question_with_viewers() {
+    let tree = with_viewers(&survey_snapshot(&[]), &[]);
+    assert!(tree.missing_viewer_modules.is_empty());
+    let single = viewer(&tree, "SingleChoice");
+    assert_eq!(single.name.as_deref(), Some("Single choice"));
+    assert_eq!(single.title.as_deref(), Some("label"));
+    assert_eq!(single.subtitle.as_deref(), Some("help"));
+    assert_eq!(single.layout.as_deref(), Some("card"));
+    // The later viewer's property viewers first, then the base's, then the rest in declaration
+    // order, every property once.
+    assert_eq!(
+        property_names(single),
+        [
+            "layout",
+            "allowsOther",
+            "required",
+            "id",
+            "label",
+            "help",
+            "choices"
+        ]
+    );
+    let layout = &single.properties[0];
+    assert_eq!(layout.label.as_deref(), Some("Shown as"));
+    assert_eq!(layout.place, "body");
+    let required = &single.properties[2];
+    assert_eq!(required.when_true.as_deref(), Some("Required"));
+    assert_eq!(required.when_false.as_deref(), Some("Optional"));
+    assert_eq!(single.properties[3].place, "details");
+}
+
+#[test]
+fn the_base_name_is_not_inherited() {
+    let form = r#"import "./survey.nx"
+let root() = { <MultiChoice id="a" label="Pick" /> }
+"#;
+    let snapshot = WorkspaceSnapshot::from_documents(
+        Option::<PathBuf>::None,
+        vec![
+            DocumentInput::new(SURVEY_URI, SURVEY).with_version(1),
+            DocumentInput::new(URI, form).with_version(1),
+        ],
+    )
+    .expect("snapshot");
+    let tree = with_viewers(&snapshot, &[]);
+    let multi = viewer(&tree, "MultiChoice");
+    assert_eq!(multi.name, None);
+    assert_eq!(multi.title.as_deref(), Some("label"));
+}
+
+#[test]
+fn the_union_a_property_uses_comes_along() {
+    let tree = with_viewers(&survey_snapshot(&[]), &[]);
+    let layout = viewer(&tree, "ChoiceLayout");
+    let cases = layout
+        .cases
+        .iter()
+        .map(|case| {
+            (
+                case.name.as_str(),
+                case.label.as_deref(),
+                case.example.as_deref(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        cases,
+        [
+            ("list", Some("a list"), None),
+            ("grid", None, None),
+            ("chips", Some("chips"), Some("A B"))
+        ]
+    );
+}
+
+#[test]
+fn an_alias_formats_every_property_that_uses_it() {
+    let tree = with_viewers(&survey_snapshot(&[]), &[]);
+    let choice = viewer(&tree, "Choice");
+    assert_eq!(choice.layout.as_deref(), Some("row"));
+    let image = choice
+        .properties
+        .iter()
+        .find(|property| property.name == "imageUrl")
+        .expect("imageUrl");
+    assert_eq!(image.format.as_deref(), Some("image"));
+    assert_eq!(viewer(&tree, "ImageUrl").format.as_deref(), Some("image"));
+}
+
+#[test]
+fn without_the_option_nothing_changes() {
+    let snapshot = survey_snapshot(&[]);
+    let tree = snapshot
+        .source_tree(&DocumentUri::from(URI))
+        .expect("source tree");
+    assert!(tree
+        .declarations
+        .iter()
+        .all(|declaration| declaration.viewer.is_none()));
+    assert!(!serde_json::to_string(&tree)
+        .expect("serialize")
+        .contains("\"viewer\""));
+}
+
+#[test]
+fn a_host_module_rewords_a_kind_and_merges_property_viewers() {
+    let host = r#"import "@nx/viewer"
+import "./survey.nx"
+viewer SingleChoice = <ElementViewer name="Pick one" />
+viewer Question = <ElementViewer><PropertyViewer of=required whenTrue="Must answer" /></ElementViewer>
+viewer Choice = <ElementViewer><PropertyViewer of=imageUrl format=url /></ElementViewer>
+viewer ChoiceLayout = <UnionViewer><CaseViewer of=chips label="tags" /></UnionViewer>
+"#;
+    let snapshot = survey_snapshot(&[("nx://tenant/host.nx", host)]);
+    let tree = with_viewers(&snapshot, &["tenant/host.nx"]);
+    assert!(tree.missing_viewer_modules.is_empty());
+    let single = viewer(&tree, "SingleChoice");
+    assert_eq!(single.name.as_deref(), Some("Pick one"));
+    let required = single
+        .properties
+        .iter()
+        .find(|property| property.name == "required")
+        .expect("required");
+    assert_eq!(required.when_true.as_deref(), Some("Must answer"));
+    assert_eq!(required.when_false.as_deref(), Some("Optional"));
+    let image = viewer(&tree, "Choice")
+        .properties
+        .iter()
+        .find(|property| property.name == "imageUrl")
+        .expect("imageUrl")
+        .clone();
+    assert_eq!(image.format.as_deref(), Some("url"));
+    let chips = viewer(&tree, "ChoiceLayout")
+        .cases
+        .iter()
+        .find(|case| case.name == "chips")
+        .expect("chips")
+        .clone();
+    assert_eq!(chips.label.as_deref(), Some("tags"));
+    assert_eq!(chips.example.as_deref(), Some("A B"));
+}
+
+#[test]
+fn a_missing_host_module_is_listed() {
+    let tree = with_viewers(&survey_snapshot(&[]), &["nowhere.nx"]);
+    assert_eq!(tree.missing_viewer_modules, ["nowhere.nx"]);
+    assert_eq!(
+        viewer(&tree, "SingleChoice").name.as_deref(),
+        Some("Single choice")
+    );
+}
+
+#[test]
+fn an_unloaded_modules_viewers_do_not_apply() {
+    let stray = r#"import "@nx/viewer"
+import "./survey.nx"
+viewer SingleChoice = <ElementViewer name="Option" />
+"#;
+    let tree = with_viewers(&survey_snapshot(&[("nx://tenant/stray.nx", stray)]), &[]);
+    assert_eq!(
+        viewer(&tree, "SingleChoice").name.as_deref(),
+        Some("Single choice")
+    );
+}
+
+#[test]
+fn duplicate_program_viewers_apply_neither() {
+    let a = r#"import "@nx/viewer"
+import "./survey.nx"
+viewer Choice = <ElementViewer name="A" />
+export let a = 1
+"#;
+    let b = r#"import "@nx/viewer"
+import "./survey.nx"
+viewer Choice = <ElementViewer name="B" />
+export let b = 1
+"#;
+    let form = format!("import \"./a.nx\"\nimport \"./b.nx\"\n{SURVEY_FORM}");
+    let snapshot = WorkspaceSnapshot::from_documents(
+        Option::<PathBuf>::None,
+        vec![
+            DocumentInput::new(SURVEY_URI, SURVEY).with_version(1),
+            DocumentInput::new("nx://tenant/a.nx", a).with_version(1),
+            DocumentInput::new("nx://tenant/b.nx", b).with_version(1),
+            DocumentInput::new(URI, form.as_str()).with_version(1),
+        ],
+    )
+    .expect("snapshot");
+    let tree = with_viewers(&snapshot, &[]);
+    assert_eq!(viewer(&tree, "Choice").name, None);
+    let report = snapshot.diagnostics().expect("diagnostics");
+    let form_diagnostics = report
+        .iter()
+        .find(|document| document.uri.as_str() == URI)
+        .expect("form diagnostics");
+    assert!(
+        form_diagnostics
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code.as_deref() == Some("duplicate-viewer")),
+        "{form_diagnostics:#?}"
+    );
+}
+
+#[test]
+fn viewers_round_trip_through_json() {
+    let tree = with_viewers(&survey_snapshot(&[]), &[]);
+    let json = serde_json::to_string(&tree).expect("serialize");
+    let back: SourceTree = serde_json::from_str(&json).expect("deserialize");
+    assert_eq!(back, tree);
 }

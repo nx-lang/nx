@@ -5,6 +5,7 @@ import type {
   DocumentSymbol,
   Hover,
   SourceTree,
+  SourceTreeViewersOption,
   TextPosition
 } from "@nx-lang/language-protocol";
 import {
@@ -66,13 +67,17 @@ export type {
   Hover,
   RelatedLocation,
   SourceCase,
+  SourceCaseViewer,
   SourceDeclaration,
   SourceDeclarationKind,
   SourceFlag,
   SourceNode,
   SourceProperty,
+  SourcePropertyViewer,
   SourceRole,
   SourceTree,
+  SourceTreeViewersOption,
+  SourceViewer,
   TextPosition,
   WorkspaceDiagnostic,
   WorkspaceDiagnosticLabel
@@ -650,8 +655,13 @@ export class NxLanguageSnapshot {
    * @throws NxEvaluationError when `uri` names no document in the snapshot.
    * @throws NxDisposedResourceError when this snapshot has already been disposed.
    */
-  public sourceTree(uri: string): SourceTree {
-    const json = invokeNative(() => getLanguageSnapshotNative(this).sourceTree(uri));
+  public sourceTree(uri: string, options?: { viewers?: SourceTreeViewersOption }): SourceTree {
+    const json = invokeNative(() =>
+      getLanguageSnapshotNative(this).sourceTree(
+        uri,
+        options?.viewers === undefined ? undefined : JSON.stringify({ viewers: options.viewers })
+      )
+    );
     return parseResultJson(json) as SourceTree;
   }
 

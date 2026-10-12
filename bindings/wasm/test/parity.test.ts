@@ -232,6 +232,37 @@ describe("language answer parity with the Node SDK", () => {
     }
   });
 
+  it("answers the source tree with resolved viewers identically", () => {
+    const source = `import "@nx/viewer"
+
+type Question = { label:string required:boolean = false }
+type Answer = yes | no
+
+viewer Question =
+  <ElementViewer name="Question" title=label layout=row>
+    <PropertyViewer of=required label="Required" whenTrue="Must be answered" />
+  </ElementViewer>
+
+viewer Answer =
+  <UnionViewer>
+    <CaseViewer of=yes label="Yes" />
+  </UnionViewer>
+`;
+    const corpus = [{ uri, source, identity: "demo/input.nx", version: 7 }];
+    const fromNode = new NodeLanguageSnapshot(corpus);
+    const fromWasm = host.createLanguageSnapshot(corpus);
+    try {
+      const options = { viewers: { modules: ["demo/missing.nx"] } };
+      const tree = JSON.parse(JSON.stringify(fromWasm.sourceTree(uri, options)));
+      expect(tree).toEqual(fromNode.sourceTree(uri, options));
+      expect(JSON.stringify(tree)).toContain('"viewer":{');
+      expect(tree.missingViewerModules).toEqual(["demo/missing.nx"]);
+    } finally {
+      fromWasm.dispose();
+      fromNode.dispose();
+    }
+  });
+
   it("answers hover and completions identically at every line start", () => {
     const lineCount = sources.component.split("\n").length;
 

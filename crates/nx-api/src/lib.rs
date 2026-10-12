@@ -35,6 +35,7 @@ mod component;
 mod diagnostics;
 mod eval;
 mod nx_text;
+mod program_viewers;
 mod schema;
 mod source_graph;
 mod value;
@@ -75,6 +76,10 @@ pub use eval::{
 };
 pub use nx_interpreter::ResourceLimits;
 pub use nx_text::{format_nx_text, NxValueNode, NxValueRole, NxValueText};
+pub use program_viewers::{
+    duplicate_program_viewers, duplicate_viewer_diagnostics, program_modules, program_viewers,
+    read_viewer_value, ProgramModule, ProgramViewer, ViewerAttribute, ViewerChild, ViewerValue,
+};
 pub use schema::{
     program_artifact_boundary_subtype_modules, program_artifact_function_schema,
     program_artifact_function_schema_json, program_artifact_type_schema,
