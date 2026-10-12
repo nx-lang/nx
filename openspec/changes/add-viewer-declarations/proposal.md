@@ -28,7 +28,7 @@ rule Bret chose on 2026-10-10.
   against the target's property union. To allow that, a generic record's field may be typed
   `P.Property` for a type parameter `P`, which becomes the argument's property union when the record
   is applied.
-- **Component props (default picked for review).** Viewer declarations name a component's props, but
+- **Component props.** Viewer declarations name a component's props, but
   since #57 a component has no `T.Property`. This change adds a derived record `T.Props` for every
   component, with exactly its props, and so the usual `T.Props.Property` and `T.Props.Update`. A
   viewer declaration on a component reads its props through `T.Props`. `Props` joins `Update`,

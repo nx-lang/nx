@@ -72,7 +72,7 @@ without a property union are a diagnostic. This is limited to records' own type 
 component's type parameter gets nothing new. A general rule for derived names of type parameters,
 `P.Update` included, is not needed yet.
 
-### Components name their props through a new `T.Props` record (default picked for review)
+### Components name their props through a new `T.Props` record
 
 A viewer declaration on a component binds `Target` to the component's derived props record, `T.Props`,
 so its property references check against `T.Props.Property`. `T.Props` is new in this change. It
@@ -91,7 +91,8 @@ follows `T.State` closely:
 
 This is the first half of the props-record idea Bret raised in #57: it gives the record and its update
 and property union, which viewer declarations need now. Generated host types for `T.Props` and a props
-record for functions are left for that later change. Until then `typegen` reports an exported
+record for functions are left for that later change. Bret settled the naming on 2026-10-12: `Props`
+for the record and `Property` kept for its property union, as on every other record. Until then `typegen` reports an exported
 declaration that refers to `T.Props` rather than emitting something it would later change.
 
 *Alternatives considered:*
@@ -99,9 +100,11 @@ declaration that refers to `T.Props` rather than emitting something it would lat
 - **A viewer-only property union for components.** Inside a viewer declaration, `Target.Property`
   would list a component's props. It needs no new record, but it brings back the
   `T.Property`-on-a-component meaning that #57 removed, for one context only.
-- **Name the record `T.Properties`.** Bret floated that name. `T.Props.Property` and
-  `T.Props.Update` read better than `T.Properties.Property`, and "props" is the word the NX docs use.
-  This is easy to rename if Bret prefers the long form.
+- **Name the record `T.Properties`.** Bret floated that name, then chose `Props`: it is the word
+  React, Vue, Svelte and the NX docs use, and `T.Props.Property` reads better than
+  `T.Properties.Property`.
+- **Rename `.Property` to `.Prop`.** Frameworks use "prop" only for component inputs, but every NX
+  record derives `.Property` (`User.Property`), so Bret kept `.Property`.
 - **Keep prop defaults in `T.Props`.** That would make `<Card.Props />` match `<Card />`, which helps
   the later props-building work. It would also make `T.Props` behave differently from `T.State`.
   Left for that change to decide.
@@ -166,7 +169,7 @@ order. Two host modules can both declare a viewer for a target because the host 
 
 - **`T.Props` is a language addition made for viewer declarations.** It is designed to stand on its
   own, to the same rules as `T.State`, so the later props work extends it rather than replacing it.
-  The risk is that the later work wants defaults or a different name; both are noted for review.
+  The risk is that the later work wants defaults; that would be a small change to this record.
 - **Viewer declarations add analysis work to every document.** Resolution walks the program's modules
   and their viewer declarations only when a client asks with `viewers`, and duplicate detection reuses
   the module list that analysis already builds. Viewer declaration type-checking happens with the
@@ -184,8 +187,6 @@ named `Props`. The `@nx/viewer` library is new and `unstable`.
 
 ## Open Questions
 
-- **Props record (for Bret):** is `T.Props` right, with no defaults and no typegen yet? The
-  alternatives are above.
 - **Is a base's `name` not being inherited the right call?** The proposal's example sets `name` on
   every kind, so it does not settle this.
 - **Should viewer diagnostics from cross-module duplicates be warnings instead of errors?** An error
