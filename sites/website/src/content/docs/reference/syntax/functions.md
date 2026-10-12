@@ -120,7 +120,7 @@ component <SearchBox
 - State defaults are evaluated once during initialization. After that, state changes only through the component's state update record, `<State.Update ... />` (see [Updating state](#updating-state)).
 - Hosts own the serialized snapshot returned by initialization and must pass it back into later dispatch calls.
 - Dispatch preserves host action order and returns effect actions in the same order handlers produce them.
-- `Update`, `Property` and `State` are reserved: a component cannot emit an action named `Update`, `Property` or `State`. `<Component>.State` is its state record, and `<Component>.Update` and `<Component>.Property` are kept free because they read as derived declarations. A prop or state field cannot be named `State` either.
+- `Update`, `Property`, `State` and `Props` are reserved: a component cannot emit an action named `Update`, `Property`, `State` or `Props`. `<Component>.State` is its state record and `<Component>.Props` its props record, and `<Component>.Update` and `<Component>.Property` are kept free because they read as derived declarations. A prop or state field cannot be named `State` either; a prop named `Props` is fine, since there is no bare `Props` inside a component.
 
 A call site that uses the `SearchBox` above binds a handler per emitted action, and a function can
 build an emitted action by its public name:
@@ -176,7 +176,8 @@ let contacts:Contact* = {}
   specified and shows the `TItem=` form to add.
 - A type parameter is not a prop. It carries no value, has no default, is never required, is
   not a field of the runtime record, and is not a case of the state's property union.
-  `<Component>.State` and the state's own update record erase it.
+  `<Component>.State` and the state's own update record erase it. `<Component>.Props` keeps it, as
+  a generic record does: `<List.Props TItem=int/>`.
   Once type checking has consumed a `TItem=Contact` binding, nothing below the checker sees it.
 - An emitted action's payload cannot be typed by a type parameter. `emits { pick { item:TItem } }`
   is rejected: the action is a record of its own, usable outside the component, where `TItem` is
@@ -197,8 +198,8 @@ so `<Range T=int/>` and `<Range T=float64/>` are different types. See
 ## Updating state
 
 Every record and action has a derived **update record**, `T.Update`, with the same fields as `T`,
-every one optional. A component is not a record, so it has none of its own; its state record does
-(see [Component state](#component-state)). An update record is a patch: a field it leaves out means "unchanged", and a
+every one optional. A component is not a record, so it has none of its own; its props record and
+its state record do (see [Component props and state](#component-props-and-state)). An update record is a patch: a field it leaves out means "unchanged", and a
 field set to the empty value `{}` means "cleared", which is allowed only where the field is
 optional in `T` (`email?:string`). Constructing one applies no defaults and requires nothing.
 
@@ -216,22 +217,51 @@ let nothing = <User.Update />                 // a valid, empty patch
   are present.
 - A list field is replaced whole.
 
-### Component state
+### Component props and state
 
-A component with `state` also has a derived **state record**, `T.State`, whose fields are its state
-fields in order, with their types and optional marks and without their defaults. It is a plain
-record like any other, so it has its own update record, `T.State.Update`, and property union,
-`T.State.Property`. It cannot be extended, and nothing else has a `.State`: a component without
-state, a record, `T.State` itself, `T.Update` and `T.Property` all report it as unknown. A
-component's `T.Update` and `T.Property` are unknown too, reported with a suggestion to write
-`T.State.Update` or `T.State.Property`.
+Every component has a derived **props record**, `T.Props`, whose fields are its props, inherited
+props first, with their types, optional marks and `content` modifiers and without their defaults. A
+component with `state` also has a derived **state record**, `T.State`, whose fields are its state
+fields in order, again with their types and optional marks and without their defaults. A default
+may read other props, which a record written outside the component does not have, so neither record
+keeps one.
+
+Each is a plain record like any other, so each has its own update record, `T.Props.Update` and
+`T.State.Update`, and property union, `T.Props.Property` and `T.State.Property`:
+
+```nx
+component <Card title:string subtitle?:string /> = { <Panel /> }
+
+let saved = <Card.Props title="Draft" />
+let rename = <Card.Props.Update title="Final" />
+let key: Card.Props.Property = {Card.Props.Property.subtitle}
+let root() = {apply(saved, rename)}
+```
+
+```nx output
+<Card.Props title="Final" />
+```
+
+- `T.Props` has one field per prop and nothing else: no type parameter, state field or emitted
+  action. A component with no props has an empty one, so `<Divider.Props />` is a value.
+- Because it keeps no defaults, a `T.Props` value gives every prop that is not optional, even one
+  the component defaults: `<Counter.Props />` is rejected when `Counter` declares `step:int = 1`.
+- Neither record can be extended, and only a component has them. A component without state, a
+  record, `T.State` and `T.Props` themselves, `T.Update` and `T.Property` all report `.State` or
+  `.Props` as unknown.
+- A component's own `T.Update` and `T.Property` are unknown too, reported with a suggestion to
+  write `T.State.Update` or `T.State.Property` when it has state, and `T.Props.Update` or
+  `T.Props.Property` when it has none.
+- `typegen` emits no host type for `T.Props` yet, and reports an exported declaration whose
+  generated type would refer to one.
 
 Inside a component body, a bare `State` names that component's state record, even if the module
 declares something else called `State`. It works as a type (`saved?:State`), as a tag
 (`<State.Update count=0 />`), and as the head of a member access (`{State.Property.count}`).
 Outside a component, write the qualified form, `Counter.State.Update`. `Update` and `Property` are
 ordinary names inside a component; a bare one that resolves to nothing is reported with a
-suggestion to write `State.Update` or `State.Property`.
+suggestion to write `State.Update` or `State.Property`. There is no bare `Props`: the props record
+is always written qualified, `Counter.Props`, inside the component as well.
 
 ```nx
 external component <Button label:string emits { Tapped { } } />
@@ -287,8 +317,8 @@ unknown-field and cleared-field rules as one the type checker saw.
 ## Property references
 
 Every record and action also has a derived **property union**, `T.Property`: a constant union
-with one case per field of `T`, inherited fields first. A component has none of its own; its state
-has `T.State.Property`. A case names a field as a value, so a sort key, a column list, or a
+with one case per field of `T`, inherited fields first. A component has none of its own; its props
+have `T.Props.Property` and its state `T.State.Property`. A case names a field as a value, so a sort key, a column list, or a
 validation rule is typed by the fields that exist rather than by `string`.
 
 ```nx

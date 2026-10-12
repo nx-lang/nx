@@ -52,12 +52,12 @@
 
 ## 7. Editor, docs and examples
 
-- [ ] 7.1 Scope `viewer` declarations in `src/vscode/syntaxes/nx.tmLanguage.json`, with grammar tests
-- [ ] 7.2 Add `viewer` to `nx-grammar.md` and the website syntax reference, and write a website page on viewer declarations with the survey example
-- [ ] 7.3 Add the `@nx/viewer` reference page beside the agent library's
-- [ ] 7.4 Document `T.Props` beside `T.State` on the website's component pages
-- [ ] 7.5 Add a playground example, `viewer-declarations.nx`, with a small record and union with viewers, and its expected output
+- [x] 7.1 Scope `viewer` declarations in `src/vscode/syntaxes/nx.tmLanguage.json`, with grammar tests
+- [x] 7.2 Add `viewer` to `nx-grammar.md` and the website syntax reference, and write a website page on viewer declarations with the survey example
+- [x] 7.3 Add the `@nx/viewer` reference page beside the agent library's
+- [x] 7.4 Document `T.Props` beside `T.State` on the website's component pages
+- [x] 7.5 Add a playground example, `viewer-declarations.nx`, with a small record and union with viewers, and its expected output
 
 ## 8. Verification
 
-- [ ] 8.1 Run the Rust workspace tests, clippy, the TypeScript package tests, the viewer coverage test, and `openspec validate add-viewer-declarations --strict`
+- [x] 8.1 Run the Rust workspace tests, clippy, the TypeScript package tests, the viewer coverage test, and `openspec validate add-viewer-declarations --strict`

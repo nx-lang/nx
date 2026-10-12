@@ -1,0 +1,2 @@
+<Drink iced=false name="Latte" size=medium />
+<Drink color="#5a3a22" iced=true name="Cold brew" size=large />
