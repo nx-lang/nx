@@ -256,6 +256,30 @@ fn a_viewer_without_the_library_imported_says_to_import_it() {
 }
 
 #[test]
+fn the_wrong_viewer_record_is_one_error() {
+    // A union's viewer written as an element viewer, property viewers and all: one mismatch, not
+    // an error for each property the element viewer could name.
+    for value in [
+        "<ElementViewer title=small />",
+        "<ElementViewer><PropertyViewer of=small /></ElementViewer>",
+    ] {
+        let source =
+            format!("import \"@nx/viewer\"\ntype Size = small | large\nviewer Size = {value}");
+        let diagnostics = diagnostics(&[("main.nx", source.as_str())]);
+        let errors = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == crate::NxSeverity::Error)
+            .map(|diagnostic| diagnostic.code.as_deref().unwrap_or(""))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            errors,
+            ["viewer-record-mismatch"],
+            "{value}: {diagnostics:#?}"
+        );
+    }
+}
+
+#[test]
 fn a_target_that_cannot_have_a_viewer() {
     assert_error(
         "let answer = 42\n\

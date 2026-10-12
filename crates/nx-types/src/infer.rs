@@ -391,7 +391,11 @@ pub struct InferenceContext<'a> {
     /// <para>Every construction of an `@nx/viewer` record in the value that leaves `Target`
     /// unbound gets this, and one that binds it to anything else is reported. `None` everywhere
     /// else, where a generic record binds every parameter itself.</para>
-    viewer_target: Option<Type>,
+    ///
+    /// <para>The viewer record the target calls for comes with it, when the target resolved. A
+    /// viewer record that does not fit it binds the error type instead, so the one
+    /// `viewer-record-mismatch` stands alone rather than above an error for each property.</para>
+    viewer_target: Option<(Type, Option<nx_hir::ViewerRecord>)>,
     /// The first viewer declaration of each target in this module, by the declaration the
     /// target names.
     viewer_targets: FxHashMap<nx_hir::DeclaringOrigin, (Name, TextSpan)>,
@@ -1444,8 +1448,12 @@ impl<'a> InferenceContext<'a> {
         type_params: &[Name],
         span: TextSpan,
     ) {
-        let Some(target) = self.viewer_target.clone() else {
+        let Some((target, expected)) = self.viewer_target.clone() else {
             return;
+        };
+        let target = match expected {
+            Some(expected) if !viewer_record_fits(expected, record_name.as_str()) => Type::Error,
+            _ => target,
         };
         let param = Name::new(nx_hir::VIEWER_TARGET_PARAMETER);
         if !type_params.contains(&param) {
@@ -1537,7 +1545,9 @@ impl<'a> InferenceContext<'a> {
             ),
             None => Type::Error,
         };
-        let previous = self.viewer_target.replace(target_ty);
+        let previous = self
+            .viewer_target
+            .replace((target_ty, target.as_ref().map(|target| target.record)));
         let actual = self.infer_expr(viewer.value);
         self.viewer_target = previous;
 
@@ -8241,6 +8251,18 @@ pub(crate) fn widened_type(ty: &Type, target: nx_hir::ast::PrimitiveType) -> Typ
         }
     }
     widen(ty, Primitive::from_hir_type(target))
+}
+
+/// Whether the `@nx/viewer` record `record` belongs in the value of a viewer declaration whose
+/// target calls for `expected`: that record itself, or the record of one of its children. A record
+/// outside the library fits anywhere.
+fn viewer_record_fits(expected: nx_hir::ViewerRecord, record: &str) -> bool {
+    match record {
+        "ElementViewer" | "UnionViewer" | "ValueViewer" => record == expected.name(),
+        "PropertyViewer" => expected == nx_hir::ViewerRecord::Element,
+        "CaseViewer" => expected == nx_hir::ViewerRecord::Union,
+        _ => true,
+    }
 }
 
 /// The indefinite article for a viewer record's name: "an ElementViewer", "a UnionViewer".
