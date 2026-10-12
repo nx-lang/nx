@@ -555,11 +555,11 @@ mod tests {
         );
     }
 
-    /// A prop or state field typed by the component's type parameter reaches the props and state
-    /// update companions and the state record. Neither host names that instantiation — an
-    /// NX use site fixed it — so both surfaces erase the parameter to the host's top type.
+    /// A state field typed by the component's type parameter reaches the state record and its
+    /// update companion. Neither host names that instantiation — an NX use site fixed it — so
+    /// both surfaces erase the parameter to the host's top type.
     #[test]
-    fn a_generic_component_state_and_update_companion_erase_the_parameter() {
+    fn a_generic_component_state_and_its_update_companion_erase_the_parameter() {
         let source = "export external component <Picker TItem:type items?:TItem+ /> = { state { sel?:TItem } }\n";
 
         let typescript = generate_for(source, TargetLanguage::TypeScript);
@@ -575,14 +575,8 @@ mod tests {
             .and_then(|tail| tail.split('}').next())
             .unwrap_or_else(|| panic!("Picker_state_update block:\n{typescript}"));
         assert!(update.contains("sel?: unknown | null;"), "{update}");
-        let props = typescript
-            .split("export interface Picker_update")
-            .nth(1)
-            .and_then(|tail| tail.split('}').next())
-            .unwrap_or_else(|| panic!("Picker_update block:\n{typescript}"));
-        assert!(props.contains("items?: unknown[] | null;"), "{props}");
         assert!(
-            !state.contains("TItem") && !update.contains("TItem") && !props.contains("TItem"),
+            !state.contains("TItem") && !update.contains("TItem"),
             "{typescript}"
         );
 
@@ -1700,11 +1694,12 @@ function glyph(b: Badge): string {
         assert!(search_box.content.contains("theme: ThemeMode;"));
         let (state, update) = search_box
             .content
-            .split_once("export interface SearchBox_update")
+            .split_once("export interface SearchBox_state_update")
             .expect("the state contract and its update companion");
         assert!(!state.contains("$type"));
-        assert!(update.contains("$type: \"SearchBox.Update\";"));
+        assert!(update.contains("$type: \"SearchBox.State.Update\";"));
         assert!(update.contains("theme?: ThemeMode;"));
+        assert!(!search_box.content.contains("SearchBox_update"));
     }
 
     #[test]
@@ -3378,14 +3373,8 @@ export type QuestionFlowInitialExperience = {
         assert!(!user_update.contains("name: string;"));
         assert!(!user_update.contains("name?: string | null;"));
 
-        // A component's `_update` patches its props, and `_state_update` its state.
-        let (_, counter_update) = output
-            .split_once("export interface Counter_update {")
-            .expect("Counter_update companion");
-        let counter_update = counter_update.split('}').next().expect("companion body");
-        assert!(counter_update.contains("$type: \"Counter.Update\";"));
-        assert!(counter_update.contains("step?: number;"));
-        assert!(!counter_update.contains("count"));
+        // A component is not a record, so only its state has an update companion.
+        assert!(!output.contains("Counter_update"), "{output}");
 
         let (_, state_update) = output
             .split_once("export interface Counter_state_update {")
@@ -3430,26 +3419,27 @@ export type QuestionFlowInitialExperience = {
             r#"
             export type User = { name:string email?:string }
             export action Saved = { note:string }
+            export abstract type Stepper = { step:int }
             export component <Counter step:int /> = { state { count:int = 0 } <Label /> }
             "#,
             TargetLanguage::CSharp,
         );
         let nl = options::FormatOptions::defaults_for(TargetLanguage::CSharp).newline_str();
 
-        // A component's props patch has no plain type to apply to, so it derives from the untyped
-        // base and carries a name→type schema.
-        let counter = csharp_companion_body(&output, "Counter_update : NxUpdateRecord");
+        // An abstract record has no plain type a host can instantiate to apply a patch to, so its
+        // companion derives from the untyped base and carries a name→type schema.
+        let stepper = csharp_companion_body(&output, "Stepper_update : NxUpdateRecord");
         assert!(
-            counter.contains("public string NxType => \"Counter.Update\";"),
-            "{counter}"
+            stepper.contains("public string NxType => \"Stepper.Update\";"),
+            "{stepper}"
         );
-        let expected_counter_schema = [
+        let expected_stepper_schema = [
             "        private static readonly NxUpdateSchema FieldSchema = new(",
-            "            \"Counter.Update\",",
+            "            \"Stepper.Update\",",
             "            new NxField(\"step\", typeof(long), clearable: false));",
         ]
         .join(nl);
-        assert!(counter.contains(&expected_counter_schema), "{counter}");
+        assert!(stepper.contains(&expected_stepper_schema), "{stepper}");
         let expected_step = [
             "        public NxOptional<long> Step",
             "        {",
@@ -3458,12 +3448,13 @@ export type QuestionFlowInitialExperience = {
             "        }",
         ]
         .join(nl);
-        assert!(counter.contains(&expected_step), "{counter}");
-        assert!(!counter.contains("NxOptional<long> Count"), "{counter}");
-        assert!(!counter.contains("Diff("), "{counter}");
-        assert!(!output.contains("CounterProperties"), "{output}");
+        assert!(stepper.contains(&expected_step), "{stepper}");
+        assert!(!stepper.contains("Diff("), "{stepper}");
+        assert!(!output.contains("StepperProperties"), "{output}");
 
-        // Its state patch applies to the `Counter_state` contract.
+        // A component's state patch applies to the `Counter_state` contract, and the component
+        // itself has no companion.
+        assert!(!output.contains("Counter_update"), "{output}");
         let state =
             csharp_companion_body(&output, "Counter_state_update : NxUpdate<Counter_state>");
         assert!(
@@ -3580,18 +3571,16 @@ export type QuestionFlowInitialExperience = {
         assert!(table.contains(&expected_of), "{table}");
 
         // An abstract record cannot be instantiated, so nothing applies a patch to it: its
-        // companion takes the untyped base and gets no key table, like a component's.
+        // companion takes the untyped base and gets no key table.
         assert!(
             output.contains("public sealed class Named_update : NxUpdateRecord"),
             "{output}"
         );
         assert!(!output.contains("NamedProperties"), "{output}");
-        assert!(
-            output.contains("public sealed class Counter_update : NxUpdateRecord"),
-            "{output}"
-        );
+        // A component is not a record, so it has neither companion nor a key table.
+        assert!(!output.contains("Counter_update"), "{output}");
         assert!(!output.contains("CounterProperties"), "{output}");
-        assert!(output.contains("public enum Counter_property"), "{output}");
+        assert!(!output.contains("Counter_property"), "{output}");
     }
 
     /// An external component with state gets a plain record under its own name, but that record
@@ -3612,11 +3601,8 @@ export type QuestionFlowInitialExperience = {
             output.contains("public sealed class Ticker_state_update : NxUpdate<Ticker_state>"),
             "{output}"
         );
-        // The props patch has no plain type a host holds, so it carries a name→type schema.
-        assert!(
-            output.contains("public sealed class Ticker_update : NxUpdateRecord"),
-            "{output}"
-        );
+        // A component is not a record, so its props have no update companion.
+        assert!(!output.contains("Ticker_update"), "{output}");
         assert!(
             output.contains("public static class Ticker_stateProperties"),
             "{output}"
@@ -4608,11 +4594,7 @@ export type User extends Named = { email:string }
             "{}",
             output
         );
-        assert!(
-            output.contains("export type Counter_property = \"step\";"),
-            "{}",
-            output
-        );
+        assert!(!output.contains("Counter_property"), "{}", output);
         assert!(
             output.contains("export type Counter_state_property = \"count\";"),
             "{}",
@@ -4724,7 +4706,7 @@ export type User extends Named = { email:string }
             app_dir.join("Saved.nx"),
             r#"import { Counter } from "../ui"
 
-export type Saved = { state:Counter.State patch?:Counter.State.Update key?:Counter.State.Property props?:Counter.Update }
+export type Saved = { state:Counter.State patch?:Counter.State.Update key?:Counter.State.Property }
 "#,
         )
         .expect("app file");
@@ -4755,11 +4737,9 @@ export type Saved = { state:Counter.State patch?:Counter.State.Update key?:Count
             "Counter_state as Counter_State",
             "Counter_state_update as Counter_State_Update",
             "Counter_state_property as Counter_State_Property",
-            "Counter_update as Counter_Update",
             "state: Counter_State;",
             "patch?: Counter_State_Update;",
             "key?: Counter_State_Property;",
-            "props?: Counter_Update;",
         ] {
             assert!(
                 saved.content.contains(expected),
@@ -5391,12 +5371,12 @@ export external component <Table sortBy?:User.Property columns:User.Property+ pa
             "    count:int   /// The count.\n",
             "  }\n",
             "}\n",
-            "/// A component without props, whose property companion has no cases.\n",
-            "export external component <Spacer />\n",
+            "/// An action without fields, whose property companion has no cases.\n",
+            "export action Reset = { }\n",
         );
         let generated = generate_for(source, TargetLanguage::TypeScript);
         assert!(
-            generated.contains("export type Spacer_property = never;"),
+            generated.contains("export type Reset_property = never;"),
             "{generated}"
         );
         assert!(generated.contains("Ends *\\/ early?"), "{generated}");
@@ -5407,13 +5387,13 @@ export external component <Table sortBy?:User.Property columns:User.Property+ pa
         fs::write(temp_dir.path().join("types.ts"), &generated).expect("types.ts");
         fs::write(
             temp_dir.path().join("host.ts"),
-            "import type { Contact, LoadState, Counter_state_update, Spacer_property, Spacer_update } from \"./types\";\n\
+            "import type { Contact, LoadState, Counter_state_update, Reset_property, Reset_update } from \"./types\";\n\
              const contact: Contact = { $type: \"Contact\", name: \"Ada\" };\n\
              declare const state: LoadState;\n\
              const patch: Counter_state_update = { $type: \"Counter.State.Update\", count: 1 };\n\
-             const spacer: Spacer_update = { $type: \"Spacer.Update\" };\n\
-             declare const key: Spacer_property;\n\
-             void contact; void state; void patch; void spacer; void key;\n",
+             const reset: Reset_update = { $type: \"Reset.Update\" };\n\
+             declare const key: Reset_property;\n\
+             void contact; void state; void patch; void reset; void key;\n",
         )
         .expect("host.ts");
 

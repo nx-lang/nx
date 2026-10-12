@@ -232,7 +232,7 @@ fn derived_companions_resolve() {
     assert_clean(
         "type Contact = { name:string }\n\
          component <Counter /> = { state { count:int = 0 } <div /> }\n\
-         type Uses = { p:Contact.Property u:Contact.Update cu?:Counter.Update cp:Counter.Property }",
+         type Uses = { p:Contact.Property u:Contact.Update cu?:Counter.State.Update cp:Counter.State.Property }",
     );
 }
 

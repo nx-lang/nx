@@ -523,21 +523,6 @@ fn effective_component_contract_resolved(
     })
 }
 
-/// The effective props of the component `name` reaches in `namespace_module`, inherited first.
-///
-/// <para>Returns `None` when the name reaches no component or its contract does not
-/// resolve.</para>
-pub(crate) fn effective_component_props_in(
-    module: &PreparedModule,
-    namespace_module: &str,
-    name: &Name,
-) -> Option<Vec<EffectiveField>> {
-    let component = resolve_component_definition_with_identity(module, namespace_module, name)?;
-    effective_component_contract_resolved(module, &component)
-        .ok()
-        .map(|contract| contract.props)
-}
-
 fn resolve_component_definition_with_identity(
     module: &PreparedModule,
     namespace_module: &str,

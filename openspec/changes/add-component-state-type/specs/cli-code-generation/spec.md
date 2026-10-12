@@ -47,12 +47,13 @@ the synthesized companion instead of overwriting the conflicting declaration.
 - **AND** SHALL preserve the explicit exported declaration `SearchBox_state`
 
 ### Requirement: Generated type surfaces include update records with distinct absence
-For every exported record, action, and component, `typegen` SHALL emit a companion update type
-named `<Name>_update` beside the exported type, following the same companion-naming and collision
-rules as `<ComponentName>_state`, and for every exported component that declares state it SHALL
-also emit `<Name>_state_update` for the component's `T.State.Update`. The companion SHALL carry the
-target's effective fields, which for a component's `<Name>_update` are its props and for
-`<Name>_state_update` are its state fields, each optional, SHALL carry the `$type` discriminator `<Name>.Update`
+For every exported record and action, `typegen` SHALL emit a companion update type named
+`<Name>_update` beside the exported type, following the same companion-naming and collision rules
+as `<ComponentName>_state`, and for every exported component that declares state it SHALL emit
+`<Name>_state_update` for the component's `T.State.Update`. A component SHALL NOT get a
+`<Name>_update` of its own, since it has no `T.Update`. The companion SHALL carry the target's
+effective fields, which for `<Name>_state_update` are the component's state fields, each optional,
+SHALL carry the update record's `$type` discriminator (`<Name>.Update` or `<Name>.State.Update`)
 where the target language emits discriminators, and SHALL let a consumer distinguish a field that
 is absent from a field that is present and `null`, where `null` is the host spelling of a cleared
 field — the empty value — and is legal only for a field that is optional in the target, as
@@ -90,10 +91,10 @@ output.
 - **THEN** the generated `User_update` SHALL expose, to the managed SDK, each field's wire name paired with its value type
 - **AND** that schema SHALL be the only thing serialization needs to read or write the companion, so no runtime reflection over the generated type is required
 
-#### Scenario: Component update companions are derived from props and from state
+#### Scenario: A component's only update companion is its state's
 - **WHEN** source contains `export component <Counter step:int /> = { state { count:int = 0 } <Label /> }`
-- **THEN** generation SHALL emit `Counter_update` with the single optional field `step` and the `$type` `Counter.Update`
-- **AND** SHALL emit `Counter_state_update` with the single optional field `count` and the `$type` `Counter.State.Update`
+- **THEN** generation SHALL emit `Counter_state_update` with the single optional field `count` and the `$type` `Counter.State.Update`
+- **AND** SHALL NOT emit `Counter_update`
 
 #### Scenario: Update companion name collision warns and skips
 - **WHEN** source contains `export type User_update = string` and `export type User = { name:string }`
@@ -128,10 +129,11 @@ output.
 - **AND** the generated companion SHALL carry the written name `Tag` for that field
 
 ### Requirement: Generated type surfaces include a property companion per record-shaped declaration
-For every exported record, action, and component, `typegen` SHALL emit a companion property type
-named `<Name>_property` beside the exported type, following the same companion-naming and collision
-rules as `<Name>_update`, and for every exported component that declares state it SHALL also emit
-`<Name>_state_property` for the component's `T.State.Property`. The companion SHALL be generated exactly
+For every exported record and action, `typegen` SHALL emit a companion property type named
+`<Name>_property` beside the exported type, following the same companion-naming and collision rules
+as `<Name>_update`, and for every exported component that declares state it SHALL emit
+`<Name>_state_property` for the component's `T.State.Property`. A component SHALL NOT get a
+`<Name>_property` of its own, since it has no `T.Property`. The companion SHALL be generated exactly
 as a constant union whose authored cases are the target's effective field names in `T.Property`
 case order: a TypeScript union of the field-name string literals, which is assignable to `keyof`
 the generated record type, and a C# `enum` with the authored-string wire format and the shared
@@ -149,9 +151,9 @@ with the same cross-library linkage a reference to `T` itself would produce.
 - **THEN** C# generation SHALL emit `enum User_property` with members for `name` and `email`
 - **AND** the enum SHALL serialize each member as its authored field name in both JSON and MessagePack using the shared enum helpers
 
-#### Scenario: Component property companions are derived from props and from state, and include inherited fields
+#### Scenario: Property companions include inherited fields, and a component's only one is its state's
 - **WHEN** source contains `abstract type Named = { name:string } export component <Counter step:int /> = { state { count:int = 0 } <Label /> }` and `export type User extends Named = { email:string }`
-- **THEN** generation SHALL emit `Counter_property` with the single case `step` and `Counter_state_property` with the single case `count`
+- **THEN** generation SHALL emit `Counter_state_property` with the single case `count` and SHALL NOT emit `Counter_property`
 - **AND** SHALL emit `User_property` with cases `name` then `email`
 
 #### Scenario: A property-typed prop references the companion

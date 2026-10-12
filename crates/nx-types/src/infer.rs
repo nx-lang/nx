@@ -1529,9 +1529,8 @@ impl<'a> InferenceContext<'a> {
     ///
     /// <para>Inside a component a result either patches that component's state — its state
     /// record's update record — or goes to its parent, which only an action the component emits
-    /// may do. The component's own update record patches its props, which belong to the parent,
-    /// so it is rejected with a pointer to `State.Update`. At the root there is no component to
-    /// patch or parent to reach, so any action or update record is an effect for the host.</para>
+    /// may do. At the root there is no component to patch or parent to reach, so any action or
+    /// update record is an effect for the host.</para>
     fn check_handler_result_item(&mut self, owner: Option<&Name>, ty: &Type, span: TextSpan) {
         let named = match ty {
             Type::Error => return,
@@ -1571,7 +1570,6 @@ impl<'a> InferenceContext<'a> {
             nx_hir::RecordKind::Update { .. } => {
                 let state_update =
                     nx_hir::update_record_name(nx_hir::state_record_name(owner.as_str()).as_str());
-                let props_update = nx_hir::update_record_name(owner.as_str());
                 let expected = self.declared_named_type(&state_update);
                 if expected
                     .as_ref()
@@ -1579,35 +1577,20 @@ impl<'a> InferenceContext<'a> {
                 {
                     return;
                 }
-                let is_props_update = self
-                    .declared_named_type(&props_update)
-                    .is_some_and(|props| named.is_same_declaration_as(&props));
-                let message = match (is_props_update, expected.is_some()) {
-                    (true, true) => format!(
-                        "Action handler inside component '{}' returns '{}', which patches the component's props; props belong to the parent, so write 'State.Update' to change this component's state",
-                        owner, named.name
-                    ),
-                    (true, false) => format!(
-                        "Action handler inside component '{}' returns '{}', which patches the component's props; props belong to the parent, and '{}' declares no state to change",
-                        owner, named.name, owner
-                    ),
-                    (false, true) => format!(
+                let message = if expected.is_some() {
+                    format!(
                         "Action handler inside component '{}' returns '{}', but only '{}' can change this component's state",
                         owner, named.name, state_update
-                    ),
+                    )
+                } else {
                     // A component without state has no state record, so there is nothing to
                     // change and no own record to name.
-                    (false, false) => format!(
+                    format!(
                         "Action handler inside component '{}' returns '{}', but '{}' declares no state to change",
                         owner, named.name, owner
-                    ),
+                    )
                 };
-                let code = if is_props_update {
-                    "handler-update-props"
-                } else {
-                    "handler-update-wrong-target"
-                };
-                self.error(code, message, span);
+                self.error("handler-update-wrong-target", message, span);
             }
             nx_hir::RecordKind::Action => {
                 if !self.component_emits_action(owner, named) {
@@ -3427,9 +3410,28 @@ impl<'a> InferenceContext<'a> {
                     )
                 } else if kind == "state record" {
                     format!("'{}' is not a component with state", target)
-                } else if record.is_some()
-                    || self.resolve_component_definition(&target_name).is_some()
+                } else if record.is_none()
+                    && self.resolve_component_definition(&target_name).is_some()
                 {
+                    // A component is not a record, so only its state record has these.
+                    let state = nx_hir::state_record_name(target);
+                    if self.resolve_record_definition(&state).is_none() {
+                        format!(
+                            "component '{}' is not a record, so it has no {}",
+                            target, kind
+                        )
+                    } else {
+                        let (suffix, use_) = if kind == "update record" {
+                            (nx_hir::UPDATE_RECORD_SUFFIX, "to patch its state")
+                        } else {
+                            (nx_hir::PROPERTY_UNION_SUFFIX, "to name a state field")
+                        };
+                        format!(
+                            "component '{}' is not a record, so it has no {}; write '{}.{}' {}",
+                            target, kind, state, suffix, use_
+                        )
+                    }
+                } else if record.is_some() {
                     // The target exists and so does its derived declaration; it was only not
                     // reached here.
                     return None;
@@ -3651,6 +3653,9 @@ impl<'a> InferenceContext<'a> {
                 if record.update_target().is_none() {
                     return Some(named.clone());
                 }
+            } else if Self::is_derived_record_name(named) {
+                // The unknown `X.Update` or `X.State` was already reported where it was written.
+                return None;
             }
         }
         self.error(
@@ -3664,6 +3669,12 @@ impl<'a> InferenceContext<'a> {
             span,
         );
         None
+    }
+
+    /// Whether `named` is spelled as a derived update or state record, `X.Update` or `X.State`.
+    fn is_derived_record_name(named: &NamedType) -> bool {
+        let name = named.name.as_str();
+        nx_hir::is_update_record_name(name) || nx_hir::is_state_record_name(name)
     }
 
     /// The update-record type an intrinsic argument must have, with the name of the declaration
@@ -3681,6 +3692,10 @@ impl<'a> InferenceContext<'a> {
                 .and_then(|record| record.update_target().cloned())
             {
                 return Some((named.clone(), target));
+            }
+            if Self::is_derived_record_name(named) && self.record_definition_for(named).is_none() {
+                // The unknown `X.Update` or `X.State` was already reported where it was written.
+                return None;
             }
         }
         self.error(

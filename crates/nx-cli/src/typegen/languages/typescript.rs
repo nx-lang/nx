@@ -549,7 +549,7 @@ fn ts_generic_arguments(record: &ExportedRecord) -> String {
 fn emit_union(writer: &mut CodeWriter, union_def: &ExportedUnion, types: ModuleTypes<'_>) {
     // A constant union is a closed set of authored strings, which TypeScript expresses natively
     // as a union of string literals — what an `enum` generated (design D4).
-    // The property companion of a component without props has no cases, which is `never`.
+    // The property companion of a record without fields has no cases, which is `never`.
     if union_def.is_constant() {
         let rhs = if union_def.cases.is_empty() {
             "never".to_string()

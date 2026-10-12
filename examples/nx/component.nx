@@ -48,8 +48,8 @@ let renderNotice(state:LoadState, compact:boolean) = {
 // Inside the component, `State` names `Counter.State`, so `<State.Update ... />` names
 // `Counter.State.Update`, and it lists only the fields that change. An action the component emits
 // goes to its parent instead. `State.Property.count` names the `count` state field as a value: a
-// case of the derived constant union `Counter.State.Property`. `Counter.Update` and
-// `Counter.Property` describe the props, which belong to the parent.
+// case of the derived constant union `Counter.State.Property`. A component is not a record, so it
+// has no `Counter.Update` or `Counter.Property` of its own; its props belong to the parent.
 action Reset = { }
 
 external component <Button label:string emits { Tapped { } } />

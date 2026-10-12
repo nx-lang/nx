@@ -318,15 +318,14 @@ fn a_type_parameter_is_never_a_missing_property() {
 }
 
 #[test]
-fn the_property_unions_of_a_generic_stateful_component_leave_out_its_type_parameters() {
+fn the_state_property_union_of_a_generic_component_leaves_out_its_type_parameters() {
     assert_clean(
         "component <List TItem:type items:TItem+ /> = { state { selected:int = 0 } <Label /> }\n\
-         let k:List.Property = {List.Property.items}\n\
          let s:List.State.Property = {List.State.Property.selected}",
     );
     assert_reports(
         "component <List TItem:type items:TItem+ /> = { state { selected:int = 0 } <Label /> }\n\
-         let k:List.Property = {List.Property.TItem}",
+         let k:List.State.Property = {List.State.Property.TItem}",
         "TItem",
     );
 }

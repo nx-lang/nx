@@ -2339,18 +2339,6 @@ let root() = <Counter.State.Update count=1 />
 }
 
 #[test]
-fn generated_javascript_constructs_a_component_props_update_record() {
-    let output = execute_generated_javascript_root(
-        r#"
-component <Counter step:int = 1 /> = { state { count:int = 0 } <Label /> }
-let root() = <Counter.Update step=2 />
-"#,
-    );
-
-    assert_json_values_eq(&output, r#"{ "$type": "Counter.Update", "step": 2 }"#);
-}
-
-#[test]
 fn generated_javascript_constructs_a_component_state_record() {
     let source = r#"
 component <Counter /> = { state { count:int = 0 note?:string } <Label /> }

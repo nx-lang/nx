@@ -962,7 +962,7 @@ fn an_update_record_makes_every_field_optional_and_a_clearable_field_nullable() 
 }
 
 #[test]
-fn a_component_state_record_has_its_state_fields_and_its_props_update_has_its_props() {
+fn a_component_state_record_and_its_update_have_the_state_fields() {
     let artifact = source(
         "component <Counter step:int = 1 /> = { state { count:int = 0 note?:string } <Label /> }",
     );
@@ -989,15 +989,6 @@ fn a_component_state_record_has_its_state_fields_and_its_props_update_has_its_pr
             "$type": { "const": "Counter.State.Update" },
             "count": { "type": "integer" },
             "note": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
-        })
-    );
-
-    let props_update = document(&output_type(&artifact, "Counter.Update"));
-    assert_eq!(
-        props_update["$defs"]["Counter.Update"]["properties"],
-        json!({
-            "$type": { "const": "Counter.Update" },
-            "step": { "type": "integer" }
         })
     );
 }

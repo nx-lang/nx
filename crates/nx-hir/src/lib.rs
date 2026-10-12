@@ -482,8 +482,8 @@ impl UnionDef {
         self.base.is_none() && self.cases.iter().all(UnionCaseDef::is_fieldless)
     }
 
-    /// Returns the name of the record, action, or component whose fields this union names, when
-    /// this is a derived `<Target>.Property` union.
+    /// Returns the name of the record, action, or component state record whose fields this union
+    /// names, when this is a derived `<Target>.Property` union.
     pub fn property_target(&self) -> Option<&Name> {
         self.property_target.as_ref()
     }
@@ -500,10 +500,11 @@ pub struct UnionDef {
     pub base: Option<Name>,
     /// Cases in source order.
     pub cases: Vec<UnionCaseDef>,
-    /// The record, action, or component this union is the derived `<Target>.Property` of.
+    /// The record, action, or component state record this union is the derived
+    /// `<Target>.Property` of.
     ///
-    /// <para>A property union has one constant case per effective field of its target (a
-    /// component's effective props), in declaration order with inherited fields first. It has no
+    /// <para>A property union has one constant case per effective field of its target, in
+    /// declaration order with inherited fields first. It has no
     /// base, cannot be extended, and has no derived declarations of its own.</para>
     pub property_target: Option<Name>,
     /// Documentation from `///` doc comments, if any.
@@ -829,13 +830,12 @@ pub enum RecordKind {
     /// `action Name = { ... }` declaration.
     Action,
     /// Derived `<Target>.Update` patch record, synthesized for every record, action, inline
-    /// emitted action, component, and component state record.
+    /// emitted action, and component state record.
     ///
-    /// <para>An update record has the target's effective fields (a component's effective props),
-    /// every one optional and none carrying a default. An absent field means "unchanged"; a present
+    /// <para>An update record has the target's effective fields, every one optional and none carrying a default. An absent field means "unchanged"; a present
     /// empty value clears the field, which only a field the target declares optional admits.</para>
     Update {
-        /// Name of the record, action, or component this update record patches.
+        /// Name of the record, action, or component state record this update record patches.
         target: Name,
     },
     /// Derived `<Component>.State` record, synthesized for every component that declares state.

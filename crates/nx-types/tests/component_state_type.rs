@@ -1,5 +1,5 @@
-//! Type checking of a component's derived `T.State` record, the bare `State` name inside a
-//! component body, and the props-based `T.Update` and `T.Property` beside them. Covers the
+//! Type checking of a component's derived `T.State` record and the bare `State` name inside a
+//! component body; a component itself has no `T.Update` or `T.Property`. Covers the
 //! component-state-type capability.
 //!
 //! The imported-component scenario needs a library on disk and lives with the other library tests
@@ -167,26 +167,33 @@ fn intrinsics_work_on_a_state_record() {
 }
 
 #[test]
-fn intrinsics_merge_and_list_a_components_props_patches() {
-    let result = assert_ok(
-        r#"
-        component <Counter step:int = 1 label?:string /> = { <Label /> }
-        let m = {merge(<Counter.Update step=2 />, <Counter.Update label={} />)}
-        let keys = {changed(m)}
-        "#,
-        "props-intrinsics.nx",
-    );
-    assert_eq!(value_type(&result, "m"), "Counter.Update");
-    assert_eq!(value_type(&result, "keys"), "Counter.Property*");
-
+fn a_component_has_no_update_record_or_property_union() {
     assert_error(
         r#"
-        component <Counter step:int = 1 /> = { <Label /> }
-        let a = {apply(<Counter step=1 />, <Counter.Update step=2 />)}
+        component <Counter step:int = 1 /> = { state { count:int = 0 } <Label /> }
+        let u = <Counter.Update step=2 />
         "#,
-        "props-apply.nx",
-        "intrinsic-argument-type",
-        "must be a record or action",
+        "component-update.nx",
+        "unknown-update-record",
+        "component 'Counter' is not a record, so it has no update record; write 'Counter.State.Update' to patch its state",
+    );
+    assert_error(
+        r#"
+        component <Counter step:int = 1 /> = { state { count:int = 0 } <Label /> }
+        type Uses = { p:Counter.Property }
+        "#,
+        "component-property.nx",
+        "unresolved-type",
+        "write 'Counter.State.Property' to name a state field",
+    );
+    assert_error(
+        r#"
+        component <Form title:string /> = { <Panel /> }
+        let u = <Form.Update title="x" />
+        "#,
+        "stateless-update.nx",
+        "unknown-update-record",
+        "component 'Form' is not a record, so it has no update record",
     );
 }
 
@@ -446,14 +453,32 @@ fn a_declaration_named_update_is_an_ordinary_record_inside_a_component() {
 // ============================================================================
 
 #[test]
-fn a_components_own_props_patch_is_rejected_inside_its_body() {
+fn a_handler_returning_the_components_name_with_update_is_an_unknown_name() {
     assert_error(
         r#"
         external component <Button emits { Tapped { } } />
         component <Counter step:int = 1 /> = { state { count:int = 0 } <Button onTapped=<Counter.Update step=2 /> /> }
         "#,
-        "own-props-patch.nx",
-        "handler-update-props",
-        "write 'State.Update'",
+        "own-update.nx",
+        "unknown-update-record",
+        "write 'Counter.State.Update' to patch its state",
+    );
+}
+
+#[test]
+fn an_unknown_derived_name_passed_to_an_intrinsic_is_reported_once() {
+    let result = check_str(
+        r#"
+        component <Counter step:int = 1 /> = { state { count:int = 0 } <Label /> }
+        let keys = {changed(<Counter.Update step=2 />)}
+        "#,
+        "intrinsic-unknown.nx",
+    );
+    assert_eq!(
+        diagnostics(&result),
+        vec![(
+            Some("unknown-update-record"),
+            "Unknown type 'Counter.Update': component 'Counter' is not a record, so it has no update record; write 'Counter.State.Update' to patch its state".to_string()
+        )]
     );
 }

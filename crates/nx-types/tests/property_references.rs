@@ -98,24 +98,27 @@ fn property_union_of_a_plain_record_lists_its_fields() {
 }
 
 #[test]
-fn property_union_of_a_component_is_derived_from_its_props() {
+fn a_component_has_no_property_union_and_its_state_has_one() {
     let result = assert_ok(
         r#"
         component <Counter step:int = 1 /> = { state { count:int = 0 } <Label text={count} /> }
-        let key: Counter.Property = {Counter.Property.step}
+        let key: Counter.State.Property = {Counter.State.Property.count}
         "#,
         "property-component.nx",
     );
-    assert_eq!(property_union_cases(&result, "Counter.Property"), ["step"]);
+    assert_eq!(
+        property_union_cases(&result, "Counter.State.Property"),
+        ["count"]
+    );
 
     assert_error(
         r#"
         component <Counter step:int = 1 /> = { state { count:int = 0 } <Label text={count} /> }
-        let key = {Counter.Property.count}
+        let key = {Counter.Property.step}
         "#,
-        "property-component-state.nx",
-        "undefined-union-case",
-        "count",
+        "property-component-props.nx",
+        "unknown-property-union",
+        "write 'Counter.State.Property' to name a state field",
     );
 }
 
@@ -131,22 +134,6 @@ fn property_union_of_a_components_state_is_the_state_records_union() {
     assert_eq!(
         property_union_cases(&result, "Counter.State.Property"),
         ["count"]
-    );
-}
-
-#[test]
-fn property_union_of_a_component_includes_inherited_props() {
-    let result = assert_ok(
-        r#"
-        abstract component <Control enabled:boolean = true />
-        component <Toggle extends Control on:boolean /> = { <Label /> }
-        let keys: Toggle.Property+ = { Toggle.Property.enabled Toggle.Property.on }
-        "#,
-        "property-component-inherited.nx",
-    );
-    assert_eq!(
-        property_union_cases(&result, "Toggle.Property"),
-        ["enabled", "on"]
     );
 }
 
@@ -223,13 +210,15 @@ fn property_union_for_an_unknown_target_is_rejected() {
 }
 
 #[test]
-fn a_component_without_state_has_a_props_property_union_and_no_state_union() {
-    assert_ok(
+fn a_component_without_state_has_no_property_union_at_all() {
+    assert_error(
         r#"
         component <Form title:string /> = { <Panel /> }
         let key = {Form.Property.title}
         "#,
         "property-stateless.nx",
+        "unknown-property-union",
+        "component 'Form' is not a record, so it has no property union",
     );
     assert_error(
         r#"

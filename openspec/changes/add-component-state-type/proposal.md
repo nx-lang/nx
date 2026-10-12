@@ -8,15 +8,15 @@ There is also no type for a component's state as a whole, so a state snapshot ca
 function, compared with `diff`, or patched with `apply`.
 
 This change makes the derived names mean one thing everywhere: `T.Property` and `T.Update` describe
-the fields a value of `T` is written with, which for a component are its props. State moves to its
-own derived record, `T.State`, which gets the usual `T.State.Property` and `T.State.Update`.
+the fields of a record or action. A component is not a record, so it has neither. State moves to its
+own derived record, `T.State`, which gets the usual `T.State.Property` and `T.State.Update`. A
+derived record for a component's props (and a function's parameters), with its own update record,
+is left for a later change.
 
 ## What Changes
 
-- **BREAKING** A component's `T.Property` is derived from its props, not its state. Every component
-  has one, whether or not it has state.
-- **BREAKING** A component's `T.Update` is a patch of its props, not its state. Every component has
-  one. A handler can't return it to change its own component, because props belong to the parent.
+- **BREAKING** A component no longer has a `T.Property` or a `T.Update`. Writing either is an
+  unknown name, reported with a suggestion to write `T.State.Property` or `T.State.Update`.
 - A component with a `state` group gets a derived record `T.State` with exactly its state fields.
   `T.State` is an ordinary record type: it has `T.State.Update` and `T.State.Property`, works with
   `apply`, `merge`, `diff` and `changed`, and can be written as a literal.
@@ -26,10 +26,11 @@ own derived record, `T.State`, which gets the usual `T.State.Property` and `T.St
   handler writes `<State.Update count={count + 1} />` and a type or case writes `State.Property`.
   The bare `Update` and `Property` shorthands are removed. Outside a component a bare `State` is an
   ordinary name.
-- `State` joins `Update` and `Property` as a reserved emitted-action name.
+- `State` joins `Update` and `Property` as a reserved emitted-action name. `Update` and `Property`
+  stay reserved so that `<Component>.Update` and `<Component>.Property` never name an action.
 - NX IR names a component's state record, and both IR runtimes recognize a state patch by that
   record rather than by the component.
-- `typegen` emits `<Name>_update` and `<Name>_property` for a component from its props, and
+- `typegen` emits no `<Name>_update` or `<Name>_property` for a component, and emits
   `<Name>_state_update` and `<Name>_state_property` beside `<Name>_state` for a component with state.
 - Docs, examples and conformance programs move to the new spellings.
 
@@ -42,19 +43,16 @@ own derived record, `T.State`, which gets the usual `T.State.Property` and `T.St
 
 ### Modified Capabilities
 
-- `update-records`: a component's `T.Update` patches its props, and every component has one; the
-  bare `Update` tag is removed.
-- `property-references`: a component's `T.Property` lists its props, and every component has one;
-  the bare `Property` name is removed.
-- `component-action-handlers`: a handler patches state with the component's `T.State.Update`, and
-  returning the component's props patch is rejected.
+- `update-records`: a component has no `T.Update`; the bare `Update` tag is removed.
+- `property-references`: a component has no `T.Property`; the bare `Property` name is removed.
+- `component-action-handlers`: a handler patches state with the component's `T.State.Update`.
 - `component-syntax`: the reserved emitted-action names gain `State`.
 - `nx-ir-format`: a component names its state record, and a state patch targets that record.
-- `cli-code-generation`: component companions follow the new derivations, and state gains update
-  and property companions.
-- `typescript-ir-runtime`: the state-patch operation takes `<Component>.State.Update` and rejects a
-  component's props patch. The rest of its scenarios change spelling only.
-- `component-type-parameters`: the generic-component scenario covers both property unions.
+- `cli-code-generation`: a component has no update or property companion of its own, and state
+  gains update and property companions.
+- `typescript-ir-runtime`: the state-patch operation takes `<Component>.State.Update`. The rest of
+  its scenarios change spelling only.
+- `component-type-parameters`: the generic-component scenario covers the state's property union.
 - Spelling only, where scenarios write a state patch as `<State.Update …/>`: `component-instance-tree`,
   `component-runtime-bindings`, `rust-ir-runtime`, `playground`, `source-tree`, `viewer` and
   `fiddle-nx-language`.

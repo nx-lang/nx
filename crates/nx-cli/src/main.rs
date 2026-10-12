@@ -2685,11 +2685,13 @@ export type AssistantConfig = { agent?:Agent }
         assert!(search_box.contains("export interface SearchBox_state"));
         assert!(search_box.contains("theme: ThemeMode;"));
         let state = search_box
-            .split("export interface SearchBox_update")
-            .next()
+            .split("export interface SearchBox_state {")
+            .nth(1)
+            .and_then(|rest| rest.split("export ").next())
             .expect("the state contract");
         assert!(!state.contains("$type"));
-        assert!(search_box.contains("export interface SearchBox_update"));
+        assert!(search_box.contains("export interface SearchBox_state_update"));
+        assert!(!search_box.contains("SearchBox_update"));
         assert!(index.contains("export * from \"./search-box\";"));
     }
 

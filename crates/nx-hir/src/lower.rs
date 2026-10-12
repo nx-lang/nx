@@ -1149,11 +1149,8 @@ impl LoweringContext {
                 );
             }
         }
-        // A component's update record and property union derive from its props. Inherited props
-        // are added once the module is prepared, as a record's inherited fields are; type
-        // parameters are never props, and a prop typed by one is erased where the record leaves
-        // the component.
-        self.predeclare_update_record(&name, visibility, &[], &props, node.span());
+        // A component is not a record, so it has no update record or property union of its own;
+        // its state record has both.
 
         let mut emits = Vec::new();
         let mut inline_records = Vec::new();
@@ -1168,7 +1165,7 @@ impl LoweringContext {
                         if emit_name.as_str() == UPDATE_RECORD_SUFFIX {
                             self.add_diagnostic(
                                 format!(
-                                    "Component '{}' cannot declare an emitted action named 'Update': '{}.Update' is reserved for the component's derived update record",
+                                    "Component '{}' cannot declare an emitted action named 'Update': '{}.Update' is reserved for derived update records",
                                     name.as_str(),
                                     name.as_str()
                                 ),
@@ -1179,7 +1176,7 @@ impl LoweringContext {
                         if emit_name.as_str() == PROPERTY_UNION_SUFFIX {
                             self.add_diagnostic(
                                 format!(
-                                    "Component '{}' cannot declare an emitted action named 'Property': '{}.Property' is reserved for the component's derived property union",
+                                    "Component '{}' cannot declare an emitted action named 'Property': '{}.Property' is reserved for derived property unions",
                                     name.as_str(),
                                     name.as_str()
                                 ),
@@ -1240,7 +1237,7 @@ impl LoweringContext {
                         if local_name.as_str() == UPDATE_RECORD_SUFFIX {
                             self.add_diagnostic(
                                 format!(
-                                    "Component '{}' cannot emit '{}': the handler 'onUpdate' and the name '{}.Update' would collide with the component's derived update record",
+                                    "Component '{}' cannot emit '{}': the handler 'onUpdate' and the name '{}.Update' are reserved for derived update records",
                                     name.as_str(),
                                     action_name.as_str(),
                                     name.as_str()
@@ -1252,7 +1249,7 @@ impl LoweringContext {
                         if local_name.as_str() == PROPERTY_UNION_SUFFIX {
                             self.add_diagnostic(
                                 format!(
-                                    "Component '{}' cannot emit '{}': the name '{}.Property' would collide with the component's derived property union",
+                                    "Component '{}' cannot emit '{}': the name '{}.Property' is reserved for derived property unions",
                                     name.as_str(),
                                     action_name.as_str(),
                                     name.as_str()
@@ -2893,7 +2890,6 @@ impl LoweringContext {
                         self.module.add_item(Item::Record(record));
                         self.add_derived_items(&action_name);
                     }
-                    self.add_derived_items(&component_name);
                     if let Some(state) = self.state_records.get(&component_name).cloned() {
                         let state_name = state.name.clone();
                         self.pending_update_items.push(state);
@@ -5913,7 +5909,7 @@ type Mode = light | dark"#;
     }
 
     #[test]
-    fn update_records_are_synthesized_for_records_actions_emits_components_and_state() {
+    fn update_records_are_synthesized_for_records_actions_emits_and_component_state() {
         let module = lower_source(
             r#"
             type User = { name:string = "anon" email:string? }
@@ -5957,15 +5953,10 @@ type Mode = light | dark"#;
         );
         assert!(!saved_update.is_action());
 
-        let counter_update = find_record(&module, "Counter.Update");
-        assert_eq!(
-            counter_update.update_target().map(Name::as_str),
-            Some("Counter")
-        );
-        assert_eq!(
-            field_names(&counter_update.properties),
-            vec!["step"],
-            "A component's update record is derived from its props and excludes state"
+        assert!(
+            module.find_item("Counter.Update").is_none()
+                && module.find_item("Counter.Property").is_none(),
+            "A component is not a record, so it has no update record or property union"
         );
 
         let counter_state = find_record(&module, "Counter.State");
@@ -6000,8 +5991,8 @@ type Mode = light | dark"#;
         assert_eq!(field_names(&reset_update.properties), vec!["to"]);
 
         assert!(
-            field_names(&find_record(&module, "Plain.Update").properties).is_empty(),
-            "A component without props has an empty update record"
+            module.find_item("Plain.Update").is_none(),
+            "A component without state has no update record at all"
         );
         assert!(
             module.find_item("Plain.State").is_none(),
@@ -6076,8 +6067,10 @@ type Mode = light | dark"#;
             .map(|diagnostic| diagnostic.message.as_str())
             .collect::<Vec<_>>();
         assert!(
-            messages.iter().any(|message| message
-                .contains("'Form.Update' is reserved for the component's derived update record")),
+            messages
+                .iter()
+                .any(|message| message
+                    .contains("'Form.Update' is reserved for derived update records")),
             "Expected the reservation diagnostic, got {:?}",
             messages
         );
@@ -6308,7 +6301,7 @@ type Mode = light | dark"#;
     }
 
     #[test]
-    fn property_union_of_a_component_is_derived_from_props_and_its_state_has_its_own() {
+    fn a_components_state_has_a_property_union_and_the_component_has_none() {
         let module = lower_source(
             r#"
             component <Counter step:int = 1 /> = { state { count:int = 0 } <Label /> }
@@ -6316,49 +6309,18 @@ type Mode = light | dark"#;
             "#,
             "property-component.nx",
         );
-        let union = find_union(&module, "Counter.Property");
-        assert_eq!(union.property_target().map(Name::as_str), Some("Counter"));
-        assert_eq!(case_names(union), vec!["step"]);
         let state_union = find_union(&module, "Counter.State.Property");
         assert_eq!(
             state_union.property_target().map(Name::as_str),
             Some("Counter.State")
         );
         assert_eq!(case_names(state_union), vec!["count"]);
-        assert_eq!(
-            case_names(find_union(&module, "Form.Property")),
-            vec!["title"]
-        );
+        assert!(module.find_item("Counter.Property").is_none());
+        assert!(module.find_item("Form.Property").is_none());
         assert!(
             module.find_item("Form.State.Property").is_none(),
             "A component without state has no state property union"
         );
-    }
-
-    #[test]
-    fn component_companions_include_inherited_props_once_completed() {
-        let module = lower_source(
-            r#"
-            abstract component <Control enabled:boolean = true />
-            component <Toggle extends Control on:boolean /> = { <Label /> }
-            "#,
-            "component-inherited.nx",
-        );
-        let mut prepared = PreparedModule::standalone("component-inherited.nx", module.clone());
-        crate::complete_property_unions(&mut prepared);
-        assert_eq!(
-            case_names(find_union(prepared.raw_module(), "Toggle.Property")),
-            vec!["enabled", "on"]
-        );
-        let update = find_record(&module, "Toggle.Update");
-        let shape = effective_record_shape(&prepared, update).expect("Shape should resolve");
-        let names = shape
-            .fields
-            .iter()
-            .map(|field| field.name.as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(names, vec!["enabled", "on"]);
-        assert!(shape.fields.iter().all(|field| field.default.is_none()));
     }
 
     #[test]
@@ -6428,11 +6390,9 @@ type Mode = light | dark"#;
                 "Counter",
                 "value",
                 "User.Update",
-                "Counter.Update",
                 "Counter.State",
                 "Counter.State.Update",
                 "User.Property",
-                "Counter.Property",
                 "Counter.State.Property",
             ]
         );
@@ -6452,9 +6412,8 @@ type Mode = light | dark"#;
             .map(|diagnostic| diagnostic.message.as_str())
             .collect::<Vec<_>>();
         assert!(
-            messages.iter().any(|message| message.contains(
-                "'Form.Property' is reserved for the component's derived property union"
-            )),
+            messages.iter().any(|message| message
+                .contains("'Form.Property' is reserved for derived property unions")),
             "Expected the reservation diagnostic, got {:?}",
             messages
         );

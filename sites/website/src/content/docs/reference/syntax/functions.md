@@ -120,7 +120,7 @@ component <SearchBox
 - State defaults are evaluated once during initialization. After that, state changes only through the component's state update record, `<State.Update ... />` (see [Updating state](#updating-state)).
 - Hosts own the serialized snapshot returned by initialization and must pass it back into later dispatch calls.
 - Dispatch preserves host action order and returns effect actions in the same order handlers produce them.
-- `Update`, `Property` and `State` are reserved: a component cannot emit an action named `Update`, `Property` or `State`, because `<Component>.Update` is its props update record, `<Component>.Property` its props property union, and `<Component>.State` its state record. A prop or state field cannot be named `State` either.
+- `Update`, `Property` and `State` are reserved: a component cannot emit an action named `Update`, `Property` or `State`. `<Component>.State` is its state record, and `<Component>.Update` and `<Component>.Property` are kept free because they read as derived declarations. A prop or state field cannot be named `State` either.
 
 A call site that uses the `SearchBox` above binds a handler per emitted action, and a function can
 build an emitted action by its public name:
@@ -175,8 +175,8 @@ let contacts:Contact* = {}
   accepts only the empty value `{}`; binding anything else reports that `TItem` was not
   specified and shows the `TItem=` form to add.
 - A type parameter is not a prop. It carries no value, has no default, is never required, is
-  not a field of the runtime record, and is not a case of the component's property union.
-  `<Component>.Update`, `<Component>.State` and the state's own update record erase it.
+  not a field of the runtime record, and is not a case of the state's property union.
+  `<Component>.State` and the state's own update record erase it.
   Once type checking has consumed a `TItem=Contact` binding, nothing below the checker sees it.
 - An emitted action's payload cannot be typed by a type parameter. `emits { pick { item:TItem } }`
   is rejected: the action is a record of its own, usable outside the component, where `TItem` is
@@ -196,9 +196,9 @@ so `<Range T=int/>` and `<Range T=float64/>` are different types. See
 
 ## Updating state
 
-Every record, action, and component has a derived **update record**, `T.Update`, with the same
-fields as `T`, every one optional. For a component those fields are its props, never its state or
-its type parameters. An update record is a patch: a field it leaves out means "unchanged", and a
+Every record and action has a derived **update record**, `T.Update`, with the same fields as `T`,
+every one optional. A component is not a record, so it has none of its own; its state record does
+(see [Component state](#component-state)). An update record is a patch: a field it leaves out means "unchanged", and a
 field set to the empty value `{}` means "cleared", which is allowed only where the field is
 optional in `T` (`email?:string`). Constructing one applies no defaults and requires nothing.
 
@@ -222,7 +222,9 @@ A component with `state` also has a derived **state record**, `T.State`, whose f
 fields in order, with their types and optional marks and without their defaults. It is a plain
 record like any other, so it has its own update record, `T.State.Update`, and property union,
 `T.State.Property`. It cannot be extended, and nothing else has a `.State`: a component without
-state, a record, `T.State` itself, `T.Update` and `T.Property` all report it as unknown.
+state, a record, `T.State` itself, `T.Update` and `T.Property` all report it as unknown. A
+component's `T.Update` and `T.Property` are unknown too, reported with a suggestion to write
+`T.State.Update` or `T.State.Property`.
 
 Inside a component body, a bare `State` names that component's state record, even if the module
 declares something else called `State`. It works as a type (`saved?:State`), as a tag
@@ -253,8 +255,6 @@ A handler's result is routed by type:
   state.
 - An action the enclosing component emits (`Reset`, declared or inherited in `emits`) goes to its
   parent.
-- The component's own props update record (`Counter.Update`) is a compile error: props belong to
-  the parent, so write `State.Update` to change state or emit an action.
 - Anything else inside a component is a compile error: add the action to `emits`, or return the
   component's state update record. At the root there is no component to patch or parent to reach,
   so any action or update record is an effect for the host.
@@ -286,10 +286,10 @@ unknown-field and cleared-field rules as one the type checker saw.
 
 ## Property references
 
-Every record, action, and component also has a derived **property union**, `T.Property`: a constant
-union with one case per field of `T` (a component's props, never its state or type parameters),
-inherited fields first. A component's state has its own, `T.State.Property`. A case names a field as a value, so a sort key, a column list,
-or a validation rule is typed by the fields that exist rather than by `string`.
+Every record and action also has a derived **property union**, `T.Property`: a constant union
+with one case per field of `T`, inherited fields first. A component has none of its own; its state
+has `T.State.Property`. A case names a field as a value, so a sort key, a column list, or a
+validation rule is typed by the fields that exist rather than by `string`.
 
 ```nx
 type Contact = { title:string subtitle:string }
@@ -323,8 +323,7 @@ reserved: they resolve before anything in scope, cannot be shadowed, and a decla
 Every intrinsic keeps the absent-versus-empty rule: a present empty field is carried and an absent
 field is never invented, so `apply(u, merge(a, b))` equals `apply(apply(u, a), b)` and
 `apply(a, diff(a, b))` equals `b`. `apply` and `diff` take a record, so they work on a component's
-`T.State` value but not on a component element; `merge` and `changed` take any update record,
-a component's props patch `T.Update` included.
+`T.State` value but not on a component element; `merge` and `changed` take any update record.
 
 ```nx
 external component <Button label:string emits { Tapped { } } />

@@ -40,10 +40,7 @@ update record of the enclosing component's state, `<Component>.State.Update`, SH
 component's state. An action the enclosing component declares or inherits in `emits` SHALL be
 emitted to the component's parent. Any other value SHALL be a host effect when the handler is bound
 outside any component body, and SHALL be a compile error when the handler is bound inside a
-component body. In particular, a value of the enclosing component's own `T.Update`, which patches
-its props, SHALL be a compile error inside its body whose diagnostic says props belong to the
-parent and suggests `State.Update`. Type checking SHALL enforce this statically for every handler
-result.
+component body. Type checking SHALL enforce this statically for every handler result.
 
 #### Scenario: State update of the enclosing component is accepted
 - **WHEN** a file contains `component <Counter /> = { state { count:int = 0 } <Button onTapped=<State.Update count={count + 1} /> /> }`
@@ -63,16 +60,15 @@ result.
 - **WHEN** a file contains `type User = { name:string } component <Form /> = { state { draft:string = "" } <Button onTapped=<User.Update name="Ada" /> /> }`
 - **THEN** type checking SHALL reject the handler because `User.Update` is not `Form.State.Update`
 
-#### Scenario: A component's own props patch is rejected inside its body
+#### Scenario: The component's name with `.Update` is an unknown name inside its body
 - **WHEN** a file contains `component <Counter step:int = 1 /> = { state { count:int = 0 } <Button onTapped=<Counter.Update step=2 /> /> }`
-- **THEN** type checking SHALL reject the handler because a component cannot patch its own props
-- **AND** the diagnostic SHALL suggest `State.Update`
+- **THEN** type checking SHALL reject `Counter.Update` as an unknown type, since a component has no update record
+- **AND** the diagnostic SHALL suggest `Counter.State.Update`
 
 #### Scenario: Any action or update record is a host effect at the root
 - **WHEN** a file contains `type User = { name:string } action DoSearch = { search:string } let render() = <SearchBox onSearchSubmitted={ <DoSearch search={action.searchString} /> <User.Update name="Ada" /> } />`
 - **THEN** type checking SHALL accept the handler
 - **AND** dispatching the action SHALL return both values in the effect list
-- **AND** a root handler returning a component's props patch, such as `<Counter.Update step=2 />`, SHALL likewise be returned as an effect
 
 #### Scenario: A mixed result list is routed item by item
 - **WHEN** a file contains `action Saved = { } component <Form emits { Saved } /> = { state { dirty:boolean = true } <Button onTapped={ <State.Update dirty=false /> <Saved /> } /> }` and the tap is dispatched

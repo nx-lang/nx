@@ -79,21 +79,24 @@ fn update_record_of_a_plain_record_has_the_same_fields() {
 }
 
 #[test]
-fn update_record_of_a_component_is_derived_from_its_props() {
-    let source = r#"
-        component <Counter step:int = 1 label?:string /> = { state { count:int = 0 } <Label text={count} /> }
-        let more(): Counter.Update = <Counter.Update step=2 label={} />
-    "#;
-    assert_ok(source, "update-component.nx");
-
+fn a_component_has_no_update_record_of_its_own() {
     assert_error(
         r#"
-        component <Counter step:int = 1 /> = { state { count:int = 0 } <Label text={count} /> }
-        let bad = <Counter.Update count=0 />
+        component <Counter step:int = 1 label?:string /> = { state { count:int = 0 } <Label text={count} /> }
+        let more = <Counter.Update step=2 />
         "#,
-        "update-component-state.nx",
-        "unknown-record-field",
-        "count",
+        "update-component.nx",
+        "unknown-update-record",
+        "write 'Counter.State.Update' to patch its state",
+    );
+    assert_error(
+        r#"
+        component <Form title:string /> = { <Panel /> }
+        let patch = <Form.Update title="Sign in" />
+        "#,
+        "update-stateless.nx",
+        "unknown-update-record",
+        "component 'Form' is not a record, so it has no update record",
     );
 }
 
@@ -114,29 +117,6 @@ fn update_record_of_a_components_state_is_the_state_records_update() {
         "update-component-state-prop.nx",
         "unknown-record-field",
         "step",
-    );
-}
-
-#[test]
-fn update_record_of_a_component_includes_inherited_props() {
-    assert_ok(
-        r#"
-        abstract component <Control enabled:boolean = true />
-        component <Toggle extends Control on:boolean /> = { <Label /> }
-        let patch = <Toggle.Update enabled=false on=true />
-        "#,
-        "update-component-inherited.nx",
-    );
-}
-
-#[test]
-fn a_component_without_state_has_a_props_update_record() {
-    assert_ok(
-        r#"
-        component <Form title:string /> = { <Panel /> }
-        let patch = <Form.Update title="Sign in" />
-        "#,
-        "update-stateless-props.nx",
     );
 }
 
@@ -728,33 +708,6 @@ fn update_record_of_another_type_is_rejected_inside_a_component() {
         "route-other-update.nx",
         "handler-update-wrong-target",
         "only 'Form.State.Update'",
-    );
-}
-
-#[test]
-fn a_components_own_props_patch_is_rejected_inside_its_body() {
-    assert_error(
-        r#"
-        action Tapped = { }
-        external component <Button emits { Tapped } />
-        component <Counter step:int = 1 /> = { state { count:int = 0 } <Button onTapped=<Counter.Update step=2 /> /> }
-        "#,
-        "route-own-props.nx",
-        "handler-update-props",
-        "props belong to the parent, so write 'State.Update'",
-    );
-}
-
-#[test]
-fn a_components_props_patch_is_a_host_effect_at_the_root() {
-    assert_ok(
-        r#"
-        action Tapped = { }
-        external component <Button emits { Tapped } />
-        component <Counter step:int = 1 /> = { <Label /> }
-        let render() = <Button onTapped=<Counter.Update step=2 /> />
-        "#,
-        "route-root-props.nx",
     );
 }
 

@@ -111,10 +111,9 @@ type UpdateRecordKey = (u32, LocalDefinitionId);
 /// The derived declarations — update records, property unions, and state records — the program
 /// references anywhere, by the declaration each reference reaches.
 ///
-/// <para>Every record, action, and component has an update record and a property union, every
-/// component with state a state record with its own two, and most programs never use any of
-/// them. Emitting only the referenced ones keeps a program that
-/// never writes a patch or names a field the same program it was before they existed. A reference
+/// <para>Every record and action has an update record and a property union, every component with
+/// state a state record with its own two, and most programs never use any of them. Emitting only
+/// the referenced ones keeps a program that never writes a patch or names a field the same program it was before they existed. A reference
 /// is a construction — a record literal or an element tag — a type annotation naming one, or a
 /// member access reaching a property union's case; a reference from another module counts, since
 /// the declaring module is where the declaration is emitted. A state record is also referenced by

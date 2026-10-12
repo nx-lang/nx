@@ -23,10 +23,10 @@ nominal type, the same type as an element of that component with a different arg
 - **THEN** the resulting external component record SHALL have `itemsSource` empty and SHALL NOT have a `TItem` field
 - **AND** its JSON serialization SHALL NOT contain a `TItem` key
 
-#### Scenario: The property unions of a generic stateful component leave out its type parameters
-- **WHEN** a file contains `component <List TItem:type items:TItem+ /> = { state { selected:int = 0 } <Label /> }` and `let k:List.Property = {List.Property.items}` and `let s:List.State.Property = {List.State.Property.selected}`
-- **THEN** type checking SHALL accept `List.Property` with the single case `items` and `List.State.Property` with the single case `selected`
-- **AND** SHALL reject `List.Property.TItem`
+#### Scenario: The state property union of a generic component leaves out its type parameters
+- **WHEN** a file contains `component <List TItem:type items:TItem+ /> = { state { selected:int = 0 } <Label /> }` and `let s:List.State.Property = {List.State.Property.selected}`
+- **THEN** type checking SHALL accept `List.State.Property` with the single case `selected`
+- **AND** SHALL reject `List.State.Property.TItem`
 
 #### Scenario: Elements with different arguments have the same type
 - **WHEN** a file contains `type Contact = { name:string } external component <List TItem:type items?:TItem+ />` and `let a:List = <List TItem=Contact /> let b:List = <List TItem=int /> let c:List = <List />`

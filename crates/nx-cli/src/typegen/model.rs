@@ -100,7 +100,7 @@ pub struct ExportedUnion {
     pub name: String,
     pub base: Option<String>,
     pub cases: Vec<ExportedUnionCase>,
-    /// The record, action, component, or component state record (`<Component>.State`) this is the
+    /// The record, action, or component state record (`<Component>.State`) this is the
     /// generated `<Target>_property` companion of.
     ///
     /// <para>A property companion is the derived `<Target>.Property` union under its generated
@@ -120,7 +120,7 @@ impl ExportedUnion {
 
     /// Whether every case is constant. This is what an `enum` declared, and it generates a CLR
     /// `enum` in C# and an `as const` object in TypeScript. A property companion is constant even
-    /// with no cases, as the companion of a component without props is.
+    /// with no cases, as the companion of a record without fields is.
     pub fn is_constant(&self) -> bool {
         (!self.cases.is_empty() || self.property_target.is_some())
             && self.base.is_none()
@@ -154,23 +154,21 @@ pub struct ExportedComponentState {
     pub doc: Option<String>,
 }
 
-/// The generated `<Target>_update` companion of an exported record, action, or component, and the
+/// The generated `<Target>_update` companion of an exported record or action, and the
 /// `<Component>_state_update` companion of a component's derived state record.
 ///
-/// <para>It has the target's effective fields — a component's props, or the state fields for its
-/// state record — every one optional, and carries the `<Target>.Update` discriminator. An absent field means "unchanged" and a present
+/// <para>It has the target's effective fields — the state fields for a state record — every one
+/// optional, and carries the `<Target>.Update` discriminator. An absent field means "unchanged" and a present
 /// `null` means "cleared" — the empty value, which only a field declared `name?:T` in the target
 /// admits — so each host surface keeps the two apart.</para>
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExportedUpdate {
-    /// The NX name of the patched declaration: `Counter` for a component's props patch and
-    /// `Counter.State` for its state patch.
+    /// The NX name of the patched declaration: `User` for a record and `Counter.State` for a
+    /// component's state patch.
     pub target_name: String,
-    /// Whether the target is a component or a component's state record. Either way the fields are
-    /// the component's annotations, so a field typed by its type parameter is erased.
-    pub target_is_component: bool,
     /// The component whose state the companion patches, when the target is its derived
-    /// `<Component>.State` record. Its plain type is the `<Component>_state` contract.
+    /// `<Component>.State` record. Its plain type is the `<Component>_state` contract, and its
+    /// fields are the component's annotations, so a field typed by its type parameter is erased.
     pub state_component: Option<String>,
     pub name: String,
     pub discriminator: String,
@@ -193,7 +191,7 @@ pub struct ExportedUpdate {
 /// precision: a C# patch whose `start` is `object` cannot be applied to a `Range<long>`, because
 /// the schema deserializes the field as `object` and the record's field is `T`.</para>
 ///
-/// <para>A component's props and state companions still erase. There the analogy that produced the
+/// <para>A component's state companion still erases. There the analogy that produced the
 /// erasure rule does hold: the patched type (`Ticker_state`) is concrete, its parameter-typed fields are
 /// `object` on both sides of the patch, and the instantiation was fixed at an NX use site the host
 /// never sees.</para>
@@ -201,7 +199,7 @@ pub fn update_companion_type_params<'a>(
     update: &'a ExportedUpdate,
     types: ModuleTypes<'_>,
 ) -> &'a [String] {
-    if update.target_is_component || update.type_params.is_empty() {
+    if update.state_component.is_some() || update.type_params.is_empty() {
         return &[];
     }
     // The prelude's `Range` is not in the generating library's graph, but its companion is generic
@@ -1470,7 +1468,7 @@ impl ImportedTypeCollector {
                 let companion_name = update.name.clone();
                 // A component's type parameter is erased by both emitters, so a field it types
                 // needs no name resolved.
-                let erased_params = if update.target_is_component {
+                let erased_params = if update.state_component.is_some() {
                     update.type_params.clone()
                 } else {
                     Vec::new()
@@ -2227,19 +2225,18 @@ fn export_update(
                 })
                 .collect()
         });
-    // A props patch targets the component itself, and a state patch its `<Component>.State`.
+    // A state patch targets the component's `<Component>.State`, whose fields are the component's.
     let state_component = match module.find_item(target.as_str()) {
         Some(Item::Record(state)) => state.state_component().cloned(),
         _ => None,
     };
-    let target_component = match module.find_item(
+    let target_component =
         state_component
             .as_ref()
-            .map_or(target.as_str(), |component| component.as_str()),
-    ) {
-        Some(Item::Component(component)) => Some(component),
-        _ => None,
-    };
+            .and_then(|component| match module.find_item(component.as_str()) {
+                Some(Item::Component(component)) => Some(component),
+                _ => None,
+            });
     // A generic record's companion declares the same parameters, and both emitters erase them:
     // the wire carries no type argument for a patch.
     let type_params = match target_component {
@@ -2252,7 +2249,6 @@ fn export_update(
     };
     ExportedUpdate {
         target_name: target.as_str().to_string(),
-        target_is_component: target_component.is_some(),
         state_component: state_component.map(|component| component.as_str().to_string()),
         name: format!("{}_update", companion_stem(target.as_str())),
         discriminator: record.name.as_str().to_string(),
@@ -2612,8 +2608,8 @@ mod tests {
         let build = ExportedTypeGraph::from_library_with_warnings(&artifact).expect("graph build");
 
         assert!(build.graph.declaration("SearchBox_state").is_none());
-        // Both components would also generate `SearchBox_update`, `SearchBox_property`,
-        // `SearchBox_state_update` and `SearchBox_state_property`, which are skipped the same way.
+        // Both components would also generate `SearchBox_state_update` and
+        // `SearchBox_state_property`, which are skipped the same way.
         let state_warnings = build
             .warnings
             .iter()
@@ -2621,13 +2617,12 @@ mod tests {
             .count();
         assert_eq!(state_warnings, 2);
         assert!(build.graph.declaration("SearchBox_update").is_none());
-        assert!(build.graph.declaration("SearchBox_property").is_none());
         assert!(build.graph.declaration("SearchBox_state_update").is_none());
         assert!(build
             .graph
             .declaration("SearchBox_state_property")
             .is_none());
-        assert_eq!(build.warnings.len(), 10);
+        assert_eq!(build.warnings.len(), 6);
     }
 
     #[test]
@@ -2848,12 +2843,9 @@ export type ChatLink = string
             "Saved.Update"
         );
 
-        let counter = update_companion(&build.graph, "Counter_update");
-        assert_eq!(counter.discriminator, "Counter.Update");
-        assert_eq!(
-            field_names(&counter.fields),
-            vec!["step"],
-            "a component's companion carries its props and none of its state"
+        assert!(
+            build.graph.declaration("Counter_update").is_none(),
+            "a component is not a record, so it has no update companion of its own"
         );
         let counter_state = update_companion(&build.graph, "Counter_state_update");
         assert_eq!(counter_state.discriminator, "Counter.State.Update");
@@ -2867,12 +2859,7 @@ export type ChatLink = string
             Some(ExportedType::ComponentState(_))
         ));
 
-        assert!(
-            update_companion(&build.graph, "Plain_update")
-                .fields
-                .is_empty(),
-            "a component without props or state still has a props companion"
-        );
+        assert!(build.graph.declaration("Plain_update").is_none());
         assert!(build.graph.declaration("Plain_state").is_none());
         assert!(build.graph.declaration("Plain_state_update").is_none());
         assert!(build.graph.declaration("Hidden_update").is_none());
@@ -3188,10 +3175,9 @@ export type User extends Named = { email:string }
             case_names(property_companion(&build.graph, "Saved_property")),
             vec!["id"]
         );
-        assert_eq!(
-            case_names(property_companion(&build.graph, "Counter_property")),
-            vec!["step"],
-            "a component's companion names its props and none of its state"
+        assert!(
+            build.graph.declaration("Counter_property").is_none(),
+            "a component is not a record, so it has no property companion of its own"
         );
         let counter_state = property_companion(&build.graph, "Counter_state_property");
         assert_eq!(
@@ -3200,6 +3186,7 @@ export type User extends Named = { email:string }
         );
         assert_eq!(case_names(counter_state), vec!["count"]);
 
+        assert!(build.graph.declaration("Plain_property").is_none());
         assert!(build.graph.declaration("Plain_state_property").is_none());
         assert!(build.graph.declaration("Hidden_property").is_none());
         assert!(
@@ -3369,11 +3356,6 @@ export external component <Counter
         let update = update_companion(&build.graph, "Contact_update");
         assert_eq!(update.doc, None);
         assert_eq!(update.fields[0].doc.as_deref(), Some("The display name."));
-        let props_update = update_companion(&build.graph, "Counter_update");
-        assert_eq!(
-            props_update.fields[0].doc.as_deref(),
-            Some("How far to count.")
-        );
         let state_update = update_companion(&build.graph, "Counter_state_update");
         assert_eq!(
             state_update.fields[0].doc.as_deref(),

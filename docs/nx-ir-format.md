@@ -244,7 +244,7 @@ declarations use the names the language gives them: `User.Update`, `User.Propert
 | --- | --- | --- |
 | 0 | function | `[0, str, [[str, type, node?, flags]...], node, type?, flags]` — name, parameters (name, type, default, flags: bit 0 content, bit 1 optional), body, declared result type and result flags. A parameter declared `p?:T` is typed by its read type, `T?` (`T*` for `p?:T+`), and sets the optional bit, so a call that leaves it out binds the empty value. A default is a node of the function's frame. See *Parameters a call leaves out* and *Results*. |
 | 1 | value | `[1, str, node, type?]` — name, value and declared type. See *Results*. |
-| 2 | record | `[2, str, [field...], [ref...], isAbstract, ref?]` — name, fields, abstract bases nearest first, `0` or `1`, and the update target when the record is a derived `T.Update`: the record, action or state record it patches, or for a component's `T.Update`, which patches its props, the component. |
+| 2 | record | `[2, str, [field...], [ref...], isAbstract, ref?]` — name, fields, abstract bases nearest first, `0` or `1`, and the update target when the record is a derived `T.Update`: the record, action or state record it patches. |
 | 3 | component | `[3, str, [field...], [field...], node?, flags, [[str, ref]...], ref?]` — name, props, state, body (absent for an external component), flags: bit 0 abstract, bit 1 external, the emits: each an emit's local name and a reference to its action record, inherited emits included, in declaration order, and the component's state record, `<Component>.State`. An inherited emit's reference names the module that declared it. The state record is present only when the image emits it, which it does when the module references the state record, its update record or its property union; a component whose state no handler patches and nothing names has none. The state fields stay in the component's own list, with their defaults, since the state record carries none. |
 | 4 | union | `[4, str, [[str, [field...], isConstant]...], [ref...], ref?]` — name, cases (name, fields, `0` or `1`), abstract bases, and the property target when the union is a derived `T.Property`. |
 | 5 | typeAlias | `[5, str]` — name only. |
@@ -631,8 +631,7 @@ Whether the owner reference is present decides nothing by itself; what matters i
 dispatches the handler. A handler whose owner is the component an instance was initialized from
 reads that instance's state live when it runs, through the owner's state slots, and every
 `<Owner>.State.Update` record it returns patches the instance's state: a record whose update
-target is the owner's state record. A `<Owner>.Update`, which patches the owner's props, is not a
-state patch; the compiler rejects one returned inside the owner's body. Any other handler in the output,
+target is the owner's state record. Any other handler in the output,
 one bound at the root or one written in a parent's body and rendered by a child through content, sees
 only what it captured, and everything it returns is an effect for the host.
 

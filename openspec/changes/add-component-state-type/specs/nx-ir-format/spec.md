@@ -64,10 +64,8 @@ type without consulting the target: every field optional in the sense that it ma
 default expressions, and the clearable mark copied from the target field's optional mark, so the
 runtime accepts a present empty value only where `T` declares the field `?:`. When `T` is a
 component's derived state record, the IR SHALL declare `T` as well, and the component's
-declaration SHALL reference it, so a runtime recognizes a state patch by its target alone. When
-`T` is a component, the update record is its props patch and its target SHALL be the component
-declaration. Update record
-declarations that the program does not reference SHALL NOT be emitted, so that programs which never
+declaration SHALL reference it, so a runtime recognizes a state patch by its target alone. Update
+record declarations that the program does not reference SHALL NOT be emitted, so that programs which never
 use a patch produce the same IR as before. A program that references an update record SHALL list a
 required feature naming update-record support, so a runtime that predates this change rejects the
 program rather than misreading the declaration.
@@ -89,11 +87,6 @@ program rather than misreading the declaration.
 - **AND** NX IR is emitted for the program
 - **THEN** the expression SHALL be encoded with the existing record construction operation targeting the `Counter.State.Update` declaration
 - **AND** the emitted canonical value SHALL carry `$type` `Counter.State.Update` and only the `count` key
-
-#### Scenario: A component's props patch targets the component
-- **WHEN** NX source declares `component <Counter step:int = 1 /> = { <Label /> }` and `let more = <Counter.Update step=2 />`
-- **AND** NX IR is emitted for the program
-- **THEN** the IR SHALL declare `Counter.Update` as an update record whose target is the `Counter` component declaration, with the single field `step`
 
 ### Requirement: NX IR encodes the supported eager expression set
 NX IR SHALL encode the supported non-reactive expression forms needed for eager evaluation,

@@ -10,11 +10,14 @@ component.
 
 The agreed design (thread decision, 2026-10-10) is:
 
-- `T.Property` always means props.
 - A component with state gets a derived record `T.State`, with `T.State.Property` and
   `T.State.Update`.
-- A component's `T.Update` is a props patch.
 - A bare `State` inside a component replaces the bare `Update` and `Property` shorthands.
+
+The first draft also derived a component's `T.Property` and `T.Update` from its props. Bret revised
+that on 2026-10-12: for now, `T.Update` and `T.Property` exist only for records (and actions), and a
+component has neither. A later change may give components and functions a derived props record,
+perhaps `T.Properties`, with its own update record, so props can be built up and transformed.
 
 AGENTS.md says no backward compatibility is needed yet, so the old spellings are removed rather
 than kept as aliases.
@@ -23,7 +26,8 @@ than kept as aliases.
 
 **Goals:**
 
-- One meaning for `T.Property` and `T.Update` across records, actions, emits and components.
+- One meaning for `T.Property` and `T.Update`: the fields of a record or action. A component has
+  neither.
 - A first-class record type for a component's state that works with the update intrinsics.
 - One short spelling inside a component, `State.Update` and `State.Property`, in place of two
   special names.
@@ -36,8 +40,8 @@ than kept as aliases.
 - Typing the previewer's `setProps`, or any other host API, as `T.Update`. That can follow once the
   type exists.
 - Letting a component change its own props. Props stay owned by the parent.
-- `apply` and `diff` over a component's props. They need a record value, and a component element is
-  not one. `merge` and `changed` work on a component's `T.Update`, since they only take updates.
+- Any derived type for a component's props, or a function's parameters. A props record and its
+  update record are left for a later change.
 - Anything in the HIR interpreter beyond keeping its existing tests passing, since it is being
   retired.
 
@@ -65,13 +69,17 @@ edits.
 So `T.State.State`, `T.Update.State` and `Record.State` don't exist. A component without state has
 no `T.State`, and naming it is a diagnostic that says so.
 
-### A component's `T.Update` and `T.Property` come from its props
+### A component has no `T.Update` or `T.Property`
 
-They are derived from the component's effective props, inherited ones first, in declaration order.
-They exclude type parameter definitions (`TItem:type`), which are not props, and the `on<Emit>`
-handler bindings, which are not declared props either. An optional prop is clearable in
-`T.Update`. Every component has both, stateful or not, external or not, so the "declares no state"
-diagnostic no longer applies to them.
+A component is not a record, so it gets neither derived declaration, stateful or not, external or
+not. Writing `Counter.Update` or `Counter.Property` is an unknown name, and the diagnostic suggests
+`Counter.State.Update` or `Counter.State.Property` when the component has state. `Update` and
+`Property` stay reserved as emitted-action names, so `<Component>.Update` and
+`<Component>.Property` never name an action and stay free for a later props record.
+
+*Alternative considered:* derive both from the component's props. Rejected for now (Bret,
+2026-10-12): a props patch is better designed together with a props record for components and
+functions, so it ships later as one feature.
 
 ### A bare `State` replaces the bare `Update` and `Property`
 
@@ -96,12 +104,9 @@ removes.
 ### Handler routing
 
 Inside a component body, a handler result whose type is the enclosing component's `T.State.Update`
-patches that component's state. A result of the component's own `T.Update` is rejected with a
-diagnostic: props belong to the parent, so state changes must use `State.Update`. Any other update
-record is rejected as before.
+patches that component's state. Any other update record is rejected as before.
 
-At the root, every value is still a host effect. That now includes a component's props patch,
-which a host can choose to apply. The runtime routing rules don't change. Only the test for "this
+At the root, every value is still a host effect. The runtime routing rules don't change. Only the test for "this
 is the owner's state patch" does.
 
 ### IR names the state record
@@ -133,8 +138,7 @@ initialize state, and `T.State` has none.
   external ones, since every such component has a `T.State`.
 - **New companions:** `<Name>_state_update` and `<Name>_state_property` describe `T.State.Update`
   and `T.State.Property`.
-- **Changed companions:** `<Name>_update` and `<Name>_property` for a component now describe its
-  props.
+- **Removed companions:** a component has no `<Name>_update` or `<Name>_property`.
 
 ## Risks / Trade-offs
 
@@ -168,3 +172,6 @@ Rolling back means reverting the PR.
 
 - Should `T.State` exist for an external component with state? The default here is yes: it matches
   `<Name>_state`, and hosts that hold such state get a named type for it.
+- (Future) A derived props record for components and functions, perhaps `T.Properties`, with its
+  own update record (perhaps `T.Properties.Update`), to build up and transform props. Its name, and
+  whether a component's `T.Update` should come back as a shorthand for it, are for that change.

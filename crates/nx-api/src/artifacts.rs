@@ -4676,9 +4676,9 @@ let key = {User.Property.nickname}"#;
         );
     }
 
-    /// A component's derived declarations travel with it, its state record and that record's own
-    /// two included: importing `Counter` makes `Counter.State`, `Counter.State.Update`,
-    /// `Counter.State.Property`, `Counter.Update` and `Counter.Property` reachable.
+    /// A component's derived declarations travel with it: importing `Counter` makes its state
+    /// record `Counter.State` and that record's `Counter.State.Update` and `Counter.State.Property`
+    /// reachable.
     #[test]
     fn state_record_of_an_imported_component_is_available_through_the_import() {
         let temp = TempDir::new().expect("temp dir");
@@ -4703,9 +4703,7 @@ export component <Counter extends Control step:int = 1 /> = { state { count:int 
         let source = r#"import { Counter } from "../ui"
 let s = <Counter.State count=1 />
 let p: Counter.State.Update = <Counter.State.Update count=2 />
-let k: Counter.State.Property = {Counter.State.Property.count}
-let props = <Counter.Update enabled=false step=2 />
-let keys: Counter.Property+ = {Counter.Property.enabled Counter.Property.step}"#;
+let k: Counter.State.Property = {Counter.State.Property.count}"#;
         fs::write(&path, source).expect("state file");
         let artifact =
             build_program_artifact_from_source(source, &path.display().to_string(), &build_context)
@@ -4714,52 +4712,6 @@ let keys: Counter.Property+ = {Counter.Property.enabled Counter.Property.step}"#
             !has_error_diagnostics(&artifact.diagnostics),
             "Expected the imported component's derived declarations to resolve: {:?}",
             artifact.diagnostics
-        );
-    }
-
-    /// A component's props companions reached through a workspace import carry the props it
-    /// inherits from a base in another module.
-    #[test]
-    fn props_companions_of_a_workspace_import_include_inherited_props() {
-        let workspace = workspace(vec![
-            workspace_module(
-                "base.nx",
-                r#"export abstract component <Control enabled:boolean = true />"#,
-            ),
-            workspace_module(
-                "toggle.nx",
-                r#"import { Control } from "./base.nx"
-export component <Toggle extends Control on:boolean /> = { state { flips:int = 0 } <Label /> }"#,
-            ),
-            workspace_module(
-                "main.nx",
-                r#"import { Toggle } from "./toggle.nx"
-let root() = <Box keys={changed(<Toggle.Update on=true enabled=false />)} state={changed(<Toggle.State.Update flips=1 />)} />"#,
-            ),
-        ]);
-        let artifact =
-            build_workspace_program_artifact(&workspace, "main.nx", &ProgramBuildContext::empty())
-                .expect("Expected workspace artifact");
-        assert!(
-            !has_error_diagnostics(&artifact.diagnostics),
-            "Expected the imported props companions to carry the inherited prop: {:?}",
-            artifact.diagnostics
-        );
-        let value = match eval_program_artifact(&artifact) {
-            EvalResult::Ok(value) => value,
-            EvalResult::Err(diagnostics) => panic!("interpreter diagnostics: {:?}", diagnostics),
-        };
-        let NxValue::Record { properties, .. } = value else {
-            panic!("Expected a record value");
-        };
-        let bare = |name: &str| NxValue::String(name.to_string());
-        assert_eq!(
-            properties.get("keys"),
-            Some(&NxValue::Array(vec![bare("enabled"), bare("on")]))
-        );
-        assert_eq!(
-            properties.get("state"),
-            Some(&NxValue::Array(vec![bare("flips")]))
         );
     }
 

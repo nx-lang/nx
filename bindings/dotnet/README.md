@@ -564,8 +564,8 @@ User_update patch = new() { Email = null };   // clears email; Name stays unset
 string json = JsonSerializer.Serialize(patch); // {"$type":"User.Update","email":null}
 ```
 
-A component gets `<Name>_update` and `<Name>_property` for its props, and, when it declares state, `<Name>_state`
-for the state snapshot with `<Name>_state_update` and `<Name>_state_property` beside it. `Counter_state_update`
+A component is not a record, so it gets no `<Name>_update` or `<Name>_property` of its own. When it declares
+state, it gets `<Name>_state` for the state snapshot with `<Name>_state_update` and `<Name>_state_property` beside it. `Counter_state_update`
 derives from `NxUpdate<Counter_state>`, so it applies to the snapshot a host holds, and it serializes with
 `$type` `Counter.State.Update`.
 
@@ -694,8 +694,8 @@ Range<long> applied = patch.Apply(before);
 `Range_update<T>` derives from `NxUpdate<Range<T>>`, its key table is `RangeProperties<T>`, and its
 `Start` and `End` are `NxOptional<T>`. The wire is unaffected by the parameter: a patch serializes
 as `{"$type":"Range.Update","end":9}` in either format, with no type argument. A *component's*
-companions still erase the component's type parameters: `<Name>_update` patches its props, and
-`<Name>_state_update` patches its `<Name>_state`, which is already concrete.
+state companions still erase the component's type parameters: `<Name>_state_update` patches its
+`<Name>_state`, which is already concrete.
 
 Because a generic type cannot name its own converter in an attribute — an attribute argument cannot
 use type parameters (CS0416) — a generic companion names `NxUpdateRecordJsonConverterFactory` from

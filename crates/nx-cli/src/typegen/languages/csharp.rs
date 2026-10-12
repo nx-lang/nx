@@ -676,8 +676,8 @@ struct UpdatePropertyEnum {
 
 /// Returns the instantiable plain type a companion's fields live on, when typegen emits one: the
 /// target itself for a record or an action that is not abstract, and `<Name>_state` for the state
-/// record of a component with declared state. A component's props have no plain type a host
-/// holds, and an abstract record has none a host can instantiate to apply a patch to.
+/// record of a component with declared state. An abstract record has no plain type a host can
+/// instantiate to apply a patch to.
 fn update_plain_target_candidate(
     update: &ExportedUpdate,
     graph: &ExportedTypeGraph,
@@ -688,8 +688,6 @@ fn update_plain_target_candidate(
             ExportedType::ComponentState(state) if &state.component_name == component => state_name,
             _ => return None,
         }
-    } else if update.target_is_component {
-        return None;
     } else {
         let record = graph.record(&update.target_name)?;
         if record.is_abstract {

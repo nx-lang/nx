@@ -1712,16 +1712,13 @@ fn derived_declarations_a_program_never_references_are_omitted() {
 #[test]
 fn an_update_construction_names_the_update_record() {
     let text = explain_source(
-        "component <Counter step:int = 1 /> = { state { count:int = 0 label:string = \"x\" } <Label /> }\nlet reset() = <Counter.State.Update count=1 />\nlet more() = <Counter.Update step=2 />",
+        "component <Counter step:int = 1 /> = { state { count:int = 0 label:string = \"x\" } <Label /> }\nlet reset() = <Counter.State.Update count=1 />",
     );
     assert_line(&text, "record Counter.State.Update update of Counter.State");
     assert_line(&text, "  <Counter.State.Update count=1 />");
     // A referenced state update brings its state record, and the component names it.
     assert_line(&text, "record Counter.State");
     assert_line(&text, "component Counter state Counter.State");
-    // A component's own update record patches its props, and its target is the component.
-    assert_line(&text, "record Counter.Update update of Counter");
-    assert_line(&text, "  <Counter.Update step=2 />");
 }
 
 /// A component whose state nothing patches or names emits no state record and names none.
@@ -1803,14 +1800,12 @@ fn a_component_type_parameter_is_erased() {
 }
 
 #[test]
-fn an_update_record_of_a_generic_component_erases_the_parameter() {
+fn a_state_update_record_of_a_generic_component_erases_the_parameter() {
     let text = explain_source(
-        "external component <Label text?:string />\ncomponent <List TItem:type items?:TItem+ /> = { state { sel?:TItem } <Label /> }\nlet u = <List.State.Update sel={} />\nlet p = <List.Update items={} />\nlet root() = { u p }",
+        "external component <Label text?:string />\ncomponent <List TItem:type items?:TItem+ /> = { state { sel?:TItem } <Label /> }\nlet u = <List.State.Update sel={} />\nlet root() = { u }",
     );
     assert_line(&text, "record List.State.Update update of List.State");
-    assert_line(&text, "record List.Update update of List");
     assert_line(&text, "  sel: object?");
-    assert_line(&text, "  items: object*");
     assert!(!text.contains("TItem"), "{text}");
 }
 

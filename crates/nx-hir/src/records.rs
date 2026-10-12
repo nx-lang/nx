@@ -855,51 +855,20 @@ fn resolve_record_shape_inner(
 /// which only mirror what the target itself declares. The target is resolved where the update
 /// record was declared, which is where the target was.</para>
 ///
-/// <para>A component's update record carries the component's effective props, inherited ones
-/// first, which come from its resolved contract the same way.</para>
-///
-/// <para>Returns `None` when this is not an update record, or when its target resolves to neither
-/// a record nor a component; the synthesized fields are then all there is.</para>
+/// <para>Returns `None` when this is not an update record, or when its target is not a record; the
+/// synthesized fields are then all there is.</para>
 fn resolve_update_target_shape(
     module: &PreparedModule,
     record: &ResolvedRecordDefinition,
     stack: &mut Vec<(DeclarationKey, Name)>,
 ) -> Option<Result<ResolvedRecordShape, RecordResolutionError>> {
     let target = record.record.update_target()?;
-    let Some(target_record) =
-        resolve_record_definition_with_identity(module, &record.module_identity, target)
-    else {
-        return resolve_component_props_shape(module, record, target);
-    };
+    let target_record =
+        resolve_record_definition_with_identity(module, &record.module_identity, target)?;
     if target_record.record.update_target().is_some() {
         return None;
     }
     Some(resolve_record_shape_inner(module, &target_record, stack))
-}
-
-/// Resolves the effective props of the component a component's update record patches, as the
-/// shape of a record with those fields.
-///
-/// <para>A contract that fails to resolve keeps the synthesized fields; component validation
-/// reports why.</para>
-fn resolve_component_props_shape(
-    module: &PreparedModule,
-    record: &ResolvedRecordDefinition,
-    target: &Name,
-) -> Option<Result<ResolvedRecordShape, RecordResolutionError>> {
-    let props =
-        crate::components::effective_component_props_in(module, &record.module_identity, target)?;
-    Some(Ok(ResolvedRecordShape {
-        record: record.record.clone(),
-        fields: props
-            .into_iter()
-            .map(|field| OwnedRecordField {
-                field,
-                owner: target.clone(),
-            })
-            .collect(),
-        ancestors: Vec::new(),
-    }))
 }
 
 /// Converts one target field into the matching update-record field: optional and without default.

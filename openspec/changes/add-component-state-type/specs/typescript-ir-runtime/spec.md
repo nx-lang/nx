@@ -19,7 +19,7 @@ empty value for a state field that is not optional SHALL be rejected naming the 
 #### Scenario: An update record for a different component is rejected
 - **WHEN** a caller applies a value whose `$type` is `Other.Update` to `Counter` state
 - **THEN** the runtime SHALL fail with a diagnostic naming the mismatched update record
-- **AND** a value whose `$type` is `Counter.Update`, the component's props patch, SHALL fail the same way
+- **AND** a value whose `$type` is `Counter.Update`, which names no record a component has, SHALL fail the same way
 
 ### Requirement: TypeScript runtime dispatches action batches against a component instance
 The TypeScript runtime SHALL expose a dispatch API that takes a prepared program, an instance

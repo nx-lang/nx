@@ -78,6 +78,21 @@ namespace NxLang.Sdk.Tests.Generated
         public long Count { get; set; }
     }
 
+    [JsonPolymorphic(TypeDiscriminatorPropertyName = "$type")]
+    [JsonDerivedType(typeof(Stride), "Stride")]
+    [MessagePackFormatter(typeof(NxPolymorphicMessagePackFormatter<Stepped>))]
+    public abstract class Stepped
+    {
+        [Key("step")]
+        [JsonPropertyName("step")]
+        public long Step { get; set; }
+    }
+
+    [MessagePackFormatter(typeof(NxPolymorphicConcreteMessagePackFormatter<Stepped, Stride>))]
+    public sealed class Stride : Stepped
+    {
+    }
+
     [MessagePackObject]
     public sealed class Clash
     {
@@ -535,34 +550,6 @@ namespace NxLang.Sdk.Tests.Generated
         }
     }
 
-    [JsonConverter(typeof(NxUpdateRecordJsonConverter<Counter_update>))]
-    [MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<Counter_update>))]
-    public sealed class Counter_update : NxUpdateRecord
-    {
-        private static readonly NxUpdateSchema FieldSchema = new(
-            "Counter.Update",
-            new NxField("step", typeof(long), clearable: false));
-
-        public Counter_update()
-            : base(FieldSchema)
-        {
-        }
-
-        public string NxType => "Counter.Update";
-
-        public NxOptional<long> Step
-        {
-            get => base.Get<long>("step");
-            set => base.Set("step", value);
-        }
-
-        public bool IsSet(Counter_property property) => base.IsSet(Counter_propertyWireFormat.Format(property));
-
-        public void Unset(Counter_property property) => base.Unset(Counter_propertyWireFormat.Format(property));
-
-        public Counter_property[] Changed() => Array.ConvertAll(base.ChangedNames(), Counter_propertyWireFormat.Parse);
-    }
-
     [JsonConverter(typeof(NxUpdateRecordJsonConverter<Counter_state_update>))]
     [MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<Counter_state_update>))]
     public sealed class Counter_state_update : NxUpdate<Counter_state>
@@ -607,6 +594,84 @@ namespace NxLang.Sdk.Tests.Generated
             {
                 case Counter_state_property.Count:
                     return Count;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(property));
+            }
+        }
+    }
+
+    [JsonConverter(typeof(NxUpdateRecordJsonConverter<Stepped_update>))]
+    [MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<Stepped_update>))]
+    public sealed class Stepped_update : NxUpdateRecord
+    {
+        private static readonly NxUpdateSchema FieldSchema = new(
+            "Stepped.Update",
+            new NxField("step", typeof(long), clearable: false));
+
+        public Stepped_update()
+            : base(FieldSchema)
+        {
+        }
+
+        public string NxType => "Stepped.Update";
+
+        public NxOptional<long> Step
+        {
+            get => base.Get<long>("step");
+            set => base.Set("step", value);
+        }
+
+        public bool IsSet(Stepped_property property) => base.IsSet(Stepped_propertyWireFormat.Format(property));
+
+        public void Unset(Stepped_property property) => base.Unset(Stepped_propertyWireFormat.Format(property));
+
+        public Stepped_property[] Changed() => Array.ConvertAll(base.ChangedNames(), Stepped_propertyWireFormat.Parse);
+    }
+
+    [JsonConverter(typeof(NxUpdateRecordJsonConverter<Stride_update>))]
+    [MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<Stride_update>))]
+    public sealed class Stride_update : NxUpdate<Stride>
+    {
+        private static readonly NxUpdateSchema FieldSchema = new(
+            "Stride.Update",
+            StrideProperties.Step);
+
+        public Stride_update()
+            : base(FieldSchema)
+        {
+        }
+
+        public string NxType => "Stride.Update";
+
+        public NxOptional<long> Step
+        {
+            get => base.Get<long>("step");
+            set => base.Set("step", value);
+        }
+
+        public bool IsSet(Stride_property property) => base.IsSet(Stride_propertyWireFormat.Format(property));
+
+        public void Unset(Stride_property property) => base.Unset(Stride_propertyWireFormat.Format(property));
+
+        public Stride_property[] Changed() => Array.ConvertAll(base.ChangedNames(), Stride_propertyWireFormat.Parse);
+
+        public static Stride_update Diff(Stride before, Stride after) => NxUpdate<Stride>.Diff<Stride_update>(before, after);
+    }
+
+    public static class StrideProperties
+    {
+        public static readonly NxProperty<Stride, long> Step = new(
+            Stride_propertyWireFormat.Format(Stride_property.Step),
+            record => record.Step,
+            (record, value) => record.Step = value,
+            clearable: false);
+
+        public static NxProperty<Stride> Of(Stride_property property)
+        {
+            switch (property)
+            {
+                case Stride_property.Step:
+                    return Step;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(property));
             }
@@ -929,34 +994,6 @@ namespace NxLang.Sdk.Tests.Generated
                     throw new ArgumentOutOfRangeException(nameof(property));
             }
         }
-    }
-
-    [JsonConverter(typeof(NxUpdateRecordJsonConverter<Ticker_update>))]
-    [MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<Ticker_update>))]
-    public sealed class Ticker_update : NxUpdateRecord
-    {
-        private static readonly NxUpdateSchema FieldSchema = new(
-            "Ticker.Update",
-            new NxField("step", typeof(long), clearable: false));
-
-        public Ticker_update()
-            : base(FieldSchema)
-        {
-        }
-
-        public string NxType => "Ticker.Update";
-
-        public NxOptional<long> Step
-        {
-            get => base.Get<long>("step");
-            set => base.Set("step", value);
-        }
-
-        public bool IsSet(Ticker_property property) => base.IsSet(Ticker_propertyWireFormat.Format(property));
-
-        public void Unset(Ticker_property property) => base.Unset(Ticker_propertyWireFormat.Format(property));
-
-        public Ticker_property[] Changed() => Array.ConvertAll(base.ChangedNames(), Ticker_propertyWireFormat.Parse);
     }
 
     [JsonConverter(typeof(NxUpdateRecordJsonConverter<Ticker_state_update>))]
@@ -1374,30 +1411,6 @@ namespace NxLang.Sdk.Tests.Generated
             };
     }
 
-    [JsonConverter(typeof(NxEnumJsonConverter<Counter_property, Counter_propertyWireFormat>))]
-    [MessagePackFormatter(typeof(NxEnumMessagePackFormatter<Counter_property, Counter_propertyWireFormat>))]
-    public enum Counter_property
-    {
-        Step
-    }
-
-    internal sealed class Counter_propertyWireFormat : INxEnumWireFormat<Counter_property>
-    {
-        public static string Format(Counter_property value) =>
-            value switch
-            {
-                Counter_property.Step => "step",
-                _ => throw new FormatException("Unknown NX enum value."),
-            };
-
-        public static Counter_property Parse(string value) =>
-            value switch
-            {
-                "step" => Counter_property.Step,
-                _ => throw new FormatException("Unknown NX enum member."),
-            };
-    }
-
     [JsonConverter(typeof(NxEnumJsonConverter<Counter_state_property, Counter_state_propertyWireFormat>))]
     [MessagePackFormatter(typeof(NxEnumMessagePackFormatter<Counter_state_property, Counter_state_propertyWireFormat>))]
     public enum Counter_state_property
@@ -1418,6 +1431,54 @@ namespace NxLang.Sdk.Tests.Generated
             value switch
             {
                 "count" => Counter_state_property.Count,
+                _ => throw new FormatException("Unknown NX enum member."),
+            };
+    }
+
+    [JsonConverter(typeof(NxEnumJsonConverter<Stepped_property, Stepped_propertyWireFormat>))]
+    [MessagePackFormatter(typeof(NxEnumMessagePackFormatter<Stepped_property, Stepped_propertyWireFormat>))]
+    public enum Stepped_property
+    {
+        Step
+    }
+
+    internal sealed class Stepped_propertyWireFormat : INxEnumWireFormat<Stepped_property>
+    {
+        public static string Format(Stepped_property value) =>
+            value switch
+            {
+                Stepped_property.Step => "step",
+                _ => throw new FormatException("Unknown NX enum value."),
+            };
+
+        public static Stepped_property Parse(string value) =>
+            value switch
+            {
+                "step" => Stepped_property.Step,
+                _ => throw new FormatException("Unknown NX enum member."),
+            };
+    }
+
+    [JsonConverter(typeof(NxEnumJsonConverter<Stride_property, Stride_propertyWireFormat>))]
+    [MessagePackFormatter(typeof(NxEnumMessagePackFormatter<Stride_property, Stride_propertyWireFormat>))]
+    public enum Stride_property
+    {
+        Step
+    }
+
+    internal sealed class Stride_propertyWireFormat : INxEnumWireFormat<Stride_property>
+    {
+        public static string Format(Stride_property value) =>
+            value switch
+            {
+                Stride_property.Step => "step",
+                _ => throw new FormatException("Unknown NX enum value."),
+            };
+
+        public static Stride_property Parse(string value) =>
+            value switch
+            {
+                "step" => Stride_property.Step,
                 _ => throw new FormatException("Unknown NX enum member."),
             };
     }
@@ -1556,30 +1617,6 @@ namespace NxLang.Sdk.Tests.Generated
             value switch
             {
                 "shape" => Doc_property.Shape,
-                _ => throw new FormatException("Unknown NX enum member."),
-            };
-    }
-
-    [JsonConverter(typeof(NxEnumJsonConverter<Ticker_property, Ticker_propertyWireFormat>))]
-    [MessagePackFormatter(typeof(NxEnumMessagePackFormatter<Ticker_property, Ticker_propertyWireFormat>))]
-    public enum Ticker_property
-    {
-        Step
-    }
-
-    internal sealed class Ticker_propertyWireFormat : INxEnumWireFormat<Ticker_property>
-    {
-        public static string Format(Ticker_property value) =>
-            value switch
-            {
-                Ticker_property.Step => "step",
-                _ => throw new FormatException("Unknown NX enum value."),
-            };
-
-        public static Ticker_property Parse(string value) =>
-            value switch
-            {
-                "step" => Ticker_property.Step,
                 _ => throw new FormatException("Unknown NX enum member."),
             };
     }

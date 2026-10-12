@@ -2090,17 +2090,17 @@ fn test_component_example_with_update_records() {
     let module = result.lowered_module.expect("lowered module");
     assert!(
         matches!(
-            module.find_item("Counter.Update"),
+            module.find_item("Counter.State.Update"),
             Some(nx_hir::Item::Record(_))
         ),
-        "Expected the Counter example to have an update record"
+        "Expected the Counter example's state to have an update record"
     );
     assert!(
         matches!(
-            module.find_item("Counter.Property"),
+            module.find_item("Counter.State.Property"),
             Some(nx_hir::Item::Union(union_def)) if union_def.property_target().is_some()
         ),
-        "Expected the Counter example to have a property union"
+        "Expected the Counter example's state to have a property union"
     );
 }
 

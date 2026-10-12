@@ -90,14 +90,14 @@ public sealed class ClearingEditorProps
 }
 
 /// <summary>
-/// A hand-written patch that clears a component's <c>step</c> prop, a value-typed field the schema knows cannot
-/// be cleared.
+/// A hand-written patch that clears an abstract record's <c>step</c> field, a value-typed field the schema knows
+/// cannot be cleared.
 /// </summary>
 [MessagePackObject]
-public sealed class ClearingCounterPatch
+public sealed class ClearingSteppedPatch
 {
     [Key("$type")]
-    public string Type { get; set; } = "Counter.Update";
+    public string Type { get; set; } = "Stepped.Update";
 
     [Key("step")]
     public long? Step { get; set; }
@@ -784,24 +784,24 @@ public class NxUpdateRecordTests
     }
 
     /// <summary>
-    /// A component's props have no plain generated type, so its props companion derives from the untyped base;
+    /// An abstract record has no plain type a host can instantiate, so its companion derives from the untyped base;
     /// merge and changed still work there, and the patch still round-trips.
     /// </summary>
     [Fact]
-    public void ComponentUpdate_WithNoPlainType_MergesAndReportsChanges()
+    public void AbstractRecordUpdate_WithNoPlainType_MergesAndReportsChanges()
     {
-        Counter_update merged = NxUpdateRecord.Merge(
-            new Counter_update { Step = 1 },
-            new Counter_update { Step = 2 });
+        Stepped_update merged = NxUpdateRecord.Merge(
+            new Stepped_update { Step = 1 },
+            new Stepped_update { Step = 2 });
 
-        Assert.Equal(typeof(NxUpdateRecord), typeof(Counter_update).BaseType);
+        Assert.Equal(typeof(NxUpdateRecord), typeof(Stepped_update).BaseType);
         Assert.Equal(2, merged.Step.Value);
-        Assert.Equal(new[] { Counter_property.Step }, merged.Changed());
-        Assert.True(merged.IsSet(Counter_property.Step));
+        Assert.Equal(new[] { Stepped_property.Step }, merged.Changed());
+        Assert.True(merged.IsSet(Stepped_property.Step));
 
         string json = JsonSerializer.Serialize(merged);
-        Assert.Equal("{\"$type\":\"Counter.Update\",\"step\":2}", json);
-        Counter_update read = MessagePackSerializer.Deserialize<Counter_update>(
+        Assert.Equal("{\"$type\":\"Stepped.Update\",\"step\":2}", json);
+        Stepped_update read = MessagePackSerializer.Deserialize<Stepped_update>(
             MessagePackSerializer.Serialize(merged, cancellationToken: TestContext.Current.CancellationToken),
             cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(2, read.Step.Value);
@@ -974,7 +974,7 @@ public class NxUpdateRecordTests
         Assert.False(UserProperties.Name.Clearable);
         Assert.False(BookProperties.Title.Clearable);
         Assert.False(BookProperties.Authors.Clearable);
-        Assert.False(Assert.Single(new Counter_update().Schema.Fields).Clearable);
+        Assert.False(Assert.Single(new Stepped_update().Schema.Fields).Clearable);
         Assert.False(NxRangeProperties<long>.Start.Clearable);
         Assert.False(NxRangeProperties<string>.Start.Clearable);
         Assert.False(new NxField("n", typeof(long)).Clearable);
@@ -995,28 +995,28 @@ public class NxUpdateRecordTests
     [Fact]
     public void UpdateRecord_Json_NullForANonClearableField_ThrowsNamingTheField()
     {
-        const string json = """{"$type":"Counter.Update","step":null}""";
+        const string json = """{"$type":"Stepped.Update","step":null}""";
 
-        JsonException error = Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<Counter_update>(json));
+        JsonException error = Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<Stepped_update>(json));
 
         Assert.Contains("step", error.Message, StringComparison.Ordinal);
-        Assert.Contains(nameof(Counter_update), error.Message, StringComparison.Ordinal);
+        Assert.Contains(nameof(Stepped_update), error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
     public void UpdateRecord_MessagePack_NilForANonClearableField_ThrowsNamingTheField()
     {
         byte[] bytes = MessagePackSerializer.Serialize(
-            new ClearingCounterPatch(),
+            new ClearingSteppedPatch(),
             cancellationToken: TestContext.Current.CancellationToken);
 
         MessagePackSerializationException error = Assert.Throws<MessagePackSerializationException>(
-            () => MessagePackSerializer.Deserialize<Counter_update>(
+            () => MessagePackSerializer.Deserialize<Stepped_update>(
                 bytes,
                 cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.Contains("step", error.ToString(), StringComparison.Ordinal);
-        Assert.Contains(nameof(Counter_update), error.ToString(), StringComparison.Ordinal);
+        Assert.Contains(nameof(Stepped_update), error.ToString(), StringComparison.Ordinal);
     }
 
     private static string DiagnosticText(NxEvaluationException error) =>

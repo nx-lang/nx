@@ -3240,7 +3240,7 @@ fn an_invalid_state_or_patch_is_rejected() {
         "nx-ir-state-patch",
         &["Counter.State.Update"],
     );
-    // The component's own update record patches its props, never its state.
+    // A component has no update record of its own, so a `Counter.Update` patches nothing.
     assert_code(
         program.apply_component_state_patch(
             "Counter",

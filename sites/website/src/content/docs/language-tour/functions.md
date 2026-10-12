@@ -72,7 +72,7 @@ let makeValueChanged(value:string): SearchBox.ValueChanged =
 - Hosts initialize components by name, receive the rendered output plus an opaque state snapshot, and later dispatch ordered action batches with that saved snapshot.
 - State defaults run only during initialization. After that a handler changes state by returning the component's state update record, written `<State.Update ... />` inside the component; it names only the fields that change.
 - Inside a component a handler may return its `State.Update` or an action the component `emits`; at the root any action or update record goes to the host.
-- A component's state is a record of its own, `Counter.State`, and inside the component a bare `State` names it. `Counter.Update` and `Counter.Property` describe its props, which belong to its parent.
+- A component's state is a record of its own, `Counter.State`, and inside the component a bare `State` names it. The component itself is not a record, so it has no `Counter.Update` or `Counter.Property`; its props belong to its parent.
 
 ```nx
 external component <Button label:string emits { Tapped { } } />
