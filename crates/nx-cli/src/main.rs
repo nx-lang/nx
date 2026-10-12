@@ -2793,6 +2793,32 @@ export type AssistantConfig = { agent?:Agent }
     }
 
     #[test]
+    fn test_cli_typegen_accepts_a_namespaced_type_named_props() {
+        let (dir, library_path) = create_temp_library(&[(
+            "saved.nx",
+            "import \"../shared\" as shared\nexport type Saved = { p:shared.Props }",
+        )]);
+        let shared_path = dir.path().join("shared");
+        fs::create_dir_all(&shared_path).unwrap();
+        fs::write(
+            shared_path.join("shared.nx"),
+            "export type Props = { a:string }",
+        )
+        .unwrap();
+        let output_path = dir.path().join("generated-ts");
+        let output = run_cli(&[
+            "typegen",
+            library_path.to_str().unwrap(),
+            "--language",
+            "typescript",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{stderr}");
+    }
+
+    #[test]
     fn test_cli_typegen_library_writes_external_component_state_output() {
         let (dir, library_path) = create_temp_library(&[
             ("theme.nx", "export type ThemeMode = light | dark"),

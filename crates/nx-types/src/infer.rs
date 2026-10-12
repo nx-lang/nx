@@ -1556,16 +1556,43 @@ impl<'a> InferenceContext<'a> {
             _ => None,
         };
         if found.as_deref() != Some(expected) {
-            self.error(
-                "viewer-record-mismatch",
+            let written = found.unwrap_or_else(|| actual.to_string());
+            // The right name from somewhere else, most often because the library is not imported.
+            let message = if written == expected {
+                let imported = self
+                    .module
+                    .raw_module()
+                    .imports
+                    .iter()
+                    .any(|import| import.library_path == nx_hir::VIEWER_LIBRARY_ROOT);
                 format!(
-                    "The viewer of {} '{}' must be a '{}' from \"{}\", not '{}'",
+                    "The viewer of {} '{}' must be {} '{}' from \"{}\", and this '{}' is not that one{}",
                     target.kind_label,
                     viewer.target,
+                    article(expected),
                     expected,
                     nx_hir::VIEWER_LIBRARY_ROOT,
-                    found.unwrap_or_else(|| actual.to_string())
-                ),
+                    expected,
+                    if imported {
+                        String::new()
+                    } else {
+                        format!("; add `import \"{}\"`", nx_hir::VIEWER_LIBRARY_ROOT)
+                    }
+                )
+            } else {
+                format!(
+                    "The viewer of {} '{}' must be {} '{}' from \"{}\", not '{}'",
+                    target.kind_label,
+                    viewer.target,
+                    article(expected),
+                    expected,
+                    nx_hir::VIEWER_LIBRARY_ROOT,
+                    written
+                )
+            };
+            self.error(
+                "viewer-record-mismatch",
+                message,
                 self.module.raw_module().expr_span(viewer.value),
             );
         }
@@ -8214,6 +8241,14 @@ pub(crate) fn widened_type(ty: &Type, target: nx_hir::ast::PrimitiveType) -> Typ
         }
     }
     widen(ty, Primitive::from_hir_type(target))
+}
+
+/// The indefinite article for a viewer record's name: "an ElementViewer", "a UnionViewer".
+fn article(name: &str) -> &'static str {
+    match name.chars().next() {
+        Some('A' | 'E' | 'I' | 'O') => "an",
+        _ => "a",
+    }
 }
 
 /// Whether a written type mentions the type name `name` anywhere: under an occurrence, as an

@@ -7,7 +7,7 @@
 //! decided by the program's import graph, not by any one module's bindings.</para>
 
 use crate::artifacts::{workspace_import_target_identity, LibraryArtifact, ProgramBuildContext};
-use nx_diagnostics::{Diagnostic, Label, TextSpan};
+use nx_diagnostics::{Diagnostic, Label, Severity, TextSpan};
 use nx_hir::ast::{Expr, Literal};
 use nx_hir::{DeclaringOrigin, ExprId, LoweredModule, ViewerRecord, ViewerTarget};
 use nx_types::ModuleArtifact;
@@ -124,9 +124,9 @@ impl ProgramViewer {
 /// target resolved in its own module.
 ///
 /// <para>A viewer declaration whose target does not resolve to a declaration that can have a
-/// viewer, or whose value is not the viewer record for that target, is left out: its module's
-/// analysis reports it. So is the second of two viewer declarations of one target in one module,
-/// which analysis reports as `duplicate-viewer`.</para>
+/// viewer, whose value is not the viewer record for that target, or that has any other error is
+/// left out whole: its module's analysis reports it. So is the second of two viewer declarations
+/// of one target in one module, which analysis reports as `duplicate-viewer`.</para>
 pub fn program_viewers<'a>(
     modules: &[ProgramModule],
     artifact_of: impl Fn(&str) -> Option<&'a ModuleArtifact>,
@@ -150,7 +150,10 @@ pub fn program_viewers<'a>(
             let Some(value) = read_viewer_value(lowered, viewer.value) else {
                 continue;
             };
-            if value.record != target.record || !targets.insert(target.origin.clone()) {
+            if value.record != target.record
+                || has_errors_within(artifact, &module.identity, viewer.span)
+                || !targets.insert(target.origin.clone())
+            {
                 continue;
             }
             viewers.push(ProgramViewer {
@@ -165,6 +168,20 @@ pub fn program_viewers<'a>(
         }
     }
     viewers
+}
+
+/// Whether analysis reported an error inside `span` of the module, other than `duplicate-viewer`,
+/// which says which of two clean viewer declarations applies rather than that one is wrong.
+fn has_errors_within(artifact: &ModuleArtifact, identity: &str, span: TextSpan) -> bool {
+    artifact.diagnostics.iter().any(|diagnostic| {
+        diagnostic.severity() == Severity::Error
+            && diagnostic.code() != Some("duplicate-viewer")
+            && diagnostic.labels().iter().any(|label| {
+                label.primary
+                    && (label.file == artifact.file_name || label.file == identity)
+                    && span.contains_range(label.range)
+            })
+    })
 }
 
 /// The targets two or more loaded modules other than the target's declaring module each declare a

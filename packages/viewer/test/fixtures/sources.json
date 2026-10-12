@@ -74,7 +74,7 @@
     "viewers": []
   },
   "inlineTag": {
-    "source": "import \"@nx/viewer\"\n\ntype Tag = { name:string color:string = \"gray\" }\ntype Post = { title:string tag:Tag }\n\nviewer Tag = <ElementViewer layout=inline title=name />\n\nlet post = <Post title=\"Launch\" tag=<Tag name=\"news\" /> />\n",
+    "source": "import \"@nx/viewer\"\n\ntype Tag = { name:string note?:string code?:string color:string = \"gray\" }\ntype Post = { title:string tag:Tag }\n\nviewer Tag = <ElementViewer layout=inline title=name subtitle=note badge=code />\n\nlet post = <Post title=\"Launch\" tag=<Tag name=\"news\" note=\"Company news\" code=\"N\" /> />\n",
     "viewers": []
   },
   "formats": {

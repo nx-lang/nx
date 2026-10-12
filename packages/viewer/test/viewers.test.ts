@@ -196,7 +196,37 @@ describe("viewers", () => {
     assert.equal(tag.tagName, "SPAN");
     assert.ok(tag.classList.contains("inline-layout"));
     assert.equal(read(tag.querySelector(".part.title")), "news");
-    assert.ok(detailsOf(tag)?.querySelector(".row.ghost"), "the color default is in details");
+    // The line holds only the title; the subtitle and badge read as rows in details.
+    assert.equal(tag.querySelector(".part.subtitle, .part.badge"), null);
+    const details = detailsOf(tag);
+    assert.deepEqual(
+      Array.from(details?.querySelectorAll(".row:not(.ghost) > .label") ?? []).map((label) => read(label)),
+      ["note", "code"]
+    );
+    assert.ok(details?.querySelector(".row.ghost"), "the color default is in details");
+  });
+
+  it("shows a value whose format or layout it does not know as plain text in a card", async () => {
+    const survey = await fixture("survey");
+    const tree = structuredClone(survey.tree);
+    for (const declaration of tree.declarations) {
+      const viewer = declaration.viewer as { layout?: string; properties?: { format?: string }[] } | undefined;
+      if (viewer === undefined) {
+        continue;
+      }
+      viewer.layout = "bogus";
+      for (const property of viewer.properties ?? []) {
+        property.format = "bogus";
+      }
+    }
+    const element = show({ ...survey, tree });
+    const engineer = cards(element, "Choice")[0]!;
+    assert.ok(!engineer.classList.contains("bogus-layout"));
+    assert.ok(engineer.querySelector(":scope > .rows"), "an unknown layout folds nothing away");
+    assert.ok(read(engineer).includes("Engineer"));
+    for (const value of Array.from(root(element).querySelectorAll(".value.formatted"))) {
+      assert.notEqual(read(value), "", "a formatted value keeps its text");
+    }
   });
 
   it("reads a viewer declaration as a declaration headed Viewer for its target", async () => {

@@ -5,7 +5,8 @@ use nx_hir::{
     ast::{Expr, Literal, OrderedFloat, TypeRef},
     Component, ImportKind, InterfaceItemKind, Item, LocalDefinitionId, LoweredModule,
     ModuleNamespace, PreparedItemKind, PreparedModule, PreparedNamespace, RecordDef, RecordField,
-    RecordKind, SelectiveImport, TypeAlias, UnionCaseDef, UnionCaseField, UnionDef, Visibility,
+    RecordKind, ResolvedPreparedItem, SelectiveImport, TypeAlias, UnionCaseDef, UnionCaseField,
+    UnionDef, Visibility,
 };
 use nx_types::ModuleArtifact;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -511,7 +512,7 @@ impl ExportedTypeGraph {
             .unwrap_or_else(|| PathBuf::from("types.nx"));
         let module_path = module_output_stem(&file_name)?;
         let declarations = collect_exported_declarations(module);
-        reject_props_record_references(&declarations)?;
+        reject_props_record_references(&declarations, module.prepared_module.as_deref())?;
         let mut modules = vec![ExportedModule {
             module_path: module_path.clone(),
             imported_types: imported_build.imported_types.clone(),
@@ -554,7 +555,7 @@ impl ExportedTypeGraph {
 
             reject_fields_admitting_zero(artifact, Path::new(&artifact.file_name))?;
             let declarations = collect_exported_declarations(artifact);
-            reject_props_record_references(&declarations)?;
+            reject_props_record_references(&declarations, artifact.prepared_module.as_deref())?;
             if declarations.is_empty() {
                 continue;
             }
@@ -1253,14 +1254,41 @@ fn is_props_record_item(item: &Item) -> bool {
 }
 
 /// The props record a type name reaches, when it names `X.Props`, `X.Props.Update` or
-/// `X.Props.Property`.
-fn props_record_reference(name: &str) -> Option<&str> {
+/// `X.Props.Property` and `X.Props` is a component's props record.
+///
+/// <para>The name is resolved in `prepared`, so a type merely named `Props` in a namespace, such as
+/// `shared.Props`, is not mistaken for one. A name that does not resolve is judged by its
+/// spelling.</para>
+fn props_record_reference<'a>(name: &'a str, prepared: Option<&PreparedModule>) -> Option<&'a str> {
     let record = name
         .strip_suffix(".Update")
         .or_else(|| name.strip_suffix(".Property"))
         .filter(|record| nx_hir::is_props_record_name(record))
         .unwrap_or(name);
-    nx_hir::is_props_record_name(record).then_some(record)
+    if !nx_hir::is_props_record_name(record) {
+        return None;
+    }
+    let resolved = prepared.and_then(|prepared| {
+        let binding =
+            prepared.resolve_binding(PreparedNamespace::Type, &nx_hir::Name::new(record))?;
+        prepared.resolve_prepared_item(binding)
+    });
+    let is_props = match resolved {
+        Some(ResolvedPreparedItem::Raw {
+            item: Item::Record(record),
+            ..
+        }) => record.props_component().is_some(),
+        Some(ResolvedPreparedItem::Imported { item, .. }) => matches!(
+            item.item,
+            InterfaceItemKind::Record {
+                kind: RecordKind::Props { .. },
+                ..
+            }
+        ),
+        Some(ResolvedPreparedItem::Raw { .. }) => false,
+        None => true,
+    };
+    is_props.then_some(record)
 }
 
 /// Fails when an exported declaration's generated type would refer to a component's props record.
@@ -1268,7 +1296,10 @@ fn props_record_reference(name: &str) -> Option<&str> {
 /// <para>Typegen generates no type for `T.Props` or its companions yet, so a reference to one
 /// could only be emitted as a name that does not exist. Failing names what to change instead of
 /// generating code that does not compile.</para>
-fn reject_props_record_references(declarations: &[ExportedTypeDecl]) -> Result<(), String> {
+fn reject_props_record_references(
+    declarations: &[ExportedTypeDecl],
+    prepared: Option<&PreparedModule>,
+) -> Result<(), String> {
     for declaration in declarations {
         let mut types: Vec<TypeRef> = Vec::new();
         match &declaration.item {
@@ -1292,7 +1323,7 @@ fn reject_props_record_references(declarations: &[ExportedTypeDecl]) -> Result<(
         for ty in &mut types {
             rewrite_type_ref_names(ty, &mut |name| {
                 if found.is_none() {
-                    found = props_record_reference(name).map(str::to_string);
+                    found = props_record_reference(name, prepared).map(str::to_string);
                 }
                 None
             });

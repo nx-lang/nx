@@ -1536,7 +1536,22 @@ let root() = { <MultiChoice id="a" label="Pick" /> }
 
 #[test]
 fn the_union_a_property_uses_comes_along() {
-    let tree = with_viewers(&survey_snapshot(&[]), &[]);
+    // The form leaves `layout` to its default, so no node of it names `ChoiceLayout`.
+    let form = r#"import "./survey.nx"
+let root() = { <SingleChoice id="a" label="Pick"><Choice value="v" label="V" /></SingleChoice> }
+"#;
+    let snapshot = WorkspaceSnapshot::from_documents(
+        Option::<PathBuf>::None,
+        vec![
+            DocumentInput::new(SURVEY_URI, SURVEY).with_version(1),
+            DocumentInput::new(URI, form).with_version(1),
+        ],
+    )
+    .expect("snapshot");
+    let tree = with_viewers(&snapshot, &[]);
+    assert!(!tree.nodes.iter().any(|node| node
+        .declaration
+        .is_some_and(|at| tree.declarations[at as usize].name == "ChoiceLayout")));
     let layout = viewer(&tree, "ChoiceLayout");
     let cases = layout
         .cases
@@ -1624,6 +1639,52 @@ viewer ChoiceLayout = <UnionViewer><CaseViewer of=chips label="tags" /></UnionVi
         .clone();
     assert_eq!(chips.label.as_deref(), Some("tags"));
     assert_eq!(chips.example.as_deref(), Some("A B"));
+}
+
+#[test]
+fn a_viewer_declaration_with_an_error_does_not_apply() {
+    let host = r#"import "@nx/viewer"
+import "./survey.nx"
+viewer SingleChoice = <ElementViewer name="Host" title=lable />
+viewer Choice = <ElementViewer layout="inline"><PropertyViewer of="value" format="image" /></ElementViewer>
+"#;
+    let snapshot = survey_snapshot(&[("nx://tenant/host.nx", host)]);
+    let tree = with_viewers(&snapshot, &["tenant/host.nx"]);
+    // The misspelled host viewer for SingleChoice contributes nothing, its name included.
+    assert_eq!(
+        viewer(&tree, "SingleChoice").name.as_deref(),
+        Some("Single choice")
+    );
+    // A quoted layout and format are type errors, so the library's row layout still holds.
+    let choice = viewer(&tree, "Choice");
+    assert_eq!(choice.layout.as_deref(), Some("row"));
+    let value = choice
+        .properties
+        .iter()
+        .find(|property| property.name == "value")
+        .expect("value");
+    assert_eq!(value.format, None);
+}
+
+#[test]
+fn two_property_viewers_of_one_property_in_one_viewer_merge() {
+    let host = r#"import "@nx/viewer"
+import "./survey.nx"
+viewer Choice = <ElementViewer>
+  <PropertyViewer of=label label="First" />
+  <PropertyViewer of=label place=details />
+</ElementViewer>
+"#;
+    let snapshot = survey_snapshot(&[("nx://tenant/host.nx", host)]);
+    let tree = with_viewers(&snapshot, &["tenant/host.nx"]);
+    let label = viewer(&tree, "Choice")
+        .properties
+        .iter()
+        .find(|property| property.name == "label")
+        .expect("label")
+        .clone();
+    assert_eq!(label.label.as_deref(), Some("First"));
+    assert_eq!(label.place, "details");
 }
 
 #[test]

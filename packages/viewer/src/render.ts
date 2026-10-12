@@ -507,7 +507,8 @@ const renderElement: Renderer = (context, at, options) => {
   }
   const entry = declarationOf(index, source);
   const viewer = entry?.viewer;
-  const layout = viewer?.layout ?? "card";
+  // A layout this version does not know reads as a card, which folds nothing away.
+  const layout = viewer?.layout === "row" || viewer?.layout === "inline" ? viewer.layout : "card";
   const card = marked(context, at, layout === "inline" ? "span" : "div", layout === "card" ? "card" : `card ${layout}-layout`);
   card.tabIndex = 0;
   card.setAttribute("role", "group");
@@ -548,9 +549,10 @@ const renderElement: Renderer = (context, at, options) => {
   details.querySelector(".details-body")!.append(detailRows);
   const folded = layout !== "card";
 
-  // The attributes bound to the card's parts move into its header, keeping their keys.
+  // The attributes bound to the card's parts move into its header, keeping their keys. An inline
+  // element's line holds only its title; its other parts read as rows in its details.
   const partNames = new Set<string>();
-  for (const part of PARTS) {
+  for (const part of layout === "inline" ? (["title"] as const) : PARTS) {
     const name = viewer?.[part];
     const unit = name === undefined ? undefined : byName.get(name);
     if (name === undefined || unit === undefined || placed.has(unit)) {
@@ -891,7 +893,8 @@ function formatted(context: RenderContext, at: number, value: string, format: So
     case "markdown":
       element.append(renderText(document, [{ kind: "text", key: "", value, raw: false }], true, "none"));
       break;
-    case "text":
+    // `text`, and a format this version does not know, show the value as it is.
+    default:
       element.textContent = value;
       break;
   }

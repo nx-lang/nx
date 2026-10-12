@@ -177,7 +177,12 @@ impl ResolvedViewer {
     /// Applies one viewer declaration's value over what earlier ones resolved; `own` says whether
     /// it is a viewer of the declaration itself rather than of a base.
     fn apply(&mut self, value: &ViewerValue, own: bool) {
-        let text = |name: &str| value.attribute(name).map(ViewerAttribute::text);
+        let text = |name: &str| {
+            value
+                .attribute(name)
+                .map(ViewerAttribute::text)
+                .filter(|text| is_known_value(name, text))
+        };
         if own {
             if let Some(name) = text("name") {
                 self.name = Some(name);
@@ -198,12 +203,20 @@ impl ResolvedViewer {
         match value.record {
             ViewerRecord::Element => {
                 // The later viewer's property viewers come first, in its order; the earlier ones
-                // it does not name follow in theirs.
+                // it does not name follow in theirs. Two of one property in one viewer merge too.
                 let mut earlier = std::mem::take(&mut self.properties);
                 for child in &value.children {
                     let Some(of) = child_of(child) else {
                         continue;
                     };
+                    if let Some(merged) = self
+                        .properties
+                        .iter_mut()
+                        .find(|existing| existing.of == of)
+                    {
+                        merge_child(merged, child);
+                        continue;
+                    }
                     let mut merged = match earlier.iter().position(|existing| existing.of == of) {
                         Some(index) => earlier.remove(index),
                         None => ResolvedChild {
@@ -212,13 +225,7 @@ impl ResolvedViewer {
                         },
                     };
                     merge_child(&mut merged, child);
-                    if !self
-                        .properties
-                        .iter()
-                        .any(|existing| existing.of == merged.of)
-                    {
-                        self.properties.push(merged);
-                    }
+                    self.properties.push(merged);
                 }
                 self.properties.extend(earlier);
             }
@@ -251,8 +258,24 @@ fn child_of(child: &ViewerChild) -> Option<String> {
 
 fn merge_child(merged: &mut ResolvedChild, child: &ViewerChild) {
     for (name, value) in &child.attributes {
-        if name != "of" {
-            merged.set(name, value.text());
+        let text = value.text();
+        if name != "of" && is_known_value(name, &text) {
+            merged.set(name, text);
         }
+    }
+}
+
+/// Whether `text` is a value the viewer protocol allows for the attribute `name`. Analysis already
+/// rejects any other, and a viewer declaration with an error never applies; this keeps a value
+/// outside the protocol's unions from reaching a reader all the same.
+fn is_known_value(name: &str, text: &str) -> bool {
+    match name {
+        "layout" => matches!(text, "card" | "row" | "inline"),
+        "place" => matches!(text, "body" | "details"),
+        "format" => matches!(
+            text,
+            "text" | "markdown" | "url" | "image" | "color" | "email" | "phone"
+        ),
+        _ => true,
     }
 }

@@ -238,6 +238,24 @@ fn the_wrong_record_for_the_kind() {
 }
 
 #[test]
+fn a_viewer_without_the_library_imported_says_to_import_it() {
+    // No `import "@nx/viewer"`, so `ElementViewer` is an unknown element of the same name.
+    let diagnostics = diagnostics(&[(
+        "main.nx",
+        "type Choice = { label:string }\nviewer Choice = <ElementViewer title=label />",
+    )]);
+    let mismatch = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code.as_deref() == Some("viewer-record-mismatch"))
+        .unwrap_or_else(|| panic!("no viewer-record-mismatch in {diagnostics:#?}"));
+    assert_eq!(
+        mismatch.message,
+        "The viewer of record 'Choice' must be an 'ElementViewer' from \"@nx/viewer\", and this \
+         'ElementViewer' is not that one; add `import \"@nx/viewer\"`"
+    );
+}
+
+#[test]
 fn a_target_that_cannot_have_a_viewer() {
     assert_error(
         "let answer = 42\n\
