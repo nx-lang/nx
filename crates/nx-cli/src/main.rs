@@ -2819,6 +2819,38 @@ export type AssistantConfig = { agent?:Agent }
     }
 
     #[test]
+    fn test_cli_typegen_resolves_a_selectively_imported_components_state() {
+        let (dir, library_path) = create_temp_library(&[(
+            "saved.nx",
+            "import { Card } from \"../ui\"\nexport type Saved = { s:Card.State }",
+        )]);
+        let ui_path = dir.path().join("ui");
+        fs::create_dir_all(&ui_path).unwrap();
+        fs::write(
+            ui_path.join("card.nx"),
+            "export external component <Card /> = {\n  state { open:boolean }\n}",
+        )
+        .unwrap();
+        let output_path = dir.path().join("generated-ts");
+        let output = run_cli(&[
+            "typegen",
+            library_path.to_str().unwrap(),
+            "--language",
+            "typescript",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{stderr}");
+        let saved = fs::read_to_string(output_path.join("saved.ts")).unwrap();
+        assert!(
+            saved.contains("import type { Card_state as Card_State } from \"ui\";"),
+            "{saved}"
+        );
+        assert!(saved.contains("s: Card_State;"), "{saved}");
+    }
+
+    #[test]
     fn test_cli_typegen_library_writes_external_component_state_output() {
         let (dir, library_path) = create_temp_library(&[
             ("theme.nx", "export type ThemeMode = light | dark"),

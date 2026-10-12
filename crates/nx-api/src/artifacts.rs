@@ -2671,25 +2671,13 @@ fn apply_graph_imports(
                                 item_indices,
                                 &mut imported_visible_names,
                             );
-                            // A declaration's derived `<Name>.Update`, `<Name>.Property`,
-                            // `<Name>.State` and `<Name>.Props` declarations travel with it: they
-                            // are reachable through the name the author imported, not exported
-                            // names of their own.
-                            for suffix in DERIVED_DECLARATION_SUFFIXES {
-                                let derived = format!("{}.{}", entry.name.as_str(), suffix);
-                                let Some(derived_indices) = library.exported_items.get(&derived)
-                                else {
-                                    continue;
-                                };
-                                add_imported_interface_bindings(
-                                    module,
-                                    &format!("{}.{}", visible_name, suffix),
-                                    entry.span,
-                                    &library,
-                                    derived_indices,
-                                    &mut imported_visible_names,
-                                );
-                            }
+                            add_derived_interface_bindings(
+                                module,
+                                entry,
+                                &visible_name,
+                                &library,
+                                &mut imported_visible_names,
+                            );
                         }
                     }
                 }
@@ -3305,6 +3293,13 @@ fn apply_build_context_imports(
                         item_indices,
                         &mut imported_visible_names,
                     );
+                    add_derived_interface_bindings(
+                        module,
+                        entry,
+                        &visible_name,
+                        &library,
+                        &mut imported_visible_names,
+                    );
                 }
             }
         }
@@ -3334,6 +3329,32 @@ fn add_ambiguous_interface_diagnostic(
         ),
         span,
     });
+}
+
+/// Binds a selectively imported library declaration's derived `<Name>.Update`, `<Name>.Property`,
+/// `<Name>.State` and `<Name>.Props` declarations under the name the author imported it as. They
+/// travel with their target rather than being exported names of their own.
+fn add_derived_interface_bindings(
+    module: &mut PreparedModule,
+    entry: &SelectiveImport,
+    visible_name: &str,
+    library: &LibraryArtifact,
+    imported_visible_names: &mut FxHashMap<(PreparedNamespace, String), String>,
+) {
+    for suffix in DERIVED_DECLARATION_SUFFIXES {
+        let derived = format!("{}.{}", entry.name.as_str(), suffix);
+        let Some(derived_indices) = library.exported_items.get(&derived) else {
+            continue;
+        };
+        add_imported_interface_bindings(
+            module,
+            &format!("{}.{}", visible_name, suffix),
+            entry.span,
+            library,
+            derived_indices,
+            imported_visible_names,
+        );
+    }
 }
 
 fn add_imported_interface_bindings(
@@ -5410,6 +5431,41 @@ let root() = { helper() }"#;
             .diagnostics
             .iter()
             .any(|diagnostic| { diagnostic.message().contains("does not export 'helper'") }));
+    }
+
+    /// A library that selectively imports a component from another library reaches the
+    /// component's derived declarations through the imported name, as a program does.
+    #[test]
+    fn a_library_reaches_a_selectively_imported_components_derived_declarations() {
+        let temp = TempDir::new().expect("temp dir");
+        let ui_dir = temp.path().join("ui");
+        let forms_dir = temp.path().join("forms");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+        fs::create_dir_all(&forms_dir).expect("forms dir");
+
+        fs::write(
+            ui_dir.join("card.nx"),
+            r#"export external component <Card title:string /> = {
+  state { open:boolean }
+}"#,
+        )
+        .expect("card file");
+        fs::write(
+            forms_dir.join("saved.nx"),
+            r#"import { Card as Ui.Card } from "../ui"
+export type Saved = {
+  state:Ui.Card.State
+  patch:Ui.Card.State.Update
+  field:Ui.Card.State.Property
+  props:Ui.Card.Props
+  prop:Ui.Card.Props.Property
+}"#,
+        )
+        .expect("saved file");
+
+        let registry = LibraryRegistry::new();
+        let result = registry.load_library_from_directory(&forms_dir);
+        assert!(result.is_ok(), "{:?}", result.err());
     }
 
     /// A union-typed property of a component imported from a built library.
