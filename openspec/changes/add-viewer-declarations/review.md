@@ -303,7 +303,7 @@ program with `build_program_artifact_from_source` and evaluates it:
 
 ## New Findings Discovered During 2026-10-12 20:10 Verification
 
-### 🟡 Fixed - RF10 Wildcard imports still bind `<Name>.State` and the other derived names when `<Name>` itself is taken
+### ✅ Verified - RF10 Wildcard imports still bind `<Name>.State` and the other derived names when `<Name>` itself is taken
 - **Severity:** Low (confidence: high, reproduced)
 - **Evidence:** A wildcard import binds every export separately, including the derived `Card.State`,
   `Card.State.Update`, and so on. `add_library_wildcard_bindings` (`crates/nx-api/src/artifacts.rs`)
@@ -331,6 +331,28 @@ program with `build_program_artifact_from_source` and evaluates it:
   `Card` beside an import) and `a_workspace_wildcard_import_does_not_bring_derived_declarations_of_a_name_it_lost`
   fail without the guard; `a_wildcard_import_still_brings_derived_declarations_beside_their_base` covers
   plain and aliased wildcard imports still bringing `Card.State`, `Card.State.Update` and `Ui.User.Update`.
+- **Verification:** I rebuilt from b18650c and re-ran the four wildcard probes. Each now reports "component
+  'Card' declares no state" instead of pairing `Card` with `ui`'s `Card.State`:
+  - Library: a local `Card` beside `import "../ui"`.
+  - Library: `import "../plain"` then `import "../ui"`.
+  - Library: `import { Card } from "../plain"` then `import "../ui"`.
+  - Workspace: a local `Card` beside `import "./ui.nx"`.
+  - The same two-wildcard and local-plus-wildcard programs built from source report the error too.
+
+  Derived names still come along beside their base:
+  - A library with a plain `import "../ui"` loads and evaluates `Card.State`, `Card.State.Update`,
+    `Card.State.Property`, `Card.Props`, `User.Update` and `User.Property` values.
+  - A library with `import "../ui" as ui` loads with `ui.Card.State`, `ui.Card.Props`, `ui.User.Update`
+    and `ui.User.Property` parameters. `ui.Card.Stat` still gets the "did you mean `ui.Card.State`"
+    hint.
+  - A program with `import "../ui"` evaluates `x().open`.
+  - `nxlang typegen` emits the companion imports for both wildcard forms: `Card_state as ui_Card_State`
+    and the rest for the aliased form, `Card_state as Card_State` and the rest for the plain form.
+
+  RF9 still holds: both selective library probes, the two-import typegen (exit 1) and the workspace
+  selective probe report the error. A lone selective import still works, and so do d04ad7b's typegen
+  (plain and aliased) and runtime probes. Two stateful `Card`s still resolve to the first import.
+  `cargo test` passes for `nx-api` (438 + 10 + 29), `nx-cli` (268) and `nx-language-service` (222).
 
 ## Out-of-scope observation (verification 2026-10-12 20:10)
 - This one predates this change. The PR does not touch `nx-interpreter` or the runtime `visible_imports`
