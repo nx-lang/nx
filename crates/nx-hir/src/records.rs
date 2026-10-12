@@ -60,6 +60,8 @@ pub enum InvalidBaseReason {
     UpdateRecord,
     /// The base is a derived `<Component>.State` record, which can never be extended.
     StateRecord,
+    /// The base is a derived `<Component>.Props` record, which can never be extended.
+    PropsRecord,
     /// The base is a derived `<Target>.Property` union, which can never be extended.
     PropertyUnion,
     KindMismatch {
@@ -122,6 +124,7 @@ impl RecordResolutionError {
                 InvalidBaseReason::ConcreteRecord => "record-base-not-abstract",
                 InvalidBaseReason::UpdateRecord => "record-base-update-record",
                 InvalidBaseReason::StateRecord => "record-base-state-record",
+                InvalidBaseReason::PropsRecord => "record-base-props-record",
                 InvalidBaseReason::PropertyUnion => "record-base-property-union",
                 InvalidBaseReason::KindMismatch { .. } => "record-base-kind-mismatch",
             },
@@ -170,6 +173,10 @@ impl RecordResolutionError {
                     ),
                     InvalidBaseReason::StateRecord => format!(
                         "{} '{}' extends '{}', but '{}' is a derived state record and cannot be extended",
+                        kind_label, record, base, base
+                    ),
+                    InvalidBaseReason::PropsRecord => format!(
+                        "{} '{}' extends '{}', but '{}' is a derived props record and cannot be extended",
                         kind_label, record, base, base
                     ),
                     InvalidBaseReason::PropertyUnion => format!(
@@ -604,8 +611,10 @@ fn validate_record_definition(
     }
 
     // Generic records stay outside every hierarchy: inheritance would need parameter merging and
-    // subtyping with arguments, neither of which this design has.
-    if !record.record.type_params.is_empty() {
+    // subtyping with arguments, neither of which this design has. A props record is the
+    // exception: its base only carries its component's inherited props, and the component's own
+    // rules decide whether it may be generic and extend a base.
+    if !record.record.type_params.is_empty() && record.record.props_component().is_none() {
         let reason = if record.record.is_abstract {
             Some(GenericInheritanceReason::Abstract)
         } else if record.record.base.is_some() {
@@ -894,7 +903,17 @@ fn resolve_base_record(
     };
 
     let mut seen = FxHashSet::default();
-    resolve_base_record_inner(module, namespace_module, record, base_name, &mut seen).map(Some)
+    let resolved =
+        resolve_base_record_inner(module, namespace_module, record, base_name, &mut seen);
+    if record.props_component().is_some() {
+        // A props record's base is its component's base's props record. When that does not
+        // resolve, the component's own `extends` clause is what is wrong, and it is reported
+        // there; the props record keeps the props the component declares.
+        return Ok(resolved
+            .ok()
+            .filter(|base| base.record.props_component().is_some()));
+    }
+    resolved.map(Some)
 }
 
 fn resolve_base_record_inner(
@@ -978,6 +997,18 @@ fn validate_base_record(
             record,
             base_name,
             InvalidBaseReason::StateRecord,
+        ));
+    }
+
+    if base_record.record.props_component().is_some() {
+        // Only a props record reaches another as its base, through its component's `extends`.
+        if record.props_component().is_some() {
+            return Ok(base_record.clone());
+        }
+        return Err(invalid_base(
+            record,
+            base_name,
+            InvalidBaseReason::PropsRecord,
         ));
     }
 

@@ -423,3 +423,44 @@ mod tests {
         assert!(component_def.body().is_none());
     }
 }
+
+/// Represents a viewer declaration in the AST: `viewer Target = Value`.
+#[derive(Debug, Clone, Copy)]
+pub struct ViewerDef<'tree> {
+    syntax: SyntaxNode<'tree>,
+}
+
+impl<'tree> AstNode<'tree> for ViewerDef<'tree> {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::VIEWER_DEFINITION
+    }
+
+    fn cast(node: SyntaxNode<'tree>) -> Option<Self> {
+        if Self::can_cast(node.kind()) {
+            Some(Self { syntax: node })
+        } else {
+            None
+        }
+    }
+
+    fn syntax(&self) -> SyntaxNode<'tree> {
+        self.syntax
+    }
+}
+
+impl<'tree> ViewerDef<'tree> {
+    /// Returns the target, the name of the declaration the viewer presents, as written.
+    pub fn target(&self) -> Option<SyntaxNode<'tree>> {
+        self.syntax.child_by_field("target")
+    }
+
+    /// Returns the value, the viewer record construction.
+    pub fn value(&self) -> Option<SyntaxNode<'tree>> {
+        self.syntax.child_by_field("value")
+    }
+
+    /// Returns the visibility modifier, which a viewer declaration may not carry.
+    pub fn visibility(&self) -> Option<SyntaxNode<'tree>> {
+        self.syntax.child_by_field("visibility")
+    }
+}

@@ -24,7 +24,7 @@ record `R` SHALL be rejected as unknown types.
 - **THEN** type checking SHALL reject the literal because `step` is required in `Counter.Props`
 
 #### Scenario: Inherited props come first
-- **WHEN** a file contains `abstract component <Question label:string help?:string /> = { <Panel /> }` and `component <SingleChoice extends Question allowsOther:boolean = false /> = { <Panel /> }` and `let keys: SingleChoice.Props.Property+ = { SingleChoice.Props.Property.label SingleChoice.Props.Property.allowsOther }`
+- **WHEN** a file contains `abstract component <Question label:string help?:string />` and `component <SingleChoice extends Question allowsOther:boolean = false /> = { <Panel /> }` and `let keys: SingleChoice.Props.Property+ = { SingleChoice.Props.Property.label SingleChoice.Props.Property.allowsOther }`
 - **THEN** type checking SHALL accept the binding
 - **AND** the cases of `SingleChoice.Props.Property` SHALL be ordered `label`, `help`, `allowsOther`
 

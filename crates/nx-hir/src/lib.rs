@@ -847,13 +847,26 @@ pub enum RecordKind {
         /// Name of the component whose state this record describes.
         component: Name,
     },
+    /// Derived `<Component>.Props` record, synthesized for every component.
+    ///
+    /// <para>A props record has the component's props, inherited props first, with their types,
+    /// optional marks and content modifiers and without defaults. A component with a base gets
+    /// the inherited props through the record's base, the base component's props record; that
+    /// link is internal, and a props record cannot be named in an `extends` clause. In every other
+    /// respect it is a plain record: it has its own update record and property union.</para>
+    Props {
+        /// Name of the component whose props this record describes.
+        component: Name,
+    },
 }
 
 impl RecordKind {
     /// Returns the `(Label, singular, plural)` wording diagnostics use for this kind.
     pub fn labels(&self) -> (&'static str, &'static str, &'static str) {
         match self {
-            RecordKind::Plain | RecordKind::State { .. } => ("Record", "record", "records"),
+            RecordKind::Plain | RecordKind::State { .. } | RecordKind::Props { .. } => {
+                ("Record", "record", "records")
+            }
             RecordKind::Action => ("Action", "action", "actions"),
             RecordKind::Update { .. } => ("Update record", "update record", "update records"),
         }
@@ -885,6 +898,20 @@ pub fn state_record_name(component: &str) -> Name {
 /// Returns true when `name` is spelled like a derived state record, `<Component>.State`.
 pub fn is_state_record_name(name: &str) -> bool {
     name.strip_suffix(STATE_RECORD_SUFFIX)
+        .is_some_and(|prefix| prefix.ends_with('.'))
+}
+
+/// Suffix of the derived props record name: `<Component>.Props`.
+pub const PROPS_RECORD_SUFFIX: &str = "Props";
+
+/// Returns the name of the derived props record for `component`.
+pub fn props_record_name(component: &str) -> Name {
+    Name::new(&format!("{}.{}", component, PROPS_RECORD_SUFFIX))
+}
+
+/// Returns true when `name` is spelled like a derived props record, `<Component>.Props`.
+pub fn is_props_record_name(name: &str) -> bool {
+    name.strip_suffix(PROPS_RECORD_SUFFIX)
         .is_some_and(|prefix| prefix.ends_with('.'))
 }
 
@@ -939,12 +966,21 @@ impl RecordDef {
         }
     }
 
+    /// Returns the component whose props this record describes, when it is a derived
+    /// `<Component>.Props` record.
+    pub fn props_component(&self) -> Option<&Name> {
+        match &self.kind {
+            RecordKind::Props { component } => Some(component),
+            _ => None,
+        }
+    }
+
     /// Returns true when this record is derived rather than declared: an update record or a
-    /// component's state record.
+    /// component's state or props record.
     pub fn is_derived(&self) -> bool {
         matches!(
             self.kind,
-            RecordKind::Update { .. } | RecordKind::State { .. }
+            RecordKind::Update { .. } | RecordKind::State { .. } | RecordKind::Props { .. }
         )
     }
 

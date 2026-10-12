@@ -485,10 +485,12 @@ impl ExportedTypeGraph {
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("types.nx"));
         let module_path = module_output_stem(&file_name)?;
+        let declarations = collect_exported_declarations(module);
+        reject_props_record_references(&declarations)?;
         let mut modules = vec![ExportedModule {
             module_path: module_path.clone(),
             imported_types: imported_build.imported_types.clone(),
-            declarations: collect_exported_declarations(module),
+            declarations,
         }];
         let mut warnings = Vec::new();
         imported_type_collector.resolve_inherited_field_types(&mut modules, &mut warnings);
@@ -527,6 +529,7 @@ impl ExportedTypeGraph {
 
             reject_fields_admitting_zero(artifact, Path::new(&artifact.file_name))?;
             let declarations = collect_exported_declarations(artifact);
+            reject_props_record_references(&declarations)?;
             if declarations.is_empty() {
                 continue;
             }
@@ -1142,7 +1145,7 @@ fn collect_exported_declarations(artifact: &ModuleArtifact) -> Vec<ExportedTypeD
     let prepared = artifact.prepared_module.as_deref();
 
     for item in module.items() {
-        if item.visibility() != Visibility::Export {
+        if item.visibility() != Visibility::Export || is_props_record_item(item) {
             continue;
         }
 
@@ -1197,6 +1200,79 @@ fn collect_exported_declarations(artifact: &ModuleArtifact) -> Vec<ExportedTypeD
     }
 
     declarations
+}
+
+/// Whether `item` is a component's derived props record, or the update record or property union
+/// derived from one. Typegen emits no type for these in this release.
+fn is_props_record_item(item: &Item) -> bool {
+    match item {
+        Item::Record(record) => {
+            record.props_component().is_some()
+                || record
+                    .update_target()
+                    .is_some_and(|target| nx_hir::is_props_record_name(target.as_str()))
+        }
+        Item::Union(union_def) => union_def
+            .property_target()
+            .is_some_and(|target| nx_hir::is_props_record_name(target.as_str())),
+        _ => false,
+    }
+}
+
+/// The props record a type name reaches, when it names `X.Props`, `X.Props.Update` or
+/// `X.Props.Property`.
+fn props_record_reference(name: &str) -> Option<&str> {
+    let record = name
+        .strip_suffix(".Update")
+        .or_else(|| name.strip_suffix(".Property"))
+        .filter(|record| nx_hir::is_props_record_name(record))
+        .unwrap_or(name);
+    nx_hir::is_props_record_name(record).then_some(record)
+}
+
+/// Fails when an exported declaration's generated type would refer to a component's props record.
+///
+/// <para>Typegen generates no type for `T.Props` or its companions yet, so a reference to one
+/// could only be emitted as a name that does not exist. Failing names what to change instead of
+/// generating code that does not compile.</para>
+fn reject_props_record_references(declarations: &[ExportedTypeDecl]) -> Result<(), String> {
+    for declaration in declarations {
+        let mut types: Vec<TypeRef> = Vec::new();
+        match &declaration.item {
+            ExportedType::Alias(alias) => types.push(alias.target.clone()),
+            ExportedType::Union(union_def) => {
+                for case in &union_def.cases {
+                    types.extend(case.fields.iter().map(|field| field.ty.clone()));
+                }
+            }
+            ExportedType::Record(record) => {
+                types.extend(record.fields.iter().map(|field| field.ty.clone()));
+            }
+            ExportedType::ComponentState(state) => {
+                types.extend(state.fields.iter().map(|field| field.ty.clone()));
+            }
+            ExportedType::Update(update) => {
+                types.extend(update.fields.iter().map(|field| field.ty.clone()));
+            }
+        }
+        let mut found = None;
+        for ty in &mut types {
+            rewrite_type_ref_names(ty, &mut |name| {
+                if found.is_none() {
+                    found = props_record_reference(name).map(str::to_string);
+                }
+                None
+            });
+        }
+        if let Some(record) = found {
+            return Err(format!(
+                "Exported declaration '{}' refers to the props record '{}', and typegen does not generate props records yet",
+                declaration.name(),
+                record
+            ));
+        }
+    }
+    Ok(())
 }
 
 impl ImportedTypeCollector {

@@ -1228,16 +1228,28 @@ impl StandardLibrary {
 }
 
 /// The standard libraries the compiler carries.
-static STANDARD_LIBRARIES: [StandardLibrary; 1] = [StandardLibrary::new(
-    "@nx/agent",
-    StandardLibraryStability::Unstable,
-    &[StandardLibraryModule {
-        identity: "agent.nx",
-        source: include_str!("std/agent/agent.nx"),
-    }],
-    "@nx-lang/agent",
-    "NxLang.Agent",
-)];
+static STANDARD_LIBRARIES: [StandardLibrary; 2] = [
+    StandardLibrary::new(
+        "@nx/agent",
+        StandardLibraryStability::Unstable,
+        &[StandardLibraryModule {
+            identity: "agent.nx",
+            source: include_str!("std/agent/agent.nx"),
+        }],
+        "@nx-lang/agent",
+        "NxLang.Agent",
+    ),
+    StandardLibrary::new(
+        "@nx/viewer",
+        StandardLibraryStability::Unstable,
+        &[StandardLibraryModule {
+            identity: "viewer.nx",
+            source: include_str!("std/viewer/viewer.nx"),
+        }],
+        "@nx-lang/viewer",
+        "NxLang.Viewer",
+    ),
+];
 
 /// Every standard library, in root order.
 pub fn standard_libraries() -> &'static [StandardLibrary] {
@@ -2583,10 +2595,10 @@ fn apply_graph_imports(
                                 item_indices,
                                 &mut imported_visible_names,
                             );
-                            // A declaration's derived `<Name>.Update`, `<Name>.Property`, and
-                            // `<Name>.State` declarations travel with it: they are reachable
-                            // through the name the author imported, not exported names of their
-                            // own.
+                            // A declaration's derived `<Name>.Update`, `<Name>.Property`,
+                            // `<Name>.State` and `<Name>.Props` declarations travel with it: they
+                            // are reachable through the name the author imported, not exported
+                            // names of their own.
                             for suffix in DERIVED_DECLARATION_SUFFIXES {
                                 let derived = format!("{}.{}", entry.name.as_str(), suffix);
                                 let Some(derived_indices) = library.exported_items.get(&derived)
@@ -2833,13 +2845,17 @@ fn add_workspace_import_bindings(
 
 /// The suffixes of the declarations derived from a record, action, or component, which an import
 /// of the target brings into scope with it: a record's or action's update record and property
-/// union, and a component's state record with that record's own two, when it declares state.
-const DERIVED_DECLARATION_SUFFIXES: [&str; 5] = [
+/// union; a component's state record with that record's own two, when it declares state; and a
+/// component's props record with its own two.
+const DERIVED_DECLARATION_SUFFIXES: [&str; 8] = [
     nx_hir::UPDATE_RECORD_SUFFIX,
     nx_hir::PROPERTY_UNION_SUFFIX,
     nx_hir::STATE_RECORD_SUFFIX,
     "State.Update",
     "State.Property",
+    nx_hir::PROPS_RECORD_SUFFIX,
+    "Props.Update",
+    "Props.Property",
 ];
 
 fn add_workspace_item_bindings(

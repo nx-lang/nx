@@ -262,6 +262,67 @@ fn test_parse_content_remains_identifier_outside_modifier_position() {
 }
 
 #[test]
+fn test_parse_viewer_definition() {
+    let source = r#"
+        type Choice = { value:string label:string }
+        viewer Choice = <ElementViewer title=label><PropertyViewer of=value /></ElementViewer>
+        viewer ui.Question = <ElementViewer name="Question" />
+    "#;
+    let result = parse_str(source, "viewer.nx");
+
+    assert!(result.is_ok(), "Viewer declarations should parse");
+    let root = result.root().expect("Should have root node");
+    let viewers = root
+        .children()
+        .filter(|child| child.kind() == SyntaxKind::VIEWER_DEFINITION)
+        .collect::<Vec<_>>();
+    assert_eq!(viewers.len(), 2);
+    assert_eq!(
+        viewers[0].child_by_field("target").map(|node| node.text()),
+        Some("Choice")
+    );
+    assert_eq!(
+        viewers[1].child_by_field("target").map(|node| node.text()),
+        Some("ui.Question")
+    );
+    assert!(viewers[0].child_by_field("value").is_some());
+}
+
+#[test]
+fn test_parse_viewer_remains_identifier_outside_module_member_position() {
+    let source = r#"
+        type Settings = { viewer:string }
+        let viewer = "Ada"
+        component <Panel viewer:string /> = { <Label text={viewer} /> }
+        let read = { viewer }
+    "#;
+    let result = parse_str(source, "viewer-contextual.nx");
+
+    assert!(
+        result.is_ok(),
+        "viewer should remain a valid identifier outside a module member's first token"
+    );
+    let root = result.root().expect("Should have root node");
+    assert!(!contains_kind(&root, SyntaxKind::VIEWER_DEFINITION));
+    assert_eq!(count_kind(&root, SyntaxKind::VALUE_DEFINITION), 2);
+}
+
+#[test]
+fn test_parse_exported_viewer_definition_parses_for_lowering_to_reject() {
+    let result = parse_str(
+        "export viewer Choice = <ElementViewer />",
+        "viewer-export.nx",
+    );
+    assert!(result.is_ok());
+    let root = result.root().expect("Should have root node");
+    let viewer = root
+        .children()
+        .find(|child| child.kind() == SyntaxKind::VIEWER_DEFINITION)
+        .expect("Expected viewer definition");
+    assert!(viewer.child_by_field("visibility").is_some());
+}
+
+#[test]
 fn test_parse_regular_element_mixed_content_preserves_text_runs() {
     let source = r#"
         let value = 1

@@ -51,6 +51,9 @@ pub enum SyntaxKind {
     EMIT_REFERENCE,
     STATE_GROUP,
 
+    // === Viewers ===
+    VIEWER_DEFINITION,
+
     // === Elements ===
     ELEMENT,
     SELF_CLOSING_ELEMENT,
@@ -162,6 +165,7 @@ pub enum SyntaxKind {
     LET,
     ACTION,
     COMPONENT,
+    VIEWER,
     EMITS,
     STATE,
     TYPE_KW,
@@ -242,6 +246,7 @@ impl SyntaxKind {
                 | SyntaxKind::LET
                 | SyntaxKind::ACTION
                 | SyntaxKind::COMPONENT
+                | SyntaxKind::VIEWER
                 | SyntaxKind::EMITS
                 | SyntaxKind::STATE
                 | SyntaxKind::TYPE_KW
@@ -319,6 +324,7 @@ impl SyntaxKind {
             SyntaxKind::LET
                 | SyntaxKind::ACTION
                 | SyntaxKind::COMPONENT
+                | SyntaxKind::VIEWER
                 | SyntaxKind::EMITS
                 | SyntaxKind::STATE
                 | SyntaxKind::TYPE_KW
@@ -396,6 +402,7 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "emit_definition" => SyntaxKind::EMIT_DEFINITION,
         "emit_reference" => SyntaxKind::EMIT_REFERENCE,
         "state_group" => SyntaxKind::STATE_GROUP,
+        "viewer_definition" => SyntaxKind::VIEWER_DEFINITION,
         "function_signature" => SyntaxKind::FUNCTION_SIGNATURE,
         "markup_signature" => SyntaxKind::MARKUP_SIGNATURE,
         "param" => SyntaxKind::PARAM,
@@ -497,6 +504,7 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "let" => SyntaxKind::LET,
         "action" => SyntaxKind::ACTION,
         "component" => SyntaxKind::COMPONENT,
+        "viewer" => SyntaxKind::VIEWER,
         "emits" => SyntaxKind::EMITS,
         "state" => SyntaxKind::STATE,
         // Note: "type" already matched earlier as TYPE
@@ -617,6 +625,11 @@ mod tests {
         );
         assert_eq!(syntax_kind_from_str("action"), SyntaxKind::ACTION);
         assert_eq!(syntax_kind_from_str("component"), SyntaxKind::COMPONENT);
+        assert_eq!(syntax_kind_from_str("viewer"), SyntaxKind::VIEWER);
+        assert_eq!(
+            syntax_kind_from_str("viewer_definition"),
+            SyntaxKind::VIEWER_DEFINITION
+        );
         assert_eq!(syntax_kind_from_str("export"), SyntaxKind::EXPORT);
         assert_eq!(syntax_kind_from_str("identifier"), SyntaxKind::IDENTIFIER);
         assert_eq!(syntax_kind_from_str("unknown"), SyntaxKind::ERROR);

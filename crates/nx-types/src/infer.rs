@@ -1423,6 +1423,107 @@ impl<'a> InferenceContext<'a> {
             .collect()
     }
 
+    /// Binds `P.Property` beside each of a record's type parameters `P` in `scope`: the property
+    /// union of the type `P` is bound to there.
+    ///
+    /// <para>A record field may be typed by its own type parameter's property union. Inside the
+    /// record `P` is rigid, and so is `P.Property`; where the record is applied with `P=A`, it is
+    /// `A.Property`. An argument with no property union binds the error type, so a field typed by
+    /// it checks nothing further; where `construction` names the record being built and where,
+    /// each such field is reported once, naming the argument and the field.</para>
+    ///
+    /// <para>Only a record's parameters get this. A component's never do, so `P.Property` written
+    /// in a component signature reaches nothing and is reported as unresolved.</para>
+    fn bind_parameter_property_unions(
+        &mut self,
+        scope: &mut FxHashMap<Name, Type>,
+        params: &[Name],
+        construction: Option<(&Name, TextSpan)>,
+    ) {
+        for param in params {
+            let Some(arg) = scope.get(param).cloned() else {
+                continue;
+            };
+            let union_name = nx_hir::property_union_name(param.as_str());
+            let union = self.parameter_property_union(&arg);
+            if union.is_none() && !matches!(arg, Type::Error) {
+                if let Some((record_name, span)) = construction {
+                    self.report_argument_without_property_union(
+                        record_name,
+                        param,
+                        &union_name,
+                        &arg,
+                        span,
+                    );
+                }
+            }
+            scope.insert(union_name, union.unwrap_or(Type::Error));
+        }
+    }
+
+    /// The property union of the type a record type parameter is bound to, `None` when it has
+    /// none: a record or action has one, and a type parameter stands for its own `.Property`.
+    fn parameter_property_union(&mut self, arg: &Type) -> Option<Type> {
+        match arg {
+            Type::Parameter(param) => Some(Type::parameter(
+                nx_hir::property_union_name(param.name.as_str()),
+                param.owner.clone(),
+                param.ordinal,
+            )),
+            Type::Named(named) => {
+                let record = self.record_definition_for(named)?;
+                if record.update_target().is_some() {
+                    return None;
+                }
+                let union_name = nx_hir::property_union_name(record.name.as_str());
+                let module_identity = named
+                    .origin()
+                    .map(|origin| origin.module_identity().to_string());
+                let ty = match module_identity {
+                    Some(module_identity) => self
+                        .nominal_type_in_module(&module_identity, &union_name)
+                        .unwrap_or_else(|| {
+                            self.resolve_named_type(&union_name, &mut FxHashSet::default())
+                        }),
+                    None => self.resolve_named_type(&union_name, &mut FxHashSet::default()),
+                };
+                matches!(ty, Type::Union(_)).then_some(ty)
+            }
+            _ => None,
+        }
+    }
+
+    /// Reports each field of `record_name` typed by `P.Property` where `P` is bound to a type with
+    /// no property union.
+    fn report_argument_without_property_union(
+        &mut self,
+        record_name: &Name,
+        param: &Name,
+        union_name: &Name,
+        arg: &Type,
+        span: TextSpan,
+    ) {
+        let fields = match self.effective_record_shape(record_name) {
+            Ok(Some(shape)) => shape
+                .fields
+                .iter()
+                .filter(|field| type_ref_mentions(&field.ty, union_name))
+                .map(|field| field.name.clone())
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
+        };
+        for field in fields {
+            self.error(
+                "type-argument-without-property-union",
+                format!(
+                    "Type argument '{}' for '{}' on '{}' has no property union, which field '{}' needs as '{}'; bind '{}' to a record or action",
+                    arg, param, record_name, field, union_name, param
+                ),
+                span,
+            );
+        }
+    }
+
     /// Infers a handler body where it is bound, then checks where each of its results can go.
     ///
     /// <para>The body sees what its binding site sees — the owner's props and state, enclosing
@@ -1547,6 +1648,7 @@ impl<'a> InferenceContext<'a> {
             let name = named.name.as_str();
             if !(nx_hir::is_update_record_name(name)
                 || nx_hir::is_state_record_name(name)
+                || nx_hir::is_props_record_name(name)
                 || name == nx_hir::UPDATE_RECORD_SUFFIX)
             {
                 self.report_handler_result_not_action(named.name.as_str(), span);
@@ -1556,7 +1658,9 @@ impl<'a> InferenceContext<'a> {
         let Some(owner) = owner else {
             if matches!(
                 record.kind,
-                nx_hir::RecordKind::Plain | nx_hir::RecordKind::State { .. }
+                nx_hir::RecordKind::Plain
+                    | nx_hir::RecordKind::State { .. }
+                    | nx_hir::RecordKind::Props { .. }
             ) {
                 self.report_handler_result_not_action(named.name.as_str(), span);
             }
@@ -1564,7 +1668,9 @@ impl<'a> InferenceContext<'a> {
         };
 
         match &record.kind {
-            nx_hir::RecordKind::Plain | nx_hir::RecordKind::State { .. } => {
+            nx_hir::RecordKind::Plain
+            | nx_hir::RecordKind::State { .. }
+            | nx_hir::RecordKind::Props { .. } => {
                 self.report_handler_result_not_action(named.name.as_str(), span)
             }
             nx_hir::RecordKind::Update { .. } => {
@@ -2806,7 +2912,13 @@ impl<'a> InferenceContext<'a> {
                     // Reading a field of an instantiation gives the field's declared type with
                     // each parameter replaced by its argument, which is what binding the
                     // parameters into the scope the annotation resolves in does in one step.
-                    let scope: FxHashMap<Name, Type> = named.args().iter().cloned().collect();
+                    let mut scope: FxHashMap<Name, Type> = named.args().iter().cloned().collect();
+                    let params = named
+                        .args()
+                        .iter()
+                        .map(|(param, _)| param.clone())
+                        .collect::<Vec<_>>();
+                    self.bind_parameter_property_unions(&mut scope, &params, None);
                     let previous_scope = std::mem::replace(&mut self.type_parameter_scope, scope);
                     let ty = self.type_from_type_ref_in_quietly(Some(&declaring_module), &field_ty);
                     self.type_parameter_scope = previous_scope;
@@ -3345,6 +3457,8 @@ impl<'a> InferenceContext<'a> {
         if let Some(message) = self.unresolved_derived_name_message(tag.as_str()) {
             let code = if nx_hir::is_state_record_name(tag.as_str()) {
                 "unknown-state-record"
+            } else if nx_hir::is_props_record_name(tag.as_str()) {
+                "unknown-props-record"
             } else {
                 "unknown-update-record"
             };
@@ -3359,18 +3473,44 @@ impl<'a> InferenceContext<'a> {
         self.declared_named_type(&state).map(|_| component)
     }
 
-    /// Says why `name`, spelled like a derived update record, property union, or state record,
-    /// reaches nothing; `None` when it is not spelled like one.
+    /// Says why `name`, spelled like a derived update record, property union, state record or
+    /// props record, reaches nothing; `None` when it is not spelled like one.
     fn unresolved_derived_name_message(&mut self, name: &str) -> Option<String> {
         let (target, kind) = if let Some(target) = name.strip_suffix(".Update") {
             (target, "update record")
         } else if let Some(target) = name.strip_suffix(".Property") {
             (target, "property union")
+        } else if let Some(target) = name.strip_suffix(".State") {
+            (target, "state record")
         } else {
-            (name.strip_suffix(".State")?, "state record")
+            (name.strip_suffix(".Props")?, "props record")
         };
         if target.is_empty() {
             return None;
+        }
+        if self.type_parameter_scope.contains_key(&Name::new(target)) {
+            return Some(format!(
+                "Unknown type '{}': '{}' is a type parameter, and only a record's own type parameter has a derived name, its property union '{}.Property', in the record's field types",
+                name, target, target
+            ));
+        }
+        if kind == "props record" {
+            let target_name = Name::new(target);
+            if self.resolve_component_definition(&target_name).is_some() {
+                // The component and its props record both exist; it was only not reached here.
+                return None;
+            }
+            let reason = if self.resolve_record_definition(&target_name).is_some()
+                || self.is_property_union(&target_name)
+            {
+                format!(
+                    "only a component has a props record, and '{}' is not one",
+                    target
+                )
+            } else {
+                format!("'{}' is not a component", target)
+            };
+            return Some(format!("Unknown type '{}': {}", name, reason));
         }
         let target_name = Name::new(target);
         let record = self.resolve_record_definition(&target_name);
@@ -3413,12 +3553,18 @@ impl<'a> InferenceContext<'a> {
                 } else if record.is_none()
                     && self.resolve_component_definition(&target_name).is_some()
                 {
-                    // A component is not a record, so only its state record has these.
+                    // A component is not a record, so only its state and props records have these.
                     let state = nx_hir::state_record_name(target);
                     if self.resolve_record_definition(&state).is_none() {
+                        let props = nx_hir::props_record_name(target);
+                        let (suffix, use_) = if kind == "update record" {
+                            (nx_hir::UPDATE_RECORD_SUFFIX, "to patch its props")
+                        } else {
+                            (nx_hir::PROPERTY_UNION_SUFFIX, "to name a prop")
+                        };
                         format!(
-                            "component '{}' is not a record, so it has no {}",
-                            target, kind
+                            "component '{}' is not a record, so it has no {}; write '{}.{}' {}",
+                            target, kind, props, suffix, use_
                         )
                     } else {
                         let (suffix, use_) = if kind == "update record" {
@@ -3671,10 +3817,13 @@ impl<'a> InferenceContext<'a> {
         None
     }
 
-    /// Whether `named` is spelled as a derived update or state record, `X.Update` or `X.State`.
+    /// Whether `named` is spelled as a derived update, state or props record, `X.Update`,
+    /// `X.State` or `X.Props`.
     fn is_derived_record_name(named: &NamedType) -> bool {
         let name = named.name.as_str();
-        nx_hir::is_update_record_name(name) || nx_hir::is_state_record_name(name)
+        nx_hir::is_update_record_name(name)
+            || nx_hir::is_state_record_name(name)
+            || nx_hir::is_props_record_name(name)
     }
 
     /// The update-record type an intrinsic argument must have, with the name of the declaration
@@ -3954,8 +4103,13 @@ impl<'a> InferenceContext<'a> {
         owner: Option<DeclaringOrigin>,
         span: TextSpan,
     ) -> ResolvedTypeArguments {
-        let arguments =
+        let mut arguments =
             self.resolve_type_argument_bindings(bindings, record_name, type_params, owner);
+        self.bind_parameter_property_unions(
+            &mut arguments.scope,
+            type_params,
+            Some((record_name, span)),
+        );
         for param in type_params {
             if arguments.unspecified.contains(param) {
                 self.error(
@@ -6820,6 +6974,7 @@ impl<'a> InferenceContext<'a> {
                     .map(|param| param.name.clone())
                     .collect();
                 let mut scope = Self::rigid_type_parameter_scope(&type_param_names, owner);
+                self.bind_parameter_property_unions(&mut scope, &type_param_names, None);
                 if let Some(parameters) = rejected_payload_parameters.get(&record_def.name) {
                     for parameter in parameters {
                         scope.entry(parameter.clone()).or_insert(Type::Error);
@@ -8396,5 +8551,27 @@ mod tests {
             },
             other => panic!("Expected function type, got {:?}", other),
         }
+    }
+}
+
+/// Whether a written type mentions the type name `name` anywhere: under an occurrence, as an
+/// applied type's tag or argument, or in a function type's parameters or result.
+fn type_ref_mentions(ty: &ast::TypeRef, name: &Name) -> bool {
+    match ty {
+        ast::TypeRef::Name(written) => written == name,
+        ast::TypeRef::Seq { inner, .. } => type_ref_mentions(inner, name),
+        ast::TypeRef::Applied { name: tag, args } => {
+            tag == name || args.iter().any(|(_, arg)| type_ref_mentions(arg, name))
+        }
+        ast::TypeRef::Function {
+            params,
+            return_type,
+        } => {
+            params
+                .iter()
+                .any(|param| type_ref_mentions(&param.ty, name))
+                || type_ref_mentions(return_type, name)
+        }
+        ast::TypeRef::AnyFunction { return_type } => type_ref_mentions(return_type, name),
     }
 }

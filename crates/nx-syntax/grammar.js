@@ -77,6 +77,7 @@ module.exports = grammar({
         $.value_definition,
         $.function_definition,
         $.component_definition,
+        $.viewer_definition,
       )),
       optional($.element),
     ),
@@ -220,6 +221,18 @@ module.exports = grammar({
         ':',
         field('type', $.type),
       )),
+      '=',
+      field('value', $.rhs_expression),
+    ),
+
+    // `viewer Target = <ElementViewer ... />`: how a viewer presents one declaration. `viewer` is
+    // a keyword only here, as the first token of a module member, so a name `viewer` anywhere else
+    // stays an identifier. A visibility modifier parses so that lowering can say a viewer
+    // declaration takes none, rather than leaving a bare parse error.
+    viewer_definition: $ => seq(
+      optional(field('visibility', $.visibility_modifier)),
+      'viewer',
+      field('target', $.qualified_name),
       '=',
       field('value', $.rhs_expression),
     ),
