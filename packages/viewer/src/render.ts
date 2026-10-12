@@ -19,7 +19,6 @@ import { childrenIn, declarationOf, indexedNodeAtSpan, nodeOf, type TreeIndex } 
 import {
   BINARY_READINGS,
   eventWords,
-  inWords,
   KIND_LABELS,
   POSTFIX_READINGS,
   PREFIX_READINGS,
@@ -29,7 +28,11 @@ import {
 export interface RenderContext {
   readonly document: Document;
   readonly index: TreeIndex;
-  /** Whether omitted defaults show as ghost rows. */
+  /**
+   * Whether every omitted default shows as a ghost row. A default whose property the kind's viewer
+   * gives a label, a phrase or a place shows either way, since the viewer says the property matters
+   * to a reader.
+   */
   readonly ghosts: boolean;
   /**
    * Whether this is a copy of nodes rendered elsewhere, as a reference's expansion is: a copy
@@ -53,6 +56,11 @@ export interface RenderOptions {
   readonly format?: SourceValueFormat;
   /** The viewer of the boolean property a literal is bound to, whose phrases it may read as. */
   readonly phrases?: SourcePropertyViewer;
+  /**
+   * Whether a boolean or a case reads as the word it is written with, as a member's default and a
+   * viewer declaration's values do.
+   */
+  readonly asWritten?: boolean;
 }
 
 /** Renders the node at `at` by its role; nothing when no renderer draws the role. */
@@ -285,10 +293,11 @@ const renderDeclaration: Renderer = (context, at) => {
   // `let roleQuestion = <SingleChoice … />` reads as the card, named by the declaration.
   const members = children.filter((child) => MEMBER_ROLES.has(node(context, child).role));
   const onlyValue = valueNodes.length === 1 ? valueNodes[0]! : undefined;
-  // `viewer Choice = <ElementViewer … />` reads as a declaration headed "Viewer for Choice".
-  const viewer = has(source, "viewer");
+  // `viewer Choice = <ElementViewer … />` reads as a folded strip headed "viewer Choice".
+  if (has(source, "viewer")) {
+    return renderViewerDeclaration(context, at);
+  }
   if (
-    !viewer &&
     members.length === 0 &&
     onlyValue !== undefined &&
     node(context, onlyValue).role === "element" &&
@@ -305,13 +314,9 @@ const renderDeclaration: Renderer = (context, at) => {
   const header = document.createElement("div");
   header.className = "declaration-header";
   for (const flag of source.flags ?? []) {
-    if (flag !== "viewer") {
-      header.append(span(document, "tag", flag));
-    }
+    header.append(span(document, "tag", flag));
   }
-  if (viewer) {
-    header.append(span(document, "declaration-kind", "Viewer for"));
-  } else if (entry !== undefined) {
+  if (entry !== undefined) {
     header.append(span(document, "declaration-kind", KIND_LABELS[entry.kind]));
   }
   header.append(span(document, "declaration-name", source.name ?? ""));
@@ -322,6 +327,16 @@ const renderDeclaration: Renderer = (context, at) => {
 
   const body = document.createElement("div");
   body.className = "declaration-body";
+  // `type ThemeMode = light | dark` reads on one line, as it is written, when no case carries
+  // fields or a comment.
+  const caseLine =
+    members.length > 0 &&
+    children.every((child) => node(context, child).role === "unionCase" && (index.children[child] ?? []).length === 0)
+      ? document.createElement("div")
+      : undefined;
+  if (caseLine !== undefined) {
+    caseLine.className = "case-line";
+  }
   let group: string | undefined;
   for (const child of children) {
     const childNode = node(context, child);
@@ -331,18 +346,129 @@ const renderDeclaration: Renderer = (context, at) => {
       groupName = memberGroup(childNode.role, entry?.kind);
     } else if (slot === "type") {
       groupName = typeGroup(entry?.kind);
-    } else if (!isNote(childNode) && !viewer) {
+    } else if (!isNote(childNode)) {
       groupName = slot === "body" ? (entry?.kind === "component" ? "Shows" : "Returns") : "Is";
     }
     if (groupName !== undefined && groupName !== group) {
       body.append(label(document, groupName));
       group = groupName;
     }
-    appendNode(context, body, child);
+    if (caseLine === undefined) {
+      appendNode(context, body, child);
+      continue;
+    }
+    if (caseLine.childElementCount > 0) {
+      caseLine.append(span(document, "case-bar", " | "));
+    }
+    appendNode(context, caseLine, child);
+    body.append(caseLine);
   }
   section.append(body);
   return section;
 };
+
+/**
+ * A viewer declaration: a strip that stays folded until a reader opens it, since what a viewer says
+ * already shows on every element of its target. Open, it reads a line to an element, as the source
+ * does.
+ */
+function renderViewerDeclaration(context: RenderContext, at: number): HTMLElement {
+  const { document, index } = context;
+  const source = node(context, at);
+  const strip = marked(context, at, "details", "details viewer-strip");
+  const summary = document.createElement("summary");
+  for (const flag of source.flags ?? []) {
+    if (flag !== "viewer") {
+      summary.append(span(document, "tag", flag), " ");
+    }
+  }
+  summary.append(span(document, "declaration-kind", "viewer"), " ", span(document, "declaration-name", source.name ?? ""));
+  const body = document.createElement("div");
+  body.className = "details-body";
+  for (const child of index.children[at] ?? []) {
+    if (node(context, child).role === "element") {
+      body.append(renderViewerElement(context, child, true));
+    } else {
+      appendNode(context, body, child);
+    }
+  }
+  strip.append(summary, body);
+  return strip;
+}
+
+/**
+ * An element of a viewer declaration on one line: its name, then each attribute as its name and
+ * value, with the elements it holds indented under it. An element that says what it is `of` leads
+ * with that in place of its name, so `<PropertyViewer of=id label="Key" />` reads "id label Key".
+ */
+function renderViewerElement(context: RenderContext, at: number, top: boolean): HTMLElement {
+  const { document, index } = context;
+  const source = node(context, at);
+  const block = marked(context, at, "div", "viewer-element");
+  block.setAttribute("role", "group");
+  block.setAttribute("aria-label", source.name ?? "");
+  const line = document.createElement("div");
+  line.className = "viewer-line";
+  const nested = document.createElement("div");
+  nested.className = "viewer-nested";
+  const children = index.children[at] ?? [];
+  const subject = children.find((child) => node(context, child).role === "attribute" && node(context, child).name === "of");
+  if (subject === undefined) {
+    line.append(span(document, "viewer-kind", source.name ?? ""));
+  } else {
+    block.title = source.name ?? "";
+    line.append(viewerAttribute(context, subject, false));
+  }
+  for (const child of children) {
+    const childNode = node(context, child);
+    if (child === subject) {
+      continue;
+    }
+    if (childNode.role === "element") {
+      nested.append(renderViewerElement(context, child, false));
+    } else if (childNode.role !== "attribute") {
+      appendNode(context, nested, child);
+    } else if (has(childNode, "content")) {
+      // The elements an element holds are the value of its content property.
+      const held = marked(context, child, "div", "viewer-held");
+      for (const item of index.children[child] ?? []) {
+        if (node(context, item).role === "element") {
+          held.append(renderViewerElement(context, item, false));
+        } else {
+          appendNode(context, held, item);
+        }
+      }
+      nested.append(held);
+    } else {
+      line.append(viewerAttribute(context, child, true));
+    }
+  }
+  if (top && !context.copy) {
+    line.append(sourceButton(document, source.key));
+  }
+  block.append(line);
+  if (nested.childElementCount > 0) {
+    block.append(nested);
+  }
+  return block;
+}
+
+/** An attribute on a viewer element's line: its name, when `named`, and its value. */
+function viewerAttribute(context: RenderContext, at: number, named: boolean): HTMLElement {
+  const { document, index } = context;
+  const source = node(context, at);
+  const element = marked(context, at, "span", named ? "viewer-attribute" : "viewer-attribute subject");
+  if (named) {
+    const name = span(document, "label", source.name ?? "");
+    name.dataset["property"] = source.name ?? "";
+    name.tabIndex = 0;
+    element.append(name, " ");
+  }
+  // A viewer's own values read as written: the case a `CaseViewer` is `of` is its name, not the
+  // label the viewer gives it.
+  appendAll(context, element, index.children[at] ?? [], { asWritten: true });
+  return element;
+}
 
 /** The heading over a declaration's type: what an alias is, what a function returns, a value's type. */
 function typeGroup(kind: string | undefined): string {
@@ -385,11 +511,13 @@ const renderMember: Renderer = (context, at) => {
     row.append(" ", span(document, "tag", "content"));
   }
   for (const child of index.children[at] ?? []) {
-    if (index.slots[child] === "default") {
-      row.append(" ", span(document, "member-default-label", "default"));
+    const isDefault = index.slots[child] === "default";
+    if (isDefault) {
+      row.append(" ", span(document, "member-default-label", "="));
     }
     row.append(" ");
-    appendNode(context, row, child);
+    // A default reads as it is written: `required:boolean = true` reads "required boolean = true".
+    appendNode(context, row, child, isDefault ? { asWritten: true } : {});
   }
   return row;
 };
@@ -512,7 +640,8 @@ const renderElement: Renderer = (context, at, options) => {
   const card = marked(context, at, layout === "inline" ? "span" : "div", layout === "card" ? "card" : `card ${layout}-layout`);
   card.tabIndex = 0;
   card.setAttribute("role", "group");
-  const kindName = viewer?.name ?? inWords(source.name ?? "");
+  // A kind reads by its name as written, so the reading and the source use one word for it.
+  const kindName = viewer?.name ?? source.name ?? "";
   card.setAttribute("aria-label", entry === undefined ? source.name ?? "" : kindName);
 
   const header = document.createElement(layout === "inline" ? "span" : "div");
@@ -581,7 +710,7 @@ const renderElement: Renderer = (context, at, options) => {
     if (unit !== undefined && !placed.has(unit)) {
       appendAll(context, container, unit);
       placed.add(unit);
-    } else if (context.ghosts && property?.default !== undefined && !set.has(name)) {
+    } else if ((context.ghosts || saysHowToRead(propertyViewer)) && property?.default !== undefined && !set.has(name)) {
       container.append(ghostRow(document, property, propertyViewer));
     }
   }
@@ -670,6 +799,18 @@ function textTypeOf(context: RenderContext, attribute: number): string | undefin
   return undefined;
 }
 
+/**
+ * Whether a viewer says how its property reads or where it goes, which marks the property as one a
+ * reader should see even at its default. A format does not count: a property takes one from the
+ * viewer of its type's alias without being named itself.
+ */
+function saysHowToRead(viewer: SourcePropertyViewer | undefined): boolean {
+  return (
+    viewer !== undefined &&
+    (viewer.label !== undefined || viewer.whenTrue !== undefined || viewer.whenFalse !== undefined || viewer.place === "details")
+  );
+}
+
 function ghostRow(document: Document, property: SourceProperty, viewer: SourcePropertyViewer | undefined): HTMLElement {
   const row = document.createElement("div");
   row.className = "row ghost";
@@ -682,7 +823,8 @@ function ghostRow(document: Document, property: SourceProperty, viewer: SourcePr
     const words = span(document, "ghost-value phrase", phrase);
     words.dataset["property"] = property.name;
     words.tabIndex = 0;
-    value.append(words, " ", span(document, "tag", "default"));
+    // Italic alone marks the phrase as a default.
+    value.append(words);
     row.append(value);
     return row;
   }
@@ -822,6 +964,11 @@ const renderLiteral: Renderer = (context, at, options) => {
     element.tabIndex = 0;
     return element;
   }
+  if ((text === "true" || text === "false") && options.asWritten === true) {
+    const element = marked(context, at, "span", `value boolean written ${text}`);
+    element.textContent = text;
+    return element;
+  }
   if (text === "true" || text === "false") {
     const element = marked(context, at, "span", `value boolean ${text}`);
     element.textContent = text === "true" ? "✓" : "✗";
@@ -907,7 +1054,7 @@ const renderEmpty: Renderer = (context, at) => {
   return element;
 };
 
-const renderCase: Renderer = (context, at) => {
+const renderCase: Renderer = (context, at, options) => {
   const { document, index } = context;
   const source = node(context, at);
   const element = marked(context, at, "span", "pill case");
@@ -919,7 +1066,7 @@ const renderCase: Renderer = (context, at) => {
   }
   const viewer: SourceViewer | undefined = declarationOf(index, source)?.viewer;
   const label = viewer?.cases?.find((candidate) => candidate.name === source.name)?.label;
-  if (label === undefined) {
+  if (label === undefined || options.asWritten === true) {
     element.append(source.name ?? "");
   } else {
     // The case's label, with its name and example in the hover.

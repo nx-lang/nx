@@ -70,18 +70,18 @@ function detailsOf(card: HTMLElement): HTMLDetailsElement | null {
 }
 
 describe("viewers", () => {
-  it("heads a card with the kind's name, and without a viewer name in words", async () => {
+  it("heads a card with the name its viewer gives the kind, and without one the kind's name as written", async () => {
     const plain = show(await fixture("survey"));
-    assert.equal(cards(plain, "Single choice").length, 1);
+    assert.equal(cards(plain, "SingleChoice").length, 1);
     const renamed = show(await fixture("surveyRenamed"));
     assert.equal(cards(renamed, "Pick one").length, 1);
-    assert.equal(cards(renamed, "Single choice").length, 0);
+    assert.equal(cards(renamed, "SingleChoice").length, 0);
   });
 
   it("shows a question's title, its required phrase, and its key in details", async () => {
     const survey = await fixture("survey");
     const element = show(survey);
-    const card = cards(element, "Single choice")[0]!;
+    const card = cards(element, "SingleChoice")[0]!;
 
     const title = card.querySelector<HTMLElement>(":scope > .card-header > .part.title")!;
     assert.equal(read(title), "Which describes your work best?");
@@ -89,7 +89,8 @@ describe("viewers", () => {
 
     // `required` is left to its default, which reads as the phrase.
     const phrase = card.querySelector(":scope > .rows > .row.ghost.phrase-row");
-    assert.equal(read(phrase), "Required default");
+    assert.equal(read(phrase), "Required");
+    assert.equal(phrase?.querySelector(".tag"), null, "italic alone marks the default");
     assert.ok(!rowLabels(card).includes("required"), rowLabels(card).join(", "));
     assert.ok(!rowLabels(card).includes("label"), "the title is not shown again as a row");
 
@@ -103,7 +104,7 @@ describe("viewers", () => {
   it("reads a boolean set to a value with a phrase as the phrase, keyed by its literal", async () => {
     const optional = await fixture("surveyOptional");
     const element = show(optional);
-    const card = cards(element, "Single choice")[0]!;
+    const card = cards(element, "SingleChoice")[0]!;
     const literal = optional.tree.nodes.find((node) => node.role === "literal" && node.value === "false")!;
     const phrase = card.querySelector<HTMLElement>(`.value.phrase[data-key="${literal.key}"]`);
     assert.ok(phrase, "the literal reads as the phrase");
@@ -115,10 +116,10 @@ describe("viewers", () => {
 
   it("orders rows by the viewer, then the rest in declaration order", async () => {
     const element = show(await fixture("survey"));
-    const card = cards(element, "Single choice")[0]!;
+    const card = cards(element, "SingleChoice")[0]!;
     // The properties the viewers name come first: `required`, which reads as its phrase, and `id`,
     // which is in details. `label` is the title. The rest follow in declaration order.
-    assert.deepEqual(rowLabels(card), ["Required default", "layout", "allowsOther", "choices"]);
+    assert.deepEqual(rowLabels(card), ["Required", "layout", "allowsOther", "choices"]);
   });
 
   it("reads choices as rows with their label, description and value as a badge", async () => {
@@ -142,7 +143,7 @@ describe("viewers", () => {
 
   it("labels a case in its pill, with its name and example in the hover", async () => {
     const element = show(await fixture("survey"));
-    const card = cards(element, "Single choice")[0]!;
+    const card = cards(element, "SingleChoice")[0]!;
     const pill = card.querySelector<HTMLElement>(".pill.case.labelled")!;
     assert.equal(read(pill), "a list");
     const hover = element.hoverFor(pill);
@@ -192,6 +193,8 @@ describe("viewers", () => {
 
   it("shows an inline element in its line, with the rest folded", async () => {
     const element = show(await fixture("inlineTag"));
+    // The color's viewer gives it only a format, so its default shows when every default does.
+    element.ghosts = true;
     const tag = cards(element, "Tag")[0]!;
     assert.equal(tag.tagName, "SPAN");
     assert.ok(tag.classList.contains("inline-layout"));
@@ -229,19 +232,20 @@ describe("viewers", () => {
     }
   });
 
-  it("reads a viewer declaration as a declaration headed Viewer for its target", async () => {
+  it("reads a viewer declaration as a folded strip, with a line to an element once open", async () => {
     const element = show(await fixture("viewerDeclaration"));
-    const declaration = Array.from(root(element).querySelectorAll(".declaration")).find(
-      (candidate) => read(candidate.querySelector(".declaration-kind")) === "Viewer for"
+    const strip = root(element).querySelector<HTMLDetailsElement>("details.viewer-strip");
+    assert.ok(strip, "a viewer declaration is shown");
+    assert.equal(strip.open, false, "the strip stays folded until a reader opens it");
+    assert.equal(read(strip.querySelector("summary")), "viewer Choice");
+    const top = strip.querySelector<HTMLElement>(".details-body > .viewer-element")!;
+    const line = top.querySelector(":scope > .viewer-line")!;
+    assert.equal(read(line.querySelector(".viewer-kind")), "ElementViewer");
+    const title = Array.from(line.querySelectorAll(".viewer-attribute")).find(
+      (attribute) => read(attribute.querySelector(".label")) === "title"
     );
-    assert.ok(declaration, "a viewer declaration is shown");
-    assert.equal(read(declaration.querySelector(".declaration-name")), "Choice");
-    const card = declaration.querySelector<HTMLElement>(".card")!;
-    assert.equal(read(card.querySelector(".kind")), "Element viewer");
-    const title = Array.from(card.querySelectorAll(":scope > .rows > .row")).find(
-      (row) => read(row.querySelector(".label")) === "title"
-    );
-    assert.ok(title, "the card has a title row");
-    assert.equal(read(title.querySelector(".row-value")), "label");
+    assert.ok(title, "the line names the title");
+    assert.equal(read(title), "title label");
+    assert.equal(strip.querySelector(".row.ghost"), null, "a viewer shows no default nobody wrote");
   });
 });

@@ -33,7 +33,7 @@ export function eventWords(name: string): string {
 export const KIND_LABELS: Readonly<Record<SourceDeclarationKind, string>> = {
   record: "Type",
   action: "Action",
-  union: "One of",
+  union: "Type",
   alias: "Type",
   component: "Component",
   function: "Function",

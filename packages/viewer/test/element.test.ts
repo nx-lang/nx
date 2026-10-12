@@ -105,17 +105,17 @@ describe("<nx-viewer>", () => {
   });
 
   it("takes properties set before the element was defined", async () => {
-    const { tree, text } = await fixture("component");
+    const { tree, text } = await fixture("questionFlow");
     const tag = "nx-viewer-defined-late";
     const element = document.createElement(tag) as NxViewerElement;
     document.body.append(element);
-    Object.assign(element, { text, tree, ghosts: false, stale: true });
+    Object.assign(element, { text, tree, ghosts: true, stale: true });
     customElements.define(tag, class extends ViewerClass {});
     created.push(element);
     assert.ok(element instanceof ViewerClass, "the element upgraded");
     assert.equal(element.tree, tree);
     assert.ok(root(element).querySelectorAll(".card").length > 0, "the tree set early is rendered");
-    assert.equal(root(element).querySelectorAll(".ghost").length, 0, "ghosts set early are hidden");
+    assert.ok(root(element).querySelectorAll(".ghost").length > 0, "ghosts set early are shown");
     assert.equal(element.hasAttribute("stale"), true);
     assert.equal(root(element).querySelector<HTMLElement>(".badge")!.hidden, false, "the stale badge shows");
   });
@@ -168,7 +168,7 @@ describe("elements read as cards", () => {
     const flow = await fixture("questionFlow");
     const element = show(flow);
     const card = rendered(element, "roleQuestion.value");
-    assert.equal(read(card.querySelector(".kind")!), "Single choice");
+    assert.equal(read(card.querySelector(".kind")!), "SingleChoice");
     assert.equal(read(card.querySelector(".card-name")!), "roleQuestion");
     const labels = Array.from(card.querySelectorAll<HTMLElement>(":scope > .rows > .row:not(.ghost) > .label")).map(read);
     assert.deepEqual(labels, ["id", "label", "allowsOther", "layout", "choices"]);
@@ -229,8 +229,9 @@ describe("values", () => {
 });
 
 describe("ghost rows", () => {
-  it("shows an omitted default as a ghost row", async () => {
+  it("shows every omitted default as a ghost row when asked", async () => {
     const element = show(await fixture("questionFlow"));
+    element.ghosts = true;
     const card = rendered(element, "roleQuestion.value");
     const ghost = Array.from(card.querySelectorAll(":scope > .rows > .row.ghost")).find(
       (row) => read(row.querySelector(".label")!) === "required"
@@ -241,9 +242,8 @@ describe("ghost rows", () => {
     assert.equal(ghost.closest("[data-key]"), card, "a ghost carries no key of its own");
   });
 
-  it("hides ghosts when asked", async () => {
+  it("hides the defaults no viewer names unless asked", async () => {
     const element = show(await fixture("questionFlow"));
-    element.ghosts = false;
     assert.equal(root(element).querySelectorAll(".row.ghost").length, 0);
   });
 });
@@ -312,6 +312,16 @@ describe("handlers read as events", () => {
 });
 
 describe("declarations, references and comments", () => {
+  it("reads a union on one line when no case carries fields, and a default as it is written", async () => {
+    const element = show(await fixture("members"));
+    const mode = rendered(element, "ThemeMode");
+    assert.equal(read(mode.querySelector(".declaration-kind")!), "Type");
+    assert.equal(read(mode.querySelector(".case-line")!), "light | dark");
+    const state = rendered(element, "LoadState");
+    assert.equal(state.querySelector(".case-line"), null, "a case with fields keeps a row to each case");
+    assert.equal(read(rendered(element, "Toggle.on")), "on boolean = true");
+  });
+
   it("reads a record type as its fields", async () => {
     const element = show(await fixture("user"));
     const declaration = rendered(element, "User");
@@ -469,7 +479,7 @@ describe("selection", () => {
     const element = show(flow);
     const status = root(element).querySelector('[role="status"]')!;
     rendered(element, "roleQuestion.value").click();
-    assert.equal(status.textContent, "Selected Single choice card, roleQuestion");
+    assert.equal(status.textContent, "Selected SingleChoice card, roleQuestion");
     rendered(element, "roleQuestion.value.layout").click();
     assert.equal(status.textContent, "Selected layout: chips");
     const choice = keyWhere(flow, (node) => node.role === "element" && node.name === "Choice");

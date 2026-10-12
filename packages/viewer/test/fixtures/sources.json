@@ -87,5 +87,8 @@
       "questions.nx": "import \"@nx/viewer\"\n\n/// The address of a picture.\nexport type ImageUrl = string\nexport type ChoiceLayout = list | grid | chips\nexport type Choice = { value:string label:string description?:string imageUrl?:ImageUrl color?:string }\n\nexport abstract component <Question id:string label:string help?:string required:boolean = true />\nexport component <SingleChoice extends Question layout:ChoiceLayout = list allowsOther:boolean = false\n  content choices:Choice+ /> = { <div /> }\n\nviewer ImageUrl = <ValueViewer format=image />\nviewer ChoiceLayout =\n  <UnionViewer>\n    <CaseViewer of=list label=\"a list\" />\n    <CaseViewer of=chips label=\"chips\" example=\"A B C\" />\n  </UnionViewer>\nviewer Choice =\n  <ElementViewer layout=row title=label subtitle=description badge=value>\n    <PropertyViewer of=color format=color />\n  </ElementViewer>\nviewer Question =\n  <ElementViewer title=label subtitle=help>\n    <PropertyViewer of=required whenTrue=\"Required\" whenFalse=\"Optional\" />\n    <PropertyViewer of=id label=\"Key\" place=details />\n  </ElementViewer>\n"
     },
     "viewers": []
+  },
+  "members": {
+    "source": "type ThemeMode = light | dark\n\ntype LoadState =\n  | idle\n  | failed { message:string }\n\ntype Toggle = {\n  on:boolean = true\n}\n"
   }
 }

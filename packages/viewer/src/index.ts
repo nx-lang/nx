@@ -95,7 +95,7 @@ export class NxViewerElement extends ElementBase {
 
   #tree: SourceTree | undefined;
   #text = "";
-  #ghosts = true;
+  #ghosts = false;
   #images = true;
   #index: TreeIndex | undefined;
   #selection: string | undefined;
@@ -223,13 +223,16 @@ export class NxViewerElement extends ElementBase {
     this.#render();
   }
 
-  /** Whether omitted defaults show as ghost rows; true unless set false. */
+  /**
+   * Whether every omitted default shows as a ghost row; false unless set true. A default whose
+   * property the kind's viewer gives a label, a phrase or a place shows either way.
+   */
   get ghosts(): boolean {
     return this.#ghosts;
   }
 
   set ghosts(ghosts: boolean) {
-    this.#ghosts = ghosts !== false;
+    this.#ghosts = ghosts === true;
     this.#render();
   }
 
