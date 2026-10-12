@@ -8216,6 +8216,28 @@ pub(crate) fn widened_type(ty: &Type, target: nx_hir::ast::PrimitiveType) -> Typ
     widen(ty, Primitive::from_hir_type(target))
 }
 
+/// Whether a written type mentions the type name `name` anywhere: under an occurrence, as an
+/// applied type's tag or argument, or in a function type's parameters or result.
+fn type_ref_mentions(ty: &ast::TypeRef, name: &Name) -> bool {
+    match ty {
+        ast::TypeRef::Name(written) => written == name,
+        ast::TypeRef::Seq { inner, .. } => type_ref_mentions(inner, name),
+        ast::TypeRef::Applied { name: tag, args } => {
+            tag == name || args.iter().any(|(_, arg)| type_ref_mentions(arg, name))
+        }
+        ast::TypeRef::Function {
+            params,
+            return_type,
+        } => {
+            params
+                .iter()
+                .any(|param| type_ref_mentions(&param.ty, name))
+                || type_ref_mentions(return_type, name)
+        }
+        ast::TypeRef::AnyFunction { return_type } => type_ref_mentions(return_type, name),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -8705,27 +8727,5 @@ mod tests {
             },
             other => panic!("Expected function type, got {:?}", other),
         }
-    }
-}
-
-/// Whether a written type mentions the type name `name` anywhere: under an occurrence, as an
-/// applied type's tag or argument, or in a function type's parameters or result.
-fn type_ref_mentions(ty: &ast::TypeRef, name: &Name) -> bool {
-    match ty {
-        ast::TypeRef::Name(written) => written == name,
-        ast::TypeRef::Seq { inner, .. } => type_ref_mentions(inner, name),
-        ast::TypeRef::Applied { name: tag, args } => {
-            tag == name || args.iter().any(|(_, arg)| type_ref_mentions(arg, name))
-        }
-        ast::TypeRef::Function {
-            params,
-            return_type,
-        } => {
-            params
-                .iter()
-                .any(|param| type_ref_mentions(&param.ty, name))
-                || type_ref_mentions(return_type, name)
-        }
-        ast::TypeRef::AnyFunction { return_type } => type_ref_mentions(return_type, name),
     }
 }

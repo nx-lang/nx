@@ -91,9 +91,10 @@ follows `T.State` closely:
 
 This is the first half of the props-record idea Bret raised in #57: it gives the record and its update
 and property union, which viewer declarations need now. Generated host types for `T.Props` and a props
-record for functions are left for that later change. Bret settled the naming on 2026-10-12: `Props`
-for the record and `Property` kept for its property union, as on every other record. Until then `typegen` reports an exported
-declaration that refers to `T.Props` rather than emitting something it would later change.
+record for functions are left for that later change. Until then `typegen` reports an exported
+declaration that refers to `T.Props` rather than emitting something it would later change. Bret
+settled the naming on 2026-10-12: `Props` for the record and `Property` kept for its property union,
+as on every other record.
 
 *Alternatives considered:*
 

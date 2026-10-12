@@ -18,8 +18,8 @@ rule Bret chose on 2026-10-10.
 ## What Changes
 
 - A new module member, the viewer declaration `viewer Target = <…Viewer …/>`, tells the viewer how
-  to present one declaration. It sits beside the declaration or in any module that can see it, with the same syntax
-  in both places. `viewer` is a keyword only as the first token of a module member.
+  to present one declaration. It sits beside the declaration or in any module that can see it, with
+  the same syntax in both places. `viewer` is a keyword only as the first token of a module member.
 - A new standard library, `@nx/viewer`, holds the viewer vocabulary: `ElementViewer`,
   `PropertyViewer`, `UnionViewer`, `CaseViewer` and `ValueViewer`, with their small unions. A viewer
   declaration is ordinary NX markup, type-checked like any value, so a misspelled property or case is
