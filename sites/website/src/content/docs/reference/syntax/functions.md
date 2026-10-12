@@ -5,7 +5,7 @@ description: 'Use `let` for functions and bindings, and `component` for declarat
 
 NX separates `let` bindings from `component` declarations. Use `let` for values and reusable functions. Use `component` when a declaration needs an `emits` contract or persistent `state`.
 
-Runtime note: `action` declarations parse, lower, and behave like records. Component init returns rendered output plus an opaque host-owned state snapshot. Dispatch consumes that snapshot together with a host-ordered batch, applies the component's own update records to its state, and returns the re-rendered output, the effect actions, and the next snapshot. See [Updating state](#updating-state).
+Runtime note: `action` declarations parse, lower, and behave like records. Component init returns rendered output plus an opaque host-owned state snapshot. Dispatch consumes that snapshot together with a host-ordered batch, applies the component's `State.Update` records to its state, and returns the re-rendered output, the effect actions, and the next snapshot. See [Updating state](#updating-state).
 
 ## `let` Definition Mirrors Invocation
 

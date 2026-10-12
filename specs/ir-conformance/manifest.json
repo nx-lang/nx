@@ -254,6 +254,7 @@
         "records"
       ],
       "diff": [
+        "handlers",
         "records"
       ],
       "merge": [
@@ -338,6 +339,7 @@
         "two-module"
       ],
       "coalesce": [
+        "handlers",
         "occurrence-lifting",
         "occurrences",
         "parameter-defaults"
@@ -393,6 +395,7 @@
       "intrinsic": [
         "evaluation-cost",
         "generic-records",
+        "handlers",
         "occurrences",
         "records"
       ],

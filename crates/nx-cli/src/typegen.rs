@@ -5391,8 +5391,14 @@ export external component <Table sortBy?:User.Property columns:User.Property+ pa
             "    count:int   /// The count.\n",
             "  }\n",
             "}\n",
+            "/// A component without props, whose property companion has no cases.\n",
+            "export external component <Spacer />\n",
         );
         let generated = generate_for(source, TargetLanguage::TypeScript);
+        assert!(
+            generated.contains("export type Spacer_property = never;"),
+            "{generated}"
+        );
         assert!(generated.contains("Ends *\\/ early?"), "{generated}");
         assert!(generated.contains(" * Why."), "{generated}");
         assert!(generated.contains(" * The count."), "{generated}");
@@ -5401,11 +5407,13 @@ export external component <Table sortBy?:User.Property columns:User.Property+ pa
         fs::write(temp_dir.path().join("types.ts"), &generated).expect("types.ts");
         fs::write(
             temp_dir.path().join("host.ts"),
-            "import type { Contact, LoadState, Counter_state_update } from \"./types\";\n\
+            "import type { Contact, LoadState, Counter_state_update, Spacer_property, Spacer_update } from \"./types\";\n\
              const contact: Contact = { $type: \"Contact\", name: \"Ada\" };\n\
              declare const state: LoadState;\n\
              const patch: Counter_state_update = { $type: \"Counter.State.Update\", count: 1 };\n\
-             void contact; void state; void patch;\n",
+             const spacer: Spacer_update = { $type: \"Spacer.Update\" };\n\
+             declare const key: Spacer_property;\n\
+             void contact; void state; void patch; void spacer; void key;\n",
         )
         .expect("host.ts");
 

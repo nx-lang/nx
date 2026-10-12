@@ -1481,10 +1481,10 @@ export function evaluateComponent(program, name, props, state, options = {}) {
  * bound on the instance's props, or an `ActionHandlerInvocation` naming a handler of the
  * instance's most recent rendered output by token, with the action to feed it. Entries run in
  * order. A handler the component's own body bound reads the state live and patches it with the
- * component's update records; any other handler sees only what it captured, and everything it
- * returns is an effect. The body is rendered once against the state the batch produced. A failure
- * throws before anything is returned, so the instance given stays the state of record. One
- * operation budget covers the whole batch and the render after it.
+ * component's `State.Update` records; any other handler sees only what it captured, and
+ * everything it returns is an effect. The body is rendered once against the state the batch
+ * produced. A failure throws before anything is returned, so the instance given stays the state of
+ * record. One operation budget covers the whole batch and the render after it.
  */
 export function dispatchComponentActions(program, instance, batch, options = {}) {
     // The entries of the batch, all of them before any runs. The instance is not input.

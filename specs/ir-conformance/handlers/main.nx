@@ -51,4 +51,19 @@ component <Page emits { DoSearch } /> = {
   </Stack>
 }
 
+// A state patch a handler computes with `diff`, never spelling `State.Update`, still patches the
+// state; clearing an optional state field is a present empty field.
+component <Diffed extends Node /> = {
+  state { count:int = 0 note?:string }
+  <Stack>
+    <Label text={count} />
+    <TextInput value={note ?? "none"} />
+    <Button label="Diff" onTapped={diff(<State count={count} />, <State count={count + 1} note="tapped" />)} />
+    <Button label="Clear" onTapped=<State.Update note={} /> />
+  </Stack>
+}
+
+// A state patch is encoded under the state record's name.
+let clearNote() = { <Diffed.State.Update note={} /> }
+
 let root() = { <SearchBox onSearchSubmitted=<DoSearch search={action.searchString} /> /> }

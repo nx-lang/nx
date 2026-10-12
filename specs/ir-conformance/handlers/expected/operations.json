@@ -10,6 +10,13 @@
       ],
       "initial": 35
     },
+    "main.nx::Diffed": {
+      "batches": [
+        53,
+        41
+      ],
+      "initial": 40
+    },
     "main.nx::Page": {
       "batches": [
         53,
@@ -26,6 +33,7 @@
       ],
       "initial": 42
     },
+    "main.nx::clearNote": 4,
     "main.nx::root": 7
   }
 }

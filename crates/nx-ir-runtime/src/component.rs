@@ -961,10 +961,10 @@ impl Program {
     /// parent bound on the instance's props, or an `ActionHandlerInvocation` naming a handler of
     /// the instance's most recent rendered output by token, with the action to feed it. Entries
     /// run in order. A handler the component's own body bound reads the state live and patches
-    /// it with the component's update records; any other handler sees only what it captured, and
-    /// everything it returns is an effect. The body is rendered once against the state the batch
-    /// produced. A failure returns before anything else does, so the instance given stays the
-    /// state of record.</para>
+    /// it with the component's `State.Update` records; any other handler sees only what it
+    /// captured, and everything it returns is an effect. The body is rendered once against the
+    /// state the batch produced. A failure returns before anything else does, so the instance
+    /// given stays the state of record.</para>
     pub fn dispatch_component_actions(
         &self,
         instance: &ComponentInstance,

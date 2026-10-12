@@ -1,6 +1,6 @@
-module main.nx fingerprint 317892144980854985
-requires update-records-v1 property-unions-v1 action-handlers-v1
-entrypoints functions [root] components [Node Label Button TextInput Card Stack Counter Tens SearchBox Page]
+module main.nx fingerprint 10047806012371405586
+requires update-records-v1 property-unions-v1 update-intrinsics-v1 action-handlers-v1 occurrence-v1
+entrypoints functions [clearNote root] components [Node Label Button TextInput Card Stack Counter Tens SearchBox Page Diffed]
 
 component Node abstract external @3:1-3:37
 
@@ -124,7 +124,30 @@ component Page state Page.State @43:1-52:2
       </SearchBox>
     </Stack>
 
-function root() @54:1-54:91 =
+component Diffed state Diffed.State @56:1-64:2
+  state
+    count: int = 0
+    note: string?
+  body =
+    <Stack>
+      <Label text=count />
+      <TextInput value=(note ?? "none") />
+      <Button label="Diff"
+        onTapped=handler Button.Tapped action@2:Button.Tapped owner Diffed =>
+          diff(<Diffed.State count=count />, <Diffed.State count=(count add 1) note="tapped" />)
+      >
+      </Button>
+      <Button label="Clear"
+        onTapped=handler Button.Tapped action@3:Button.Tapped owner Diffed =>
+          <Diffed.State.Update note={} />
+      >
+      </Button>
+    </Stack>
+
+function clearNote() @67:1-67:54 =
+  <Diffed.State.Update note={} />
+
+function root() @69:1-69:91 =
   <SearchBox
     onSearchSubmitted=handler SearchBox.SearchSubmitted action@0:SearchSubmitted =>
       <DoSearch search=action.searchString />
@@ -152,6 +175,14 @@ record Page.State @43:1-52:2
 record Page.State.Update update of Page.State @43:1-52:2
   count: int
   query: string
+
+record Diffed.State @56:1-64:2
+  count: int required
+  note: string?
+
+record Diffed.State.Update update of Diffed.State @56:1-64:2
+  count: int
+  note: string?
 
 union Counter.State.Property property of Counter.State @15:1-22:2
   case count constant

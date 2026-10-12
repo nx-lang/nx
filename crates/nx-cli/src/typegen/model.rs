@@ -1106,7 +1106,6 @@ impl<'a> ModuleTypes<'a> {
     }
 }
 
-/// The record a derived companion patches or names the fields of, or `None` for a declared item.
 /// The stem a derived declaration's companion is named from: `Counter_state` for the component state
 /// record `Counter.State`, so its companions are `Counter_state_update` and
 /// `Counter_state_property`; the target's own name for anything else.
@@ -1119,6 +1118,7 @@ pub fn companion_stem(target: &str) -> String {
     }
 }
 
+/// The record a derived companion patches or names the fields of, or `None` for a declared item.
 fn companion_target_name(item: &ExportedType) -> Option<&str> {
     match item {
         ExportedType::Update(update) => Some(&update.target_name),

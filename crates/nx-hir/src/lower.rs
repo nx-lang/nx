@@ -1098,16 +1098,17 @@ impl LoweringContext {
             .child_by_field("base")
             .map(|base| Name::new(base.text()));
 
-        let enclosing_component = self.current_component.replace(name.clone());
-
         // State is lowered with the component body; only the state record and the records
         // derived from it are needed now, so element tags and type references in any body can
-        // name them.
+        // name them. A bare `State` means the component's own only inside the body, which the
+        // state fields belong to and the signature's props and emits do not.
+        let enclosing_component = self.current_component.replace(name.clone());
         let state_fields = node
             .child_by_field("body")
             .and_then(|body| body.child_by_field("state"))
             .map(|state| self.lower_field_signatures(state))
             .unwrap_or_default();
+        self.current_component = enclosing_component;
         for field in &state_fields {
             if field.name.as_str() == STATE_RECORD_SUFFIX {
                 self.add_diagnostic(
@@ -1284,8 +1285,6 @@ impl LoweringContext {
                 }
             }
         }
-
-        self.current_component = enclosing_component;
 
         self.component_emit_records
             .insert(name.clone(), inline_records);

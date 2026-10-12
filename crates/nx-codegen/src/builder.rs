@@ -118,7 +118,8 @@ type UpdateRecordKey = (u32, LocalDefinitionId);
 /// is a construction — a record literal or an element tag — a type annotation naming one, or a
 /// member access reaching a property union's case; a reference from another module counts, since
 /// the declaring module is where the declaration is emitted. A state record is also referenced by
-/// its update record and its property union, whose target it is.</para>
+/// its update record and its property union, whose target it is, and it references its update
+/// record in turn.</para>
 fn referenced_derived_declarations(artifact: &ProgramArtifact) -> FxHashSet<UpdateRecordKey> {
     let mut referenced = FxHashSet::default();
     for module in artifact.resolved_program.modules() {
@@ -205,7 +206,38 @@ fn referenced_derived_declarations(artifact: &ProgramArtifact) -> FxHashSet<Upda
         })
         .collect::<Vec<_>>();
     referenced.extend(targets);
+    // A state patch can be computed without being spelled — `diff` of two state records in a
+    // handler — and a runtime recognizes one only by its declaration, so a referenced state record
+    // brings its update record along.
+    let state_updates = referenced
+        .iter()
+        .filter_map(|&(module_id, definition_id)| {
+            state_update_record(artifact, RuntimeModuleId::new(module_id), definition_id)
+                .map(|update| (module_id, update))
+        })
+        .collect::<Vec<_>>();
+    referenced.extend(state_updates);
     referenced
+}
+
+/// The update record of the state record at the address, when it is a component's state record.
+///
+/// <para>The update record is declared beside it, so it is found in the same module.</para>
+fn state_update_record(
+    artifact: &ProgramArtifact,
+    module_id: RuntimeModuleId,
+    definition_id: LocalDefinitionId,
+) -> Option<LocalDefinitionId> {
+    let lowered_module = &artifact.resolved_program.module(module_id)?.lowered_module;
+    let Item::Record(record) = lowered_module.item_by_definition(definition_id)? else {
+        return None;
+    };
+    record.state_component()?;
+    let update_name = nx_hir::update_record_name(record.name.as_str());
+    match lowered_module.find_item_with_definition(update_name.as_str())? {
+        (update_id, Item::Record(update)) if update.update_target().is_some() => Some(update_id),
+        _ => None,
+    }
 }
 
 /// The state record the derived declaration at the address patches or names the fields of, when

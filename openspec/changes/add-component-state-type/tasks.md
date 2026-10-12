@@ -20,7 +20,7 @@
 - [x] 3.1 Emit `T.State` whenever its update or property union is emitted, and add the trailing state-record reference to the component layout in `crates/nx-codegen` (`builder.rs`, `model.rs`, `ir.rs`)
 - [x] 3.2 Point a component's props patch `T.Update` at the component declaration, and a state patch at `T.State`
 - [x] 3.3 Move the IR schema version from 5 to 6 and update `docs/nx-ir-format.md`: the component layout, the dispatch text (`<Owner>.State.Update` patches state), and the examples
-- [x] 3.4 Update the JS executable emitter (`emit.rs`) so generated state types and `nxApplyUpdate` use the state record
+- [x] 3.4 Update the JS executable emitter (`emit.rs`) so generated state types and `nxApplyUpdate` use the state record (no emitter change was needed: it names records by their declarations, so `T.State` and `T.State.Update` generate as `Counter_State` and `Counter_State_Update`; covered by the codegen tests)
 - [x] 3.5 Update `ir_tests.rs`, `ir_runtime_tests.rs`, `ir_instance_tree_tests.rs`, `tests.rs`, the cost probes, and the prelude image tests
 
 ## 4. Runtimes

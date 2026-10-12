@@ -7,6 +7,10 @@
     {
       "module": "main.nx",
       "function": "root"
+    },
+    {
+      "module": "main.nx",
+      "function": "clearNote"
     }
   ],
   "lifecycles": [
@@ -66,6 +70,18 @@
           }
         ],
         []
+      ]
+    },
+    {
+      "module": "main.nx",
+      "component": "Diffed",
+      "batches": [
+        [
+          { "$type": "ActionHandlerInvocation", "token": "h1-1", "action": { "$type": "Button.Tapped" } }
+        ],
+        [
+          { "$type": "ActionHandlerInvocation", "token": "h2-2", "action": { "$type": "Button.Tapped" } }
+        ]
       ]
     }
   ]

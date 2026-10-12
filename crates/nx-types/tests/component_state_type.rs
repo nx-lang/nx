@@ -305,6 +305,20 @@ fn bare_state_property_names_a_state_field() {
 }
 
 #[test]
+fn bare_state_property_case_is_a_value_inside_a_component() {
+    assert_ok(
+        r#"
+        component <Counter /> = {
+          state { count:int = 0 last?:Counter.State.Property }
+          <Label text={State.Property.count} />
+        }
+        let k: Counter.State.Property = {Counter.State.Property.count}
+        "#,
+        "bare-state-property-value.nx",
+    );
+}
+
+#[test]
 fn bare_state_as_a_type() {
     assert_ok(
         r#"
@@ -325,6 +339,26 @@ fn bare_state_takes_precedence_over_a_same_named_declaration_inside_a_component(
         let s: State = idle
         "#,
         "bare-state-precedence.nx",
+    );
+}
+
+#[test]
+fn bare_state_in_the_signature_is_an_ordinary_name() {
+    let result = assert_ok(
+        r#"
+        type State = idle | busy
+        component <C mode?:State /> = { state { count:int = 0 } <Label /> }
+        let c = <C mode={State.idle} />
+        "#,
+        "bare-state-signature.nx",
+    );
+    let module = result.lowered_module.as_ref().expect("lowered module");
+    let Some(nx_hir::Item::Component(component)) = module.find_item("C") else {
+        panic!("Expected a C component");
+    };
+    assert_eq!(
+        component.props[0].ty,
+        nx_hir::ast::TypeRef::name(nx_hir::Name::new("State"))
     );
 }
 
@@ -372,6 +406,18 @@ fn a_bare_property_inside_a_component_suggests_state_property() {
         "#,
         "bare-property-suggest.nx",
         "did you mean `State.Property`?",
+    );
+}
+
+#[test]
+fn a_bare_property_value_inside_a_component_suggests_state_property() {
+    assert_error(
+        r#"
+        component <Counter /> = { state { count:int = 0 } <Label text={Property.count} /> }
+        "#,
+        "bare-property-value-suggest.nx",
+        "unknown-bare-property",
+        "State.Property",
     );
 }
 

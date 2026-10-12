@@ -549,13 +549,18 @@ fn ts_generic_arguments(record: &ExportedRecord) -> String {
 fn emit_union(writer: &mut CodeWriter, union_def: &ExportedUnion, types: ModuleTypes<'_>) {
     // A constant union is a closed set of authored strings, which TypeScript expresses natively
     // as a union of string literals — what an `enum` generated (design D4).
+    // The property companion of a component without props has no cases, which is `never`.
     if union_def.is_constant() {
-        let rhs = union_def
-            .cases
-            .iter()
-            .map(|case| format!("\"{}\"", escape_ts_string(&case.name)))
-            .collect::<Vec<_>>()
-            .join(" | ");
+        let rhs = if union_def.cases.is_empty() {
+            "never".to_string()
+        } else {
+            union_def
+                .cases
+                .iter()
+                .map(|case| format!("\"{}\"", escape_ts_string(&case.name)))
+                .collect::<Vec<_>>()
+                .join(" | ")
+        };
         // A constant case is a string literal in the union and has no declaration of its own to
         // carry documentation.
         emit_doc(writer, union_def.doc.as_deref());
@@ -651,7 +656,7 @@ fn emit_union_case(
     });
 }
 
-/// Emits an external component's state record. A field typed by the component's type parameter
+/// Emits a component's state record, `<Name>_state`. A field typed by the component's type parameter
 /// erases to `unknown`: the host holds state as data and never names the instantiation, which an
 /// NX use site fixed.
 fn emit_component_state(
