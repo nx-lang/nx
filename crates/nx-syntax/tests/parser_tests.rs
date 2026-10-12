@@ -2823,6 +2823,9 @@ fn test_snapshot_union_definition() {
 // Performance Tests (T056)
 // ============================================================================
 
+// These check only that parsing succeeds. Like the tests in performance_tests.rs, they print
+// their timings rather than assert them, since a wall-clock threshold fails on slow CI runners.
+
 #[test]
 fn test_performance_large_file() {
     // Generate a file with ~1000 lines
@@ -2835,7 +2838,7 @@ fn test_performance_large_file() {
     let result = parse_str(&large_source, "large.nx");
     let duration = start.elapsed();
 
-    assert!(result.tree.is_some(), "Should parse large file");
+    assert!(result.is_ok(), "Should parse large file");
     println!("1000 lines parsed in {:?}", duration);
 }
 

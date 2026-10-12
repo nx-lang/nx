@@ -1,6 +1,6 @@
 //! Type checks generated files of growing size and prints how long each one took.
 //!
-//! These tests only check that type checking finishes. Wall-clock thresholds fail on slow CI
+//! These tests only check that type checking succeeds. Wall-clock thresholds fail on slow CI
 //! runners without any change to the checker, so the times are printed rather than asserted.
 
 use nx_types::check_str;
@@ -27,8 +27,10 @@ fn test_typecheck_performance_small() {
     let line_count = source.lines().count();
 
     let start = Instant::now();
-    let _result = check_str(&source, "typecheck_perf_test.nx");
+    let result = check_str(&source, "typecheck_perf_test.nx");
     let duration = start.elapsed();
+
+    assert!(result.is_ok(), "Type check should succeed");
 
     println!(
         "Small file ({} lines): Type checked in {:?}",
@@ -43,8 +45,10 @@ fn test_typecheck_performance_medium() {
     let line_count = source.lines().count();
 
     let start = Instant::now();
-    let _result = check_str(&source, "typecheck_perf_test.nx");
+    let result = check_str(&source, "typecheck_perf_test.nx");
     let duration = start.elapsed();
+
+    assert!(result.is_ok(), "Type check should succeed");
 
     println!(
         "Medium file ({} lines): Type checked in {:?}",
@@ -59,8 +63,10 @@ fn test_typecheck_performance_large() {
     let line_count = source.lines().count();
 
     let start = Instant::now();
-    let _result = check_str(&source, "typecheck_perf_test.nx");
+    let result = check_str(&source, "typecheck_perf_test.nx");
     let duration = start.elapsed();
+
+    assert!(result.is_ok(), "Type check should succeed");
 
     println!(
         "Large file ({} lines): Type checked in {:?}",
@@ -93,6 +99,12 @@ fn test_typecheck_performance_with_errors() {
     let start = Instant::now();
     let result = check_str(&source, "typecheck_perf_test.nx");
     let duration = start.elapsed();
+
+    assert_eq!(
+        result.errors().len(),
+        500,
+        "Each invalid component should report one error"
+    );
 
     println!(
         "File with errors ({} lines, {} errors): Type checked in {:?}",
