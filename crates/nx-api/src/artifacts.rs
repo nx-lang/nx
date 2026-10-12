@@ -2722,15 +2722,38 @@ fn add_library_wildcard_bindings(
 ) {
     let mut export_names = library.exported_items.keys().cloned().collect::<Vec<_>>();
     export_names.sort();
+    let visible = |name: &str| {
+        alias
+            .map(|prefix| format!("{}.{}", prefix.as_str(), name))
+            .unwrap_or_else(|| name.to_string())
+    };
+    // The declarations themselves first, then those derived from them, each only beside its base.
+    let (derived, declared): (Vec<_>, Vec<_>) = export_names.into_iter().partition(|name| {
+        derived_base(name, |base| library.exported_items.contains_key(base)).is_some()
+    });
 
-    for export_name in export_names {
-        let visible_name = alias
-            .map(|prefix| format!("{}.{}", prefix.as_str(), export_name))
-            .unwrap_or_else(|| export_name.clone());
+    for export_name in declared.into_iter().chain(derived) {
+        let visible_name = visible(&export_name);
 
         let Some(item_indices) = library.exported_items.get(&export_name) else {
             continue;
         };
+        if let Some(base) = derived_base(&export_name, |base| {
+            library.exported_items.contains_key(base)
+        }) {
+            let base_bound_here = library.exported_items[base].iter().any(|index| {
+                let item = &library.interface_items[*index];
+                binds_to(
+                    module,
+                    &visible(base),
+                    &item.module_identity,
+                    item.definition_id,
+                )
+            });
+            if !base_bound_here {
+                continue;
+            }
+        }
         add_imported_interface_bindings(
             module,
             &visible_name,
@@ -2833,15 +2856,44 @@ fn add_workspace_import_bindings(
 
     match &import.kind {
         ImportKind::Wildcard { alias } => {
-            for (item_index, item) in target_module.items().iter().enumerate() {
-                if item.visibility() != Visibility::Export {
-                    continue;
+            let visible = |name: &str| {
+                alias
+                    .as_ref()
+                    .map(|prefix| format!("{}.{}", prefix.as_str(), name))
+                    .unwrap_or_else(|| name.to_string())
+            };
+            let exports = target_module
+                .items()
+                .iter()
+                .enumerate()
+                .filter(|(_, item)| item.visibility() == Visibility::Export)
+                .map(|(index, item)| (item.name().as_str().to_string(), index))
+                .collect::<FxHashMap<_, _>>();
+            // The declarations themselves first, then those derived from them, each only beside
+            // its base.
+            let (derived, declared): (Vec<_>, Vec<_>) = target_module
+                .items()
+                .iter()
+                .enumerate()
+                .filter(|(_, item)| item.visibility() == Visibility::Export)
+                .partition(|(_, item)| {
+                    derived_base(item.name().as_str(), |base| exports.contains_key(base)).is_some()
+                });
+            for (item_index, item) in declared.into_iter().chain(derived) {
+                if let Some(base) =
+                    derived_base(item.name().as_str(), |base| exports.contains_key(base))
+                {
+                    if !binds_to(
+                        module,
+                        &visible(base),
+                        &target_source_file.identity,
+                        local_definition_id(exports[base]),
+                    ) {
+                        continue;
+                    }
                 }
 
-                let visible_name = alias
-                    .as_ref()
-                    .map(|prefix| format!("{}.{}", prefix.as_str(), item.name().as_str()))
-                    .unwrap_or_else(|| item.name().as_str().to_string());
+                let visible_name = visible(item.name().as_str());
                 add_workspace_item_bindings(
                     module,
                     &target_source_file.identity,
@@ -2935,6 +2987,19 @@ fn binds_to(
     .filter_map(|namespace| module.resolve_binding(namespace, &name))
     .any(|binding| {
         binding.module_identity("") == module_identity && binding.definition_id() == definition_id
+    })
+}
+
+/// The declaration `name` is derived from, when it is `<Base>.<suffix>` for one of
+/// `DERIVED_DECLARATION_SUFFIXES` and `is_export` says `<Base>` is exported beside it. The longest
+/// suffix is tried first, so `Card.State.Update` derives from `Card`, not from `Card.State`.
+fn derived_base(name: &str, is_export: impl Fn(&str) -> bool) -> Option<&str> {
+    let mut suffixes = DERIVED_DECLARATION_SUFFIXES;
+    suffixes.sort_by_key(|suffix| std::cmp::Reverse(suffix.len()));
+    suffixes.into_iter().find_map(|suffix| {
+        name.strip_suffix(suffix)
+            .and_then(|base| base.strip_suffix('.'))
+            .filter(|base| is_export(base))
     })
 }
 
@@ -5584,6 +5649,70 @@ export type Saved = {
             says_card_declares_no_state(diagnostics.iter().map(|d| d.message.clone())),
             "{diagnostics:?}"
         );
+    }
+
+    /// A wildcard import brings a derived declaration only beside its base, as a selective one does.
+    #[test]
+    fn a_library_wildcard_import_does_not_bring_derived_declarations_of_a_name_it_lost() {
+        for saved in [
+            "import \"../plain\"\nimport \"../ui\"\nexport type Saved = { s:Card.State }",
+            "import \"../ui\"\nexport component <Card label:string /> = { <div>{label}</div> }\nexport type Saved = { s:Card.State }",
+        ] {
+            let temp = TempDir::new().expect("temp dir");
+            write_two_cards(temp.path());
+            let forms_dir = temp.path().join("forms");
+            fs::create_dir_all(&forms_dir).expect("forms dir");
+            fs::write(forms_dir.join("saved.nx"), saved).expect("saved file");
+
+            let diagnostics = LibraryRegistry::new()
+                .load_library_from_directory(&forms_dir)
+                .expect_err("Card.State names no state record here");
+            assert!(
+                says_card_declares_no_state(diagnostics.iter().map(|d| d.message.clone())),
+                "{saved}: {diagnostics:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_workspace_wildcard_import_does_not_bring_derived_declarations_of_a_name_it_lost() {
+        let workspace = workspace(vec![
+            workspace_module(
+                "ui.nx",
+                "export component <Card title:string /> = {\n  state { open:boolean = false }\n  <div>{title}</div>\n}",
+            ),
+            workspace_module(
+                "main.nx",
+                "import \"./ui.nx\"\ncomponent <Card label:int /> = { <span>{label}</span> }\nlet x():Card.State = { <Card.State open=true /> }\nlet root() = { 1 }",
+            ),
+        ]);
+        let Err(diagnostics) =
+            build_workspace_program_artifact(&workspace, "main.nx", &ProgramBuildContext::empty())
+        else {
+            panic!("Expected Card.State to name no state record");
+        };
+        assert!(
+            says_card_declares_no_state(diagnostics.iter().map(|d| d.message.clone())),
+            "{diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn a_wildcard_import_still_brings_derived_declarations_beside_their_base() {
+        let workspace = workspace(vec![
+            workspace_module(
+                "ui.nx",
+                "export component <Card title:string /> = {\n  state { open:boolean = false }\n  <div>{title}</div>\n}",
+            ),
+            workspace_module("user.nx", "export type User = { name:string }"),
+            workspace_module(
+                "main.nx",
+                "import \"./ui.nx\"\nimport \"./user.nx\" as Ui\nlet a():Card.State.Update = { <Card.State.Update open=true /> }\nlet b():Ui.User.Update = { <Ui.User.Update name=\"x\" /> }\nlet c():Card.State = { <Card.State open=true /> }\nlet root() = { 1 }",
+            ),
+        ]);
+        let result =
+            build_workspace_program_artifact(&workspace, "main.nx", &ProgramBuildContext::empty());
+        assert!(result.is_ok(), "{:?}", result.err());
     }
 
     #[test]

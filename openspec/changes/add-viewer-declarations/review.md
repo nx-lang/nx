@@ -234,7 +234,7 @@ program with `build_program_artifact_from_source` and evaluates it:
   `library.exported_items` lists them. The workspace selective path and both `visible_imports` paths
   already expanded `DERIVED_DECLARATION_SUFFIXES`.
 
-### 🟡 Fixed - RF9 A derived name binds even when its base name came from somewhere else, so `Card` and `Card.State` can name different components
+### ✅ Verified - RF9 A derived name binds even when its base name came from somewhere else, so `Card` and `Card.State` can name different components
 - **Severity:** Low (confidence: high, reproduced)
 - **Evidence:** `add_derived_interface_bindings` (`crates/nx-api/src/artifacts.rs:3337`) binds each
   `<Name>.<suffix>` on its own. It does not check whether the base binding for `<Name>` was actually made by
@@ -280,3 +280,67 @@ program with `build_program_artifact_from_source` and evaluates it:
   guard. Left as is: the two `visible_imports` expansions, because type checking now rejects any program
   that would reach them with a mismatched pair; and the unreachable "provided by both" diagnostic for
   two selective imports of one name, which predates this change and would change behavior beyond this fix.
+- **Verification:** I rebuilt from be1b9c5 (`nxlang` and a scratch probe binary on `nx-api`) and re-ran the
+  probes. Each of these now reports "component 'Card' declares no state" instead of resolving
+  `Card.State` to `ui`'s component:
+  - In a library: `import { Card } from "../plain"` followed by `import { Card } from "../ui"`, and a
+    local `component <Card label:int />` next to `import { Card } from "../ui"`.
+  - In a program built from source: the same two cases.
+  - In a workspace (`./plain.nx`, `./ui.nx`): the same two cases.
+
+  `nxlang typegen` on the two-import library now fails with that error (exit 1) instead of writing an
+  unimported `Card_State`. With two stateful `Card`s (p2), the first import still provides both `Card`
+  and `Card.State`, so the pair stays consistent. d04ad7b's behavior still holds:
+  - The selective `Card.State` / `.State.Update` / `.State.Property` / `User.Update` / `User.Property`
+    library still type-generates the same TypeScript and C# imports. So does the aliased
+    `import { Card as Ui.Card, User as Ui.User }`.
+  - The runtime probe (a library function building `<Panel.State count=3 />`, `User.Update` and property
+    values, called from a program) still evaluates.
+
+  `cargo test -p nx-api` (435 + 10 + 29) and `cargo test -p nx-cli` (268) pass. The fix covers selective
+  imports, which is everything RF9 recommended. Wildcard imports still pair names across sources; that is
+  filed as RF10.
+
+## New Findings Discovered During 2026-10-12 20:10 Verification
+
+### 🟡 Fixed - RF10 Wildcard imports still bind `<Name>.State` and the other derived names when `<Name>` itself is taken
+- **Severity:** Low (confidence: high, reproduced)
+- **Evidence:** A wildcard import binds every export separately, including the derived `Card.State`,
+  `Card.State.Update`, and so on. `add_library_wildcard_bindings` (`crates/nx-api/src/artifacts.rs`)
+  iterates `library.exported_items`, and the wildcard branch of `add_workspace_import_bindings` iterates
+  every exported item. So a derived name binds even when its base name was skipped because it was already
+  bound, the same split RF9 fixed for selective imports. `plain` exports a stateless
+  `component <Card label:int />` and `ui` exports `Card` with `state { open:boolean = false }`. Each of
+  the following type-checks and evaluates `x().open` to `true`, with `Card` naming one component and
+  `Card.State` the other:
+  - Library module: `import "../ui"` plus a local `export component <Card label:int />` and
+    `export let x():Card.State = { <Card.State open=true /> }`.
+  - Library module: `import "../plain"` then `import "../ui"`.
+  - Library module: `import { Card } from "../plain"` then `import "../ui"`.
+  - Workspace `main.nx`: `import "./ui.nx"` plus a local stateless `component <Card label:int />`.
+- **Recommendation:** In both wildcard paths, bind a `<Name>.<suffix>` export only when the same import
+  bound `<Name>` to its declaration: reuse `binds_to`, or skip derived export names and expand them from
+  each base the way the selective paths do. Apply the same rule to the two `visible_imports`
+  expansions, or rely on the type checker as RF9's fix does. Add a library test and a workspace test: a
+  local stateless `Card` plus a wildcard import of a stateful one reports "declares no state".
+- **Fix:** Both wildcard paths (`add_library_wildcard_bindings` and the wildcard branch of
+  `add_workspace_import_bindings`) now bind a module's own declarations first, then its derived ones, and
+  bind a derived declaration only when the import bound its base (`derived_base`, longest suffix first, so
+  `Card.State.Update` derives from `Card`; then `binds_to`). Tests
+  `a_library_wildcard_import_does_not_bring_derived_declarations_of_a_name_it_lost` (two imports, and a local
+  `Card` beside an import) and `a_workspace_wildcard_import_does_not_bring_derived_declarations_of_a_name_it_lost`
+  fail without the guard; `a_wildcard_import_still_brings_derived_declarations_beside_their_base` covers
+  plain and aliased wildcard imports still bringing `Card.State`, `Card.State.Update` and `Ui.User.Update`.
+
+## Out-of-scope observation (verification 2026-10-12 20:10)
+- This one predates this change. The PR does not touch `nx-interpreter` or the runtime `visible_imports`
+  maps. Qualified (aliased) imports of records type-check but fail at run time or report wrong
+  diagnostics. With `import "../ui" as ui`, in a program as well as in a library:
+  - `<ui.User name="a" />` fails at run time with "Record type not found: User".
+  - `<ui.Card.State open=true />` fails with "Record type not found: Card.State".
+  - `<ui.User.Update name="a" />` is rejected with "Element 'ui.User.Update' requires property 'age'",
+    although an update record has only optional fields.
+  - A function returning `ui.User.Property.name` fails with "expected ui.User.Property, got
+    User.Property.name".
+
+  `import { Card as ui.Card }` does the same. The unqualified forms work. Worth its own issue or change.
