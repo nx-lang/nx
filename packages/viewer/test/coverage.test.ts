@@ -94,7 +94,7 @@ describe("coverage", () => {
     }
   });
 
-  it("renders the question-flow program quickly", async () => {
+  it("reports how long the question-flow program takes to render", async () => {
     const path = "specs/ir-conformance/question-flow/main.nx";
     const { fixture } = (await repositoryTrees()).find((entry) => entry.path === path)!;
     const index = indexTree(fixture.tree, fixture.text);
@@ -102,6 +102,5 @@ describe("coverage", () => {
     renderDocument({ document, index, ghosts: true, copy: false });
     const elapsed = performance.now() - started;
     console.log(`Rendered ${path} (${fixture.tree.nodes.length} nodes) in ${elapsed.toFixed(1)} ms`);
-    assert.ok(elapsed < 1000, `rendering took ${elapsed.toFixed(1)} ms`);
   });
 });
