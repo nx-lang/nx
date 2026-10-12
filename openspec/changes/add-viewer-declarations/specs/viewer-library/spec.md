@@ -27,11 +27,11 @@ inline`. `PropertyViewer` SHALL be a record with the type parameter `Target`, a 
 `format:ValueFormat`, and a field `place:Placement` defaulting to `body`. `Placement` SHALL be the
 constant union `body | details`.
 
-#### Scenario: An element hint with property hints
+#### Scenario: An element viewer with property viewers
 - **WHEN** a module declares `type Choice = { value:string label:string description?:string }` and `viewer Choice = <ElementViewer layout=row title=label subtitle=description badge=value><PropertyViewer of=value place=details /></ElementViewer>`
-- **THEN** analysis SHALL accept the hint
+- **THEN** analysis SHALL accept the viewer
 
-#### Scenario: A property hint names a property of its target
+#### Scenario: A property viewer names a property of its target
 - **WHEN** a module declares `type Choice = { label:string }` and `viewer Choice = <ElementViewer><PropertyViewer of=value /></ElementViewer>`
 - **THEN** analysis SHALL reject `of=value` because `value` is not a case of `Choice.Property`
 
@@ -43,10 +43,10 @@ type parameter `Target`, a required field `of:Target`, and optional fields `labe
 
 #### Scenario: Case labels
 - **WHEN** a module declares `type ChoiceLayout = list | grid | chips` and `viewer ChoiceLayout = <UnionViewer><CaseViewer of=list label="a list" /><CaseViewer of=chips label="chips" example="◉ A  ○ B" /></UnionViewer>`
-- **THEN** analysis SHALL accept the hint
+- **THEN** analysis SHALL accept the viewer
 
 #### Scenario: A case that is not in the union
-- **WHEN** `ChoiceLayout` is `list | grid | chips` and its hint has `<CaseViewer of=table />`
+- **WHEN** `ChoiceLayout` is `list | grid | chips` and its viewer has `<CaseViewer of=table />`
 - **THEN** analysis SHALL reject `of=table` because `table` is not a case of `ChoiceLayout`
 
 ### Requirement: `ValueViewer` formats a scalar type
@@ -56,4 +56,4 @@ type parameter `Target`, a required field `of:Target`, and optional fields `labe
 
 #### Scenario: An image URL alias
 - **WHEN** a module declares `type ImageUrl = string` and `viewer ImageUrl = <ValueViewer format=image />`
-- **THEN** analysis SHALL accept the hint
+- **THEN** analysis SHALL accept the viewer

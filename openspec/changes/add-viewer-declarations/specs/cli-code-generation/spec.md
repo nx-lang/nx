@@ -8,7 +8,7 @@ whose generated type would refer to one SHALL be a `typegen` error naming the de
 props record. A generic record field typed by a type parameter's property union, `P.Property`,
 SHALL be generated in TypeScript as `Extract<keyof P, string>` and in C# as `string`.
 
-#### Scenario: Hints change nothing in generated code
+#### Scenario: Viewer declarations change nothing in generated code
 - **WHEN** the user runs `nxlang typegen` on a library whose module declares `export type Choice = { label:string }` and `viewer Choice = <ElementViewer title=label />`
 - **THEN** the generated files SHALL be identical to those for the same library without the viewer declaration
 

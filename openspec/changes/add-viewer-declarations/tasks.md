@@ -20,11 +20,11 @@
 - [ ] 3.1 Add `viewer_definition` to `crates/nx-syntax/grammar.js` as a module member, with `viewer` a keyword only in that position; regenerate the parser and update `ast.rs`, `syntax_kind.rs` and the grammar tests
 - [ ] 3.2 Lower viewer declarations in HIR as a separate list on the module, keeping the target path and value; keep them out of the module's items, exports, IR and declaration schema
 - [ ] 3.3 Resolve the target and report targets that cannot have a viewer (functions, values, payload unions, non-primitive aliases, generic and derived declarations)
-- [ ] 3.4 Type-check the value against the hint record for the target's kind, binding `Target` for `@nx/viewer` constructions that leave it unset (the target, or `T.Props` for a component) and rejecting a different explicit `Target`
-- [ ] 3.5 Report non-constant hint values (braces, references, conditionals, loops, interpolation, calls)
-- [ ] 3.6 Report `duplicate-viewer-hint` for two hints of one target in one module
+- [ ] 3.4 Type-check the value against the viewer record for the target's kind, binding `Target` for `@nx/viewer` constructions that leave it unset (the target, or `T.Props` for a component) and rejecting a different explicit `Target`
+- [ ] 3.5 Report non-constant viewer declaration values (braces, references, conditionals, loops, interpolation, calls)
+- [ ] 3.6 Report `duplicate-viewer` for two viewer declarations of one target in one module
 - [ ] 3.7 Make sure the interpreter, codegen and both runtimes ignore viewer declarations; add an IR test that an image is identical with and without them
-- [ ] 3.8 Add tests for every scenario in `viewer-hints` that analysis alone covers
+- [ ] 3.8 Add tests for every scenario in `viewer-declarations` that analysis alone covers
 
 ## 4. The `@nx/viewer` library
 
@@ -34,11 +34,11 @@
 
 ## 5. Resolution and the source tree
 
-- [ ] 5.1 Gather hints for a document's program (entry module, its imports, the standard libraries) and for host hint modules named in the request
-- [ ] 5.2 Resolve hints along inheritance and across sources, merging attributes, `PropertyViewer`s and `CaseViewer`s by `of`, ordering properties, not inheriting `name`, and resolving formats through aliases as written
-- [ ] 5.3 Report cross-module `duplicate-viewer-hint` on each document whose program loads both hints
-- [ ] 5.4 Add the `viewers` option and the `viewer` values to `crates/nx-language-service/src/source_tree.rs`, list hinted unions and aliases that type listed properties, mark viewer declarations, and report missing host modules
-- [ ] 5.5 Add the option and types to `@nx-lang/language-protocol`, carry them through the wasm snapshot and `@nx-lang/language-core`, and extend the Rust/TypeScript parity test with a hinted document
+- [ ] 5.1 Gather viewer declarations for a document's program (entry module, its imports, the standard libraries) and for host viewer modules named in the request
+- [ ] 5.2 Resolve viewer declarations along inheritance and across sources, merging attributes, `PropertyViewer`s and `CaseViewer`s by `of`, ordering properties, not inheriting `name`, and resolving formats through aliases as written
+- [ ] 5.3 Report cross-module `duplicate-viewer` on each document whose program loads both viewer declarations
+- [ ] 5.4 Add the `viewers` option and the `viewer` values to `crates/nx-language-service/src/source_tree.rs`, list unions and aliases with viewers that type listed properties, mark viewer declarations, and report missing host modules
+- [ ] 5.5 Add the option and types to `@nx-lang/language-protocol`, carry them through the wasm snapshot and `@nx-lang/language-core`, and extend the Rust/TypeScript parity test with a document with viewer declarations
 - [ ] 5.6 Add tests for every scenario in the `source-tree` delta
 
 ## 6. Viewer and playground
@@ -47,17 +47,17 @@
 - [ ] 6.2 Add the `row` and `inline` layouts
 - [ ] 6.3 Show case labels and examples, and value formats (`url`, `email`, `phone`, `image`, `color`, `markdown`, `text`), with the `images` property
 - [ ] 6.4 Read a `viewer` declaration as "Viewer for …"
-- [ ] 6.5 Keep the coverage test passing over the repository, and add a hinted fixture (the survey question library with the proposal's hints) to the viewer tests
-- [ ] 6.6 Ask for hints in the playground's Read view and add the playground scenarios to its tests
+- [ ] 6.5 Keep the coverage test passing over the repository, and add a fixture with viewer declarations (the survey question library with the proposal's viewer declarations) to the viewer tests
+- [ ] 6.6 Ask for viewer declarations in the playground's Read view and add the playground scenarios to its tests
 
 ## 7. Editor, docs and examples
 
 - [ ] 7.1 Scope `viewer` declarations in `src/vscode/syntaxes/nx.tmLanguage.json`, with grammar tests
-- [ ] 7.2 Add `viewer` to `nx-grammar.md` and the website syntax reference, and write a website page on viewer hints with the survey example
+- [ ] 7.2 Add `viewer` to `nx-grammar.md` and the website syntax reference, and write a website page on viewer declarations with the survey example
 - [ ] 7.3 Add the `@nx/viewer` reference page beside the agent library's
 - [ ] 7.4 Document `T.Props` beside `T.State` on the website's component pages
-- [ ] 7.5 Add a playground example, `viewer-hints.nx`, with a small hinted record and union, and its expected output
+- [ ] 7.5 Add a playground example, `viewer-declarations.nx`, with a small record and union with viewers, and its expected output
 
 ## 8. Verification
 
-- [ ] 8.1 Run the Rust workspace tests, clippy, the TypeScript package tests, the viewer coverage test, and `openspec validate add-viewer-hints --strict`
+- [ ] 8.1 Run the Rust workspace tests, clippy, the TypeScript package tests, the viewer coverage test, and `openspec validate add-viewer-declarations --strict`

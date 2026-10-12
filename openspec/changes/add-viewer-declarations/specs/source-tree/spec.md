@@ -69,31 +69,31 @@ one.
 
 ## ADDED Requirements
 
-### Requirement: The answer carries resolved viewer hints when asked
+### Requirement: The answer carries resolved viewer declarations when asked
 A `sourceTree` request SHALL accept an optional `viewers` option, holding an optional list of host
-hint module identities. When the option is absent the answer SHALL carry no hints and SHALL be
+viewer module identities. When the option is absent the answer SHALL carry no viewers and SHALL be
 unchanged from an answer without this feature. When it is present, the answer SHALL resolve the
-program's viewer hints and the named host hint modules, as the viewer-hints capability defines, and
-SHALL attach to each declaration entry with a resolved hint a `viewer` value:
+program's viewer declarations and the named host viewer modules, as the viewer-declarations capability defines, and
+SHALL attach to each declaration entry with a resolved viewer a `viewer` value:
 
 - for a record, an action or a component: its `name`, `title`, `subtitle`, `badge` and `image` when
   set, its `layout`, and a `properties` list holding every property of the entry once, in the
-  resolved order (the properties the hint lists, then the rest in declaration order), each with its
+  resolved order (the properties the viewer lists, then the rest in declaration order), each with its
   name, its `label`, `whenTrue`, `whenFalse` and resolved `format` when set, and its `place`;
 - for a union: a `cases` list holding every case once, in declaration order, each with its name and
   its `label` and `example` when set;
 - for an alias: its `format`.
 
-An entry for a record, action or component that has no hint but has a property with a resolved
-format SHALL carry a `viewer` value with the default layout and the formats. When hints are asked
-for, the declaration table SHALL also list each union and alias with a hint that types a property of
-a listed declaration, so a reader can read the property's cases without another query. A host hint
+An entry for a record, action or component that has no viewer but has a property with a resolved
+format SHALL carry a `viewer` value with the default layout and the formats. When viewers are asked
+for, the declaration table SHALL also list each union and alias with a viewer that types a property of
+a listed declaration, so a reader can read the property's cases without another query. A host viewer declaration
 module the workspace snapshot does not hold SHALL be reported in the answer as missing and SHALL
 NOT fail the query. The `viewer` values SHALL round-trip through JSON without loss.
 
-#### Scenario: A hinted question
+#### Scenario: A question with viewers
 - **WHEN** a client asks with `viewers` for the source tree of a document that constructs
-  `<SingleChoice … />`, and the survey library hints `Question` with `title=label` and
+  `<SingleChoice … />`, and the survey library declares a viewer for `Question` with `title=label` and
   `SingleChoice` with `name="Single choice"` and a property viewer for `layout` labelled "Shown as"
 - **THEN** the entry for `SingleChoice` SHALL carry a `viewer` value with the name `Single choice`,
   the title `label` and the layout `card`
@@ -102,7 +102,7 @@ NOT fail the query. The `viewer` values SHALL round-trip through JSON without lo
 
 #### Scenario: The union a property uses comes along
 - **WHEN** a client asks with `viewers` and `SingleChoice`'s `layout` property is typed by
-  `ChoiceLayout`, whose hint labels its cases, and no node of the document names `ChoiceLayout`
+  `ChoiceLayout`, whose viewer labels its cases, and no node of the document names `ChoiceLayout`
 - **THEN** the declaration table SHALL hold `ChoiceLayout` with a `viewer` value listing its cases
   and their labels
 
@@ -111,10 +111,10 @@ NOT fail the query. The `viewer` values SHALL round-trip through JSON without lo
 - **THEN** no declaration entry SHALL carry a `viewer` value
 
 #### Scenario: A host module rewords a kind
-- **WHEN** a client asks with `viewers` naming a host module that hints `SingleChoice` with
+- **WHEN** a client asks with `viewers` naming a host module that declares a viewer for `SingleChoice` with
   `name="Pick one"`
 - **THEN** the entry for `SingleChoice` SHALL carry the name `Pick one`
 
 #### Scenario: A missing host module
 - **WHEN** a client asks with `viewers` naming a module identity the snapshot does not hold
-- **THEN** the answer SHALL list that identity as missing and SHALL carry the program's own hints
+- **THEN** the answer SHALL list that identity as missing and SHALL carry the program's own viewers
