@@ -153,7 +153,7 @@ diagnostic with the expected suggestion, so the `unresolved_derived_name_message
 suppression behave as the specs require. I found no behavioral bug in the commit; the findings are spec gaps, dead
 code and coverage.
 
-### 🟡 Fixed - RF7 Main-spec requirements the change does not touch still say typegen emits a component's `<Name>_update` and `<Name>_property`
+### ✅ Verified - RF7 Main-spec requirements the change does not touch still say typegen emits a component's `<Name>_update` and `<Name>_property`
 - **Severity:** Medium
 - **Confidence:** High
 - **Evidence:** The `cli-code-generation` delta now says a component "SHALL NOT get a `<Name>_update` of its own" and
@@ -193,8 +193,9 @@ code and coverage.
   test) and drops "component state" from the list of DTOs without a plain type. Re-run
   `openspec validate add-component-state-type --strict`.
 - **Fix:** Added MODIFIED blocks to the `cli-code-generation` delta for "C# generation emits typed property keys beside each property companion" (every component with state gets keys over `<Name>_state`; `Ticker_state_update`, `Counter_state_property`, no `Ticker_update`/`Counter_property`), "Generated contracts erase component type parameters …" (`<Name>_state` and `<Name>_state_update` erase; `Picker_state_update`) and "Generated contracts carry a generic record …" (`Picker_state_update`). Added a `dotnet-binding` delta that moves the no-plain-type scenario to `Stepped_update`/`Stepped_property` and drops component state (and actions, which do have plain types) from the no-plain-type list. Listed both in the proposal. `openspec validate --strict` passes.
+- **Verification:** Verified in 92ce8ff. The `cli-code-generation` delta now has MODIFIED blocks for all three requirements, with `Ticker_state_update`, `Counter_state_property` and `Picker_state_update` and explicit "SHALL NOT emit `Ticker_update`/`Counter_property`". The new `dotnet-binding` delta moves the no-plain-type scenario to `Stepped_update`/`Stepped_property`, which matches the .NET test. I checked the new claim that every exported component with state, external or not, gets keys over `<Name>_state` against `nxlang typegen --language csharp`: a non-external `Counter` emits `Counter_stateProperties` over `Counter_state`, and `Counter_state_update : NxUpdate<Counter_state>`, as the delta says. A rescan of `openspec/specs` finds no requirement outside the deltas that still names a component's `_update`/`_property`. `openspec validate add-component-state-type --strict` reports the change valid.
 
-### 🟡 Fixed - RF8 The change's own artifacts still give a component a derived update record in two places
+### ✅ Verified - RF8 The change's own artifacts still give a component a derived update record in two places
 - **Severity:** Low
 - **Confidence:** High
 - **Evidence:**
@@ -209,8 +210,9 @@ code and coverage.
   describe each field the same way". In the design and proposal, say that `setProps` could be typed by the future
   props record (for example `T.Properties.Update`), not by `T.Update`.
 - **Fix:** The nx-ir-format delta now says the component's derived state record and that record's update record describe each field the same way. The design's non-goal and the proposal's impact note now say `setProps` could be typed by the future props record's update (perhaps `T.Properties.Update`), not `T.Update`.
+- **Verification:** Verified in 92ce8ff. The nx-ir-format delta (`:190-193`) now names the state record and its update record, which matches its `List.State.Update`/`List.State` scenario. `design.md` Non-Goals and `proposal.md` Impact now point `setProps` at the future props record rather than `T.Update`.
 
-### 🟡 Fixed - RF9 Dead code and stale comments still describe a component's own update record
+### ✅ Verified - RF9 Dead code and stale comments still describe a component's own update record
 - **Severity:** Low
 - **Confidence:** High
 - **Evidence:**
@@ -237,8 +239,9 @@ code and coverage.
   comment to match the Rust one ("A component has no update record of its own, so a `Card.Update` patches nothing"),
   then rebuild `dist`.
 - **Fix:** `erased_record_type_params` returns no parameters for an update whose target is not a state record (the component arm is gone) and its doc and comments describe only state records. Reworded `model.rs` `property_target`, the `DERIVED_DECLARATION_SUFFIXES` doc and the TS runtime test comment (and rebuilt `dist`). Left `docs/add-update-actions-followsup.md:138` as is, since it records what an earlier archived change did.
+- **Verification:** Verified in 92ce8ff. The `_ => target.clone()` arm in `erased_record_type_params` is now `_ => return Vec::new()`, and its doc and comment describe only state records and their updates. `cargo test -p nx-codegen` passes (359 + 4 + 1). The `model.rs` `property_target` doc, the `DERIVED_DECLARATION_SUFFIXES` doc and the TS test comment are reworded, and `dist/test/runtime.test.js` carries the same one-line change. Leaving the history note in `docs/add-update-actions-followsup.md` as it is is reasonable.
 
-### 🟡 Fixed - RF10 The new cascade suppression and the cross-module diagnostic are only partly tested
+### ✅ Verified - RF10 The new cascade suppression and the cross-module diagnostic are only partly tested
 - **Severity:** Low
 - **Confidence:** Medium
 - **Evidence:** `crates/nx-types/src/infer.rs` adds suppression in two places. One is `intrinsic_update_argument`
@@ -257,6 +260,7 @@ code and coverage.
   `crates/nx-api/src/artifacts.rs`, add a workspace test asserting that `<Counter.Update …/>` on an imported stateful
   component reports `unknown-update-record` with the `Counter.State.Update` suggestion.
 - **Fix:** Added `unknown_derived_records_passed_to_record_and_update_intrinsics_are_reported_once_each` (`diff` of two unknown `Form.State` records, `merge` of two `Counter.Update`s: exactly one diagnostic per operand, no `intrinsic-argument-type`) and the nx-api workspace test `update_record_of_a_workspace_imported_component_suggests_its_state_update`.
+- **Verification:** Verified in 92ce8ff. `unknown_derived_records_passed_to_record_and_update_intrinsics_are_reported_once_each` covers the record-argument suppression path (`diff` of two unknown `Form.State` records) and `merge` of two `Counter.Update`s. It compares the full diagnostic list, so a returning `intrinsic-argument-type` would fail it. `update_record_of_a_workspace_imported_component_suggests_its_state_update` pins the exact `unknown-update-record` message for a component imported through the workspace. Both pass (`component_state_type`: 23 passed; the nx-api test passes).
 
 ### Questions (this pass)
 - None.
@@ -269,3 +273,8 @@ code and coverage.
 - The main gap is in the specs (RF7): the main `cli-code-generation` and `dotnet-binding` specs still name component
   `<Name>_update`/`<Name>_property` in requirements this change does not modify. Fix them before archiving. RF8–RF10
   are small cleanups and test additions.
+
+## Verification Summary (2026-10-12 05:52)
+- RF7–RF10 are verified against commit 92ce8ff. The targeted `nx-types` and `nx-api` tests and the full `nx-codegen`
+  suite pass, and `openspec validate --strict` reports the change valid. C# typegen output matches the revised
+  key-table spec. The fixes introduce no new findings.
