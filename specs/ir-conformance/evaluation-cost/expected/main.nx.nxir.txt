@@ -1,4 +1,4 @@
-module main.nx fingerprint 3319043930966403103
+module main.nx fingerprint 4527554670836314352
 links @nx/prelude.nx version "1" fingerprint 3805895034114390176
 requires update-records-v1 update-intrinsics-v1 action-handlers-v1 function-values-v1 ranges-v1
 entrypoints functions [corners one triple through twice greet button sum both Count repeated patterns directCall valueCall spliced forItems forRange content concat defaults valueReference checked compared comparedLists comparedHandlers comparedText written bound updated misaligned patched] components [Button Tally]
@@ -149,13 +149,13 @@ function misaligned() @76:1-76:68 =
 function patched() @79:1-79:41 =
   <Opt.Update b=5 />
 
-component Tally @81:1-84:2
+component Tally state Tally.State @81:1-84:2
   state
     count: int = (1 add 1)
   body =
     <Button
       onTapped=handler Button.Tapped action@1:Button.Tapped owner Tally =>
-        <Tally.Update count=(count add 1) />
+        <Tally.State.Update count=(count add 1) />
     >
     </Button>
 
@@ -164,5 +164,8 @@ record Opt.Update update of Opt @8:1-8:42
   b: int?
   c: string?
 
-record Tally.Update update of Tally @81:1-84:2
+record Tally.State @81:1-84:2
+  count: int required
+
+record Tally.State.Update update of Tally.State @81:1-84:2
   count: int

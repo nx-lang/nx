@@ -482,8 +482,8 @@ impl UnionDef {
         self.base.is_none() && self.cases.iter().all(UnionCaseDef::is_fieldless)
     }
 
-    /// Returns the name of the record, action, or component whose fields this union names, when
-    /// this is a derived `<Target>.Property` union.
+    /// Returns the name of the record, action, or component state record whose fields this union
+    /// names, when this is a derived `<Target>.Property` union.
     pub fn property_target(&self) -> Option<&Name> {
         self.property_target.as_ref()
     }
@@ -500,10 +500,11 @@ pub struct UnionDef {
     pub base: Option<Name>,
     /// Cases in source order.
     pub cases: Vec<UnionCaseDef>,
-    /// The record, action, or component this union is the derived `<Target>.Property` of.
+    /// The record, action, or component state record this union is the derived
+    /// `<Target>.Property` of.
     ///
-    /// <para>A property union has one constant case per effective field of its target (a
-    /// component's state fields), in declaration order with inherited fields first. It has no
+    /// <para>A property union has one constant case per effective field of its target, in
+    /// declaration order with inherited fields first. It has no
     /// base, cannot be extended, and has no derived declarations of its own.</para>
     pub property_target: Option<Name>,
     /// Documentation from `///` doc comments, if any.
@@ -828,15 +829,23 @@ pub enum RecordKind {
     Plain,
     /// `action Name = { ... }` declaration.
     Action,
-    /// Derived `<Target>.Update` patch record, synthesized for every record, action, and
-    /// stateful component.
+    /// Derived `<Target>.Update` patch record, synthesized for every record, action, inline
+    /// emitted action, and component state record.
     ///
-    /// <para>An update record has the target's effective fields (a component's state fields), every
-    /// one optional and none carrying a default. An absent field means "unchanged"; a present
+    /// <para>An update record has the target's effective fields, every one optional and none carrying a default. An absent field means "unchanged"; a present
     /// empty value clears the field, which only a field the target declares optional admits.</para>
     Update {
-        /// Name of the record, action, or component this update record patches.
+        /// Name of the record, action, or component state record this update record patches.
         target: Name,
+    },
+    /// Derived `<Component>.State` record, synthesized for every component that declares state.
+    ///
+    /// <para>A state record has the component's state fields in declaration order, with their
+    /// types and optional marks and without defaults. In every other respect it is a plain record:
+    /// it has its own update record and property union, and it cannot be extended.</para>
+    State {
+        /// Name of the component whose state this record describes.
+        component: Name,
     },
 }
 
@@ -844,7 +853,7 @@ impl RecordKind {
     /// Returns the `(Label, singular, plural)` wording diagnostics use for this kind.
     pub fn labels(&self) -> (&'static str, &'static str, &'static str) {
         match self {
-            RecordKind::Plain => ("Record", "record", "records"),
+            RecordKind::Plain | RecordKind::State { .. } => ("Record", "record", "records"),
             RecordKind::Action => ("Action", "action", "actions"),
             RecordKind::Update { .. } => ("Update record", "update record", "update records"),
         }
@@ -862,6 +871,20 @@ pub fn update_record_name(target: &str) -> Name {
 /// Returns true when `name` is spelled like a derived update record, `<Target>.Update`.
 pub fn is_update_record_name(name: &str) -> bool {
     name.strip_suffix(UPDATE_RECORD_SUFFIX)
+        .is_some_and(|prefix| prefix.ends_with('.'))
+}
+
+/// Suffix of the derived state record name: `<Component>.State`.
+pub const STATE_RECORD_SUFFIX: &str = "State";
+
+/// Returns the name of the derived state record for `component`.
+pub fn state_record_name(component: &str) -> Name {
+    Name::new(&format!("{}.{}", component, STATE_RECORD_SUFFIX))
+}
+
+/// Returns true when `name` is spelled like a derived state record, `<Component>.State`.
+pub fn is_state_record_name(name: &str) -> bool {
+    name.strip_suffix(STATE_RECORD_SUFFIX)
         .is_some_and(|prefix| prefix.ends_with('.'))
 }
 
@@ -905,6 +928,24 @@ impl RecordDef {
             RecordKind::Update { target } => Some(target),
             _ => None,
         }
+    }
+
+    /// Returns the component whose state this record describes, when it is a derived
+    /// `<Component>.State` record.
+    pub fn state_component(&self) -> Option<&Name> {
+        match &self.kind {
+            RecordKind::State { component } => Some(component),
+            _ => None,
+        }
+    }
+
+    /// Returns true when this record is derived rather than declared: an update record or a
+    /// component's state record.
+    pub fn is_derived(&self) -> bool {
+        matches!(
+            self.kind,
+            RecordKind::Update { .. } | RecordKind::State { .. }
+        )
     }
 
     /// Returns true when this record is declared as abstract.

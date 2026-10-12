@@ -53,5 +53,5 @@ let bound(xs:object): int = { count(xs) }
 // of 3, the entry, its token and its action, and a batch of two is 21 on an input of 6.
 component <Counter title:string step:int = 1 /> = {
   state { count:int = 0 }
-  <Button label={title} onTapped=<Update count={count + step} /> />
+  <Button label={title} onTapped=<State.Update count={count + step} /> />
 }

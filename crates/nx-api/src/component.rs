@@ -977,7 +977,7 @@ let root() = { 0 }"#;
         external component <Button value:int = 0 emits { Tapped { } } />
         component <Counter emits { Saved } /> = {
           state { count:int = 0 }
-          <Button value={count} onTapped={<Update count={count + 1} /> <Saved />} />
+          <Button value={count} onTapped={<State.Update count={count + 1} /> <Saved />} />
         }
     "#;
 

@@ -2,9 +2,7 @@
 
 ## Purpose
 TBD - created by archiving change add-nx-ir-format. Update Purpose after archive.
-
 ## Requirements
-
 ### Requirement: TypeScript runtime loads and prepares NX IR programs
 The TypeScript runtime SHALL expose APIs that accept an NX IR artifact as bytes, validate the image
 header, IR schema version, runtime ABI, required features and every structural reference before
@@ -202,7 +200,7 @@ program initialized with the same props yields the same tokens in both runtimes.
 - **AND** it SHALL NOT return a partially updated state object
 
 #### Scenario: Initialization output carries handler tokens
-- **WHEN** a caller initializes `component <Counter /> = { state { count:int = 0 } <Button onTapped=<Update count={count + 1} /> /> }`
+- **WHEN** a caller initializes `component <Counter /> = { state { count:int = 0 } <Button onTapped=<State.Update count={count + 1} /> /> }`
 - **THEN** the rendered `Button`'s `onTapped` SHALL be a record with `$type` `ActionHandler`,
   `action` `Button.Tapped`, and token `h1-1`
 - **AND** the result SHALL include an instance the caller can dispatch against
@@ -267,7 +265,7 @@ fresh tokens, and dispatch SHALL return the rendered output, the ordered effects
 and the next instance. The instance passed in SHALL NOT be modified.
 
 #### Scenario: Handler invocation patches the component's state
-- **WHEN** a caller initializes `component <Counter /> = { state { count:int = 0 } <Button onTapped=<Update count={count + 1} /> /> }`,
+- **WHEN** a caller initializes `component <Counter /> = { state { count:int = 0 } <Button onTapped=<State.Update count={count + 1} /> /> }`,
   reads the token from the rendered `Button`'s `onTapped`, and dispatches one invocation of that
   token with `<Button.Tapped />`
 - **THEN** dispatch SHALL return state with `count` equal to `1`
@@ -275,19 +273,19 @@ and the next instance. The instance passed in SHALL NOT be modified.
 - **AND** the effect list SHALL be empty
 
 #### Scenario: State reads in a handler are live within a batch
-- **WHEN** a caller dispatches two invocations of the same `onTapped=<Update count={count + 1} />`
+- **WHEN** a caller dispatches two invocations of the same `onTapped=<State.Update count={count + 1} />`
   token in one batch against a `Counter` at `count` `0`
 - **THEN** dispatch SHALL return state with `count` equal to `2`
 
 #### Scenario: A shadowed state name keeps its captured value
-- **WHEN** a component body binds `for count in tens { <Button onTapped=<Update count={count + 1} /> /> }`
+- **WHEN** a component body binds `for count in tens { <Button onTapped=<State.Update count={count + 1} /> /> }`
   with `tens` holding `10`, inside a component whose state field `count` is `0`
 - **AND** a caller dispatches that handler
 - **THEN** the update SHALL set `count` to `11`
 
 #### Scenario: Non-update results of a handler invocation are effects
 - **WHEN** a caller dispatches an invocation of a handler bound as
-  `onTapped={<Update count=0 /> <Saved />}` inside a component that emits `Saved`
+  `onTapped={<State.Update count=0 /> <Saved />}` inside a component that emits `Saved`
 - **THEN** dispatch SHALL apply the update to the state
 - **AND** SHALL return `Saved` as the only effect
 
@@ -300,16 +298,16 @@ and the next instance. The instance passed in SHALL NOT be modified.
 
 #### Scenario: Update records returned by a parent-bound handler are effects
 - **WHEN** a caller dispatches `<SearchBox.SearchSubmitted searchString="docs" />` against a
-  `SearchBox` instance whose parent bound `onSearchSubmitted=<Update query={action.searchString} />`
+  `SearchBox` instance whose parent bound `onSearchSubmitted=<State.Update query={action.searchString} />`
   inside the parent's own body
 - **THEN** dispatch SHALL NOT change the `SearchBox` state
 - **AND** SHALL return the parent's update record in the effect list
 
 #### Scenario: A handler in a content child is unowned by the child
-- **WHEN** `Page`'s body renders `<Stack><Button onTapped=<Update count={count + 1} /> /></Stack>`
+- **WHEN** `Page`'s body renders `<Stack><Button onTapped=<State.Update count={count + 1} /> /></Stack>`
   and a caller initializes `Stack` from `Page`'s rendered output, passing `Page`'s instance
 - **AND** dispatches an invocation of the `Button`'s token against the `Stack` instance
-- **THEN** dispatch SHALL return `Page.Update` as the only effect
+- **THEN** dispatch SHALL return `Page.State.Update` as the only effect
 - **AND** `Stack`'s state SHALL be unchanged
 
 #### Scenario: An emitted action with no bound handler is a no-op
@@ -644,24 +642,25 @@ update record's `$type`, and SHALL encode a present empty field as `null` in can
 - **AND** the feature name SHALL appear in the diagnostic a runtime without support reports
 
 ### Requirement: TypeScript runtime applies a component update record to host-owned state
-The state-patch operation SHALL accept the component's update record value, in addition to a plain
+The state-patch operation SHALL accept the update record of the component's state record, `<Component>.State.Update`, in addition to a plain
 partial state object, and SHALL apply it with the same semantics: present fields replace the
 current value, absent fields keep it, a present empty value clears an optional state field so the
 next state carries no key for it, and the result is validated against the state schema. A present
 empty value for a state field that is not optional SHALL be rejected naming the field.
 
-#### Scenario: Component update record patches state
-- **WHEN** a caller applies `{ $type: "Counter.Update", count: 3 }` to current state `{ count: 1, label: "x" }` for prepared component `Counter`
+#### Scenario: A state update record patches state
+- **WHEN** a caller applies `{ $type: "Counter.State.Update", count: 3 }` to current state `{ count: 1, label: "x" }` for prepared component `Counter`
 - **THEN** the runtime SHALL return next state `{ count: 3, label: "x" }`
 
 #### Scenario: A present empty clears an optional state field
-- **WHEN** a caller applies `{ $type: "Search.Update", query: null }` to current state `{ query: "docs" }` for a prepared component whose state declares `query?:string`
+- **WHEN** a caller applies `{ $type: "Search.State.Update", query: null }` to current state `{ query: "docs" }` for a prepared component whose state declares `query?:string`
 - **THEN** the runtime SHALL return a next state with no `query` key
 - **AND** the same patch against a component whose state declares `query:string` SHALL fail with a diagnostic naming `query`
 
 #### Scenario: An update record for a different component is rejected
 - **WHEN** a caller applies a value whose `$type` is `Other.Update` to `Counter` state
 - **THEN** the runtime SHALL fail with a diagnostic naming the mismatched update record
+- **AND** a value whose `$type` is `Counter.Update`, which names no record a component has, SHALL fail the same way
 
 ### Requirement: TypeScript runtime normalizes property union values as constant cases
 When the TypeScript runtime normalizes a value whose declared type is a property union — from an
@@ -1670,3 +1669,4 @@ write to SHALL be refused with `nx-ir-options` before anything runs.
 #### Scenario: A report that cannot be written
 - **WHEN** a host passes a frozen object as `origins`
 - **THEN** the call SHALL fail with `nx-ir-options` before evaluating anything
+

@@ -1,9 +1,10 @@
 use crate::typegen::languages::csharp_doc::csharp_doc_lines;
 use crate::typegen::model::{
-    erase_field_type_parameters, update_companion_type_params, ExportedExternalState,
-    ExportedFieldDefault, ExportedLiteralDefault, ExportedModule, ExportedPolymorphicDescendant,
-    ExportedRecord, ExportedRecordField, ExportedType, ExportedTypeGraph, ExportedUnion,
-    ExportedUnionCase, ExportedUpdate, ImportedType, ImportedTypeKind, ModuleTypes,
+    companion_stem, erase_field_type_parameters, update_companion_type_params,
+    ExportedComponentState, ExportedFieldDefault, ExportedLiteralDefault, ExportedModule,
+    ExportedPolymorphicDescendant, ExportedRecord, ExportedRecordField, ExportedType,
+    ExportedTypeGraph, ExportedUnion, ExportedUnionCase, ExportedUpdate, ImportedType,
+    ImportedTypeKind, ModuleTypes,
 };
 use crate::typegen::writer::CodeWriter;
 use crate::typegen::{GenerateTypesOptions, GeneratedFile};
@@ -373,7 +374,7 @@ fn emit_declaration(
         ExportedType::Alias(_) => {}
         ExportedType::Union(union_def) => emit_union(writer, union_def, context),
         ExportedType::Record(record) => emit_record(writer, record, context),
-        ExportedType::ExternalState(state) => emit_external_state(writer, state, context),
+        ExportedType::ComponentState(state) => emit_component_state(writer, state, context),
         ExportedType::Update(update) => emit_update(writer, update, context),
     }
 }
@@ -674,19 +675,17 @@ struct UpdatePropertyEnum {
 }
 
 /// Returns the instantiable plain type a companion's fields live on, when typegen emits one: the
-/// target itself for a record or an action that is not abstract, and `<Name>_state` for an
-/// external component with declared state. A non-external component's state has no plain type,
-/// and an abstract record has none a host can instantiate to apply a patch to.
+/// target itself for a record or an action that is not abstract, and `<Name>_state` for the state
+/// record of a component with declared state. An abstract record has no plain type a host can
+/// instantiate to apply a patch to.
 fn update_plain_target_candidate(
     update: &ExportedUpdate,
     graph: &ExportedTypeGraph,
 ) -> Option<UpdatePlainTargetCandidate> {
-    let type_name = if update.target_is_component {
-        let state_name = format!("{}_state", update.target_name);
+    let type_name = if let Some(component) = &update.state_component {
+        let state_name = format!("{component}_state");
         match &graph.declaration(&state_name)?.item {
-            ExportedType::ExternalState(state) if state.component_name == update.target_name => {
-                state_name
-            }
+            ExportedType::ComponentState(state) if &state.component_name == component => state_name,
             _ => return None,
         }
     } else {
@@ -751,7 +750,7 @@ fn update_property_enum(
     update: &ExportedUpdate,
     context: &CSharpRenderContext<'_>,
 ) -> Option<UpdatePropertyEnum> {
-    let companion_name = format!("{}_property", update.target_name);
+    let companion_name = format!("{}_property", companion_stem(&update.target_name));
     let ExportedType::Union(union_def) = &context.graph().declaration(&companion_name)?.item else {
         return None;
     };
@@ -1110,9 +1109,9 @@ fn emit_union_case(
     );
 }
 
-fn emit_external_state(
+fn emit_component_state(
     writer: &mut CodeWriter,
-    state: &ExportedExternalState,
+    state: &ExportedComponentState,
     context: &CSharpRenderContext<'_>,
 ) {
     emit_doc(writer, state.doc.as_deref());
@@ -1202,7 +1201,7 @@ fn declaration_fields(item: &ExportedType) -> Vec<(&str, &ExportedRecordField)> 
             .iter()
             .map(|field| (record.name.as_str(), field))
             .collect(),
-        ExportedType::ExternalState(state) => state
+        ExportedType::ComponentState(state) => state
             .fields
             .iter()
             .map(|field| (state.name.as_str(), field))
@@ -1265,7 +1264,7 @@ fn collect_closed_update_formatters(
                     add(&field.ty);
                 }
             }
-            ExportedType::ExternalState(state) => {
+            ExportedType::ComponentState(state) => {
                 for field in &state.fields {
                     add(&field.ty);
                 }
@@ -1935,7 +1934,7 @@ fn csharp_type_name_inner(
                         is_reference: true,
                         is_nullable: false,
                     },
-                    ExportedType::ExternalState(_) | ExportedType::Update(_) => CSharpType {
+                    ExportedType::ComponentState(_) | ExportedType::Update(_) => CSharpType {
                         text: generated_type_name(
                             other,
                             context.namespace,

@@ -7,7 +7,7 @@
 
 use nx_diagnostics::{Diagnostic, Label, TextSize, TextSpan};
 use nx_hir::{
-    Component, Doc, DocLink, Item, Name, PreparedModule, PreparedNamespace, RecordDef, RecordKind,
+    Component, Doc, DocLink, Item, Name, PreparedModule, PreparedNamespace, RecordDef,
     ResolvedPreparedItem, UnionCaseDef, UnionDef,
 };
 
@@ -179,9 +179,9 @@ fn for_each_doc<'a>(items: &'a [Item], mut visit: impl FnMut(Option<&'a Doc>, &[
             }
             Item::Value(value) => visit(value.doc.as_ref(), &[]),
             Item::TypeAlias(alias) => visit(alias.doc.as_ref(), &[]),
-            // Update records mirror a declaration's fields, docs included, and are not written by
-            // the author.
-            Item::Record(record) if matches!(record.kind, RecordKind::Update { .. }) => {}
+            // Update and state records mirror a declaration's fields, docs included, and are not
+            // written by the author; the fields' links resolve where they were written.
+            Item::Record(record) if record.is_derived() => {}
             Item::Record(record) => {
                 let owner = inline_emit_owners
                     .iter()
@@ -645,6 +645,22 @@ mod tests {
             usize::from(artifact.doc_links[0].span.start()),
             source.len()
         );
+    }
+
+    /// A component's derived `State` record copies its state fields' docs, so their links are
+    /// checked once, in the component's scope, where a prop resolves.
+    #[test]
+    fn a_state_field_doc_is_checked_once_in_the_component_scope() {
+        let artifact = analyze(
+            "component <Counter step:int = 1 /> = {\n  state {\n    count:int = 0   /// Grows by [step]; see [Nope].\n  }\n  <Label />\n}\n",
+        );
+        assert_eq!(
+            link_codes(&artifact),
+            vec!["unresolved-doc-link"],
+            "{:?}",
+            artifact.diagnostics
+        );
+        assert!(artifact.diagnostics[0].message().contains("Nope"));
     }
 
     #[test]

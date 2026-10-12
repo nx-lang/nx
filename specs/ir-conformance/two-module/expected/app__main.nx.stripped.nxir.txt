@@ -1,4 +1,4 @@
-module app/main.nx fingerprint 4176870241451159357
+module app/main.nx fingerprint 12884743078104476298
 links shared/model.nx version "" fingerprint 14674601980650906756
 requires update-records-v1 action-handlers-v1
 entrypoints functions [total user card local nameOf root] components [Tap Panel]
@@ -31,15 +31,18 @@ component Tap external
   emits
     Tapped = shared/model.nx:Control.Tapped
 
-component Panel
+component Panel state Panel.State
   state
     taps: int = 0
   body =
     <Tap count=taps
       onTapped=handler Tap.Tapped action@1:shared/model.nx:Control.Tapped owner Panel =>
-        <Panel.Update taps=(taps add 1) />
+        <Panel.State.Update taps=(taps add 1) />
     >
     </Tap>
 
-record Panel.Update update of Panel
+record Panel.State
+  taps: int required
+
+record Panel.State.Update update of Panel.State
   taps: int

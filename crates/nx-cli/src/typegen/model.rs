@@ -100,7 +100,8 @@ pub struct ExportedUnion {
     pub name: String,
     pub base: Option<String>,
     pub cases: Vec<ExportedUnionCase>,
-    /// The record, action, or component this is the generated `<Target>_property` companion of.
+    /// The record, action, or component state record (`<Component>.State`) this is the
+    /// generated `<Target>_property` companion of.
     ///
     /// <para>A property companion is the derived `<Target>.Property` union under its generated
     /// name: one constant case per effective field, so it generates exactly what a constant union
@@ -118,9 +119,10 @@ impl ExportedUnion {
     }
 
     /// Whether every case is constant. This is what an `enum` declared, and it generates a CLR
-    /// `enum` in C# and an `as const` object in TypeScript.
+    /// `enum` in C# and an `as const` object in TypeScript. A property companion is constant even
+    /// with no cases, as the companion of a record without fields is.
     pub fn is_constant(&self) -> bool {
-        !self.cases.is_empty()
+        (!self.cases.is_empty() || self.property_target.is_some())
             && self.base.is_none()
             && self.cases.iter().all(|case| case.fields.is_empty())
     }
@@ -137,8 +139,11 @@ pub enum ExportedPolymorphicDescendant {
     },
 }
 
+/// The generated `<Component>_state` contract of an exported component that declares state,
+/// external or not: the plain snapshot of its state fields, without a `$type`, which is also what a
+/// reference to the derived `<Component>.State` record generates.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ExportedExternalState {
+pub struct ExportedComponentState {
     pub component_name: String,
     pub name: String,
     pub fields: Vec<ExportedRecordField>,
@@ -149,19 +154,22 @@ pub struct ExportedExternalState {
     pub doc: Option<String>,
 }
 
-/// The generated `<Target>_update` companion of an exported record, action, or stateful component.
+/// The generated `<Target>_update` companion of an exported record or action, and the
+/// `<Component>_state_update` companion of a component's derived state record.
 ///
-/// <para>It has the target's effective fields — a component's state fields — every one optional,
-/// and carries the `<Target>.Update` discriminator. An absent field means "unchanged" and a present
+/// <para>It has the target's effective fields — the state fields for a state record — every one
+/// optional, and carries the `<Target>.Update` discriminator. An absent field means "unchanged" and a present
 /// `null` means "cleared" — the empty value, which only a field declared `name?:T` in the target
 /// admits — so each host surface keeps the two apart.</para>
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExportedUpdate {
+    /// The NX name of the patched declaration: `User` for a record and `Counter.State` for a
+    /// component's state patch.
     pub target_name: String,
-    /// Whether the target is a component, whose companion patches its state. A component has no
-    /// generated plain type carrying those fields: the record emitted under a component's name,
-    /// when there is one, is an external component's props contract.
-    pub target_is_component: bool,
+    /// The component whose state the companion patches, when the target is its derived
+    /// `<Component>.State` record. Its plain type is the `<Component>_state` contract, and its
+    /// fields are the component's annotations, so a field typed by its type parameter is erased.
+    pub state_component: Option<String>,
     pub name: String,
     pub discriminator: String,
     pub fields: Vec<ExportedRecordField>,
@@ -183,15 +191,15 @@ pub struct ExportedUpdate {
 /// precision: a C# patch whose `start` is `object` cannot be applied to a `Range<long>`, because
 /// the schema deserializes the field as `object` and the record's field is `T`.</para>
 ///
-/// <para>A component's state companion still erases. There the analogy that produced the erasure
-/// rule does hold: the patched type (`Ticker_state`) is concrete, its parameter-typed fields are
+/// <para>A component's state companion still erases. There the analogy that produced the
+/// erasure rule does hold: the patched type (`Ticker_state`) is concrete, its parameter-typed fields are
 /// `object` on both sides of the patch, and the instantiation was fixed at an NX use site the host
 /// never sees.</para>
 pub fn update_companion_type_params<'a>(
     update: &'a ExportedUpdate,
     types: ModuleTypes<'_>,
 ) -> &'a [String] {
-    if update.target_is_component || update.type_params.is_empty() {
+    if update.state_component.is_some() || update.type_params.is_empty() {
         return &[];
     }
     // The prelude's `Range` is not in the generating library's graph, but its companion is generic
@@ -274,7 +282,7 @@ pub enum ExportedType {
     Alias(ExportedAlias),
     Union(ExportedUnion),
     Record(ExportedRecord),
-    ExternalState(ExportedExternalState),
+    ComponentState(ExportedComponentState),
     Update(ExportedUpdate),
 }
 
@@ -284,7 +292,7 @@ impl ExportedType {
             Self::Alias(alias) => &alias.name,
             Self::Union(union_def) => &union_def.name,
             Self::Record(record) => &record.name,
-            Self::ExternalState(state) => &state.name,
+            Self::ComponentState(state) => &state.name,
             Self::Update(update) => &update.name,
         }
     }
@@ -296,8 +304,8 @@ impl ExportedType {
     /// that would share a name are both skipped, so neither silently shadows the other.</para>
     fn generated_companion(&self) -> Option<String> {
         match self {
-            Self::ExternalState(state) => Some(format!(
-                "component state contract '{}' for external component '{}'",
+            Self::ComponentState(state) => Some(format!(
+                "component state contract '{}' for component '{}'",
                 state.name, state.component_name
             )),
             Self::Update(update) => Some(format!(
@@ -371,8 +379,9 @@ struct ImportedTypesBuild {
 struct CachedImportedLibrary {
     library_name: String,
     export_kinds: FxHashMap<String, PreparedItemKind>,
-    /// Exported derived declarations — `<Target>.Update` and `<Target>.Property` — which the
-    /// dependency generates as companions and an import of the target brings along.
+    /// Exported derived declarations — `<Target>.Update`, `<Target>.Property`, and a component's
+    /// `<Target>.State` with its own two — which the dependency generates as companions and an
+    /// import of the target brings along.
     derived_exports: FxHashSet<String>,
     /// Exported names whose union declares no base and no case fields.
     constant_unions: FxHashSet<String>,
@@ -759,7 +768,8 @@ impl ExportedTypeGraph {
     }
 
     /// Points every `<T>.Update` and `<T>.Property` type reference at the `<T>_update` or
-    /// `<T>_property` companion that stands for it.
+    /// `<T>_property` companion that stands for it, and every `<C>.State`, `<C>.State.Update` and
+    /// `<C>.State.Property` at `<C>_state`, `<C>_state_update` and `<C>_state_property`.
     ///
     /// <para>A field typed `User.Update` must generate as the companion, since that is the only
     /// declaration of the patch either language sees, and a field typed `User.Property` likewise.
@@ -784,6 +794,12 @@ impl ExportedTypeGraph {
                         )
                     })
                 }
+                ExportedType::ComponentState(state) => Some((
+                    nx_hir::state_record_name(&state.component_name)
+                        .as_str()
+                        .to_string(),
+                    state.name.clone(),
+                )),
                 _ => None,
             })
             .collect::<FxHashMap<_, _>>();
@@ -826,7 +842,9 @@ impl ExportedTypeGraph {
                 .collect::<FxHashSet<_>>();
             let mut rename = |ty: &mut TypeRef| {
                 rewrite_type_ref_names(ty, &mut |name| {
-                    if !nx_hir::is_update_record_name(name) && !nx_hir::is_property_union_name(name)
+                    if !nx_hir::is_update_record_name(name)
+                        && !nx_hir::is_property_union_name(name)
+                        && !nx_hir::is_state_record_name(name)
                     {
                         return None;
                     }
@@ -863,7 +881,7 @@ impl ExportedTypeGraph {
                             rename(&mut field.ty);
                         }
                     }
-                    ExportedType::ExternalState(state) => {
+                    ExportedType::ComponentState(state) => {
                         for field in &mut state.fields {
                             rename(&mut field.ty);
                         }
@@ -882,9 +900,13 @@ impl ExportedTypeGraph {
                 .rsplit_once('.')
                 .map(|(target, suffix)| (target, suffix.to_ascii_lowercase()))
                 .unwrap_or((&name, String::new()));
+            let component = target.strip_suffix(".State").unwrap_or(target);
             warnings.push(format!(
                 "Type reference '{}' has no generated companion '{}_{}' to resolve to; the generated code will not compile until '{}' is exported and the companion name is free",
-                name, target, suffix, target
+                name,
+                companion_stem(target),
+                suffix,
+                component
             ));
         }
     }
@@ -1082,6 +1104,18 @@ impl<'a> ModuleTypes<'a> {
     }
 }
 
+/// The stem a derived declaration's companion is named from: `Counter_state` for the component state
+/// record `Counter.State`, so its companions are `Counter_state_update` and
+/// `Counter_state_property`; the target's own name for anything else.
+pub fn companion_stem(target: &str) -> String {
+    match target.strip_suffix(nx_hir::STATE_RECORD_SUFFIX) {
+        Some(component) if component.ends_with('.') => {
+            format!("{}_state", component.trim_end_matches('.'))
+        }
+        _ => target.to_string(),
+    }
+}
+
 /// The record a derived companion patches or names the fields of, or `None` for a declared item.
 fn companion_target_name(item: &ExportedType) -> Option<&str> {
     match item {
@@ -1090,6 +1124,15 @@ fn companion_target_name(item: &ExportedType) -> Option<&str> {
         _ => None,
     }
 }
+
+/// The suffixes a derived declaration adds to its target's name, longest first.
+const DERIVED_NAME_SUFFIXES: [&str; 5] = [
+    "State.Update",
+    "State.Property",
+    nx_hir::STATE_RECORD_SUFFIX,
+    nx_hir::UPDATE_RECORD_SUFFIX,
+    nx_hir::PROPERTY_UNION_SUFFIX,
+];
 
 fn collect_exported_declarations(artifact: &ModuleArtifact) -> Vec<ExportedTypeDecl> {
     let mut declarations = Vec::new();
@@ -1124,6 +1167,9 @@ fn collect_exported_declarations(artifact: &ModuleArtifact) -> Vec<ExportedTypeD
                     visibility: record.visibility,
                     item: ExportedType::Update(export_update(module, prepared, record, target)),
                 }),
+                // A component's derived state record is its `<Component>_state` contract, which the
+                // component exports below.
+                None if record.state_component().is_some() => {}
                 None => declarations.push(ExportedTypeDecl {
                     visibility: record.visibility,
                     item: ExportedType::Record(export_record(module, record)),
@@ -1139,10 +1185,10 @@ fn collect_exported_declarations(artifact: &ModuleArtifact) -> Vec<ExportedTypeD
                     });
                 }
 
-                if let Some(state) = export_external_state(module, prepared, component) {
+                if let Some(state) = export_component_state(module, prepared, component) {
                     declarations.push(ExportedTypeDecl {
                         visibility: component.visibility,
-                        item: ExportedType::ExternalState(state),
+                        item: ExportedType::ComponentState(state),
                     });
                 }
             }
@@ -1276,10 +1322,20 @@ impl ImportedTypeCollector {
             }
         }
         for name in referenced_names {
-            let Some((visible_name, suffix)) = name.rsplit_once('.') else {
-                continue;
-            };
-            let Some(dependency) = dependencies_by_visible_name.get(visible_name) else {
+            // A visible name may itself be dotted (`t.Tag`), so each derived suffix is tried
+            // against what precedes it.
+            let Some((visible_name, suffix, dependency)) = DERIVED_NAME_SUFFIXES
+                .iter()
+                .filter_map(|suffix| {
+                    let visible_name = name.strip_suffix(suffix)?.strip_suffix('.')?;
+                    Some((visible_name, *suffix))
+                })
+                .find_map(|(visible_name, suffix)| {
+                    dependencies_by_visible_name
+                        .get(visible_name)
+                        .map(|dependency| (visible_name, suffix, dependency))
+                })
+            else {
                 continue;
             };
             let Some(exported_name) = imported_types
@@ -1410,6 +1466,13 @@ impl ImportedTypeCollector {
                     continue;
                 };
                 let companion_name = update.name.clone();
+                // A component's type parameter is erased by both emitters, so a field it types
+                // needs no name resolved.
+                let erased_params = if update.state_component.is_some() {
+                    update.type_params.clone()
+                } else {
+                    Vec::new()
+                };
                 for field in &mut update.fields {
                     let Some(declaring_module) = field.declaring_module.as_deref() else {
                         continue;
@@ -1418,7 +1481,10 @@ impl ImportedTypeCollector {
                     let mut renames = FxHashMap::default();
                     for name in names {
                         // An unresolved `X.Update` is reported by the companion rewrite instead.
-                        if is_primitive_type_name(&name) || nx_hir::is_update_record_name(&name) {
+                        if is_primitive_type_name(&name)
+                            || nx_hir::is_update_record_name(&name)
+                            || erased_params.contains(&name)
+                        {
                             continue;
                         }
                         match self.resolve_inherited_type_name(
@@ -1646,7 +1712,9 @@ impl CachedImportedLibrary {
     }
 
     /// The companion a derived name on an imported declaration reaches: `<visible>.Update` names
-    /// the dependency's `<exported>_update`, and `<visible>.Property` its `<exported>_property`.
+    /// the dependency's `<exported>_update`, `<visible>.Property` its `<exported>_property`, and
+    /// `<visible>.State`, `<visible>.State.Update` and `<visible>.State.Property` its
+    /// `<exported>_state`, `<exported>_state_update` and `<exported>_state_property`.
     fn derived_imported_type(
         &self,
         visible_name: &str,
@@ -1665,6 +1733,23 @@ impl CachedImportedLibrary {
             nx_hir::PROPERTY_UNION_SUFFIX => {
                 ("_property", ImportedTypeKind::Union { is_constant: true })
             }
+            // A state snapshot erases the component's parameters, so it carries none either.
+            nx_hir::STATE_RECORD_SUFFIX => (
+                "_state",
+                ImportedTypeKind::Record {
+                    type_params: Vec::new(),
+                },
+            ),
+            "State.Update" => (
+                "_state_update",
+                ImportedTypeKind::Record {
+                    type_params: Vec::new(),
+                },
+            ),
+            "State.Property" => (
+                "_state_property",
+                ImportedTypeKind::Union { is_constant: true },
+            ),
             _ => return None,
         };
         if !self
@@ -1823,12 +1908,13 @@ fn build_cached_imported_library(
             continue;
         };
 
-        // A derived update record or property union is generated as its target's `_update` or
-        // `_property` companion; it is never a type a consumer names by its dotted NX name.
+        // A derived update record, state record or property union is generated as its target's
+        // `_update`, `_state` or `_property` companion; it is never a type a consumer names by its
+        // dotted NX name.
         if matches!(
             &interface_item.item,
             InterfaceItemKind::Record {
-                kind: RecordKind::Update { .. },
+                kind: RecordKind::Update { .. } | RecordKind::State { .. },
                 ..
             } | InterfaceItemKind::Union {
                 property_target: Some(_),
@@ -1945,7 +2031,7 @@ fn export_union(module: &LoweredModule, def: &UnionDef) -> ExportedUnion {
 /// has already completed with the target's inherited fields, in `T.Property` case order.
 fn export_property_union(def: &UnionDef, target: &nx_hir::Name) -> ExportedUnion {
     ExportedUnion {
-        name: format!("{}_property", target.as_str()),
+        name: format!("{}_property", companion_stem(target.as_str())),
         base: None,
         cases: def
             .cases
@@ -2139,10 +2225,18 @@ fn export_update(
                 })
                 .collect()
         });
-    let target_component = match module.find_item(target.as_str()) {
-        Some(Item::Component(component)) => Some(component),
+    // A state patch targets the component's `<Component>.State`, whose fields are the component's.
+    let state_component = match module.find_item(target.as_str()) {
+        Some(Item::Record(state)) => state.state_component().cloned(),
         _ => None,
     };
+    let target_component =
+        state_component
+            .as_ref()
+            .and_then(|component| match module.find_item(component.as_str()) {
+                Some(Item::Component(component)) => Some(component),
+                _ => None,
+            });
     // A generic record's companion declares the same parameters, and both emitters erase them:
     // the wire carries no type argument for a patch.
     let type_params = match target_component {
@@ -2155,8 +2249,8 @@ fn export_update(
     };
     ExportedUpdate {
         target_name: target.as_str().to_string(),
-        target_is_component: target_component.is_some(),
-        name: format!("{}_update", target.as_str()),
+        state_component: state_component.map(|component| component.as_str().to_string()),
+        name: format!("{}_update", companion_stem(target.as_str())),
         discriminator: record.name.as_str().to_string(),
         fields,
         type_params,
@@ -2165,16 +2259,16 @@ fn export_update(
     }
 }
 
-fn export_external_state(
+fn export_component_state(
     module: &LoweredModule,
     prepared: Option<&PreparedModule>,
     component: &Component,
-) -> Option<ExportedExternalState> {
-    if !component.is_external || component.state.is_empty() {
+) -> Option<ExportedComponentState> {
+    if component.state.is_empty() {
         return None;
     }
 
-    Some(ExportedExternalState {
+    Some(ExportedComponentState {
         component_name: component.name.as_str().to_string(),
         name: format!("{}_state", component.name.as_str()),
         fields: component
@@ -2382,7 +2476,7 @@ mod tests {
             .declaration("SearchBox_state")
             .expect("SearchBox_state declaration");
         match &declaration.item {
-            ExportedType::ExternalState(state) => {
+            ExportedType::ComponentState(state) => {
                 assert_eq!(state.component_name, "SearchBox");
                 assert_eq!(state.fields.len(), 1);
                 assert_eq!(state.fields[0].name, "query");
@@ -2412,7 +2506,7 @@ mod tests {
                     .graph
                     .declaration("SearchBox_state")
                     .map(|declaration| &declaration.item),
-                Some(ExportedType::ExternalState(_))
+                Some(ExportedType::ComponentState(_))
             ),
             "explicit export should win when generated state collides"
         );
@@ -2447,7 +2541,7 @@ mod tests {
                     .graph
                     .declaration("SearchBox_state")
                     .map(|declaration| &declaration.item),
-                Some(ExportedType::ExternalState(_))
+                Some(ExportedType::ComponentState(_))
             ),
             "explicit export should win when alias module sorts first"
         );
@@ -2482,7 +2576,7 @@ mod tests {
                     .graph
                     .declaration("SearchBox_state")
                     .map(|declaration| &declaration.item),
-                Some(ExportedType::ExternalState(_))
+                Some(ExportedType::ComponentState(_))
             ),
             "explicit export should win when component module sorts first"
         );
@@ -2514,16 +2608,20 @@ mod tests {
         let build = ExportedTypeGraph::from_library_with_warnings(&artifact).expect("graph build");
 
         assert!(build.graph.declaration("SearchBox_state").is_none());
-        // Both components would also generate `SearchBox_update` and `SearchBox_property`, which
-        // are skipped the same way.
+        // Both components would also generate `SearchBox_state_update` and
+        // `SearchBox_state_property`, which are skipped the same way.
         let state_warnings = build
             .warnings
             .iter()
-            .filter(|warning| warning.contains("SearchBox_state"))
+            .filter(|warning| warning.contains("'SearchBox_state'"))
             .count();
         assert_eq!(state_warnings, 2);
         assert!(build.graph.declaration("SearchBox_update").is_none());
-        assert!(build.graph.declaration("SearchBox_property").is_none());
+        assert!(build.graph.declaration("SearchBox_state_update").is_none());
+        assert!(build
+            .graph
+            .declaration("SearchBox_state_property")
+            .is_none());
         assert_eq!(build.warnings.len(), 6);
     }
 
@@ -2745,14 +2843,25 @@ export type ChatLink = string
             "Saved.Update"
         );
 
-        let counter = update_companion(&build.graph, "Counter_update");
-        assert_eq!(
-            field_names(&counter.fields),
-            vec!["count"],
-            "a component's companion carries its state and none of its props"
+        assert!(
+            build.graph.declaration("Counter_update").is_none(),
+            "a component is not a record, so it has no update companion of its own"
         );
+        let counter_state = update_companion(&build.graph, "Counter_state_update");
+        assert_eq!(counter_state.discriminator, "Counter.State.Update");
+        assert_eq!(counter_state.state_component.as_deref(), Some("Counter"));
+        assert_eq!(field_names(&counter_state.fields), vec!["count"]);
+        assert!(matches!(
+            build
+                .graph
+                .declaration("Counter_state")
+                .map(|declaration| &declaration.item),
+            Some(ExportedType::ComponentState(_))
+        ));
 
         assert!(build.graph.declaration("Plain_update").is_none());
+        assert!(build.graph.declaration("Plain_state").is_none());
+        assert!(build.graph.declaration("Plain_state_update").is_none());
         assert!(build.graph.declaration("Hidden_update").is_none());
         assert!(
             build.graph.declaration("User.Update").is_none(),
@@ -3066,13 +3175,19 @@ export type User extends Named = { email:string }
             case_names(property_companion(&build.graph, "Saved_property")),
             vec!["id"]
         );
-        assert_eq!(
-            case_names(property_companion(&build.graph, "Counter_property")),
-            vec!["count"],
-            "a component's companion names its state and none of its props"
+        assert!(
+            build.graph.declaration("Counter_property").is_none(),
+            "a component is not a record, so it has no property companion of its own"
         );
+        let counter_state = property_companion(&build.graph, "Counter_state_property");
+        assert_eq!(
+            counter_state.property_target.as_deref(),
+            Some("Counter.State")
+        );
+        assert_eq!(case_names(counter_state), vec!["count"]);
 
         assert!(build.graph.declaration("Plain_property").is_none());
+        assert!(build.graph.declaration("Plain_state_property").is_none());
         assert!(build.graph.declaration("Hidden_property").is_none());
         assert!(
             build.graph.declaration("User.Property").is_none(),
@@ -3232,7 +3347,7 @@ export external component <Counter
         assert_eq!(counter.doc.as_deref(), Some("A counter."));
         assert_eq!(counter.fields[0].doc.as_deref(), Some("How far to count."));
 
-        let ExportedType::ExternalState(state) = item("Counter_state") else {
+        let ExportedType::ComponentState(state) = item("Counter_state") else {
             panic!("Counter_state");
         };
         assert_eq!(state.doc, None);
@@ -3241,7 +3356,7 @@ export external component <Counter
         let update = update_companion(&build.graph, "Contact_update");
         assert_eq!(update.doc, None);
         assert_eq!(update.fields[0].doc.as_deref(), Some("The display name."));
-        let state_update = update_companion(&build.graph, "Counter_update");
+        let state_update = update_companion(&build.graph, "Counter_state_update");
         assert_eq!(
             state_update.fields[0].doc.as_deref(),
             Some("The current count.")

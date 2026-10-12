@@ -1,20 +1,22 @@
-# NX IR, schema 5
+# NX IR, schema 6
 
 NX IR is a deterministic binary image emitted from a successful `ProgramArtifact`. It is intended
-for caching, inspection, and loading by a runtime without re-reading NX source. Schema 5 carries
+for caching, inspection, and loading by a runtime without re-reading NX source. Schema 6 carries
 one module per image, links to other modules by name, and encodes the module as flat tables so
 that a name, a type or a literal is written once and referenced by index. The tables are 32-bit
 cells over one string blob, laid out so a runtime reads them in place: a JavaScript reader is one
 typed-array view per table, and no table is decoded before it is used.
 
-Schema 5 differs from schema 4 by the `seq` type kind, `5`, which carries an occurrence and
-replaces the `array` and `nullable` type kinds; by the `exists`, `optionalMember` and `coalesce`
-node kinds, `23` to `25`, and the `{}` match pattern; and by the `null` node kind no longer being
-emitted. Every other kind, table and layout is unchanged. Schema 4 differed from schema 3 by the
-`text` node, kind `20`, by the `float32` binary operators `16` to `19`, and by `concat` taking
-string operands only. Schema 4 and earlier artifacts, and the JSON encoding schema 3 had before it
-was released, are not read by any runtime and are not emitted by the compiler. There is no
-converter.
+Schema 6 differs from schema 5 by the component declaration's trailing reference to the
+component's state record, `<Component>.State`, which a runtime compares with a handler result's
+update target to recognize a state patch. Every other kind, table and layout is unchanged. Schema 5
+differed from schema 4 by the `seq` type kind, `5`, which carries an occurrence and replaces the
+`array` and `nullable` type kinds; by the `exists`, `optionalMember` and `coalesce` node kinds, `23`
+to `25`, and the `{}` match pattern; and by the `null` node kind no longer being emitted. Schema 4
+differed from schema 3 by the `text` node, kind `20`, by the `float32` binary operators `16` to
+`19`, and by `concat` taking string operands only. Schema 5 and earlier artifacts, and the JSON
+encoding schema 3 had before it was released, are not read by any runtime and are not emitted by the
+compiler. There is no converter.
 
 ## Reading this document
 
@@ -144,7 +146,7 @@ reader that evaluates by index never needs to look ahead and no node reaches its
 | 16 | unionCase | `[16, ref, str, [[str, node]...], [node...]]` | Constructs a case of the union the reference names. The string is the case name. A constant case evaluates to its bare name. |
 | 17 | element | `[17, id, str, [[str, node]...], [node...]]` | An intrinsic element with a module-local id, a tag, properties and content children. |
 | 18 | component | `[18, ref, [[str, node]...], [node...]]` | A component descriptor: props are normalized against the component's declaration. A property named `on<Emit>` for an emit the component declares is a handler property, not a prop: its value is an action handler, and it is carried on the descriptor rather than normalized. |
-| 19 | actionHandler | `[19, ref, str, ref, slot, ref?, node]` | An action handler, `onTapped=<Update count={count + 1} />`: the component and the name of the emit it answers, the action record it accepts, the slot of its `action` binding, the owner component whose body bound it (absent at the root), and the body. Evaluating the node captures the frame; the body runs when a host dispatches the action. See *Action handlers*. |
+| 19 | actionHandler | `[19, ref, str, ref, slot, ref?, node]` | An action handler, `onTapped=<State.Update count={count + 1} />`: the component and the name of the emit it answers, the action record it accepts, the slot of its `action` binding, the owner component whose body bound it (absent at the root), and the body. Evaluating the node captures the frame; the body runs when a host dispatches the action. See *Action handlers*. |
 | 20 | text | `[20, node, str]` | The canonical text form of a primitive value: the operand, and the name of its static type, one of `int`, `int32`, `int64`, `float32`, `float64` or `boolean`. See *Text conversion*. |
 | 21 | namedCall | `[21, node, [[str, node]...]]` | A call of a function-typed value by name, `<Row Item={c} Index={i} />` where `Row` is a parameter, a prop or a `let`: the callee, which evaluates to a function value, then each argument as a name and a node, sorted by name like any property list. The runtime binds the arguments to the callee's own parameters by name — a name the declaration lacks is dropped, a parameter it declares must be present. See *Function values*. |
 | 22 | forRange | `[22, slot, str, slot?, str?, node, node]` | A `for` whose iterable evaluates to a `Range` record, with the layout of a `for`. The body runs once per integer from the range's `start` upward, stopping before `end` or after it when `endInclusive` is true, with the item bound to that integer and the index, when present, to its position from zero. An empty or reversed range runs the body no times. Yields the list of body values. Requires `ranges-v1`. |
@@ -235,14 +237,15 @@ rounded when emitted, and a runtime rounds a number the host supplies at a `floa
 
 Each entry is `[kind, str, ...]`, the string being the declaration's name. Top-level names are
 unique within a module; the compiler rejects a module that declares one name twice. Derived
-declarations use the names the language gives them: `User.Update`, `User.Property`.
+declarations use the names the language gives them: `User.Update`, `User.Property`,
+`Counter.State`, `Counter.State.Update`.
 
 | Kind | Name | Layout |
 | --- | --- | --- |
 | 0 | function | `[0, str, [[str, type, node?, flags]...], node, type?, flags]` — name, parameters (name, type, default, flags: bit 0 content, bit 1 optional), body, declared result type and result flags. A parameter declared `p?:T` is typed by its read type, `T?` (`T*` for `p?:T+`), and sets the optional bit, so a call that leaves it out binds the empty value. A default is a node of the function's frame. See *Parameters a call leaves out* and *Results*. |
 | 1 | value | `[1, str, node, type?]` — name, value and declared type. See *Results*. |
-| 2 | record | `[2, str, [field...], [ref...], isAbstract, ref?]` — name, fields, abstract bases nearest first, `0` or `1`, and the update target when the record is a derived `T.Update`. |
-| 3 | component | `[3, str, [field...], [field...], node?, flags, [[str, ref]...]]` — name, props, state, body (absent for an external component), flags: bit 0 abstract, bit 1 external, and the emits: each an emit's local name and a reference to its action record, inherited emits included, in declaration order. An inherited emit's reference names the module that declared it. |
+| 2 | record | `[2, str, [field...], [ref...], isAbstract, ref?]` — name, fields, abstract bases nearest first, `0` or `1`, and the update target when the record is a derived `T.Update`: the record, action or state record it patches. |
+| 3 | component | `[3, str, [field...], [field...], node?, flags, [[str, ref]...], ref?]` — name, props, state, body (absent for an external component), flags: bit 0 abstract, bit 1 external, the emits: each an emit's local name and a reference to its action record, inherited emits included, in declaration order, and the component's state record, `<Component>.State`. An inherited emit's reference names the module that declared it. The state record is present only when the image emits it, which it does when the module references the state record, its update record or its property union; a component whose state no handler patches and nothing names has none. The state fields stay in the component's own list, with their defaults, since the state record carries none. |
 | 4 | union | `[4, str, [[str, [field...], isConstant]...], [ref...], ref?]` — name, cases (name, fields, `0` or `1`), abstract bases, and the property target when the union is a derived `T.Property`. |
 | 5 | typeAlias | `[5, str]` — name only. |
 
@@ -454,7 +457,7 @@ An image begins with a 16-byte header of four cells:
 | Offset | Cell | Value |
 | --- | --- | --- |
 | 0 | magic | The ASCII bytes `NXIR`. |
-| 4 | schema version | `5`. |
+| 4 | schema version | `6`. |
 | 8 | total length | The length of the whole image in bytes. |
 | 12 | directory count | The number of directory entries that follow. |
 
@@ -462,7 +465,7 @@ The directory follows at offset 16: one entry of three cells per section, `kind`
 `length`, each offset and length a multiple of four and each section inside the image. The emitter
 writes the sections in kind order, contiguously after the directory. A reader refuses an image
 whose magic or schema version it does not implement, naming the version found and the version it
-supports — a schema 4 image is refused as found `4`, supported `5` — and does not interpret the
+supports — a schema 5 image is refused as found `5`, supported `6` — and does not interpret the
 bytes that follow the header; it refuses an image whose total length is not the length of the bytes
 it was given, which is the truncation check.
 
@@ -627,7 +630,8 @@ declared in another module resolves its component and action by reference like a
 Whether the owner reference is present decides nothing by itself; what matters is which instance
 dispatches the handler. A handler whose owner is the component an instance was initialized from
 reads that instance's state live when it runs, through the owner's state slots, and every
-`<Owner>.Update` record it returns patches the instance's state. Any other handler in the output,
+`<Owner>.State.Update` record it returns patches the instance's state: a record whose update
+target is the owner's state record. Any other handler in the output,
 one bound at the root or one written in a parent's body and rendered by a child through content, sees
 only what it captured, and everything it returns is an effect for the host.
 
@@ -848,7 +852,7 @@ let add(a:int, b:int): int = { a + b }
 component <Card title:string = "none" count:int = 0 content body?:object+ /> = { <Text value={title} /> }
 component <Counter /> = {
   state { count:int = 0 note?:string data?:object }
-  <Button onTapped=<Update count={count + 1} /> />
+  <Button onTapped=<State.Update count={count + 1} /> />
 }
 ```
 
@@ -1134,7 +1138,7 @@ Its image without the debug section, `specs/ir-conformance/snippet/expected/inpu
 is 848 bytes. Cells are shown as little-endian values, sixteen bytes per line, offsets in hex.
 
 ```
-0000  "NXIR"  5         350       6           header: magic, schema 5, 848 bytes, 6 sections
+0000  "NXIR"  6         350       6           header: magic, schema 6, 848 bytes, 6 sections
 0010  0       58        118       1           directory: strings at 0x58, 280 bytes; module …
 0020  170     38        2         1a8         … at 0x170, 56 bytes; types at 0x1a8 …
 0030  8       3         1b0       28          … 8 bytes; constants at 0x1b0, 40 bytes

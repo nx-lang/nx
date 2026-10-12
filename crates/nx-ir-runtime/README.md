@@ -134,7 +134,7 @@ fn main() -> nx_ir_runtime::Result<()> {
 | `evaluate_component` | Renders the body from props and explicit state. The output carries no tokens. |
 | `dispatch_component_actions` | Runs a batch of emitted actions and handler invocations in order, then renders once. |
 | `normalize_component_state` | Validates a complete state. |
-| `apply_component_state_patch` | Applies a partial state or a `<Component>.Update` record to a state. |
+| `apply_component_state_patch` | Applies a partial state or a `<Component>.State.Update` record to a state. |
 | `call_function` | Calls the function a `Function` record names, with arguments by parameter name. |
 | `apply`, `merge`, `diff`, `Program::changed` | The update intrinsics, over values the host holds. |
 

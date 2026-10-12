@@ -1,6 +1,6 @@
 //! Type checking of derived `T.Property` unions: their cases, how they behave as constant unions in
-//! type, expression, pattern, and bare-name positions, and the contextual bare `Property` inside a
-//! component. Covers the first three requirements of the property-references capability.
+//! type, expression, pattern, and bare-name positions, and the contextual bare `State.Property`
+//! inside a component. Covers the first three requirements of the property-references capability.
 //!
 //! The imported-record scenario needs a library on disk and lives with the other library tests in
 //! `nx-api`, which owns the library registry.
@@ -98,24 +98,42 @@ fn property_union_of_a_plain_record_lists_its_fields() {
 }
 
 #[test]
-fn property_union_of_a_component_is_derived_from_state() {
+fn a_component_has_no_property_union_and_its_state_has_one() {
     let result = assert_ok(
         r#"
         component <Counter step:int = 1 /> = { state { count:int = 0 } <Label text={count} /> }
-        let key: Counter.Property = {Counter.Property.count}
+        let key: Counter.State.Property = {Counter.State.Property.count}
         "#,
         "property-component.nx",
     );
-    assert_eq!(property_union_cases(&result, "Counter.Property"), ["count"]);
+    assert_eq!(
+        property_union_cases(&result, "Counter.State.Property"),
+        ["count"]
+    );
 
     assert_error(
         r#"
         component <Counter step:int = 1 /> = { state { count:int = 0 } <Label text={count} /> }
         let key = {Counter.Property.step}
         "#,
-        "property-component-prop.nx",
-        "undefined-union-case",
-        "step",
+        "property-component-props.nx",
+        "unknown-property-union",
+        "write 'Counter.State.Property' to name a state field",
+    );
+}
+
+#[test]
+fn property_union_of_a_components_state_is_the_state_records_union() {
+    let result = assert_ok(
+        r#"
+        component <Counter step:int = 1 /> = { state { count:int = 0 } <Label text={count} /> }
+        let key: Counter.State.Property = {Counter.State.Property.count}
+        "#,
+        "property-component-state-record.nx",
+    );
+    assert_eq!(
+        property_union_cases(&result, "Counter.State.Property"),
+        ["count"]
     );
 }
 
@@ -187,20 +205,29 @@ fn property_union_for_an_unknown_target_is_rejected() {
         "#,
         "property-unknown.nx",
         "unknown-property-union",
-        "'Icons' is not a record, action, or component with state",
+        "'Icons' is not a record, action, or component",
     );
 }
 
 #[test]
-fn a_component_without_state_has_no_property_union() {
+fn a_component_without_state_has_no_property_union_at_all() {
     assert_error(
         r#"
-        component <Form /> = { <Panel /> }
-        let key = {Form.Property.value}
+        component <Form title:string /> = { <Panel /> }
+        let key = {Form.Property.title}
         "#,
         "property-stateless.nx",
         "unknown-property-union",
-        "component 'Form' declares no state, so it has no property union",
+        "component 'Form' is not a record, so it has no property union",
+    );
+    assert_error(
+        r#"
+        component <Form /> = { <Panel /> }
+        let key = {Form.State.Property.value}
+        "#,
+        "property-stateless-state.nx",
+        "unknown-property-union",
+        "component 'Form' declares no state, so it has no state record",
     );
 }
 
@@ -359,17 +386,17 @@ fn property_union_values_cannot_be_ordered() {
 }
 
 // ============================================================================
-// The bare `Property` name resolves to the enclosing component's property union
+// The bare `State` name resolves to the enclosing component's state record
 // ============================================================================
 
 #[test]
-fn bare_property_in_a_handler_body_resolves_to_the_component() {
+fn bare_state_property_in_a_handler_body_resolves_to_the_component() {
     assert_ok(
         r#"
         external component <Grid emits { Sorted { by:string } } />
         component <People /> = {
-          state { sortBy:People.Property = {Property.name} name:string = "" }
-          <Grid onSorted=<Update sortBy={Property.name} /> />
+          state { sortBy:State.Property = {State.Property.name} name:string = "" }
+          <Grid onSorted=<State.Update sortBy=name /> />
         }
         "#,
         "property-handler.nx",
@@ -378,8 +405,8 @@ fn bare_property_in_a_handler_body_resolves_to_the_component() {
         r#"
         external component <Grid emits { Sorted { by:string } } />
         component <People /> = {
-          state { sortBy:People.Property = {Property.name} name:string = "" }
-          <Grid onSorted=<Update sortBy={Property.nickname} /> />
+          state { sortBy:State.Property = {State.Property.name} name:string = "" }
+          <Grid onSorted=<State.Update sortBy={State.Property.nickname} /> />
         }
         "#,
         "property-handler-unknown.nx",
@@ -396,7 +423,7 @@ fn bare_property_outside_a_component_is_rejected_with_the_qualified_spelling() {
         let key = {Property.name}
         "#,
         "property-root.nx",
-        "bare-property-outside-component",
+        "unknown-bare-property",
         "Type.Property.field",
     );
 }
@@ -419,21 +446,44 @@ fn bare_property_outside_a_component_reports_exactly_one_diagnostic() {
         .collect::<Vec<_>>();
     assert_eq!(
         codes,
-        vec![Some("bare-property-outside-component")],
+        vec![Some("unknown-bare-property")],
         "{:?}",
         diagnostics(&result)
     );
 }
 
 #[test]
-fn bare_property_takes_precedence_over_a_same_named_declaration_inside_a_component() {
-    assert_ok(
+fn bare_property_inside_a_component_suggests_state_property() {
+    assert_error(
         r#"
-        type Property = { note:string }
         component <Counter /> = {
-          state { count:int = 0 key:Counter.Property = {Property.count} }
+          state { count:int = 0 key?:Counter.State.Property = {Property.count} }
           <Label />
         }
+        "#,
+        "property-inside.nx",
+        "unknown-bare-property",
+        "write 'State.Property.field'",
+    );
+    assert_message(
+        r#"
+        component <Counter /> = { state { count:int = 0 key?:Property } <Label /> }
+        "#,
+        "property-type-inside.nx",
+        "did you mean `State.Property`?",
+    );
+}
+
+#[test]
+fn bare_state_takes_precedence_over_a_same_named_declaration_inside_a_component() {
+    assert_ok(
+        r#"
+        type State = { note:string }
+        component <Counter /> = {
+          state { count:int = 0 key:Counter.State.Property = {State.Property.count} }
+          <Label />
+        }
+        let s = <State note="x" />
         "#,
         "property-precedence.nx",
     );

@@ -53,8 +53,8 @@ runtime face of the static rule that a handler's result type must not admit zero
 - **THEN** invocation SHALL return both actions in source order
 
 #### Scenario: Update records are accepted as handler results
-- **WHEN** a handler bound inside `component <Counter /> = { state { count:int = 0 } ... }` evaluates to `{ <Update count={count + 1} /> <Saved /> }`
-- **THEN** invocation SHALL return a two-item sequence whose first item is a `Counter.Update` value and whose second item is a `Saved` action
+- **WHEN** a handler bound inside `component <Counter /> = { state { count:int = 0 } ... }` evaluates to `{ <State.Update count={count + 1} /> <Saved /> }`
+- **THEN** invocation SHALL return a two-item sequence whose first item is a `Counter.State.Update` value and whose second item is a `Saved` action
 
 #### Scenario: Empty or non-action results are rejected
 - **WHEN** a handler body evaluates to `{}`, `"docs"`, or a plain record such as `<User name="Ada" />`
@@ -101,40 +101,40 @@ particular a result whose occurrence admits zero — `{}`, an `if` with no `else
 SHALL be rejected, naming the result type against the `+` the handler requires.
 
 #### Scenario: Action payload fields are typed inside the body
-- **WHEN** a file contains `external component <Slider emits { EndChanged { value:float64 } } />` and `component <Volume /> = { state { level:float64 = 0.5 } <Slider onEndChanged=<Update level={action.value} /> /> }`
+- **WHEN** a file contains `external component <Slider emits { EndChanged { value:float64 } } />` and `component <Volume /> = { state { level:float64 = 0.5 } <Slider onEndChanged=<State.Update level={action.value} /> /> }`
 - **THEN** type checking SHALL accept the handler because `action.value` is `float64` and `level` is `float64`
 
 #### Scenario: A mistyped update field in a handler is rejected
-- **WHEN** a file contains `external component <Slider emits { EndChanged { value:float64 } } />` and `component <Volume /> = { state { level:int = 0 } <Slider onEndChanged=<Update level={action.value} /> /> }`
+- **WHEN** a file contains `external component <Slider emits { EndChanged { value:float64 } } />` and `component <Volume /> = { state { level:int = 0 } <Slider onEndChanged=<State.Update level={action.value} /> /> }`
 - **THEN** type checking SHALL reject the handler because `action.value` is `float64` and `level` is `int`
 
 #### Scenario: A misspelled state field in a handler is rejected
-- **WHEN** a file contains `component <Counter /> = { state { count:int = 0 } <Button onTapped=<Update cont={count + 1} /> /> }`
-- **THEN** type checking SHALL reject `cont` as an unknown field of `Counter.Update`
+- **WHEN** a file contains `component <Counter /> = { state { count:int = 0 } <Button onTapped=<State.Update cont={count + 1} /> /> }`
+- **THEN** type checking SHALL reject `cont` as an unknown field of `Counter.State.Update`
 
 #### Scenario: A handler whose result is not an action or update is rejected statically
 - **WHEN** a file contains `component <Counter /> = { state { count:int = 0 } <Button onTapped={count + 1} /> }`
 - **THEN** type checking SHALL reject the handler because its result type `int` is neither an action nor an update record
 
 #### Scenario: A handler whose result may be empty is rejected statically
-- **WHEN** a file contains `component <Counter /> = { state { count:int = 0 } <Button onTapped={ if count < 10 { <Update count={count + 1} /> } } /> }`
-- **THEN** type checking SHALL reject the handler, naming `Counter.Update?` against a result that must be `+`
-- **AND** the same handler with an `else` arm returning `<Update />` SHALL be accepted
+- **WHEN** a file contains `component <Counter /> = { state { count:int = 0 } <Button onTapped={ if count < 10 { <State.Update count={count + 1} /> } } /> }`
+- **THEN** type checking SHALL reject the handler, naming `Counter.State.Update?` against a result that must be `+`
+- **AND** the same handler with an `else` arm returning `<State.Update />` SHALL be accepted
 
 #### Scenario: Enclosing let bindings and loop variables are visible
-- **WHEN** a file contains `component <List /> = { state { items?:string+ } for item in items { <Row onTapped=<Update items={remove(items, item)} /> /> } }` with a suitable `remove` function
+- **WHEN** a file contains `component <List /> = { state { items?:string+ } for item in items { <Row onTapped=<State.Update items={remove(items, item)} /> /> } }` with a suitable `remove` function
 - **THEN** type checking SHALL accept the reference to the loop variable `item` inside the handler
 
 ### Requirement: Handler results are routed by type to state, parent, or host
 The system SHALL route each value a handler returns by its type. A value whose type is the
-enclosing component's own update record SHALL patch that component's state. An action the enclosing
-component declares or inherits in `emits` SHALL be emitted to the component's parent. Any other
-value SHALL be a host effect when the handler is bound outside any component body, and SHALL be a
-compile error when the handler is bound inside a component body. Type checking SHALL enforce this
-statically for every handler result.
+update record of the enclosing component's state, `<Component>.State.Update`, SHALL patch that
+component's state. An action the enclosing component declares or inherits in `emits` SHALL be
+emitted to the component's parent. Any other value SHALL be a host effect when the handler is bound
+outside any component body, and SHALL be a compile error when the handler is bound inside a
+component body. Type checking SHALL enforce this statically for every handler result.
 
-#### Scenario: Update of the enclosing component is accepted
-- **WHEN** a file contains `component <Counter /> = { state { count:int = 0 } <Button onTapped=<Update count={count + 1} /> /> }`
+#### Scenario: State update of the enclosing component is accepted
+- **WHEN** a file contains `component <Counter /> = { state { count:int = 0 } <Button onTapped=<State.Update count={count + 1} /> /> }`
 - **THEN** type checking SHALL accept the handler
 
 #### Scenario: Emitted action is accepted and re-emitted to the parent
@@ -149,7 +149,12 @@ statically for every handler result.
 
 #### Scenario: Update record of another type is rejected inside a component body
 - **WHEN** a file contains `type User = { name:string } component <Form /> = { state { draft:string = "" } <Button onTapped=<User.Update name="Ada" /> /> }`
-- **THEN** type checking SHALL reject the handler because `User.Update` is not `Form.Update`
+- **THEN** type checking SHALL reject the handler because `User.Update` is not `Form.State.Update`
+
+#### Scenario: The component's name with `.Update` is an unknown name inside its body
+- **WHEN** a file contains `component <Counter step:int = 1 /> = { state { count:int = 0 } <Button onTapped=<Counter.Update step=2 /> /> }`
+- **THEN** type checking SHALL reject `Counter.Update` as an unknown type, since a component has no update record
+- **AND** the diagnostic SHALL suggest `Counter.State.Update`
 
 #### Scenario: Any action or update record is a host effect at the root
 - **WHEN** a file contains `type User = { name:string } action DoSearch = { search:string } let render() = <SearchBox onSearchSubmitted={ <DoSearch search={action.searchString} /> <User.Update name="Ada" /> } />`
@@ -157,25 +162,27 @@ statically for every handler result.
 - **AND** dispatching the action SHALL return both values in the effect list
 
 #### Scenario: A mixed result list is routed item by item
-- **WHEN** a file contains `action Saved = { } component <Form emits { Saved } /> = { state { dirty:boolean = true } <Button onTapped={ <Update dirty=false /> <Saved /> } /> }` and the tap is dispatched
+- **WHEN** a file contains `action Saved = { } component <Form emits { Saved } /> = { state { dirty:boolean = true } <Button onTapped={ <State.Update dirty=false /> <Saved /> } /> }` and the tap is dispatched
 - **THEN** the component's `dirty` state SHALL become `false`
 - **AND** `Saved` SHALL be emitted to the parent
 
 ### Requirement: State reads inside a handler body are live at dispatch time
-When a handler body is invoked during component dispatch, every identifier that names a state field
-of the enclosing component SHALL evaluate to that field's value as it stands at the moment the
-handler runs, including changes applied earlier in the same dispatch batch. Identifiers that name
+A state field read in a handler body SHALL evaluate to the field's value at the moment the handler
+runs. When a handler body is invoked during component dispatch, every identifier that names a
+state field of the enclosing component SHALL evaluate to that field's value as it stands at that
+moment, including changes applied earlier in the same dispatch batch. Identifiers that name
 props, enclosing `let` bindings, or loop variables SHALL keep the values captured when the handler
 was created.
 
 #### Scenario: Two increments in one batch move twice
-- **WHEN** a component `Counter` with state `count:int = 0` renders `<Button onTapped=<Update count={count + 1} /> />` and one dispatch batch invokes that handler twice
+- **WHEN** a component `Counter` with state `count:int = 0` renders `<Button onTapped=<State.Update count={count + 1} /> />` and one dispatch batch invokes that handler twice
 - **THEN** the next state SHALL have `count` equal to `2`
 
 #### Scenario: A later handler sees an earlier patch
-- **WHEN** a component with state `count:int = 0` renders two buttons, one bound to `<Update count=10 />` and the other to `<Update count={count * 2} />`, and one batch invokes the first then the second
+- **WHEN** a component with state `count:int = 0` renders two buttons, one bound to `<State.Update count=10 />` and the other to `<State.Update count={count * 2} />`, and one batch invokes the first then the second
 - **THEN** the next state SHALL have `count` equal to `20`
 
 #### Scenario: Captured locals keep their snapshot
-- **WHEN** a component renders `for item in items { <Row onTapped=<Update selected={item} /> /> }` and the state field `items` is patched to a different list earlier in the same batch
+- **WHEN** a component renders `for item in items { <Row onTapped=<State.Update selected={item} /> /> }` and the state field `items` is patched to a different list earlier in the same batch
 - **THEN** a handler created for a row of the original list SHALL still bind `item` to the original row's value
+

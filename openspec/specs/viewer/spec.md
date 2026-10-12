@@ -8,9 +8,7 @@ sentences and handlers as events, and declarations read as headed sections. The 
 every node of the tree is rendered once, carries its key and opens to the exact source behind it.
 Hover and reference expansion come from the tree's declaration table, and a shared selection by key
 lets a host such as the playground move between the reading and the editor.
-
 ## Requirements
-
 ### Requirement: One element shows a source tree in any host
 The repository SHALL publish `@nx-lang/viewer`, which defines an `<nx-viewer>` custom element that
 shows a `SourceTree`, as `@nx-lang/language-protocol` types it, together with the text of the
@@ -147,7 +145,7 @@ The element SHALL read an attribute flagged `handler` as "When" followed by its 
 name, "to" and its value. Any other handler value SHALL be read after an arrow as an ordinary value.
 
 #### Scenario: A state update
-- **WHEN** an element binds `onIntegerAnswered=<Update answered={answered + 1} teamSize={action.answer.value} />`
+- **WHEN** an element binds `onIntegerAnswered=<State.Update answered={answered + 1} teamSize={action.answer.value} />`
   inside a component body
 - **THEN** it SHALL read "When integer answered" followed by "set answered to answered + 1" and "set
   teamSize to action.answer.value"
@@ -210,3 +208,4 @@ when no node has them.
 #### Scenario: From an origin to a node
 - **WHEN** a host holds a value origin whose span is that of a `<SingleChoice … />` element
 - **THEN** `nodeAtSpan` SHALL return the index of that element's node
+

@@ -695,11 +695,11 @@ fn explain_refuses_another_schema_version_naming_both() {
         error,
         ExplainError::SchemaVersion {
             found: 3,
-            supported: 5
+            supported: 6
         }
     );
     assert!(error.to_string().contains("schema version 3"));
-    assert!(error.to_string().contains("schema version 5"));
+    assert!(error.to_string().contains("schema version 6"));
 }
 
 #[test]
@@ -1712,10 +1712,23 @@ fn derived_declarations_a_program_never_references_are_omitted() {
 #[test]
 fn an_update_construction_names_the_update_record() {
     let text = explain_source(
-        "component <Counter /> = { state { count:int = 0 label:string = \"x\" } <Label /> }\nlet reset() = <Counter.Update count=1 />",
+        "component <Counter step:int = 1 /> = { state { count:int = 0 label:string = \"x\" } <Label /> }\nlet reset() = <Counter.State.Update count=1 />",
     );
-    assert_line(&text, "record Counter.Update update of Counter");
-    assert_line(&text, "  <Counter.Update count=1 />");
+    assert_line(&text, "record Counter.State.Update update of Counter.State");
+    assert_line(&text, "  <Counter.State.Update count=1 />");
+    // A referenced state update brings its state record, and the component names it.
+    assert_line(&text, "record Counter.State");
+    assert_line(&text, "component Counter state Counter.State");
+}
+
+/// A component whose state nothing patches or names emits no state record and names none.
+#[test]
+fn a_component_without_a_referenced_state_record_names_none() {
+    let text = explain_source(
+        "component <Counter /> = { state { count:int = 0 } <Label /> }\nlet root() = { <Counter /> }",
+    );
+    assert_line(&text, "component Counter");
+    assert!(!text.contains("Counter.State"), "{text}");
 }
 
 #[test]
@@ -1787,11 +1800,11 @@ fn a_component_type_parameter_is_erased() {
 }
 
 #[test]
-fn an_update_record_of_a_generic_component_erases_the_parameter() {
+fn a_state_update_record_of_a_generic_component_erases_the_parameter() {
     let text = explain_source(
-        "external component <Label text?:string />\ncomponent <List TItem:type items?:TItem+ /> = { state { sel?:TItem } <Label /> }\nlet u = <List.Update sel={} />\nlet root() = { u }",
+        "external component <Label text?:string />\ncomponent <List TItem:type items?:TItem+ /> = { state { sel?:TItem } <Label /> }\nlet u = <List.State.Update sel={} />\nlet root() = { u }",
     );
-    assert_line(&text, "record List.Update update of List");
+    assert_line(&text, "record List.State.Update update of List.State");
     assert_line(&text, "  sel: object?");
     assert!(!text.contains("TItem"), "{text}");
 }
@@ -1886,7 +1899,7 @@ action Reset = { }
 external component <Button label:string emits { Tapped { } } />
 component <Counter emits { Reset ValueChanged { value:int } } /> = {
   state { count:int = 0 }
-  <Button label="Add" onTapped=<Update count={count + 1} /> />
+  <Button label="Add" onTapped=<State.Update count={count + 1} /> />
 }
 component <Plain /> = { <Button label="x" /> }
 "#;
@@ -1912,7 +1925,7 @@ fn node_of_kind(artifact: &NxIrArtifact, kind: i64) -> &[nx_ir::IrItem] {
 fn component_declarations_carry_their_emits_in_declaration_order() {
     let text = explain_source(COUNTER_SOURCE);
     let counter = text
-        .split("\ncomponent Counter\n")
+        .split("\ncomponent Counter state Counter.State\n")
         .nth(1)
         .and_then(|rest| rest.split("\n\n").next())
         .expect("the Counter declaration");
@@ -2004,7 +2017,7 @@ type User = { name:string }
 external component <Button emits { Tapped { } } />
 component <Editor /> = {
   state { user:User = <User name="a" /> }
-  <Button onTapped=<Update user={apply(user, <User.Update name="b" />)} /> />
+  <Button onTapped=<State.Update user={apply(user, <User.Update name="b" />)} /> />
 }
 "#,
     ));
@@ -2033,7 +2046,10 @@ fn a_handler_bound_inside_a_component_body_is_encoded_with_its_owner() {
         &text,
         "      onTapped=handler Button.Tapped action@1:Button.Tapped owner Counter =>",
     );
-    assert_line(&text, "        <Counter.Update count=(count add 1) />");
+    assert_line(
+        &text,
+        "        <Counter.State.Update count=(count add 1) />",
+    );
 
     // `[19, ref, str, ref, slot, ref?, node]`: `Counter`'s frame is its one state field at slot
     // 0, so `action` takes slot 1 and the body reads `count` through slot 0.
@@ -2747,7 +2763,7 @@ fn iterating_a_range_does_not_change_the_schema_version() {
 
     assert_eq!(with_range.schema_version, NX_IR_SCHEMA_VERSION);
     assert_eq!(with_range.schema_version, without.schema_version);
-    assert_eq!(NX_IR_SCHEMA_VERSION, 5);
+    assert_eq!(NX_IR_SCHEMA_VERSION, 6);
 }
 
 // ------------------------------------------------------------------------------------------------

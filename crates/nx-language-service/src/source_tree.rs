@@ -1556,7 +1556,7 @@ impl<'a> TreeBuilder<'a> {
     }
 
     /// The declaration an element's tag names: the visible declaration of that name, or else the
-    /// one the element's type names, which is how a component's own `<Update>` resolves.
+    /// one the element's type names, which is how a component's own `<State.Update>` resolves.
     fn element_origin(&self, tag: &str, span: ByteTextRange) -> Option<DeclarationOrigin> {
         if let Some(declaration) = self.scope.visible.get(tag) {
             return Some(declaration.origin.clone());
@@ -1570,15 +1570,17 @@ impl<'a> TreeBuilder<'a> {
         }
     }
 
-    /// Whether `origin` is the update record of the component the walk is inside.
+    /// Whether `origin` is the update record of the state record of the component the walk is
+    /// inside.
     fn is_state_update(&self, origin: Option<&DeclarationOrigin>) -> bool {
         let (Some(origin), Some(component)) = (origin, self.component.as_deref()) else {
             return false;
         };
+        let state = nx_hir::state_record_name(component);
         matches!(
             item_at(&self.scope.workspace, origin),
             Some(Item::Record(record))
-                if matches!(&record.kind, RecordKind::Update { target } if target.as_str() == component)
+                if matches!(&record.kind, RecordKind::Update { target } if *target == state)
         )
     }
 

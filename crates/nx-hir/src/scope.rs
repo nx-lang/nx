@@ -560,9 +560,9 @@ impl<'a> UndefinedIdentifierChecker<'a> {
                 let is_prepared_top_level = flattened
                     .as_ref()
                     .is_some_and(|name| self.resolves_prepared_binding(name));
-                // A bare `Property` heading a member access outside a component is the checker's
-                // diagnostic, which names the qualified spelling; calling it undefined here as
-                // well would only repeat that less usefully.
+                // An unresolved bare `Property` heading a member access is the checker's
+                // diagnostic, which suggests the spelling meant; calling it undefined here as well
+                // would only repeat that less usefully.
                 let is_bare_property = flattened.as_ref().is_some_and(|name| {
                     name.as_str().split('.').next() == Some(crate::PROPERTY_UNION_SUFFIX)
                 });

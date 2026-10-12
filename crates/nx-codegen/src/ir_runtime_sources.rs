@@ -89,7 +89,7 @@ let keys(): User.Property* = { changed(<User.Update age={} name="Ada" />) }
 external component <Button label:string emits { Tapped { } } />
 component <Counter step:int = 1 /> = {
   state { count:int = 0 }
-  <Button label="Add" onTapped=<Update count={count + step} /> />
+  <Button label="Add" onTapped=<State.Update count={count + step} /> />
 }
 "##,
     r##"

@@ -1,8 +1,8 @@
 //! Type checking of derived `T.Update` records and of the action handlers that return them.
 //!
-//! Covers the update-records capability (shape, absent-versus-empty construction, the bare
-//! `Update` tag) and the component-action-handlers requirements that handler bodies are checked
-//! and their results routed by type.
+//! Covers the update-records capability (shape, absent-versus-empty construction), the bare
+//! `State` name of component-state-type, and the component-action-handlers requirements that
+//! handler bodies are checked and their results routed by type.
 
 use nx_hir::ast;
 use nx_types::{check_str, TypeCheckResult};
@@ -79,19 +79,42 @@ fn update_record_of_a_plain_record_has_the_same_fields() {
 }
 
 #[test]
-fn update_record_of_a_component_is_derived_from_state() {
-    let source = r#"
-        component <Counter step:int = 1 /> = { state { count:int = 0 } <Label text={count} /> }
-        let reset(): Counter.Update = <Counter.Update count=0 />
-    "#;
-    assert_ok(source, "update-component.nx");
+fn a_component_has_no_update_record_of_its_own() {
+    assert_error(
+        r#"
+        component <Counter step:int = 1 label?:string /> = { state { count:int = 0 } <Label text={count} /> }
+        let more = <Counter.Update step=2 />
+        "#,
+        "update-component.nx",
+        "unknown-update-record",
+        "write 'Counter.State.Update' to patch its state",
+    );
+    assert_error(
+        r#"
+        component <Form title:string /> = { <Panel /> }
+        let patch = <Form.Update title="Sign in" />
+        "#,
+        "update-stateless.nx",
+        "unknown-update-record",
+        "component 'Form' is not a record, so it has no update record",
+    );
+}
 
+#[test]
+fn update_record_of_a_components_state_is_the_state_records_update() {
+    assert_ok(
+        r#"
+        component <Counter step:int = 1 /> = { state { count:int = 0 } <Label text={count} /> }
+        let reset(): Counter.State.Update = <Counter.State.Update count=0 />
+        "#,
+        "update-component-state-record.nx",
+    );
     assert_error(
         r#"
         component <Counter step:int = 1 /> = { state { count:int = 0 } <Label text={count} /> }
-        let bad = <Counter.Update step=2 />
+        let bad = <Counter.State.Update step=2 />
         "#,
-        "update-component-prop.nx",
+        "update-component-state-prop.nx",
         "unknown-record-field",
         "step",
     );
@@ -146,11 +169,11 @@ fn update_record_of_an_update_record_does_not_exist() {
     assert_error(
         r#"
         component <Counter /> = { state { count:int = 0 } <Label /> }
-        let patch = <Counter.Update.Update count=1 />
+        let patch = <Counter.State.Update.Update count=1 />
         "#,
         "component-update-update.nx",
         "unknown-update-record",
-        "Counter.Update.Update",
+        "Counter.State.Update.Update",
     );
 }
 
@@ -162,17 +185,17 @@ fn an_update_tag_for_an_unknown_target_is_rejected() {
         "#,
         "unknown-update-target.nx",
         "unknown-update-record",
-        "'Icons' is not a record, action, or component with state",
+        "'Icons' is not a record, action, or component",
     );
 }
 
 #[test]
-fn a_stateless_component_has_no_update_record() {
+fn a_stateless_component_has_no_state_update_record() {
     let result = check_str(
         r#"
         action Tapped = { }
         external component <Button emits { Tapped } />
-        component <Form /> = { <Button onTapped=<Update /> /> }
+        component <Form /> = { <Button onTapped=<State.Update /> /> }
         "#,
         "stateless-bare-update.nx",
     );
@@ -180,7 +203,7 @@ fn a_stateless_component_has_no_update_record() {
         diagnostics(&result),
         vec![(
             Some("unknown-update-record"),
-            "Unknown type 'Form.Update': component 'Form' declares no state, so it has no update record"
+            "Unknown type 'Form.State.Update': component 'Form' declares no state, so it has no state record"
                 .to_string()
         )]
     );
@@ -188,7 +211,7 @@ fn a_stateless_component_has_no_update_record() {
     assert_error(
         r#"
         component <Form /> = { <Panel /> }
-        let patch = <Form.Update />
+        let patch = <Form.State.Update />
         "#,
         "stateless-qualified-update.nx",
         "unknown-update-record",
@@ -360,7 +383,7 @@ fn a_field_of_an_update_record_reads_as_optional() {
 }
 
 // ============================================================================
-// The bare `Update` tag resolves to the enclosing component's update record
+// The bare `State` name resolves to the enclosing component's state record
 // ============================================================================
 
 /// Returns the record name the first handler bound in `component`'s body constructs.
@@ -383,22 +406,25 @@ fn handler_body_record(result: &TypeCheckResult, component: &str) -> String {
 }
 
 #[test]
-fn bare_update_in_a_handler_body_resolves_to_the_component() {
+fn bare_state_update_in_a_handler_body_resolves_to_the_component() {
     let result = assert_ok(
         r#"
         action Tapped = { }
         external component <Button emits { Tapped } />
-        component <Counter /> = { state { count:int = 0 } <Button onTapped=<Update count={count + 1} /> /> }
+        component <Counter /> = { state { count:int = 0 } <Button onTapped=<State.Update count={count + 1} /> /> }
         "#,
         "bare-update-handler.nx",
     );
-    assert_eq!(handler_body_record(&result, "Counter"), "Counter.Update");
+    assert_eq!(
+        handler_body_record(&result, "Counter"),
+        "Counter.State.Update"
+    );
 
     assert_error(
         r#"
         action Tapped = { }
         external component <Button emits { Tapped } />
-        component <Counter /> = { state { count:int = 0 } <Button onTapped=<Update count="one" /> /> }
+        component <Counter /> = { state { count:int = 0 } <Button onTapped=<State.Update count="one" /> /> }
         "#,
         "bare-update-handler-mismatch.nx",
         "record-field-type-mismatch",
@@ -407,12 +433,16 @@ fn bare_update_in_a_handler_body_resolves_to_the_component() {
 }
 
 #[test]
-fn bare_update_in_a_state_default_resolves_to_the_component() {
+fn bare_state_in_a_state_default_and_type_resolves_to_the_component() {
     assert_ok(
         r#"
-        component <Editor /> = { state { pending:Editor.Update = <Update /> } <Panel /> }
+        component <Editor /> = {
+          state { draft:string = "" saved?:State pending:State.Update = <State.Update /> }
+          <Panel />
+        }
+        let check(e: Editor.State): Editor.State.Update = <Editor.State.Update saved={e} />
         "#,
-        "bare-update-state-default.nx",
+        "bare-state-default.nx",
     );
 }
 
@@ -424,23 +454,63 @@ fn bare_update_outside_a_component_is_rejected_with_the_qualified_spelling() {
         let patch = <Update name="Ada" />
         "#,
         "bare-update-root.nx",
-        "bare-update-outside-component",
+        "unknown-bare-update",
         "<Type.Update ... />",
     );
 }
 
 #[test]
-fn bare_update_takes_precedence_over_a_same_named_declaration_inside_a_component() {
-    let result = assert_ok(
+fn bare_update_inside_a_component_suggests_state_update() {
+    let result = check_str(
         r#"
-        type Update = { note:string }
         action Tapped = { }
         external component <Button emits { Tapped } />
         component <Counter /> = { state { count:int = 0 } <Button onTapped=<Update count=1 /> /> }
         "#,
-        "bare-update-precedence.nx",
+        "bare-update-inside.nx",
     );
-    assert_eq!(handler_body_record(&result, "Counter"), "Counter.Update");
+    let errors = diagnostics(&result)
+        .into_iter()
+        .filter(|(code, _)| code.is_some())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        errors,
+        vec![(
+            Some("unknown-bare-update"),
+            "Unknown element 'Update'; to change the state of component 'Counter', write '<State.Update ... />'"
+                .to_string()
+        )]
+    );
+}
+
+#[test]
+fn a_declaration_named_update_is_an_ordinary_record_inside_a_component() {
+    assert_ok(
+        r#"
+        type Update = { note:string }
+        component <Notes /> = { state { last?:Update } <Panel /> }
+        let n = <Update note="x" />
+        "#,
+        "ordinary-update.nx",
+    );
+}
+
+#[test]
+fn bare_state_takes_precedence_over_a_same_named_declaration_inside_a_component() {
+    let result = assert_ok(
+        r#"
+        type State = idle | busy
+        action Tapped = { }
+        external component <Button emits { Tapped } />
+        component <Counter /> = { state { count:int = 0 } <Button onTapped=<State.Update count=1 /> /> }
+        let s: State = idle
+        "#,
+        "bare-state-precedence.nx",
+    );
+    assert_eq!(
+        handler_body_record(&result, "Counter"),
+        "Counter.State.Update"
+    );
 }
 
 // ============================================================================
@@ -452,7 +522,7 @@ fn action_payload_fields_are_typed_inside_the_body() {
     assert_ok(
         r#"
         external component <Slider emits { EndChanged { value:float64 } } />
-        component <Volume /> = { state { level:float64 = 0.5 } <Slider onEndChanged=<Update level={action.value} /> /> }
+        component <Volume /> = { state { level:float64 = 0.5 } <Slider onEndChanged=<State.Update level={action.value} /> /> }
         "#,
         "handler-payload.nx",
     );
@@ -463,7 +533,7 @@ fn a_mistyped_update_field_in_a_handler_is_rejected() {
     assert_error(
         r#"
         external component <Slider emits { EndChanged { value:float64 } } />
-        component <Volume /> = { state { level:int = 0 } <Slider onEndChanged=<Update level={action.value} /> /> }
+        component <Volume /> = { state { level:int = 0 } <Slider onEndChanged=<State.Update level={action.value} /> /> }
         "#,
         "handler-mistyped.nx",
         "record-field-type-mismatch",
@@ -477,7 +547,7 @@ fn a_misspelled_state_field_in_a_handler_is_rejected() {
         r#"
         action Tapped = { }
         external component <Button emits { Tapped } />
-        component <Counter /> = { state { count:int = 0 } <Button onTapped=<Update cont={count + 1} /> /> }
+        component <Counter /> = { state { count:int = 0 } <Button onTapped=<State.Update cont={count + 1} /> /> }
         "#,
         "handler-misspelled.nx",
         "unknown-record-field",
@@ -509,7 +579,7 @@ fn enclosing_loop_variables_are_visible_inside_a_handler() {
         component <List /> = {
           state { items:string+ = { "a" } }
           <Column>
-            {for item in items { <Row onTapped=<Update items={remove(items, item)} /> /> }}
+            {for item in items { <Row onTapped=<State.Update items={remove(items, item)} /> /> }}
           </Column>
         }
         "#,
@@ -528,7 +598,7 @@ fn enclosing_let_bindings_are_visible_inside_a_handler() {
         let first = "x"
         component <List /> = {
           state { items:string+ = { "a" } }
-          <Row onTapped=<Update items={remove(items, first)} /> />
+          <Row onTapped=<State.Update items={remove(items, first)} /> />
         }
         "#,
         "handler-let-binding.nx",
@@ -545,7 +615,7 @@ fn a_match_result_is_routed_arm_by_arm() {
         external component <Button emits { Tapped } />
         component <Form emits { Saved Cleared } /> = {
           state { mode:string = "a" }
-          <Button onTapped={if mode is { "a" => <Saved /> "b" => <Update mode="a" /> else => <Cleared /> }} />
+          <Button onTapped={if mode is { "a" => <Saved /> "b" => <State.Update mode="a" /> else => <Cleared /> }} />
         }
         "#,
         "handler-match-result.nx",
@@ -592,7 +662,7 @@ fn update_of_the_enclosing_component_is_accepted() {
         r#"
         action Tapped = { }
         external component <Button emits { Tapped } />
-        component <Counter /> = { state { count:int = 0 } <Button onTapped=<Update count={count + 1} /> /> }
+        component <Counter /> = { state { count:int = 0 } <Button onTapped=<State.Update count={count + 1} /> /> }
         "#,
         "route-own-update.nx",
     );
@@ -637,7 +707,7 @@ fn update_record_of_another_type_is_rejected_inside_a_component() {
         "#,
         "route-other-update.nx",
         "handler-update-wrong-target",
-        "only 'Form.Update'",
+        "only 'Form.State.Update'",
     );
 }
 
@@ -675,7 +745,7 @@ fn a_mixed_result_list_is_routed_item_by_item() {
         action Saved = { }
         action Tapped = { }
         external component <Button emits { Tapped } />
-        component <Form emits { Saved } /> = { state { dirty:boolean = true } <Button onTapped={<Update dirty=false /> <Saved />} /> }
+        component <Form emits { Saved } /> = { state { dirty:boolean = true } <Button onTapped={<State.Update dirty=false /> <Saved />} /> }
         "#,
         "route-mixed.nx",
     );
@@ -685,7 +755,7 @@ fn a_mixed_result_list_is_routed_item_by_item() {
         action Saved = { }
         action Tapped = { }
         external component <Button emits { Tapped } />
-        component <Form /> = { state { dirty:boolean = true } <Button onTapped={<Update dirty=false /> <Saved />} /> }
+        component <Form /> = { state { dirty:boolean = true } <Button onTapped={<State.Update dirty=false /> <Saved />} /> }
         "#,
         "route-mixed-not-emitted.nx",
         "handler-action-not-emitted",

@@ -7,9 +7,7 @@ and the declarations the nodes refer to are listed once in a table beside them. 
 facts about the source and nothing about presentation, so a viewer, a change view, an outline, a
 lint rule or a structural editor can each build on it. It is distinct from the parser's syntax
 tree, which stays internal and free to change.
-
 ## Requirements
-
 ### Requirement: The language service answers a source tree for a document
 The language service SHALL answer a `sourceTree` query for a document of a workspace snapshot with
 the document's URI, identity and version, a list of nodes and a list of declarations. The answer
@@ -92,7 +90,7 @@ one.
   `&&`, whose operands are `operator` nodes with the tokens `==` and `!=`
 
 #### Scenario: A handler attribute
-- **WHEN** a component binds `onTapped=<Update count={count + 1} />` inside its body
+- **WHEN** a component binds `onTapped=<State.Update count={count + 1} />` inside its body
 - **THEN** the `attribute` node for `onTapped` SHALL be marked as a handler
 - **AND** the `element` node for the update SHALL be marked as an update of the enclosing
   component's state

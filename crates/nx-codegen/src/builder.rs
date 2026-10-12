@@ -108,15 +108,17 @@ pub fn build_codegen_program(artifact: &ProgramArtifact) -> Result<CodegenProgra
 /// Where one derived declaration is declared: its module and definition.
 type UpdateRecordKey = (u32, LocalDefinitionId);
 
-/// The derived declarations — update records and property unions — the program references
-/// anywhere, by the declaration each reference reaches.
+/// The derived declarations — update records, property unions, and state records — the program
+/// references anywhere, by the declaration each reference reaches.
 ///
-/// <para>Every record, action, and stateful component has an update record and a property union,
-/// and most programs never use either. Emitting only the referenced ones keeps a program that
-/// never writes a patch or names a field the same program it was before they existed. A reference
+/// <para>Every record and action has an update record and a property union, every component with
+/// state a state record with its own two, and most programs never use any of them. Emitting only
+/// the referenced ones keeps a program that never writes a patch or names a field the same program it was before they existed. A reference
 /// is a construction — a record literal or an element tag — a type annotation naming one, or a
 /// member access reaching a property union's case; a reference from another module counts, since
-/// the declaring module is where the declaration is emitted.</para>
+/// the declaring module is where the declaration is emitted. A state record is also referenced by
+/// its update record and its property union, whose target it is, and it references its update
+/// record in turn.</para>
 fn referenced_derived_declarations(artifact: &ProgramArtifact) -> FxHashSet<UpdateRecordKey> {
     let mut referenced = FxHashSet::default();
     for module in artifact.resolved_program.modules() {
@@ -195,7 +197,67 @@ fn referenced_derived_declarations(artifact: &ProgramArtifact) -> FxHashSet<Upda
             }
         }
     }
+    let targets = referenced
+        .iter()
+        .filter_map(|&(module_id, definition_id)| {
+            derived_state_target(artifact, RuntimeModuleId::new(module_id), definition_id)
+                .map(|target| (module_id, target))
+        })
+        .collect::<Vec<_>>();
+    referenced.extend(targets);
+    // A state patch can be computed without being spelled — `diff` of two state records in a
+    // handler — and a runtime recognizes one only by its declaration, so a referenced state record
+    // brings its update record along.
+    let state_updates = referenced
+        .iter()
+        .filter_map(|&(module_id, definition_id)| {
+            state_update_record(artifact, RuntimeModuleId::new(module_id), definition_id)
+                .map(|update| (module_id, update))
+        })
+        .collect::<Vec<_>>();
+    referenced.extend(state_updates);
     referenced
+}
+
+/// The update record of the state record at the address, when it is a component's state record.
+///
+/// <para>The update record is declared beside it, so it is found in the same module.</para>
+fn state_update_record(
+    artifact: &ProgramArtifact,
+    module_id: RuntimeModuleId,
+    definition_id: LocalDefinitionId,
+) -> Option<LocalDefinitionId> {
+    let lowered_module = &artifact.resolved_program.module(module_id)?.lowered_module;
+    let Item::Record(record) = lowered_module.item_by_definition(definition_id)? else {
+        return None;
+    };
+    record.state_component()?;
+    let update_name = nx_hir::update_record_name(record.name.as_str());
+    match lowered_module.find_item_with_definition(update_name.as_str())? {
+        (update_id, Item::Record(update)) if update.update_target().is_some() => Some(update_id),
+        _ => None,
+    }
+}
+
+/// The state record the derived declaration at the address patches or names the fields of, when
+/// it is a state record's update record or property union.
+///
+/// <para>The state record is declared beside both, so it is found in the same module.</para>
+fn derived_state_target(
+    artifact: &ProgramArtifact,
+    module_id: RuntimeModuleId,
+    definition_id: LocalDefinitionId,
+) -> Option<LocalDefinitionId> {
+    let lowered_module = &artifact.resolved_program.module(module_id)?.lowered_module;
+    let target = match lowered_module.item_by_definition(definition_id)? {
+        Item::Record(record) => record.update_target()?,
+        Item::Union(union_def) => union_def.property_target()?,
+        _ => return None,
+    };
+    match lowered_module.find_item_with_definition(target.as_str())? {
+        (target_id, Item::Record(record)) if record.state_component().is_some() => Some(target_id),
+        _ => None,
+    }
 }
 
 /// Collects the declaration names a checker type mentions, through its occurrence and function
@@ -229,7 +291,8 @@ fn flattened_expr_name(lowered_module: &LoweredModule, expr_id: ExprId) -> Optio
     }
 }
 
-/// Returns true when the item at the address is a derived update record or property union.
+/// Returns true when the item at the address is a derived update record, state record, or property
+/// union.
 fn is_derived_declaration(
     artifact: &ProgramArtifact,
     module_id: RuntimeModuleId,
@@ -242,10 +305,10 @@ fn is_derived_declaration(
         .is_some_and(is_derived_item)
 }
 
-/// Returns true when `item` is a derived update record or property union.
+/// Returns true when `item` is a derived update record, state record, or property union.
 fn is_derived_item(item: &Item) -> bool {
     match item {
-        Item::Record(record) => record.update_target().is_some(),
+        Item::Record(record) => record.is_derived(),
         Item::Union(union_def) => union_def.property_target().is_some(),
         _ => false,
     }
@@ -306,6 +369,7 @@ fn build_module(
             declarations.push(declaration);
         }
     }
+    link_state_records(&mut declarations);
 
     let mut imports = artifact
         .resolved_program
@@ -524,7 +588,7 @@ fn build_declaration(
             )?;
             // A plain generic record is emitted as a real generic, so each field keeps the type
             // reference as written; only `resolved_ty`, which IR reads, is erased.
-            let own_params: Vec<String> = if record.update_target().is_none() {
+            let own_params: Vec<String> = if !record.is_derived() {
                 for (field, source) in fields.iter_mut().zip(&shape.fields) {
                     field.ty = source.ty.clone();
                 }
@@ -720,7 +784,30 @@ fn build_component(
         state,
         emits,
         body,
+        // Set by `link_state_records` once the module's declarations are known.
+        state_record: None,
     })
+}
+
+/// Points each component at its state record, when the module emits one.
+///
+/// <para>The state record is emitted only when something references it, its update record, or
+/// its property union, so a component whose state is never patched or named has none, and its
+/// layout is what it was before state records existed.</para>
+fn link_state_records(declarations: &mut [CodegenDeclaration]) {
+    let state_records = declarations
+        .iter()
+        .filter(|declaration| matches!(declaration.kind, CodegenDeclarationKind::Record { .. }))
+        .filter_map(|declaration| {
+            let component = declaration.reference.name.strip_suffix(".State")?;
+            Some((component.to_string(), declaration.reference.clone()))
+        })
+        .collect::<FxHashMap<_, _>>();
+    for declaration in declarations.iter_mut() {
+        if let CodegenDeclarationKind::Component(component) = &mut declaration.kind {
+            component.state_record = state_records.get(&declaration.reference.name).cloned();
+        }
+    }
 }
 
 /// Resolves `name` as the module with `module_identity` sees it: how an emit's action record is
@@ -2760,10 +2847,11 @@ fn record_literal_shape(
     })
 }
 
-/// The type parameters of the component whose state `record` patches, when it is the derived
-/// update record of a generic component; empty for every other record.
+/// The type parameters of the component `record` derives from, when it is the derived state record
+/// of a generic component or that state record's update record; the record's own parameters when
+/// it is a generic record; empty for every other record.
 ///
-/// <para>The update record copies its target's state annotations, and a state field may be typed
+/// <para>A derived record copies its component's state annotations, and such a field may be typed
 /// by a type parameter. Outside the component that parameter is not a type, and no host names the
 /// instantiation of an update — it was fixed at an NX use site — so the record's fields erase it
 /// the way the component's own state schema does.</para>
@@ -2783,10 +2871,20 @@ fn erased_record_type_params(
             .map(|param| param.name.clone())
             .collect();
     }
-    let Some(target) = record.update_target() else {
-        return Vec::new();
+    // A state record copies its component's state annotations, and so does its update record;
+    // each erases the component's parameters.
+    let component_name = match (record.state_component(), record.update_target()) {
+        (Some(component), _) => component.clone(),
+        (None, Some(target)) => match lowered_module.find_item(target.as_str()) {
+            Some(Item::Record(state)) => match state.state_component() {
+                Some(component) => component.clone(),
+                None => return Vec::new(),
+            },
+            _ => return Vec::new(),
+        },
+        (None, None) => return Vec::new(),
     };
-    let Some(Item::Component(component)) = lowered_module.find_item(target.as_str()) else {
+    let Some(Item::Component(component)) = lowered_module.find_item(component_name.as_str()) else {
         return Vec::new();
     };
     if component.type_params.is_empty() && component.base.is_none() {

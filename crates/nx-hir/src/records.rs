@@ -58,6 +58,8 @@ pub enum InvalidBaseReason {
     ConcreteRecord,
     /// The base is a derived `<Target>.Update` record, which can never be extended.
     UpdateRecord,
+    /// The base is a derived `<Component>.State` record, which can never be extended.
+    StateRecord,
     /// The base is a derived `<Target>.Property` union, which can never be extended.
     PropertyUnion,
     KindMismatch {
@@ -119,6 +121,7 @@ impl RecordResolutionError {
                 InvalidBaseReason::AliasCycle => "record-base-alias-cycle",
                 InvalidBaseReason::ConcreteRecord => "record-base-not-abstract",
                 InvalidBaseReason::UpdateRecord => "record-base-update-record",
+                InvalidBaseReason::StateRecord => "record-base-state-record",
                 InvalidBaseReason::PropertyUnion => "record-base-property-union",
                 InvalidBaseReason::KindMismatch { .. } => "record-base-kind-mismatch",
             },
@@ -163,6 +166,10 @@ impl RecordResolutionError {
                     ),
                     InvalidBaseReason::UpdateRecord => format!(
                         "{} '{}' extends '{}', but '{}' is a derived update record and cannot be extended",
+                        kind_label, record, base, base
+                    ),
+                    InvalidBaseReason::StateRecord => format!(
+                        "{} '{}' extends '{}', but '{}' is a derived state record and cannot be extended",
                         kind_label, record, base, base
                     ),
                     InvalidBaseReason::PropertyUnion => format!(
@@ -848,9 +855,8 @@ fn resolve_record_shape_inner(
 /// which only mirror what the target itself declares. The target is resolved where the update
 /// record was declared, which is where the target was.</para>
 ///
-/// <para>Returns `None` when this is not an update record, or when its target is not a record — a
-/// component's update record is derived from state fields, which are never inherited, so the
-/// synthesized fields are already complete.</para>
+/// <para>Returns `None` when this is not an update record, or when its target is not a record; the
+/// synthesized fields are then all there is.</para>
 fn resolve_update_target_shape(
     module: &PreparedModule,
     record: &ResolvedRecordDefinition,
@@ -964,6 +970,14 @@ fn validate_base_record(
             record,
             base_name,
             InvalidBaseReason::UpdateRecord,
+        ));
+    }
+
+    if base_record.record.state_component().is_some() {
+        return Err(invalid_base(
+            record,
+            base_name,
+            InvalidBaseReason::StateRecord,
         ));
     }
 

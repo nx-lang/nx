@@ -14,5 +14,5 @@ let root() = <Card Title={nameOf(user())} />
 external component <Tap extends Control count:int />
 component <Panel /> = {
   state { taps:int = 0 }
-  <Tap count={taps} onTapped=<Update taps={taps + 1} /> />
+  <Tap count={taps} onTapped=<State.Update taps={taps + 1} /> />
 }

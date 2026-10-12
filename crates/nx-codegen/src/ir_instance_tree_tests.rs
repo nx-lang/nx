@@ -151,7 +151,7 @@ component <Counter /> = {
   state { count:int = 0 }
   <Stack>
     <Label Text={if count > 0 { \"tapped\" } else { \"untapped\" }} />
-    <Button Text=\"Tap\" onTapped=<Update count={count + 1} /> />
+    <Button Text=\"Tap\" onTapped=<State.Update count={count + 1} /> />
   </Stack>
 }
 component <Timer /> = {
@@ -171,7 +171,7 @@ component <Page /> = {
   state { last:string = \"\" }
   <Stack>
     <Label Text={last} />
-    <Card onLogged=<Update last={action.text} /> />
+    <Card onLogged=<State.Update last={action.text} /> />
   </Stack>
 }
 let root() = { <Page /> }
@@ -182,7 +182,7 @@ const CONTENT: &str = "
 component <Box extends Node content Children:Node+ /> = {
   state { opened:int = 0 }
   <Stack>
-    <Button Text=\"Open\" onTapped=<Update opened={opened + 1} /> />
+    <Button Text=\"Open\" onTapped=<State.Update opened={opened + 1} /> />
     {Children}
   </Stack>
 }
@@ -190,7 +190,7 @@ component <Page /> = {
   state { count:int = 0 }
   <Box>
     <Label Text={if count > 0 { \"counted\" } else { \"zero\" }} />
-    <Button Text=\"More\" onTapped=<Update count={count + 1} /> />
+    <Button Text=\"More\" onTapped=<State.Update count={count + 1} /> />
   </Box>
 }
 let root() = { <Page /> }
@@ -200,11 +200,11 @@ let root() = { <Page /> }
 const FAILING_PARENT: &str = "
 component <Child extends Node emits { A { } } /> = {
   state { c:int = 0 }
-  <Button Text=\"Go\" onTapped={<Update c={c + 1} /> <Child.A />} />
+  <Button Text=\"Go\" onTapped={<State.Update c={c + 1} /> <Child.A />} />
 }
 component <Page /> = {
   state { n:int = 1 }
-  <Child onA=<Update n={n / 0} /> />
+  <Child onA=<State.Update n={n / 0} /> />
 }
 let root() = { <Page /> }
 ";
@@ -248,7 +248,7 @@ fn a_limit_reached_inside_a_tree_operation_is_the_runtimes_diagnostic() {
 let total(n:int): int = { if n <= 0 { 0 } else { n + total(n - 1) } }
 component <Counter /> = {
   state { count:int = 0 }
-  <Button Text=\"Tap\" onTapped=<Update count={count + total(50)} /> />
+  <Button Text=\"Tap\" onTapped=<State.Update count={count + total(50)} /> />
 }
 let root() = { <Counter /> }",
     );
@@ -538,15 +538,15 @@ fn a_render_reaches_what_is_under_the_node_and_nothing_beside_it() {
         "
 component <Card extends Node emits { Logged { text:string } } /> = {
   state { logs:int = 0 }
-  <Button Text=\"Log\" onTapped={<Update logs={logs + 1} /> <Card.Logged text=\"hi\" />} />
+  <Button Text=\"Log\" onTapped={<State.Update logs={logs + 1} /> <Card.Logged text=\"hi\" />} />
 }
 component <Box extends Node /> = {
   state { opened:int = 0 }
-  <Button Text=\"Open\" onTapped=<Update opened={opened + 1} /> />
+  <Button Text=\"Open\" onTapped=<State.Update opened={opened + 1} /> />
 }
 component <Page /> = {
   state { last:string = \"\" }
-  <Stack><Card onLogged=<Update last={action.text} /> /><Box /></Stack>
+  <Stack><Card onLogged=<State.Update last={action.text} /> /><Box /></Stack>
 }
 let root() = { <Page /> }",
     );
@@ -603,11 +603,11 @@ fn a_descriptor_that_reads_the_same_from_a_parent_initialized_again_is_a_new_one
         "
 component <Card extends Node emits { Logged { text:string } } /> = {
   state { logs:int = 0 }
-  <Button Text=\"Log\" onTapped={<Update logs={logs + 1} /> <Card.Logged text=\"hi\" />} />
+  <Button Text=\"Log\" onTapped={<State.Update logs={logs + 1} /> <Card.Logged text=\"hi\" />} />
 }
 component <Page tag:string /> = {
   state { last:string = \"\" }
-  <Card onLogged=<Update last={tag + action.text} /> />
+  <Card onLogged=<State.Update last={tag + action.text} /> />
 }
 let first() = { <Page tag=\"a\" /> }
 let second() = { <Page tag=\"b\" /> }",
@@ -651,12 +651,12 @@ let second() = { <Page tag=\"b\" /> }",
 const SHOWN: &str = "
 component <Counter extends Node /> = {
   state { count:int = 0 }
-  <Button Text=\"Add\" onTapped=<Update count={count + 1} /> />
+  <Button Text=\"Add\" onTapped=<State.Update count={count + 1} /> />
 }
 component <Page /> = {
   state { shown:boolean = true }
   <Stack>
-    <Button Text=\"Toggle\" onTapped=<Update shown={!shown} /> />
+    <Button Text=\"Toggle\" onTapped=<State.Update shown={!shown} /> />
     { if shown { <Counter /> } else { <Label Text=\"hidden\" /> } }
   </Stack>
 }
@@ -828,12 +828,12 @@ fn a_node_visited_before_its_parent_rendered_again_does_not_count_as_visited() {
 const SETTLED: &str = "
 component <Leaf extends Node /> = {
   state { taps:int = 0 }
-  <Button Text=\"Leaf\" onTapped=<Update taps={taps + 1} /> />
+  <Button Text=\"Leaf\" onTapped=<State.Update taps={taps + 1} /> />
 }
 component <Middle extends Node /> = { <Stack><Label Text=\"middle\" /><Leaf /></Stack> }
 component <Side extends Node /> = {
   state { taps:int = 0 }
-  <Button Text=\"Side\" onTapped=<Update taps={taps + 1} /> />
+  <Button Text=\"Side\" onTapped=<State.Update taps={taps + 1} /> />
 }
 component <Top /> = { <Stack><Middle /><Side /></Stack> }
 let root() = { <Top /> }
@@ -996,7 +996,7 @@ fn a_component_nested_under_itself_is_told_from_its_ancestor() {
 component <Rec extends Node /> = {
   state { open:boolean = false }
   <Stack>
-    <Button Text=\"Toggle\" onTapped=<Update open={!open} /> />
+    <Button Text=\"Toggle\" onTapped=<State.Update open={!open} /> />
     { if open { <Rec /> } else { <Label Text=\"closed\" /> } }
   </Stack>
 }
@@ -1064,7 +1064,7 @@ component <Page /> = {
   state { taps:int = 0 open:boolean = false speed:float64 = 1 }
   <Stack>
     <Label Text={\"Tapped \" + taps + \"× · IsOpen: \" + open + \" · \" + speed + \"x\"} />
-    <Button Text=\"Tap\" onTapped=<Update taps={taps + 1} open={!open} speed={speed / 2} /> />
+    <Button Text=\"Tap\" onTapped=<State.Update taps={taps + 1} open={!open} speed={speed / 2} /> />
   </Stack>
 }
 let root() = { <Page /> }",
@@ -1107,7 +1107,7 @@ component <Child extends Node emits { A { } B { } } /> = {
 }
 component <Page /> = {
   state { a:int = 0 b:int = 0 }
-  <Child onA=<Update a={a + 1} /> onB=<Update b={b + a} /> />
+  <Child onA=<State.Update a={a + 1} /> onB=<State.Update b={b + a} /> />
 }
 let root() = { <Page /> }",
     );
@@ -1125,13 +1125,13 @@ fn an_emit_whose_handler_belongs_to_a_replaced_render_is_refused() {
     let source = "
 component <Card extends Node emits { Logged { text:string } } /> = {
   state { logs:int = 0 }
-  <Button Text=\"Log\" onTapped={<Update logs={logs + 1} /> <Card.Logged text=\"hi\" />} />
+  <Button Text=\"Log\" onTapped={<State.Update logs={logs + 1} /> <Card.Logged text=\"hi\" />} />
 }
 component <Page /> = {
   state { last:string = \"\" taps:int = 0 }
   <Stack>
-    <Button Text=\"Tap\" onTapped=<Update taps={taps + 1} /> />
-    <Card onLogged=<Update last={last + action.text} /> />
+    <Button Text=\"Tap\" onTapped=<State.Update taps={taps + 1} /> />
+    <Card onLogged=<State.Update last={last + action.text} /> />
   </Stack>
 }
 let root() = { <Page /> }";
@@ -1213,14 +1213,14 @@ component <Middle extends Node emits { Chosen { name:string } } /> = {
   state { passed:int = 0 }
   <Stack>
     <Label Text={\"passed \" + passed} />
-    <Leaf onPicked={<Update passed={passed + 1} /> <Middle.Chosen name={action.name + \"er\"} />} />
+    <Leaf onPicked={<State.Update passed={passed + 1} /> <Middle.Chosen name={action.name + \"er\"} />} />
   </Stack>
 }
 component <Top /> = {
   state { picked:string = \"\" }
   <Stack>
     <Label Text={\"picked \" + picked} />
-    <Middle onChosen=<Update picked={action.name} /> />
+    <Middle onChosen=<State.Update picked={action.name} /> />
   </Stack>
 }
 let root() = { <Top /> }",
@@ -1301,7 +1301,7 @@ fn a_failed_dispatch_leaves_the_instance_it_named_as_it_was() {
         "
 component <Counter /> = {
   state { count:int = 0 }
-  <Button Text=\"Tap\" onTapped=<Update count={count / 0} /> />
+  <Button Text=\"Tap\" onTapped=<State.Update count={count / 0} /> />
 }
 let root() = { <Counter /> }",
     );
@@ -1483,7 +1483,7 @@ fn a_descriptor_that_nests_too_deeply_is_refused_within_the_stack_budget() {
 const CELLS: &str = "
 component <Row extends Node n:int /> = {
   state { picks:int = 0 }
-  <Button Text={\"Row \" + n} onTapped=<Update picks={picks + 1} /> />
+  <Button Text={\"Row \" + n} onTapped=<State.Update picks={picks + 1} /> />
 }
 let <Cell Item:int Index:int />: Node = <Row n={Item} />
 let template() = { Cell }

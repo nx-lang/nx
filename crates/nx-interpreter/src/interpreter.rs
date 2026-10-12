@@ -1255,7 +1255,7 @@ impl Interpreter {
         )
     }
 
-    /// Returns true when `value` is the update record of `component`.
+    /// Returns true when `value` is the update record of `component`'s state record.
     fn is_update_record_for(
         &self,
         module: &LoweredModule,
@@ -1265,8 +1265,9 @@ impl Interpreter {
         let Value::Record { type_name, .. } = value else {
             return false;
         };
+        let state = nx_hir::state_record_name(component.as_str());
         self.resolve_record_definition(module, type_name.as_str())
-            .is_some_and(|record| record.update_target() == Some(component))
+            .is_some_and(|record| record.update_target() == Some(&state))
     }
 
     /// Applies one update record to the working state: present fields replace, absent ones stay.
@@ -7511,7 +7512,7 @@ mod tests {
         external component <Button value:int = 0 emits { Tapped { } } />
         component <Counter emits { Saved } /> = {
           state { count:int = 0 label:string = "x" }
-          <Button value={count} onTapped=<Update count={count + 1} /> />
+          <Button value={count} onTapped=<State.Update count={count + 1} /> />
         }
     "#;
 
@@ -7698,7 +7699,7 @@ mod tests {
             external component <Button emits { Tapped { } } />
             component <Counter emits { Saved } /> = {
               state { count:int = 0 }
-              <Button onTapped={<Update count={count + 1} /> <Saved />} />
+              <Button onTapped={<State.Update count={count + 1} /> <Saved />} />
             }
             "#,
         );
@@ -7716,7 +7717,7 @@ mod tests {
         assert_eq!(
             results,
             vec![
-                record("Counter.Update", &[("count", Value::Int(1))]),
+                record("Counter.State.Update", &[("count", Value::Int(1))]),
                 record("Saved", &[]),
             ]
         );
@@ -7826,8 +7827,8 @@ mod tests {
             component <Counter /> = {
               state { count:int = 0 }
               <Row>
-                <Button onTapped=<Update count=10 /> />
-                <Button onTapped=<Update count={count * 2} /> />
+                <Button onTapped=<State.Update count=10 /> />
+                <Button onTapped=<State.Update count={count * 2} /> />
               </Row>
             }
             "#,
@@ -7863,7 +7864,7 @@ mod tests {
             component <Picker /> = {
               state { items:string+ = {"a" "b"} selected:string = "" }
               <Column>
-                {for item in items { <Row onTapped={<Update items={"x" "y"} /> <Update selected={item} />} /> }}
+                {for item in items { <Row onTapped={<State.Update items={"x" "y"} /> <State.Update selected={item} />} /> }}
               </Column>
             }
             "#,
@@ -7907,7 +7908,7 @@ mod tests {
             external component <Button emits { Tapped { } } />
             component <Form emits { Saved } /> = {
               state { dirty:boolean = true }
-              <Button onTapped={<Update dirty=false /> <Saved />} />
+              <Button onTapped={<State.Update dirty=false /> <Saved />} />
             }
             "#,
         );
@@ -7938,7 +7939,7 @@ mod tests {
             }
             component <Page /> = {
               state { query:string = "" }
-              <SearchBox onSearchSubmitted=<Update query={action.searchString} /> />
+              <SearchBox onSearchSubmitted=<State.Update query={action.searchString} /> />
             }
             "#,
         );
@@ -7961,7 +7962,7 @@ mod tests {
             .expect("Expected dispatch to succeed");
         assert_eq!(
             dispatch.effects,
-            vec![record("Page.Update", &[("query", string("docs"))])]
+            vec![record("Page.State.Update", &[("query", string("docs"))])]
         );
         let state = snapshot_state(&interpreter, module.as_ref(), &dispatch.state_snapshot);
         assert_eq!(
@@ -8039,7 +8040,7 @@ mod tests {
             external component <Slider emits { EndChanged { value:float64 } } />
             component <Counter /> = {
               state { count:int = 0 }
-              <Button onTapped=<Update count={count + 1} /> />
+              <Button onTapped=<State.Update count={count + 1} /> />
             }
             "#,
         );
@@ -8073,7 +8074,7 @@ mod tests {
             external component <Button emits { Tapped { } } />
             component <Counter /> = {
               state { count:int = 0 }
-              <Button onTapped=<Update count="one" /> />
+              <Button onTapped=<State.Update count="one" /> />
             }
             "#,
         );
@@ -8105,7 +8106,7 @@ mod tests {
                 module,
                 component,
                 &mut state,
-                record("Counter.Update", &[("count", string("one"))]),
+                record("Counter.State.Update", &[("count", string("one"))]),
             )
             .expect_err("Expected a mistyped patch to be refused");
         assert!(error.to_string().contains("Counter.count"), "got {}", error);

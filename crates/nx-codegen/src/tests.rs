@@ -2324,15 +2324,29 @@ let root() = <User.Update email={} />
 }
 
 #[test]
-fn generated_javascript_constructs_a_component_update_record_from_its_state() {
+fn generated_javascript_constructs_a_component_state_update_record() {
     let output = execute_generated_javascript_root(
         r#"
 component <Counter /> = { state { count:int = 0 label:string = "x" } <Label /> }
-let root() = <Counter.Update count=1 />
+let root() = <Counter.State.Update count=1 />
 "#,
     );
 
-    assert_json_values_eq(&output, r#"{ "$type": "Counter.Update", "count": 1 }"#);
+    assert_json_values_eq(
+        &output,
+        r#"{ "$type": "Counter.State.Update", "count": 1 }"#,
+    );
+}
+
+#[test]
+fn generated_javascript_constructs_a_component_state_record() {
+    let source = r#"
+component <Counter /> = { state { count:int = 0 note?:string } <Label /> }
+let root() = {apply(<Counter.State count=1 />, <Counter.State.Update count=2 />)}
+"#;
+    let output = execute_generated_javascript_root(source);
+    assert_json_values_eq(&output, r#"{ "$type": "Counter.State", "count": 2 }"#);
+    assert_json_values_eq(&output, &interpreter_json_root(source));
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -2797,13 +2811,13 @@ fn generated_typescript_erases_a_type_parameter_on_the_state_type() {
 #[test]
 fn an_update_record_of_a_generic_component_erases_the_parameter() {
     let artifact = artifact_from_source(&format!(
-        "{GENERIC_STATEFUL_LIST}let u = <List.Update sel={{}} />\nlet root() = {{ u }}"
+        "{GENERIC_STATEFUL_LIST}let u = <List.State.Update sel={{}} />\nlet root() = {{ u }}"
     ));
     let module = generated_file(&artifact, CodegenTarget::TypeScript, "m0_main.ts");
 
     assert!(
         module.contains(
-            "type List_Update = {\n  readonly $type: \"List.Update\";\n  readonly sel?: object | null;\n};"
+            "type List_State_Update = {\n  readonly $type: \"List.State.Update\";\n  readonly sel?: object | null;\n};"
         ),
         "{module}"
     );

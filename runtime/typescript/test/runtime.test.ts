@@ -304,7 +304,12 @@ class ArtifactBuilder {
     props: readonly Cells[],
     state: readonly Cells[],
     body: number,
-    options: { external?: boolean; abstract?: boolean; emits?: readonly (readonly [string, Cells])[] } = {},
+    options: {
+      external?: boolean;
+      abstract?: boolean;
+      emits?: readonly (readonly [string, Cells])[];
+      stateRecord?: Cells;
+    } = {},
   ): number {
     const flags = (options.abstract === true ? 1 : 0) + (options.external === true ? 2 : 0);
     const index = this.declaration([
@@ -315,6 +320,7 @@ class ArtifactBuilder {
       body < 0 ? NX_IR_NONE : body,
       flags,
       ...this.list((options.emits ?? []).map(([emitName, action]) => [this.str(emitName), ...action])),
+      ...(options.stateRecord ?? [NX_IR_NONE, NX_IR_NONE]),
     ]);
     this.componentEntrypoints.push(index);
     return index;
@@ -466,7 +472,7 @@ test("refuses schema 4 naming both versions, and unknown ABIs and features", () 
   const b = new ArtifactBuilder("main.nx");
   b.fn("root", b.int(1));
   const artifact = b.build();
-  assertEqual(new DataView(artifact.buffer, artifact.byteOffset).getUint32(4, true), 5);
+  assertEqual(new DataView(artifact.buffer, artifact.byteOffset).getUint32(4, true), 6);
 
   const old = artifact.slice();
   new DataView(old.buffer).setUint32(4, 4, true);
@@ -475,7 +481,7 @@ test("refuses schema 4 naming both versions, and unknown ABIs and features", () 
   if (!schema4.ok) {
     const message = schema4.diagnostics[0]!.message;
     assertEqual(message.includes("schema version 4"), true);
-    assertEqual(message.includes("schema version 5"), true);
+    assertEqual(message.includes("schema version 6"), true);
   }
   assertEqual(tryPrepareNxIrModule(b.build({ runtimeAbi: "nx-ir-runtime-v1" })).ok, false);
   const notAnImage = tryPrepareNxIrModule(new TextEncoder().encode('{"format":"nx-ir-json","schemaVersion":3}'));
@@ -963,8 +969,10 @@ test("initializes, evaluates and patches a component's host-owned state", () => 
   assertThrows(() => evaluateComponent(program, "Card", { user }, {}), "Missing required Card state field 'count'");
   assertEqual(normalizeComponentState(program, "Card", { count: 2 }), { count: 2 });
   assertEqual(applyComponentStatePatch(program, "Card", { count: 1 }, { count: 5 }), { count: 5 });
-  assertEqual(applyComponentStatePatch(program, "Card", { count: 1 }, { $type: "Card.Update", count: 6 }), { count: 6 });
-  assertThrows(() => applyComponentStatePatch(program, "Card", { count: 1 }, { $type: "Other.Update" }), "only 'Card.Update' patches it");
+  assertEqual(applyComponentStatePatch(program, "Card", { count: 1 }, { $type: "Card.State.Update", count: 6 }), { count: 6 });
+  assertThrows(() => applyComponentStatePatch(program, "Card", { count: 1 }, { $type: "Other.Update" }), "only 'Card.State.Update' patches it");
+  // A component has no update record of its own, so a `Card.Update` patches nothing.
+  assertThrows(() => applyComponentStatePatch(program, "Card", { count: 1 }, { $type: "Card.Update", count: 6 }), "only 'Card.State.Update' patches it");
   assertThrows(() => applyComponentStatePatch(program, "Card", { count: 1 }, { size: 2 }), "Unknown Card state field 'size'");
 });
 
@@ -1024,8 +1032,8 @@ test("the exported helpers apply, merge, diff and list changed fields on host-he
 
 /**
  * `component <Counter step:int = 1 emits { Reset } /> = { state { count:int = 0 } [<Button
- * label="Add" onTapped=<Update count={count + step} /> />, <Button label="Bad"
- * onTapped=<Update count="oops" /> />] }` beside `external component <Button label:string emits
+ * label="Add" onTapped=<State.Update count={count + step} /> />, <Button label="Bad"
+ * onTapped=<State.Update count="oops" /> />] }` beside `external component <Button label:string emits
  * { Tapped { } } />` and `action Reset = { }`, plus functions whose descriptors bind a handler
  * under `onReset`, under a name no emit has, and under `onReset` for the wrong emit.
  */
@@ -1039,20 +1047,22 @@ function counterArtifact(): Uint8Array {
     external: true,
     emits: [["Tapped", b.ref("Button.Tapped")]],
   });
-  b.record("Counter.Update", [b.field("count", int)], { updateTarget: b.ref("Counter") });
+  b.record("Counter.State", [b.field("count", int, { required: true })]);
+  b.record("Counter.State.Update", [b.field("count", int)], { updateTarget: b.ref("Counter.State") });
   // Counter's frame: step at 0, count at 1, and each handler's `action` at 2.
   const count = b.node([nodeKinds.slot, 1, b.str("count")]);
   const step = b.node([nodeKinds.slot, 0, b.str("step")]);
   const sum = b.node([nodeKinds.binary, 0, count, step]);
-  const patch = b.node([nodeKinds.record, ...b.ref("Counter.Update"), ...b.list([b.property("count", sum)]), ...b.content([])]);
+  const patch = b.node([nodeKinds.record, ...b.ref("Counter.State.Update"), ...b.list([b.property("count", sum)]), ...b.content([])]);
   const add = b.handler(b.ref("Button"), "Tapped", b.ref("Button.Tapped"), 2, b.ref("Counter"), patch);
-  const oops = b.node([nodeKinds.record, ...b.ref("Counter.Update"), ...b.list([b.property("count", b.string("oops"))]), ...b.content([])]);
+  const oops = b.node([nodeKinds.record, ...b.ref("Counter.State.Update"), ...b.list([b.property("count", b.string("oops"))]), ...b.content([])]);
   const bad = b.handler(b.ref("Button"), "Tapped", b.ref("Button.Tapped"), 2, b.ref("Counter"), oops);
   const button = (label: string, handler: number): number =>
     b.node([nodeKinds.component, ...b.ref("Button"), ...b.list([b.property("label", b.string(label)), b.property("onTapped", handler)]), ...b.content([])]);
   const body = b.node([nodeKinds.array, ...b.content([button("Add", add), button("Bad", bad)])]);
   b.component("Counter", [b.field("step", int, { default: b.int(1) })], [b.field("count", int, { default: b.int(0) })], body, {
     emits: [["Reset", b.ref("Reset")]],
+    stateRecord: b.ref("Counter.State"),
   });
   // Root-bound handlers: `action` is the function frame's first slot.
   const reset = b.node([nodeKinds.record, ...b.ref("Reset"), ...b.list([]), ...b.content([])]);
@@ -1179,7 +1189,7 @@ test("a failing batch is atomic and leaves the supplied instance usable", () => 
   const program = prepareNxIrProgram(counterArtifact());
   const { instance } = initializeComponent(program, "Counter", { step: 5 });
   assertThrows(() => dispatchComponentActions(program, instance, [tapped("h1-1"), tapped("h9-9")]), "Unknown handler token 'h9-9'");
-  const bad = assertThrows(() => dispatchComponentActions(program, instance, [tapped("h1-1"), tapped("h1-2")]), "Expected Counter.Update.count to be a number");
+  const bad = assertThrows(() => dispatchComponentActions(program, instance, [tapped("h1-1"), tapped("h1-2")]), "Expected Counter.State.Update.count to be a number");
   assertEqual(bad.diagnostics[0]!.code, "nx-ir-boundary-type");
   const retry = dispatchComponentActions(program, instance, [tapped("h1-1")]);
   assertEqual(retry.state, { count: 5 });
@@ -1226,7 +1236,7 @@ test("a parent's handler reaches the child through the parent's instance and run
   // The second box's handler returns the parent's own update record, which is an effect here.
   const again = initializeComponent(program, "SearchBox", searchBoxProps(second!), { parent: page.instance });
   const patched = dispatchComponentActions(program, again.instance, [{ $type: "SearchSubmitted", searchString: "docs" }]);
-  assertEqual(patched.effects, [{ $type: "Page.Update", query: "docs" }]);
+  assertEqual(patched.effects, [{ $type: "Page.State.Update", query: "docs" }]);
   assertEqual(patched.state, { query: "Again" });
   assertThrows(() => dispatchComponentActions(program, again.instance, [{ $type: "SearchSubmitted", searchString: 3 }]), "Expected SearchSubmitted action.searchString to be a string");
 });
@@ -1240,7 +1250,7 @@ test("a handler in a content child stays the parent's and is unowned by the chil
   const [button] = ofType(fields(stack.rendered).content as NxCanonicalValue[], "Button");
   assertEqual(fields(button!.onTapped!).token, "h1-1");
   const dispatched = dispatchComponentActions(program, stack.instance, [tapped("h1-1")]);
-  assertEqual(dispatched.effects, [{ $type: "Page.Update", count: 1 }]);
+  assertEqual(dispatched.effects, [{ $type: "Page.State.Update", count: 1 }]);
   assertEqual(dispatched.state, {});
 });
 
@@ -2157,15 +2167,18 @@ test("a present empty value clears an optional state field and is refused for on
   const string = b.primitive("string");
   const int = b.primitive("int");
   const body = b.node([nodeKinds.element, 0, b.str("div"), ...b.list([b.property("q", b.node([nodeKinds.slot, 0, b.str("query")]))]), ...b.content([])]);
-  b.component("Search", [], [b.field("query", b.optional(string)), b.field("count", int, { default: b.int(0) })], body);
-  b.record("Search.Update", [b.field("query", b.optional(string)), b.field("count", int)], { updateTarget: b.ref("Search") });
+  b.component("Search", [], [b.field("query", b.optional(string)), b.field("count", int, { default: b.int(0) })], body, {
+    stateRecord: b.ref("Search.State"),
+  });
+  b.record("Search.State", [b.field("query", b.optional(string)), b.field("count", int, { required: true })]);
+  b.record("Search.State.Update", [b.field("query", b.optional(string)), b.field("count", int)], { updateTarget: b.ref("Search.State") });
   const program = prepareNxIrProgram(b.build({ requiredFeatures: ["update-records-v1"] }));
 
   // Optional state starts empty, which the state carries no key for and the body reads as empty.
   const initialized = initializeComponent(program, "Search");
   assertEqual(initialized.state, { count: 0 });
   assertEqual(initialized.rendered, { $type: "div", q: [] });
-  assertEqual(applyComponentStatePatch(program, "Search", { query: "docs", count: 1 }, { $type: "Search.Update", query: null }), { count: 1 });
+  assertEqual(applyComponentStatePatch(program, "Search", { query: "docs", count: 1 }, { $type: "Search.State.Update", query: null }), { count: 1 });
   assertEqual(applyComponentStatePatch(program, "Search", { query: "docs", count: 1 }, { query: [] }), { count: 1 });
   assertEqual(applyComponentStatePatch(program, "Search", { count: 1 }, { query: "x" }), { count: 1, query: "x" });
   for (const empty of [null, []]) {

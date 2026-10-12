@@ -8,7 +8,10 @@ This page describes type declarations and usage. For formal grammar, see [nx-gra
 ## Type Names
 A name written where a type goes must name a type visible in that module: a primitive, a record,
 union, alias, component or action declared in or imported into the module, `Element`, `Range` from
-the prelude, a type parameter in scope, or a derived `Name.Property` or `Name.Update`. Any other name
+the prelude, a type parameter in scope, a record's or action's derived `Name.Property` or
+`Name.Update`, or, for a component with state, `Name.State`, `Name.State.Update` and
+`Name.State.Property`. Inside a component
+body a bare `State` names that component's state record. Any other name
 is an error, `unresolved-type`, reported where it was written and suggesting the closest visible name:
 
 ```nx invalid
@@ -456,8 +459,9 @@ let stage = { DealStage.pending_review }
 - A union whose cases all carry no payload is a *constant union*: it is the plain scalar-choice
   form, and it generates a C# `enum` and a TypeScript string-literal union. Give a case a payload
   when that state needs to carry data.
-- Every record, action, and component with `state` has a derived constant union of its field
-  names, `T.Property`, so `User.Property.email` names the `email` field of `User` as a value. See
+- Every record and action has a derived constant union of its field names, `T.Property` (a
+  component has none; its state fields are `T.State.Property`), so
+  `User.Property.email` names the `email` field of `User` as a value. See
   [Property references](/reference/syntax/functions#property-references).
 
 ## Discriminated Union Types
@@ -680,7 +684,8 @@ instantiation (`Bounds<long>`, `Bounds<number>`) — because a host names the co
 its own deserialization site. The update companion follows the record: `Bounds_update<T>` in both
 languages, so a patch of a `Bounds<long>` is typed as one and applies to it. The wire is unaffected —
 a patch is still `Bounds.Update` with its field names and no type argument. Only a *component's*
-state companion erases its parameters, because the type it patches is already concrete.
+state companions (`<Name>_state` and `<Name>_state_update`) erase its parameters, because
+the instantiation was fixed at an NX use site the host never sees.
 
 ## Ranges
 `Range` is a **built-in type**: a generic record NX declares for every program, so it needs no import

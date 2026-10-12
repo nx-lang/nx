@@ -2,110 +2,138 @@
   "main.nx::Counter": {
     "batches": [
       [
-        {"path": "", "module": "main.nx", "start": 912, "end": 1116},
-        {"path": "/children/0", "module": "main.nx", "start": 924, "end": 946},
-        {"path": "/children/1", "module": "main.nx", "start": 951, "end": 1036},
-        {"path": "/children/2", "module": "main.nx", "start": 1041, "end": 1105}
+        {"path": "", "module": "main.nx", "start": 916, "end": 1138},
+        {"path": "/children/0", "module": "main.nx", "start": 928, "end": 950},
+        {"path": "/children/1", "module": "main.nx", "start": 955, "end": 1052},
+        {"path": "/children/2", "module": "main.nx", "start": 1057, "end": 1127}
       ],
       [
-        {"path": "", "module": "main.nx", "start": 912, "end": 1116},
-        {"path": "/children/0", "module": "main.nx", "start": 924, "end": 946},
-        {"path": "/children/1", "module": "main.nx", "start": 951, "end": 1036},
-        {"path": "/children/2", "module": "main.nx", "start": 1041, "end": 1105}
+        {"path": "", "module": "main.nx", "start": 916, "end": 1138},
+        {"path": "/children/0", "module": "main.nx", "start": 928, "end": 950},
+        {"path": "/children/1", "module": "main.nx", "start": 955, "end": 1052},
+        {"path": "/children/2", "module": "main.nx", "start": 1057, "end": 1127}
       ],
       [
-        {"path": "", "module": "main.nx", "start": 912, "end": 1116},
-        {"path": "/children/0", "module": "main.nx", "start": 924, "end": 946},
-        {"path": "/children/1", "module": "main.nx", "start": 951, "end": 1036},
-        {"path": "/children/2", "module": "main.nx", "start": 1041, "end": 1105}
+        {"path": "", "module": "main.nx", "start": 916, "end": 1138},
+        {"path": "/children/0", "module": "main.nx", "start": 928, "end": 950},
+        {"path": "/children/1", "module": "main.nx", "start": 955, "end": 1052},
+        {"path": "/children/2", "module": "main.nx", "start": 1057, "end": 1127}
       ],
       [
-        {"path": "", "module": "main.nx", "start": 912, "end": 1116},
-        {"path": "/children/0", "module": "main.nx", "start": 924, "end": 946},
-        {"path": "/children/1", "module": "main.nx", "start": 951, "end": 1036},
-        {"path": "/children/2", "module": "main.nx", "start": 1041, "end": 1105}
+        {"path": "", "module": "main.nx", "start": 916, "end": 1138},
+        {"path": "/children/0", "module": "main.nx", "start": 928, "end": 950},
+        {"path": "/children/1", "module": "main.nx", "start": 955, "end": 1052},
+        {"path": "/children/2", "module": "main.nx", "start": 1057, "end": 1127}
       ],
       [
-        {"path": "", "module": "main.nx", "start": 912, "end": 1116},
-        {"path": "/children/0", "module": "main.nx", "start": 924, "end": 946},
-        {"path": "/children/1", "module": "main.nx", "start": 951, "end": 1036},
-        {"path": "/children/2", "module": "main.nx", "start": 1041, "end": 1105}
+        {"path": "", "module": "main.nx", "start": 916, "end": 1138},
+        {"path": "/children/0", "module": "main.nx", "start": 928, "end": 950},
+        {"path": "/children/1", "module": "main.nx", "start": 955, "end": 1052},
+        {"path": "/children/2", "module": "main.nx", "start": 1057, "end": 1127}
       ]
     ],
     "initial": [
-      {"path": "", "module": "main.nx", "start": 912, "end": 1116},
-      {"path": "/children/0", "module": "main.nx", "start": 924, "end": 946},
-      {"path": "/children/1", "module": "main.nx", "start": 951, "end": 1036},
-      {"path": "/children/2", "module": "main.nx", "start": 1041, "end": 1105}
+      {"path": "", "module": "main.nx", "start": 916, "end": 1138},
+      {"path": "/children/0", "module": "main.nx", "start": 928, "end": 950},
+      {"path": "/children/1", "module": "main.nx", "start": 955, "end": 1052},
+      {"path": "/children/2", "module": "main.nx", "start": 1057, "end": 1127}
+    ]
+  },
+  "main.nx::Diffed": {
+    "batches": [
+      [
+        {"path": "", "module": "main.nx", "start": 2683, "end": 2944},
+        {"path": "/children/0", "module": "main.nx", "start": 2695, "end": 2717},
+        {"path": "/children/1", "module": "main.nx", "start": 2722, "end": 2758},
+        {"path": "/children/2", "module": "main.nx", "start": 2763, "end": 2870},
+        {"path": "/children/3", "module": "main.nx", "start": 2875, "end": 2933}
+      ],
+      [
+        {"path": "", "module": "main.nx", "start": 2683, "end": 2944},
+        {"path": "/children/0", "module": "main.nx", "start": 2695, "end": 2717},
+        {"path": "/children/1", "module": "main.nx", "start": 2722, "end": 2758},
+        {"path": "/children/2", "module": "main.nx", "start": 2763, "end": 2870},
+        {"path": "/children/3", "module": "main.nx", "start": 2875, "end": 2933}
+      ]
+    ],
+    "initial": [
+      {"path": "", "module": "main.nx", "start": 2683, "end": 2944},
+      {"path": "/children/0", "module": "main.nx", "start": 2695, "end": 2717},
+      {"path": "/children/1", "module": "main.nx", "start": 2722, "end": 2758},
+      {"path": "/children/2", "module": "main.nx", "start": 2763, "end": 2870},
+      {"path": "/children/3", "module": "main.nx", "start": 2875, "end": 2933}
     ]
   },
   "main.nx::Page": {
     "batches": [
       [
-        {"path": "", "module": "main.nx", "start": 2071, "end": 2387},
-        {"path": "/children/0", "module": "main.nx", "start": 2083, "end": 2105},
-        {"path": "/children/1", "module": "main.nx", "start": 2110, "end": 2137},
-        {"path": "/children/2", "module": "main.nx", "start": 2142, "end": 2203},
-        {"path": "/children/3", "module": "main.nx", "start": 2208, "end": 2281},
-        {"path": "/children/4", "module": "main.nx", "start": 2286, "end": 2376}
+        {"path": "", "module": "main.nx", "start": 2105, "end": 2433},
+        {"path": "/children/0", "module": "main.nx", "start": 2117, "end": 2139},
+        {"path": "/children/1", "module": "main.nx", "start": 2144, "end": 2171},
+        {"path": "/children/2", "module": "main.nx", "start": 2176, "end": 2243},
+        {"path": "/children/3", "module": "main.nx", "start": 2248, "end": 2321},
+        {"path": "/children/4", "module": "main.nx", "start": 2326, "end": 2422}
       ],
       [
-        {"path": "", "module": "main.nx", "start": 2071, "end": 2387},
-        {"path": "/children/0", "module": "main.nx", "start": 2083, "end": 2105},
-        {"path": "/children/1", "module": "main.nx", "start": 2110, "end": 2137},
-        {"path": "/children/2", "module": "main.nx", "start": 2142, "end": 2203},
-        {"path": "/children/3", "module": "main.nx", "start": 2208, "end": 2281},
-        {"path": "/children/4", "module": "main.nx", "start": 2286, "end": 2376}
+        {"path": "", "module": "main.nx", "start": 2105, "end": 2433},
+        {"path": "/children/0", "module": "main.nx", "start": 2117, "end": 2139},
+        {"path": "/children/1", "module": "main.nx", "start": 2144, "end": 2171},
+        {"path": "/children/2", "module": "main.nx", "start": 2176, "end": 2243},
+        {"path": "/children/3", "module": "main.nx", "start": 2248, "end": 2321},
+        {"path": "/children/4", "module": "main.nx", "start": 2326, "end": 2422}
       ],
       [
-        {"path": "", "module": "main.nx", "start": 2071, "end": 2387},
-        {"path": "/children/0", "module": "main.nx", "start": 2083, "end": 2105},
-        {"path": "/children/1", "module": "main.nx", "start": 2110, "end": 2137},
-        {"path": "/children/2", "module": "main.nx", "start": 2142, "end": 2203},
-        {"path": "/children/3", "module": "main.nx", "start": 2208, "end": 2281},
-        {"path": "/children/4", "module": "main.nx", "start": 2286, "end": 2376}
+        {"path": "", "module": "main.nx", "start": 2105, "end": 2433},
+        {"path": "/children/0", "module": "main.nx", "start": 2117, "end": 2139},
+        {"path": "/children/1", "module": "main.nx", "start": 2144, "end": 2171},
+        {"path": "/children/2", "module": "main.nx", "start": 2176, "end": 2243},
+        {"path": "/children/3", "module": "main.nx", "start": 2248, "end": 2321},
+        {"path": "/children/4", "module": "main.nx", "start": 2326, "end": 2422}
       ],
       [
-        {"path": "", "module": "main.nx", "start": 2071, "end": 2387},
-        {"path": "/children/0", "module": "main.nx", "start": 2083, "end": 2105},
-        {"path": "/children/1", "module": "main.nx", "start": 2110, "end": 2137},
-        {"path": "/children/2", "module": "main.nx", "start": 2142, "end": 2203},
-        {"path": "/children/3", "module": "main.nx", "start": 2208, "end": 2281},
-        {"path": "/children/4", "module": "main.nx", "start": 2286, "end": 2376}
+        {"path": "", "module": "main.nx", "start": 2105, "end": 2433},
+        {"path": "/children/0", "module": "main.nx", "start": 2117, "end": 2139},
+        {"path": "/children/1", "module": "main.nx", "start": 2144, "end": 2171},
+        {"path": "/children/2", "module": "main.nx", "start": 2176, "end": 2243},
+        {"path": "/children/3", "module": "main.nx", "start": 2248, "end": 2321},
+        {"path": "/children/4", "module": "main.nx", "start": 2326, "end": 2422}
       ]
     ],
     "initial": [
-      {"path": "", "module": "main.nx", "start": 2071, "end": 2387},
-      {"path": "/children/0", "module": "main.nx", "start": 2083, "end": 2105},
-      {"path": "/children/1", "module": "main.nx", "start": 2110, "end": 2137},
-      {"path": "/children/2", "module": "main.nx", "start": 2142, "end": 2203},
-      {"path": "/children/3", "module": "main.nx", "start": 2208, "end": 2281},
-      {"path": "/children/4", "module": "main.nx", "start": 2286, "end": 2376}
+      {"path": "", "module": "main.nx", "start": 2105, "end": 2433},
+      {"path": "/children/0", "module": "main.nx", "start": 2117, "end": 2139},
+      {"path": "/children/1", "module": "main.nx", "start": 2144, "end": 2171},
+      {"path": "/children/2", "module": "main.nx", "start": 2176, "end": 2243},
+      {"path": "/children/3", "module": "main.nx", "start": 2248, "end": 2321},
+      {"path": "/children/4", "module": "main.nx", "start": 2326, "end": 2422}
     ]
   },
   "main.nx::Tens": {
     "batches": [
       [
-        {"path": "", "module": "main.nx", "start": 1523, "end": 1721},
-        {"path": "/header", "module": "main.nx", "start": 1635, "end": 1700},
-        {"path": "/items/0", "module": "main.nx", "start": 1560, "end": 1620},
-        {"path": "/items/1", "module": "main.nx", "start": 1560, "end": 1620}
+        {"path": "", "module": "main.nx", "start": 1545, "end": 1755},
+        {"path": "/header", "module": "main.nx", "start": 1663, "end": 1734},
+        {"path": "/items/0", "module": "main.nx", "start": 1582, "end": 1648},
+        {"path": "/items/1", "module": "main.nx", "start": 1582, "end": 1648}
       ],
       [
-        {"path": "", "module": "main.nx", "start": 1523, "end": 1721},
-        {"path": "/header", "module": "main.nx", "start": 1635, "end": 1700},
-        {"path": "/items/0", "module": "main.nx", "start": 1560, "end": 1620},
-        {"path": "/items/1", "module": "main.nx", "start": 1560, "end": 1620}
+        {"path": "", "module": "main.nx", "start": 1545, "end": 1755},
+        {"path": "/header", "module": "main.nx", "start": 1663, "end": 1734},
+        {"path": "/items/0", "module": "main.nx", "start": 1582, "end": 1648},
+        {"path": "/items/1", "module": "main.nx", "start": 1582, "end": 1648}
       ]
     ],
     "initial": [
-      {"path": "", "module": "main.nx", "start": 1523, "end": 1721},
-      {"path": "/header", "module": "main.nx", "start": 1635, "end": 1700},
-      {"path": "/items/0", "module": "main.nx", "start": 1560, "end": 1620},
-      {"path": "/items/1", "module": "main.nx", "start": 1560, "end": 1620}
+      {"path": "", "module": "main.nx", "start": 1545, "end": 1755},
+      {"path": "/header", "module": "main.nx", "start": 1663, "end": 1734},
+      {"path": "/items/0", "module": "main.nx", "start": 1582, "end": 1648},
+      {"path": "/items/1", "module": "main.nx", "start": 1582, "end": 1648}
     ]
   },
+  "main.nx::clearNote": [
+    {"path": "", "module": "main.nx", "start": 3027, "end": 3058}
+  ],
   "main.nx::root": [
-    {"path": "", "module": "main.nx", "start": 2406, "end": 2479}
+    {"path": "", "module": "main.nx", "start": 3077, "end": 3150}
   ]
 }

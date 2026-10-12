@@ -11,7 +11,7 @@
 
 import { NX_PRELUDE_IMAGE_BASE64, NX_PRELUDE_VERSION } from "./prelude-image.js";
 
-export const NX_IR_SCHEMA_VERSION = 5;
+export const NX_IR_SCHEMA_VERSION = 6;
 export const NX_IR_RUNTIME_ABI = "nx-ir-runtime-v2";
 
 export const NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1 = "update-records-v1";
@@ -884,6 +884,11 @@ export type PreparedDeclarationKind =
       readonly isExternal: boolean;
       /** The effective emits, inherited included, in declaration order. */
       readonly emits: readonly PreparedEmit[];
+      /**
+       * The component's `<Component>.State` record, when the image emits it. A handler result
+       * whose update target is this record patches the component's state.
+       */
+      readonly stateRecord: NxIrReference | undefined;
     }
   | {
       readonly tag: "union";
@@ -1429,7 +1434,7 @@ const layouts: Record<NxIrTable, readonly (readonly Op[] | undefined)[]> = {
     ["str", { list: DECLARED_PARAM }, "node", "optType", "int"],
     ["str", "node", "optType"],
     ["str", { list: FIELD }, { list: REFS }, "int", "optRef"],
-    ["str", { list: FIELD }, { list: FIELD }, "optNode", "int", { list: EMIT }],
+    ["str", { list: FIELD }, { list: FIELD }, "optNode", "int", { list: EMIT }, "optRef"],
     ["str", { list: UNION_CASE }, { list: REFS }, "optRef"],
     ["str"],
   ],
@@ -1497,7 +1502,7 @@ class TableReader {
     if (layout === undefined) {
       const retired =
         (table === "types" && (kind === 2 || kind === 3)) || (table === "nodes" && kind === 0)
-          ? ` (retired with schema ${NX_IR_SCHEMA_VERSION})`
+          ? ` (retired with schema 5)`
           : "";
       this.#fail(`Unknown ${table.replace(/s$/, "")} kind ${kind}${retired} at ${what}.`);
       return;
@@ -1808,6 +1813,7 @@ class TableReader {
           const emitName = this.#image.string(cursor.next());
           return { name: emitName, action: this.#ref(cursor) };
         });
+        const stateRecord = this.#optRef(cursor);
         prepared = {
           tag: "component",
           props,
@@ -1816,6 +1822,7 @@ class TableReader {
           isAbstract: (flags & componentFlags.abstract) !== 0,
           isExternal: (flags & componentFlags.external) !== 0,
           emits,
+          stateRecord,
         };
         break;
       }
@@ -2245,10 +2252,10 @@ export function evaluateComponent(
  * bound on the instance's props, or an `ActionHandlerInvocation` naming a handler of the
  * instance's most recent rendered output by token, with the action to feed it. Entries run in
  * order. A handler the component's own body bound reads the state live and patches it with the
- * component's update records; any other handler sees only what it captured, and everything it
- * returns is an effect. The body is rendered once against the state the batch produced. A failure
- * throws before anything is returned, so the instance given stays the state of record. One
- * operation budget covers the whole batch and the render after it.
+ * component's `State.Update` records; any other handler sees only what it captured, and
+ * everything it returns is an effect. The body is rendered once against the state the batch
+ * produced. A failure throws before anything is returned, so the instance given stays the state of
+ * record. One operation budget covers the whole batch and the render after it.
  */
 export function dispatchComponentActions(
   program: NxPreparedProgram | NxPreparedModule,
@@ -2283,6 +2290,8 @@ function dispatchBatch(
   }
   const linked = linkedProgram.entry;
   const ownerKey = `${linked.module.identity}::${declaration.name}`;
+  // A component's state record is declared beside it, in the entry module.
+  const stateKey = component.stateRecord === undefined ? undefined : declarationKey(linked, component.stateRecord);
   // The records the instance holds keep the origins its lineage recorded for them, whether or not
   // this call records any of its own.
   const lineage = instanceOrigins.get(instance);
@@ -2313,7 +2322,7 @@ function dispatchBatch(
         evaluation,
       );
       for (const result of results) {
-        if (owned && isUpdateRecordFor(result, linkedProgram, ownerKey)) {
+        if (owned && stateKey !== undefined && isUpdateRecordFor(result, linkedProgram, stateKey)) {
           working = patchComponentState(linkedProgram, linked, declaration, component, working, result as NxRecordObject, evaluation);
         } else {
           effects.push(result);
@@ -2410,8 +2419,8 @@ function propsFrame(component: Extract<PreparedDeclarationKind, { tag: "componen
 /**
  * Applies a patch to host-owned component state and returns the validated next state.
  *
- * The patch is either a plain partial state object or the component's own update record,
- * `{ $type: "<Component>.Update", ... }`. Either way a present field replaces the current value, an
+ * The patch is either a plain partial state object or the update record of the component's state,
+ * `{ $type: "<Component>.State.Update", ... }`. Either way a present field replaces the current value, an
  * absent one keeps it, and a present empty value — `null` or `[]` — clears an optional state field,
  * so the next state carries no key for it; for a field that is not optional it is rejected.
  */
@@ -2449,7 +2458,7 @@ function patchComponentState(
 ): Record<string, NxCanonicalValue> {
   const name = declaration.name;
   const { $type: discriminator, ...fields } = patch;
-  const expectedUpdate = `${name}.Update`;
+  const expectedUpdate = `${name}.State.Update`;
   if (discriminator !== undefined && discriminator !== expectedUpdate) {
     fail("nx-ir-state-patch", `Cannot apply '${String(discriminator)}' to ${name} state; only '${expectedUpdate}' patches it.`);
   }
@@ -4371,8 +4380,8 @@ function invokeHandler(
   return results;
 }
 
-/** Whether `value` is the update record of the component with `ownerKey`. */
-function isUpdateRecordFor(value: NxCanonicalValue, program: NxPreparedProgram, ownerKey: string): boolean {
+/** Whether `value` is the update record of the state record with `stateKey`. */
+function isUpdateRecordFor(value: NxCanonicalValue, program: NxPreparedProgram, stateKey: string): boolean {
   if (!isObject(value) || typeof value.$type !== "string") {
     return false;
   }
@@ -4383,7 +4392,7 @@ function isUpdateRecordFor(value: NxCanonicalValue, program: NxPreparedProgram, 
       declaration !== undefined &&
       declaration.kind.tag === "record" &&
       declaration.kind.updateTarget !== undefined &&
-      declarationKey(shape.linked, declaration.kind.updateTarget) === ownerKey
+      declarationKey(shape.linked, declaration.kind.updateTarget) === stateKey
     );
   });
 }

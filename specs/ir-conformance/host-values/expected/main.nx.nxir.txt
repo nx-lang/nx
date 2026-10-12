@@ -1,4 +1,4 @@
-module main.nx fingerprint 12652264459537661976
+module main.nx fingerprint 10322034692741992173
 requires update-records-v1 action-handlers-v1
 entrypoints functions [listed held greeting same count bound] components [Button Counter]
 
@@ -28,7 +28,7 @@ function count(content items: object): int @43:1-43:45 =
 function bound(xs: object): int @44:1-44:42 =
   count(xs)
 
-component Counter @54:1-57:2
+component Counter state Counter.State @54:1-57:2
   props
     title: string required
     step: int = 1
@@ -37,9 +37,12 @@ component Counter @54:1-57:2
   body =
     <Button label=title
       onTapped=handler Button.Tapped action@3:Button.Tapped owner Counter =>
-        <Counter.Update count=(count add step) />
+        <Counter.State.Update count=(count add step) />
     >
     </Button>
 
-record Counter.Update update of Counter @54:1-57:2
+record Counter.State @54:1-57:2
+  count: int required
+
+record Counter.State.Update update of Counter.State @54:1-57:2
   count: int

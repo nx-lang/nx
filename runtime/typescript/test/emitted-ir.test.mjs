@@ -377,7 +377,7 @@ withSource(
 external component <Button label:string emits { Tapped { } } />
 component <Counter step:int = 1 /> = {
   state { count:int = 0 }
-  <Button label="Add" onTapped=<Update count={count + step} /> />
+  <Button label="Add" onTapped=<State.Update count={count + step} /> />
 }
 `,
   (dir, sourcePath) => {
@@ -972,7 +972,7 @@ let longContent() = <list>{for i in 0..200000 { i }}</list>
 
 component <Busy /> = {
   state { items?:int+ }
-  <Button onTapped=<Update items={for i in 0..300 { i }} /> />
+  <Button onTapped=<State.Update items={for i in 0..300 { i }} /> />
 }
 component <Eager /> = {
   state { bag:Bag = <Bag items={for i in 0..100000 { i }} /> }
@@ -1015,7 +1015,7 @@ let repeat(s:string, count:int) = { for i in 0..count { s } }
 let fan(n:int, count:int) = { repeat(growText(n, "x"), count) }
 component <Holder /> = {
   state { view?:object }
-  <Button onTapped=<Update view={growPair(40, <leaf />)} /> />
+  <Button onTapped=<State.Update view={growPair(40, <leaf />)} /> />
 }
 let pings(): Ping+ = { <Ping n={0} /> for i in 1..200000 { <Ping n={i} /> } }
 component <Burst emits { Fired { } } /> = { <Button /> }
@@ -1439,13 +1439,13 @@ component <Card title:string = "none" count:int = 0 content body?:object+ /> = {
 }
 component <Counter /> = {
   state { count:int = 0 note?:string data?:object }
-  <Button onTapped=<Update count={count + 1} /> />
+  <Button onTapped=<State.Update count={count + 1} /> />
 }
 component <Keeper /> = {
   state { data?:object n:int = {0} }
   <panel>
-    <Button onTapped=<Update data=<bag>{for i in 0..50000 { <leaf /> }}</bag> /> />
-    <Button onTapped=<Update data={data} n={n + 1} /> />
+    <Button onTapped=<State.Update data=<bag>{for i in 0..50000 { <leaf /> }}</bag> /> />
+    <Button onTapped=<State.Update data={data} n={n + 1} /> />
   </panel>
 }
 `,
@@ -2043,12 +2043,12 @@ component <Card title:string = "none" extra?:object content body?:object+ /> = {
 }
 component <Counter /> = {
   state { count:int = 0 note?:string data?:object }
-  <Button onTapped=<Update count={count + 1} /> />
+  <Button onTapped=<State.Update count={count + 1} /> />
 }
 component <Child emits { Fired { } } /> = { <Button /> }
 component <Parent /> = {
   state { n:int = 0 }
-  <Child onFired=<Update n={n + 1} /> />
+  <Child onFired=<State.Update n={n + 1} /> />
 }
 let double(n:int): int = { n * 2 }
 component <Stepper /> = {

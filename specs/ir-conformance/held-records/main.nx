@@ -15,10 +15,10 @@ component <Holder /> = {
   state { held:Item = {first} spare:Item = <Item name="spare" /> count:int = 0 }
   <Stack>
     <Panel item={held} count={count} />
-    <Button label="Count" onTapped=<Update count={count + 1} /> />
-    <Button label="Swap" onTapped=<Update held={spare} spare={held} /> />
-    <Button label="Fresh" onTapped=<Update held=<Item name="fresh" /> /> />
-    <Chooser onChosen=<Update held={action.item} /> />
+    <Button label="Count" onTapped=<State.Update count={count + 1} /> />
+    <Button label="Swap" onTapped=<State.Update held={spare} spare={held} /> />
+    <Button label="Fresh" onTapped=<State.Update held=<Item name="fresh" /> /> />
+    <Chooser onChosen=<State.Update held={action.item} /> />
   </Stack>
 }
 
@@ -37,6 +37,6 @@ component <Tool /> = {
   state { op:Op = {double} spare:Op = {triple} }
   <Stack>
     <Result value={applied(op)} />
-    <Picker onPicked=<Update op={action.op} /> />
+    <Picker onPicked=<State.Update op={action.op} /> />
   </Stack>
 }

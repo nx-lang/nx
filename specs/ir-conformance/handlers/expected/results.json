@@ -184,6 +184,109 @@
       ]
     }
   },
+  "main.nx::Diffed": {
+    "batches": [
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Stack",
+          "children": [
+            {
+              "$type": "Label",
+              "text": 1
+            },
+            {
+              "$type": "TextInput",
+              "value": "tapped"
+            },
+            {
+              "$type": "Button",
+              "label": "Diff",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h2-1"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Clear",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h2-2"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Stack",
+          "children": [
+            {
+              "$type": "Label",
+              "text": 1
+            },
+            {
+              "$type": "TextInput",
+              "value": "none"
+            },
+            {
+              "$type": "Button",
+              "label": "Diff",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h3-1"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Clear",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h3-2"
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "initial": {
+      "$type": "Stack",
+      "children": [
+        {
+          "$type": "Label",
+          "text": 0
+        },
+        {
+          "$type": "TextInput",
+          "value": "none"
+        },
+        {
+          "$type": "Button",
+          "label": "Diff",
+          "onTapped": {
+            "$type": "ActionHandler",
+            "action": "Button.Tapped",
+            "token": "h1-1"
+          }
+        },
+        {
+          "$type": "Button",
+          "label": "Clear",
+          "onTapped": {
+            "$type": "ActionHandler",
+            "action": "Button.Tapped",
+            "token": "h1-2"
+          }
+        }
+      ]
+    }
+  },
   "main.nx::Page": {
     "batches": [
       {
@@ -513,6 +616,10 @@
         }
       ]
     }
+  },
+  "main.nx::clearNote": {
+    "$type": "Diffed.State.Update",
+    "note": null
   },
   "main.nx::root": {
     "$type": "SearchBox",

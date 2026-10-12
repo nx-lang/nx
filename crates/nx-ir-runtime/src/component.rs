@@ -516,8 +516,8 @@ impl<'p> Machine<'p> {
         Ok(results)
     }
 
-    /// Whether `value` is the update record of the component with `owner_key`.
-    fn is_update_record_for(&self, value: &Value, owner_key: &str) -> bool {
+    /// Whether `value` is the update record of the state record with `state_key`.
+    fn is_update_record_for(&self, value: &Value, state_key: &str) -> bool {
         let Some(discriminator) = value.as_record().and_then(Record::type_name) else {
             return false;
         };
@@ -525,7 +525,7 @@ impl<'p> Machine<'p> {
             shape
                 .update_target
                 .as_ref()
-                .is_some_and(|target| self.program.key(module, target) == owner_key)
+                .is_some_and(|target| self.program.key(module, target) == state_key)
         })
     }
 
@@ -539,7 +539,7 @@ impl<'p> Machine<'p> {
         patch: &Record,
         depths: &mut Depths,
     ) -> Result<Fields> {
-        let expected = format!("{name}.Update");
+        let expected = format!("{name}.State.Update");
         if let Some(discriminator) = patch
             .type_name()
             .filter(|discriminator| *discriminator != expected)
@@ -961,10 +961,10 @@ impl Program {
     /// parent bound on the instance's props, or an `ActionHandlerInvocation` naming a handler of
     /// the instance's most recent rendered output by token, with the action to feed it. Entries
     /// run in order. A handler the component's own body bound reads the state live and patches
-    /// it with the component's update records; any other handler sees only what it captured, and
-    /// everything it returns is an effect. The body is rendered once against the state the batch
-    /// produced. A failure returns before anything else does, so the instance given stays the
-    /// state of record.</para>
+    /// it with the component's `State.Update` records; any other handler sees only what it
+    /// captured, and everything it returns is an effect. The body is rendered once against the
+    /// state the batch produced. A failure returns before anything else does, so the instance
+    /// given stays the state of record.</para>
     pub fn dispatch_component_actions(
         &self,
         instance: &ComponentInstance,
@@ -987,6 +987,11 @@ impl Program {
                     );
                 };
                 let owner_key = format!("{}::{name}", self.data.entry.identity);
+                // A component's state record is declared beside it, in the entry module.
+                let state_key = component
+                    .state_record
+                    .as_ref()
+                    .map(|state| self.data.key(0, state));
                 let mut working = instance.state.clone();
                 let mut effects = Vec::new();
                 let mut depths = Depths::default();
@@ -1023,7 +1028,9 @@ impl Program {
                             match result.as_record() {
                                 Some(patch)
                                     if owned
-                                        && machine.is_update_record_for(&result, &owner_key) =>
+                                        && state_key.as_deref().is_some_and(|state_key| {
+                                            machine.is_update_record_for(&result, state_key)
+                                        }) =>
                                 {
                                     working = machine.patch_state(
                                         index,
@@ -1159,8 +1166,8 @@ impl Program {
 
     /// Applies a patch to host-owned component state and returns the validated next state.
     ///
-    /// <para>The patch is a record: either plain, or the component's own update record,
-    /// `<Component>.Update`. Either way a present field replaces the current value, an absent
+    /// <para>The patch is a record: either plain, or the update record of the component's state,
+    /// `<Component>.State.Update`. Either way a present field replaces the current value, an absent
     /// one keeps it, and a present empty value clears an optional state field, so the next state
     /// carries no entry for it; for a field that is not optional it is rejected.</para>
     pub fn apply_component_state_patch(

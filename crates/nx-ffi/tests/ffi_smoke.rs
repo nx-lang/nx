@@ -749,7 +749,7 @@ fn ffi_codegen_nx_ir_returns_a_bundle_of_images_and_metadata() {
     assert_eq!(artifact.identity, "root.nx");
     assert!(!image.has_debug());
     assert_eq!(artifact.metadata.identity, "root.nx");
-    assert_eq!(artifact.metadata.schema_version, 5);
+    assert_eq!(artifact.metadata.schema_version, 6);
     assert_eq!(artifact.metadata.runtime_abi, "nx-ir-runtime-v2");
     assert_eq!(
         artifact.metadata.fingerprint,
@@ -1767,7 +1767,7 @@ const FFI_COUNTER_SOURCE: &str = r#"
     external component <Button value:int = 0 emits { Tapped { } } />
     component <Counter emits { Saved } /> = {
       state { count:int = 0 }
-      <Button value={count} onTapped={<Update count={count + 1} /> <Saved />} />
+      <Button value={count} onTapped={<State.Update count={count + 1} /> <Saved />} />
     }
 "#;
 

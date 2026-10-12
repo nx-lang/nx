@@ -162,9 +162,8 @@ pub fn resolve_union_definition(module: &PreparedModule, name: &Name) -> Option<
 /// <para>Lowering synthesizes a property union with one case per field its target itself
 /// declares. A base may live in another module, so inherited fields are known only once the module
 /// is prepared; this fills them in, inherited first, before validation and type checking, so every
-/// later consumer reads the complete case list from the declaration itself. A component's union
-/// is already complete, since state is never inherited. A target whose shape does not resolve keeps
-/// its declared cases; record validation reports why.</para>
+/// later consumer reads the complete case list from the declaration itself. A target whose shape
+/// does not resolve keeps its declared cases; record validation reports why.</para>
 pub fn complete_property_unions(module: &mut PreparedModule) {
     let completions = module
         .raw_module()

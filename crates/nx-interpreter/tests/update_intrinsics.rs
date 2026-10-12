@@ -218,18 +218,18 @@ fn changed_lists_present_fields_in_declaration_order() {
 }
 
 #[test]
-fn changed_of_a_component_update_names_state_fields() {
+fn changed_of_a_component_state_update_names_state_fields() {
     let runtime = Runtime::new(
         r#"
         component <Counter step:int = 1 /> = { state { count:int = 0 label:string = "" } <Label /> }
-        let keys() = {changed(<Counter.Update label="x" count=1 />)}
+        let keys() = {changed(<Counter.State.Update label="x" count=1 />)}
         "#,
     );
     assert_eq!(
         runtime.call("keys"),
         Value::Array(vec![
-            case("Counter.Property", "count"),
-            case("Counter.Property", "label"),
+            case("Counter.State.Property", "count"),
+            case("Counter.State.Property", "label"),
         ])
     );
 }

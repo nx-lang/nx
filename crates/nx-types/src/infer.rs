@@ -386,6 +386,11 @@ pub struct InferenceContext<'a> {
     /// expands to was written where the alias was declared, outside any component, and is resolved
     /// there.</para>
     type_parameter_scope: FxHashMap<Name, Type>,
+    /// The component whose declaration is being checked, if any.
+    ///
+    /// <para>Only diagnostics read it: an unknown bare `Update` or `Property` written inside a
+    /// component with state suggests the `State` spelling.</para>
+    current_component: Option<Name>,
     /// The value expression of every plain type-argument binding the checker consumed.
     ///
     /// Consumed after analysis to remove each binding from its element, on the same terms as
@@ -481,6 +486,7 @@ impl<'a> InferenceContext<'a> {
             resolved_type_aliases: FxHashMap::default(),
             local_type_alias_spans: FxHashMap::default(),
             type_parameter_scope: FxHashMap::default(),
+            current_component: None,
             type_ref_span: TextSpan::new(0.into(), 0.into()),
             consumed_type_arguments: FxHashSet::default(),
             function_value_calls: FxHashMap::default(),
@@ -1301,6 +1307,7 @@ impl<'a> InferenceContext<'a> {
     /// itself.</para>
     pub fn infer_component(&mut self, component: &nx_hir::Component) {
         self.env.push_scope();
+        let previous_component = self.current_component.replace(component.name.clone());
 
         let contract = self
             .effective_component_contract(&component.name)
@@ -1395,6 +1402,7 @@ impl<'a> InferenceContext<'a> {
         }
 
         self.type_parameter_scope = previous_scope;
+        self.current_component = previous_component;
         self.env.pop_scope();
     }
 
@@ -1519,10 +1527,10 @@ impl<'a> InferenceContext<'a> {
 
     /// Checks one handler result against where a handler bound at this site may send it.
     ///
-    /// <para>Inside a component a result either patches that component's state — its own update
-    /// record — or goes to its parent, which only an action the component emits may do. At the root
-    /// there is no component to patch or parent to reach, so any action or update record is an
-    /// effect for the host.</para>
+    /// <para>Inside a component a result either patches that component's state — its state
+    /// record's update record — or goes to its parent, which only an action the component emits
+    /// may do. At the root there is no component to patch or parent to reach, so any action or
+    /// update record is an effect for the host.</para>
     fn check_handler_result_item(&mut self, owner: Option<&Name>, ty: &Type, span: TextSpan) {
         let named = match ty {
             Type::Error => return,
@@ -1533,51 +1541,56 @@ impl<'a> InferenceContext<'a> {
             }
         };
         let Some(record) = self.record_definition_for(named) else {
-            // An unresolved `X.Update` was already reported where it was written, so a second
-            // diagnostic here would only repeat that the record does not exist.
-            if !nx_hir::is_update_record_name(named.name.as_str()) {
+            // An unresolved `X.Update`, `X.State` or bare `Update` was already reported where it
+            // was written, so a second diagnostic here would only repeat that the record does not
+            // exist.
+            let name = named.name.as_str();
+            if !(nx_hir::is_update_record_name(name)
+                || nx_hir::is_state_record_name(name)
+                || name == nx_hir::UPDATE_RECORD_SUFFIX)
+            {
                 self.report_handler_result_not_action(named.name.as_str(), span);
             }
             return;
         };
         let Some(owner) = owner else {
-            if record.kind == nx_hir::RecordKind::Plain {
+            if matches!(
+                record.kind,
+                nx_hir::RecordKind::Plain | nx_hir::RecordKind::State { .. }
+            ) {
                 self.report_handler_result_not_action(named.name.as_str(), span);
             }
             return;
         };
 
         match &record.kind {
-            nx_hir::RecordKind::Plain => {
+            nx_hir::RecordKind::Plain | nx_hir::RecordKind::State { .. } => {
                 self.report_handler_result_not_action(named.name.as_str(), span)
             }
             nx_hir::RecordKind::Update { .. } => {
-                let own_update = nx_hir::update_record_name(owner.as_str());
-                let expected = match self.nominal_named_type(&own_update) {
-                    Type::Named(expected) if expected.origin().is_some() => Some(expected),
-                    _ => None,
-                };
-                match expected {
-                    Some(expected) if named.is_same_declaration_as(&expected) => {}
-                    Some(_) => self.error(
-                        "handler-update-wrong-target",
-                        format!(
-                            "Action handler inside component '{}' returns '{}', but only '{}' can change this component's state",
-                            owner, named.name, own_update
-                        ),
-                        span,
-                    ),
-                    // A component without state has no update record, so there is nothing to
-                    // change and no own record to name.
-                    None => self.error(
-                        "handler-update-wrong-target",
-                        format!(
-                            "Action handler inside component '{}' returns '{}', but '{}' declares no state to change",
-                            owner, named.name, owner
-                        ),
-                        span,
-                    ),
+                let state_update =
+                    nx_hir::update_record_name(nx_hir::state_record_name(owner.as_str()).as_str());
+                let expected = self.declared_named_type(&state_update);
+                if expected
+                    .as_ref()
+                    .is_some_and(|expected| named.is_same_declaration_as(expected))
+                {
+                    return;
                 }
+                let message = if expected.is_some() {
+                    format!(
+                        "Action handler inside component '{}' returns '{}', but only '{}' can change this component's state",
+                        owner, named.name, state_update
+                    )
+                } else {
+                    // A component without state has no state record, so there is nothing to
+                    // change and no own record to name.
+                    format!(
+                        "Action handler inside component '{}' returns '{}', but '{}' declares no state to change",
+                        owner, named.name, owner
+                    )
+                };
+                self.error("handler-update-wrong-target", message, span);
             }
             nx_hir::RecordKind::Action => {
                 if !self.component_emits_action(owner, named) {
@@ -1591,6 +1604,14 @@ impl<'a> InferenceContext<'a> {
                     );
                 }
             }
+        }
+    }
+
+    /// The nominal type `name` reaches here, when a declaration stands behind it.
+    fn declared_named_type(&mut self, name: &Name) -> Option<NamedType> {
+        match self.nominal_named_type(name) {
+            Type::Named(named) if named.origin().is_some() => Some(named),
+            _ => None,
         }
     }
 
@@ -3278,7 +3299,7 @@ impl<'a> InferenceContext<'a> {
             return entry.case_type(case.name);
         }
 
-        self.report_unresolved_update_tag(&element.tag, span);
+        self.report_unresolved_derived_tag(&element.tag, span);
 
         // A tag that resolves to nothing has no binding contract, so there is nothing to check the
         // element's properties and content against. Every expression written inside it is still an
@@ -3298,58 +3319,128 @@ impl<'a> InferenceContext<'a> {
         self.nominal_named_type(&element.tag)
     }
 
-    /// Reports an unresolved tag spelled like an update record, which is never a host element.
+    /// Reports an unresolved tag spelled like a derived record, which is never a host element.
     ///
-    /// <para>Inside a component, lowering already rewrote a bare `Update` to the component's own
-    /// record, so a bare one that reaches here was written outside any component. `X.Update` that
-    /// did not resolve names a declaration with no update record: a component without state, an
-    /// update record itself, since update records have none of their own, or nothing at all. A
-    /// bare `Update` inside a component without state arrives here as that component's qualified
-    /// name, so this is the one diagnostic it gets.</para>
-    fn report_unresolved_update_tag(&mut self, tag: &Name, span: TextSpan) {
-        let suffix = nx_hir::UPDATE_RECORD_SUFFIX;
-        if tag.as_str() == suffix {
-            self.error(
-                "bare-update-outside-component",
-                "A bare 'Update' names the enclosing component's update record, and there is no enclosing component here; write the qualified form for the record to patch, as in '<Type.Update ... />'"
+    /// <para>`X.Update` that did not resolve names a declaration with no update record: a derived
+    /// declaration, since those have none of their own, a component without state when `X` is its
+    /// state record, or nothing at all. `X.State` that did not resolve names a component without
+    /// state, or something that is not a component. Inside a component, lowering already rewrote
+    /// a bare `State` to the component's qualified state record, so a bare `State` inside a
+    /// component without state arrives here as that qualified name, and this is the one diagnostic
+    /// it gets. A bare `Update` is an ordinary name; when nothing declares it, the diagnostic
+    /// points to the spelling meant.</para>
+    fn report_unresolved_derived_tag(&mut self, tag: &Name, span: TextSpan) {
+        if tag.as_str() == nx_hir::UPDATE_RECORD_SUFFIX {
+            let message = match self.stateful_current_component() {
+                Some(component) => format!(
+                    "Unknown element 'Update'; to change the state of component '{}', write '<State.Update ... />'",
+                    component
+                ),
+                None => "Unknown element 'Update'; to patch a record, write the qualified form, as in '<Type.Update ... />'"
                     .to_string(),
-                span,
-            );
+            };
+            self.error("unknown-bare-update", message, span);
             return;
         }
-        let Some(target) = tag
-            .as_str()
-            .strip_suffix(suffix)
-            .and_then(|prefix| prefix.strip_suffix('.'))
-        else {
-            return;
-        };
-        let target = Name::new(target);
-        let message = if self
-            .resolve_record_definition(&target)
-            .is_some_and(|record| record.update_target().is_some())
-        {
-            format!(
-                "Unknown type '{}': '{}' is an update record, and update records have no update record of their own",
-                tag, target
-            )
-        } else if self.is_property_union(&target) {
-            format!(
-                "Unknown type '{}': '{}' is a property union, and property unions have no update record",
-                tag, target
-            )
-        } else if self.resolve_component_definition(&target).is_some() {
-            format!(
-                "Unknown type '{}': component '{}' declares no state, so it has no update record",
-                tag, target
-            )
+        if let Some(message) = self.unresolved_derived_name_message(tag.as_str()) {
+            let code = if nx_hir::is_state_record_name(tag.as_str()) {
+                "unknown-state-record"
+            } else {
+                "unknown-update-record"
+            };
+            self.error(code, message, span);
+        }
+    }
+
+    /// The component being checked, when it declares state.
+    fn stateful_current_component(&mut self) -> Option<Name> {
+        let component = self.current_component.clone()?;
+        let state = nx_hir::state_record_name(component.as_str());
+        self.declared_named_type(&state).map(|_| component)
+    }
+
+    /// Says why `name`, spelled like a derived update record, property union, or state record,
+    /// reaches nothing; `None` when it is not spelled like one.
+    fn unresolved_derived_name_message(&mut self, name: &str) -> Option<String> {
+        let (target, kind) = if let Some(target) = name.strip_suffix(".Update") {
+            (target, "update record")
+        } else if let Some(target) = name.strip_suffix(".Property") {
+            (target, "property union")
         } else {
-            format!(
-                "Unknown type '{}': '{}' is not a record, action, or component with state",
-                tag, target
-            )
+            (name.strip_suffix(".State")?, "state record")
         };
-        self.error("unknown-update-record", message, span);
+        if target.is_empty() {
+            return None;
+        }
+        let target_name = Name::new(target);
+        let record = self.resolve_record_definition(&target_name);
+        let own = |of: &str| if of == kind { " of their own" } else { "" };
+        let reason = match record.as_ref().map(|record| &record.kind) {
+            Some(nx_hir::RecordKind::Update { .. }) => format!(
+                "'{}' is an update record, and update records have no {}{}",
+                target,
+                kind,
+                own("update record")
+            ),
+            // A state record has an update record and a property union like any record.
+            Some(nx_hir::RecordKind::State { .. }) if kind == "state record" => format!(
+                "'{}' is a state record, and state records have no state record of their own",
+                target
+            ),
+            _ if self.is_property_union(&target_name) => format!(
+                "'{}' is a property union, and property unions have no {}{}",
+                target,
+                kind,
+                own("property union")
+            ),
+            _ => {
+                let stateless_component = if kind == "state record" {
+                    Some(target)
+                } else {
+                    target.strip_suffix(".State")
+                }
+                .filter(|component| {
+                    self.resolve_component_definition(&Name::new(component))
+                        .is_some()
+                });
+                if let Some(component) = stateless_component {
+                    format!(
+                        "component '{}' declares no state, so it has no state record",
+                        component
+                    )
+                } else if kind == "state record" {
+                    format!("'{}' is not a component with state", target)
+                } else if record.is_none()
+                    && self.resolve_component_definition(&target_name).is_some()
+                {
+                    // A component is not a record, so only its state record has these.
+                    let state = nx_hir::state_record_name(target);
+                    if self.resolve_record_definition(&state).is_none() {
+                        format!(
+                            "component '{}' is not a record, so it has no {}",
+                            target, kind
+                        )
+                    } else {
+                        let (suffix, use_) = if kind == "update record" {
+                            (nx_hir::UPDATE_RECORD_SUFFIX, "to patch its state")
+                        } else {
+                            (nx_hir::PROPERTY_UNION_SUFFIX, "to name a state field")
+                        };
+                        format!(
+                            "component '{}' is not a record, so it has no {}; write '{}.{}' {}",
+                            target, kind, state, suffix, use_
+                        )
+                    }
+                } else if record.is_some() {
+                    // The target exists and so does its derived declaration; it was only not
+                    // reached here.
+                    return None;
+                } else {
+                    format!("'{}' is not a record, action, or component", target)
+                }
+            }
+        };
+        Some(format!("Unknown type '{}': {}", name, reason))
     }
 
     /// Returns true when `name` reaches a derived property union here.
@@ -3362,13 +3453,12 @@ impl<'a> InferenceContext<'a> {
     /// Reports a member access whose base is spelled like a property union that resolves to
     /// nothing, and returns whether it did.
     ///
-    /// <para>Inside a component, lowering already rewrote a bare `Property` to the component's own
-    /// union, so a bare one that reaches here was written outside any component — unless something
-    /// declared here is actually named `Property`, in which case the access means that. `X.Property`
-    /// that did not resolve names a declaration with no property union: a component without state,
-    /// a derived declaration, since derived declarations have none of their own, or nothing at
-    /// all. Reporting here, at the first member access on the missing union, is what keeps the
-    /// access from cascading into a diagnostic about every segment after it.</para>
+    /// <para>A bare `Property` is an ordinary name: when something declared here is named
+    /// `Property`, the access means that, and when nothing is, the diagnostic points to the
+    /// spelling meant. `X.Property` that did not resolve names a declaration with no property
+    /// union: a derived declaration, a component without state when `X` is its state record, or
+    /// nothing at all. Reporting here, at the first member access on the missing union, is what
+    /// keeps the access from cascading into a diagnostic about every segment after it.</para>
     fn report_unresolved_property_reference(&mut self, name: &Name, span: TextSpan) -> bool {
         let Some((base, _member)) = name.as_str().rsplit_once('.') else {
             return false;
@@ -3384,45 +3474,22 @@ impl<'a> InferenceContext<'a> {
             {
                 return false;
             }
-            self.error(
-                "bare-property-outside-component",
-                "A bare 'Property' names the enclosing component's property union, and there is no enclosing component here; write the qualified form for the declaration whose fields to name, as in 'Type.Property.field'"
+            let message = match self.stateful_current_component() {
+                Some(component) => format!(
+                    "Unknown name 'Property'; to name a state field of component '{}', write 'State.Property.field'",
+                    component
+                ),
+                None => "Unknown name 'Property'; to name a field, write the qualified form for the declaration that has it, as in 'Type.Property.field'"
                     .to_string(),
-                span,
-            );
+            };
+            self.error("unknown-bare-property", message, span);
             return true;
         }
         if !nx_hir::is_property_union_name(base) || self.union_defs.contains_key(&Name::new(base)) {
             return false;
         }
-        let target = Name::new(
-            base.strip_suffix(suffix)
-                .and_then(|prefix| prefix.strip_suffix('.'))
-                .unwrap_or(base),
-        );
-        let message = if self
-            .resolve_record_definition(&target)
-            .is_some_and(|record| record.update_target().is_some())
-        {
-            format!(
-                "Unknown type '{}': '{}' is an update record, and update records have no property union",
-                base, target
-            )
-        } else if self.is_property_union(&target) {
-            format!(
-                "Unknown type '{}': '{}' is a property union, and property unions have no property union of their own",
-                base, target
-            )
-        } else if self.resolve_component_definition(&target).is_some() {
-            format!(
-                "Unknown type '{}': component '{}' declares no state, so it has no property union",
-                base, target
-            )
-        } else {
-            format!(
-                "Unknown type '{}': '{}' is not a record, action, or component with state",
-                base, target
-            )
+        let Some(message) = self.unresolved_derived_name_message(base) else {
+            return false;
         };
         self.error("unknown-property-union", message, span);
         true
@@ -3586,6 +3653,9 @@ impl<'a> InferenceContext<'a> {
                 if record.update_target().is_none() {
                     return Some(named.clone());
                 }
+            } else if Self::is_derived_record_name(named) {
+                // The unknown `X.Update` or `X.State` was already reported where it was written.
+                return None;
             }
         }
         self.error(
@@ -3599,6 +3669,12 @@ impl<'a> InferenceContext<'a> {
             span,
         );
         None
+    }
+
+    /// Whether `named` is spelled as a derived update or state record, `X.Update` or `X.State`.
+    fn is_derived_record_name(named: &NamedType) -> bool {
+        let name = named.name.as_str();
+        nx_hir::is_update_record_name(name) || nx_hir::is_state_record_name(name)
     }
 
     /// The update-record type an intrinsic argument must have, with the name of the declaration
@@ -3616,6 +3692,10 @@ impl<'a> InferenceContext<'a> {
                 .and_then(|record| record.update_target().cloned())
             {
                 return Some((named.clone(), target));
+            }
+            if Self::is_derived_record_name(named) && self.record_definition_for(named).is_none() {
+                // The unknown `X.Update` or `X.State` was already reported where it was written.
+                return None;
             }
         }
         self.error(
@@ -4655,16 +4735,29 @@ impl<'a> InferenceContext<'a> {
         if self.is_name_of_failed_import(name) {
             return;
         }
+        let bare_state_suggestion = match name.as_str() {
+            "Property" | "Update" => self
+                .stateful_current_component()
+                .map(|_| format!("; did you mean `State.{}`?", name)),
+            _ => None,
+        };
         let message = match self.union_of_case_written_as_type(name) {
             Some(union) => format!(
                 "`{}` is not a visible type; it is a case of the union `{}`, which is the type to write",
                 name, union
             ),
-            None => format!(
-                "`{}` is not a visible type{}",
-                name,
-                self.did_you_mean_type(name)
-            ),
+            None => match (
+                bare_state_suggestion,
+                self.unresolved_derived_name_message(name.as_str()),
+            ) {
+                (Some(suggestion), _) => format!("`{}` is not a visible type{}", name, suggestion),
+                (None, Some(message)) => message,
+                (None, None) => format!(
+                    "`{}` is not a visible type{}",
+                    name,
+                    self.did_you_mean_type(name)
+                ),
+            },
         };
         let span = self.type_name_span(name, ordinal);
         self.error("unresolved-type", message, span);
@@ -6713,10 +6806,11 @@ impl<'a> InferenceContext<'a> {
             .collect();
         for item in local_items {
             if let Item::Record(record_def) = item {
-                // A derived update record's fields are copies of its target's, with defaults
-                // stripped, so there is nothing here that the target's own pass does not already
-                // cover — and resolving them again would report each malformed field type twice.
-                if record_def.update_target().is_some() {
+                // A derived update or state record's fields are copies of its target's, with
+                // defaults stripped, so there is nothing here that the target's own pass does not
+                // already cover — and resolving them again would report each malformed field type
+                // twice.
+                if record_def.is_derived() {
                     continue;
                 }
                 let owner = self.record_origins.get(&record_def.name).cloned();

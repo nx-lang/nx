@@ -239,7 +239,7 @@ describe("choosing what to preview", () => {
   const two = `external component <Button label:string emits { Tapped { } } />
 component <Counter start:int = 0 /> = {
   state { count:int = {start} }
-  <Button label={"Count " + count} onTapped=<Update count={count + 1} /> />
+  <Button label={"Count " + count} onTapped=<State.Update count={count + 1} /> />
 }
 component <Stepper /> = {
   state { step:int = 1 }
@@ -295,7 +295,7 @@ describe("actions and limits", () => {
 external component <Ask emits { Answered } />
 component <Asker /> = {
   state { last:string = "" }
-  <Ask onAnswered=<Update last={action.questionId} /> />
+  <Ask onAnswered=<State.Update last={action.questionId} /> />
 }
 `;
     let state = await run({ op: "start", source });
@@ -315,8 +315,8 @@ let fib(n:int):int = { if n < 2 { n } else { fib(n - 1) + fib(n - 2) } }
 component <Looper /> = {
   state { n:int = 0 }
   <Row>
-    <Button label="Deep" onTapped=<Update n={spin(0)} /> />
-    <Button label="Long" onTapped=<Update n={fib(60)} /> />
+    <Button label="Deep" onTapped=<State.Update n={spin(0)} /> />
+    <Button label="Long" onTapped=<State.Update n={fib(60)} /> />
   </Row>
 }
 `;

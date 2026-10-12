@@ -149,6 +149,9 @@ pub(crate) struct ComponentDecl {
     pub is_abstract: bool,
     /// The effective emits, inherited included, in declaration order.
     pub emits: Vec<Emit>,
+    /// The component's `<Component>.State` record, when the image emits it. A handler result
+    /// whose update target is this record patches the component's state.
+    pub state_record: Option<Ref>,
 }
 
 #[derive(Debug)]
@@ -920,12 +923,14 @@ impl<'a> Decoder<'a> {
                         action: self.reference(reader)?,
                     })
                 })?;
+                let state_record = self.optional_reference(&mut reader)?;
                 DeclarationKind::Component(ComponentDecl {
                     props,
                     state,
                     body,
                     is_abstract: flags & 1 != 0,
                     emits,
+                    state_record,
                 })
             }
             declaration::UNION => {

@@ -55,7 +55,7 @@ fn the_snippet_image_is_laid_out_as_the_document_says() {
     let bytes = write_nx_ir_image(&artifact).expect("image");
 
     assert_eq!(&bytes[0..4], b"NXIR");
-    assert_eq!(cell_at(&bytes, 4), 5, "schema version");
+    assert_eq!(cell_at(&bytes, 4), 6, "schema version");
     assert_eq!(cell_at(&bytes, 8) as usize, bytes.len(), "total length");
     assert_eq!(cell_at(&bytes, 12), 6, "six sections without debug");
 
@@ -209,7 +209,7 @@ fn another_schema_version_is_refused_naming_both() {
         NxIrImage::open(&bytes).unwrap_err(),
         NxIrImageError::SchemaVersion {
             found: 3,
-            supported: 5
+            supported: 6
         }
     );
 }

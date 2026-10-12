@@ -8,9 +8,7 @@ carried to the handler a parent bound. The tree is indifferent to what a host ma
 a host may draw it, or keep some other structure derived from it, and one that follows changes
 walks only what changed. The Rust IR runtime implements the tree, so a Rust host composes instances
 without writing the composition itself.
-
 ## Requirements
-
 ### Requirement: The Rust runtime exports an instance tree over a linked program
 The Rust IR runtime SHALL export an instance tree created for one linked program. The tree SHALL
 compose instances only through the runtime's component lifecycle, so that every rendered output,
@@ -56,7 +54,7 @@ node under it, with `nx-ir-instance-key`.
 
 #### Scenario: A child receives the handler its parent bound
 - **WHEN** a host visits, under the node of `Page`, the descriptor `Page`'s output holds for
-  `<Card onLogged=<Update last={action.text} /> />`
+  `<Card onLogged=<State.Update last={action.text} /> />`
 - **THEN** the handler `Card` holds for `onLogged` SHALL be the handler `Page` holds under the token
   that descriptor carries
 
@@ -230,12 +228,12 @@ was handed down from an instance since replaced, SHALL fail with `nx-ir-handler-
 change nothing: it SHALL NOT run the handler against a node that was only handed it.
 
 #### Scenario: A tap patches the instance that bound the handler
-- **WHEN** a host dispatches the token of `onTapped=<Update count={count + 1} />` read from a
+- **WHEN** a host dispatches the token of `onTapped=<State.Update count={count + 1} />` read from a
   `Counter` node's output, twice, each time with the token of the output then current
 - **THEN** the node's state SHALL hold `count` equal to `2`
 
 #### Scenario: A handler in a content child patches its owner
-- **WHEN** `Page` renders `<Stack><Button onTapped=<Update taps={taps + 1} /> /></Stack>`, `Stack`
+- **WHEN** `Page` renders `<Stack><Button onTapped=<State.Update taps={taps + 1} /> /></Stack>`, `Stack`
   is an authored component that renders its content, and the host dispatches the button's token
   through the `Stack` node whose output held it
 - **THEN** the `Page` node's state SHALL hold `taps` equal to `1`
@@ -274,7 +272,7 @@ once, with every action routed to it in one batch in the order the actions were 
 no entry names a token an earlier dispatch of the same chain retired.
 
 #### Scenario: A child's emit patches the parent
-- **WHEN** `Card` emits `Logged`, `Page` renders `<Card onLogged=<Update last={action.text} /> />`,
+- **WHEN** `Card` emits `Logged`, `Page` renders `<Card onLogged=<State.Update last={action.text} /> />`,
   and a handler in `Card` returns `<Card.Logged text="hi" />`
 - **THEN** the `Page` node's state SHALL hold `last` equal to `"hi"`
 - **AND** the host SHALL receive no effect
@@ -371,3 +369,4 @@ renders itself. This limit is the one such a program meets.
 - **AND** a walk under a component depth of 150 SHALL visit all 150
 - **AND** a later walk under a component depth of 3 SHALL fail at the fourth node, naming the
   value `3`, and SHALL leave that node as it was
+
