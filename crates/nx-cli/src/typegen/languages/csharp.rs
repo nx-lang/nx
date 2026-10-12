@@ -1833,6 +1833,12 @@ fn csharp_type_name_inner(
     context: &CSharpRenderContext<'_>,
     seen_aliases: &mut BTreeSet<String>,
 ) -> CSharpType {
+    // A field typed `P.Property` holds one of the argument's property names.
+    let name = if crate::typegen::model::parameter_of_property_union(name).is_some() {
+        "string"
+    } else {
+        name
+    };
     match name {
         "string" => CSharpType {
             text: "string".to_string(),

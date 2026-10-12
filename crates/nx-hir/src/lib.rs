@@ -31,6 +31,7 @@ pub mod prepared;
 pub mod records;
 pub mod scope;
 pub mod unions;
+pub mod viewers;
 
 use la_arena::{Arena, Idx};
 use nx_diagnostics::{Diagnostic, Label, Severity, TextSize, TextSpan};
@@ -81,6 +82,10 @@ pub use scope::{
 pub use unions::{
     complete_property_unions, resolve_union_definition, validate_union_definitions,
     InvalidUnionBaseReason, UnionValidationError,
+};
+pub use viewers::{
+    resolve_viewer_target, ViewerRecord, ViewerTarget, ViewerTargetError, VIEWER_LIBRARY_MODULE,
+    VIEWER_LIBRARY_ROOT, VIEWER_TARGET_PARAMETER,
 };
 
 /// The reserved module identity of the NX prelude.
@@ -1333,6 +1338,28 @@ pub struct LoweredModule {
     /// Where the annotation of a declaration that is not a property was written — a function's
     /// return type, a value's `: Type` — keyed by the declaration's span.
     annotation_spans: FxHashMap<TextSpan, TextSpan>,
+    /// The module's `viewer` declarations, in source order.
+    ///
+    /// <para>They are kept apart from [`items`](Self::items): a viewer declaration has no name of
+    /// its own, nothing refers to it, and it never reaches the module's exports, declaration
+    /// schema or NX IR. The type checker checks each value, and tools gather them.</para>
+    viewers: Vec<ViewerDecl>,
+}
+
+/// A `viewer Target = Value` declaration: how a viewer presents the declaration `Target`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ViewerDecl {
+    /// The target as written, possibly qualified (`ui.Choice`, `Form.Submitted`).
+    pub target: Name,
+    /// Where the target was written.
+    pub target_span: TextSpan,
+    /// The value, a construction of an `@nx/viewer` record.
+    pub value: ExprId,
+    /// The arena indices of the value's expressions, which were allocated together. Code that
+    /// scans every expression of a module for what the program uses skips these.
+    pub exprs: std::ops::Range<usize>,
+    /// The whole declaration.
+    pub span: TextSpan,
 }
 
 impl LoweredModule {
@@ -1348,7 +1375,26 @@ impl LoweredModule {
             elements: Arena::new(),
             type_name_spans: Vec::new(),
             annotation_spans: FxHashMap::default(),
+            viewers: Vec::new(),
         }
+    }
+
+    /// The module's `viewer` declarations, in source order.
+    pub fn viewers(&self) -> &[ViewerDecl] {
+        &self.viewers
+    }
+
+    /// Whether the expression is part of a viewer declaration's value, which no runtime evaluates.
+    pub fn is_viewer_expr(&self, id: ExprId) -> bool {
+        let index = id.into_raw().into_u32() as usize;
+        self.viewers
+            .iter()
+            .any(|viewer| viewer.exprs.contains(&index))
+    }
+
+    /// Adds a `viewer` declaration.
+    pub fn add_viewer(&mut self, viewer: ViewerDecl) {
+        self.viewers.push(viewer);
     }
 
     /// Records every type name written in a type position, with where it was written.

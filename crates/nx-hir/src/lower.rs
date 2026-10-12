@@ -13,7 +13,7 @@ use crate::{
     ImportKind, Item, LoweredModule, LoweringDiagnostic, Name, Param, Property,
     PropertyConditionArm, PropertyEntry, PropertyMatchArm, RecordDef, RecordField, RecordKind,
     SelectiveImport, SourceId, TypeAlias, TypeParameter, UnionCaseDef, UnionCaseField, UnionDef,
-    ValueDef, Visibility, WhitespaceRun, PROPERTY_UNION_SUFFIX, PROPS_RECORD_SUFFIX,
+    ValueDef, ViewerDecl, Visibility, WhitespaceRun, PROPERTY_UNION_SUFFIX, PROPS_RECORD_SUFFIX,
     STATE_RECORD_SUFFIX, UPDATE_RECORD_SUFFIX,
 };
 use nx_diagnostics::{TextSize, TextSpan};
@@ -2310,6 +2310,91 @@ impl LoweringContext {
         }
     }
 
+    /// Lowers a `viewer Target = Value` declaration.
+    ///
+    /// <para>A visibility modifier is reported here: a viewer declaration applies wherever its
+    /// module is loaded, so there is nothing for `export` or `private` to change.</para>
+    fn lower_viewer_definition(&mut self, node: SyntaxNode) -> Option<ViewerDecl> {
+        if let Some(visibility) = node.child_by_field("visibility") {
+            self.add_diagnostic(
+                format!(
+                    "A viewer declaration takes no visibility modifier; remove '{}': a viewer applies wherever its module is loaded",
+                    visibility.text()
+                ),
+                visibility.span(),
+            );
+        }
+        let target = node.child_by_field("target")?;
+        if let Some(value_node) = node.child_by_field("value") {
+            self.check_viewer_value_is_written_out(value_node);
+        }
+        let first_expr = self.module.exprs().len();
+        let value = node
+            .child_by_field("value")
+            .map(|value_node| self.lower_expr(value_node))
+            .unwrap_or_else(|| self.error_expr(node.span()));
+        Some(ViewerDecl {
+            target: Name::new(target.text()),
+            target_span: target.span(),
+            value,
+            exprs: first_expr..self.module.exprs().len(),
+            span: node.span(),
+        })
+    }
+
+    /// Reports every part of a viewer declaration's value that is not written out.
+    ///
+    /// <para>A viewer's value is built only from element constructions, string and boolean
+    /// literals, and bare names, which name properties or cases. Anything computed — a braced
+    /// expression, a conditional, a loop, a number, text or an embed in an element's body — is
+    /// reported, so every viewer declaration can be read without evaluating it. The rule is
+    /// checked on the syntax, because a braced literal and a bare one lower alike.</para>
+    fn check_viewer_value_is_written_out(&mut self, node: SyntaxNode) {
+        match node.kind() {
+            SyntaxKind::RHS_EXPRESSION | SyntaxKind::PROPERTY_LIST | SyntaxKind::MIXED_CONTENT => {
+                for child in node.children() {
+                    self.check_viewer_value_is_written_out(child);
+                }
+            }
+            SyntaxKind::ELEMENT => {
+                for child in node.children() {
+                    if child.kind() != SyntaxKind::ELEMENT_NAME {
+                        self.check_viewer_value_is_written_out(child);
+                    }
+                }
+            }
+            SyntaxKind::PROPERTY_VALUE => {
+                if let Some(value) = node.child_by_field("value") {
+                    self.check_viewer_value_is_written_out(value);
+                }
+            }
+            SyntaxKind::LITERAL => {
+                let written_out = node.children().all(|child| {
+                    matches!(
+                        child.kind(),
+                        SyntaxKind::STRING_LITERAL | SyntaxKind::BOOL_LITERAL
+                    )
+                });
+                if !written_out {
+                    self.report_viewer_value_not_written_out(node);
+                }
+            }
+            SyntaxKind::CONTEXTUAL_NAME => {}
+            kind if kind.is_comment() => {}
+            _ => self.report_viewer_value_not_written_out(node),
+        }
+    }
+
+    fn report_viewer_value_not_written_out(&mut self, node: SyntaxNode) {
+        self.add_diagnostic(
+            format!(
+                "A viewer's values must be written out: use a viewer record, a string or boolean literal, or a bare property or case name, not '{}'",
+                node.text().trim()
+            ),
+            node.span(),
+        );
+    }
+
     /// Lowers a record definition node.
     pub fn lower_record_definition(&mut self, node: SyntaxNode) -> RecordDef {
         self.lower_record_like_definition(node, RecordKind::Plain)
@@ -3017,6 +3102,11 @@ impl LoweringContext {
                 SyntaxKind::UNION_DEFINITION => {
                     let union_def = self.lower_union_definition(child);
                     self.module.add_item(Item::Union(union_def));
+                }
+                SyntaxKind::VIEWER_DEFINITION => {
+                    if let Some(viewer) = self.lower_viewer_definition(child) {
+                        self.module.add_viewer(viewer);
+                    }
                 }
                 SyntaxKind::ELEMENT => {
                     // Top-level element becomes an implicit 'root' function

@@ -3960,6 +3960,93 @@ component <Resetting emits { Reset } /> = {
 }
 ";
 
+/// A component's derived props record, built, patched and compared like any record.
+const PROPS_SOURCE: &str = "
+abstract component <Question label:string />
+component <Card extends Question title:string subtitle?:string /> = { <Panel /> }
+let patched(): Card.Props = {
+  apply(<Card.Props label=\"Q\" title=\"Old\" subtitle=\"Sub\" />, <Card.Props.Update title=\"New\" subtitle={} />)
+}
+let changes(): Card.Props.Update = {
+  diff(<Card.Props label=\"Q\" title=\"Old\" />, <Card.Props label=\"Q\" title=\"New\" />)
+}
+let key(): Card.Props.Property = { Card.Props.Property.label }
+";
+
+#[test]
+fn a_components_props_record_is_an_ordinary_record() {
+    let program = program(PROPS_SOURCE);
+    assert_same(
+        &program
+            .evaluate_function("patched", &[], &options())
+            .unwrap(),
+        r#"{ "$type": "Card.Props", "label": "Q", "title": "New" }"#,
+    );
+    assert_same(
+        &program
+            .evaluate_function("changes", &[], &options())
+            .unwrap(),
+        r#"{ "$type": "Card.Props.Update", "title": "New" }"#,
+    );
+    assert_eq!(
+        program.evaluate_function("key", &[], &options()),
+        Ok(NxValue::String("label".to_string()))
+    );
+}
+
+#[test]
+fn viewer_declarations_leave_the_image_unchanged() {
+    let declarations = "import \"@nx/viewer\"
+type Choice = { value:string label:string }
+type ChoiceLayout = list | grid
+component <Card title:string /> = { <Panel /> }
+let root(): Choice = { <Choice value=\"a\" label=\"A\" /> }
+";
+    let viewers = "viewer Choice = <ElementViewer title=label><PropertyViewer of=value place=details /></ElementViewer>
+viewer ChoiceLayout = <UnionViewer><CaseViewer of=grid label=\"a grid\" /></UnionViewer>
+viewer Card = <ElementViewer title=title />
+";
+    let image = |source: &str| {
+        let artifact = artifact(source);
+        assert!(
+            artifact.diagnostics.is_empty(),
+            "{:#?}",
+            artifact.diagnostics
+        );
+        emit_nx_ir(
+            &artifact,
+            &NxIrEmitOptions {
+                modules: Some(Vec::new()),
+                debug: false,
+            },
+        )
+        .expect("nx ir")
+        .into_iter()
+        .map(|image| {
+            // The fingerprint hashes the module's source text, which the viewer declarations are
+            // part of; everything else must match.
+            let fingerprint = image.metadata.fingerprint.to_le_bytes();
+            let mut bytes = image.bytes;
+            let at = bytes
+                .windows(fingerprint.len())
+                .position(|window| window == fingerprint)
+                .expect("the image holds its fingerprint");
+            bytes[at..at + fingerprint.len()].fill(0);
+            (image.identity, bytes)
+        })
+        .collect::<BTreeMap<_, _>>()
+    };
+    assert_eq!(
+        image(declarations),
+        image(&format!("{declarations}{viewers}"))
+    );
+    let program = link(&artifact(&format!("{declarations}{viewers}")), false);
+    assert_same(
+        &program.evaluate_function("root", &[], &options()).unwrap(),
+        r#"{ "$type": "Choice", "value": "a", "label": "A" }"#,
+    );
+}
+
 #[test]
 fn emitted_ir_agrees_with_the_interpreter() {
     let mut differences_found = Vec::new();
@@ -3971,6 +4058,7 @@ fn emitted_ir_agrees_with_the_interpreter() {
         LIST_SOURCE,
         OPERATOR_SOURCE,
         DISPATCH_SOURCE,
+        PROPS_SOURCE,
     ];
     for source in SOURCES.iter().copied().chain(own) {
         let emitted =

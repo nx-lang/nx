@@ -1068,6 +1068,9 @@ fn ts_field_line(field: &ExportedRecordField, types: ModuleTypes<'_>) -> String 
 }
 
 fn ts_type_name(name: &str) -> String {
+    if let Some(param) = crate::typegen::model::parameter_of_property_union(name) {
+        return format!("Extract<keyof {}, string>", sanitize_ts_type_name(param));
+    }
     match name {
         "string" => "string".to_string(),
         "int" | "int32" | "int64" | "float32" | "float64" => "number".to_string(),

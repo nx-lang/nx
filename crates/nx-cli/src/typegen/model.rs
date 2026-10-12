@@ -214,8 +214,25 @@ pub fn update_companion_type_params<'a>(
     }
 }
 
+const PROPERTY_SUFFIX: &str = ".Property";
+
+/// What a field typed `P.Property`, for its record's own type parameter `P`, is renamed to: a name
+/// no source can write, which each emitter spells as the argument's property names. TypeScript
+/// writes `Extract<keyof P, string>` and C# `string`.
+const PARAMETER_PROPERTY_UNION_PREFIX: &str = "#property-of:";
+
+fn parameter_property_union_name(param: &str) -> String {
+    format!("{PARAMETER_PROPERTY_UNION_PREFIX}{param}")
+}
+
+/// The type parameter `P` when `name` stands for a field typed `P.Property`.
+pub fn parameter_of_property_union(name: &str) -> Option<&str> {
+    name.strip_prefix(PARAMETER_PROPERTY_UNION_PREFIX)
+}
+
 /// `fields` with every reference to one of `type_params` replaced by `object`, which each emitter
-/// already maps to its host's top type; `fields` itself when there is nothing to erase.
+/// already maps to its host's top type, and every `P.Property` of one by `string`; `fields` itself
+/// when there is nothing to erase.
 pub fn erase_field_type_parameters<'a>(
     fields: &'a [ExportedRecordField],
     type_params: &[String],
@@ -230,9 +247,17 @@ pub fn erase_field_type_parameters<'a>(
     Cow::Owned(
         fields
             .iter()
-            .map(|field| ExportedRecordField {
-                ty: nx_hir::erase_type_parameters(&field.ty, &params),
-                ..field.clone()
+            .map(|field| {
+                let mut ty = nx_hir::erase_type_parameters(&field.ty, &params);
+                rewrite_type_ref_names(&mut ty, &mut |name| {
+                    parameter_of_property_union(name)
+                        .filter(|param| type_params.iter().any(|candidate| candidate == param))
+                        .map(|_| "string".to_string())
+                });
+                ExportedRecordField {
+                    ty,
+                    ..field.clone()
+                }
             })
             .collect(),
     )
@@ -843,8 +868,16 @@ impl ExportedTypeGraph {
                 .iter()
                 .map(|imported_type| imported_type.visible_name.as_str())
                 .collect::<FxHashSet<_>>();
-            let mut rename = |ty: &mut TypeRef| {
+            // `params` are the type parameters of the declaration the type is written in: a field
+            // typed `P.Property` for one of them names the argument's property union, which only
+            // the emitters can spell.
+            let mut rename = |ty: &mut TypeRef, params: &[String]| {
                 rewrite_type_ref_names(ty, &mut |name| {
+                    if let Some(param) = name.strip_suffix(PROPERTY_SUFFIX) {
+                        if params.iter().any(|candidate| candidate == param) {
+                            return Some(parameter_property_union_name(param));
+                        }
+                    }
                     if !nx_hir::is_update_record_name(name)
                         && !nx_hir::is_property_union_name(name)
                         && !nx_hir::is_state_record_name(name)
@@ -871,27 +904,27 @@ impl ExportedTypeGraph {
 
             for declaration in declarations {
                 match &mut declaration.item {
-                    ExportedType::Alias(alias) => rename(&mut alias.target),
+                    ExportedType::Alias(alias) => rename(&mut alias.target, &[]),
                     ExportedType::Union(union_def) => {
                         for case in &mut union_def.cases {
                             for field in &mut case.fields {
-                                rename(&mut field.ty);
+                                rename(&mut field.ty, &[]);
                             }
                         }
                     }
                     ExportedType::Record(record) => {
                         for field in &mut record.fields {
-                            rename(&mut field.ty);
+                            rename(&mut field.ty, &record.type_params);
                         }
                     }
                     ExportedType::ComponentState(state) => {
                         for field in &mut state.fields {
-                            rename(&mut field.ty);
+                            rename(&mut field.ty, &[]);
                         }
                     }
                     ExportedType::Update(update) => {
                         for field in &mut update.fields {
-                            rename(&mut field.ty);
+                            rename(&mut field.ty, &update.type_params);
                         }
                     }
                 }

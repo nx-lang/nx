@@ -2653,6 +2653,146 @@ export type AssistantConfig = { agent?:Agent }
     }
 
     #[test]
+    fn test_cli_typegen_viewer_library_spells_target_property_names() {
+        let dir = TempDir::new().unwrap();
+        let ts_path = dir.path().join("generated-ts");
+        let cs_path = dir.path().join("generated-cs");
+
+        let output = run_cli(&[
+            "typegen",
+            "@nx/viewer",
+            "--language",
+            "typescript",
+            "--output",
+            ts_path.to_str().unwrap(),
+        ]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{stderr}");
+        assert!(!stderr.contains("Warning:"), "{stderr}");
+        let viewer = fs::read_to_string(ts_path.join("viewer.ts")).unwrap();
+        assert!(
+            viewer.contains("export interface ElementViewer<Target> "),
+            "{viewer}"
+        );
+        assert!(
+            viewer.contains("title?: Extract<keyof Target, string>;"),
+            "{viewer}"
+        );
+        assert!(
+            viewer.contains("of: Extract<keyof Target, string>;"),
+            "{viewer}"
+        );
+        assert!(!viewer.contains("#property-of"), "{viewer}");
+
+        let output = run_cli(&[
+            "typegen",
+            "@nx/viewer",
+            "--language",
+            "csharp",
+            "--output",
+            cs_path.to_str().unwrap(),
+        ]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{stderr}");
+        let viewer = fs::read_to_string(cs_path.join("viewer.g.cs")).unwrap();
+        assert!(viewer.contains("namespace NxLang.Viewer"), "{viewer}");
+        assert!(viewer.contains("public string? Title"), "{viewer}");
+        assert!(!viewer.contains("#property-of"), "{viewer}");
+    }
+
+    #[test]
+    fn test_cli_typegen_record_type_parameter_property_union() {
+        let (dir, library_path) = create_temp_library(&[(
+            "sort.nx",
+            "export type SortBy = { T:type key:T.Property descending:boolean = false }",
+        )]);
+        for (language, file, expected) in [
+            ("typescript", "sort.ts", "key: Extract<keyof T, string>;"),
+            ("csharp", "sort.g.cs", "public string Key"),
+        ] {
+            let output_path = dir.path().join(format!("generated-{language}"));
+            let output = run_cli(&[
+                "typegen",
+                library_path.to_str().unwrap(),
+                "--language",
+                language,
+                "--output",
+                output_path.to_str().unwrap(),
+            ]);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(output.status.success(), "{stderr}");
+            assert!(!stderr.contains("T.Property"), "{stderr}");
+            let generated = fs::read_to_string(output_path.join(file)).unwrap();
+            assert!(generated.contains(expected), "{generated}");
+        }
+    }
+
+    #[test]
+    fn test_cli_typegen_viewer_declarations_change_nothing() {
+        // The import stays: what is compared is the viewer declaration alone.
+        let choice = "import \"@nx/viewer\"\nexport type Choice = { label:string }\n";
+        let (plain_dir, plain_path) = create_temp_library(&[("choice.nx", choice)]);
+        let with_viewer = format!("{choice}viewer Choice = <ElementViewer title=label />\n");
+        let (viewer_dir, viewer_path) = create_temp_library(&[("choice.nx", with_viewer.as_str())]);
+        for language in ["typescript", "csharp"] {
+            let generate = |dir: &TempDir, library: &Path| {
+                let output_path = dir.path().join(format!("generated-{language}"));
+                let output = run_cli(&[
+                    "typegen",
+                    library.to_str().unwrap(),
+                    "--language",
+                    language,
+                    "--output",
+                    output_path.to_str().unwrap(),
+                ]);
+                assert!(
+                    output.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                let mut files = fs::read_dir(&output_path)
+                    .unwrap()
+                    .map(|entry| {
+                        let path = entry.unwrap().path();
+                        let text = fs::read_to_string(&path).unwrap();
+                        (path.file_name().unwrap().to_owned(), text)
+                    })
+                    .collect::<Vec<_>>();
+                files.sort();
+                files
+            };
+            assert_eq!(
+                generate(&plain_dir, &plain_path),
+                generate(&viewer_dir, &viewer_path),
+                "{language}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_cli_typegen_rejects_a_props_record_in_an_exported_signature() {
+        let (dir, library_path) = create_temp_library(&[(
+            "card.nx",
+            "export component <Card title:string /> = { <Panel /> }\nexport type Saved = { props:Card.Props }",
+        )]);
+        let output_path = dir.path().join("generated-ts");
+        let output = run_cli(&[
+            "typegen",
+            library_path.to_str().unwrap(),
+            "--language",
+            "typescript",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success(), "{stderr}");
+        assert!(
+            stderr.contains("'Saved'") && stderr.contains("'Card.Props'"),
+            "{stderr}"
+        );
+    }
+
+    #[test]
     fn test_cli_typegen_library_writes_external_component_state_output() {
         let (dir, library_path) = create_temp_library(&[
             ("theme.nx", "export type ThemeMode = light | dark"),

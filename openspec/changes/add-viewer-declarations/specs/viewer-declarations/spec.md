@@ -24,7 +24,7 @@ declaration schema.
 
 #### Scenario: Nothing reaches the IR
 - **WHEN** a module with viewer declarations is built to NX IR
-- **THEN** the image SHALL be identical to the image of the same module with its viewer declarations removed
+- **THEN** the image SHALL be identical to the image of the same module with its viewer declarations removed, apart from the module fingerprint, which hashes the module's source text
 
 ### Requirement: A viewer declaration's target decides its viewer record
 The target of a viewer declaration SHALL resolve, through the module's ordinary name resolution, to

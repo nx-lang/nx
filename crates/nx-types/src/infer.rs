@@ -386,6 +386,15 @@ pub struct InferenceContext<'a> {
     /// expands to was written where the alias was declared, outside any component, and is resolved
     /// there.</para>
     type_parameter_scope: FxHashMap<Name, Type>,
+    /// The type a `viewer` declaration binds `Target` to, while its value is being checked.
+    ///
+    /// <para>Every construction of an `@nx/viewer` record in the value that leaves `Target`
+    /// unbound gets this, and one that binds it to anything else is reported. `None` everywhere
+    /// else, where a generic record binds every parameter itself.</para>
+    viewer_target: Option<Type>,
+    /// The first viewer declaration of each target in this module, by the declaration the
+    /// target names.
+    viewer_targets: FxHashMap<nx_hir::DeclaringOrigin, (Name, TextSpan)>,
     /// The component whose declaration is being checked, if any.
     ///
     /// <para>Only diagnostics read it: an unknown bare `Update` or `Property` written inside a
@@ -486,6 +495,8 @@ impl<'a> InferenceContext<'a> {
             resolved_type_aliases: FxHashMap::default(),
             local_type_alias_spans: FxHashMap::default(),
             type_parameter_scope: FxHashMap::default(),
+            viewer_target: None,
+            viewer_targets: FxHashMap::default(),
             current_component: None,
             type_ref_span: TextSpan::new(0.into(), 0.into()),
             consumed_type_arguments: FxHashSet::default(),
@@ -1421,6 +1432,143 @@ impl<'a> InferenceContext<'a> {
                 )
             })
             .collect()
+    }
+
+    /// Binds `Target` for a construction of an `@nx/viewer` record inside a viewer declaration's
+    /// value: to the declaration's target when the construction leaves it unbound, and reports a
+    /// construction that binds it to anything else.
+    fn bind_viewer_target(
+        &mut self,
+        arguments: &mut ResolvedTypeArguments,
+        record_name: &Name,
+        type_params: &[Name],
+        span: TextSpan,
+    ) {
+        let Some(target) = self.viewer_target.clone() else {
+            return;
+        };
+        let param = Name::new(nx_hir::VIEWER_TARGET_PARAMETER);
+        if !type_params.contains(&param) {
+            return;
+        }
+        if arguments.unspecified.remove(&param) {
+            arguments.scope.insert(param.clone(), target.clone());
+            arguments.resolved.push((param, target));
+            arguments.resolved.sort_by_key(|(name, _)| {
+                type_params
+                    .iter()
+                    .position(|candidate| candidate == name)
+                    .unwrap_or(usize::MAX)
+            });
+            return;
+        }
+        let Some(bound) = arguments.scope.get(&param).cloned() else {
+            return;
+        };
+        if bound != target && !matches!(bound, Type::Error) && !matches!(target, Type::Error) {
+            self.error(
+                "viewer-target-mismatch",
+                format!(
+                    "'{}' binds Target={}, but this viewer declaration's target is '{}'; leave Target out and the declaration binds it",
+                    record_name, bound, target
+                ),
+                span,
+            );
+        }
+    }
+
+    /// Checks one `viewer Target = Value` declaration.
+    ///
+    /// <para>The target must name a declaration that can have a viewer, and the value must be the
+    /// `@nx/viewer` record for the target's kind. While the value is checked, every viewer record
+    /// in it binds `Target` to the target, or to its props record for a component, so property and
+    /// case names check against the target. A second viewer declaration of one target in a module
+    /// is reported.</para>
+    pub fn infer_viewer(&mut self, viewer: &nx_hir::ViewerDecl) {
+        let target = match nx_hir::resolve_viewer_target(self.module, &viewer.target) {
+            Ok(target) => Some(target),
+            Err(nx_hir::ViewerTargetError::Unknown) => {
+                self.error(
+                    "unknown-viewer-target",
+                    format!(
+                        "Unknown name '{}': a viewer declaration's target must name a declaration visible here",
+                        viewer.target
+                    ),
+                    viewer.target_span,
+                );
+                None
+            }
+            Err(nx_hir::ViewerTargetError::NotAllowed { reason }) => {
+                self.error(
+                    "viewer-target-not-allowed",
+                    format!("'{}' cannot have a viewer: {}", viewer.target, reason),
+                    viewer.target_span,
+                );
+                None
+            }
+        };
+
+        if let Some(target) = target.as_ref() {
+            match self.viewer_targets.get(&target.origin).cloned() {
+                Some((first, first_span)) => {
+                    let builder = Diagnostic::error("duplicate-viewer")
+                        .with_message(format!(
+                            "'{}' already has a viewer in this module, declared as 'viewer {}'; a module declares at most one viewer for a declaration",
+                            viewer.target, first
+                        ))
+                        .with_label(Label::primary(self.file_name.clone(), viewer.span))
+                        .with_label(
+                            Label::secondary(self.file_name.clone(), first_span)
+                                .with_message("the first viewer is declared here"),
+                        );
+                    self.diagnostics.push(builder.build());
+                }
+                None => {
+                    self.viewer_targets
+                        .insert(target.origin.clone(), (viewer.target.clone(), viewer.span));
+                }
+            }
+        }
+
+        let target_ty = match target.as_ref() {
+            Some(target) => self.type_from_type_ref_in_quietly(
+                None,
+                &ast::TypeRef::name(target.target_type.as_str()),
+            ),
+            None => Type::Error,
+        };
+        let previous = self.viewer_target.replace(target_ty);
+        let actual = self.infer_expr(viewer.value);
+        self.viewer_target = previous;
+
+        let Some(target) = target else {
+            return;
+        };
+        let expected = target.record.name();
+        let found = match &actual {
+            Type::Error => return,
+            Type::Named(named) => match named.origin() {
+                Some(origin) if origin.module_identity() == nx_hir::VIEWER_LIBRARY_MODULE => self
+                    .record_definition_for(named)
+                    .map(|record| record.name.as_str().to_string()),
+                _ => None,
+            },
+            _ => None,
+        };
+        if found.as_deref() != Some(expected) {
+            self.error(
+                "viewer-record-mismatch",
+                format!(
+                    "The viewer of {} '{}' must be a '{}' from \"{}\", not '{}'",
+                    target.kind_label,
+                    viewer.target,
+                    expected,
+                    nx_hir::VIEWER_LIBRARY_ROOT,
+                    found.unwrap_or_else(|| actual.to_string())
+                ),
+                self.module.raw_module().expr_span(viewer.value),
+            );
+        }
     }
 
     /// Binds `P.Property` beside each of a record's type parameters `P` in `scope`: the property
@@ -4103,8 +4251,14 @@ impl<'a> InferenceContext<'a> {
         owner: Option<DeclaringOrigin>,
         span: TextSpan,
     ) -> ResolvedTypeArguments {
+        let viewer_record = owner
+            .as_ref()
+            .is_some_and(|origin| origin.module_identity() == nx_hir::VIEWER_LIBRARY_MODULE);
         let mut arguments =
             self.resolve_type_argument_bindings(bindings, record_name, type_params, owner);
+        if viewer_record {
+            self.bind_viewer_target(&mut arguments, record_name, type_params, span);
+        }
         self.bind_parameter_property_unions(
             &mut arguments.scope,
             type_params,

@@ -129,6 +129,10 @@ fn referenced_derived_declarations(artifact: &ProgramArtifact) -> FxHashSet<Upda
         };
         let mut names = Vec::new();
         for (expr_id, expr) in lowered_module.exprs() {
+            // A viewer declaration is never emitted, so nothing its value names is used.
+            if lowered_module.is_viewer_expr(expr_id) {
+                continue;
+            }
             match expr {
                 ast::Expr::RecordLiteral { record, .. } => names.push(record.clone()),
                 ast::Expr::Element { element, .. } => {
@@ -216,6 +220,31 @@ fn referenced_derived_declarations(artifact: &ProgramArtifact) -> FxHashSet<Upda
         })
         .collect::<Vec<_>>();
     referenced.extend(state_updates);
+    // A props record extends its component's base's props record, which a runtime must know to
+    // read the inherited fields, so a referenced derived record brings its derived bases along.
+    let mut pending = referenced.iter().copied().collect::<Vec<_>>();
+    while let Some((module_id, definition_id)) = pending.pop() {
+        let module_id = RuntimeModuleId::new(module_id);
+        let Some(Item::Record(record)) = artifact
+            .resolved_program
+            .module(module_id)
+            .and_then(|module| module.lowered_module.item_by_definition(definition_id))
+        else {
+            continue;
+        };
+        let Some(base) = record.base.as_ref() else {
+            continue;
+        };
+        let Some(reference) = resolve_visible_reference(artifact, module_id, base.as_str()) else {
+            continue;
+        };
+        let key = (reference.module_id.as_u32(), reference.definition_id);
+        if is_derived_declaration(artifact, reference.module_id, reference.definition_id)
+            && referenced.insert(key)
+        {
+            pending.push(key);
+        }
+    }
     referenced
 }
 

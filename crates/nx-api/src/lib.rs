@@ -46,6 +46,8 @@ mod library_source_tests;
 mod schema_tests;
 #[cfg(test)]
 mod standard_library_tests;
+#[cfg(test)]
+mod viewer_declarations_tests;
 
 pub use artifacts::{
     analyze_workspace_modules, build_library_artifact_from_directory,
