@@ -680,9 +680,9 @@ offer, with the same results for the same inputs.
   the record's declared field order.
 
 Apply and diff SHALL be available where an instantiable generated plain record type exists for the
-patch's target. Merge and changed SHALL be available on every update DTO, including those for
-actions and component state, which have no plain record type, and those for abstract records, which
-have no instantiable one.
+patch's target, including a component's `<Name>_state` contract for its `<Name>_state_update`.
+Merge and changed SHALL be available on every update DTO, including those for abstract records,
+which have no instantiable plain record type. A component has no update DTO of its own.
 
 #### Scenario: Apply overwrites only the carried fields
 - **WHEN** a C# caller applies a `User_update` carrying only `Email` set to `null` to a `User` with a name and an email
@@ -706,8 +706,8 @@ have no instantiable one.
 - **THEN** the result SHALL be the `User_property` values for `name` then `email`, in the order `User` declares them
 
 #### Scenario: Merge and changed work on an update with no plain record type
-- **WHEN** a C# caller merges two `Counter_update` values for a component's state
-- **THEN** the merge SHALL succeed and asking which fields changed SHALL yield `Counter_property` values
+- **WHEN** a C# caller merges two `Stepped_update` values for an abstract record `Stepped`
+- **THEN** the merge SHALL succeed and asking which fields changed SHALL yield `Stepped_property` values
 
 ### Requirement: Managed binding explains an NX IR artifact
 The managed .NET binding SHALL render an NX IR image it is given as the same readable text the
@@ -779,3 +779,4 @@ when these types stop matching the prelude's declarations.
 #### Scenario: The SDK companion tracks the prelude
 - **WHEN** the prelude's `Range` declaration renames a field
 - **THEN** an SDK test SHALL fail until `NxRange_update<T>` is updated to match
+

@@ -2,9 +2,7 @@
 
 ## Purpose
 TBD - created by archiving change add-nx-ir-format. Update Purpose after archive.
-
 ## Requirements
-
 ### Requirement: NX IR program artifacts are versioned and deterministic
 The system SHALL define a versioned NX IR artifact emitted from a successful `ProgramArtifact`, one
 per emitted module. The artifact SHALL be a little-endian binary image whose fixed header carries a
@@ -170,7 +168,7 @@ SHALL list a required feature naming update-intrinsic support. A `changed` call 
 the declared field order of the target record, so a runtime orders the result without consulting
 the declaration.
 
-An action-handler binding (`onTapped=<Update count={count + 1} />`) SHALL be encoded as an
+An action-handler binding (`onTapped=<State.Update count={count + 1} />`) SHALL be encoded as an
 action-handler node kind that carries a reference to the component and the name of the emit the
 handler answers, a reference to the action record it accepts, the slot the handler's `action`
 binding occupies, a reference to the owner component whose state the handler may patch (absent for
@@ -222,14 +220,14 @@ as IR build diagnostics.
 
 #### Scenario: A handler bound inside a component body is encoded with its owner
 - **WHEN** NX source declares `external component <Button emits { Tapped { } } />` and
-  `component <Counter /> = { state { count:int = 0 } <Button onTapped=<Update count={count + 1} /> /> }`
+  `component <Counter /> = { state { count:int = 0 } <Button onTapped=<State.Update count={count + 1} /> /> }`
 - **AND** NX IR is emitted for the program
 - **THEN** the `onTapped` property of the `Button` descriptor SHALL be encoded with the
   action-handler node kind
 - **AND** the node SHALL reference component `Button`, name emit `Tapped`, and reference the
   `Button.Tapped` action record
 - **AND** the node SHALL reference `Counter` as the owner
-- **AND** the body SHALL be the `Counter.Update` construction, referencing `count` through the
+- **AND** the body SHALL be the `Counter.State.Update` construction, referencing `count` through the
   slot of `Counter`'s `count` state field
 - **AND** the required feature list SHALL name action-handler support
 
@@ -321,8 +319,10 @@ exactly, so every `float32` value it holds is one.
 NX IR SHALL preserve effective component prop contracts, declared state fields, defaults, content
 field metadata, abstract/external/concrete component flags, the effective emits of the component
 (each emit's name and a reference to the action record it carries, inherited emits included, in
-declaration order), component body expressions where available, and schemas needed to normalize
-props and state at runtime. Component descriptor expressions SHALL remain atomic and SHALL encode
+declaration order), component body expressions where available, schemas needed to normalize
+props and state at runtime, and, for a component whose program references its derived state
+record or that record's update record or property union, a reference to the `<Component>.State`
+record declaration. Component descriptor expressions SHALL remain atomic and SHALL encode
 normalized descriptor construction rather than deep-rendering the referenced component body. A
 descriptor's handler properties SHALL be encoded as properties of the descriptor, alongside its
 declared props, so a runtime can carry the parent's bindings with the instance.
@@ -333,6 +333,13 @@ declared props, so a runtime can carry the parent's bindings with the instance.
 - **THEN** the component declaration in IR SHALL include a prop schema for `placeholder`
 - **AND** it SHALL include a state schema for `query`
 - **AND** it SHALL preserve the default expression used to materialize the initial `query` value
+
+#### Scenario: A component names its state record when the program uses it
+- **WHEN** NX source declares `component <Counter /> = { state { count:int = 0 } <Button onTapped=<State.Update count={count + 1} /> /> }`
+- **AND** NX IR is emitted for the program
+- **THEN** the `Counter` declaration SHALL reference the `Counter.State` record declaration
+- **AND** the IR SHALL declare `Counter.State` with the field `count:int` and no default
+- **AND** a component whose program never names its state record, its update or its property union SHALL carry no such reference
 
 #### Scenario: Component descriptor remains atomic
 - **WHEN** NX source declares `component <Parent /> = { <Child /> }`
@@ -422,14 +429,16 @@ and the declaration name when it is not, and SHALL never need to read a source f
 - **AND** the artifact with and without the section SHALL differ only in that section
 
 ### Requirement: NX IR declares the update records a program references
-When a program references a derived update record `T.Update` — by constructing one, by naming it in
-a type annotation, or by declaring a state or prop field of that type — emitted NX IR SHALL contain
-a declaration for it. The declaration SHALL identify itself as an update record, SHALL name its
+Emitted NX IR SHALL contain a declaration for every derived update record `T.Update` the program
+references, whether by constructing one, by naming it in a type annotation, or by declaring a
+state or prop field of that type. The declaration SHALL identify itself as an update record, SHALL name its
 target `T`, and SHALL carry its own field schemas so that a runtime can normalize a value of the
 type without consulting the target: every field optional in the sense that it may be absent, no
 default expressions, and the clearable mark copied from the target field's optional mark, so the
-runtime accepts a present empty value only where `T` declares the field `?:`. Update record
-declarations that the program does not reference SHALL NOT be emitted, so that programs which never
+runtime accepts a present empty value only where `T` declares the field `?:`. When `T` is a
+component's derived state record, the IR SHALL declare `T` as well, and the component's
+declaration SHALL reference it, so a runtime recognizes a state patch by its target alone. Update
+record declarations that the program does not reference SHALL NOT be emitted, so that programs which never
 use a patch produce the same IR as before. A program that references an update record SHALL list a
 required feature naming update-record support, so a runtime that predates this change rejects the
 program rather than misreading the declaration.
@@ -447,10 +456,10 @@ program rather than misreading the declaration.
 - **AND** the required feature list SHALL be unchanged from a program without update records
 
 #### Scenario: Construction of an update record is encoded as record construction
-- **WHEN** NX source constructs `<Counter.Update count=1 />` for a component `Counter` with state `count:int`
+- **WHEN** NX source constructs `<Counter.State.Update count=1 />` for a component `Counter` with state `count:int`
 - **AND** NX IR is emitted for the program
-- **THEN** the expression SHALL be encoded with the existing record construction operation targeting the `Counter.Update` declaration
-- **AND** the emitted canonical value SHALL carry `$type` `Counter.Update` and only the `count` key
+- **THEN** the expression SHALL be encoded with the existing record construction operation targeting the `Counter.State.Update` declaration
+- **AND** the emitted canonical value SHALL carry `$type` `Counter.State.Update` and only the `count` key
 
 ### Requirement: NX IR declares the property unions a program references
 When a program references a derived property union `T.Property` — by naming one of its cases, by
@@ -485,8 +494,8 @@ as a constant case.
 ### Requirement: NX IR erases component type parameters
 NX IR SHALL NOT carry component type parameters. A component's prop schema and state schema in IR
 SHALL describe each field with the type parameter replaced by the top type `object`, keeping the
-field's occurrence around the erased type, the component's derived update record SHALL describe
-each field the same way, and a component descriptor in IR SHALL NOT include a property for a type
+field's occurrence around the erased type, the component's derived state record and that record's
+update record SHALL describe each field the same way, and a component descriptor in IR SHALL NOT include a property for a type
 argument the source bound. IR emitted for a program with generic components SHALL remain
 deterministic and boundary-clean.
 
@@ -502,9 +511,10 @@ deterministic and boundary-clean.
 - **THEN** the descriptor expression for `v` SHALL carry a property for `itemsSource` and no property for `TItem`
 
 #### Scenario: Update record carries the erased type
-- **WHEN** NX source declares `component <List TItem:type items?:TItem+ /> = { state { sel?:TItem } <Label /> } let u = <List.Update sel={} />`
+- **WHEN** NX source declares `component <List TItem:type items?:TItem+ /> = { state { sel?:TItem } <Label /> } let u = <List.State.Update sel={} />`
 - **AND** NX IR is emitted for the program
-- **THEN** the `List.Update` declaration in IR SHALL type `sel` as `object?`, mark it clearable, and SHALL NOT mention `TItem`
+- **THEN** the `List.State.Update` declaration in IR SHALL type `sel` as `object?`, mark it clearable, and SHALL NOT mention `TItem`
+- **AND** the `List.State` declaration it targets SHALL type `sel` the same way
 
 ### Requirement: NX IR erases record type parameters and type arguments
 NX IR SHALL NOT carry record type parameters or type arguments. A generic record's field schema in
@@ -1757,3 +1767,4 @@ program SHALL still be cut at every four-byte boundary and refused.
 - **THEN** every truncation of each of its images at a four-byte boundary SHALL be refused with a
   diagnostic
 - **AND** the test that overwrites every cell SHALL leave the program out and say that it did
+

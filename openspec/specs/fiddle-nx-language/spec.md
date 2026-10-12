@@ -5,9 +5,7 @@
 NX as a language of the DrawnUI fiddle engine: a visitor picks NX, edits a snippet, sees it drawn
 with DrawnUI in the browser, shares it, and embeds it through the player, with the DrawnUI catalog
 kept in the fiddle repository and derived from the DrawnUI engine the fiddle ships.
-
 ## Requirements
-
 ### Requirement: NX is a built-in language of the fiddle engine
 The fiddle engine SHALL ship NX as a language with the stable id `nx`, on its React surface, for a
 host to register next to C# and TSX. Switching to NX SHALL load NX's starter preset when the buffer
@@ -276,7 +274,7 @@ omitted.
 - **THEN** it SHALL compile, because `SkiaControl` declares `Tapped` and `SkiaShape` inherits it
 
 #### Scenario: A payload carries the callback's primitive arguments
-- **WHEN** a snippet binds `onToggled=<Update on={action.value} />` on a `SkiaSwitch`
+- **WHEN** a snippet binds `onToggled=<State.Update on={action.value} />` on a `SkiaSwitch`
 - **THEN** it SHALL compile, with `action.value` typed `boolean`
 
 #### Scenario: Events leave the omitted list
@@ -369,7 +367,7 @@ player SHALL behave identically from a share's image, without the compiler modul
 
 #### Scenario: A tap patches state and redraws
 - **WHEN** a snippet declares a component with `state { count:int = 0 }`, a label whose text is
-  `"Taps: " + count` and a button with `onTapped=<Update count={count + 1} />`, and draws it
+  `"Taps: " + count` and a button with `onTapped=<State.Update count={count + 1} />`, and draws it
 - **AND** the visitor taps the button twice
 - **THEN** the label SHALL read `Taps: 2`
 - **AND** no compile SHALL have been issued by the taps
@@ -378,7 +376,7 @@ player SHALL behave identically from a share's image, without the compiler modul
 - **WHEN** a child component declares `emits { Chosen { name:string } }` and binds
   `onTapped=<Child.Chosen name="a" />` on a button
 - **AND** a parent with state `picked:string = ""` uses it as
-  `<Child onChosen=<Update picked={action.name} /> />` and draws `picked` in a label
+  `<Child onChosen=<State.Update picked={action.name} /> />` and draws `picked` in a label
 - **AND** the visitor taps the child's button
 - **THEN** the parent's label SHALL redraw as `a`
 
@@ -509,3 +507,4 @@ The build SHALL say which source it used.
 - **WHEN** the committed catalog image was emitted by a compiler whose image layout differs from
   the checkout's
 - **THEN** the build SHALL fail naming the catalog and the command that regenerates it
+

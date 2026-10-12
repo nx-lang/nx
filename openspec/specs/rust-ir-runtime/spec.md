@@ -4,9 +4,7 @@
 
 Defines the Rust crate that prepares, links and evaluates NX IR images without the NX compiler, so
 that a Rust host can run compiled NX programs with the same results as the TypeScript IR runtime.
-
 ## Requirements
-
 ### Requirement: The Rust IR runtime does not depend on the NX compiler
 The Rust IR runtime SHALL be a crate whose dependency closure contains the NX IR format crate and
 the NX value crate and no crate that parses, lowers, type-checks or emits NX. The NX IR format —
@@ -214,7 +212,7 @@ no tokens. No operation SHALL modify an instance it was given, and a failed disp
 the instance usable.
 
 #### Scenario: Initialization returns rendered output, state and an instance
-- **WHEN** a caller initializes `component <Counter /> = { state { count:int = 0 } <Button onTapped=<Update count={count + 1} /> /> }`
+- **WHEN** a caller initializes `component <Counter /> = { state { count:int = 0 } <Button onTapped=<State.Update count={count + 1} /> /> }`
 - **THEN** the rendered `Button`'s `onTapped` SHALL be an `ActionHandler` record with action
   `Button.Tapped` and token `h1-1`
 - **AND** the state SHALL hold `count` equal to `0`
@@ -732,3 +730,4 @@ again.
   its debug section
 - **THEN** after the call the report's entries SHALL list the origins of the rendered output, equal
   to what the TypeScript runtime reports for the same call
+

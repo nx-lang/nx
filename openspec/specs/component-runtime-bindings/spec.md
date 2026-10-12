@@ -47,18 +47,18 @@ snapshot.
 - **AND** every returned value SHALL appear only in the effect list
 
 #### Scenario: Handler invocation patches the component's state
-- **WHEN** a host initializes `component <Counter /> = { state { count:int = 0 } <Button onTapped=<Update count={count + 1} /> /> }`, reads the handler token from the rendered `Button`'s `onTapped`, and dispatches one invocation of that token with `<Button.Tapped />`
+- **WHEN** a host initializes `component <Counter /> = { state { count:int = 0 } <Button onTapped=<State.Update count={count + 1} /> /> }`, reads the handler token from the rendered `Button`'s `onTapped`, and dispatches one invocation of that token with `<Button.Tapped />`
 - **THEN** dispatch SHALL return a next snapshot whose `count` is `1`
 - **AND** the returned rendered output SHALL reflect `count` equal to `1`
 - **AND** the effect list SHALL be empty
 
 #### Scenario: Non-update results of a handler invocation are effects
-- **WHEN** a host dispatches an invocation of a handler bound as `onTapped={ <Update count=0 /> <Saved /> }` inside a component that emits `Saved`
+- **WHEN** a host dispatches an invocation of a handler bound as `onTapped={ <State.Update count=0 /> <Saved /> }` inside a component that emits `Saved`
 - **THEN** dispatch SHALL apply the update to the snapshot's state
 - **AND** SHALL return `Saved` as the only effect
 
 #### Scenario: Update records returned by a parent-bound handler are effects
-- **WHEN** a host dispatches `<SearchSubmitted searchString="docs" />` against a `SearchBox` instance whose parent bound `onSearchSubmitted=<Update query={action.searchString} />` inside the parent's own body
+- **WHEN** a host dispatches `<SearchSubmitted searchString="docs" />` against a `SearchBox` instance whose parent bound `onSearchSubmitted=<State.Update query={action.searchString} />` inside the parent's own body
 - **THEN** dispatch SHALL NOT change the `SearchBox` state
 - **AND** SHALL return the parent's update record in the effect list for the host to apply
 
@@ -256,7 +256,7 @@ by the same call. Rendered output returned by pure component evaluation SHALL re
 the same way but SHALL NOT carry a token, since there is no snapshot to dispatch against.
 
 #### Scenario: Initialization output carries handler tokens
-- **WHEN** a host initializes a component whose body renders `<Button onTapped=<Update count={count + 1} /> />`
+- **WHEN** a host initializes a component whose body renders `<Button onTapped=<State.Update count={count + 1} /> />`
 - **THEN** the rendered `Button` element's `onTapped` SHALL be a record with `$type` `ActionHandler`, `action` `Button.Tapped`, and a non-empty `token`
 
 #### Scenario: A token from a stale snapshot is rejected
@@ -341,3 +341,4 @@ itself produced SHALL NOT be re-checked.
 - **WHEN** a host dispatches `{ $type: "Editor.Apply", patch: { $type: "User.Update", name: null } }`, where `Editor` emits `Apply { patch:User.Update }` and `User` declares `name:string`, against an instance whose parent bound no `onApply`
 - **THEN** dispatch SHALL fail with a diagnostic naming `name`
 - **AND** the same entry with a well-formed `patch` SHALL succeed with no effects
+

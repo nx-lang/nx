@@ -7,9 +7,7 @@ visitor writes NX source on one side and sees the value its `root` evaluates to 
 by the `value-view` element as highlighted NX text. Short examples grouped by topic get a visitor
 started, and the source travels in the page's address so it can be shared. Everything runs in the
 browser; the DrawnUI fiddle is where NX draws interfaces.
-
 ## Requirements
-
 ### Requirement: Compilation and language queries run in the browser behind the same seam
 The site SHALL compile and evaluate NX and answer hover, completion, diagnostics and symbol queries
 in the visitor's browser, off the main thread, and SHALL keep the choice of where that work happens
@@ -501,7 +499,7 @@ when it has one. A dispatch that fails SHALL add no tick and SHALL show the fail
 the form or button.
 
 #### Scenario: Pressing a button
-- **WHEN** a visitor previews the counter, whose `Button` binds `onTapped=<Update count={count +
+- **WHEN** a visitor previews the counter, whose `Button` binds `onTapped=<State.Update count={count +
   1} />`, and presses "Tapped"
 - **THEN** the output SHALL show the count as 4, and the timeline SHALL gain a step
 
@@ -602,3 +600,4 @@ with a `Counter` element, so that switching to Preview runs it with no further s
 - **WHEN** a visitor opens "A counter to click" and switches to Preview
 - **THEN** the pane SHALL show the counter with buttons for adding and resetting, and pressing them
   SHALL change the count
+

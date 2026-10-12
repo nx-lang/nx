@@ -5,7 +5,6 @@
 Lets a component declare type parameters with the same property syntax as its props, so a
 collection-drawing component can say that its items and its template agree on one item type, and
 lets a use site supply that type by name or leave it unspecified.
-
 ## Requirements
 ### Requirement: A component signature declares type parameters as leading `type`-typed properties
 A component signature SHALL accept a property definition whose declared type is the keyword
@@ -199,10 +198,10 @@ nominal type, the same type as an element of that component with a different arg
 - **THEN** the resulting external component record SHALL have `itemsSource` empty and SHALL NOT have a `TItem` field
 - **AND** its JSON serialization SHALL NOT contain a `TItem` key
 
-#### Scenario: The property union of a generic stateful component is derived from state only
-- **WHEN** a file contains `component <List TItem:type items:TItem+ /> = { state { selected:int = 0 } <Label /> }` and `let k:List.Property = {List.Property.selected}`
-- **THEN** type checking SHALL accept `List.Property` with the single case `selected`
-- **AND** SHALL reject `List.Property.TItem`
+#### Scenario: The state property union of a generic component leaves out its type parameters
+- **WHEN** a file contains `component <List TItem:type items:TItem+ /> = { state { selected:int = 0 } <Label /> }` and `let s:List.State.Property = {List.State.Property.selected}`
+- **THEN** type checking SHALL accept `List.State.Property` with the single case `selected`
+- **AND** SHALL reject `List.State.Property.TItem`
 
 #### Scenario: Elements with different arguments have the same type
 - **WHEN** a file contains `type Contact = { name:string } external component <List TItem:type items?:TItem+ />` and `let a:List = <List TItem=Contact /> let b:List = <List TItem=int /> let c:List = <List />`
@@ -233,3 +232,4 @@ diagnostic against such a prop SHALL name the parameter and show the `Name=` for
 - **WHEN** a file contains `abstract external component <DrawnNode /> external component <SkiaLayout TItem:type ItemsSource?:TItem+ ItemTemplate?:<function Item:TItem Index:int />: DrawnNode /> component <Section extends DrawnNode TItem:type Items:TItem+ Row:<function Item:TItem Index:int />: DrawnNode /> = { <SkiaLayout TItem=TItem ItemsSource={Items} ItemTemplate={Row} /> }`
 - **THEN** analysis SHALL accept the body, checking `Row` against the prop with `Section`'s own
   parameter substituted
+

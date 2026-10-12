@@ -3,9 +3,7 @@
 ## Purpose
 Define the `nxlang typegen` CLI behavior for single-file and library code generation while
 honoring NX export visibility.
-
 ## Requirements
-
 ### Requirement: `typegen` infers file versus library generation from the input path
 The `nxlang typegen` command SHALL inspect the input path and select generation behavior from the
 filesystem entry kind. A `.nx` file SHALL trigger single-file generation. A directory SHALL trigger
@@ -265,37 +263,6 @@ and which declares no base. A union with any payload case SHALL NOT generate a C
 - **AND** typed MessagePack handling SHALL use that string-based wire shape rather than a canonical
   raw map shape
 
-### Requirement: Generated external component state contracts use stable companion names
-Generated external component state contracts SHALL use stable companion names. When generated
-output includes a companion state contract for an exported external component, the generator SHALL
-name it `<ComponentName>_state`, SHALL include exactly the declared state fields from that
-component, SHALL map those fields to the same wire names for both MessagePack and JSON, and SHALL
-NOT include component props, emitted actions, or a `$type` discriminator.
-
-#### Scenario: TypeScript companion state contract is a plain interface
-- **WHEN** source contains `export external component <SearchBox /> = { state { query:string } }`
-- **THEN** TypeScript generation SHALL emit `export interface SearchBox_state`
-- **AND** SHALL include property `query: string`
-- **AND** SHALL NOT emit `$type` on `SearchBox_state`
-
-#### Scenario: C# companion state contract is a plain dual-annotated DTO
-- **WHEN** source contains `export external component <SearchBox /> = { state { query:string } }`
-- **THEN** C# generation SHALL emit a generated type `SearchBox_state`
-- **AND** SHALL include the declared state field `query`
-- **AND** SHALL annotate that field so both MessagePack and JSON use wire name `query`
-- **AND** SHALL NOT emit a `$type` discriminator member on `SearchBox_state`
-
-### Requirement: Generated external component state names warn and skip on collisions
-The generator SHALL warn when a synthesized external-component state companion name would collide
-with another generated declaration name or exported declaration name, and SHALL skip generation of
-the synthesized companion instead of overwriting the conflicting declaration.
-
-#### Scenario: Generated external state name collides with an exported declaration
-- **WHEN** source contains `export type SearchBox_state = string` and `export external component <SearchBox /> = { state { query:string } }`
-- **THEN** generation SHALL emit a warning about the `SearchBox_state` naming conflict
-- **AND** SHALL omit the generated `SearchBox_state` companion contract
-- **AND** SHALL preserve the explicit exported declaration `SearchBox_state`
-
 ### Requirement: Generated C# enums reuse shared runtime serialization helpers
 Generated C# enums SHALL reference shared enum serialization helpers from `NxLang.Runtime` for both
 `System.Text.Json` and MessagePack instead of emitting a dedicated converter and formatter type per
@@ -486,10 +453,13 @@ member of the union type.
   enum form before this change
 
 ### Requirement: Generated type surfaces include update records with distinct absence
-For every exported record, action, and component with declared state, `typegen` SHALL emit a
-companion update type named `<Name>_update` beside the exported type, following the same
-companion-naming and collision rules as `<ComponentName>_state`. The companion SHALL carry the
-target's effective fields, each optional, SHALL carry the `$type` discriminator `<Name>.Update`
+For every exported record and action, `typegen` SHALL emit a companion update type named
+`<Name>_update` beside the exported type, following the same companion-naming and collision rules
+as `<ComponentName>_state`, and for every exported component that declares state it SHALL emit
+`<Name>_state_update` for the component's `T.State.Update`. A component SHALL NOT get a
+`<Name>_update` of its own, since it has no `T.Update`. The companion SHALL carry the target's
+effective fields, which for `<Name>_state_update` are the component's state fields, each optional,
+SHALL carry the update record's `$type` discriminator (`<Name>.Update` or `<Name>.State.Update`)
 where the target language emits discriminators, and SHALL let a consumer distinguish a field that
 is absent from a field that is present and `null`, where `null` is the host spelling of a cleared
 field — the empty value — and is legal only for a field that is optional in the target, as
@@ -527,10 +497,10 @@ output.
 - **THEN** the generated `User_update` SHALL expose, to the managed SDK, each field's wire name paired with its value type
 - **AND** that schema SHALL be the only thing serialization needs to read or write the companion, so no runtime reflection over the generated type is required
 
-#### Scenario: Component update companion is derived from state
+#### Scenario: A component's only update companion is its state's
 - **WHEN** source contains `export component <Counter step:int /> = { state { count:int = 0 } <Label /> }`
-- **THEN** generation SHALL emit `Counter_update` with the single optional field `count`
-- **AND** SHALL NOT include `step`
+- **THEN** generation SHALL emit `Counter_state_update` with the single optional field `count` and the `$type` `Counter.State.Update`
+- **AND** SHALL NOT emit `Counter_update`
 
 #### Scenario: Update companion name collision warns and skips
 - **WHEN** source contains `export type User_update = string` and `export type User = { name:string }`
@@ -565,9 +535,11 @@ output.
 - **AND** the generated companion SHALL carry the written name `Tag` for that field
 
 ### Requirement: Generated type surfaces include a property companion per record-shaped declaration
-For every exported record, action, and component with declared state, `typegen` SHALL emit a
-companion property type named `<Name>_property` beside the exported type, following the same
-companion-naming and collision rules as `<Name>_update`. The companion SHALL be generated exactly
+For every exported record and action, `typegen` SHALL emit a companion property type named
+`<Name>_property` beside the exported type, following the same companion-naming and collision rules
+as `<Name>_update`, and for every exported component that declares state it SHALL emit
+`<Name>_state_property` for the component's `T.State.Property`. A component SHALL NOT get a
+`<Name>_property` of its own, since it has no `T.Property`. The companion SHALL be generated exactly
 as a constant union whose authored cases are the target's effective field names in `T.Property`
 case order: a TypeScript union of the field-name string literals, which is assignable to `keyof`
 the generated record type, and a C# `enum` with the authored-string wire format and the shared
@@ -585,9 +557,9 @@ with the same cross-library linkage a reference to `T` itself would produce.
 - **THEN** C# generation SHALL emit `enum User_property` with members for `name` and `email`
 - **AND** the enum SHALL serialize each member as its authored field name in both JSON and MessagePack using the shared enum helpers
 
-#### Scenario: Component property companion is derived from state and includes inherited fields
+#### Scenario: Property companions include inherited fields, and a component's only one is its state's
 - **WHEN** source contains `abstract type Named = { name:string } export component <Counter step:int /> = { state { count:int = 0 } <Label /> }` and `export type User extends Named = { email:string }`
-- **THEN** generation SHALL emit `Counter_property` with the single case `count` and SHALL NOT include `step`
+- **THEN** generation SHALL emit `Counter_state_property` with the single case `count` and SHALL NOT emit `Counter_property`
 - **AND** SHALL emit `User_property` with cases `name` then `email`
 
 #### Scenario: A property-typed prop references the companion
@@ -602,18 +574,19 @@ with the same cross-library linkage a reference to `T` itself would produce.
 - **AND** SHALL preserve the explicit exported declaration `User_property`
 
 ### Requirement: C# generation emits typed property keys beside each property companion
-For every declaration that gets a `<Name>_property` companion and whose fields are reachable on a
-generated plain type, C# generation SHALL also emit a typed key per field. A key SHALL carry the
+C# generation SHALL emit a typed key per field for every declaration that gets a `<Name>_property`
+companion and whose fields are reachable on a generated plain type. A key SHALL carry the
 field's wire name, its value type, and read and write access to that field on the plain generated
 type. A key for an optional field (`name?:T`) SHALL carry a nullable value type. Generation SHALL
 provide a mapping from each `<Name>_property` case to its key, so the property companion remains
 the single naming of a declaration's fields and no second spelling of those names is introduced.
 
 Where a declaration has a property companion but no instantiable generated plain type carrying its
-fields, such as a non-external component's state or an abstract record, generation SHALL emit the
-property companion alone and SHALL NOT emit keys. An external component's props contract is not
-the plain type of its state companion; its generated `<Name>_state` record is, so an external
-component with declared state SHALL get keys over `<Name>_state`.
+fields, such as an abstract record, generation SHALL emit the property companion alone and SHALL
+NOT emit keys. A component's state record `T.State` has its generated `<Name>_state` contract as
+its plain type, so every exported component with declared state, external or not, SHALL get keys
+over `<Name>_state`; an external component's props contract is never the plain type of its state
+companions.
 
 The key table's generated name SHALL follow the companion collision rule: when an exported
 declaration already owns that name, generation SHALL warn naming the table and the companion,
@@ -633,7 +606,8 @@ SHALL omit the table, and SHALL emit the update companion without keys.
 #### Scenario: External component state gets keys over its state record
 - **WHEN** source contains `export external component <Ticker step:int /> = { state { count:int = 0 } }`
 - **THEN** C# generation SHALL emit a typed key for `count` over the generated `Ticker_state`
-- **AND** `Ticker_update` SHALL apply to and diff `Ticker_state` values
+- **AND** `Ticker_state_update` SHALL apply to and diff `Ticker_state` values
+- **AND** SHALL NOT emit `Ticker_update`, since a component has no update record of its own
 - **AND** SHALL NOT emit keys over the `Ticker` props contract
 
 #### Scenario: Key table name collision warns and skips
@@ -642,10 +616,10 @@ SHALL omit the table, and SHALL emit the update companion without keys.
 - **AND** SHALL preserve the explicit exported declaration `UserProperties`
 - **AND** SHALL emit `User_update` without keys
 
-#### Scenario: Component state gets a property companion but no keys
+#### Scenario: Component state gets keys over its state contract
 - **WHEN** source contains `export component <Counter step:int /> = { state { count:int = 0 } <Label /> }`
-- **THEN** C# generation SHALL emit `Counter_property` with the single case `count`
-- **AND** SHALL NOT emit keys for it, since no generated plain type carries the component's state
+- **THEN** C# generation SHALL emit `Counter_state_property` with the single case `count` and a typed key for `count` over the generated `Counter_state`
+- **AND** SHALL NOT emit `Counter_property`, since a component has no property union of its own
 
 ### Requirement: Generated contracts erase component type parameters in C# and carry them generically in TypeScript
 The C# `typegen` emitter SHALL map a component type parameter to `object` wherever an exported
@@ -657,8 +631,8 @@ member for it. An occurrence on a type-parameter reference, and the optional mar
 that carries it, SHALL be preserved around the erased or generic type as "Generated type surfaces
 map occurrences" maps them. The exported contract's parameter list SHALL be the component's
 effective one, including parameters inherited from an abstract base declared in another module of
-the library. A generic component's `<Name>_update` companion and, for an external component, its
-`<Name>_state` record SHALL erase a state field's type parameter in both languages — to `object`
+the library. A generic component's `<Name>_state` contract and its `<Name>_state_update` companion
+SHALL erase a state field's type parameter in both languages — to `object`
 in C# and `unknown` in TypeScript — with no generic parameter, because no host names that
 instantiation: an NX use site fixed it.
 
@@ -681,10 +655,10 @@ instantiation: an NX use site fixed it.
 - **THEN** the generated TypeScript SHALL declare `ContactList<TItem = unknown>` extending `ItemsBase<TItem>` with `extra` as an optional array of `TItem`
 - **AND** the generated C# `ContactList` SHALL declare `extra` as a nullable list of `object` with no `TItem` anywhere
 
-#### Scenario: State and update companion erase the parameter
+#### Scenario: State contract and its update companion erase the parameter
 - **WHEN** NX source declares `export external component <Picker TItem:type items?:TItem+ /> = { state { sel?:TItem } }`
-- **THEN** the generated TypeScript `Picker_state` SHALL type `sel` as the optional property `sel?: unknown` and `Picker_update` SHALL type it as `sel?: unknown | null`, since `sel` is clearable
-- **AND** the generated C# `Picker_state` SHALL declare `Sel` as nullable `object` and `Picker_update` SHALL expose it as `NxOptional<object?>`
+- **THEN** the generated TypeScript `Picker_state` SHALL type `sel` as the optional property `sel?: unknown` and `Picker_state_update` SHALL type it as `sel?: unknown | null`, since `sel` is clearable
+- **AND** the generated C# `Picker_state` SHALL declare `Sel` as nullable `object` and `Picker_state_update` SHALL expose it as `NxOptional<object?>`
 - **AND** neither language's output SHALL declare a `TItem` member on either type
 
 ### Requirement: Generated contracts carry a generic record as a generic type in both languages
@@ -744,7 +718,7 @@ on the wire: the discriminator and the field names are unchanged by the paramete
 
 #### Scenario: A component's state companion still erases the component's parameters
 - **WHEN** NX source declares `export external component <Picker TItem:type /> = { state { sel?:TItem } <Label /> }`
-- **THEN** the generated `Picker_update` SHALL declare no generic parameter, and SHALL type `sel` as `sel?: unknown | null` in TypeScript and `NxOptional<object?>` in C#
+- **THEN** the generated `Picker_state_update` SHALL declare no generic parameter, and SHALL type `sel` as `sel?: unknown | null` in TypeScript and `NxOptional<object?>` in C#
 
 ### Requirement: CLI explains an NX IR artifact as readable text
 Because an NX IR artifact is a binary image, `nxlang ir explain <artifact>` SHALL be the supported
@@ -1086,3 +1060,42 @@ one.
 - **WHEN** the same library is generated with `--language csharp --csharp-namespace Org.ChatLink`
 - **THEN** the generated `AssistantConfig` SHALL type `Agent` with the `Agent` type of namespace `NxLang.Agent`
 - **AND** the command SHALL emit no warning about an assumed dependency namespace
+
+### Requirement: Generated component state contracts use stable companion names
+Generated component state contracts SHALL use stable companion names. For every exported
+component that declares state, external or not, the generator SHALL emit a companion state contract
+named `<ComponentName>_state`, which SHALL also be what a type reference to `<ComponentName>.State`
+in an exported contract generates. The contract SHALL include exactly the declared state fields
+from that component, SHALL map those fields to the same wire names for both MessagePack and JSON, and SHALL
+NOT include component props, emitted actions, or a `$type` discriminator.
+
+#### Scenario: TypeScript companion state contract is a plain interface
+- **WHEN** source contains `export external component <SearchBox /> = { state { query:string } }`
+- **THEN** TypeScript generation SHALL emit `export interface SearchBox_state`
+- **AND** SHALL include property `query: string`
+- **AND** SHALL NOT emit `$type` on `SearchBox_state`
+
+#### Scenario: C# companion state contract is a plain dual-annotated DTO
+- **WHEN** source contains `export external component <SearchBox /> = { state { query:string } }`
+- **THEN** C# generation SHALL emit a generated type `SearchBox_state`
+- **AND** SHALL include the declared state field `query`
+- **AND** SHALL annotate that field so both MessagePack and JSON use wire name `query`
+- **AND** SHALL NOT emit a `$type` discriminator member on `SearchBox_state`
+
+#### Scenario: A concrete component with state gets a state contract
+- **WHEN** source contains `export component <Counter step:int /> = { state { count:int = 0 } <Label /> }`
+- **THEN** TypeScript generation SHALL emit `export interface Counter_state` with the property `count: number`
+- **AND** SHALL NOT include `step`
+
+### Requirement: Generated component state names warn and skip on collisions
+The generator SHALL warn when a synthesized component state companion name, `<Name>_state`,
+`<Name>_state_update` or `<Name>_state_property`, would collide with another generated declaration
+name or exported declaration name, and SHALL skip generation of
+the synthesized companion instead of overwriting the conflicting declaration.
+
+#### Scenario: Generated external state name collides with an exported declaration
+- **WHEN** source contains `export type SearchBox_state = string` and `export external component <SearchBox /> = { state { query:string } }`
+- **THEN** generation SHALL emit a warning about the `SearchBox_state` naming conflict
+- **AND** SHALL omit the generated `SearchBox_state` companion contract
+- **AND** SHALL preserve the explicit exported declaration `SearchBox_state`
+
