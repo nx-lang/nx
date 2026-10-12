@@ -80,5 +80,5 @@ let patched() = { <Opt.Update b={5} /> }
 
 component <Tally /> = {
   state { count:int = {1 + 1} }
-  <Button onTapped=<Update count={count + 1} /> />
+  <Button onTapped=<State.Update count={count + 1} /> />
 }

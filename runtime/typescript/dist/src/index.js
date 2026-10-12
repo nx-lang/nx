@@ -9,7 +9,7 @@
  * one prepared catalog serves any number of programs.
  */
 import { NX_PRELUDE_IMAGE_BASE64, NX_PRELUDE_VERSION } from "./prelude-image.js";
-export const NX_IR_SCHEMA_VERSION = 5;
+export const NX_IR_SCHEMA_VERSION = 6;
 export const NX_IR_RUNTIME_ABI = "nx-ir-runtime-v2";
 export const NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1 = "update-records-v1";
 export const NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1 = "property-unions-v1";
@@ -789,7 +789,7 @@ const layouts = {
         ["str", { list: DECLARED_PARAM }, "node", "optType", "int"],
         ["str", "node", "optType"],
         ["str", { list: FIELD }, { list: REFS }, "int", "optRef"],
-        ["str", { list: FIELD }, { list: FIELD }, "optNode", "int", { list: EMIT }],
+        ["str", { list: FIELD }, { list: FIELD }, "optNode", "int", { list: EMIT }, "optRef"],
         ["str", { list: UNION_CASE }, { list: REFS }, "optRef"],
         ["str"],
     ],
@@ -847,7 +847,7 @@ class TableReader {
         const layout = layouts[table][kind];
         if (layout === undefined) {
             const retired = (table === "types" && (kind === 2 || kind === 3)) || (table === "nodes" && kind === 0)
-                ? ` (retired with schema ${NX_IR_SCHEMA_VERSION})`
+                ? ` (retired with schema 5)`
                 : "";
             this.#fail(`Unknown ${table.replace(/s$/, "")} kind ${kind}${retired} at ${what}.`);
             return;
@@ -1138,6 +1138,7 @@ class TableReader {
                     const emitName = this.#image.string(cursor.next());
                     return { name: emitName, action: this.#ref(cursor) };
                 });
+                const stateRecord = this.#optRef(cursor);
                 prepared = {
                     tag: "component",
                     props,
@@ -1146,6 +1147,7 @@ class TableReader {
                     isAbstract: (flags & componentFlags.abstract) !== 0,
                     isExternal: (flags & componentFlags.external) !== 0,
                     emits,
+                    stateRecord,
                 };
                 break;
             }
@@ -1502,6 +1504,8 @@ function dispatchBatch(linkedProgram, instance, batch, evaluation) {
     }
     const linked = linkedProgram.entry;
     const ownerKey = `${linked.module.identity}::${declaration.name}`;
+    // A component's state record is declared beside it, in the entry module.
+    const stateKey = component.stateRecord === undefined ? undefined : declarationKey(linked, component.stateRecord);
     // The records the instance holds keep the origins its lineage recorded for them, whether or not
     // this call records any of its own.
     const lineage = instanceOrigins.get(instance);
@@ -1525,7 +1529,7 @@ function dispatchBatch(linkedProgram, instance, batch, evaluation) {
             const owned = handler.owner === ownerKey;
             const results = invokeHandler(linkedProgram, handler, requireObject(object.action, `${path}.action`), owned ? { component, state: working } : undefined, evaluation);
             for (const result of results) {
-                if (owned && isUpdateRecordFor(result, linkedProgram, ownerKey)) {
+                if (owned && stateKey !== undefined && isUpdateRecordFor(result, linkedProgram, stateKey)) {
                     working = patchComponentState(linkedProgram, linked, declaration, component, working, result, evaluation);
                 }
                 else {
@@ -1610,8 +1614,8 @@ function propsFrame(component) {
 /**
  * Applies a patch to host-owned component state and returns the validated next state.
  *
- * The patch is either a plain partial state object or the component's own update record,
- * `{ $type: "<Component>.Update", ... }`. Either way a present field replaces the current value, an
+ * The patch is either a plain partial state object or the update record of the component's state,
+ * `{ $type: "<Component>.State.Update", ... }`. Either way a present field replaces the current value, an
  * absent one keeps it, and a present empty value — `null` or `[]` — clears an optional state field,
  * so the next state carries no key for it; for a field that is not optional it is rejected.
  */
@@ -1634,7 +1638,7 @@ export function applyComponentStatePatch(program, name, currentState, patch, opt
 function patchComponentState(program, linked, declaration, component, currentState, patch, evaluation) {
     const name = declaration.name;
     const { $type: discriminator, ...fields } = patch;
-    const expectedUpdate = `${name}.Update`;
+    const expectedUpdate = `${name}.State.Update`;
     if (discriminator !== undefined && discriminator !== expectedUpdate) {
         fail("nx-ir-state-patch", `Cannot apply '${String(discriminator)}' to ${name} state; only '${expectedUpdate}' patches it.`);
     }
@@ -3269,8 +3273,8 @@ function invokeHandler(program, handler, action, live, evaluation) {
     }
     return results;
 }
-/** Whether `value` is the update record of the component with `ownerKey`. */
-function isUpdateRecordFor(value, program, ownerKey) {
+/** Whether `value` is the update record of the state record with `stateKey`. */
+function isUpdateRecordFor(value, program, stateKey) {
     if (!isObject(value) || typeof value.$type !== "string") {
         return false;
     }
@@ -3280,7 +3284,7 @@ function isUpdateRecordFor(value, program, ownerKey) {
         return (declaration !== undefined &&
             declaration.kind.tag === "record" &&
             declaration.kind.updateTarget !== undefined &&
-            declarationKey(shape.linked, declaration.kind.updateTarget) === ownerKey);
+            declarationKey(shape.linked, declaration.kind.updateTarget) === stateKey);
     });
 }
 /**

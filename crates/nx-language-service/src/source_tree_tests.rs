@@ -881,12 +881,12 @@ fn a_handler_attribute() {
         "component <Button emits { Tapped {} } />\n\
          component <Counter emits { Done {} } /> = {\n\
            state { count:int = 0 }\n\
-           <Button onTapped=<Update count={count + 1} /> />\n\
+           <Button onTapped=<State.Update count={count + 1} /> />\n\
          }",
     );
     let handler = named(&tree, SourceRole::Attribute, "onTapped");
     assert_eq!(handler.flags, [SourceFlag::Handler]);
-    let update = named(&tree, SourceRole::Element, "Update");
+    let update = named(&tree, SourceRole::Element, "State.Update");
     assert_eq!(update.flags, [SourceFlag::StateUpdate]);
     assert_eq!(
         update.parent,

@@ -1160,6 +1160,7 @@ impl<'a> ModuleEmitter<'a> {
                 IrItem::list([IrItem::Int(name), action])
             })
             .collect::<Vec<_>>();
+        let state_record = self.optional_reference(component.state_record.as_ref());
         IrItem::list([
             IrItem::Int(kinds::declaration::COMPONENT),
             IrItem::Int(name),
@@ -1168,6 +1169,7 @@ impl<'a> ModuleEmitter<'a> {
             IrItem::Int(body),
             IrItem::Int(flags),
             IrItem::List(emits),
+            state_record,
         ])
     }
 

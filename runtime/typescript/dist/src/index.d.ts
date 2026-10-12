@@ -9,7 +9,7 @@
  * one prepared catalog serves any number of programs.
  */
 import { NX_PRELUDE_VERSION } from "./prelude-image.js";
-export declare const NX_IR_SCHEMA_VERSION = 5;
+export declare const NX_IR_SCHEMA_VERSION = 6;
 export declare const NX_IR_RUNTIME_ABI = "nx-ir-runtime-v2";
 export declare const NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1 = "update-records-v1";
 export declare const NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1 = "property-unions-v1";
@@ -330,6 +330,11 @@ export type PreparedDeclarationKind = {
     readonly isExternal: boolean;
     /** The effective emits, inherited included, in declaration order. */
     readonly emits: readonly PreparedEmit[];
+    /**
+     * The component's `<Component>.State` record, when the image emits it. A handler result
+     * whose update target is this record patches the component's state.
+     */
+    readonly stateRecord: NxIrReference | undefined;
 } | {
     readonly tag: "union";
     readonly cases: readonly PreparedUnionCase[];
@@ -647,8 +652,8 @@ export declare function normalizeComponentState(program: NxPreparedProgram | NxP
 /**
  * Applies a patch to host-owned component state and returns the validated next state.
  *
- * The patch is either a plain partial state object or the component's own update record,
- * `{ $type: "<Component>.Update", ... }`. Either way a present field replaces the current value, an
+ * The patch is either a plain partial state object or the update record of the component's state,
+ * `{ $type: "<Component>.State.Update", ... }`. Either way a present field replaces the current value, an
  * absent one keeps it, and a present empty value — `null` or `[]` — clears an optional state field,
  * so the next state carries no key for it; for a field that is not optional it is rejected.
  */

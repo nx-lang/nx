@@ -153,7 +153,7 @@ const COUNTER: &str = r#"
     external component <Button value:int = 0 emits { Tapped { } } />
     component <Counter /> = {
       state { count:int = 0 }
-      <Button value={count} onTapped=<Update count={count + 1} /> />
+      <Button value={count} onTapped=<State.Update count={count + 1} /> />
     }
 "#;
 
@@ -163,7 +163,7 @@ const FORM: &str = r#"
     component <Form emits { Saved } /> = {
       state { dirty:boolean = true count:int = 5 }
       <Panel dirty={dirty} count={count}>
-        <Button onTapped={<Update dirty=false /> <Saved />} />
+        <Button onTapped={<State.Update dirty=false /> <Saved />} />
         <Button onTapped=<Saved /> />
       </Panel>
     }
@@ -317,7 +317,7 @@ fn a_parent_bound_update_is_an_effect_for_the_host() {
         }
         component <Page /> = {
           state { query:string = "" }
-          <SearchBox onSearchSubmitted=<Update query={action.searchString} /> />
+          <SearchBox onSearchSubmitted=<State.Update query={action.searchString} /> />
         }
         "#,
     );
@@ -333,7 +333,7 @@ fn a_parent_bound_update_is_an_effect_for_the_host() {
     );
     assert_eq!(
         next.effects,
-        vec![record("Page.Update", &[("query", string("docs"))])]
+        vec![record("Page.State.Update", &[("query", string("docs"))])]
     );
     assert_eq!(field(&next.rendered, "value"), &string(""));
 }
@@ -382,8 +382,8 @@ fn an_update_record_is_the_only_way_state_changes() {
           state { query:string = {placeholder} typed:int = 0 }
           <TextInput
             value={query}
-            onTextChanged=<Update query={action.text} />
-            onCleared={<Update query="" /> <Cleared />}
+            onTextChanged=<State.Update query={action.text} />
+            onCleared={<State.Update query="" /> <Cleared />}
           />
         }
         "#,
@@ -466,7 +466,7 @@ fn an_update_that_fails_validation_aborts_the_batch() {
         external component <Button value:int = 0 emits { Tapped { } } />
         component <Counter /> = {
           state { count:int = 0 }
-          <Button value={count} onTapped=<Update count="many" /> />
+          <Button value={count} onTapped=<State.Update count="many" /> />
         }
     "#;
     let module = Arc::new(nx_hir::lower_source_module(source, "unchecked.nx").expect("lowers"));
@@ -542,7 +542,7 @@ fn a_loop_variable_that_shadows_a_state_field_keeps_its_captured_value() {
         component <Picker /> = {
           state { count:int = 0 items:int+ = {10 20 30} }
           <Panel count={count}>
-            {for count in items { <Row onTapped=<Update count={count} /> /> }}
+            {for count in items { <Row onTapped=<State.Update count={count} /> /> }}
           </Panel>
         }
         "#,
@@ -562,7 +562,7 @@ fn a_root_bound_handler_in_the_output_runs_and_its_results_are_effects() {
         r#"
         action Saved = { }
         external component <Button emits { Tapped { } } />
-        let saveButton() = <Button onTapped={<Saved /> <Form.Update dirty=false />} />
+        let saveButton() = <Button onTapped={<Saved /> <Form.State.Update dirty=false />} />
         component <Form /> = {
           state { dirty:boolean = true }
           <Panel dirty={dirty}>{saveButton()}</Panel>
@@ -579,7 +579,7 @@ fn a_root_bound_handler_in_the_output_runs_and_its_results_are_effects() {
         next.effects,
         vec![
             record("Saved", &[]),
-            record("Form.Update", &[("dirty", Value::Boolean(false))]),
+            record("Form.State.Update", &[("dirty", Value::Boolean(false))]),
         ]
     );
     assert_eq!(field(&next.rendered, "dirty"), &Value::Boolean(true));
@@ -592,7 +592,7 @@ fn a_parent_bound_handler_on_an_external_instance_runs_and_its_results_are_effec
         external component <SearchBox emits { SearchSubmitted { searchString:string } } />
         component <Page /> = {
           state { query:string = "" }
-          <SearchBox onSearchSubmitted=<Update query={action.searchString} /> />
+          <SearchBox onSearchSubmitted=<State.Update query={action.searchString} /> />
         }
         "#,
     );
@@ -612,7 +612,7 @@ fn a_parent_bound_handler_on_an_external_instance_runs_and_its_results_are_effec
     );
     assert_eq!(
         next.effects,
-        vec![record("Page.Update", &[("query", string("docs"))])]
+        vec![record("Page.State.Update", &[("query", string("docs"))])]
     );
 }
 
@@ -683,7 +683,7 @@ const HOST_BOUNDARY: &str = r#"
     component <Editor pending:User.Update drafts?:User.Update+ /> = {
       state { last:User.Update = <User.Update /> }
       <Panel pending={pending} drafts={drafts} last={last}>
-        <Button onTapped=<Update last={action.patch} /> />
+        <Button onTapped=<State.Update last={action.patch} /> />
       </Panel>
     }
 "#;
@@ -811,7 +811,7 @@ fn an_omitted_optional_prop_is_still_in_scope_after_dispatch() {
         component <Form note?:string /> = {
           state { count:int = 0 label?:string }
           <Panel note={note} label={label} count={count}>
-            <Button onTapped=<Update count={count + 1} /> />
+            <Button onTapped=<State.Update count={count + 1} /> />
           </Panel>
         }
         "#,
@@ -975,9 +975,9 @@ fn a_cleared_optional_state_field_reads_as_empty_later_in_the_batch() {
         component <Form /> = {
           state { note?:string copy:string = "" }
           <Panel copy={copy}>
-            <Button onTapped=<Update note="x" /> />
-            <Button onTapped=<Update note={} /> />
-            <Button onTapped=<Update copy={note ?? "none"} /> />
+            <Button onTapped=<State.Update note="x" /> />
+            <Button onTapped=<State.Update note={} /> />
+            <Button onTapped=<State.Update copy={note ?? "none"} /> />
           </Panel>
         }
         "#,

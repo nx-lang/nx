@@ -1,4 +1,4 @@
-//! The NX IR model, schema 5: the constants, the kind numbers and the tables of one artifact.
+//! The NX IR model, schema 6: the constants, the kind numbers and the tables of one artifact.
 //!
 //! <para>An artifact carries the module's string, type, constant and node tables and its
 //! declaration list, plus a module table naming every module it references. A reference is a
@@ -8,7 +8,7 @@
 //! [`kinds`] and are never reused. The model here is what an emitter builds; the bytes a host
 //! receives are the image `image` writes from it.</para>
 
-pub const NX_IR_SCHEMA_VERSION: u32 = 5;
+pub const NX_IR_SCHEMA_VERSION: u32 = 6;
 pub const NX_IR_RUNTIME_ABI: &str = "nx-ir-runtime-v2";
 /// Required by a module that declares a derived update record, so a runtime that predates them
 /// refuses the module rather than normalizing a patch as a whole record.

@@ -2583,9 +2583,10 @@ fn apply_graph_imports(
                                 item_indices,
                                 &mut imported_visible_names,
                             );
-                            // A declaration's derived `<Name>.Update` and `<Name>.Property`
-                            // travel with it: they are reachable through the name the author
-                            // imported, not exported names of their own.
+                            // A declaration's derived `<Name>.Update`, `<Name>.Property`, and
+                            // `<Name>.State` declarations travel with it: they are reachable
+                            // through the name the author imported, not exported names of their
+                            // own.
                             for suffix in DERIVED_DECLARATION_SUFFIXES {
                                 let derived = format!("{}.{}", entry.name.as_str(), suffix);
                                 let Some(derived_indices) = library.exported_items.get(&derived)
@@ -2830,10 +2831,16 @@ fn add_workspace_import_bindings(
     }
 }
 
-/// The suffixes of the declarations derived from a record, action, or stateful component, which an
-/// import of the target brings into scope with it.
-const DERIVED_DECLARATION_SUFFIXES: [&str; 2] =
-    [nx_hir::UPDATE_RECORD_SUFFIX, nx_hir::PROPERTY_UNION_SUFFIX];
+/// The suffixes of the declarations derived from a record, action, or component, which an import
+/// of the target brings into scope with it: its update record and property union, and for a
+/// component with state its state record with that record's own two.
+const DERIVED_DECLARATION_SUFFIXES: [&str; 5] = [
+    nx_hir::UPDATE_RECORD_SUFFIX,
+    nx_hir::PROPERTY_UNION_SUFFIX,
+    nx_hir::STATE_RECORD_SUFFIX,
+    "State.Update",
+    "State.Property",
+];
 
 fn add_workspace_item_bindings(
     module: &mut PreparedModule,
@@ -4666,6 +4673,93 @@ let key = {User.Property.nickname}"#;
             }),
             "Expected an unknown case to be rejected with the candidates: {:?}",
             unknown.diagnostics
+        );
+    }
+
+    /// A component's derived declarations travel with it, its state record and that record's own
+    /// two included: importing `Counter` makes `Counter.State`, `Counter.State.Update`,
+    /// `Counter.State.Property`, `Counter.Update` and `Counter.Property` reachable.
+    #[test]
+    fn state_record_of_an_imported_component_is_available_through_the_import() {
+        let temp = TempDir::new().expect("temp dir");
+        let app_dir = temp.path().join("app");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&app_dir).expect("app dir");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+        fs::write(
+            ui_dir.join("Counter.nx"),
+            r#"export abstract component <Control enabled:boolean = true />
+export component <Counter extends Control step:int = 1 /> = { state { count:int = 0 } <Label /> }"#,
+        )
+        .expect("ui file");
+
+        let registry = LibraryRegistry::new();
+        registry
+            .load_library_from_directory(&ui_dir)
+            .expect("Expected ui registry load");
+        let build_context = registry.build_context();
+
+        let path = app_dir.join("state.nx");
+        let source = r#"import { Counter } from "../ui"
+let s = <Counter.State count=1 />
+let p: Counter.State.Update = <Counter.State.Update count=2 />
+let k: Counter.State.Property = {Counter.State.Property.count}
+let props = <Counter.Update enabled=false step=2 />
+let keys: Counter.Property+ = {Counter.Property.enabled Counter.Property.step}"#;
+        fs::write(&path, source).expect("state file");
+        let artifact =
+            build_program_artifact_from_source(source, &path.display().to_string(), &build_context)
+                .expect("Expected program artifact");
+        assert!(
+            !has_error_diagnostics(&artifact.diagnostics),
+            "Expected the imported component's derived declarations to resolve: {:?}",
+            artifact.diagnostics
+        );
+    }
+
+    /// A component's props companions reached through a workspace import carry the props it
+    /// inherits from a base in another module.
+    #[test]
+    fn props_companions_of_a_workspace_import_include_inherited_props() {
+        let workspace = workspace(vec![
+            workspace_module(
+                "base.nx",
+                r#"export abstract component <Control enabled:boolean = true />"#,
+            ),
+            workspace_module(
+                "toggle.nx",
+                r#"import { Control } from "./base.nx"
+export component <Toggle extends Control on:boolean /> = { state { flips:int = 0 } <Label /> }"#,
+            ),
+            workspace_module(
+                "main.nx",
+                r#"import { Toggle } from "./toggle.nx"
+let root() = <Box keys={changed(<Toggle.Update on=true enabled=false />)} state={changed(<Toggle.State.Update flips=1 />)} />"#,
+            ),
+        ]);
+        let artifact =
+            build_workspace_program_artifact(&workspace, "main.nx", &ProgramBuildContext::empty())
+                .expect("Expected workspace artifact");
+        assert!(
+            !has_error_diagnostics(&artifact.diagnostics),
+            "Expected the imported props companions to carry the inherited prop: {:?}",
+            artifact.diagnostics
+        );
+        let value = match eval_program_artifact(&artifact) {
+            EvalResult::Ok(value) => value,
+            EvalResult::Err(diagnostics) => panic!("interpreter diagnostics: {:?}", diagnostics),
+        };
+        let NxValue::Record { properties, .. } = value else {
+            panic!("Expected a record value");
+        };
+        let bare = |name: &str| NxValue::String(name.to_string());
+        assert_eq!(
+            properties.get("keys"),
+            Some(&NxValue::Array(vec![bare("enabled"), bare("on")]))
+        );
+        assert_eq!(
+            properties.get("state"),
+            Some(&NxValue::Array(vec![bare("flips")]))
         );
     }
 

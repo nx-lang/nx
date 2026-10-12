@@ -1,7 +1,7 @@
 # @nx-lang/ir-runtime
 
 Evaluates persisted NX IR in JavaScript, in a browser or under Node, with no compiler and no NX
-checkout. The IR is the schema 5 image `@nx-lang/sdk-wasm`, `@nx-lang/sdk-node`, the .NET SDK
+checkout. The IR is the schema 6 image `@nx-lang/sdk-wasm`, `@nx-lang/sdk-node`, the .NET SDK
 and the `nxlang` CLI emit for one module of a compiled program: a binary a runtime reads in place.
 This package links images by name and turns them into values.
 
@@ -99,7 +99,7 @@ A batch entry is either an action record the component emits, which runs the han
 bound under `on<Emit>` and is a no-op when none was bound, or an `ActionHandlerInvocation` naming a
 handler of the instance's most recent output by token, with the action to feed it. Entries run in
 order. A handler the component's own body bound reads the state live, so two patches in one batch
-compound, and every `<Component>.Update` it returns patches the state; every other returned record
+compound, and every `<Component>.State.Update` it returns patches the state; every other returned record
 is an effect. A handler bound anywhere else, at the root or in a parent whose content the component
 renders, sees only what it captured, and everything it returns is an effect. A failure throws
 `NxIrRuntimeError` before anything is returned, and the instance the call was given is unchanged

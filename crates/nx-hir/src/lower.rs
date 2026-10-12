@@ -8,12 +8,12 @@ use crate::ast::{
     Stmt, TypeRef, UnOp,
 };
 use crate::{
-    property_union_name, update_record_name, Component, ComponentEmit, ComponentEmitKind, Doc,
-    Element, ExprId, Function, FunctionForm, Import, ImportKind, Item, LoweredModule,
-    LoweringDiagnostic, Name, Param, Property, PropertyConditionArm, PropertyEntry,
+    property_union_name, state_record_name, update_record_name, Component, ComponentEmit,
+    ComponentEmitKind, Doc, Element, ExprId, Function, FunctionForm, Import, ImportKind, Item,
+    LoweredModule, LoweringDiagnostic, Name, Param, Property, PropertyConditionArm, PropertyEntry,
     PropertyMatchArm, RecordDef, RecordField, RecordKind, SelectiveImport, SourceId, TypeAlias,
     TypeParameter, UnionCaseDef, UnionCaseField, UnionDef, ValueDef, Visibility, WhitespaceRun,
-    PROPERTY_UNION_SUFFIX, UPDATE_RECORD_SUFFIX,
+    PROPERTY_UNION_SUFFIX, STATE_RECORD_SUFFIX, UPDATE_RECORD_SUFFIX,
 };
 use nx_diagnostics::{TextSize, TextSpan};
 use nx_syntax::{property_definition_is_type_parameter, SyntaxKind, SyntaxNode};
@@ -160,11 +160,13 @@ pub struct LoweringContext {
     scope_stack: Vec<FxHashMap<Name, TypeTag>>,
     predeclared_components: FxHashMap<Name, PredeclaredComponent>,
     component_emit_records: FxHashMap<Name, Vec<RecordDef>>,
-    /// Records element tags may name before their declaration is lowered: inline emitted actions
-    /// and every derived `<Target>.Update` record.
+    /// Records element tags may name before their declaration is lowered: inline emitted actions,
+    /// every derived `<Target>.Update` record, and every derived `<Component>.State` record.
     predeclared_records: FxHashMap<Name, RecordDef>,
     /// Derived update records keyed by the name of the declaration they patch.
     update_records: FxHashMap<Name, RecordDef>,
+    /// Derived state records keyed by the name of their component.
+    state_records: FxHashMap<Name, RecordDef>,
     /// Update records to add once every declared item has been added, in declaration order.
     pending_update_items: Vec<RecordDef>,
     /// Derived property unions keyed by the name of the declaration whose fields they name.
@@ -173,8 +175,8 @@ pub struct LoweringContext {
     pending_property_items: Vec<UnionDef>,
     /// The component whose declaration is being lowered, if any.
     ///
-    /// <para>Inside a component a bare `Update` tag names that component's update record, a bare
-    /// `Property` names its property union, and a handler bound there is owned by it.</para>
+    /// <para>Inside a component a bare `State` names that component's state record, and a handler
+    /// bound there is owned by it.</para>
     current_component: Option<Name>,
     /// Every type name lowered, with where it was written. Moved into the module by
     /// [`Self::finish`]; kept here because type lowering borrows the context immutably.
@@ -196,6 +198,7 @@ impl LoweringContext {
             component_emit_records: FxHashMap::default(),
             predeclared_records: FxHashMap::default(),
             update_records: FxHashMap::default(),
+            state_records: FxHashMap::default(),
             pending_update_items: Vec::new(),
             property_unions: FxHashMap::default(),
             pending_property_items: Vec::new(),
@@ -237,7 +240,7 @@ impl LoweringContext {
             .filter(|part| !part.is_empty())
             .map(Name::new)
             .collect::<Vec<_>>();
-        self.resolve_bare_property_base(&mut parts);
+        self.resolve_bare_state_base(&mut parts);
         let mut parts = parts.into_iter();
 
         let Some(first) = parts.next() else {
@@ -869,6 +872,46 @@ impl LoweringContext {
         self.property_unions.insert(target.clone(), union);
     }
 
+    /// Synthesizes and registers the derived `<Component>.State` record of a component with state,
+    /// and the update record and property union derived from it.
+    ///
+    /// <para>The state record has the state fields in declaration order with their types and
+    /// optional marks. Defaults are dropped: a state default may read props, and a state literal
+    /// written outside the component has none to read.</para>
+    fn predeclare_state_record(
+        &mut self,
+        component: &Name,
+        visibility: Visibility,
+        fields: &[RecordField],
+        span: TextSpan,
+    ) {
+        let record = RecordDef {
+            name: state_record_name(component.as_str()),
+            visibility,
+            kind: RecordKind::State {
+                component: component.clone(),
+            },
+            is_abstract: false,
+            base: None,
+            type_params: Vec::new(),
+            properties: fields
+                .iter()
+                .map(|field| RecordField {
+                    default: None,
+                    ..field.clone()
+                })
+                .collect(),
+            doc: None,
+            span,
+        };
+        self.predeclared_records
+            .insert(record.name.clone(), record.clone());
+        let state_name = record.name.clone();
+        self.state_records.insert(component.clone(), record);
+        // State is never generic: abstract components cannot declare it.
+        self.predeclare_update_record(&state_name, visibility, &[], fields, span);
+    }
+
     /// Predeclares the update record of every top-level `type` record and `action`.
     fn predeclare_record_update_records(&mut self, root: SyntaxNode) {
         for child in root.children() {
@@ -1057,7 +1100,7 @@ impl LoweringContext {
 
         let enclosing_component = self.current_component.replace(name.clone());
 
-        // State is lowered with the component body; only the update record and property union
+        // State is lowered with the component body; only the state record and the records
         // derived from it are needed now, so element tags and type references in any body can
         // name them.
         let state_fields = node
@@ -1065,9 +1108,20 @@ impl LoweringContext {
             .and_then(|body| body.child_by_field("state"))
             .map(|state| self.lower_field_signatures(state))
             .unwrap_or_default();
+        for field in &state_fields {
+            if field.name.as_str() == STATE_RECORD_SUFFIX {
+                self.add_diagnostic(
+                    format!(
+                        "Component '{}' cannot declare a state field named 'State': inside its body the bare name 'State' denotes '{}.State'",
+                        name.as_str(),
+                        name.as_str()
+                    ),
+                    field.span,
+                );
+            }
+        }
         if !state_fields.is_empty() {
-            // A component's update record derives from its state, which is not generic.
-            self.predeclare_update_record(&name, visibility, &[], &state_fields, node.span());
+            self.predeclare_state_record(&name, visibility, &state_fields, node.span());
         }
 
         let type_params = self.lower_type_parameters(signature);
@@ -1083,7 +1137,22 @@ impl LoweringContext {
                     prop.span,
                 );
             }
+            if prop.name.as_str() == STATE_RECORD_SUFFIX {
+                self.add_diagnostic(
+                    format!(
+                        "Component '{}' cannot declare a prop named 'State': inside its body the bare name 'State' denotes '{}.State'",
+                        name.as_str(),
+                        name.as_str()
+                    ),
+                    prop.span,
+                );
+            }
         }
+        // A component's update record and property union derive from its props. Inherited props
+        // are added once the module is prepared, as a record's inherited fields are; type
+        // parameters are never props, and a prop typed by one is erased where the record leaves
+        // the component.
+        self.predeclare_update_record(&name, visibility, &[], &props, node.span());
 
         let mut emits = Vec::new();
         let mut inline_records = Vec::new();
@@ -1110,6 +1179,17 @@ impl LoweringContext {
                             self.add_diagnostic(
                                 format!(
                                     "Component '{}' cannot declare an emitted action named 'Property': '{}.Property' is reserved for the component's derived property union",
+                                    name.as_str(),
+                                    name.as_str()
+                                ),
+                                emit_node.span(),
+                            );
+                            continue;
+                        }
+                        if emit_name.as_str() == STATE_RECORD_SUFFIX {
+                            self.add_diagnostic(
+                                format!(
+                                    "Component '{}' cannot declare an emitted action named 'State': '{}.State' is reserved for the component's derived state record",
                                     name.as_str(),
                                     name.as_str()
                                 ),
@@ -1172,6 +1252,18 @@ impl LoweringContext {
                             self.add_diagnostic(
                                 format!(
                                     "Component '{}' cannot emit '{}': the name '{}.Property' would collide with the component's derived property union",
+                                    name.as_str(),
+                                    action_name.as_str(),
+                                    name.as_str()
+                                ),
+                                emit_node.span(),
+                            );
+                            continue;
+                        }
+                        if local_name.as_str() == STATE_RECORD_SUFFIX {
+                            self.add_diagnostic(
+                                format!(
+                                    "Component '{}' cannot emit '{}': the name '{}.State' would collide with the component's derived state record",
                                     name.as_str(),
                                     action_name.as_str(),
                                     name.as_str()
@@ -1577,8 +1669,8 @@ impl LoweringContext {
                     .child_by_field("object")
                     .or_else(|| node.children().next());
                 let base = match object {
-                    Some(object) if self.is_bare_property_base(object) => {
-                        self.lower_bare_property_base(object)
+                    Some(object) if self.is_bare_state_base(object) => {
+                        self.lower_bare_state_base(object)
                     }
                     Some(object) => self.lower_expr(object),
                     None => self.error_expr(node.span()),
@@ -2013,12 +2105,10 @@ impl LoweringContext {
             }
             SyntaxKind::APPLIED_TYPE => {
                 // The tag goes through the same bare-name resolution a written type name does,
-                // which inside a component rewrites a bare `Property` to that component's
-                // property union. A bare `Update` tag is not rewritten here: that is
-                // `resolve_bare_update_tag`, which belongs to element lowering, and a component's
-                // update record has no type parameters to apply in the first place.
+                // which inside a component rewrites a bare `State` to that component's state
+                // record.
                 let name = match node.child_by_field("name").map(|name| {
-                    self.lower_type_name(name, self.resolve_bare_property_type(name.text()))
+                    self.lower_type_name(name, self.resolve_bare_state_type(name.text()))
                 }) {
                     Some(TypeRef::Name(name)) => name,
                     _ => Name::new(""),
@@ -2041,14 +2131,14 @@ impl LoweringContext {
                 TypeRef::Applied { name, args }
             }
             SyntaxKind::IDENTIFIER | SyntaxKind::QUALIFIED_NAME => {
-                self.lower_type_name(node, self.resolve_bare_property_type(node.text()))
+                self.lower_type_name(node, self.resolve_bare_state_type(node.text()))
             }
             SyntaxKind::USER_DEFINED_TYPE => node
                 .children()
                 .next()
                 .map(|child| self.lower_type(child))
                 .unwrap_or_else(|| {
-                    self.lower_type_name(node, self.resolve_bare_property_type(node.text()))
+                    self.lower_type_name(node, self.resolve_bare_state_type(node.text()))
                 }),
             _ => TypeRef::recovery(),
         }
@@ -2621,7 +2711,7 @@ impl LoweringContext {
             .child_by_field("name")
             .map(|n| Name::new(n.text()))
             .unwrap_or_else(|| Name::new("unknown"));
-        let tag = self.resolve_bare_update_tag(tag);
+        let tag = self.resolve_bare_state_tag(tag);
         let component = self.find_predeclared_component(tag.as_str()).cloned();
 
         // Parse properties from property_list.
@@ -2670,14 +2760,15 @@ impl LoweringContext {
         }
     }
 
-    /// Rewrites a bare `Property` at the head of a member access to the enclosing component's
-    /// `<Component>.Property`, so `Property.name` lowers exactly as `Counter.Property.name` does.
+    /// Rewrites a bare `State` at the head of a dotted name to the enclosing component's
+    /// `<Component>.State`, so `State.Property.name` lowers exactly as
+    /// `Counter.State.Property.name` does.
     ///
-    /// <para>Outside a component the name is left as written, so a declaration named `Property`
-    /// still resolves and type checking reports the bare form when nothing does. A bare `Property`
-    /// that is not the head of a member access is left alone: a union's name is not a value.</para>
-    fn resolve_bare_property_base(&self, parts: &mut Vec<Name>) {
-        if parts.len() < 2 || parts[0].as_str() != PROPERTY_UNION_SUFFIX {
+    /// <para>Outside a component the name is left as written, so `State` is an ordinary name there.
+    /// A bare `State` that is not the head of a dotted name is left alone: a record's name is not a
+    /// value.</para>
+    fn resolve_bare_state_base(&self, parts: &mut Vec<Name>) {
+        if parts.len() < 2 || parts[0].as_str() != STATE_RECORD_SUFFIX {
             return;
         }
         if let Some(component) = &self.current_component {
@@ -2685,11 +2776,11 @@ impl LoweringContext {
         }
     }
 
-    /// Returns true when `node` is the identifier `Property` inside a component, which as the
-    /// object of a member access names the component's property union.
-    fn is_bare_property_base(&self, node: SyntaxNode) -> bool {
+    /// Returns true when `node` is the identifier `State` inside a component, which as the object
+    /// of a member access names the component's state record.
+    fn is_bare_state_base(&self, node: SyntaxNode) -> bool {
         self.current_component.is_some()
-            && Self::bare_identifier_text(node).as_deref() == Some(PROPERTY_UNION_SUFFIX)
+            && Self::bare_identifier_text(node).as_deref() == Some(STATE_RECORD_SUFFIX)
     }
 
     /// The identifier a value expression is, when it is nothing more than one.
@@ -2713,53 +2804,59 @@ impl LoweringContext {
         }
     }
 
-    /// Lowers the bare `Property` object of a member access to `<Component>.Property`, as the
-    /// qualified spelling lowers.
-    fn lower_bare_property_base(&mut self, object: SyntaxNode) -> ExprId {
+    /// Lowers the bare `State` object of a member access to `<Component>.State`, as the qualified
+    /// spelling lowers.
+    fn lower_bare_state_base(&mut self, object: SyntaxNode) -> ExprId {
         let component = self
             .current_component
             .clone()
-            .expect("a bare Property base is only recognized inside a component");
+            .expect("a bare State base is only recognized inside a component");
         let base = self.alloc_expr(Expr::Ident(component.clone()));
         self.module.set_expr_span(base, object.span());
         let ty = self.lookup_name(&component);
         self.set_expr_type(base, ty);
         self.alloc_expr(Expr::Member {
             base,
-            member: Name::new(PROPERTY_UNION_SUFFIX),
+            member: Name::new(STATE_RECORD_SUFFIX),
             span: object.span(),
         })
     }
 
-    /// Resolves a bare `Property` type reference to the enclosing component's property union.
-    fn resolve_bare_property_type(&self, text: &str) -> TypeRef {
-        match &self.current_component {
-            Some(component) if text == PROPERTY_UNION_SUFFIX => {
-                TypeRef::name(property_union_name(component.as_str()))
-            }
-            _ => TypeRef::name(text),
+    /// Resolves a name written as `State` or `State.<rest>` inside a component to the enclosing
+    /// component's `<Component>.State` or `<Component>.State.<rest>`.
+    ///
+    /// <para>Inside a component the bare name always means that component's state record, even
+    /// when the module declares something else called `State`: a handler's meaning should not
+    /// depend on what else happens to be declared. Resolving it here makes the bare form
+    /// indistinguishable from the qualified one in every later phase. A component without state
+    /// has no state record, so the qualified name resolves to nothing and type checking reports
+    /// that the component declares no state. Outside a component the name is left as
+    /// written.</para>
+    fn resolve_bare_state_name(&self, text: &str) -> Option<Name> {
+        let component = self.current_component.as_ref()?;
+        let rest = text.strip_prefix(STATE_RECORD_SUFFIX)?;
+        if !(rest.is_empty() || rest.starts_with('.')) {
+            return None;
+        }
+        Some(Name::new(&format!(
+            "{}.{}{}",
+            component.as_str(),
+            STATE_RECORD_SUFFIX,
+            rest
+        )))
+    }
+
+    /// Resolves a type name, rewriting a bare `State` inside a component.
+    fn resolve_bare_state_type(&self, text: &str) -> TypeRef {
+        match self.resolve_bare_state_name(text) {
+            Some(name) => TypeRef::name(name),
+            None => TypeRef::name(text),
         }
     }
 
-    /// Resolves a bare `Update` tag to the enclosing component's `<Component>.Update` record.
-    ///
-    /// <para>Inside a component the bare name always means that component's update record, even
-    /// when the module declares something else called `Update`: a handler's meaning should not
-    /// depend on what else happens to be declared. Resolving it here makes the bare form
-    /// indistinguishable from the qualified one in every later phase. Outside a component the tag
-    /// is left as written, so a declaration named `Update` still resolves, and type checking
-    /// reports the bare form when nothing does.</para>
-    ///
-    /// <para>A component without state has no update record, so the qualified name resolves to
-    /// nothing; the checker reports that once, as it does for any `X.Update` with no record.</para>
-    fn resolve_bare_update_tag(&self, tag: Name) -> Name {
-        if tag.as_str() != UPDATE_RECORD_SUFFIX {
-            return tag;
-        }
-        match &self.current_component {
-            Some(component) => update_record_name(component.as_str()),
-            None => tag,
-        }
+    /// Resolves an element tag, rewriting a bare `State` inside a component.
+    fn resolve_bare_state_tag(&self, tag: Name) -> Name {
+        self.resolve_bare_state_name(tag.as_str()).unwrap_or(tag)
     }
 
     /// Lowers a module (source file).
@@ -2798,6 +2895,11 @@ impl LoweringContext {
                         self.add_derived_items(&action_name);
                     }
                     self.add_derived_items(&component_name);
+                    if let Some(state) = self.state_records.get(&component_name).cloned() {
+                        let state_name = state.name.clone();
+                        self.pending_update_items.push(state);
+                        self.add_derived_items(&state_name);
+                    }
                 }
                 SyntaxKind::TYPE_DEFINITION => {
                     let alias = self.lower_type_alias(child);
@@ -5812,7 +5914,7 @@ type Mode = light | dark"#;
     }
 
     #[test]
-    fn update_records_are_synthesized_for_records_actions_emits_and_stateful_components() {
+    fn update_records_are_synthesized_for_records_actions_emits_components_and_state() {
         let module = lower_source(
             r#"
             type User = { name:string = "anon" email:string? }
@@ -5863,16 +5965,52 @@ type Mode = light | dark"#;
         );
         assert_eq!(
             field_names(&counter_update.properties),
-            vec!["count", "label"],
-            "A component's update record is derived from state and excludes props"
+            vec!["step"],
+            "A component's update record is derived from its props and excludes state"
+        );
+
+        let counter_state = find_record(&module, "Counter.State");
+        assert_eq!(
+            counter_state.kind,
+            RecordKind::State {
+                component: Name::new("Counter")
+            }
+        );
+        assert_eq!(
+            field_names(&counter_state.properties),
+            vec!["count", "label"]
+        );
+        assert!(
+            counter_state
+                .properties
+                .iter()
+                .all(|field| field.default.is_none()),
+            "State record fields must not carry defaults"
+        );
+        let state_update = find_record(&module, "Counter.State.Update");
+        assert_eq!(
+            state_update.update_target().map(Name::as_str),
+            Some("Counter.State")
+        );
+        assert_eq!(
+            field_names(&state_update.properties),
+            vec!["count", "label"]
         );
 
         let reset_update = find_record(&module, "Counter.Reset.Update");
         assert_eq!(field_names(&reset_update.properties), vec!["to"]);
 
         assert!(
-            module.find_item("Plain.Update").is_none(),
-            "A component without state has no update record"
+            field_names(&find_record(&module, "Plain.Update").properties).is_empty(),
+            "A component without props has an empty update record"
+        );
+        assert!(
+            module.find_item("Plain.State").is_none(),
+            "A component without state has no state record"
+        );
+        assert!(
+            module.find_item("User.State").is_none(),
+            "Only a component has a state record"
         );
         assert!(
             module.find_item("User.Update.Update").is_none(),
@@ -5985,9 +6123,9 @@ type Mode = light | dark"#;
             external component <Button emits { Tapped } />
             component <Counter /> = {
               state { count:int = 0 }
-              <Button onTapped=<Update count={count + 1} /> />
+              <Button onTapped=<State.Update count={count + 1} /> />
             }
-            let render() = <Button onTapped=<Counter.Update count=1 /> />
+            let render() = <Button onTapped=<Counter.State.Update count=1 /> />
             "#,
             "handler-owner.nx",
         );
@@ -6010,14 +6148,19 @@ type Mode = light | dark"#;
             Some("Counter")
         );
 
-        // The bare `Update` inside the handler is the component's own update record.
+        // The bare `State` inside the handler is the component's own state record.
         let property = &module.element(*element).properties[0];
         let Expr::ActionHandler { body, .. } = module.expr(property.value) else {
             panic!("Expected action handler");
         };
         match module.expr(*body) {
-            Expr::RecordLiteral { record, .. } => assert_eq!(record.as_str(), "Counter.Update"),
-            other => panic!("Expected Counter.Update record literal, got {:?}", other),
+            Expr::RecordLiteral { record, .. } => {
+                assert_eq!(record.as_str(), "Counter.State.Update")
+            }
+            other => panic!(
+                "Expected Counter.State.Update record literal, got {:?}",
+                other
+            ),
         }
 
         let Some(Item::Function(render)) = module.find_item("render") else {
@@ -6030,17 +6173,17 @@ type Mode = light | dark"#;
     }
 
     #[test]
-    fn bare_update_takes_precedence_over_a_same_named_declaration_inside_a_component() {
+    fn bare_state_takes_precedence_over_a_same_named_declaration_inside_a_component() {
         let module = lower_source(
             r#"
-            type Update = { note:string }
-            let note() = <Update note="kept" />
+            type State = { note:string }
+            let note() = <State note="kept" />
             component <Editor /> = {
-              state { pending:Editor.Update = <Update /> }
+              state { draft:string = "" saved?:State pending:Editor.State.Update = <State.Update /> }
               <Panel />
             }
             "#,
-            "update-precedence.nx",
+            "state-precedence.nx",
         );
         assert!(
             module.diagnostics().is_empty(),
@@ -6051,19 +6194,80 @@ type Mode = light | dark"#;
         let Some(Item::Component(editor)) = module.find_item("Editor") else {
             panic!("Expected Editor component");
         };
-        let default = editor.state[0].default.expect("state default");
+        assert_eq!(editor.state[1].ty, TypeRef::name("Editor.State"));
+        let default = editor.state[2].default.expect("state default");
         match module.expr(default) {
-            Expr::RecordLiteral { record, .. } => assert_eq!(record.as_str(), "Editor.Update"),
-            other => panic!("Expected Editor.Update record literal, got {:?}", other),
+            Expr::RecordLiteral { record, .. } => {
+                assert_eq!(record.as_str(), "Editor.State.Update")
+            }
+            other => panic!(
+                "Expected Editor.State.Update record literal, got {:?}",
+                other
+            ),
         }
 
-        // Outside a component the bare name keeps meaning the declaration named `Update`.
+        // Outside a component the bare name keeps meaning the declaration named `State`.
         let Some(Item::Function(note)) = module.find_item("note") else {
             panic!("Expected note function");
         };
         match module.expr(note.body) {
-            Expr::RecordLiteral { record, .. } => assert_eq!(record.as_str(), "Update"),
-            other => panic!("Expected Update record literal, got {:?}", other),
+            Expr::RecordLiteral { record, .. } => assert_eq!(record.as_str(), "State"),
+            other => panic!("Expected State record literal, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn bare_update_and_property_are_ordinary_names_inside_a_component() {
+        let module = lower_source(
+            r#"
+            type Update = { note:string }
+            component <Notes /> = {
+              state { last?:Update key?:Property }
+              <Panel />
+            }
+            "#,
+            "ordinary-update.nx",
+        );
+        let Some(Item::Component(notes)) = module.find_item("Notes") else {
+            panic!("Expected Notes component");
+        };
+        assert_eq!(notes.state[0].ty, TypeRef::name("Update"));
+        assert_eq!(notes.state[1].ty, TypeRef::name("Property"));
+    }
+
+    #[test]
+    fn state_is_reserved_as_an_emit_prop_and_state_field_name() {
+        for (source, expected) in [
+            (
+                "component <Form emits { State { value:string } } /> = { <Panel /> }",
+                "'Form.State' is reserved for the component's derived state record",
+            ),
+            (
+                "action State = { value:string } component <Form emits { State } /> = { <Panel /> }",
+                "the name 'Form.State' would collide with the component's derived state record",
+            ),
+            (
+                "component <Form State:string /> = { <Panel /> }",
+                "cannot declare a prop named 'State'",
+            ),
+            (
+                r#"component <Form /> = { state { State:string = "" } <Panel /> }"#,
+                "cannot declare a state field named 'State'",
+            ),
+        ] {
+            let module = lower_source(source, "state-reserved.nx");
+            let messages = module
+                .diagnostics()
+                .iter()
+                .map(|diagnostic| diagnostic.message.as_str())
+                .collect::<Vec<_>>();
+            assert!(
+                messages.iter().any(|message| message.contains(expected)),
+                "Expected '{}' for {}, got {:?}",
+                expected,
+                source,
+                messages
+            );
         }
     }
 
@@ -6105,21 +6309,57 @@ type Mode = light | dark"#;
     }
 
     #[test]
-    fn property_union_of_a_component_is_derived_from_state_and_never_props() {
+    fn property_union_of_a_component_is_derived_from_props_and_its_state_has_its_own() {
         let module = lower_source(
             r#"
             component <Counter step:int = 1 /> = { state { count:int = 0 } <Label /> }
-            component <Form /> = { <Panel /> }
+            component <Form title:string /> = { <Panel /> }
             "#,
             "property-component.nx",
         );
         let union = find_union(&module, "Counter.Property");
         assert_eq!(union.property_target().map(Name::as_str), Some("Counter"));
-        assert_eq!(case_names(union), vec!["count"]);
-        assert!(
-            module.find_item("Form.Property").is_none(),
-            "A component without state has no property union"
+        assert_eq!(case_names(union), vec!["step"]);
+        let state_union = find_union(&module, "Counter.State.Property");
+        assert_eq!(
+            state_union.property_target().map(Name::as_str),
+            Some("Counter.State")
         );
+        assert_eq!(case_names(state_union), vec!["count"]);
+        assert_eq!(
+            case_names(find_union(&module, "Form.Property")),
+            vec!["title"]
+        );
+        assert!(
+            module.find_item("Form.State.Property").is_none(),
+            "A component without state has no state property union"
+        );
+    }
+
+    #[test]
+    fn component_companions_include_inherited_props_once_completed() {
+        let module = lower_source(
+            r#"
+            abstract component <Control enabled:boolean = true />
+            component <Toggle extends Control on:boolean /> = { <Label /> }
+            "#,
+            "component-inherited.nx",
+        );
+        let mut prepared = PreparedModule::standalone("component-inherited.nx", module.clone());
+        crate::complete_property_unions(&mut prepared);
+        assert_eq!(
+            case_names(find_union(prepared.raw_module(), "Toggle.Property")),
+            vec!["enabled", "on"]
+        );
+        let update = find_record(&module, "Toggle.Update");
+        let shape = effective_record_shape(&prepared, update).expect("Shape should resolve");
+        let names = shape
+            .fields
+            .iter()
+            .map(|field| field.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec!["enabled", "on"]);
+        assert!(shape.fields.iter().all(|field| field.default.is_none()));
     }
 
     #[test]
@@ -6190,8 +6430,11 @@ type Mode = light | dark"#;
                 "value",
                 "User.Update",
                 "Counter.Update",
+                "Counter.State",
+                "Counter.State.Update",
                 "User.Property",
                 "Counter.Property",
+                "Counter.State.Property",
             ]
         );
     }
@@ -6269,11 +6512,11 @@ type Mode = light | dark"#;
     }
 
     #[test]
-    fn bare_property_in_a_state_default_and_type_resolves_to_the_component() {
+    fn bare_state_property_in_a_state_default_and_type_resolves_to_the_component() {
         let module = lower_source(
             r#"
             component <Counter /> = {
-              state { count:int = 0 key:Property = {Property.count} }
+              state { count:int = 0 key:State.Property = {State.Property.count} }
               <Label />
             }
             "#,
@@ -6287,23 +6530,29 @@ type Mode = light | dark"#;
         let Some(Item::Component(counter)) = module.find_item("Counter") else {
             panic!("Expected Counter component");
         };
-        assert_eq!(counter.state[1].ty, TypeRef::name("Counter.Property"));
+        assert_eq!(counter.state[1].ty, TypeRef::name("Counter.State.Property"));
         let default = counter.state[1].default.expect("state default");
-        assert_eq!(dotted_name(&module, default), "Counter.Property.count");
+        assert_eq!(
+            dotted_name(&module, default),
+            "Counter.State.Property.count"
+        );
 
-        // The rewrite reached the update record's field type too.
-        let update = find_record(&module, "Counter.Update");
-        assert_eq!(update.properties[1].ty, TypeRef::name("Counter.Property"));
+        // The rewrite reached the state record's field type too.
+        let state = find_record(&module, "Counter.State");
+        assert_eq!(
+            state.properties[1].ty,
+            TypeRef::name("Counter.State.Property")
+        );
     }
 
     #[test]
-    fn bare_property_in_a_handler_body_resolves_to_the_component() {
+    fn bare_state_in_a_handler_body_resolves_to_the_component() {
         let module = lower_source(
             r#"
             external component <Grid emits { Sorted { by:string } } />
             component <People /> = {
-              state { sortBy:People.Property = {Property.name} name:string = "" }
-              <Grid onSorted=<Update sortBy={Property.name} /> />
+              state { sortBy:People.State.Property = {State.Property.name} name:string = "" }
+              <Grid onSorted=<State.Update sortBy={State.Property.name} /> />
             }
             "#,
             "property-handler.nx",
@@ -6329,51 +6578,26 @@ type Mode = light | dark"#;
         else {
             panic!("Expected update record literal");
         };
-        assert_eq!(record.as_str(), "People.Update");
+        assert_eq!(record.as_str(), "People.State.Update");
         assert_eq!(
             dotted_name(&module, properties[0].value),
-            "People.Property.name"
+            "People.State.Property.name"
         );
     }
 
     #[test]
-    fn bare_property_outside_a_component_is_left_as_written() {
+    fn bare_state_outside_a_component_is_left_as_written() {
         let module = lower_source(
             r#"
             type User = { name:string }
-            let key = {Property.name}
+            let key = {State.Property.name}
             "#,
             "property-root.nx",
         );
         let Some(Item::Value(key)) = module.find_item("key") else {
             panic!("Expected key value");
         };
-        assert_eq!(dotted_name(&module, key.value), "Property.name");
-    }
-
-    #[test]
-    fn bare_property_takes_precedence_over_a_same_named_declaration_inside_a_component() {
-        let module = lower_source(
-            r#"
-            type Property = { note:string }
-            let note() = {Property.note}
-            component <Counter /> = {
-              state { count:int = 0 key:Counter.Property = {Property.count} }
-              <Label />
-            }
-            "#,
-            "property-precedence.nx",
-        );
-        let Some(Item::Component(counter)) = module.find_item("Counter") else {
-            panic!("Expected Counter component");
-        };
-        let default = counter.state[1].default.expect("state default");
-        assert_eq!(dotted_name(&module, default), "Counter.Property.count");
-
-        let Some(Item::Function(note)) = module.find_item("note") else {
-            panic!("Expected note function");
-        };
-        assert_eq!(dotted_name(&module, note.body), "Property.note");
+        assert_eq!(dotted_name(&module, key.value), "State.Property.name");
     }
 
     #[test]

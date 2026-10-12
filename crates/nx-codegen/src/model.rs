@@ -142,7 +142,8 @@ pub enum CodegenDeclarationKind {
         /// itself. A runtime taking host input needs this to hold that line, the way analysis holds
         /// it for NX source.
         is_abstract: bool,
-        /// The record or component this derived `<Target>.Update` record patches, if it is one.
+        /// The record, component, or state record this derived `<Target>.Update` record patches,
+        /// if it is one.
         ///
         /// <para>An update record's fields are all optional and carry no defaults, so a runtime
         /// normalizing one keeps an absent field absent rather than filling it.</para>
@@ -249,6 +250,12 @@ pub struct CodegenComponent {
     /// The component's effective emits, inherited first, in declaration order.
     pub emits: Vec<CodegenComponentEmit>,
     pub body: Option<CodegenExpression>,
+    /// The component's derived `<Component>.State` record, when the module emits it.
+    ///
+    /// <para>A handler result whose update target is this record is a patch of the component's
+    /// state. Absent when the component declares no state, or when nothing references its state
+    /// record, that record's update record, or its property union.</para>
+    pub state_record: Option<CodegenReference>,
 }
 
 /// One action a component emits: the local name a parent binds as `on<Name>`, and the action
@@ -438,7 +445,7 @@ pub enum CodegenExpressionKind {
     },
     ComponentDescriptor(CodegenComponentDescriptor),
     Element(CodegenElement),
-    /// An action-handler binding, `onTapped=<Update count={count + 1} />`.
+    /// An action-handler binding, `onTapped=<State.Update count={count + 1} />`.
     ///
     /// <para>Nothing here is evaluated when the binding is built: the body runs when a host
     /// dispatches the action, against the locals captured where the binding was written.</para>

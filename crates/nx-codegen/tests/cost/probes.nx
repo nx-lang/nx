@@ -110,7 +110,7 @@ component <Wrapped label?:string content items?:object+ /> = { <box>{items}</box
 component <Form /> = {
   state { held?:object count:int = 0 }
   <panel>
-    <Field onChanged=<Update held={action.value} /> />
-    <Button onTapped=<Update count={count + 1} /> />
+    <Field onChanged=<State.Update held={action.value} /> />
+    <Button onTapped=<State.Update count={count + 1} /> />
   </panel>
 }

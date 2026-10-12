@@ -483,14 +483,15 @@ order (`Effects`), and the snapshot to pass to the next call (`StateSnapshot`). 
 
 Rendered output from initialization and dispatch represents each bound handler as an `ActionHandler` record with the
 action it accepts and a `token`. Type the property as `NxActionHandlerRef` to read it, and dispatch a
-`NxHandlerInvocation<TAction>` to run the handler. An update record it returns patches the component's state:
+`NxHandlerInvocation<TAction>` to run the handler. A state update record it returns, written `<State.Update ... />`
+inside the component, patches the component's state:
 
 ```csharp
 string source = """
     external component <Button value:int = 0 emits { Tapped { } } />
     component <Counter /> = {
       state { count:int = 0 }
-      <Button value={count} onTapped=<Update count={count + 1} /> />
+      <Button value={count} onTapped=<State.Update count={count + 1} /> />
     }
     """;
 
@@ -562,6 +563,11 @@ value type is nullable only for such a field: `User_update.Email` is `NxOptional
 User_update patch = new() { Email = null };   // clears email; Name stays unset
 string json = JsonSerializer.Serialize(patch); // {"$type":"User.Update","email":null}
 ```
+
+A component gets `<Name>_update` and `<Name>_property` for its props, and, when it declares state, `<Name>_state`
+for the state snapshot with `<Name>_state_update` and `<Name>_state_property` beside it. `Counter_state_update`
+derives from `NxUpdate<Counter_state>`, so it applies to the snapshot a host holds, and it serializes with
+`$type` `Counter.State.Update`.
 
 The runtime checks every record a host passes in — as a prop, in explicit state, or inside an action (even one with no
 bound handler), at any nesting depth — against its NX declaration. A property the NX type does not declare, `null` for a
@@ -688,8 +694,8 @@ Range<long> applied = patch.Apply(before);
 `Range_update<T>` derives from `NxUpdate<Range<T>>`, its key table is `RangeProperties<T>`, and its
 `Start` and `End` are `NxOptional<T>`. The wire is unaffected by the parameter: a patch serializes
 as `{"$type":"Range.Update","end":9}` in either format, with no type argument. A *component's*
-state companion still erases the component's type parameters, because the type it patches
-(`<Name>_state`) is already concrete.
+companions still erase the component's type parameters: `<Name>_update` patches its props, and
+`<Name>_state_update` patches its `<Name>_state`, which is already concrete.
 
 Because a generic type cannot name its own converter in an attribute — an attribute argument cannot
 use type parameters (CS0416) — a generic companion names `NxUpdateRecordJsonConverterFactory` from

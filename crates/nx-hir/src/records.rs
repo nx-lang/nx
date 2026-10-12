@@ -58,6 +58,8 @@ pub enum InvalidBaseReason {
     ConcreteRecord,
     /// The base is a derived `<Target>.Update` record, which can never be extended.
     UpdateRecord,
+    /// The base is a derived `<Component>.State` record, which can never be extended.
+    StateRecord,
     /// The base is a derived `<Target>.Property` union, which can never be extended.
     PropertyUnion,
     KindMismatch {
@@ -119,6 +121,7 @@ impl RecordResolutionError {
                 InvalidBaseReason::AliasCycle => "record-base-alias-cycle",
                 InvalidBaseReason::ConcreteRecord => "record-base-not-abstract",
                 InvalidBaseReason::UpdateRecord => "record-base-update-record",
+                InvalidBaseReason::StateRecord => "record-base-state-record",
                 InvalidBaseReason::PropertyUnion => "record-base-property-union",
                 InvalidBaseReason::KindMismatch { .. } => "record-base-kind-mismatch",
             },
@@ -163,6 +166,10 @@ impl RecordResolutionError {
                     ),
                     InvalidBaseReason::UpdateRecord => format!(
                         "{} '{}' extends '{}', but '{}' is a derived update record and cannot be extended",
+                        kind_label, record, base, base
+                    ),
+                    InvalidBaseReason::StateRecord => format!(
+                        "{} '{}' extends '{}', but '{}' is a derived state record and cannot be extended",
                         kind_label, record, base, base
                     ),
                     InvalidBaseReason::PropertyUnion => format!(
@@ -848,21 +855,51 @@ fn resolve_record_shape_inner(
 /// which only mirror what the target itself declares. The target is resolved where the update
 /// record was declared, which is where the target was.</para>
 ///
-/// <para>Returns `None` when this is not an update record, or when its target is not a record — a
-/// component's update record is derived from state fields, which are never inherited, so the
-/// synthesized fields are already complete.</para>
+/// <para>A component's update record carries the component's effective props, inherited ones
+/// first, which come from its resolved contract the same way.</para>
+///
+/// <para>Returns `None` when this is not an update record, or when its target resolves to neither
+/// a record nor a component; the synthesized fields are then all there is.</para>
 fn resolve_update_target_shape(
     module: &PreparedModule,
     record: &ResolvedRecordDefinition,
     stack: &mut Vec<(DeclarationKey, Name)>,
 ) -> Option<Result<ResolvedRecordShape, RecordResolutionError>> {
     let target = record.record.update_target()?;
-    let target_record =
-        resolve_record_definition_with_identity(module, &record.module_identity, target)?;
+    let Some(target_record) =
+        resolve_record_definition_with_identity(module, &record.module_identity, target)
+    else {
+        return resolve_component_props_shape(module, record, target);
+    };
     if target_record.record.update_target().is_some() {
         return None;
     }
     Some(resolve_record_shape_inner(module, &target_record, stack))
+}
+
+/// Resolves the effective props of the component a component's update record patches, as the
+/// shape of a record with those fields.
+///
+/// <para>A contract that fails to resolve keeps the synthesized fields; component validation
+/// reports why.</para>
+fn resolve_component_props_shape(
+    module: &PreparedModule,
+    record: &ResolvedRecordDefinition,
+    target: &Name,
+) -> Option<Result<ResolvedRecordShape, RecordResolutionError>> {
+    let props =
+        crate::components::effective_component_props_in(module, &record.module_identity, target)?;
+    Some(Ok(ResolvedRecordShape {
+        record: record.record.clone(),
+        fields: props
+            .into_iter()
+            .map(|field| OwnedRecordField {
+                field,
+                owner: target.clone(),
+            })
+            .collect(),
+        ancestors: Vec::new(),
+    }))
 }
 
 /// Converts one target field into the matching update-record field: optional and without default.
@@ -964,6 +1001,14 @@ fn validate_base_record(
             record,
             base_name,
             InvalidBaseReason::UpdateRecord,
+        ));
+    }
+
+    if base_record.record.state_component().is_some() {
+        return Err(invalid_base(
+            record,
+            base_name,
+            InvalidBaseReason::StateRecord,
         ));
     }
 

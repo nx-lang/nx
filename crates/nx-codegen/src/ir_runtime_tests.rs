@@ -1582,7 +1582,7 @@ let repeat(s:string, count:int) = { for i in 0..count { s } }
 let fan(n:int, count:int) = { repeat(growText(n, \"x\"), count) }
 component <Holder /> = {
   state { view?:object }
-  <Button onTapped=<Update view={growPair(40, <leaf />)} /> />
+  <Button onTapped=<State.Update view={growPair(40, <leaf />)} /> />
 }";
 
 /// A value that holds another value twice is one allocation reached by two paths: forty levels of
@@ -1686,10 +1686,10 @@ let sameButton(a:int, b:int, c:int, d:int): boolean = { button(a, b) == button(c
 component <Keeper /> = {
   state { data?:object n:int = {0} }
   <panel>
-    <Button onTapped=<Update data=<bag>{for i in 0..50000 { <leaf /> }}</bag> /> />
-    <Button onTapped=<Update data={data} n={n + 1} /> />
-    <Button onTapped=<Update data=<box>{data}</box> n={n + 1} /> />
-    <Button onTapped=<Update data=<leaf /> /> />
+    <Button onTapped=<State.Update data=<bag>{for i in 0..50000 { <leaf /> }}</bag> /> />
+    <Button onTapped=<State.Update data={data} n={n + 1} /> />
+    <Button onTapped=<State.Update data=<box>{data}</box> n={n + 1} /> />
+    <Button onTapped=<State.Update data=<leaf /> /> />
   </panel>
 }
 ";
@@ -2167,7 +2167,7 @@ const BUSY_SOURCE: &str = "
 external component <Button emits { Tapped { } } />
 component <Busy /> = {
   state { items?:int+ }
-  <Button onTapped=<Update items={for i in 0..300 { i }} /> />
+  <Button onTapped=<State.Update items={for i in 0..300 { i }} /> />
 }
 type Bag = { items?:int+ }
 component <Eager /> = {
@@ -2304,7 +2304,7 @@ component <Card title:string = \"none\" count:int = 0 content body?:object+ /> =
 }
 component <Counter /> = {
   state { count:int = 0 note?:string data?:object }
-  <Button onTapped=<Update count={count + 1} /> />
+  <Button onTapped=<State.Update count={count + 1} /> />
 }";
 
 fn input_limit(size: u64) -> RuntimeOptions {
@@ -3002,7 +3002,7 @@ action SearchSubmitted = { searchString:string }
 action DoSearch = { search:string }
 component <Counter /> = {
   state { count:int = 0 note?:string }
-  <Button onTapped=<Update count={count + 1} /> />
+  <Button onTapped=<State.Update count={count + 1} /> />
 }
 component <SearchBox placeholder:string = \"Find\" emits { SearchSubmitted } /> = {
   state { query:string = {placeholder} }
@@ -3238,14 +3238,25 @@ fn an_invalid_state_or_patch_is_rejected() {
             &options(),
         ),
         "nx-ir-state-patch",
-        &["Counter.Update"],
+        &["Counter.State.Update"],
+    );
+    // The component's own update record patches its props, never its state.
+    assert_code(
+        program.apply_component_state_patch(
+            "Counter",
+            &current,
+            &json(r#"{ "$type": "Counter.Update", "count": 5 }"#),
+            &options(),
+        ),
+        "nx-ir-state-patch",
+        &["Counter.State.Update"],
     );
 
     let next = program
         .apply_component_state_patch(
             "Counter",
             &current,
-            &json(r#"{ "$type": "Counter.Update", "count": 5, "note": null }"#),
+            &json(r#"{ "$type": "Counter.State.Update", "count": 5, "note": null }"#),
             &options(),
         )
         .unwrap();
@@ -3551,15 +3562,15 @@ external component <Button emits { Tapped { } } />
 type Link = { child?:Link }
 component <Deep /> = {
   state { tree?:Link }
-  <Button onTapped=<Update tree=<Link child={tree} /> /> />
+  <Button onTapped=<State.Update tree=<Link child={tree} /> /> />
 }
 component <Holder data:object /> = {
   state { n:int = 0 }
-  <Button onTapped=<Update n={n + 1} /> />
+  <Button onTapped=<State.Update n={n + 1} /> />
 }
 component <Rows items:string+ /> = {
   state { n:int = 0 }
-  for item in items { <Button onTapped=<Update n={n + 1} /> /> }
+  for item in items { <Button onTapped=<State.Update n={n + 1} /> /> }
 }";
 
 /// Runs `test` on a thread with the stack a Rust test thread has by default.
@@ -3937,14 +3948,14 @@ component <Tally step:int = 2 emits { Reset } /> = {
   state { count:int = 0 }
   <Card
     items={<Label text={count} />}
-    header=<Button label=\"Add\" onTapped=<Update count={count + step} /> />
+    header=<Button label=\"Add\" onTapped=<State.Update count={count + step} /> />
     count={count} />
 }
 component <Resetting emits { Reset } /> = {
   state { count:int = 5 }
   <Card
     items={<Label text={count} />}
-    header=<Button label=\"Reset\" onTapped={<Update count=0 /> <Reset />} />
+    header=<Button label=\"Reset\" onTapped={<State.Update count=0 /> <Reset />} />
     count={count} />
 }
 ";

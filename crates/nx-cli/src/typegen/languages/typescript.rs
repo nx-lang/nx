@@ -1,7 +1,7 @@
 use crate::typegen::languages::typescript_doc::typescript_doc_lines;
 use crate::typegen::model::{
     erase_field_type_parameters, update_companion_type_params, ExportedAlias,
-    ExportedExternalState, ExportedModule, ExportedRecord, ExportedRecordField, ExportedType,
+    ExportedComponentState, ExportedModule, ExportedRecord, ExportedRecordField, ExportedType,
     ExportedTypeDecl, ExportedTypeGraph, ExportedUnion, ExportedUnionCase, ExportedUpdate,
     ImportedType, ModuleTypes,
 };
@@ -399,7 +399,7 @@ fn declaration_needs_function_ref(item: &ExportedType) -> bool {
                 .any(|field| type_ref_holds_function_ref(&field.ty))
         }
         ExportedType::Record(record) => &record.fields,
-        ExportedType::ExternalState(state) => &state.fields,
+        ExportedType::ComponentState(state) => &state.fields,
         ExportedType::Update(update) => &update.fields,
     };
     fields
@@ -439,7 +439,7 @@ fn emit_declaration(writer: &mut CodeWriter, declaration: &ExportedType, types: 
         ExportedType::Alias(alias) => emit_alias(writer, alias, types),
         ExportedType::Union(union_def) => emit_union(writer, union_def, types),
         ExportedType::Record(record) => emit_record(writer, record, types),
-        ExportedType::ExternalState(state) => emit_external_state(writer, state, types),
+        ExportedType::ComponentState(state) => emit_component_state(writer, state, types),
         ExportedType::Update(update) => emit_update(writer, update, types),
     }
 }
@@ -654,9 +654,9 @@ fn emit_union_case(
 /// Emits an external component's state record. A field typed by the component's type parameter
 /// erases to `unknown`: the host holds state as data and never names the instantiation, which an
 /// NX use site fixed.
-fn emit_external_state(
+fn emit_component_state(
     writer: &mut CodeWriter,
-    state: &ExportedExternalState,
+    state: &ExportedComponentState,
     types: ModuleTypes<'_>,
 ) {
     let fields = erase_field_type_parameters(&state.fields, &state.type_params);
@@ -795,7 +795,7 @@ fn collect_prelude_names(
                 visit(&field.ty);
             }
         }
-        ExportedType::ExternalState(state) => {
+        ExportedType::ComponentState(state) => {
             for field in &state.fields {
                 visit(&field.ty);
             }
@@ -866,7 +866,7 @@ fn collect_module_imports(
                     add_type_ref_imports(module, context, &field.ty, &mut imports);
                 }
             }
-            ExportedType::ExternalState(state) => {
+            ExportedType::ComponentState(state) => {
                 for field in &state.fields {
                     add_type_ref_imports(module, context, &field.ty, &mut imports);
                 }

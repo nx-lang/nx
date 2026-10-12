@@ -2,11 +2,11 @@
   "app/main.nx::Panel": {
     "batches": [
       [
-        {"path": "", "module": "app/main.nx", "start": 631, "end": 687}
+        {"path": "", "module": "app/main.nx", "start": 631, "end": 693}
       ]
     ],
     "initial": [
-      {"path": "", "module": "app/main.nx", "start": 631, "end": 687}
+      {"path": "", "module": "app/main.nx", "start": 631, "end": 693}
     ]
   },
   "app/main.nx::card": [

@@ -237,10 +237,10 @@ public class NxEndToEndTests
         NxGeneratedNxIr ir = artifact.GenerateNxIr();
 
         Assert.Equal("NXIR", Encoding.ASCII.GetString(ir.Bytes, 0, 4));
-        Assert.Equal(5u, BinaryPrimitives.ReadUInt32LittleEndian(ir.Bytes.AsSpan(4, 4)));
+        Assert.Equal(6u, BinaryPrimitives.ReadUInt32LittleEndian(ir.Bytes.AsSpan(4, 4)));
         Assert.Equal((uint)ir.Bytes.Length, BinaryPrimitives.ReadUInt32LittleEndian(ir.Bytes.AsSpan(8, 4)));
         Assert.Equal(0, ir.Bytes.Length % 4);
-        Assert.Equal(5, ir.Metadata.SchemaVersion);
+        Assert.Equal(6, ir.Metadata.SchemaVersion);
         Assert.Equal("nx-ir-runtime-v2", ir.Metadata.RuntimeAbi);
         Assert.Equal("input.nx", ir.Identity);
         Assert.Equal("root", Assert.Single(ir.Metadata.FunctionEntrypoints));

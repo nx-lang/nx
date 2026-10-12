@@ -2,14 +2,14 @@
   "main.nx::Tally": {
     "batches": [
       [
-        {"path": "", "module": "main.nx", "start": 4585, "end": 4633}
+        {"path": "", "module": "main.nx", "start": 4585, "end": 4639}
       ],
       [
-        {"path": "", "module": "main.nx", "start": 4585, "end": 4633}
+        {"path": "", "module": "main.nx", "start": 4585, "end": 4639}
       ]
     ],
     "initial": [
-      {"path": "", "module": "main.nx", "start": 4585, "end": 4633}
+      {"path": "", "module": "main.nx", "start": 4585, "end": 4639}
     ]
   },
   "main.nx::bound": [],

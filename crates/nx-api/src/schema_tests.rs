@@ -961,6 +961,47 @@ fn an_update_record_makes_every_field_optional_and_a_clearable_field_nullable() 
     );
 }
 
+#[test]
+fn a_component_state_record_has_its_state_fields_and_its_props_update_has_its_props() {
+    let artifact = source(
+        "component <Counter step:int = 1 /> = { state { count:int = 0 note?:string } <Label /> }",
+    );
+    let state = document(&output_type(&artifact, "Counter.State"));
+    assert_eq!(state["$ref"], "#/$defs/Counter.State");
+    assert_eq!(
+        state["$defs"]["Counter.State"],
+        json!({
+            "type": "object",
+            "properties": {
+                "$type": { "const": "Counter.State" },
+                "count": { "type": "integer" },
+                "note": { "type": "string" }
+            },
+            "required": ["$type", "count"],
+            "additionalProperties": false
+        })
+    );
+
+    let state_update = document(&output_type(&artifact, "Counter.State.Update"));
+    assert_eq!(
+        state_update["$defs"]["Counter.State.Update"]["properties"],
+        json!({
+            "$type": { "const": "Counter.State.Update" },
+            "count": { "type": "integer" },
+            "note": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+        })
+    );
+
+    let props_update = document(&output_type(&artifact, "Counter.Update"));
+    assert_eq!(
+        props_update["$defs"]["Counter.Update"]["properties"],
+        json!({
+            "$type": { "const": "Counter.Update" },
+            "step": { "type": "integer" }
+        })
+    );
+}
+
 // ---- Descriptions ------------------------------------------------------------------------------
 
 const DOCUMENTED: &str = r#"/// A plan a team can buy.

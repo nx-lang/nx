@@ -9,8 +9,8 @@ component <Counter start:int = 0 emits { Finished { total:int } } /> = {
   state { count:int = {start} }
   <Row>
     <Label text={"Count: " + count} />
-    <Button label="Add one" onTapped=<Update count={count + 1} /> />
-    <Button label="Reset" onTapped=<Update count={start} /> />
+    <Button label="Add one" onTapped=<State.Update count={count + 1} /> />
+    <Button label="Reset" onTapped=<State.Update count={start} /> />
     <Button label="Finish" onTapped=<Counter.Finished total={count} /> />
   </Row>
 }

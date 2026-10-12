@@ -571,7 +571,7 @@ function ghostRow(document: Document, property: SourceProperty): HTMLElement {
   return row;
 }
 
-/** `<Update a={…} b={…} />` in a component: one "set a to …" line per attribute. */
+/** `<State.Update a={…} b={…} />` in a component: one "set a to …" line per attribute. */
 function renderStateUpdate(context: RenderContext, at: number): HTMLElement {
   const { document, index } = context;
   const block = marked(context, at, "div", "update");

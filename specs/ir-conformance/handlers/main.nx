@@ -13,11 +13,11 @@ action DoSearch = { search:string }
 
 // From examples/nx/component.nx: an owned handler patches the state; a second one also emits.
 component <Counter extends Node step:int = 1 emits { Reset } /> = {
-  state { count:int = 0 last:Counter.Property = {Property.count} }
+  state { count:int = 0 last:State.Property = {State.Property.count} }
   <Stack>
     <Label text={count} />
-    <Button label="Add" onTapped=<Update count={count + step} last={Property.count} /> />
-    <Button label="Reset" onTapped={<Update count=0 /> <Reset />} />
+    <Button label="Add" onTapped=<State.Update count={count + step} last={State.Property.count} /> />
+    <Button label="Reset" onTapped={<State.Update count=0 /> <Reset />} />
   </Stack>
 }
 
@@ -29,8 +29,8 @@ let tens = { 10 20 }
 component <Tens /> = {
   state { count:int = 0 }
   <Card
-    items={for count in tens { <Button label="Ten" onTapped=<Update count={count + 1} /> /> }}
-    header=<Button label="Header" onTapped=<Update count={count + 100} /> />
+    items={for count in tens { <Button label="Ten" onTapped=<State.Update count={count + 1} /> /> }}
+    header=<Button label="Header" onTapped=<State.Update count={count + 100} /> />
     count={count} />
 }
 
@@ -45,9 +45,9 @@ component <Page emits { DoSearch } /> = {
   <Stack>
     <Label text={count} />
     <TextInput value={query} />
-    <Button label="More" onTapped=<Update count={count + 1} /> />
+    <Button label="More" onTapped=<State.Update count={count + 1} /> />
     <SearchBox onSearchSubmitted=<DoSearch search={action.searchString} /> />
-    <SearchBox placeholder="Again" onSearchSubmitted=<Update query={action.searchString} /> />
+    <SearchBox placeholder="Again" onSearchSubmitted=<State.Update query={action.searchString} /> />
   </Stack>
 }
 

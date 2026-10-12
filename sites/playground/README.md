@@ -31,7 +31,7 @@ external component <Button label:string emits { Tapped { } } />
 
 component <Counter start:int = 0 /> = {
   state { count:int = {start} }
-  <Button label={"Count: " + count} onTapped=<Update count={count + 1} /> />
+  <Button label={"Count: " + count} onTapped=<State.Update count={count + 1} /> />
 }
 
 <Counter start=3 />

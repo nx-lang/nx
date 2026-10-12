@@ -251,6 +251,7 @@ impl Table {
                     Op::OptNode,
                     Op::Int,
                     Op::List(EMIT),
+                    Op::OptRef,
                 ],
                 declaration::UNION => &[Op::Str, Op::List(UNION_CASE), Op::List(REFS), Op::OptRef],
                 declaration::TYPE_ALIAS => &[Op::Str],

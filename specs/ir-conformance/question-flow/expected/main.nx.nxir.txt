@@ -1,4 +1,4 @@
-module main.nx fingerprint 13435975170582337621
+module main.nx fingerprint 2066384928075143113
 links library/questions.nx version "" fingerprint 14700776180858802568
 links library/layout.nx version "" fingerprint 11139573422423982897
 links library/answers.nx version "" fingerprint 4710217782950829473
@@ -191,7 +191,7 @@ function definition(): library/layout.nx:FlowDefinition @160:1-197:20 =
 function received(answers?: library/answers.nx:Answer+): boolean @201:1-201:55 =
   answers?
 
-component Flow @203:1-366:2
+component Flow state Flow.State @203:1-366:2
   props
     respondent: string = "there"
   state
@@ -215,223 +215,223 @@ component Flow @203:1-366:2
       if (step eq 0) then
         <library/layout.nx:Step question=nameQuestion
           onTextAnswered=handler library/layout.nx:Step.TextAnswered action@8:library/layout.nx:Step.TextAnswered owner Flow =>
-            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] name=action.answer.value step=1 />
+            <Flow.State.Update answered=(answered add 1) answers=[answers, action.answer] name=action.answer.value step=1 />
         >
         </library/layout.nx:Step>
       if (step eq 1) then
         <library/layout.nx:Step question=emailQuestion(name)
           onTextAnswered=handler library/layout.nx:Step.TextAnswered action@9:library/layout.nx:Step.TextAnswered owner Flow =>
-            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=2 />
+            <Flow.State.Update answered=(answered add 1) answers=[answers, action.answer] step=2 />
         >
         </library/layout.nx:Step>
       if (step eq 2) then
         <library/layout.nx:Step question=roleQuestion
           onChoiceAnswered=handler library/layout.nx:Step.ChoiceAnswered action@10:library/layout.nx:Step.ChoiceAnswered owner Flow =>
-            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] role=action.answer.selected step=3 />
+            <Flow.State.Update answered=(answered add 1) answers=[answers, action.answer] role=action.answer.selected step=3 />
         >
         </library/layout.nx:Step>
       if ((step eq 3) and (role eq "engineer")) then
         <library/layout.nx:Step question=languagesQuestion
           onChoicesAnswered=handler library/layout.nx:Step.ChoicesAnswered action@11:library/layout.nx:Step.ChoicesAnswered owner Flow =>
-            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=4 />
+            <Flow.State.Update answered=(answered add 1) answers=[answers, action.answer] step=4 />
         >
         </library/layout.nx:Step>
       if ((step eq 3) and (role eq "designer")) then
         <library/layout.nx:Step question=designToolQuestion
           onChoiceAnswered=handler library/layout.nx:Step.ChoiceAnswered action@12:library/layout.nx:Step.ChoiceAnswered owner Flow =>
-            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=4 />
+            <Flow.State.Update answered=(answered add 1) answers=[answers, action.answer] step=4 />
         >
         </library/layout.nx:Step>
       if (((step eq 3) and (role ne "engineer")) and (role ne "designer")) then
         <library/layout.nx:Step question=reportsQuestion
           onIntegerAnswered=handler library/layout.nx:Step.IntegerAnswered action@13:library/layout.nx:Step.IntegerAnswered owner Flow =>
-            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=4 />
+            <Flow.State.Update answered=(answered add 1) answers=[answers, action.answer] step=4 />
         >
         </library/layout.nx:Step>
       if (step eq 4) then
         <library/layout.nx:Step question=teamSizeQuestion
           onIntegerAnswered=handler library/layout.nx:Step.IntegerAnswered action@14:library/layout.nx:Step.IntegerAnswered owner Flow =>
-            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] teamSize=action.answer.value
+            <Flow.State.Update answered=(answered add 1) answers=[answers, action.answer] teamSize=action.answer.value
               step=if (action.answer.value gt 10) then
                 5
               else
                 6
             >
-            </Flow.Update>
+            </Flow.State.Update>
         >
         </library/layout.nx:Step>
       if (step eq 5) then
         <library/layout.nx:Step question=departmentQuestion
           onChoiceAnswered=handler library/layout.nx:Step.ChoiceAnswered action@15:library/layout.nx:Step.ChoiceAnswered owner Flow =>
-            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=6 />
+            <Flow.State.Update answered=(answered add 1) answers=[answers, action.answer] step=6 />
         >
         </library/layout.nx:Step>
       if (step eq 6) then
         <library/layout.nx:Step question=ciQuestion
           onBooleanAnswered=handler library/layout.nx:Step.BooleanAnswered action@16:library/layout.nx:Step.BooleanAnswered owner Flow =>
-            <Flow.Update answered=(answered add 1) answers=[answers, action.answer]
+            <Flow.State.Update answered=(answered add 1) answers=[answers, action.answer]
               step=if action.answer.value then
                 7
               else
                 9
             >
-            </Flow.Update>
+            </Flow.State.Update>
         >
         </library/layout.nx:Step>
       if (step eq 7) then
         <library/layout.nx:Step question=ciProviderQuestion
           onChoiceAnswered=handler library/layout.nx:Step.ChoiceAnswered action@17:library/layout.nx:Step.ChoiceAnswered owner Flow =>
-            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=8 />
+            <Flow.State.Update answered=(answered add 1) answers=[answers, action.answer] step=8 />
         >
         </library/layout.nx:Step>
       if (step eq 8) then
         <library/layout.nx:Step question=buildMinutesQuestion
           onNumberAnswered=handler library/layout.nx:Step.NumberAnswered action@18:library/layout.nx:Step.NumberAnswered owner Flow =>
-            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=9 />
+            <Flow.State.Update answered=(answered add 1) answers=[answers, action.answer] step=9 />
         >
         </library/layout.nx:Step>
       if (step eq 9) then
         <library/layout.nx:Step question=ratingQuestion
           onIntegerAnswered=handler library/layout.nx:Step.IntegerAnswered action@19:library/layout.nx:Step.IntegerAnswered owner Flow =>
-            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] rating=action.answer.value
+            <Flow.State.Update answered=(answered add 1) answers=[answers, action.answer] rating=action.answer.value
               step=if (action.answer.value le 2) then
                 10
               else
                 11
             >
-            </Flow.Update>
+            </Flow.State.Update>
         >
         </library/layout.nx:Step>
       if (step eq 10) then
         <library/layout.nx:Step question=troubleQuestion(rating)
           onTextAnswered=handler library/layout.nx:Step.TextAnswered action@20:library/layout.nx:Step.TextAnswered owner Flow =>
-            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=11 />
+            <Flow.State.Update answered=(answered add 1) answers=[answers, action.answer] step=11 />
         >
         </library/layout.nx:Step>
       if (step eq 11) then
         <library/layout.nx:Step question=npsQuestion
           onIntegerAnswered=handler library/layout.nx:Step.IntegerAnswered action@21:library/layout.nx:Step.IntegerAnswered owner Flow =>
-            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=12 />
+            <Flow.State.Update answered=(answered add 1) answers=[answers, action.answer] step=12 />
         >
         </library/layout.nx:Step>
       if (step eq 12) then
         <library/layout.nx:Step question=prioritiesQuestion
           onChoicesAnswered=handler library/layout.nx:Step.ChoicesAnswered action@22:library/layout.nx:Step.ChoicesAnswered owner Flow =>
-            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=13 />
+            <Flow.State.Update answered=(answered add 1) answers=[answers, action.answer] step=13 />
         >
         </library/layout.nx:Step>
       if (step eq 13) then
         <library/layout.nx:Step question=frequencyQuestion
           onAnswered=handler library/layout.nx:Step.Answered action@23:library/layout.nx:Step.Answered owner Flow =>
-            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=14 />
+            <Flow.State.Update answered=(answered add 1) answers=[answers, action.answer] step=14 />
         >
         </library/layout.nx:Step>
       if (step eq 14) then
         <library/layout.nx:Step question=startDateQuestion
           onTextAnswered=handler library/layout.nx:Step.TextAnswered action@24:library/layout.nx:Step.TextAnswered owner Flow =>
-            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=15 />
+            <Flow.State.Update answered=(answered add 1) answers=[answers, action.answer] step=15 />
         >
         </library/layout.nx:Step>
       if (step eq 15) then
         <library/layout.nx:Step question=trialQuestion
           onAnswered=handler library/layout.nx:Step.Answered action@25:library/layout.nx:Step.Answered owner Flow =>
-            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=16 />
+            <Flow.State.Update answered=(answered add 1) answers=[answers, action.answer] step=16 />
         >
         </library/layout.nx:Step>
       if (step eq 16) then
         <library/layout.nx:Step question=callTimeQuestion
           onTextAnswered=handler library/layout.nx:Step.TextAnswered action@26:library/layout.nx:Step.TextAnswered owner Flow =>
-            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=17 />
+            <Flow.State.Update answered=(answered add 1) answers=[answers, action.answer] step=17 />
         >
         </library/layout.nx:Step>
       if (step eq 17) then
         <library/layout.nx:Step question=countryQuestion
           onChoiceAnswered=handler library/layout.nx:Step.ChoiceAnswered action@27:library/layout.nx:Step.ChoiceAnswered owner Flow =>
-            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=18 />
+            <Flow.State.Update answered=(answered add 1) answers=[answers, action.answer] step=18 />
         >
         </library/layout.nx:Step>
       if (step eq 18) then
         <library/layout.nx:Step question=parcelQuestion
           onBooleanAnswered=handler library/layout.nx:Step.BooleanAnswered action@28:library/layout.nx:Step.BooleanAnswered owner Flow =>
-            <Flow.Update answered=(answered add 1) answers=[answers, action.answer]
+            <Flow.State.Update answered=(answered add 1) answers=[answers, action.answer]
               step=if action.answer.value then
                 19
               else
                 20
             >
-            </Flow.Update>
+            </Flow.State.Update>
         >
         </library/layout.nx:Step>
       if (step eq 19) then
         <library/layout.nx:Step question=addressQuestion(name)
           onAnswered=handler library/layout.nx:Step.Answered action@29:library/layout.nx:Step.Answered owner Flow =>
-            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=20 />
+            <Flow.State.Update answered=(answered add 1) answers=[answers, action.answer] step=20 />
         >
         </library/layout.nx:Step>
       if (step eq 20) then
         <library/layout.nx:Step question=phoneQuestion
           onTextAnswered=handler library/layout.nx:Step.TextAnswered action@30:library/layout.nx:Step.TextAnswered owner Flow =>
-            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=21 />
+            <Flow.State.Update answered=(answered add 1) answers=[answers, action.answer] step=21 />
         >
         </library/layout.nx:Step>
       if (step eq 21) then
         <library/layout.nx:Step question=repositoryQuestion
           onTextAnswered=handler library/layout.nx:Step.TextAnswered action@31:library/layout.nx:Step.TextAnswered owner Flow =>
-            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=22 />
+            <Flow.State.Update answered=(answered add 1) answers=[answers, action.answer] step=22 />
         >
         </library/layout.nx:Step>
       if (step eq 22) then
         <library/layout.nx:Step question=configQuestion
           onAnswered=handler library/layout.nx:Step.Answered action@32:library/layout.nx:Step.Answered owner Flow =>
-            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=23 />
+            <Flow.State.Update answered=(answered add 1) answers=[answers, action.answer] step=23 />
         >
         </library/layout.nx:Step>
       if (step eq 23) then
         <library/layout.nx:Step question=budgetQuestion
           onNumberAnswered=handler library/layout.nx:Step.NumberAnswered action@33:library/layout.nx:Step.NumberAnswered owner Flow =>
-            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=24 />
+            <Flow.State.Update answered=(answered add 1) answers=[answers, action.answer] step=24 />
         >
         </library/layout.nx:Step>
       if (step eq 24) then
         <library/layout.nx:Step question=coverageQuestion
           onNumberAnswered=handler library/layout.nx:Step.NumberAnswered action@34:library/layout.nx:Step.NumberAnswered owner Flow =>
-            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=25 />
+            <Flow.State.Update answered=(answered add 1) answers=[answers, action.answer] step=25 />
         >
         </library/layout.nx:Step>
       if (step eq 25) then
         <library/layout.nx:Step question=themeQuestion
           onChoiceAnswered=handler library/layout.nx:Step.ChoiceAnswered action@35:library/layout.nx:Step.ChoiceAnswered owner Flow =>
-            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=26 />
+            <Flow.State.Update answered=(answered add 1) answers=[answers, action.answer] step=26 />
         >
         </library/layout.nx:Step>
       if (step eq 26) then
         <library/layout.nx:Step question=confidenceQuestion
           onIntegerAnswered=handler library/layout.nx:Step.IntegerAnswered action@36:library/layout.nx:Step.IntegerAnswered owner Flow =>
-            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=27 />
+            <Flow.State.Update answered=(answered add 1) answers=[answers, action.answer] step=27 />
         >
         </library/layout.nx:Step>
       if (step eq 27) then
         <library/layout.nx:Step question=commentsQuestion
           onTextAnswered=handler library/layout.nx:Step.TextAnswered action@37:library/layout.nx:Step.TextAnswered owner Flow =>
-            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=28 />
+            <Flow.State.Update answered=(answered add 1) answers=[answers, action.answer] step=28 />
         >
         </library/layout.nx:Step>
       if (step eq 28) then
         <library/layout.nx:Step question=consentQuestion
           onBooleanAnswered=handler library/layout.nx:Step.BooleanAnswered action@38:library/layout.nx:Step.BooleanAnswered owner Flow =>
-            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=29 />
+            <Flow.State.Update answered=(answered add 1) answers=[answers, action.answer] step=29 />
         >
         </library/layout.nx:Step>
       if (step eq 29) then
         <library/layout.nx:Step question=signatureQuestion
           onAnswered=handler library/layout.nx:Step.Answered action@39:library/layout.nx:Step.Answered owner Flow =>
-            <Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=30 />
+            <Flow.State.Update answered=(answered add 1) answers=[answers, action.answer] step=30 />
         >
         </library/layout.nx:Step>
       if (step eq 30) then
         <library/layout.nx:Step question=reviewQuestion(name, role, teamSize)
           onAnswered=handler library/layout.nx:Step.Answered action@40:library/layout.nx:Step.Answered owner Flow =>
-            [<Flow.Update answered=(answered add 1) answers=[answers, action.answer] step=31 />, <Completed answered=(answered add 1) respondent=name />]
+            [<Flow.State.Update answered=(answered add 1) answers=[answers, action.answer] step=31 />, <Completed answered=(answered add 1) respondent=name />]
         >
         </library/layout.nx:Step>
       if (step ge 30) then
@@ -445,12 +445,21 @@ component Flow @203:1-366:2
         <library/layout.nx:Notice body=(("We have " concat text<int>(answered)) concat " answers from you.") title="Sent" />
       <library/layout.nx:Button label="Start over"
         onTapped=handler library/layout.nx:Button.Tapped action@41:library/layout.nx:Button.Tapped owner Flow =>
-          <Flow.Update answered=0 answers={} rating=0 role="" step=0 teamSize=0 />
+          <Flow.State.Update answered=0 answers={} rating=0 role="" step=0 teamSize=0 />
       >
       </library/layout.nx:Button>
     </library/layout.nx:Screen>
 
-record Flow.Update update of Flow @203:1-366:2
+record Flow.State @203:1-366:2
+  step: int required
+  answered: int required
+  name: string required
+  role: string required
+  teamSize: int required
+  rating: int required
+  answers: library/answers.nx:Answer*
+
+record Flow.State.Update update of Flow.State @203:1-366:2
   step: int
   answered: int
   name: string

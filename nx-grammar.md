@@ -301,13 +301,15 @@ they can also declare emitted action payloads in `emits` and persistent local st
 identifier, and each emit/state field uses the same `PropertyDefinition` shape as other record-like
 members. Inline emitted actions may optionally include an `extends` clause but remain concrete.
 
-`Update`, `Property`, `<Name>.Update`, and `<Name>.Property` are derived names, not grammar
-productions. Every record, action, inline emitted action, and component with `state` has an update
-record `<Name>.Update` and a property union `<Name>.Property`; inside a component body a bare
-`Update` element tag names that component's own update record, and a bare `Property` type reference
-or member-access base names its own property union. All are ordinary names to the parser; analysis
-gives them their meaning. Because `<Component>.Update` and `<Component>.Property` are taken, an
-`EmitDefinition` or emit reference may not use the name `Update` or `Property`. The intrinsic
+`State`, `<Name>.Update`, `<Name>.Property`, and `<Name>.State` are derived names, not grammar
+productions. Every record, action, inline emitted action, and component has an update record
+`<Name>.Update` and a property union `<Name>.Property` (for a component, of its props); a component
+with `state` also has a state record `<Name>.State`, with its own `<Name>.State.Update` and
+`<Name>.State.Property`. Inside a component body a bare `State` type reference, element tag, or
+member-access base names that component's state record. All are ordinary names to the parser;
+analysis gives them their meaning. Because `<Component>.Update`, `<Component>.Property`, and
+`<Component>.State` are taken, an `EmitDefinition` or emit reference may not use the name `Update`,
+`Property`, or `State`, and a prop or state field may not be named `State`. The intrinsic
 function names `apply`, `merge`, `diff`, and `changed` are likewise ordinary identifiers to the
 parser that analysis reserves.
 

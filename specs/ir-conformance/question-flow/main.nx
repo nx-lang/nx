@@ -215,139 +215,139 @@ component <Flow respondent:string = "there" emits { Completed } /> = {
     <Progress answered={answered} total={total} />
     if step == 0 {
       <Step question={nameQuestion}
-        onTextAnswered=<Update step=1 answered={answered + 1} name={action.answer.value} answers={ answers action.answer } /> />
+        onTextAnswered=<State.Update step=1 answered={answered + 1} name={action.answer.value} answers={ answers action.answer } /> />
     }
     if step == 1 {
       <Step question={emailQuestion(name)}
-        onTextAnswered=<Update step=2 answered={answered + 1} answers={ answers action.answer } /> />
+        onTextAnswered=<State.Update step=2 answered={answered + 1} answers={ answers action.answer } /> />
     }
     if step == 2 {
       <Step question={roleQuestion}
-        onChoiceAnswered=<Update step=3 answered={answered + 1} role={action.answer.selected} answers={ answers action.answer } /> />
+        onChoiceAnswered=<State.Update step=3 answered={answered + 1} role={action.answer.selected} answers={ answers action.answer } /> />
     }
     if step == 3 && role == "engineer" {
       <Step question={languagesQuestion}
-        onChoicesAnswered=<Update step=4 answered={answered + 1} answers={ answers action.answer } /> />
+        onChoicesAnswered=<State.Update step=4 answered={answered + 1} answers={ answers action.answer } /> />
     }
     if step == 3 && role == "designer" {
       <Step question={designToolQuestion}
-        onChoiceAnswered=<Update step=4 answered={answered + 1} answers={ answers action.answer } /> />
+        onChoiceAnswered=<State.Update step=4 answered={answered + 1} answers={ answers action.answer } /> />
     }
     if step == 3 && role != "engineer" && role != "designer" {
       <Step question={reportsQuestion}
-        onIntegerAnswered=<Update step=4 answered={answered + 1} answers={ answers action.answer } /> />
+        onIntegerAnswered=<State.Update step=4 answered={answered + 1} answers={ answers action.answer } /> />
     }
     if step == 4 {
       <Step question={teamSizeQuestion}
-        onIntegerAnswered=<Update step={if action.answer.value > 10 { 5 } else { 6 }} answered={answered + 1}
+        onIntegerAnswered=<State.Update step={if action.answer.value > 10 { 5 } else { 6 }} answered={answered + 1}
           teamSize={action.answer.value} answers={ answers action.answer } /> />
     }
     if step == 5 {
       <Step question={departmentQuestion}
-        onChoiceAnswered=<Update step=6 answered={answered + 1} answers={ answers action.answer } /> />
+        onChoiceAnswered=<State.Update step=6 answered={answered + 1} answers={ answers action.answer } /> />
     }
     if step == 6 {
       <Step question={ciQuestion}
-        onBooleanAnswered=<Update step={if action.answer.value { 7 } else { 9 }} answered={answered + 1}
+        onBooleanAnswered=<State.Update step={if action.answer.value { 7 } else { 9 }} answered={answered + 1}
           answers={ answers action.answer } /> />
     }
     if step == 7 {
       <Step question={ciProviderQuestion}
-        onChoiceAnswered=<Update step=8 answered={answered + 1} answers={ answers action.answer } /> />
+        onChoiceAnswered=<State.Update step=8 answered={answered + 1} answers={ answers action.answer } /> />
     }
     if step == 8 {
       <Step question={buildMinutesQuestion}
-        onNumberAnswered=<Update step=9 answered={answered + 1} answers={ answers action.answer } /> />
+        onNumberAnswered=<State.Update step=9 answered={answered + 1} answers={ answers action.answer } /> />
     }
     if step == 9 {
       <Step question={ratingQuestion}
-        onIntegerAnswered=<Update step={if action.answer.value <= 2 { 10 } else { 11 }} answered={answered + 1}
+        onIntegerAnswered=<State.Update step={if action.answer.value <= 2 { 10 } else { 11 }} answered={answered + 1}
           rating={action.answer.value} answers={ answers action.answer } /> />
     }
     if step == 10 {
       <Step question={troubleQuestion(rating)}
-        onTextAnswered=<Update step=11 answered={answered + 1} answers={ answers action.answer } /> />
+        onTextAnswered=<State.Update step=11 answered={answered + 1} answers={ answers action.answer } /> />
     }
     if step == 11 {
       <Step question={npsQuestion}
-        onIntegerAnswered=<Update step=12 answered={answered + 1} answers={ answers action.answer } /> />
+        onIntegerAnswered=<State.Update step=12 answered={answered + 1} answers={ answers action.answer } /> />
     }
     if step == 12 {
       <Step question={prioritiesQuestion}
-        onChoicesAnswered=<Update step=13 answered={answered + 1} answers={ answers action.answer } /> />
+        onChoicesAnswered=<State.Update step=13 answered={answered + 1} answers={ answers action.answer } /> />
     }
     if step == 13 {
       <Step question={frequencyQuestion}
-        onAnswered=<Update step=14 answered={answered + 1} answers={ answers action.answer } /> />
+        onAnswered=<State.Update step=14 answered={answered + 1} answers={ answers action.answer } /> />
     }
     if step == 14 {
       <Step question={startDateQuestion}
-        onTextAnswered=<Update step=15 answered={answered + 1} answers={ answers action.answer } /> />
+        onTextAnswered=<State.Update step=15 answered={answered + 1} answers={ answers action.answer } /> />
     }
     if step == 15 {
       <Step question={trialQuestion}
-        onAnswered=<Update step=16 answered={answered + 1} answers={ answers action.answer } /> />
+        onAnswered=<State.Update step=16 answered={answered + 1} answers={ answers action.answer } /> />
     }
     if step == 16 {
       <Step question={callTimeQuestion}
-        onTextAnswered=<Update step=17 answered={answered + 1} answers={ answers action.answer } /> />
+        onTextAnswered=<State.Update step=17 answered={answered + 1} answers={ answers action.answer } /> />
     }
     if step == 17 {
       <Step question={countryQuestion}
-        onChoiceAnswered=<Update step=18 answered={answered + 1} answers={ answers action.answer } /> />
+        onChoiceAnswered=<State.Update step=18 answered={answered + 1} answers={ answers action.answer } /> />
     }
     if step == 18 {
       <Step question={parcelQuestion}
-        onBooleanAnswered=<Update step={if action.answer.value { 19 } else { 20 }} answered={answered + 1}
+        onBooleanAnswered=<State.Update step={if action.answer.value { 19 } else { 20 }} answered={answered + 1}
           answers={ answers action.answer } /> />
     }
     if step == 19 {
       <Step question={addressQuestion(name)}
-        onAnswered=<Update step=20 answered={answered + 1} answers={ answers action.answer } /> />
+        onAnswered=<State.Update step=20 answered={answered + 1} answers={ answers action.answer } /> />
     }
     if step == 20 {
       <Step question={phoneQuestion}
-        onTextAnswered=<Update step=21 answered={answered + 1} answers={ answers action.answer } /> />
+        onTextAnswered=<State.Update step=21 answered={answered + 1} answers={ answers action.answer } /> />
     }
     if step == 21 {
       <Step question={repositoryQuestion}
-        onTextAnswered=<Update step=22 answered={answered + 1} answers={ answers action.answer } /> />
+        onTextAnswered=<State.Update step=22 answered={answered + 1} answers={ answers action.answer } /> />
     }
     if step == 22 {
       <Step question={configQuestion}
-        onAnswered=<Update step=23 answered={answered + 1} answers={ answers action.answer } /> />
+        onAnswered=<State.Update step=23 answered={answered + 1} answers={ answers action.answer } /> />
     }
     if step == 23 {
       <Step question={budgetQuestion}
-        onNumberAnswered=<Update step=24 answered={answered + 1} answers={ answers action.answer } /> />
+        onNumberAnswered=<State.Update step=24 answered={answered + 1} answers={ answers action.answer } /> />
     }
     if step == 24 {
       <Step question={coverageQuestion}
-        onNumberAnswered=<Update step=25 answered={answered + 1} answers={ answers action.answer } /> />
+        onNumberAnswered=<State.Update step=25 answered={answered + 1} answers={ answers action.answer } /> />
     }
     if step == 25 {
       <Step question={themeQuestion}
-        onChoiceAnswered=<Update step=26 answered={answered + 1} answers={ answers action.answer } /> />
+        onChoiceAnswered=<State.Update step=26 answered={answered + 1} answers={ answers action.answer } /> />
     }
     if step == 26 {
       <Step question={confidenceQuestion}
-        onIntegerAnswered=<Update step=27 answered={answered + 1} answers={ answers action.answer } /> />
+        onIntegerAnswered=<State.Update step=27 answered={answered + 1} answers={ answers action.answer } /> />
     }
     if step == 27 {
       <Step question={commentsQuestion}
-        onTextAnswered=<Update step=28 answered={answered + 1} answers={ answers action.answer } /> />
+        onTextAnswered=<State.Update step=28 answered={answered + 1} answers={ answers action.answer } /> />
     }
     if step == 28 {
       <Step question={consentQuestion}
-        onBooleanAnswered=<Update step=29 answered={answered + 1} answers={ answers action.answer } /> />
+        onBooleanAnswered=<State.Update step=29 answered={answered + 1} answers={ answers action.answer } /> />
     }
     if step == 29 {
       <Step question={signatureQuestion}
-        onAnswered=<Update step=30 answered={answered + 1} answers={ answers action.answer } /> />
+        onAnswered=<State.Update step=30 answered={answered + 1} answers={ answers action.answer } /> />
     }
     if step == 30 {
       <Step question={reviewQuestion(name, role, teamSize)}
-        onAnswered={<Update step=31 answered={answered + 1} answers={ answers action.answer } />
+        onAnswered={<State.Update step=31 answered={answered + 1} answers={ answers action.answer } />
           <Completed respondent={name} answered={answered + 1} />} />
     }
     if step >= 30 {
@@ -361,6 +361,6 @@ component <Flow respondent:string = "there" emits { Completed } /> = {
     if step == 31 {
       <Notice title="Sent" body={"We have " + answered + " answers from you."} />
     }
-    <Button label="Start over" onTapped=<Update step=0 answered=0 role="" teamSize=0 rating=0 answers={} /> />
+    <Button label="Start over" onTapped=<State.Update step=0 answered=0 role="" teamSize=0 rating=0 answers={} /> />
   </Screen>
 }

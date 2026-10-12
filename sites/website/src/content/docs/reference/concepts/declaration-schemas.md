@@ -17,7 +17,7 @@ tool.description;  // the function's doc comment, as Markdown
 ```
 
 `typeSchema` answers the same way for a declared type: a record, action, union, type alias,
-`<Target>.Update` or `<Target>.Property`. Both queries first ship in release 0.6.0, together with
+`<Target>.Update`, `<Target>.Property`, or a component's `<Target>.State` and its own two. Both queries first ship in release 0.6.0, together with
 doc comments.
 
 The schemas are derived when the program is compiled. An NX IR image holds no doc comments, no

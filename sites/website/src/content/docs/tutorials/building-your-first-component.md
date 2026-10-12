@@ -103,5 +103,5 @@ it.
 - Introduce a `content` property, such as `content extra?:Element`, to let callers inject extra
   markup into the footer.
 - Give the card local state, `state { following:boolean = false }`, and have a Follow button
-  return `<Update following={!following}/>` instead of an action.
+  return `<State.Update following={!following}/>` instead of an action.
 - Thread design tokens (see the next tutorial) into `tone` and button styling so the component respects theming.

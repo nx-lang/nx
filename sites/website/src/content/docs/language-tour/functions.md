@@ -70,8 +70,9 @@ let makeValueChanged(value:string): SearchBox.ValueChanged =
 - Inline emitted actions become public action names such as `SearchBox.ValueChanged`.
 - Component invocation sites can bind emitted actions through `on<ActionName>` properties with an implicit `action` value inside the handler body.
 - Hosts initialize components by name, receive the rendered output plus an opaque state snapshot, and later dispatch ordered action batches with that saved snapshot.
-- State defaults run only during initialization. After that a handler changes state by returning the component's update record, written `<Update ... />` inside the component; it names only the fields that change.
-- Inside a component a handler may return its own `Update` or an action the component `emits`; at the root any action or update record goes to the host.
+- State defaults run only during initialization. After that a handler changes state by returning the component's state update record, written `<State.Update ... />` inside the component; it names only the fields that change.
+- Inside a component a handler may return its `State.Update` or an action the component `emits`; at the root any action or update record goes to the host.
+- A component's state is a record of its own, `Counter.State`, and inside the component a bare `State` names it. `Counter.Update` and `Counter.Property` describe its props, which belong to its parent.
 
 ```nx
 external component <Button label:string emits { Tapped { } } />
@@ -80,7 +81,7 @@ component <Counter /> = {
   state { count:int = 0 }
   <Row>
     <Label text={count} />
-    <Button label="Add" onTapped=<Update count={count + 1} /> />
+    <Button label="Add" onTapped=<State.Update count={count + 1} /> />
   </Row>
 }
 ```
@@ -92,7 +93,7 @@ for an optional field such as `email?:string` — and leaves every other field a
 
 A field can also be named as a value. `User.Property.email` is a case of the derived constant union
 `User.Property`, so a sort key or a column list is typed by the fields that exist, and inside a
-component a bare `Property` names the component's own. Four intrinsics work on any update record:
+component `State.Property` names the component's state fields. Four intrinsics work on any update record:
 `apply(record, update)`, `merge(first, second)`, `diff(before, after)`, and `changed(update)`, which
 lists the present fields as `User.Property` cases. See
 [Property references](/reference/syntax/functions#property-references).

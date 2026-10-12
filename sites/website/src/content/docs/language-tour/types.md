@@ -127,7 +127,8 @@ written, so `snake_case` keeps the source aligned with JSON or database values s
 
 Every record also has a derived constant union of its field names. For
 `type User = { name:string email?:string }` that is `User.Property`, with the cases `name` and
-`email`, and it serializes a case as the bare field name.
+`email`, and it serializes a case as the bare field name. A component's `Counter.Property` lists
+its props, and `Counter.State.Property` its state fields.
 
 ## Discriminated unions
 

@@ -30,7 +30,7 @@ describe("program artifacts", () => {
       expect(ir.bytes.byteLength % 4).toBe(0);
       expect(ir.identity).toBe("demo.nx");
       expect(ir.metadata.identity).toBe("demo.nx");
-      expect(ir.metadata.schemaVersion).toBe(5);
+      expect(ir.metadata.schemaVersion).toBe(6);
       expect(ir.metadata.fingerprint).toBeTypeOf("string");
       expect(ir.metadata.runtimeAbi).toBe("nx-ir-runtime-v2");
       expect(ir.metadata.functionEntrypoints).toEqual(["root"]);
@@ -53,7 +53,7 @@ let root() = <Book title="A" tags={"x"} />`;
     const artifact = host.buildProgramArtifact(source, { fileName: "shapes.nx" });
     try {
       const [ir] = artifact.generateNxIr();
-      expect(ir!.metadata.schemaVersion).toBe(5);
+      expect(ir!.metadata.schemaVersion).toBe(6);
       expect(host.explainNxIr(ir!.bytes)).toContain(
         "record Book\n  title: string required\n  author: Person?\n  tags: string+ required\n  extras: string*\n"
       );
@@ -426,7 +426,7 @@ component <Counter start:int = 0 /> = {
   state { count:int = {start} ratio:float64 = 1 }
   <Row>
     <Label text={"Count: " + count} size=<Size width=3 /> status=paused />
-    <Button label="Add" onTapped=<Update count={count + 1} /> />
+    <Button label="Add" onTapped=<State.Update count={count + 1} /> />
   </Row>
 }
 <Counter start=3 />`;

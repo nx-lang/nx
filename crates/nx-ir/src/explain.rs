@@ -384,7 +384,9 @@ impl<'a> Explainer<'a> {
                 if flags & kinds::component::EXTERNAL != 0 {
                     modifiers.push_str(" external");
                 }
-                lines.push(format!("component {name}{modifiers}{span}"));
+                let state_record =
+                    self.optional_reference_suffix(self.operand(entry, 7, "component")?, "state")?;
+                lines.push(format!("component {name}{modifiers}{state_record}{span}"));
                 let props = self.fields(self.list_operand(entry, 2, "component")?)?;
                 if !props.is_empty() {
                     lines.push("  props".to_string());

@@ -1,4 +1,4 @@
-module main.nx fingerprint 13005845147897737361
+module main.nx fingerprint 13547087621431410540
 requires update-records-v1 action-handlers-v1 function-values-v1
 entrypoints functions [picked double triple applied] components [Node Stack Panel Button Chooser Holder Result Picker Tool]
 
@@ -34,7 +34,7 @@ record Item
 value first =
   <Item name="first" />
 
-component Holder
+component Holder state Holder.State
   state
     held: Item = first
     spare: Item = <Item name="spare" />
@@ -44,22 +44,22 @@ component Holder
       <Panel count=count item=held />
       <Button label="Count"
         onTapped=handler Button.Tapped action@3:Button.Tapped owner Holder =>
-          <Holder.Update count=(count add 1) />
+          <Holder.State.Update count=(count add 1) />
       >
       </Button>
       <Button label="Swap"
         onTapped=handler Button.Tapped action@4:Button.Tapped owner Holder =>
-          <Holder.Update held=spare spare=held />
+          <Holder.State.Update held=spare spare=held />
       >
       </Button>
       <Button label="Fresh"
         onTapped=handler Button.Tapped action@5:Button.Tapped owner Holder =>
-          <Holder.Update held=<Item name="fresh" /> />
+          <Holder.State.Update held=<Item name="fresh" /> />
       >
       </Button>
       <Chooser
         onChosen=handler Chooser.Chosen action@6:Chooser.Chosen owner Holder =>
-          <Holder.Update held=action.item />
+          <Holder.State.Update held=action.item />
       >
       </Chooser>
     </Stack>
@@ -89,7 +89,7 @@ function triple(n: int): int =
 function applied(f: <function n:int />: int): int =
   <f n=2 />
 
-component Tool
+component Tool state Tool.State
   state
     op: <function n:int />: int = double
     spare: <function n:int />: int = triple
@@ -98,16 +98,25 @@ component Tool
       <Result value=applied(op) />
       <Picker
         onPicked=handler Picker.Picked action@2:Picker.Picked owner Tool =>
-          <Tool.Update op=action.op />
+          <Tool.State.Update op=action.op />
       >
       </Picker>
     </Stack>
 
-record Holder.Update update of Holder
+record Holder.State
+  held: Item required
+  spare: Item required
+  count: int required
+
+record Holder.State.Update update of Holder.State
   held: Item
   spare: Item
   count: int
 
-record Tool.Update update of Tool
+record Tool.State
+  op: <function n:int />: int required
+  spare: <function n:int />: int required
+
+record Tool.State.Update update of Tool.State
   op: <function n:int />: int
   spare: <function n:int />: int

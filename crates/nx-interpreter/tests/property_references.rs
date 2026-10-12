@@ -109,10 +109,10 @@ fn invoke(token: &SmolStr, action: Value) -> Value {
 
 const PEOPLE: &str = r#"
     type User = { name:string email?:string }
-    external component <Grid sortBy:User.Property keys:People.Property+ emits { Sorted { } } />
+    external component <Grid sortBy:User.Property keys:People.State.Property+ emits { Sorted { } } />
     component <People /> = {
-      state { sortBy:User.Property = {User.Property.name} keys:People.Property+ = { Property.sortBy } }
-      <Grid sortBy={sortBy} keys={keys} onSorted=<Update sortBy={User.Property.email} keys={ Property.sortBy Property.keys } /> />
+      state { sortBy:User.Property = {User.Property.name} keys:State.Property+ = { State.Property.sortBy } }
+      <Grid sortBy={sortBy} keys={keys} onSorted=<State.Update sortBy={User.Property.email} keys={ State.Property.sortBy State.Property.keys } /> />
     }
 "#;
 
@@ -126,7 +126,7 @@ fn a_property_case_in_state_round_trips_through_init_snapshot_and_dispatch() {
     );
     assert_eq!(
         field(&init.rendered, "keys"),
-        &Value::Array(vec![case("People.Property", "sortBy")])
+        &Value::Array(vec![case("People.State.Property", "sortBy")])
     );
 
     let next = runtime.dispatch(
@@ -143,8 +143,8 @@ fn a_property_case_in_state_round_trips_through_init_snapshot_and_dispatch() {
     assert_eq!(
         field(&next.rendered, "keys"),
         &Value::Array(vec![
-            case("People.Property", "sortBy"),
-            case("People.Property", "keys"),
+            case("People.State.Property", "sortBy"),
+            case("People.State.Property", "keys"),
         ])
     );
 

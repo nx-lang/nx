@@ -82,7 +82,7 @@ lost. None is scheduled; each would need its own change and its own case for bei
   of a per-case field type inside the checker — but there are **no present plans to implement it**.
   The .NET and TypeScript helper shapes that landed in `map-backed-update-records` and
   `add-property-references` are the typegen target whenever it is picked up.
-- **Computed keys in construction**, `<Update {prop}={value} />`.
+- **Computed keys in construction**, `<State.Update {prop}={value} />`.
 - **A generic `get(record, property)` read**, whose result would be `object` for an open key. Note
   that `add-component-type-parameters` does not enable this: its type parameters are scoped to a
   component signature, and parameters on records, functions, aliases, and unions are explicitly out

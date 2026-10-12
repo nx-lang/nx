@@ -71,6 +71,14 @@ namespace NxLang.Sdk.Tests.Generated
     }
 
     [MessagePackObject]
+    public sealed class Counter_state
+    {
+        [Key("count")]
+        [JsonPropertyName("count")]
+        public long Count { get; set; }
+    }
+
+    [MessagePackObject]
     public sealed class Clash
     {
         [Key("changed")]
@@ -533,7 +541,7 @@ namespace NxLang.Sdk.Tests.Generated
     {
         private static readonly NxUpdateSchema FieldSchema = new(
             "Counter.Update",
-            new NxField("count", typeof(long), clearable: false));
+            new NxField("step", typeof(long), clearable: false));
 
         public Counter_update()
             : base(FieldSchema)
@@ -542,10 +550,10 @@ namespace NxLang.Sdk.Tests.Generated
 
         public string NxType => "Counter.Update";
 
-        public NxOptional<long> Count
+        public NxOptional<long> Step
         {
-            get => base.Get<long>("count");
-            set => base.Set("count", value);
+            get => base.Get<long>("step");
+            set => base.Set("step", value);
         }
 
         public bool IsSet(Counter_property property) => base.IsSet(Counter_propertyWireFormat.Format(property));
@@ -553,6 +561,56 @@ namespace NxLang.Sdk.Tests.Generated
         public void Unset(Counter_property property) => base.Unset(Counter_propertyWireFormat.Format(property));
 
         public Counter_property[] Changed() => Array.ConvertAll(base.ChangedNames(), Counter_propertyWireFormat.Parse);
+    }
+
+    [JsonConverter(typeof(NxUpdateRecordJsonConverter<Counter_state_update>))]
+    [MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<Counter_state_update>))]
+    public sealed class Counter_state_update : NxUpdate<Counter_state>
+    {
+        private static readonly NxUpdateSchema FieldSchema = new(
+            "Counter.State.Update",
+            Counter_stateProperties.Count);
+
+        public Counter_state_update()
+            : base(FieldSchema)
+        {
+        }
+
+        public string NxType => "Counter.State.Update";
+
+        public NxOptional<long> Count
+        {
+            get => base.Get<long>("count");
+            set => base.Set("count", value);
+        }
+
+        public bool IsSet(Counter_state_property property) => base.IsSet(Counter_state_propertyWireFormat.Format(property));
+
+        public void Unset(Counter_state_property property) => base.Unset(Counter_state_propertyWireFormat.Format(property));
+
+        public Counter_state_property[] Changed() => Array.ConvertAll(base.ChangedNames(), Counter_state_propertyWireFormat.Parse);
+
+        public static Counter_state_update Diff(Counter_state before, Counter_state after) => NxUpdate<Counter_state>.Diff<Counter_state_update>(before, after);
+    }
+
+    public static class Counter_stateProperties
+    {
+        public static readonly NxProperty<Counter_state, long> Count = new(
+            Counter_state_propertyWireFormat.Format(Counter_state_property.Count),
+            record => record.Count,
+            (record, value) => record.Count = value,
+            clearable: false);
+
+        public static NxProperty<Counter_state> Of(Counter_state_property property)
+        {
+            switch (property)
+            {
+                case Counter_state_property.Count:
+                    return Count;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(property));
+            }
+        }
     }
 
     [JsonConverter(typeof(NxUpdateRecordJsonConverter<Clash_update>))]
@@ -875,11 +933,11 @@ namespace NxLang.Sdk.Tests.Generated
 
     [JsonConverter(typeof(NxUpdateRecordJsonConverter<Ticker_update>))]
     [MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<Ticker_update>))]
-    public sealed class Ticker_update : NxUpdate<Ticker_state>
+    public sealed class Ticker_update : NxUpdateRecord
     {
         private static readonly NxUpdateSchema FieldSchema = new(
             "Ticker.Update",
-            Ticker_stateProperties.Count);
+            new NxField("step", typeof(long), clearable: false));
 
         public Ticker_update()
             : base(FieldSchema)
@@ -888,10 +946,10 @@ namespace NxLang.Sdk.Tests.Generated
 
         public string NxType => "Ticker.Update";
 
-        public NxOptional<long> Count
+        public NxOptional<long> Step
         {
-            get => base.Get<long>("count");
-            set => base.Set("count", value);
+            get => base.Get<long>("step");
+            set => base.Set("step", value);
         }
 
         public bool IsSet(Ticker_property property) => base.IsSet(Ticker_propertyWireFormat.Format(property));
@@ -899,23 +957,51 @@ namespace NxLang.Sdk.Tests.Generated
         public void Unset(Ticker_property property) => base.Unset(Ticker_propertyWireFormat.Format(property));
 
         public Ticker_property[] Changed() => Array.ConvertAll(base.ChangedNames(), Ticker_propertyWireFormat.Parse);
+    }
 
-        public static Ticker_update Diff(Ticker_state before, Ticker_state after) => NxUpdate<Ticker_state>.Diff<Ticker_update>(before, after);
+    [JsonConverter(typeof(NxUpdateRecordJsonConverter<Ticker_state_update>))]
+    [MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<Ticker_state_update>))]
+    public sealed class Ticker_state_update : NxUpdate<Ticker_state>
+    {
+        private static readonly NxUpdateSchema FieldSchema = new(
+            "Ticker.State.Update",
+            Ticker_stateProperties.Count);
+
+        public Ticker_state_update()
+            : base(FieldSchema)
+        {
+        }
+
+        public string NxType => "Ticker.State.Update";
+
+        public NxOptional<long> Count
+        {
+            get => base.Get<long>("count");
+            set => base.Set("count", value);
+        }
+
+        public bool IsSet(Ticker_state_property property) => base.IsSet(Ticker_state_propertyWireFormat.Format(property));
+
+        public void Unset(Ticker_state_property property) => base.Unset(Ticker_state_propertyWireFormat.Format(property));
+
+        public Ticker_state_property[] Changed() => Array.ConvertAll(base.ChangedNames(), Ticker_state_propertyWireFormat.Parse);
+
+        public static Ticker_state_update Diff(Ticker_state before, Ticker_state after) => NxUpdate<Ticker_state>.Diff<Ticker_state_update>(before, after);
     }
 
     public static class Ticker_stateProperties
     {
         public static readonly NxProperty<Ticker_state, long> Count = new(
-            Ticker_propertyWireFormat.Format(Ticker_property.Count),
+            Ticker_state_propertyWireFormat.Format(Ticker_state_property.Count),
             record => record.Count,
             (record, value) => record.Count = value,
             clearable: false);
 
-        public static NxProperty<Ticker_state> Of(Ticker_property property)
+        public static NxProperty<Ticker_state> Of(Ticker_state_property property)
         {
             switch (property)
             {
-                case Ticker_property.Count:
+                case Ticker_state_property.Count:
                     return Count;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(property));
@@ -1292,7 +1378,7 @@ namespace NxLang.Sdk.Tests.Generated
     [MessagePackFormatter(typeof(NxEnumMessagePackFormatter<Counter_property, Counter_propertyWireFormat>))]
     public enum Counter_property
     {
-        Count
+        Step
     }
 
     internal sealed class Counter_propertyWireFormat : INxEnumWireFormat<Counter_property>
@@ -1300,14 +1386,38 @@ namespace NxLang.Sdk.Tests.Generated
         public static string Format(Counter_property value) =>
             value switch
             {
-                Counter_property.Count => "count",
+                Counter_property.Step => "step",
                 _ => throw new FormatException("Unknown NX enum value."),
             };
 
         public static Counter_property Parse(string value) =>
             value switch
             {
-                "count" => Counter_property.Count,
+                "step" => Counter_property.Step,
+                _ => throw new FormatException("Unknown NX enum member."),
+            };
+    }
+
+    [JsonConverter(typeof(NxEnumJsonConverter<Counter_state_property, Counter_state_propertyWireFormat>))]
+    [MessagePackFormatter(typeof(NxEnumMessagePackFormatter<Counter_state_property, Counter_state_propertyWireFormat>))]
+    public enum Counter_state_property
+    {
+        Count
+    }
+
+    internal sealed class Counter_state_propertyWireFormat : INxEnumWireFormat<Counter_state_property>
+    {
+        public static string Format(Counter_state_property value) =>
+            value switch
+            {
+                Counter_state_property.Count => "count",
+                _ => throw new FormatException("Unknown NX enum value."),
+            };
+
+        public static Counter_state_property Parse(string value) =>
+            value switch
+            {
+                "count" => Counter_state_property.Count,
                 _ => throw new FormatException("Unknown NX enum member."),
             };
     }
@@ -1454,7 +1564,7 @@ namespace NxLang.Sdk.Tests.Generated
     [MessagePackFormatter(typeof(NxEnumMessagePackFormatter<Ticker_property, Ticker_propertyWireFormat>))]
     public enum Ticker_property
     {
-        Count
+        Step
     }
 
     internal sealed class Ticker_propertyWireFormat : INxEnumWireFormat<Ticker_property>
@@ -1462,14 +1572,38 @@ namespace NxLang.Sdk.Tests.Generated
         public static string Format(Ticker_property value) =>
             value switch
             {
-                Ticker_property.Count => "count",
+                Ticker_property.Step => "step",
                 _ => throw new FormatException("Unknown NX enum value."),
             };
 
         public static Ticker_property Parse(string value) =>
             value switch
             {
-                "count" => Ticker_property.Count,
+                "step" => Ticker_property.Step,
+                _ => throw new FormatException("Unknown NX enum member."),
+            };
+    }
+
+    [JsonConverter(typeof(NxEnumJsonConverter<Ticker_state_property, Ticker_state_propertyWireFormat>))]
+    [MessagePackFormatter(typeof(NxEnumMessagePackFormatter<Ticker_state_property, Ticker_state_propertyWireFormat>))]
+    public enum Ticker_state_property
+    {
+        Count
+    }
+
+    internal sealed class Ticker_state_propertyWireFormat : INxEnumWireFormat<Ticker_state_property>
+    {
+        public static string Format(Ticker_state_property value) =>
+            value switch
+            {
+                Ticker_state_property.Count => "count",
+                _ => throw new FormatException("Unknown NX enum value."),
+            };
+
+        public static Ticker_state_property Parse(string value) =>
+            value switch
+            {
+                "count" => Ticker_state_property.Count,
                 _ => throw new FormatException("Unknown NX enum member."),
             };
     }

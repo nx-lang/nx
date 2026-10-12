@@ -163,8 +163,8 @@ pub fn resolve_union_definition(module: &PreparedModule, name: &Name) -> Option<
 /// declares. A base may live in another module, so inherited fields are known only once the module
 /// is prepared; this fills them in, inherited first, before validation and type checking, so every
 /// later consumer reads the complete case list from the declaration itself. A component's union
-/// is already complete, since state is never inherited. A target whose shape does not resolve keeps
-/// its declared cases; record validation reports why.</para>
+/// names its effective props, inherited first, the same way. A target whose shape does not resolve
+/// keeps its declared cases; record or component validation reports why.</para>
 pub fn complete_property_unions(module: &mut PreparedModule) {
     let completions = module
         .raw_module()
@@ -176,9 +176,16 @@ pub fn complete_property_unions(module: &mut PreparedModule) {
                 return None;
             };
             let target = union.property_target()?;
-            let shape = effective_record_shape_for_name(module, target).ok()??;
-            let cases = shape
-                .fields
+            let fields = match effective_record_shape_for_name(module, target) {
+                Ok(Some(shape)) => shape.fields,
+                Ok(None) => crate::components::effective_component_props_in(
+                    module,
+                    module.module_identity(),
+                    target,
+                )?,
+                Err(_) => return None,
+            };
+            let cases = fields
                 .iter()
                 .map(|field| UnionCaseDef {
                     name: field.name.clone(),

@@ -1657,7 +1657,7 @@ let root() = { Ui.title() }"#,
         let image = NxIrImage::open(&bytes).unwrap();
 
         assert_eq!(&bytes[..4], b"NXIR");
-        assert_eq!(image.schema_version(), 5);
+        assert_eq!(image.schema_version(), 6);
         let root = image.function_entrypoints().get(0).unwrap();
         assert_eq!(image.declaration_name(root), Some("root"));
         // The CLI's files carry debug data.
@@ -1855,7 +1855,7 @@ let root() = { Ui.title() }"#,
         assert!(!refused.status.success());
         let stderr = String::from_utf8_lossy(&refused.stderr);
         assert!(stderr.contains("schema version 3"), "{stderr}");
-        assert!(stderr.contains("schema version 5"), "{stderr}");
+        assert!(stderr.contains("schema version 6"), "{stderr}");
 
         // A truncated file and a file that is not an image are diagnostics, not panics.
         let image = fs::read(&artifact).unwrap();
@@ -2117,7 +2117,7 @@ let root() = { <ShortTextQuestion /> }"#,
         let stderr = String::from_utf8_lossy(&output.stderr);
 
         assert!(stdout.contains("export type SearchBox_state = string;"));
-        assert!(!stdout.contains("export interface SearchBox_state"));
+        assert!(!stdout.contains("export interface SearchBox_state {"));
         assert!(stderr.contains("Warning:"));
         assert!(stderr.contains("SearchBox_state"));
     }

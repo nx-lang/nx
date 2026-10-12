@@ -64,7 +64,7 @@ pub fn validate_declaration_names(module: &LoweredModule) -> Vec<DuplicateDeclar
 
 fn is_derived_item(item: &Item) -> bool {
     match item {
-        Item::Record(record) => record.update_target().is_some(),
+        Item::Record(record) => record.is_derived(),
         Item::Union(union_def) => union_def.property_target().is_some(),
         _ => false,
     }

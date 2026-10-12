@@ -158,7 +158,8 @@ Attributes may receive typed objects or sequences when the signature permits. A 
 stands on its own; a sequence goes in braces.
 
 Element-shaped construction also builds patches. Every record `T` has an update record `T.Update`
-whose fields are all optional, so the element names only the fields that change:
+whose fields are all optional, so the element names only the fields that change. A component's
+`T.Update` patches its props, and inside a component `<State.Update ... />` patches its state:
 
 ```nx
 type User = { name:string email?:string }

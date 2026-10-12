@@ -574,8 +574,8 @@ export interface NxParameterSchema {
    * The listed host-supplied types this parameter's type holds without being one: under an
    * occurrence, as a field of a record or of a union case, through a type alias or as a type
    * argument, at any depth, in the order they were listed. A record that is two of the listed
-   * types is named for both. A type derived from a listed type, its `.Update` or `.Property`, is
-   * another type and holds none of it. Absent when it holds none. Such a parameter is still in the
+   * types is named for both. A type derived from a listed type, its `.Update`, `.Property` or a
+   * component's `.State`, is another type and holds none of it. Absent when it holds none. Such a parameter is still in the
    * input schema, and a caller decides what to make of it.
    */
   readonly hostSuppliedWithin?: readonly NxDeclarationName[];
