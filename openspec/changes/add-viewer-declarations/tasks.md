@@ -43,12 +43,12 @@
 
 ## 6. Viewer and playground
 
-- [ ] 6.1 Read `viewer` values in `packages/viewer`: kind names, title, subtitle, badge and image parts, labels, boolean phrases, the property order, and the details strip
-- [ ] 6.2 Add the `row` and `inline` layouts
-- [ ] 6.3 Show case labels and examples, and value formats (`url`, `email`, `phone`, `image`, `color`, `markdown`, `text`), with the `images` property
-- [ ] 6.4 Read a `viewer` declaration as "Viewer for …"
-- [ ] 6.5 Keep the coverage test passing over the repository, and add a fixture with viewer declarations (the survey question library with the proposal's viewer declarations) to the viewer tests
-- [ ] 6.6 Ask for viewer declarations in the playground's Read view and add the playground scenarios to its tests
+- [x] 6.1 Read `viewer` values in `packages/viewer`: kind names, title, subtitle, badge and image parts, labels, boolean phrases, the property order, and the details strip
+- [x] 6.2 Add the `row` and `inline` layouts
+- [x] 6.3 Show case labels and examples, and value formats (`url`, `email`, `phone`, `image`, `color`, `markdown`, `text`), with the `images` property
+- [x] 6.4 Read a `viewer` declaration as "Viewer for …"
+- [x] 6.5 Keep the coverage test passing over the repository, and add a fixture with viewer declarations (the survey question library with the proposal's viewer declarations) to the viewer tests
+- [x] 6.6 Ask for viewer declarations in the playground's Read view and add the playground scenarios to its tests
 
 ## 7. Editor, docs and examples
 

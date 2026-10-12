@@ -2,10 +2,17 @@
  * The reading view: one renderer for each role of the source tree. Each turns a node and its
  * children into DOM and marks the result with the node's key, so the reading is lossless by
  * construction: a node no renderer draws is missing from the rendering, which the coverage test
- * catches. Only the element renderer consults the declaration table, for property order and
- * defaults.
+ * catches. Only the element, attribute, literal and case renderers consult the declaration table,
+ * for property order, defaults and the viewers it carries.
  */
-import type { SourceNode, SourceProperty, SourceRole } from "@nx-lang/language-protocol";
+import type {
+  SourceNode,
+  SourceProperty,
+  SourcePropertyViewer,
+  SourceRole,
+  SourceValueFormat,
+  SourceViewer,
+} from "@nx-lang/language-protocol";
 
 import { renderText, type KeyMode, type TextPiece } from "./text.js";
 import { childrenIn, declarationOf, indexedNodeAtSpan, nodeOf, type TreeIndex } from "./tree.js";
@@ -29,6 +36,8 @@ export interface RenderContext {
    * carries each node's key as `data-ref-key`, so the original stays the one node with the key.
    */
   readonly copy: boolean;
+  /** Whether a value formatted as `image` loads its picture; true unless the host turns it off. */
+  readonly images?: boolean;
 }
 
 /** Turns the node at `at` into DOM, or nothing. */
@@ -40,6 +49,10 @@ export interface RenderOptions {
   readonly declarationName?: string;
   /** Whether a string literal reads as words of a sentence, with no value style. */
   readonly inSentence?: boolean;
+  /** How a string literal shows, from the viewer of the property it is bound to. */
+  readonly format?: SourceValueFormat;
+  /** The viewer of the boolean property a literal is bound to, whose phrases it may read as. */
+  readonly phrases?: SourcePropertyViewer;
 }
 
 /** Renders the node at `at` by its role; nothing when no renderer draws the role. */
@@ -88,6 +101,35 @@ function detailsStrip(document: Document, title: string): HTMLElement {
 // ---------------------------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------------------------
+
+/** The element node that holds the node at `at`, through any condition in its tag. */
+function elementHolding(context: RenderContext, at: number): number | undefined {
+  for (let parent = node(context, at).parent; parent !== undefined; parent = node(context, parent).parent) {
+    if (node(context, parent).role === "element") {
+      return parent;
+    }
+  }
+  return undefined;
+}
+
+/** The viewer of the property an attribute sets, from its element's kind. */
+function propertyViewerOf(context: RenderContext, attribute: number): SourcePropertyViewer | undefined {
+  const element = elementHolding(context, attribute);
+  const viewer = element === undefined ? undefined : declarationOf(context.index, node(context, element))?.viewer;
+  const name = node(context, attribute).name;
+  return viewer?.properties?.find((property) => property.name === name);
+}
+
+/** The phrase a boolean property reads as for `value`, when its viewer sets one. */
+function phraseFor(viewer: SourcePropertyViewer | undefined, value: string | undefined): string | undefined {
+  if (value === "true") {
+    return viewer?.whenTrue;
+  }
+  if (value === "false") {
+    return viewer?.whenFalse;
+  }
+  return undefined;
+}
 
 function node(context: RenderContext, at: number): SourceNode {
   return nodeOf(context.index, at);
@@ -243,7 +285,10 @@ const renderDeclaration: Renderer = (context, at) => {
   // `let roleQuestion = <SingleChoice … />` reads as the card, named by the declaration.
   const members = children.filter((child) => MEMBER_ROLES.has(node(context, child).role));
   const onlyValue = valueNodes.length === 1 ? valueNodes[0]! : undefined;
+  // `viewer Choice = <ElementViewer … />` reads as a declaration headed "Viewer for Choice".
+  const viewer = has(source, "viewer");
   if (
+    !viewer &&
     members.length === 0 &&
     onlyValue !== undefined &&
     node(context, onlyValue).role === "element" &&
@@ -260,9 +305,13 @@ const renderDeclaration: Renderer = (context, at) => {
   const header = document.createElement("div");
   header.className = "declaration-header";
   for (const flag of source.flags ?? []) {
-    header.append(span(document, "tag", flag));
+    if (flag !== "viewer") {
+      header.append(span(document, "tag", flag));
+    }
   }
-  if (entry !== undefined) {
+  if (viewer) {
+    header.append(span(document, "declaration-kind", "Viewer for"));
+  } else if (entry !== undefined) {
     header.append(span(document, "declaration-kind", KIND_LABELS[entry.kind]));
   }
   header.append(span(document, "declaration-name", source.name ?? ""));
@@ -282,7 +331,7 @@ const renderDeclaration: Renderer = (context, at) => {
       groupName = memberGroup(childNode.role, entry?.kind);
     } else if (slot === "type") {
       groupName = typeGroup(entry?.kind);
-    } else if (!isNote(childNode)) {
+    } else if (!isNote(childNode) && !viewer) {
       groupName = slot === "body" ? (entry?.kind === "component" ? "Shows" : "Returns") : "Is";
     }
     if (groupName !== undefined && groupName !== group) {
@@ -445,6 +494,11 @@ function lastOf(unit: readonly number[]): number {
   return unit[unit.length - 1]!;
 }
 
+/** The parts of a card a viewer can bind a property to, in the order the header shows them. */
+const PARTS = ["title", "subtitle", "badge", "image"] as const;
+
+type Part = (typeof PARTS)[number];
+
 const renderElement: Renderer = (context, at, options) => {
   const { document, index } = context;
   const source = node(context, at);
@@ -452,14 +506,17 @@ const renderElement: Renderer = (context, at, options) => {
     return renderStateUpdate(context, at);
   }
   const entry = declarationOf(index, source);
-  const card = marked(context, at, "div", "card");
+  const viewer = entry?.viewer;
+  const layout = viewer?.layout ?? "card";
+  const card = marked(context, at, layout === "inline" ? "span" : "div", layout === "card" ? "card" : `card ${layout}-layout`);
   card.tabIndex = 0;
   card.setAttribute("role", "group");
-  card.setAttribute("aria-label", entry === undefined ? source.name ?? "" : inWords(source.name ?? ""));
+  const kindName = viewer?.name ?? inWords(source.name ?? "");
+  card.setAttribute("aria-label", entry === undefined ? source.name ?? "" : kindName);
 
-  const header = document.createElement("div");
+  const header = document.createElement(layout === "inline" ? "span" : "div");
   header.className = "card-header";
-  const kind = span(document, entry === undefined ? "kind unresolved" : "kind", inWords(source.name ?? ""));
+  const kind = span(document, entry === undefined ? "kind unresolved" : "kind", kindName);
   if (entry === undefined) {
     kind.textContent = source.name ?? "";
     kind.title = "This kind is not declared anywhere the document can see.";
@@ -473,34 +530,62 @@ const renderElement: Renderer = (context, at, options) => {
   if (source.textType !== undefined && source.textType !== "") {
     header.append(span(document, "tag", source.textType));
   }
-  if (!context.copy) {
-    header.append(sourceButton(document, source.key));
-  }
   card.append(header);
 
   const children = index.children[at] ?? [];
   const grouped = units(context, children);
   const attributeUnits = grouped.filter((unit) => node(context, lastOf(unit)).role === "attribute");
   const otherUnits = grouped.filter((unit) => node(context, lastOf(unit)).role !== "attribute");
+  const byName = new Map(attributeUnits.map((unit) => [node(context, lastOf(unit)).name ?? "", unit]));
+  const placed = new Set<number[]>();
 
   const rows = document.createElement("div");
   rows.className = "rows";
-  const properties: readonly SourceProperty[] = entry?.properties ?? [];
-  const byName = new Map(attributeUnits.map((unit) => [node(context, lastOf(unit)).name ?? "", unit]));
-  const placed = new Set<number[]>();
+  // A row or inline layout folds everything but its heading; any layout folds what it places there.
+  const details = detailsStrip(document, "Details");
+  const detailRows = document.createElement("div");
+  detailRows.className = "rows";
+  details.querySelector(".details-body")!.append(detailRows);
+  const folded = layout !== "card";
+
+  // The attributes bound to the card's parts move into its header, keeping their keys.
+  const partNames = new Set<string>();
+  for (const part of PARTS) {
+    const name = viewer?.[part];
+    const unit = name === undefined ? undefined : byName.get(name);
+    if (name === undefined || unit === undefined || placed.has(unit)) {
+      continue;
+    }
+    partNames.add(name);
+    placed.add(unit);
+    appendAll(context, folded ? detailRows : rows, unit.slice(0, -1));
+    header.append(renderPart(context, lastOf(unit), part));
+  }
+  if (!context.copy) {
+    header.append(sourceButton(document, source.key));
+  }
+
+  const declared: readonly SourceProperty[] = entry?.properties ?? [];
+  const order = viewer?.properties?.map((property) => property.name) ?? declared.map((property) => property.name);
   const set = attributesSetBy(context, at);
-  for (const property of properties) {
-    const unit = byName.get(property.name);
+  for (const name of order) {
+    if (partNames.has(name)) {
+      continue;
+    }
+    const propertyViewer = viewer?.properties?.find((candidate) => candidate.name === name);
+    const container = folded || propertyViewer?.place === "details" ? detailRows : rows;
+    const unit = byName.get(name);
+    const property = declared.find((candidate) => candidate.name === name);
     if (unit !== undefined && !placed.has(unit)) {
-      appendAll(context, rows, unit);
+      appendAll(context, container, unit);
       placed.add(unit);
-    } else if (context.ghosts && property.default !== undefined && !set.has(property.name)) {
-      rows.append(ghostRow(document, property));
+    } else if (context.ghosts && property?.default !== undefined && !set.has(name)) {
+      container.append(ghostRow(document, property, propertyViewer));
     }
   }
   for (const unit of attributeUnits) {
     if (!placed.has(unit)) {
-      appendAll(context, rows, unit);
+      appendAll(context, folded ? detailRows : rows, unit);
     }
   }
   if (rows.childElementCount > 0) {
@@ -512,10 +597,35 @@ const renderElement: Renderer = (context, at, options) => {
   content.className = "content";
   appendContent(context, content, otherUnits.flat(), source.textType === "markdown");
   if (content.childElementCount > 0) {
-    card.append(content);
+    if (folded) {
+      details.querySelector(".details-body")!.append(content);
+    } else {
+      card.append(content);
+    }
+  }
+  if (detailRows.childElementCount === 0) {
+    detailRows.remove();
+  }
+  if (details.querySelector(".details-body")!.childElementCount > 0) {
+    card.append(details);
   }
   return card;
 };
+
+/** An attribute bound to a part of its card: its value alone, marked with the attribute's key. */
+function renderPart(context: RenderContext, at: number, part: Part): HTMLElement {
+  const { document, index } = context;
+  const source = node(context, at);
+  const element = marked(context, at, "span", `part ${part}`);
+  // The part's property, hovered like a row's label.
+  element.dataset["property"] = source.name ?? "";
+  element.tabIndex = 0;
+  const format: SourceValueFormat | undefined = part === "image" ? "image" : undefined;
+  for (const child of index.children[at] ?? []) {
+    appendNode(context, element, child, format === undefined ? {} : { format });
+  }
+  return element;
+}
 
 /**
  * Appends an element's content: runs of text and embeds as one body of prose, markdown when the
@@ -558,10 +668,23 @@ function textTypeOf(context: RenderContext, attribute: number): string | undefin
   return undefined;
 }
 
-function ghostRow(document: Document, property: SourceProperty): HTMLElement {
+function ghostRow(document: Document, property: SourceProperty, viewer: SourcePropertyViewer | undefined): HTMLElement {
   const row = document.createElement("div");
   row.className = "row ghost";
-  const name = span(document, "label", property.name);
+  const phrase = phraseFor(viewer, property.default);
+  if (phrase !== undefined) {
+    // The default reads as its phrase, as a set value would.
+    row.classList.add("phrase-row");
+    const value = document.createElement("span");
+    value.className = "row-value";
+    const words = span(document, "ghost-value phrase", phrase);
+    words.dataset["property"] = property.name;
+    words.tabIndex = 0;
+    value.append(words, " ", span(document, "tag", "default"));
+    row.append(value);
+    return row;
+  }
+  const name = span(document, "label", viewer?.label ?? property.name);
   name.dataset["property"] = property.name;
   name.tabIndex = 0;
   const value = document.createElement("span");
@@ -614,7 +737,20 @@ const renderAttribute: Renderer = (context, at) => {
     return row;
   }
 
-  const name = span(document, "label", source.name ?? "");
+  const viewer = propertyViewerOf(context, at);
+  const values = children.filter((child) => !isNote(node(context, child)));
+  const only = values.length === 1 ? node(context, values[0]!) : undefined;
+  if (only?.role === "literal" && phraseFor(viewer, only.value) !== undefined) {
+    // A boolean with a phrase for its value reads as the phrase, in place of its row.
+    row.classList.add("phrase-row");
+    const value = document.createElement("div");
+    value.className = "row-value";
+    appendAll(context, value, children, { phrases: viewer! });
+    row.append(value);
+    return row;
+  }
+
+  const name = span(document, "label", viewer?.label ?? source.name ?? "");
   name.dataset["property"] = source.name ?? "";
   name.tabIndex = 0;
   const value = document.createElement("div");
@@ -626,7 +762,7 @@ const renderAttribute: Renderer = (context, at) => {
     appendContent(context, list, children, textTypeOf(context, at) === "markdown");
     value.append(list);
   } else {
-    appendAll(context, value, children);
+    appendAll(context, value, children, viewer?.format === undefined ? {} : { format: viewer.format });
   }
   row.append(name, value);
   return row;
@@ -668,8 +804,20 @@ const renderLiteral: Renderer = (context, at, options) => {
   const source = node(context, at);
   const text = source.value ?? "";
   if (text.startsWith('"')) {
+    if (options.format !== undefined && options.inSentence !== true) {
+      return formatted(context, at, unquote(text), options.format);
+    }
     const element = marked(context, at, "span", options.inSentence === true ? "words" : "value string");
     element.textContent = unquote(text);
+    return element;
+  }
+  const phrase = phraseFor(options.phrases, text);
+  if (phrase !== undefined) {
+    const element = marked(context, at, "span", "value phrase");
+    element.textContent = phrase;
+    // The phrase stands for its property's row, so it is hovered like the row's label.
+    element.dataset["property"] = node(context, source.parent ?? at).name ?? "";
+    element.tabIndex = 0;
     return element;
   }
   if (text === "true" || text === "false") {
@@ -685,6 +833,71 @@ const renderLiteral: Renderer = (context, at, options) => {
   return element;
 };
 
+/** Whether `url` is an `http:` or `https:` URL, the only kind the viewer links to or loads. */
+function isWebUrl(url: string): boolean {
+  return /^https?:\/\/[^\s]+$/i.test(url.trim());
+}
+
+function link(document: Document, href: string, text: string): HTMLAnchorElement {
+  const anchor = document.createElement("a");
+  anchor.href = href;
+  anchor.textContent = text;
+  anchor.target = "_blank";
+  anchor.rel = "noopener noreferrer";
+  return anchor;
+}
+
+/**
+ * A string literal shown by its property's format, still without its quotes and carrying its key.
+ * A format changes how the value looks, never what it is, and nothing but an `http:` or `https:`
+ * URL is linked to or loaded.
+ */
+function formatted(context: RenderContext, at: number, value: string, format: SourceValueFormat): HTMLElement {
+  const { document } = context;
+  const element = marked(context, at, "span", `value formatted ${format}`);
+  switch (format) {
+    case "url":
+      element.append(isWebUrl(value) ? link(document, value.trim(), value) : value);
+      break;
+    case "email":
+      element.append(/^[^\s@:/]+@[^\s@/]+$/.test(value) ? link(document, `mailto:${value}`, value) : value);
+      break;
+    case "phone": {
+      const digits = value.replace(/[^\d+]/g, "");
+      element.append(digits === "" ? value : link(document, `tel:${digits}`, value));
+      break;
+    }
+    case "image":
+      if (isWebUrl(value) && context.images !== false) {
+        const picture = document.createElement("img");
+        picture.src = value.trim();
+        picture.alt = "";
+        picture.loading = "lazy";
+        picture.referrerPolicy = "no-referrer";
+        picture.className = "picture";
+        element.append(picture, span(document, "picture-url", value));
+      } else {
+        element.append(isWebUrl(value) ? link(document, value.trim(), value) : value);
+      }
+      break;
+    case "color": {
+      const swatch = span(document, "swatch", "");
+      // A color, never anything else: `background-color` takes no URL.
+      swatch.style.backgroundColor = value;
+      swatch.setAttribute("aria-hidden", "true");
+      element.append(swatch, value);
+      break;
+    }
+    case "markdown":
+      element.append(renderText(document, [{ kind: "text", key: "", value, raw: false }], true, "none"));
+      break;
+    case "text":
+      element.textContent = value;
+      break;
+  }
+  return element;
+}
+
 const renderEmpty: Renderer = (context, at) => {
   const element = marked(context, at, "span", "value empty");
   element.textContent = "empty";
@@ -693,6 +906,7 @@ const renderEmpty: Renderer = (context, at) => {
 
 const renderCase: Renderer = (context, at) => {
   const { document, index } = context;
+  const source = node(context, at);
   const element = marked(context, at, "span", "pill case");
   const qualifier = index.children[at] ?? [];
   if (qualifier.length > 0) {
@@ -700,7 +914,16 @@ const renderCase: Renderer = (context, at) => {
     appendAll(context, muted, qualifier);
     element.append(muted, " ");
   }
-  element.append(node(context, at).name ?? "");
+  const viewer: SourceViewer | undefined = declarationOf(index, source)?.viewer;
+  const label = viewer?.cases?.find((candidate) => candidate.name === source.name)?.label;
+  if (label === undefined) {
+    element.append(source.name ?? "");
+  } else {
+    // The case's label, with its name and example in the hover.
+    element.classList.add("labelled");
+    element.tabIndex = 0;
+    element.append(label);
+  }
   return element;
 };
 

@@ -12,7 +12,7 @@ import { after, describe, it } from "node:test";
 
 import type { SourceTree } from "@nx-lang/language-protocol";
 
-import { nxHost, repository, treeOf, type Fixture } from "./fixtures.js";
+import { fixture, nxHost, repository, treeOf, type Fixture } from "./fixtures.js";
 
 const { renderDocument, renderers } = await import("../src/render.js");
 const { indexTree } = await import("../src/tree.js");
@@ -50,7 +50,8 @@ async function repositoryTrees(): Promise<{ path: string; fixture: Fixture }[]> 
   try {
     return documents.map((document) => ({
       path: document.identity,
-      fixture: { text: document.source, tree: snapshot.sourceTree(document.uri) as SourceTree }
+      // With viewers, so every node a viewer moves into a part or a details strip is checked too.
+      fixture: { text: document.source, tree: snapshot.sourceTree(document.uri, { viewers: {} }) as SourceTree }
     }));
   } finally {
     snapshot.dispose();
@@ -73,6 +74,14 @@ describe("coverage", () => {
   it("renders every node of every .nx file in the repository exactly once", async () => {
     const trees = await repositoryTrees();
     assert.ok(trees.length > 100, "the repository's .nx files are found");
+    const failures = failuresOf(trees);
+    assert.deepEqual(failures, [], `nodes not rendered exactly once:\n${failures.join("\n")}`);
+  });
+
+  it("renders every node once where viewers move attributes into parts and details", async () => {
+    const names = ["survey", "surveyOptional", "surveyRenamed", "viewerDeclaration", "inlineTag", "formats"];
+    const trees = await Promise.all(names.map(async (name) => ({ path: name, fixture: await fixture(name) })));
+    assert.ok(trees.every(({ fixture }) => fixture.tree.declarations.some((entry) => entry.viewer !== undefined)));
     const failures = failuresOf(trees);
     assert.deepEqual(failures, [], `nodes not rendered exactly once:\n${failures.join("\n")}`);
   });

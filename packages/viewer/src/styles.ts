@@ -104,6 +104,24 @@ code, .type { font-family: var(--mono); font-size: 12.5px; }
 .ghost-value { font-family: var(--mono); font-size: 12.5px; margin-right: 6px; }
 .item-list { display: flex; flex-direction: column; gap: 6px; }
 .content { display: flex; flex-direction: column; gap: 6px; }
+.card.row-layout { padding: 6px 10px; }
+.card.inline-layout { display: inline-flex; vertical-align: baseline; padding: 1px 8px; gap: 4px; border-radius: 6px; }
+.part.title { font-weight: 600; }
+.part.subtitle { color: var(--ink-2); font-size: 13px; }
+.card:not(.row-layout):not(.inline-layout) > .card-header > .part.subtitle { order: 1; flex-basis: 100%; }
+.part.badge { font-size: 11px; color: var(--ink-2); border: 1px solid var(--rule); border-radius: 999px; padding: 0 8px; }
+.part.image .picture-url { display: none; }
+.part, .phrase { cursor: help; }
+.row.phrase-row > .row-value { grid-column: 1 / -1; }
+.value.phrase { color: var(--ink-2); font-weight: 500; }
+.ghost-value.phrase { font-family: inherit; font-size: inherit; }
+.picture { max-width: 96px; max-height: 64px; border-radius: 4px; vertical-align: middle; margin-right: 6px; }
+.part.image .picture { max-height: 32px; margin-right: 0; }
+.picture-url { font-size: 12px; color: var(--ink-3); }
+.swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid var(--rule); vertical-align: -1px; margin-right: 6px; }
+.value.formatted a { color: var(--blue); }
+.value.formatted.markdown > .text-body { display: inline-flex; }
+.pill.case.labelled { font-family: inherit; cursor: help; }
 
 .value.string { color: var(--green); }
 .value.number { font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 12.5px; }

@@ -120,6 +120,39 @@ test("answers hover on the visitor's own declarations, with no catalog behind th
   assert.deepEqual(report.documents[0].diagnostics, []);
 });
 
+test("reads viewer declarations in the visitor's source, and reports a misspelled one", async () => {
+  const source = [
+    'import "@nx/viewer"',
+    "type Choice = { value:string label:string }",
+    'viewer Choice = <ElementViewer name="Option" title=label />',
+    'let pick = <Choice value="a" label="Apples" />',
+    "",
+  ].join("\n");
+  const tree = await session.answer({
+    kind: "language",
+    id: ++id,
+    query: "sourceTree",
+    request: { documents: [{ uri, source, version: 1 }], uri, viewers: {} },
+  });
+  const choice = tree.declarations.find((entry) => entry.name === "Choice");
+  assert.equal(choice.viewer.name, "Option");
+  assert.equal(choice.viewer.title, "label");
+
+  const misspelled = source.replace("title=label", "title=lable");
+  const report = await session.answer({
+    kind: "language",
+    id: ++id,
+    query: "diagnostics",
+    request: { documents: [{ uri, source: misspelled, version: 2 }], uri },
+  });
+  const diagnostics = report.documents[0].diagnostics;
+  assert.equal(diagnostics.length, 1, JSON.stringify(diagnostics));
+  // On the attribute that sets it, as for any misspelled case, naming the property it meant.
+  const { start, end } = diagnostics[0].range;
+  assert.equal(misspelled.split("\n")[start.line].slice(start.character, end.character), "title=lable");
+  assert.match(diagnostics[0].message, /'lable'.*did you mean `label`/);
+});
+
 test("a crashed host is reported once and replaced, and the next request is answered", async () => {
   // One host that crashes on its first build, then the real thing. That is what a trap looks like
   // from the session's side; the trap itself is proved against a real one in the wasm SDK's tests.

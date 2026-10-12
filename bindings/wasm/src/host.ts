@@ -8,12 +8,6 @@ import type {
   TextPosition
 } from "@nx-lang/language-protocol";
 
-/** What a source-tree query asks for besides the tree. */
-export interface SourceTreeOptions {
-  /** Resolve viewer declarations and attach each declaration's resolved viewer. */
-  viewers?: SourceTreeViewersOption;
-}
-
 import {
   abiVersion,
   resultLengthOffset,
@@ -58,6 +52,12 @@ import type {
   NxWorkspaceBuildOptions,
   NxWorkspaceValidateOptions
 } from "./types.js";
+
+/** What a source-tree query asks for besides the tree. */
+export interface SourceTreeOptions {
+  /** Resolve viewer declarations and attach each declaration's resolved viewer. */
+  viewers?: SourceTreeViewersOption;
+}
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();

@@ -136,3 +136,18 @@ export function declarationHover(document: Document, index: TreeIndex, source: S
   }
   return hover;
 }
+
+/** The hover for a case its union's viewer labels: the case's name, its label and its example. */
+export function caseHover(document: Document, index: TreeIndex, source: SourceNode): HTMLElement | undefined {
+  const union = declarationOf(index, source);
+  const viewer = union?.viewer?.cases?.find((candidate) => candidate.name === source.name);
+  if (union === undefined || viewer === undefined) {
+    return undefined;
+  }
+  const hover = document.createElement("div");
+  hover.append(line(document, "hover-head", code(document, source.name ?? ""), ` · a case of ${union.name}`));
+  if (viewer.example !== undefined) {
+    hover.append(line(document, "hover-note", "For example: ", viewer.example));
+  }
+  return hover;
+}

@@ -15,7 +15,8 @@ export type {
   NxLanguageSnapshot,
   NxLibraryRegistry,
   NxProgramArtifact,
-  NxProgramBuildContext
+  NxProgramBuildContext,
+  SourceTreeOptions
 } from "./host.js";
 export type { SnapshotLanguageService, SnapshotLike } from "@nx-lang/language-core";
 export type {

@@ -9,7 +9,7 @@
  */
 import type { EditorRange, SourceRole, SourceTree } from "@nx-lang/language-protocol";
 
-import { declarationHover, handlerHover, propertyHover } from "./hover.js";
+import { caseHover, declarationHover, handlerHover, propertyHover } from "./hover.js";
 import { inWords } from "./words.js";
 import { renderDocument, renderNode, type RenderContext } from "./render.js";
 import { styles } from "./styles.js";
@@ -35,7 +35,7 @@ export interface NxSelectDetail {
 }
 
 /** The element's properties, which a host may set before the element is defined. */
-const PROPERTIES = ["tree", "text", "ghosts", "selection", "stale"] as const;
+const PROPERTIES = ["tree", "text", "ghosts", "images", "selection", "stale"] as const;
 
 /** How long the pointer rests on a name before its hover shows, in milliseconds. */
 const hoverDelay = 250;
@@ -88,7 +88,7 @@ function keyOf(element: Element): string | undefined {
  * The `<nx-viewer>` element.
  *
  * <para>The attribute `stale` mirrors the property of the same name. Everything else is a property:
- * `tree`, `text`, `ghosts` and `selection`.</para>
+ * `tree`, `text`, `ghosts`, `images` and `selection`.</para>
  */
 export class NxViewerElement extends ElementBase {
   static observedAttributes = ["stale"];
@@ -96,6 +96,7 @@ export class NxViewerElement extends ElementBase {
   #tree: SourceTree | undefined;
   #text = "";
   #ghosts = true;
+  #images = true;
   #index: TreeIndex | undefined;
   #selection: string | undefined;
   /** Each key's original rendering. */
@@ -232,6 +233,20 @@ export class NxViewerElement extends ElementBase {
     this.#render();
   }
 
+  /**
+   * Whether a value its viewer formats as `image` loads its picture; true unless set false. Only
+   * `http:` and `https:` URLs ever load. A host showing untrusted source can turn loading off, and
+   * the value then reads as a link.
+   */
+  get images(): boolean {
+    return this.#images;
+  }
+
+  set images(images: boolean) {
+    this.#images = images !== false;
+    this.#render();
+  }
+
   /** Whether the tree is out of date: the reading is muted and badged, and still works. */
   get stale(): boolean {
     return this.hasAttribute("stale");
@@ -316,7 +331,13 @@ export class NxViewerElement extends ElementBase {
     }
     const index = indexTree(tree, this.#text);
     this.#index = index;
-    const context: RenderContext = { document: this.ownerDocument, index, ghosts: this.#ghosts, copy: false };
+    const context: RenderContext = {
+      document: this.ownerDocument,
+      index,
+      ghosts: this.#ghosts,
+      copy: false,
+      images: this.#images,
+    };
     this.#body.append(renderDocument(context));
     for (const element of this.#body.querySelectorAll<HTMLElement>("[data-key]")) {
       this.#rendered.set(element.dataset["key"]!, element);
@@ -474,7 +495,13 @@ export class NxViewerElement extends ElementBase {
     if (entry?.valueRange === undefined) {
       return;
     }
-    const context: RenderContext = { document: this.ownerDocument, index, ghosts: this.#ghosts, copy: true };
+    const context: RenderContext = {
+      document: this.ownerDocument,
+      index,
+      ghosts: this.#ghosts,
+      copy: true,
+      images: this.#images,
+    };
     const target = indexedNodeAtSpan(index, entry.valueRange.startByte, entry.valueRange.endByte);
     const rendered = target === undefined ? undefined : renderNode(context, target);
     if (rendered === undefined) {
@@ -489,7 +516,7 @@ export class NxViewerElement extends ElementBase {
   }
 
   #hoverTarget(target: Element | null): HTMLElement | undefined {
-    const found = target?.closest?.(".label, .when, .ref, .kind");
+    const found = target?.closest?.(".label, .when, .ref, .kind, .part, .phrase, .case.labelled");
     return found === null || found === undefined || !this.#body.contains(found) ? undefined : (found as HTMLElement);
   }
 
@@ -551,8 +578,11 @@ export class NxViewerElement extends ElementBase {
       if (target.classList.contains("when")) {
         return handlerHover(document, index, element, target.dataset["property"]);
       }
-      // The node the attribute sets the property to, when the row is an attribute's.
-      const attribute = ownerAt !== undefined && nodeOf(index, ownerAt).role === "attribute" ? ownerAt : undefined;
+      // The node the attribute sets the property to, when the row is an attribute's; a phrase is
+      // the attribute's value itself.
+      const owned = ownerAt === undefined ? undefined : nodeOf(index, ownerAt);
+      const attribute =
+        owned?.role === "attribute" ? ownerAt : owned?.role === "literal" && owned.parent !== undefined ? owned.parent : undefined;
       const valueAt = attribute === undefined ? undefined : (index.children[attribute] ?? []).find((child) => nodeOf(index, child).role !== "comment");
       return propertyHover(
         document,
@@ -564,6 +594,9 @@ export class NxViewerElement extends ElementBase {
     }
     if (ownerAt === undefined) {
       return undefined;
+    }
+    if (target.classList.contains("case")) {
+      return caseHover(document, index, nodeOf(index, ownerAt));
     }
     return declarationHover(document, index, nodeOf(index, ownerAt));
   }

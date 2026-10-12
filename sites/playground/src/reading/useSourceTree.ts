@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { languageService, MODEL_URI } from "../editor/NxEditor";
-import { NO_ANSWERS, readingOf, type Answers, type Reading } from "./reading.ts";
+import { NO_ANSWERS, readingOf, readingRequest, type Answers, type Reading } from "./reading.ts";
 
 export type { Reading } from "./reading.ts";
 
@@ -21,7 +21,7 @@ export function useSourceTree(source: string | null, active: boolean, debounceMs
     const timer = setTimeout(
       () => {
         languageService
-          .sourceTree({ documents: [{ uri: MODEL_URI, source }], uri: MODEL_URI }, abort.signal)
+          .sourceTree(readingRequest(MODEL_URI, source), abort.signal)
           .then(
             (tree) => {
               if (!abort.signal.aborted) {

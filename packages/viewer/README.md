@@ -73,7 +73,7 @@ declare module "react" {
   namespace JSX {
     interface IntrinsicElements {
       "nx-viewer": React.DetailedHTMLProps<React.HTMLAttributes<NxViewerElement>, NxViewerElement> &
-        Partial<Pick<NxViewerElement, "tree" | "text" | "stale" | "ghosts" | "selection">>;
+        Partial<Pick<NxViewerElement, "tree" | "text" | "stale" | "ghosts" | "images" | "selection">>;
     }
   }
 }
@@ -86,6 +86,7 @@ declare module "react" {
 | `tree`      | property               | The `SourceTree` to show                                                     |
 | `text`      | property               | The document's text, which a node's source is sliced from by byte offsets    |
 | `ghosts`    | property               | Whether omitted defaults show as ghost rows; `true` unless set `false`       |
+| `images`    | property               | Whether a value formatted `image` loads its picture; `true` unless set `false` |
 | `stale`     | property and attribute | The reading is muted and badged "Out of date"; selection and hover still work |
 | `selection` | property               | The selected node's key; setting it opens what is folded around the node     |
 
@@ -129,6 +130,35 @@ a value it shows.
   on a reference or a kind shows the declaration. All of it comes from the
   tree's declaration table, so it needs no language service.
 - **References** to a value declared in the document expand in place to that value.
+- **Viewer declarations**, `viewer Choice = <ElementViewer … />`, read "Viewer for Choice" over
+  their value.
+
+## Viewer declarations
+
+Ask the language service for the tree with `viewers`, and the declaration table carries each
+declaration's resolved viewer, from the `viewer` declarations of the document's program and of any
+host modules named:
+
+```ts
+viewer.tree = snapshot.sourceTree("nx:///survey/form.nx", { viewers: { modules: ["tenant/viewers.nx"] } });
+```
+
+With them, the reading follows what the viewer declarations say:
+
+- A card is headed by the viewer's `name` for its kind. The properties bound to `title`,
+  `subtitle`, `badge` and `image` show in its header and not again as rows.
+- Rows read the `label` of their property, in the order the viewer names them, then the rest in
+  declaration order. A boolean with `whenTrue` or `whenFalse` reads as that phrase in place of its
+  row, and a property placed in `details` folds into a strip at the foot of the card.
+- A `row` layout shows a card as one line, and an `inline` layout shows an element within the line
+  that holds it, each with everything but the header folded into the details strip.
+- A union's case reads as its `label`, with its name and `example` in the hover.
+- A string value is shown by its format: `url`, `email` and `phone` as links, `image` as a picture
+  with its URL, `color` with a swatch, `markdown` as prose. A `url` or `image` value is linked or
+  loaded only when it is an `http:` or `https:` URL, and setting `images` to `false` shows a
+  picture's URL as a link without loading it.
+
+Nothing is hidden: a folded row is still in the reading, with its key, one click away.
 
 ## Styling
 
