@@ -2676,6 +2676,7 @@ fn apply_graph_imports(
                                 entry,
                                 &visible_name,
                                 &library,
+                                item_indices,
                                 &mut imported_visible_names,
                             );
                         }
@@ -2881,7 +2882,16 @@ fn add_workspace_import_bindings(
                     entry.span,
                     imported_visible_names,
                 );
-                // As for a library import: the derived declarations come along with their target.
+                // As for a library import: the derived declarations come along with their target,
+                // when the import bound the name to it.
+                if !binds_to(
+                    module,
+                    &visible_name,
+                    &target_source_file.identity,
+                    local_definition_id(item_index),
+                ) {
+                    continue;
+                }
                 for suffix in DERIVED_DECLARATION_SUFFIXES {
                     let derived = format!("{}.{}", entry.name.as_str(), suffix);
                     let Some((derived_index, derived_item)) =
@@ -2905,6 +2915,27 @@ fn add_workspace_import_bindings(
             }
         }
     }
+}
+
+/// Whether `visible_name` is bound, in any namespace, to the declaration `definition_id` of the
+/// module `module_identity`.
+fn binds_to(
+    module: &PreparedModule,
+    visible_name: &str,
+    module_identity: &str,
+    definition_id: LocalDefinitionId,
+) -> bool {
+    let name = Name::new(visible_name);
+    [
+        PreparedNamespace::Type,
+        PreparedNamespace::Element,
+        PreparedNamespace::Value,
+    ]
+    .into_iter()
+    .filter_map(|namespace| module.resolve_binding(namespace, &name))
+    .any(|binding| {
+        binding.module_identity("") == module_identity && binding.definition_id() == definition_id
+    })
 }
 
 /// The suffixes of the declarations derived from a record, action, or component, which an import
@@ -3298,6 +3329,7 @@ fn apply_build_context_imports(
                         entry,
                         &visible_name,
                         &library,
+                        item_indices,
                         &mut imported_visible_names,
                     );
                 }
@@ -3334,13 +3366,30 @@ fn add_ambiguous_interface_diagnostic(
 /// Binds a selectively imported library declaration's derived `<Name>.Update`, `<Name>.Property`,
 /// `<Name>.State` and `<Name>.Props` declarations under the name the author imported it as. They
 /// travel with their target rather than being exported names of their own.
+///
+/// <para>They come along only when the import bound the name itself to the declaration at
+/// `item_indices`: a name already taken by a local declaration or another import keeps its own
+/// derived declarations, so `Card` and `Card.State` never name two different components.</para>
 fn add_derived_interface_bindings(
     module: &mut PreparedModule,
     entry: &SelectiveImport,
     visible_name: &str,
     library: &LibraryArtifact,
+    item_indices: &[usize],
     imported_visible_names: &mut FxHashMap<(PreparedNamespace, String), String>,
 ) {
+    let bound_here = item_indices.iter().any(|index| {
+        let item = &library.interface_items[*index];
+        binds_to(
+            module,
+            visible_name,
+            &item.module_identity,
+            item.definition_id,
+        )
+    });
+    if !bound_here {
+        return;
+    }
     for suffix in DERIVED_DECLARATION_SUFFIXES {
         let derived = format!("{}.{}", entry.name.as_str(), suffix);
         let Some(derived_indices) = library.exported_items.get(&derived) else {
@@ -5466,6 +5515,109 @@ export type Saved = {
         let registry = LibraryRegistry::new();
         let result = registry.load_library_from_directory(&forms_dir);
         assert!(result.is_ok(), "{:?}", result.err());
+    }
+
+    /// Writes a `plain` library whose `Card` declares no state and a `ui` library whose `Card`
+    /// does, under `root`.
+    fn write_two_cards(root: &Path) {
+        for (dir, source) in [
+            (
+                "plain",
+                "export component <Card label:string /> = { <div>{label}</div> }",
+            ),
+            (
+                "ui",
+                "export component <Card title:string /> = {\n  state { open:boolean = false }\n  <div>{title}</div>\n}",
+            ),
+        ] {
+            let path = root.join(dir);
+            fs::create_dir_all(&path).expect("library dir");
+            fs::write(path.join("card.nx"), source).expect("card file");
+        }
+    }
+
+    fn says_card_declares_no_state(messages: impl IntoIterator<Item = String>) -> bool {
+        messages
+            .into_iter()
+            .any(|message| message.contains("component 'Card' declares no state"))
+    }
+
+    /// When a name is already taken, a later import of the same name brings none of its derived
+    /// declarations, so `Card.State` never names the state of a different `Card`.
+    #[test]
+    fn a_library_does_not_take_derived_declarations_from_an_import_that_lost_the_name() {
+        let temp = TempDir::new().expect("temp dir");
+        write_two_cards(temp.path());
+        let forms_dir = temp.path().join("forms");
+        fs::create_dir_all(&forms_dir).expect("forms dir");
+        fs::write(
+            forms_dir.join("saved.nx"),
+            "import { Card } from \"../plain\"\nimport { Card } from \"../ui\"\nexport type Saved = { s:Card.State }",
+        )
+        .expect("saved file");
+
+        let diagnostics = LibraryRegistry::new()
+            .load_library_from_directory(&forms_dir)
+            .expect_err("Card.State names no state record here");
+        assert!(
+            says_card_declares_no_state(diagnostics.iter().map(|d| d.message.clone())),
+            "{diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn a_local_component_keeps_its_own_derived_declarations_beside_an_import() {
+        let temp = TempDir::new().expect("temp dir");
+        write_two_cards(temp.path());
+        let forms_dir = temp.path().join("forms");
+        fs::create_dir_all(&forms_dir).expect("forms dir");
+        fs::write(
+            forms_dir.join("saved.nx"),
+            "import { Card } from \"../ui\"\nexport component <Card label:string /> = { <div>{label}</div> }\nexport type Saved = { s:Card.State }",
+        )
+        .expect("saved file");
+
+        let diagnostics = LibraryRegistry::new()
+            .load_library_from_directory(&forms_dir)
+            .expect_err("Card.State names no state record here");
+        assert!(
+            says_card_declares_no_state(diagnostics.iter().map(|d| d.message.clone())),
+            "{diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn a_program_does_not_take_derived_declarations_from_an_import_that_lost_the_name() {
+        let temp = TempDir::new().expect("temp dir");
+        write_two_cards(temp.path());
+        let registry = LibraryRegistry::new();
+        for dir in ["plain", "ui"] {
+            registry
+                .load_library_from_directory(temp.path().join(dir))
+                .expect("library loads");
+        }
+        let app_dir = temp.path().join("app");
+        fs::create_dir_all(&app_dir).expect("app dir");
+        let main_path = app_dir.join("main.nx");
+        let source = "import { Card } from \"../plain\"\nimport { Card } from \"../ui\"\nlet s:Card.State = <Card.State open=true />\nlet root() = { <Card label=\"x\" /> }";
+        fs::write(&main_path, source).expect("main file");
+
+        let artifact = build_program_artifact_from_source(
+            source,
+            &main_path.display().to_string(),
+            &registry.build_context(),
+        )
+        .expect("Expected program artifact");
+        assert!(
+            says_card_declares_no_state(
+                artifact
+                    .diagnostics
+                    .iter()
+                    .map(|diagnostic| diagnostic.message().to_string())
+            ),
+            "{:?}",
+            artifact.diagnostics
+        );
     }
 
     /// A union-typed property of a component imported from a built library.

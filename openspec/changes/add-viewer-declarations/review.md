@@ -203,3 +203,80 @@ through the wasm SDK's language snapshot and `<nx-viewer>` under jsdom, and the 
   type-check, which contradicts the spec and pushes out-of-protocol values to readers; RF2 makes the viewer
   robust to such values. RF3–RF7 are smaller spec divergences, a typegen false positive, a silent merge
   loss, a confusing diagnostic and a test gap.
+
+## Follow-up review: d04ad7b
+
+**Reviewed code:** d04ad7b "Bind derived declarations of a library's selective imports in libraries":
+`crates/nx-api/src/artifacts.rs` (`apply_graph_imports`, `apply_build_context_imports`,
+`add_derived_interface_bindings`, `add_imported_interface_bindings`, and for comparison
+`add_workspace_import_bindings`, `add_library_wildcard_bindings` and the runtime `visible_imports` maps),
+`crates/nx-cli/src/typegen/model.rs` (`ImportedTypeCollector::collect_for_module`, `derived_imported_type`),
+and the two new tests.  
+**Checks run:** both new tests pass. Probes (sources under the session scratchpad `rvw2/`) through the built
+`nxlang typegen`, and through a scratch binary that loads libraries into a `LibraryRegistry`, builds a
+program with `build_program_artifact_from_source` and evaluates it:
+- In a library, `import { Card, User } from "../ui"` with fields typed `Card.State`, `Card.State.Update`,
+  `Card.State.Property`, `User.Update` and `User.Property` now type-checks. TypeScript typegen imports
+  `Card_state as Card_State`, `Card_state_update as Card_State_Update`, `Card_state_property as
+  Card_State_Property`, `User_update as User_Update` and `User_property as User_Property` from `"ui"`, all
+  of which `ui`'s own typegen exports. C# references `global::Nx.Ui.Card_state` and the rest. The aliased
+  form `import { Card as Ui.Card, User as Ui.User }` gives `Ui_Card_State` and so on. `Card.Props` still
+  stops typegen with the existing "typegen does not generate props records yet" error, as for a program.
+- Runtime: a library function `mk():Panel.State = { <Panel.State count=3 /> }`, along with
+  `User.Update`, `Panel.State.Property` and `User.Property` values built in that library, evaluates
+  correctly when a program calls it. The runtime `visible_imports` map already carried derived names for
+  library modules.
+- Diagnostics: the new bindings cannot add duplicate or ambiguity noise. `add_imported_interface_bindings`
+  skips a name that is already bound (`artifacts.rs:3395`) before its "provided by both" check
+  (`:3405`), so two imports of the same name resolve silently, first one wins. That was already the case
+  for programs (see RF9 for what this means for derived names).
+- Wildcard imports, with or without an alias, already bound derived names, because
+  `library.exported_items` lists them. The workspace selective path and both `visible_imports` paths
+  already expanded `DERIVED_DECLARATION_SUFFIXES`.
+
+### 🟡 Fixed - RF9 A derived name binds even when its base name came from somewhere else, so `Card` and `Card.State` can name different components
+- **Severity:** Low (confidence: high, reproduced)
+- **Evidence:** `add_derived_interface_bindings` (`crates/nx-api/src/artifacts.rs:3337`) binds each
+  `<Name>.<suffix>` on its own. It does not check whether the base binding for `<Name>` was actually made by
+  this import. `add_imported_interface_bindings` quietly skips a name that is already bound
+  (`:3395`). So when `Card` is already bound, by a local declaration or by an earlier import, while
+  `Card.State` is not, the derived name still binds to the newly imported component. Before this commit a
+  library build rejected such code ("component 'Card' declares no state"). Now it compiles. Probes, where
+  `plain` exports a stateless `component <Card label:int />` and `ui` exports `Card` with
+  `state { open:boolean = false }`:
+  - A library module with `import { Card } from "../plain"`, `import { Card } from "../ui"`,
+    `export let x():Card.State = { <Card.State open=true /> }` and `export let y() = { <Card label=3 /> }`
+    loads with no diagnostic. A program calling both prints `content={true <Card label=3 />}`: `Card` is
+    `plain`'s component and `Card.State` is `ui`'s.
+  - The same thing happens with a local `export component <Card label:int />` next to
+    `import { Card } from "../ui"`. The local `Card` shadows the import silently, and `Card.State` still
+    reaches `ui`'s.
+  - `nxlang typegen` on a library with the two imports and `export type Saved = { s:Card.State }` exits 0.
+    It prints only warnings ("no generated companion 'Card_state'", "Skipping imported type 'Card' from
+    '../ui'"), and writes `s: Card_State;` with no import of `Card_State`, so the generated TypeScript
+    does not compile.
+
+  The program path (`apply_graph_imports` at `:2674`, the workspace path at `:2885`, and the
+  `visible_imports` expansions at `:3688` and `:3857`) behaved this way before. This commit extends it to
+  library builds, the one place that had rejected it.
+- **Recommendation:** Bind a selective import's derived names only when the base name bound to the same
+  declaration in this import. One way: have `add_imported_interface_bindings` / `add_workspace_item_bindings`
+  return whether they bound anything, and call the derived expansion only then. Apply the same guard in
+  the two `visible_imports` expansions so runtime resolution agrees. The derived-suffix expansion now
+  appears in four places (`add_derived_interface_bindings`, `add_workspace_import_bindings`, and the two
+  `visible_imports` loops). Sharing one name-pair iterator, such as `derived_names(entry, visible_name)`,
+  would keep them in step. Separately, consider whether two selective imports of the same name should
+  report "provided by both", since the `has_binding` check before it makes that diagnostic unreachable
+  for them. Add a library test: `Card` from a stateless source plus `Card.State` reports "declares no
+  state" (or a duplicate-import error) rather than resolving to the other component.
+- **Fix:** A selective import now binds its derived names only when it bound the base name to that same
+  declaration (`binds_to`, checked in `add_derived_interface_bindings` for both library paths and in
+  `add_workspace_import_bindings`). `add_derived_interface_bindings` takes the base's `item_indices` for
+  this. A name taken by a local declaration or an earlier import keeps its own derived names, so
+  `Card.State` there reports "component 'Card' declares no state". Tests
+  `a_library_does_not_take_derived_declarations_from_an_import_that_lost_the_name`,
+  `a_local_component_keeps_its_own_derived_declarations_beside_an_import` and
+  `a_program_does_not_take_derived_declarations_from_an_import_that_lost_the_name` all fail without the
+  guard. Left as is: the two `visible_imports` expansions, because type checking now rejects any program
+  that would reach them with a mismatched pair; and the unreachable "provided by both" diagnostic for
+  two selective imports of one name, which predates this change and would change behavior beyond this fix.
