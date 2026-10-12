@@ -155,7 +155,7 @@ through the wasm SDK's language snapshot and `<nx-viewer>` under jsdom, and the 
 
 ## New Findings Discovered During 2026-10-12 18:40 Verification
 
-### 🟡 Fixed - RF8 Dropping an erroneous viewer declaration before duplicate detection lets a reported duplicate apply, and hides a cross-module duplicate
+### ✅ Verified - RF8 Dropping an erroneous viewer declaration before duplicate detection lets a reported duplicate apply, and hides a cross-module duplicate
 - **Severity:** Low (confidence: high, reproduced)
 - **Evidence:** In `program_viewers` (`crates/nx-api/src/program_viewers.rs`), `has_errors_within` is checked
   before `targets.insert(...)`, and the cross-module duplicate check (`duplicate_program_viewers`) runs over
@@ -182,6 +182,7 @@ through the wasm SDK's language snapshot and `<nx-viewer>` under jsdom, and the 
   applies only clean declarations, after removing duplicates, for the program and for host modules. Tests
   `the_second_of_two_viewers_in_one_module_does_not_apply_when_the_first_has_errors` and
   `a_duplicate_with_errors_still_conflicts` fail without the fix.
+- **Verification:** Rebuilt the wasm from f55faf4 and re-ran both probes. In the same-module probe, the first declaration (with `title=lable`) now claims the target. The second is reported as `duplicate-viewer`, and `Choice` has no viewer. In the cross-module probe, `duplicate-viewer` is now reported at `main.nx` for `t/a.nx` and `t/b.nx` with an error in `a.nx`, and neither applies. The same holds when `a.nx` lacks `import "@nx/viewer"` or writes a computed `name={p}`. RF1 still holds: a host module with misspelled properties leaves the library's `name` "Lib" in place; a declaration with quoted case values, an unknown attribute or a repeated `title` contributes nothing; a clean viewer next to an unrelated error in its module still applies. Host modules filter by `clean` too. The viewer tests pass (94/94).
 
 ## Questions
 - RF1: should a viewer declaration with errors contribute nothing (all-or-nothing per declaration), or
