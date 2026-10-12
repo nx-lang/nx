@@ -16,7 +16,7 @@ unchanged after rebuild), `cargo fmt --check` (clean), `openspec validate add-co
 
 ## Findings
 
-### 🟡 Fixed - RF1 A state patch produced by `diff` inside a handler is returned as an effect instead of patching state
+### ✅ Verified - RF1 A state patch produced by `diff` inside a handler is returned as an effect instead of patching state
 - **Severity:** High
 - **Evidence:** `referenced_derived_declarations` (`crates/nx-codegen/src/builder.rs:122-209`) emits a derived
   declaration only when it is constructed, named in an annotation, reached by a member access, or appears in the
@@ -37,8 +37,9 @@ unchanged after rebuild), `cargo fmt --check` (clean), `openspec validate add-co
   test that dispatches a handler returning `diff(...)` of two state records and asserts the state changes in both
   runtimes.
 - **Fix:** `referenced_derived_declarations` (`crates/nx-codegen/src/builder.rs`) now brings a referenced state record's update record along (new `state_update_record`, same module). The `handlers` IR conformance program gains a `Diffed` component whose handler returns `diff(<State …/>, <State …/>)`; its lifecycle shows the state patched and no effects in both runtimes.
+- **Verification:** Verified. `state_update_record` brings a referenced state record's `.State.Update` into the IR. I re-ran the original probe (handler returning `diff` of two state records) through the TS runtime: dispatch now gives `state {"count":1}` and no effects. The new `Diffed` lifecycle in the `handlers` conformance program pins this in both runtimes: the tap gives `count` 1, `note` "tapped" and empty effects. Other conformance images are unchanged, and `cargo test --workspace` passes.
 
-### 🟡 Fixed - RF2 TypeScript typegen emits invalid code for every exported component without props
+### ✅ Verified - RF2 TypeScript typegen emits invalid code for every exported component without props
 - **Severity:** High
 - **Evidence:** Every component now has a `T.Property`, so `typegen` emits `<Name>_property` for prop-less
   components too. `ExportedUnion::is_constant` was changed to treat an empty property companion as constant
@@ -52,8 +53,9 @@ unchanged after rebuild), `cargo fmt --check` (clean), `openspec validate add-co
   at `typescript.rs:586` already does). Add a typegen test for a prop-less exported component, ideally to the test
   that type-checks generated TypeScript with `tsc` (`typegen.rs` around line 5401).
 - **Fix:** The TypeScript constant-union path emits `never` when there are no cases. `documented_typescript_type_checks` adds a prop-less `Spacer` and checks `Spacer_property = never` and that host code using `Spacer_update`/`Spacer_property` passes `tsc`.
+- **Verification:** Verified. The constant-union branch emits `never` when there are no cases. `nxlang typegen` on `export component <Form />` now writes `export type Form_property = never;`. The `tsc`-backed test now includes a prop-less `Spacer` and its `_update`/`_property` companions. The only other ` | ` join in the emitter (`typescript.rs:606`) already handles the empty case.
 
-### 🟡 Fixed - RF3 Doc links in state-field docs are checked twice, and links to props are falsely reported unresolved
+### ✅ Verified - RF3 Doc links in state-field docs are checked twice, and links to props are falsely reported unresolved
 - **Severity:** Medium
 - **Evidence:** `predeclare_state_record` copies each state field, docs included, into the derived `T.State`
   record (`crates/nx-hir/src/lower.rs:897-902`, `..field.clone()`). `resolve_doc_links` skips
@@ -64,8 +66,9 @@ unchanged after rebuild), `cargo fmt --check` (clean), `openspec validate add-co
 - **Recommendation:** Skip every derived record there: `Item::Record(record) if record.is_derived() => {}`, and
   update the comment. Add a doc-links test with a state field doc that links a prop and an unknown name.
 - **Fix:** `resolve_doc_links` skips every derived record (`record.is_derived()`). New test `a_state_field_doc_is_checked_once_in_the_component_scope` in `doc_links.rs`: a state field linking a prop and an unknown name yields exactly one warning, for the unknown name.
+- **Verification:** Verified. `for_each_doc` skips every derived record (`record.is_derived()`). Re-running my `nx-types` probe on the original source now gives exactly one `unresolved-doc-link`, for `[Nope]`, with no duplicate and no false `[step]`. The new `a_state_field_doc_is_checked_once_in_the_component_scope` test pins this.
 
-### 🟡 Fixed - RF4 A bare `State` in a component's signature is rewritten, hijacking a top-level `State` for prop types
+### ✅ Verified - RF4 A bare `State` in a component's signature is rewritten, hijacking a top-level `State` for prop types
 - **Severity:** Medium
 - **Evidence:** In the predeclaration pass `current_component` is set before props, emits and state are lowered
   (`crates/nx-hir/src/lower.rs:1101`), so `resolve_bare_state_type` rewrites `State` in prop and inline-emit field
@@ -79,8 +82,9 @@ unchanged after rebuild), `cargo fmt --check` (clean), `openspec validate add-co
   are meant to be covered, update the `component-state-type` spec and design to say so. Either way, add a test that
   pins the behavior for a prop typed `State` when a top-level `State` exists.
 - **Fix:** Followed the spec: `predeclare_component` restores the enclosing component right after lowering the state fields, so props and emit fields see `State` as an ordinary name, matching the final lowering pass. New test `bare_state_in_the_signature_is_an_ordinary_name`.
+- **Verification:** Verified. The predeclaration pass now restores `current_component` right after lowering the state fields, so props and emit fields see `State` as an ordinary name, matching the final lowering pass. The original probe (`type State = idle | busy` with `component <C mode?:State />` and `<C mode={State.idle} />`) now runs. `bare_state_in_the_signature_is_an_ordinary_name` pins it, and the existing bare-`State` tests for state fields, defaults, body and handlers still pass.
 
-### 🟡 Fixed - RF5 Stale comments and docs still describe a component's own `Update` as its state patch
+### ✅ Verified - RF5 Stale comments and docs still describe a component's own `Update` as its state patch
 - **Severity:** Low
 - **Evidence:**
   - `crates/nx-ir-runtime/README.md:137`: "Applies a partial state or a `<Component>.Update` record".
@@ -96,8 +100,9 @@ unchanged after rebuild), `cargo fmt --check` (clean), `openspec validate add-co
 - **Recommendation:** Reword each to `<Component>.State.Update` / "the update record of its state record", and move
   the stray doc line back onto `companion_target_name`.
 - **Fix:** Reworded each comment and doc to the `State.Update` spelling (nx-ir-runtime README and `component.rs`, `ast/expr.rs`, TS runtime `index.ts`, website `functions.md`, typegen `typescript.rs`), and moved the stray doc line back onto `companion_target_name`.
+- **Verification:** Verified. Every location listed is reworded: nx-ir-runtime README, `component.rs`, `ast/expr.rs`, TS `index.ts` and its rebuilt `dist`, website `functions.md:8`, and typegen `typescript.rs`. The stray doc line is back on `companion_target_name`. A grep finds no remaining 'own update records' or `<Component>.Update` record wording for state patches.
 
-### 🟡 Fixed - RF6 Some spec scenarios and risky paths have no direct test
+### ✅ Verified - RF6 Some spec scenarios and risky paths have no direct test
 - **Severity:** Low
 - **Evidence:** No test encodes a handler's `<State.Update label={} />` and checks the JSON is exactly
   `{"$type":"Counter.State.Update","label":null}` (`component-state-type`, "A state patch is encoded under the state
@@ -109,6 +114,7 @@ unchanged after rebuild), `cargo fmt --check` (clean), `openspec validate add-co
 - **Recommendation:** Add the wire-form test (IR runtime or codegen JSON), the value-position bare `Property` test,
   and the RF1/RF2 regression tests. Note in tasks.md that 3.4 needed no emitter change.
 - **Fix:** Added the wire-form check (`clearNote` entrypoint in the `handlers` corpus: `{"$type":"Diffed.State.Update","note":null}`), `a_bare_property_value_inside_a_component_suggests_state_property`, `bare_state_property_case_is_a_value_inside_a_component`, and the RF1/RF2 regression coverage above. tasks.md 3.4 now says no emitter change was needed.
+- **Verification:** Verified. The `handlers` corpus pins the wire form (`clearNote` gives `{"$type":"Diffed.State.Update","note":null}`), and the Clear button exercises a state-clearing handler. The new type-checker tests cover a bare `Property` in value position, which suggests `State.Property`, and a `State.Property` case used as a value. RF1 and RF2 have regression tests, and tasks.md 3.4 now says no emitter change was needed.
 
 ## Questions
 - RF4 (answered by the fix): the spec scopes the bare name to state, the body and handlers, so the signature is left alone.
@@ -126,3 +132,8 @@ unchanged after rebuild), `cargo fmt --check` (clean), `openspec validate add-co
   - A `diff`-built state patch in a handler is silently treated as an effect (RF1).
   - TypeScript typegen produces uncompilable output for prop-less exported components (RF2).
 - The doc-link duplication (RF3) and the signature-scope question (RF4) are smaller but user-visible.
+
+## Verification Summary
+- All six findings (RF1–RF6) are verified against commit 9c37d4c. `cargo test --workspace`, the TypeScript runtime
+  tests and `cargo fmt --check` pass, and the original probes for RF1–RF4 now behave as the specs require. No new
+  findings.
