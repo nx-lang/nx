@@ -5,7 +5,7 @@ import editorWorker from "monaco-editor/editor/editor.worker.js?worker";
 import { NX_LANGUAGE_ID, registerNxLanguage } from "@nx-lang/monaco";
 import type { Diagnostic, DiagnosticSpan } from "../compile";
 import { createWorkerLanguageService } from "../language/worker.ts";
-import { EDITOR_THEMES, type Theme } from "../theme.ts";
+import { ALL_EDITOR_THEMES, useEditorThemes, type Theme } from "../theme.ts";
 import { offsetOf, positionAt } from "./positions.ts";
 import { openSuggestionDetailsOnce } from "./suggestDetails.ts";
 
@@ -28,7 +28,7 @@ export const languageService = createWorkerLanguageService();
  */
 const registration = registerNxLanguage(monaco, {
   service: languageService,
-  themes: [EDITOR_THEMES.dark, EDITOR_THEMES.light],
+  themes: ALL_EDITOR_THEMES,
   onError: (error) => console.debug("nx language", error),
 });
 
@@ -64,6 +64,9 @@ export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, them
   latestChange.current = onChange;
   const latestTheme = useRef(theme);
   latestTheme.current = theme;
+  const themes = useEditorThemes();
+  const latestThemes = useRef(themes);
+  latestThemes.current = themes;
   // The editor is created once the highlighter has loaded, by which time the text to show may have
   // moved on from the text there was at mount: an example chosen, or Back pressed, meanwhile.
   const latestValue = useRef(value);
@@ -142,7 +145,7 @@ export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, them
       // Through `setTheme`, once the highlighter is installed, so the Shiki bridge tokenizes with the
       // theme Monaco draws with. A theme passed to `create` reaches Monaco without the bridge
       // knowing, and a document set later is then colored from the other theme's palette.
-      monaco.editor.setTheme(EDITOR_THEMES[latestTheme.current]);
+      monaco.editor.setTheme(latestThemes.current[latestTheme.current]);
       subscription = instance.onDidChangeModelContent(() => {
         if (!settingValue.current) {
           latestChange.current(instance.getValue());
@@ -177,9 +180,9 @@ export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, them
 
   useEffect(() => {
     if (editor.current !== null) {
-      monaco.editor.setTheme(EDITOR_THEMES[theme]);
+      monaco.editor.setTheme(themes[theme]);
     }
-  }, [theme]);
+  }, [theme, themes]);
 
   // Markers are set when an evaluation reports, positioned in the text it evaluated. Monaco then
   // moves them with every edit, so they are not set again per keystroke: that would put them back

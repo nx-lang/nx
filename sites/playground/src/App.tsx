@@ -24,7 +24,7 @@ import { createAddressKeeper } from "./address.ts";
 import { pathForPayload, routeFromLocation } from "./routes.ts";
 import { decodeSource, encodeSource } from "./share/codec.ts";
 import type { PreviewReloadNotice, PreviewState } from "./preview/protocol.ts";
-import { useSiteTheme } from "./theme.ts";
+import { setThemeFamily, THEME_FAMILIES, THEME_FAMILY_LABELS, useSiteTheme, useThemeFamily, type ThemeFamily } from "./theme.ts";
 import { useEvaluation } from "./useEvaluation.ts";
 import { startNxWorker } from "./worker/index.ts";
 
@@ -75,6 +75,7 @@ const MODE_LABELS: Record<SourceMode, string> = { edit: "Edit", read: "Read", ca
 /** The site: the header, the toolbar, and the source and output panes. */
 export function App() {
   const theme = useSiteTheme();
+  const themeFamily = useThemeFamily();
   const [source, setSource] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [shareState, setShareState] = useState<"idle" | "copied" | "failed">("idle");
@@ -311,6 +312,16 @@ export function App() {
             <span>Source</span>
             <span className="pane-note">NX</span>
             <span className="spacer" />
+            <label className="reading-font">
+              Theme
+              <select value={themeFamily} onChange={(event) => setThemeFamily(event.target.value as ThemeFamily)}>
+                {(Object.keys(THEME_FAMILIES) as ThemeFamily[]).map((option) => (
+                  <option key={option} value={option}>
+                    {THEME_FAMILY_LABELS[option]}
+                  </option>
+                ))}
+              </select>
+            </label>
             {mode === "read" && (
               <label className="reading-font">
                 Font

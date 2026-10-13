@@ -57,6 +57,17 @@
   --warning: #9a6700;
 }
 
+/* The panes take the background and text color of whichever theme family colors the source. */
+:root[data-theme-family="vscode"] {
+  --pane-background: #1e1e1e; /* dark-plus */
+  --pane-foreground: #d4d4d4;
+}
+
+:root[data-theme="light"][data-theme-family="vscode"] {
+  --pane-background: #ffffff; /* light-plus */
+  --pane-foreground: #000000;
+}
+
 html,
 body,
 #root {

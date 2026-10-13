@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import "@nx-lang/viewer";
 import { NX_SELECT_EVENT, type NxSelectDetail, type NxViewerElement, type NxViewerView } from "@nx-lang/viewer";
 import { colorize, loadHighlighter, type NxValueHighlighter } from "@nx-lang/value-view";
-import { EDITOR_THEMES } from "../theme.ts";
+import { useEditorThemes, type EditorThemes } from "../theme.ts";
 import type { Reading } from "./reading.ts";
 // The faces the source reading is being tried in. Latin only, in the weights and styles a theme asks for.
 import "@fontsource/ibm-plex-sans/latin-400.css";
@@ -107,13 +107,15 @@ export function ReadingView({ reading, view, font, selection, onSelect }: Readin
   const element = useRef<NxViewerElement>(null);
   // The highlighter the output pane colors with, loaded with the editor's themes, so the source
   // reading takes the colors the editor shows.
-  const [highlighter, setHighlighter] = useState<NxValueHighlighter | null>(null);
+  const themes = useEditorThemes();
+  // A highlighter is loaded for one pair of themes, so it is kept with the pair it colors with.
+  const [highlighter, setHighlighter] = useState<{ value: NxValueHighlighter; themes: EditorThemes } | null>(null);
   useEffect(() => {
     let current = true;
-    loadHighlighter(EDITOR_THEMES).then(
+    loadHighlighter(themes).then(
       (loaded) => {
         if (current) {
-          setHighlighter(loaded);
+          setHighlighter({ value: loaded, themes });
         }
       },
       // Without a highlighter the text still reads, uncolored.
@@ -122,7 +124,7 @@ export function ReadingView({ reading, view, font, selection, onSelect }: Readin
     return () => {
       current = false;
     };
-  }, []);
+  }, [themes]);
   const latestSelect = useRef(onSelect);
   latestSelect.current = onSelect;
 
@@ -136,7 +138,7 @@ export function ReadingView({ reading, view, font, selection, onSelect }: Readin
     target.tree = undefined;
     target.text = reading.text;
     target.view = view;
-    target.colors = view === "source" && highlighter !== null ? colorize(highlighter, reading.text, EDITOR_THEMES) : [];
+    target.colors = view === "source" && highlighter !== null ? colorize(highlighter.value, reading.text, highlighter.themes) : [];
     target.tree = reading.tree;
   }, [reading.tree, reading.text, view, highlighter]);
 

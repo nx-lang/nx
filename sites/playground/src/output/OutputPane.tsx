@@ -8,7 +8,7 @@ import {
 } from "@nx-lang/value-view";
 import type { Diagnostic } from "../compile";
 import { outputNotice, type Evaluation } from "../evaluation.ts";
-import { EDITOR_THEMES } from "../theme.ts";
+import { useEditorThemes } from "../theme.ts";
 
 /** What the output pane shows: what `root` returns, or a component running. */
 export type OutputView = "output" | "preview";
@@ -35,6 +35,7 @@ export interface OutputPaneProps {
  */
 export function OutputPane({ evaluation, view, onViewChange, preview, describe, onNavigate }: OutputPaneProps) {
   const element = useRef<NxValueElement>(null);
+  const themes = useEditorThemes();
   const latestNavigate = useRef(onNavigate);
   latestNavigate.current = onNavigate;
 
@@ -102,7 +103,7 @@ export function OutputPane({ evaluation, view, onViewChange, preview, describe, 
             truncated={value.truncated}
             stale={stale}
             describe={describe}
-            themes={EDITOR_THEMES}
+            themes={themes}
           />
         )}
       </div>
