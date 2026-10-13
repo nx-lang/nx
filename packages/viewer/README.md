@@ -136,10 +136,9 @@ a value it shows.
   on a reference or a kind shows the declaration. All of it comes from the
   tree's declaration table, so it needs no language service.
 - **References** to a value declared in the document expand in place to that value.
-- **Viewer declarations**, `viewer Choice = <ElementViewer … />`: each run of them folds into one
-  strip headed "Viewers · 3" with their names, which stays folded until a reader opens it. Open,
-  each reads "viewer Choice" over one line per element: its name and its attributes, with a
-  `PropertyViewer` or `CaseViewer` led by what it is `of`.
+- **Viewer declarations**, `viewer Choice = <ElementViewer … />`, read as a card headed "viewer
+  Choice" over one line per element: its name and its attributes, with a `PropertyViewer` or
+  `CaseViewer` led by what it is `of`.
 
 ## Viewer declarations
 

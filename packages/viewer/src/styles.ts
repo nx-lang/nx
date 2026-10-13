@@ -71,14 +71,8 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 .details summary { cursor: pointer; }
 .details-body { display: flex; flex-direction: column; gap: 4px; padding: 4px 0 6px; }
 
-.strip-names { font-family: var(--mono); font-size: 12.5px; color: var(--ink-3); }
-.viewer-block { display: flex; flex-direction: column; gap: 2px; }
-.viewer-block + .viewer-block { border-top: 1px solid var(--rule); border-radius: 0; padding-top: 6px; margin-top: 2px; }
-.viewer-header { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
-.viewer-block > .viewer-element { padding-left: 14px; }
 .viewer-element { display: flex; flex-direction: column; gap: 2px; }
 .viewer-line { display: flex; flex-wrap: wrap; gap: 2px 14px; align-items: baseline; }
-.viewer-line .source-toggle { margin-left: auto; opacity: 0.7; }
 .viewer-kind { font-family: var(--mono); font-size: 12.5px; font-weight: 600; color: var(--blue); }
 .viewer-attribute > .label { color: var(--ink-3); font-size: 13px; cursor: help; }
 .viewer-attribute.subject { min-width: 11ch; }

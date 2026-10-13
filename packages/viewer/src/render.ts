@@ -72,16 +72,14 @@ export function renderNode(context: RenderContext, at: number, options: RenderOp
 }
 
 /**
- * Renders the whole document: its top-level nodes in order, with its imports in one strip, each
- * run of viewer declarations in one strip, and a declaration's doc comments inside its card.
+ * Renders the whole document: its top-level nodes in order, with its imports in one strip and a
+ * declaration's doc comments inside its card.
  */
 export function renderDocument(context: RenderContext): HTMLElement {
   const { document, index } = context;
   const root = document.createElement("div");
   root.className = "document";
   let imports: HTMLElement | undefined;
-  let viewers: HTMLElement | undefined;
-  let viewerNames: string[] = [];
   let docs: number[] = [];
   const flushDocs = () => {
     for (const doc of docs) {
@@ -111,30 +109,12 @@ export function renderDocument(context: RenderContext): HTMLElement {
     }
     if (node.role !== "declaration") {
       flushDocs();
-      viewers = undefined;
       appendNode(context, root, at);
       return;
     }
     const options: RenderOptions = docs.length > 0 ? { docs } : {};
     docs = [];
-    if (!has(node, "viewer")) {
-      viewers = undefined;
-      appendNode(context, root, at, options);
-      return;
-    }
-    // Viewers say how types read, which already shows on every element: a run of them folds into
-    // one strip that names them.
-    if (viewers === undefined) {
-      viewers = detailsStrip(document, "Viewers");
-      viewers.classList.add("viewer-strip");
-      viewerNames = [];
-      root.append(viewers);
-    }
-    appendNode(context, viewers.querySelector(".details-body")!, at, options);
-    viewerNames.push(node.name ?? "");
-    viewers
-      .querySelector("summary")!
-      .replaceChildren(`Viewers · ${viewerNames.length} `, span(document, "strip-names", viewerNames.join(", ")));
+    appendNode(context, root, at, options);
   });
   flushDocs();
   return root;
@@ -338,7 +318,7 @@ const renderDeclaration: Renderer = (context, at, options) => {
   // `let roleQuestion = <SingleChoice … />` reads as the card, named by the declaration.
   const members = children.filter((child) => MEMBER_ROLES.has(node(context, child).role));
   const onlyValue = valueNodes.length === 1 ? valueNodes[0]! : undefined;
-  // `viewer Choice = <ElementViewer … />` reads a line to an element, headed "viewer Choice".
+  // `viewer Choice = <ElementViewer … />` reads as a card headed "viewer Choice", a line to an element.
   if (has(source, "viewer")) {
     return renderViewerDeclaration(context, at, options);
   }
@@ -468,31 +448,37 @@ function typeSign(kind: string | undefined): string {
 }
 
 /**
- * A viewer declaration: its name, then a line to each of its elements, as the source has them. The
- * document folds each run of these into one strip.
+ * A viewer declaration: a card headed "viewer" and its target's name, over a line to each of its
+ * elements, as the source has them.
  */
 function renderViewerDeclaration(context: RenderContext, at: number, options: RenderOptions): HTMLElement {
   const { document, index } = context;
   const source = node(context, at);
-  const block = marked(context, at, "section", "viewer-block");
+  const section = marked(context, at, "section", "declaration viewer-declaration");
   const header = document.createElement("div");
-  header.className = "viewer-header";
+  header.className = "declaration-header";
   for (const flag of source.flags ?? []) {
     if (flag !== "viewer") {
       header.append(span(document, "tag", flag), " ");
     }
   }
   header.append(span(document, "declaration-kind", "viewer"), " ", span(document, "declaration-name", source.name ?? ""));
-  block.append(header);
-  appendAll(context, block, options.docs ?? []);
+  if (!context.copy) {
+    header.append(sourceButton(document, source.key));
+  }
+  section.append(header);
+  appendAll(context, section, options.docs ?? []);
+  const body = document.createElement("div");
+  body.className = "declaration-body";
   for (const child of index.children[at] ?? []) {
     if (node(context, child).role === "element") {
-      block.append(renderViewerElement(context, child, true));
+      body.append(renderViewerElement(context, child));
     } else {
-      appendNode(context, block, child);
+      appendNode(context, body, child);
     }
   }
-  return block;
+  section.append(body);
+  return section;
 }
 
 /**
@@ -500,7 +486,7 @@ function renderViewerDeclaration(context: RenderContext, at: number, options: Re
  * value, with the elements it holds indented under it. An element that says what it is `of` leads
  * with that in place of its name, so `<PropertyViewer of=id label="Key" />` reads "id label Key".
  */
-function renderViewerElement(context: RenderContext, at: number, top: boolean): HTMLElement {
+function renderViewerElement(context: RenderContext, at: number): HTMLElement {
   const { document, index } = context;
   const source = node(context, at);
   const block = marked(context, at, "div", "viewer-element");
@@ -524,7 +510,7 @@ function renderViewerElement(context: RenderContext, at: number, top: boolean): 
       continue;
     }
     if (childNode.role === "element") {
-      nested.append(renderViewerElement(context, child, false));
+      nested.append(renderViewerElement(context, child));
     } else if (childNode.role !== "attribute") {
       appendNode(context, nested, child);
     } else if (has(childNode, "content")) {
@@ -532,7 +518,7 @@ function renderViewerElement(context: RenderContext, at: number, top: boolean): 
       const held = marked(context, child, "div", "viewer-held");
       for (const item of index.children[child] ?? []) {
         if (node(context, item).role === "element") {
-          held.append(renderViewerElement(context, item, false));
+          held.append(renderViewerElement(context, item));
         } else {
           appendNode(context, held, item);
         }
@@ -541,9 +527,6 @@ function renderViewerElement(context: RenderContext, at: number, top: boolean): 
     } else {
       line.append(viewerAttribute(context, child, true));
     }
-  }
-  if (top && !context.copy) {
-    line.append(sourceButton(document, source.key));
   }
   block.append(line);
   if (nested.childElementCount > 0) {
