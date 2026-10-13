@@ -71,10 +71,11 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 .details summary { cursor: pointer; }
 .details-body { display: flex; flex-direction: column; gap: 4px; padding: 4px 0 6px; }
 
-.viewer-strip > summary { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; list-style: none; }
-.viewer-strip > summary::before { content: "▸"; font-size: 11px; }
-.viewer-strip[open] > summary::before { content: "▾"; }
-.viewer-strip > summary::-webkit-details-marker { display: none; }
+.strip-names { font-family: var(--mono); font-size: 12.5px; color: var(--ink-3); }
+.viewer-block { display: flex; flex-direction: column; gap: 2px; }
+.viewer-block + .viewer-block { border-top: 1px solid var(--rule); border-radius: 0; padding-top: 6px; margin-top: 2px; }
+.viewer-header { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.viewer-block > .viewer-element { padding-left: 14px; }
 .viewer-element { display: flex; flex-direction: column; gap: 2px; }
 .viewer-line { display: flex; flex-wrap: wrap; gap: 2px 14px; align-items: baseline; }
 .viewer-line .source-toggle { margin-left: auto; opacity: 0.7; }
@@ -83,9 +84,11 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 .viewer-attribute.subject { min-width: 11ch; }
 .viewer-nested, .viewer-held { display: flex; flex-direction: column; gap: 2px; }
 .viewer-nested { padding-left: 14px; }
-.case-line { display: flex; flex-wrap: wrap; align-items: baseline; }
+.case-line { display: inline-flex; flex-wrap: wrap; align-items: baseline; }
+.declaration-sign { color: var(--ink-3); }
+.declaration-docs { display: flex; flex-direction: column; gap: 4px; }
 .case-bar { color: var(--ink-3); white-space: pre; }
-.value.boolean.written { font-family: var(--mono); font-size: 12.5px; font-weight: 400; }
+.value.boolean.written.true, .value.boolean.written.false { font-family: var(--mono); font-size: 12.5px; font-weight: 400; color: inherit; }
 
 .declaration { display: flex; flex-direction: column; gap: 6px; background: var(--sheet); border: 1px solid var(--rule); border-radius: 8px; padding: 10px 12px; }
 .declaration-header { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }

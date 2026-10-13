@@ -61,6 +61,8 @@ export interface RenderOptions {
    * viewer declaration's values do.
    */
   readonly asWritten?: boolean;
+  /** The doc comments written over a declaration, which read inside its card. */
+  readonly docs?: readonly number[];
 }
 
 /** Renders the node at `at` by its role; nothing when no renderer draws the role. */
@@ -69,17 +71,34 @@ export function renderNode(context: RenderContext, at: number, options: RenderOp
   return renderer?.(context, at, options);
 }
 
-/** Renders the whole document: its top-level nodes in order, with its imports in one strip. */
+/**
+ * Renders the whole document: its top-level nodes in order, with its imports in one strip, each
+ * run of viewer declarations in one strip, and a declaration's doc comments inside its card.
+ */
 export function renderDocument(context: RenderContext): HTMLElement {
   const { document, index } = context;
   const root = document.createElement("div");
   root.className = "document";
   let imports: HTMLElement | undefined;
+  let viewers: HTMLElement | undefined;
+  let viewerNames: string[] = [];
+  let docs: number[] = [];
+  const flushDocs = () => {
+    for (const doc of docs) {
+      appendNode(context, root, doc);
+    }
+    docs = [];
+  };
   index.tree.nodes.forEach((node, at) => {
     if (node.parent !== undefined) {
       return;
     }
+    if (node.role === "docComment") {
+      docs.push(at);
+      return;
+    }
     if (node.role === "import") {
+      flushDocs();
       if (imports === undefined) {
         imports = detailsStrip(document, "Imports");
         root.append(imports);
@@ -90,8 +109,34 @@ export function renderDocument(context: RenderContext): HTMLElement {
       summary.textContent = `Imports · ${count}`;
       return;
     }
-    appendNode(context, root, at);
+    if (node.role !== "declaration") {
+      flushDocs();
+      viewers = undefined;
+      appendNode(context, root, at);
+      return;
+    }
+    const options: RenderOptions = docs.length > 0 ? { docs } : {};
+    docs = [];
+    if (!has(node, "viewer")) {
+      viewers = undefined;
+      appendNode(context, root, at, options);
+      return;
+    }
+    // Viewers say how types read, which already shows on every element: a run of them folds into
+    // one strip that names them.
+    if (viewers === undefined) {
+      viewers = detailsStrip(document, "Viewers");
+      viewers.classList.add("viewer-strip");
+      viewerNames = [];
+      root.append(viewers);
+    }
+    appendNode(context, viewers.querySelector(".details-body")!, at, options);
+    viewerNames.push(node.name ?? "");
+    viewers
+      .querySelector("summary")!
+      .replaceChildren(`Viewers · ${viewerNames.length} `, span(document, "strip-names", viewerNames.join(", ")));
   });
+  flushDocs();
   return root;
 }
 
@@ -281,7 +326,7 @@ function isBlockRole(role: SourceRole): boolean {
 
 const MEMBER_ROLES: ReadonlySet<SourceRole> = new Set(["parameter", "stateField", "field", "unionCase", "emit"]);
 
-const renderDeclaration: Renderer = (context, at) => {
+const renderDeclaration: Renderer = (context, at, options) => {
   const { document, index } = context;
   const source = node(context, at);
   const entry = declarationOf(index, source);
@@ -293,9 +338,9 @@ const renderDeclaration: Renderer = (context, at) => {
   // `let roleQuestion = <SingleChoice … />` reads as the card, named by the declaration.
   const members = children.filter((child) => MEMBER_ROLES.has(node(context, child).role));
   const onlyValue = valueNodes.length === 1 ? valueNodes[0]! : undefined;
-  // `viewer Choice = <ElementViewer … />` reads as a folded strip headed "viewer Choice".
+  // `viewer Choice = <ElementViewer … />` reads a line to an element, headed "viewer Choice".
   if (has(source, "viewer")) {
-    return renderViewerDeclaration(context, at);
+    return renderViewerDeclaration(context, at, options);
   }
   if (
     members.length === 0 &&
@@ -307,93 +352,147 @@ const renderDeclaration: Renderer = (context, at) => {
     for (const child of children) {
       appendNode(context, section, child, child === onlyValue ? { declarationName: source.name ?? "" } : {});
     }
+    // The declaration's doc comments read under the card's heading.
+    const heading = section.querySelector(":scope > .card > .card-header");
+    const docs = document.createElement("div");
+    docs.className = "declaration-docs";
+    appendAll(context, docs, options.docs ?? []);
+    if (docs.childElementCount > 0) {
+      if (heading === null) {
+        section.prepend(docs);
+      } else {
+        heading.after(docs);
+      }
+    }
     return section;
   }
 
   const section = marked(context, at, "section", "declaration");
   const header = document.createElement("div");
   header.className = "declaration-header";
+  // Spaces between the parts, so the header reads as words to a screen reader and when copied.
   for (const flag of source.flags ?? []) {
-    header.append(span(document, "tag", flag));
+    header.append(span(document, "tag", flag), " ");
   }
   if (entry !== undefined) {
-    header.append(span(document, "declaration-kind", KIND_LABELS[entry.kind]));
+    header.append(span(document, "declaration-kind", KIND_LABELS[entry.kind]), " ");
   }
   header.append(span(document, "declaration-name", source.name ?? ""));
+
+  // What fits beside the name reads there, as it does in the source: `type Swatch = string` reads
+  // "Type Swatch = string", and a function's return type reads after an arrow.
+  const types = children.filter((child) => index.slots[child] === "type");
+  const headed = new Set<number>();
+  if (types.length > 0 && types.every((child) => node(context, child).role === "typeReference")) {
+    header.append(" ", span(document, "declaration-sign", typeSign(entry?.kind)));
+    for (const child of types) {
+      header.append(" ");
+      appendNode(context, header, child);
+      headed.add(child);
+    }
+  }
+  // `type ThemeMode = light | dark` reads on one line too, when no case carries fields or a
+  // comment.
+  const caseLine =
+    members.length > 0 &&
+    children.every((child) => node(context, child).role === "unionCase" && (index.children[child] ?? []).length === 0)
+      ? document.createElement("span")
+      : undefined;
+  if (caseLine !== undefined) {
+    caseLine.className = "case-line";
+    header.append(" ", span(document, "declaration-sign", "="), " ", caseLine);
+  }
   if (!context.copy) {
     header.append(sourceButton(document, source.key));
   }
   section.append(header);
+  appendAll(context, section, options.docs ?? []);
 
-  const body = document.createElement("div");
-  body.className = "declaration-body";
-  // `type ThemeMode = light | dark` reads on one line, as it is written, when no case carries
-  // fields or a comment.
-  const caseLine =
-    members.length > 0 &&
-    children.every((child) => node(context, child).role === "unionCase" && (index.children[child] ?? []).length === 0)
-      ? document.createElement("div")
-      : undefined;
-  if (caseLine !== undefined) {
-    caseLine.className = "case-line";
-  }
-  let group: string | undefined;
-  for (const child of children) {
+  const groupOf = (child: number): string | undefined => {
     const childNode = node(context, child);
     const slot = index.slots[child];
-    let groupName: string | undefined;
     if (MEMBER_ROLES.has(childNode.role)) {
-      groupName = memberGroup(childNode.role, entry?.kind);
-    } else if (slot === "type") {
-      groupName = typeGroup(entry?.kind);
-    } else if (!isNote(childNode)) {
-      groupName = slot === "body" ? (entry?.kind === "component" ? "Shows" : "Returns") : "Is";
+      return memberGroup(childNode.role, entry?.kind);
     }
-    if (groupName !== undefined && groupName !== group) {
-      body.append(label(document, groupName));
-      group = groupName;
+    if (slot === "type") {
+      return typeGroup(entry?.kind);
     }
-    if (caseLine === undefined) {
-      appendNode(context, body, child);
+    if (!isNote(childNode)) {
+      return slot === "body" ? (entry?.kind === "component" ? "Shows" : "Returns") : "Is";
+    }
+    return undefined;
+  };
+  const inBody = children.filter((child) => !headed.has(child));
+  // A heading tells one group of a declaration from the next, so a lone group needs none.
+  const groups = new Set(inBody.map(groupOf).filter((name) => name !== undefined));
+  const body = document.createElement("div");
+  body.className = "declaration-body";
+  let group: string | undefined;
+  for (const child of inBody) {
+    if (caseLine !== undefined) {
+      if (caseLine.childElementCount > 0) {
+        caseLine.append(span(document, "case-bar", " | "));
+      }
+      appendNode(context, caseLine, child);
       continue;
     }
-    if (caseLine.childElementCount > 0) {
-      caseLine.append(span(document, "case-bar", " | "));
+    // A comment belongs with what it is written over, so it reads under that group's heading.
+    const grouped = isNote(node(context, child))
+      ? inBody.slice(inBody.indexOf(child)).find((later) => !isNote(node(context, later)))
+      : child;
+    const groupName = grouped === undefined ? undefined : groupOf(grouped);
+    if (groupName !== undefined && groupName !== group) {
+      if (groups.size > 1) {
+        body.append(label(document, groupName));
+      }
+      group = groupName;
     }
-    appendNode(context, caseLine, child);
-    body.append(caseLine);
+    appendNode(context, body, child);
   }
-  section.append(body);
+  if (body.childElementCount > 0) {
+    section.append(body);
+  }
   return section;
 };
 
+/** The sign between a declaration's name and its type in its header. */
+function typeSign(kind: string | undefined): string {
+  switch (kind) {
+    case "alias":
+      return "=";
+    case "function":
+      return "→";
+    default:
+      return ":";
+  }
+}
+
 /**
- * A viewer declaration: a strip that stays folded until a reader opens it, since what a viewer says
- * already shows on every element of its target. Open, it reads a line to an element, as the source
- * does.
+ * A viewer declaration: its name, then a line to each of its elements, as the source has them. The
+ * document folds each run of these into one strip.
  */
-function renderViewerDeclaration(context: RenderContext, at: number): HTMLElement {
+function renderViewerDeclaration(context: RenderContext, at: number, options: RenderOptions): HTMLElement {
   const { document, index } = context;
   const source = node(context, at);
-  const strip = marked(context, at, "details", "details viewer-strip");
-  const summary = document.createElement("summary");
+  const block = marked(context, at, "section", "viewer-block");
+  const header = document.createElement("div");
+  header.className = "viewer-header";
   for (const flag of source.flags ?? []) {
     if (flag !== "viewer") {
-      summary.append(span(document, "tag", flag), " ");
+      header.append(span(document, "tag", flag), " ");
     }
   }
-  summary.append(span(document, "declaration-kind", "viewer"), " ", span(document, "declaration-name", source.name ?? ""));
-  const body = document.createElement("div");
-  body.className = "details-body";
+  header.append(span(document, "declaration-kind", "viewer"), " ", span(document, "declaration-name", source.name ?? ""));
+  block.append(header);
+  appendAll(context, block, options.docs ?? []);
   for (const child of index.children[at] ?? []) {
     if (node(context, child).role === "element") {
-      body.append(renderViewerElement(context, child, true));
+      block.append(renderViewerElement(context, child, true));
     } else {
-      appendNode(context, body, child);
+      appendNode(context, block, child);
     }
   }
-  strip.append(summary, body);
-  return strip;
+  return block;
 }
 
 /**

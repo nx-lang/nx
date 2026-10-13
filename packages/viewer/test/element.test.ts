@@ -316,10 +316,12 @@ describe("declarations, references and comments", () => {
     const element = show(await fixture("members"));
     const mode = rendered(element, "ThemeMode");
     assert.equal(read(mode.querySelector(".declaration-kind")!), "Type");
-    assert.equal(read(mode.querySelector(".case-line")!), "light | dark");
+    assert.equal(read(mode.querySelector(".declaration-header > .case-line")!), "light | dark");
+    assert.equal(mode.querySelector(".group-label"), null);
     const state = rendered(element, "LoadState");
     assert.equal(state.querySelector(".case-line"), null, "a case with fields keeps a row to each case");
     assert.equal(read(rendered(element, "Toggle.on")), "on boolean = true");
+    assert.equal(rendered(element, "Toggle").querySelector(".group-label"), null, "a record's fields need no heading");
   });
 
   it("reads a record type as its fields", async () => {
@@ -341,12 +343,27 @@ describe("declarations, references and comments", () => {
     assert.ok(note.classList.contains("comment"));
   });
 
-  it("heads a function's parts Takes and Returns, a typed value's Type and Is, and an alias's Is", async () => {
+  it("reads a declaration's type in its header, and heads its groups only when it has several", async () => {
     const element = show(await fixture("headings"));
     const headings = (key: string): string[] => Array.from(rendered(element, key).querySelectorAll(".group-label"), read);
+    const header = (key: string): string => {
+      const copy = rendered(element, key).querySelector(".declaration-header")!.cloneNode(true) as HTMLElement;
+      copy.querySelector(".source-toggle")?.remove();
+      return read(copy);
+    };
+    assert.equal(header("total"), "Function total → int");
     assert.deepEqual(headings("total"), ["Takes", "Returns"]);
-    assert.deepEqual(headings("answer"), ["Type", "Is"]);
-    assert.deepEqual(headings("Count"), ["Is"]);
+    assert.equal(header("answer"), "Value answer : int");
+    assert.deepEqual(headings("answer"), [], "a lone group needs no heading");
+    assert.equal(header("Count"), "Type Count = int");
+    assert.equal(rendered(element, "Count").querySelector(".declaration-body"), null, "an alias is its header");
+  });
+
+  it("reads a declaration's doc comment inside its card", async () => {
+    const element = show(await fixture("user"));
+    const doc = rendered(element, "User").querySelector(":scope > .doc");
+    assert.equal(read(doc!), "A person the survey is about.");
+    assert.equal(root(element).querySelector(".document > .doc"), null);
   });
 
   it("reads a comment written over several lines as one note", async () => {
@@ -517,10 +534,12 @@ describe("the keyboard", () => {
     assert.equal(body.tabIndex, 0, "the reading takes focus");
     key(body, "ArrowDown");
     key(body, "ArrowDown");
+    key(body, "ArrowDown");
     key(body, "ArrowUp");
     const order = Array.from(root(element).querySelectorAll<HTMLElement>("[data-key]")).map((run) => run.dataset["key"]!);
-    assert.deepEqual(events, [order[0], order[1], order[0]]);
-    assert.equal(element.selection, order[0]);
+    // The type's card comes first, and its doc comment is the first thing in it.
+    assert.deepEqual(events, [order[0], order[1], order[2], order[1]]);
+    assert.equal(element.selection, order[1]);
     assert.equal(body.getAttribute("role"), "region");
     const announcer = root(element).querySelector('[role="status"]')!;
     assert.equal(announcer.getAttribute("aria-live"), "polite");

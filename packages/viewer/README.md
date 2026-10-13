@@ -123,20 +123,23 @@ a value it shows.
   a convention (`and`, `or`, `not`, "otherwise" for `??`, "is given" for `x?`, "through" for `..=`).
   String concatenation reads as a sentence with its slots marked.
 - **Handlers** read "When integer answered →" with one "set … to …" line per state change.
-- **Declarations** read as headed sections (Type, Action, Component, Function, Value) with
-  their members, and doc comments as prose. A member's default reads as it is written
-  (`required boolean = true`), and a union whose cases carry no fields reads on one line
-  (`light | dark`). A function reads "Takes" over its parameters and
-  "Returns" over what it gives back. Imports fold into a strip at the top. Comments read as
+- **Declarations** read as cards (Type, Action, Component, Function, Value) with their members,
+  and doc comments as prose inside the card they are written over. What fits beside the name reads
+  in the header, as in the source: an alias's type (`Type Swatch = string`), a union whose cases
+  carry no fields (`Type Size = small | medium | large`), a function's return type after an arrow
+  and a value's type after a colon. A member's default reads as it is written
+  (`required boolean = true`). Groups are headed ("Takes", "Returns", "State", "Emits") only when
+  a declaration has more than one. Imports fold into a strip at the top. Comments read as
   notes where they stand, and line comments standing alone on consecutive lines read as one note.
 - **Hover** on a property's name shows its type, doc and default, and every case of a union with the
   current one marked; hover on a handler shows the action it answers and what that carries; hover
   on a reference or a kind shows the declaration. All of it comes from the
   tree's declaration table, so it needs no language service.
 - **References** to a value declared in the document expand in place to that value.
-- **Viewer declarations**, `viewer Choice = <ElementViewer … />`, read as a strip headed "viewer
-  Choice" that stays folded until a reader opens it. Open, each element is one line: its name and
-  its attributes, with a `PropertyViewer` or `CaseViewer` led by what it is `of`.
+- **Viewer declarations**, `viewer Choice = <ElementViewer … />`: each run of them folds into one
+  strip headed "Viewers · 3" with their names, which stays folded until a reader opens it. Open,
+  each reads "viewer Choice" over one line per element: its name and its attributes, with a
+  `PropertyViewer` or `CaseViewer` led by what it is `of`.
 
 ## Viewer declarations
 

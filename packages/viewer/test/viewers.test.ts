@@ -232,13 +232,15 @@ describe("viewers", () => {
     }
   });
 
-  it("reads a viewer declaration as a folded strip, with a line to an element once open", async () => {
+  it("folds viewer declarations into a strip that names them, with a line to an element once open", async () => {
     const element = show(await fixture("viewerDeclaration"));
     const strip = root(element).querySelector<HTMLDetailsElement>("details.viewer-strip");
     assert.ok(strip, "a viewer declaration is shown");
     assert.equal(strip.open, false, "the strip stays folded until a reader opens it");
-    assert.equal(read(strip.querySelector("summary")), "viewer Choice");
-    const top = strip.querySelector<HTMLElement>(".details-body > .viewer-element")!;
+    assert.equal(read(strip.querySelector("summary")), "Viewers · 1 Choice");
+    const block = strip.querySelector<HTMLElement>(".details-body > .viewer-block")!;
+    assert.equal(read(block.querySelector(".viewer-header")), "viewer Choice");
+    const top = block.querySelector<HTMLElement>(":scope > .viewer-element")!;
     const line = top.querySelector(":scope > .viewer-line")!;
     assert.equal(read(line.querySelector(".viewer-kind")), "ElementViewer");
     const title = Array.from(line.querySelectorAll(".viewer-attribute")).find(
