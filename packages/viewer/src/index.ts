@@ -176,6 +176,10 @@ export class NxViewerElement extends ElementBase {
 
     close.addEventListener("click", () => this.#closeSource());
     this.#body.addEventListener("click", (event) => this.#onClick(event));
+    // A focus ring is for a reader on the keyboard; after a click, the selection's outline says
+    // where they are.
+    this.#body.addEventListener("pointerdown", () => this.#body.classList.add("by-pointer"));
+    this.#frame.addEventListener("keydown", () => this.#body.classList.remove("by-pointer"));
     this.#frame.addEventListener("keydown", (event) => this.#onKeyDown(event));
     this.#body.addEventListener("pointerover", (event) => this.#onPointerOver(event));
     this.#body.addEventListener("pointerleave", () => this.#setHovered(undefined));

@@ -64,6 +64,7 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 .n { border-radius: 4px; }
 .announcer { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .body:focus-visible { outline: 2px solid var(--blue-soft); outline-offset: 4px; border-radius: 4px; }
+.body.by-pointer:focus-visible, .body.by-pointer .card:focus-visible { outline: none; }
 .n.selected { outline: 2px solid var(--blue); outline-offset: 2px; }
 .n.hovered { background: var(--blue-soft); }
 
@@ -136,8 +137,12 @@ code, .type { font-family: var(--mono); font-size: 12.5px; }
 .row-value { min-width: 0; overflow-wrap: anywhere; }
 .row.ghost > .label, .ghost-value { color: var(--ink-3); font-style: italic; }
 .ghost-value { font-family: var(--mono); font-size: 12.5px; margin-right: 6px; }
-.item-list { display: flex; flex-direction: column; gap: 6px; }
-.content { display: flex; flex-direction: column; gap: 6px; }
+/* Elements that follow one another share one column for their rows' names, so their values line up. */
+.item-list, .content, .sequence.blocks { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 14px; }
+.item-list > *, .content > *, .sequence.blocks > * { grid-column: 1 / -1; }
+.item-list > .card, .content > .card, .sequence.blocks > .card { display: grid; grid-template-columns: subgrid; row-gap: 4px; }
+.item-list > .card > *, .content > .card > *, .sequence.blocks > .card > * { grid-column: 1 / -1; }
+.item-list > .card > .rows, .content > .card > .rows, .sequence.blocks > .card > .rows { grid-template-columns: subgrid; }
 .card.inline-layout { display: inline-flex; vertical-align: baseline; padding: 1px 8px; gap: 4px; border: 1px solid var(--rule); border-radius: 6px; }
 .part.title { font-weight: 600; }
 .part.subtitle { color: var(--ink-2); font-size: 13px; }
@@ -168,7 +173,7 @@ code, .type { font-family: var(--mono); font-size: 12.5px; }
 .qualifier { color: var(--ink-3); }
 .sequence { display: inline; }
 .sequence > .reference { display: inline-block; vertical-align: top; }
-.sequence.blocks { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
+.sequence.blocks { align-items: stretch; }
 
 .reference .ref { font-family: var(--mono); font-size: 12.5px; color: var(--blue); border-bottom: 1px dashed var(--blue); cursor: pointer; }
 .expand { margin-left: 4px; padding: 0 4px; font-size: 11px; line-height: 1.3; }
