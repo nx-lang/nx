@@ -1,0 +1,216 @@
+// An orders dashboard for a small shop, the kind of page a React component tree holds: data
+// records, functions that derive what to show from them, an element-style function and a
+// component for the repeated pieces, and a dashboard component that keeps which order is open.
+
+type Tone = neutral | info | success | warning | danger
+type Align = start | center | end
+type Money = float64
+
+abstract external component <View />
+
+external component <Screen extends View title:string content children:View+ />
+external component <Grid extends View columns:int = 2 content children:View+ />
+external component <Card extends View title?:string footer?:string content children:View+ />
+external component <Stack extends View content children:View+ />
+external component <Row extends View align:Align = start content children:View+ />
+external component <Heading extends View level:int = 2 content text:string />
+external component <Text extends View muted:boolean = false content text:string />
+external component <Stat extends View label:string value:string delta?:string tone:Tone = neutral />
+external component <Badge extends View label:string tone:Tone = neutral />
+external component <Link extends View label:string href:string />
+external component <EmptyState extends View title:string body?:string />
+external component <Button extends View label:string primary:boolean = false emits { Tapped { } } />
+
+type Customer = {
+  name:string
+  email:string
+  city:string
+  returning:boolean = false
+}
+
+type LineItem = {
+  product:string
+  quantity:int = 1
+  unitPrice:Money
+}
+
+/// Where an order is. A shipped or cancelled order carries what a person asks about next.
+type OrderStatus =
+  | pending
+  | paid
+  | shipped { carrier:string tracking:string }
+  | delivered
+  | cancelled { reason:string }
+
+type Order = {
+  id:string
+  placed:string
+  customer:Customer
+  items:LineItem+
+  shipping:Money = 0.0
+  status:OrderStatus
+  note?:string
+}
+
+action OrderOpened = { id:string }
+
+let ada = <Customer name="Ada Lovelace" email="ada@example.com" city="London" returning={true} />
+let grace = <Customer name="Grace Hopper" email="grace@example.com" city="Arlington" />
+let barbara = <Customer name="Barbara Liskov" email="barbara@example.com" city="Boston" returning={true} />
+
+let orders:Order+ = {
+  <Order
+    id="1042"
+    placed="12 Oct"
+    customer={ada}
+    items={
+      <LineItem product="Block plane" unitPrice=89.0 />
+      <LineItem product="Honing guide" unitPrice=24.5 />
+      <LineItem product="Sandpaper, 220 grit" quantity=3 unitPrice=6.0 />
+    }
+    shipping=7.5
+    status=<OrderStatus.shipped carrier="Royal Mail" tracking="RM 4410 2291 7GB" />
+    note="Leave with the neighbour at number 12."
+  />
+  <Order
+    id="1043"
+    placed="12 Oct"
+    customer={grace}
+    items={<LineItem product="Marking gauge" unitPrice=32.0 />}
+    status={OrderStatus.paid}
+  />
+  <Order
+    id="1044"
+    placed="13 Oct"
+    customer={barbara}
+    items={
+      <LineItem product="Bench chisel set" unitPrice=120.0 />
+      <LineItem product="Mallet" unitPrice=28.0 />
+    }
+    shipping=9.0
+    status=<OrderStatus.cancelled reason="Paid twice by mistake" />
+  />
+  <Order
+    id="1045"
+    placed="13 Oct"
+    customer={ada}
+    items={<LineItem product="Dovetail saw" quantity=2 unitPrice=64.0 />}
+    shipping=7.5
+    status={OrderStatus.pending}
+  />
+}
+
+let money(amount:Money): string = { "$" + amount }
+
+let lineTotal(item:LineItem): Money = { item.quantity * item.unitPrice }
+
+let statusLabel(status:OrderStatus): string = {
+  if status is {
+    OrderStatus.pending => "Awaiting payment"
+    OrderStatus.paid => "Ready to ship"
+    OrderStatus.shipped => "Shipped with " + status.carrier
+    OrderStatus.delivered => "Delivered"
+    OrderStatus.cancelled => "Cancelled"
+  }
+}
+
+let statusTone(status:OrderStatus): Tone = {
+  if status is {
+    OrderStatus.pending => Tone.warning
+    OrderStatus.paid => Tone.info
+    OrderStatus.shipped => Tone.info
+    OrderStatus.delivered => Tone.success
+    OrderStatus.cancelled => Tone.danger
+  }
+}
+
+/// What to do next about an order, or nothing when it needs no one.
+let nextStep(status:OrderStatus): string? = {
+  if status is {
+    OrderStatus.pending => "Send a payment reminder"
+    OrderStatus.paid => "Print the label and pack it"
+    OrderStatus.cancelled => "Refund: " + status.reason
+    else => {}
+  }
+}
+
+/// The tracking number of an order on its way.
+let tracking(status:OrderStatus): string? = {
+  if status is {
+    OrderStatus.shipped => status.tracking
+    else => {}
+  }
+}
+
+let <CustomerLine customer:Customer /> =
+  <Row align=center>
+    <Text>{customer.name}</Text>
+    <Text muted={true}>{customer.city}</Text>
+    if customer.returning {
+      <Badge label="Returning" tone=success />
+    }
+  </Row>
+
+component <OrderCard extends View order:Order open:boolean = false emits { OrderOpened } /> = {
+  <Card title={"Order " + order.id} footer={"Placed " + order.placed}>
+    <Row align=center>
+      <CustomerLine customer={order.customer} />
+      <Badge label={statusLabel(order.status)} tone={statusTone(order.status)} />
+    </Row>
+    if open {
+      <Stack>
+        for item in order.items {
+          <Row>
+            <Text>{item.quantity} × {item.product}</Text>
+            <Text muted={true}>{money(lineTotal(item))}</Text>
+          </Row>
+        }
+        if order.shipping > 0.0 {
+          <Row>
+            <Text>Shipping</Text>
+            <Text muted={true}>{money(order.shipping)}</Text>
+          </Row>
+        }
+      </Stack>
+      if order.note? {
+        <Text muted={true}>Note: {order.note}</Text>
+      }
+      if tracking(order.status)? {
+        <Link label={"Track " + (tracking(order.status) ?? "")} href={"https://example.com/track/" + order.id} />
+      }
+    }
+    if nextStep(order.status)? {
+      <Text>Next: {nextStep(order.status) ?? ""}</Text>
+    }
+    <Button label={if open { "Hide details" } else { "Show details" }} onTapped=<OrderOpened id={order.id} /> />
+  </Card>
+}
+
+component <Dashboard orders?:Order+ /> = {
+  state { openId:string = "1042" }
+
+  <Screen title="Orders">
+    <Grid columns=3>
+      <Stat label="This week" value="4 orders" delta="+1 on last week" tone=success />
+      <Stat label="To ship" value="1" tone=info />
+      <Stat label="Needs attention" value="2" delta="1 unpaid, 1 refund" tone=warning />
+    </Grid>
+
+    <Heading>Recent orders</Heading>
+    if orders? {
+      <Grid>
+        for order in orders {
+          <OrderCard
+            order={order}
+            open={order.id == openId}
+            onOrderOpened=<State.Update openId={if action.id == openId { "" } else { action.id }} />
+          />
+        }
+      </Grid>
+    } else {
+      <EmptyState title="No orders yet" body="Orders appear here as soon as someone checks out." />
+    }
+  </Screen>
+}
+
+<Dashboard orders={orders} />

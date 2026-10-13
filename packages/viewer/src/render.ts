@@ -817,7 +817,7 @@ const renderElement: Renderer = (context, at, options) => {
     if (unit !== undefined && !placed.has(unit)) {
       appendAll(context, container, unit);
       placed.add(unit);
-    } else if ((context.ghosts || saysHowToRead(propertyViewer)) && property?.default !== undefined && !set.has(name)) {
+    } else if (property?.default !== undefined && !set.has(name) && (context.ghosts || saysHowToRead(propertyViewer, property.default))) {
       container.append(ghostRow(document, property, propertyViewer));
     }
   }
@@ -946,14 +946,15 @@ function textTypeOf(context: RenderContext, attribute: number): string | undefin
 }
 
 /**
- * Whether a viewer says how its property reads or where it goes, which marks the property as one a
- * reader should see even at its default. A format does not count: a property takes one from the
- * viewer of its type's alias without being named itself.
+ * Whether a viewer says how its property reads at `value`, its default, or where it goes, which
+ * marks the property as one a reader should see even when it is left out. A phrase for the other
+ * value does not count, and neither does a format: a property takes one from the viewer of its
+ * type's alias without being named itself.
  */
-function saysHowToRead(viewer: SourcePropertyViewer | undefined): boolean {
+function saysHowToRead(viewer: SourcePropertyViewer | undefined, value: string): boolean {
   return (
     viewer !== undefined &&
-    (viewer.label !== undefined || viewer.whenTrue !== undefined || viewer.whenFalse !== undefined || viewer.place === "details")
+    (viewer.label !== undefined || phraseFor(viewer, value) !== undefined || viewer.place === "details")
   );
 }
 

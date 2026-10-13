@@ -90,7 +90,10 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 .declaration-header { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
 .declaration-kind { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3); }
 .declaration-name { font-weight: 600; font-family: var(--mono); font-size: 13px; }
-.declaration-header .source-toggle, .card-header .source-toggle { margin-left: auto; opacity: 0; transition: opacity 0.1s; }
+/* The Source button keeps the header's top right corner, so a long title wraps beside it and the
+   hidden button never takes a line of its own. */
+.declaration-header, .card-header { position: relative; padding-right: 60px; }
+.declaration-header .source-toggle, .card-header .source-toggle { position: absolute; top: 0; right: 0; opacity: 0; transition: opacity 0.1s; }
 /* A Source button shows for the innermost card or declaration under the pointer, for the selected
    one, and when it has focus. Where nothing hovers, as on a touch screen, every button shows. */
 .declaration:hover:not(:has(.card:hover)) > .declaration-header > .source-toggle,
