@@ -195,6 +195,14 @@ code, .type { font-family: var(--mono); font-size: 12.5px; }
 
 .reference .ref { font-family: var(--mono); font-size: 12.5px; color: var(--blue); border-bottom: 1px dashed var(--blue); cursor: pointer; }
 .expand { margin-left: 4px; padding: 0 4px; font-size: 11px; line-height: 1.3; }
+.inherited-toggle { padding: 0 4px; font-size: 11px; line-height: 1.3; }
+/* What a declaration inherits, folded until its toggle is pressed: the same columns as its own
+   members, a little quieter, since none of it is written here. */
+.inherited { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; row-gap: 1px; padding-bottom: 4px; }
+.inherited[hidden] { display: none; }
+.inherited > :not(.member) { grid-column: 1 / -1; }
+.inherited-member > .member-name { font-weight: 400; color: var(--ink-2); }
+.inherited-default { font-family: var(--mono); font-size: 12.5px; }
 .expansion { display: block; margin: 6px 0 2px; padding-left: 10px; border-left: 2px solid var(--blue-soft); }
 .member-access, .call, .binding { font-family: var(--mono); font-size: 12.5px; }
 .member-access .member-name { font-weight: 400; }

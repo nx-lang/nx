@@ -93,5 +93,8 @@
   },
   "tasks": {
     "source": "type Task = {\n  title:string\n  priority:int = 2\n  notes?:string\n}\n\nlet root(): Task+ = {\n  <Task title=\"Ship the site\" priority=1 />\n  <Task title=\"Plan the next release, and then write down every step of it for the whole team\" notes=\"After the site ships\" />\n}\n"
+  },
+  "bases": {
+    "source": "abstract external component <View />\nexternal component <Control extends View disabled:boolean = false help?:string />\nexternal component <Button extends Control label:string />\nexternal component <Divider extends View />\n"
   }
 }

@@ -6,6 +6,7 @@
  * for property order, defaults and the viewers it carries.
  */
 import type {
+  SourceDeclaration,
   SourceNode,
   SourceProperty,
   SourcePropertyViewer,
@@ -360,6 +361,33 @@ const renderDeclaration: Renderer = (context, at, options) => {
   // "Type Swatch = string", and a function's return type reads after an arrow.
   const types = children.filter((child) => index.slots[child] === "type");
   const headed = new Set<number>();
+  // `component <Button extends Control … />` reads "Component Button extends Control". What it
+  // inherits is not written here, so it stays folded behind a button beside the base's name.
+  const bases = children.filter((child) => index.slots[child] === "extends" && node(context, child).role === "typeReference");
+  const inherited = bases.length > 0 && !context.copy ? inheritedMembers(context, entry) : undefined;
+  if (bases.length > 0) {
+    header.append(" ", span(document, "declaration-sign", "extends"));
+    for (const child of bases) {
+      header.append(" ");
+      appendNode(context, header, child);
+      headed.add(child);
+    }
+    if (inherited !== undefined) {
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "inherited-toggle";
+      toggle.textContent = "▸";
+      toggle.setAttribute("aria-expanded", "false");
+      toggle.setAttribute("aria-label", `Show what ${source.name ?? "it"} inherits`);
+      toggle.title = "Show what it inherits";
+      toggle.addEventListener("click", () => {
+        inherited.hidden = !inherited.hidden;
+        toggle.textContent = inherited.hidden ? "▸" : "▾";
+        toggle.setAttribute("aria-expanded", String(!inherited.hidden));
+      });
+      header.append(toggle);
+    }
+  }
   if (types.length > 0 && types.every((child) => node(context, child).role === "typeReference")) {
     header.append(" ", span(document, "declaration-sign", typeSign(entry?.kind)));
     for (const child of types) {
@@ -430,10 +458,62 @@ const renderDeclaration: Renderer = (context, at, options) => {
   if (body.childElementCount > 0) {
     // `=` ends the header when a definition follows, as it does before one that fits beside the name.
     endHeader(document, header);
+  }
+  if (inherited !== undefined) {
+    body.prepend(inherited);
+  }
+  if (body.childElementCount > 0) {
     section.append(body);
   }
   return section;
 };
+
+/**
+ * The properties a declaration takes from its bases, nearest base first, each under the base that
+ * declares it. They come from the declaration table, since the source does not write them, so they
+ * carry no keys. Nothing when no base declares a property.
+ */
+function inheritedMembers(context: RenderContext, entry: SourceDeclaration | undefined): HTMLElement | undefined {
+  const { document, index } = context;
+  const block = document.createElement("div");
+  block.className = "inherited";
+  block.hidden = true;
+  for (const base of entry?.bases ?? []) {
+    const declared = index.tree.declarations[base];
+    const own = (declared?.properties ?? []).filter((property) => !(property.flags?.includes("inherited") ?? false));
+    if (declared === undefined || own.length === 0) {
+      continue;
+    }
+    block.append(label(document, `From ${declared.name}`));
+    for (const property of own) {
+      const row = document.createElement("div");
+      row.className = "member inherited-member";
+      const rest = span(document, "member-rest", "");
+      if (property.default !== undefined) {
+        // A default reads as a written one does: a string without its quotes.
+        const text = property.default;
+        const value = text.startsWith('"') ? span(document, "value string", unquote(text)) : span(document, "inherited-default", text);
+        rest.append(span(document, "member-default-label", "="), " ", value);
+      } else if (property.flags?.includes("optional") ?? false) {
+        rest.append(span(document, "member-qualifier", "optional"));
+      }
+      if (property.flags?.includes("content") ?? false) {
+        rest.append(rest.childNodes.length > 0 ? " " : "", span(document, "member-qualifier", "content"));
+      }
+      const type = span(document, "member-type", "");
+      const typeName = document.createElement("code");
+      typeName.className = "type";
+      typeName.textContent = property.type;
+      type.append(typeName);
+      row.append(span(document, "member-name", property.name), " ", type, " ", rest);
+      if (property.doc !== undefined && property.doc !== "") {
+        row.title = property.doc;
+      }
+      block.append(row);
+    }
+  }
+  return block.childElementCount > 0 ? block : undefined;
+}
 
 /** Ends a declaration's header with `=`, before its Source button. */
 function endHeader(document: Document, header: HTMLElement): void {

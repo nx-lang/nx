@@ -369,6 +369,30 @@ describe("declarations, references and comments", () => {
     assert.equal(rendered(element, "Count").querySelector(".declaration-body"), null, "an alias is its header");
   });
 
+  it("reads what a declaration extends in its header, with what it inherits folded behind a toggle", async () => {
+    const element = show(await fixture("bases"));
+    const header = (key: string): string => {
+      const copy = rendered(element, key).querySelector(".declaration-header")!.cloneNode(true) as HTMLElement;
+      copy.querySelectorAll("button").forEach((button) => button.remove());
+      return read(copy);
+    };
+    assert.equal(header("Button"), "external Component Button extends Control =");
+    const button = rendered(element, "Button");
+    assert.equal(button.querySelector(".group-label:not(.inherited *)"), null, "the base needs no heading of its own");
+    const inherited = button.querySelector<HTMLElement>(".inherited")!;
+    assert.equal(inherited.hidden, true, "what is inherited stays folded");
+    const toggle = button.querySelector<HTMLButtonElement>(".inherited-toggle")!;
+    toggle.click();
+    assert.equal(inherited.hidden, false);
+    assert.equal(toggle.getAttribute("aria-expanded"), "true");
+    assert.deepEqual(Array.from(inherited.children, read), ["From Control", "disabled boolean = false", "help string optional"]);
+    // A base that declares nothing leaves nothing to unfold, and a declaration with nothing of its own has no body.
+    const divider = rendered(element, "Divider");
+    assert.equal(header("Divider"), "external Component Divider extends View");
+    assert.equal(divider.querySelector(".inherited-toggle"), null);
+    assert.equal(divider.querySelector(".declaration-body"), null);
+  });
+
   it("reads a declaration's doc comment inside its card", async () => {
     const element = show(await fixture("user"));
     const doc = rendered(element, "User").querySelector(":scope > .doc");
