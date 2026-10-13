@@ -378,20 +378,6 @@ nx-viewer.reading-font-fira-hybrid {
   --nx-viewer-indent-font-family: "Fira Mono", ui-monospace, monospace;
 }
 
-/* Input is not bundled: its license allows private use and not redistribution. These two name the
-   fonts as installed on the reader's own computer, and fall back to the system's where they are
-   not. */
-nx-viewer.reading-font-input {
-  --nx-viewer-source-font-family: "Input Sans", "InputSans", "Segoe UI", system-ui, sans-serif;
-  --nx-viewer-indent-font-family: "Input Mono", "InputMono", ui-monospace, Consolas, monospace;
-}
-
-nx-viewer.reading-font-input-hybrid {
-  --nx-viewer-source-font-family: "Input Mono", "InputMono", ui-monospace, Consolas, monospace;
-  --nx-viewer-prose-font-family: "Input Sans", "InputSans", "Segoe UI", system-ui, sans-serif;
-  --nx-viewer-indent-font-family: "Input Mono", "InputMono", ui-monospace, Consolas, monospace;
-}
-
 nx-viewer.reading-font-proportional {
   --nx-viewer-source-font-family: "IBM Plex Sans", system-ui, sans-serif;
   --nx-viewer-indent-font-family: "IBM Plex Mono", ui-monospace, monospace;
