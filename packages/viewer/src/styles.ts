@@ -67,6 +67,7 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 .n.hovered { background: var(--blue-soft); }
 
 .details { border: 1px solid var(--rule); border-radius: 6px; padding: 2px 10px; font-size: 13px; color: var(--ink-2); }
+.document > .details { background: var(--sheet); border-radius: 8px; padding: 4px 12px; }
 .details summary { cursor: pointer; }
 .details-body { display: flex; flex-direction: column; gap: 4px; padding: 4px 0 6px; }
 
@@ -86,12 +87,12 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 .case-bar { color: var(--ink-3); white-space: pre; }
 .value.boolean.written { font-family: var(--mono); font-size: 12.5px; font-weight: 400; }
 
-.declaration { display: flex; flex-direction: column; gap: 6px; }
+.declaration { display: flex; flex-direction: column; gap: 6px; background: var(--sheet); border: 1px solid var(--rule); border-radius: 8px; padding: 10px 12px; }
 .declaration-header { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
 .declaration-kind { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3); }
 .declaration-name { font-weight: 600; font-family: var(--mono); font-size: 13px; }
 .declaration-header .source-toggle, .card-header .source-toggle { margin-left: auto; opacity: 0.7; }
-.declaration-body { display: flex; flex-direction: column; gap: 4px; padding-left: 12px; border-left: 2px solid var(--rule); }
+.declaration-body { display: flex; flex-direction: column; gap: 4px; }
 .declaration-body > .type { align-self: flex-start; }
 .group-label { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
 .member { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
@@ -102,7 +103,12 @@ code, .type { font-family: var(--mono); font-size: 12.5px; }
 .type { color: var(--ink-2); background: var(--code-bg); border: 1px solid var(--rule); border-radius: 4px; padding: 0 4px; }
 .tag { font-size: 11px; color: var(--ink-3); border: 1px solid var(--rule); border-radius: 4px; padding: 0 5px; }
 
-.card { background: var(--sheet); border: 1px solid var(--rule); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.card { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+/* A declaration is the card. An element inside one is a block: a rule over it when it follows
+   another, and a rule beside it when another element holds it. */
+.document > .card { background: var(--sheet); border: 1px solid var(--rule); border-radius: 8px; padding: 10px 12px; }
+.card + .card { border-top: 1px solid var(--rule); border-radius: 0; padding-top: 8px; }
+.card .card { border-top: none; border-left: 2px solid var(--rule); border-radius: 0; padding: 0 0 0 12px; }
 .card:focus-visible { outline: 2px solid var(--blue); }
 .card-header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .kind { font-size: 12px; font-weight: 600; color: var(--blue); background: var(--blue-soft); border-radius: 999px; padding: 1px 10px; }
@@ -120,8 +126,7 @@ code, .type { font-family: var(--mono); font-size: 12.5px; }
 .ghost-value { font-family: var(--mono); font-size: 12.5px; margin-right: 6px; }
 .item-list { display: flex; flex-direction: column; gap: 6px; }
 .content { display: flex; flex-direction: column; gap: 6px; }
-.card.row-layout { padding: 6px 10px; }
-.card.inline-layout { display: inline-flex; vertical-align: baseline; padding: 1px 8px; gap: 4px; border-radius: 6px; }
+.card.inline-layout { display: inline-flex; vertical-align: baseline; padding: 1px 8px; gap: 4px; border: 1px solid var(--rule); border-radius: 6px; }
 .part.title { font-weight: 600; }
 .part.subtitle { color: var(--ink-2); font-size: 13px; }
 .card:not(.row-layout):not(.inline-layout) > .card-header > .part.subtitle { order: 1; flex-basis: 100%; }
