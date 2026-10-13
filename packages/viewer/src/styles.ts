@@ -74,6 +74,8 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
   margin: 0;
   padding: 4px 2px 12px;
   font-family: var(--nx-viewer-source-font-family, var(--mono));
+  font-variation-settings: var(--nx-viewer-source-font-variation, normal);
+  font-feature-settings: var(--nx-viewer-source-font-features, normal);
   font-size: var(--nx-viewer-source-font-size, 13px);
   line-height: var(--nx-viewer-source-line-height, 18px);
   white-space: pre;
@@ -83,8 +85,17 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 .source .t { color: light-dark(var(--l, inherit), var(--d, inherit)); }
 .source .n { border-radius: 2px; }
 /* Strings, comments and text may be set in another font, and indentation keeps a fixed width. */
-.source .prose { font-family: var(--nx-viewer-prose-font-family, inherit); }
-.source .indent { font-family: var(--nx-viewer-indent-font-family, var(--mono)); }
+/* A span in another font takes no line height of its own, so every line keeps the height the
+   text's own font gives it, whichever fonts meet on it. */
+.source .prose, .source .indent { line-height: 0; }
+.source .prose {
+  font-family: var(--nx-viewer-prose-font-family, inherit);
+  font-variation-settings: var(--nx-viewer-prose-font-variation, inherit);
+}
+.source .indent {
+  font-family: var(--nx-viewer-indent-font-family, var(--mono));
+  font-variation-settings: var(--nx-viewer-indent-font-variation, normal);
+}
 .source .n.selected { outline: none; background: var(--nx-viewer-selection, light-dark(#0969da1f, #388bfd33)); }
 .source .n.hovered { background: none; }
 

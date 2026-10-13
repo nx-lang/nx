@@ -307,6 +307,43 @@ nx-viewer.reading-font-proportional-system {
   --nx-viewer-source-font-family: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
 }
 
+nx-viewer.reading-font-verdana {
+  --nx-viewer-source-font-family: Verdana, "DejaVu Sans", sans-serif;
+}
+
+/* Inter, with its slashed zero and the alternates that tell I, l and 1 apart. */
+nx-viewer.reading-font-inter {
+  --nx-viewer-source-font-family: "Inter Variable", system-ui, sans-serif;
+  --nx-viewer-source-font-features: "zero", "ss02";
+}
+
+nx-viewer.reading-font-atkinson {
+  --nx-viewer-source-font-family: "Atkinson Hyperlegible Next", system-ui, sans-serif;
+  --nx-viewer-indent-font-family: "Atkinson Hyperlegible Mono", ui-monospace, monospace;
+}
+
+nx-viewer.reading-font-atkinson-hybrid {
+  --nx-viewer-source-font-family: "Atkinson Hyperlegible Mono", ui-monospace, monospace;
+  --nx-viewer-prose-font-family: "Atkinson Hyperlegible Next", system-ui, sans-serif;
+  --nx-viewer-indent-font-family: "Atkinson Hyperlegible Mono", ui-monospace, monospace;
+}
+
+/* Recursive is one face whose MONO axis runs from proportional, 0, to monospace, 1. */
+nx-viewer.reading-font-recursive {
+  --nx-viewer-source-font-family: "Recursive Variable", system-ui, sans-serif;
+  --nx-viewer-source-font-variation: "MONO" 0, "CASL" 0;
+  --nx-viewer-indent-font-family: "Recursive Variable", ui-monospace, monospace;
+  --nx-viewer-indent-font-variation: "MONO" 1, "CASL" 0;
+}
+
+nx-viewer.reading-font-recursive-hybrid {
+  --nx-viewer-source-font-family: "Recursive Variable", ui-monospace, monospace;
+  --nx-viewer-source-font-variation: "MONO" 1, "CASL" 0;
+  --nx-viewer-prose-font-variation: "MONO" 0, "CASL" 0;
+  --nx-viewer-indent-font-family: "Recursive Variable", ui-monospace, monospace;
+  --nx-viewer-indent-font-variation: "MONO" 1, "CASL" 0;
+}
+
 nx-viewer.reading-font-proportional {
   --nx-viewer-source-font-family: "IBM Plex Sans", system-ui, sans-serif;
   --nx-viewer-indent-font-family: "IBM Plex Mono", ui-monospace, monospace;

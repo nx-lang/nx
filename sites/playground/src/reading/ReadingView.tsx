@@ -14,6 +14,16 @@ import "@fontsource/ibm-plex-mono/latin-700.css";
 import "@fontsource/ia-writer-quattro/latin-400.css";
 import "@fontsource/ia-writer-quattro/latin-400-italic.css";
 import "@fontsource/ia-writer-quattro/latin-700.css";
+import "@fontsource/atkinson-hyperlegible-next/latin-400.css";
+import "@fontsource/atkinson-hyperlegible-next/latin-400-italic.css";
+import "@fontsource/atkinson-hyperlegible-next/latin-700.css";
+import "@fontsource/atkinson-hyperlegible-mono/latin-400.css";
+import "@fontsource/atkinson-hyperlegible-mono/latin-400-italic.css";
+import "@fontsource/atkinson-hyperlegible-mono/latin-700.css";
+// Variable faces: Inter by weight, and Recursive with every axis, its monospace one among them.
+import "@fontsource-variable/inter/wght.css";
+import "@fontsource-variable/inter/wght-italic.css";
+import "@fontsource-variable/recursive/full.css";
 
 /**
  * The fonts the source reading can be set in while they are compared: the editor's monospace, the
@@ -21,15 +31,34 @@ import "@fontsource/ia-writer-quattro/latin-700.css";
  * face throughout, a bundled proportional face for prose with its monospace one for code, and a
  * duospace face.
  */
-export const READING_FONTS = ["monospace", "hybrid-system", "proportional-system", "proportional", "hybrid", "duospace"] as const;
+export const READING_FONTS = [
+  "monospace",
+  "hybrid-system",
+  "proportional-system",
+  "verdana",
+  "inter",
+  "atkinson",
+  "recursive",
+  "proportional",
+  "atkinson-hybrid",
+  "recursive-hybrid",
+  "hybrid",
+  "duospace",
+] as const;
 export type ReadingFont = (typeof READING_FONTS)[number];
 export const READING_FONT_LABELS: Record<ReadingFont, string> = {
   monospace: "Monospace (as Edit)",
-  "hybrid-system": "Hybrid, system fonts (Segoe UI prose, Consolas code)",
-  "proportional-system": "Proportional, system font (Segoe UI)",
-  proportional: "Proportional (IBM Plex Sans)",
-  hybrid: "Hybrid (Plex Sans prose, Plex Mono code)",
-  duospace: "Duospace (iA Writer Quattro)",
+  "hybrid-system": "Hybrid, system: Segoe UI prose, Consolas code",
+  "proportional-system": "Proportional, system: Segoe UI",
+  verdana: "Proportional, system: Verdana",
+  inter: "Proportional: Inter",
+  atkinson: "Proportional: Atkinson Hyperlegible",
+  recursive: "Proportional: Recursive",
+  proportional: "Proportional: IBM Plex Sans",
+  "atkinson-hybrid": "Hybrid: Atkinson Hyperlegible, with its Mono for code",
+  "recursive-hybrid": "Hybrid: Recursive, monospace for code",
+  hybrid: "Hybrid: IBM Plex Sans, with Plex Mono for code",
+  duospace: "Duospace: iA Writer Quattro",
 };
 
 export interface ReadingViewProps {
