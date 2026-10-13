@@ -344,6 +344,40 @@ nx-viewer.reading-font-recursive-hybrid {
   --nx-viewer-indent-font-variation: "MONO" 1, "CASL" 0;
 }
 
+/* Three more matched pairs: a proportional face, and the monospace face drawn to go with it. */
+nx-viewer.reading-font-geist {
+  --nx-viewer-source-font-family: "Geist Sans", system-ui, sans-serif;
+  --nx-viewer-indent-font-family: "Geist Mono", ui-monospace, monospace;
+}
+
+nx-viewer.reading-font-geist-hybrid {
+  --nx-viewer-source-font-family: "Geist Mono", ui-monospace, monospace;
+  --nx-viewer-prose-font-family: "Geist Sans", system-ui, sans-serif;
+  --nx-viewer-indent-font-family: "Geist Mono", ui-monospace, monospace;
+}
+
+nx-viewer.reading-font-source {
+  --nx-viewer-source-font-family: "Source Sans 3", system-ui, sans-serif;
+  --nx-viewer-indent-font-family: "Source Code Pro", ui-monospace, monospace;
+}
+
+nx-viewer.reading-font-source-hybrid {
+  --nx-viewer-source-font-family: "Source Code Pro", ui-monospace, monospace;
+  --nx-viewer-prose-font-family: "Source Sans 3", system-ui, sans-serif;
+  --nx-viewer-indent-font-family: "Source Code Pro", ui-monospace, monospace;
+}
+
+nx-viewer.reading-font-fira {
+  --nx-viewer-source-font-family: "Fira Sans", system-ui, sans-serif;
+  --nx-viewer-indent-font-family: "Fira Mono", ui-monospace, monospace;
+}
+
+nx-viewer.reading-font-fira-hybrid {
+  --nx-viewer-source-font-family: "Fira Mono", ui-monospace, monospace;
+  --nx-viewer-prose-font-family: "Fira Sans", system-ui, sans-serif;
+  --nx-viewer-indent-font-family: "Fira Mono", ui-monospace, monospace;
+}
+
 nx-viewer.reading-font-proportional {
   --nx-viewer-source-font-family: "IBM Plex Sans", system-ui, sans-serif;
   --nx-viewer-indent-font-family: "IBM Plex Mono", ui-monospace, monospace;

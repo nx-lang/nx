@@ -20,6 +20,23 @@ import "@fontsource/atkinson-hyperlegible-next/latin-700.css";
 import "@fontsource/atkinson-hyperlegible-mono/latin-400.css";
 import "@fontsource/atkinson-hyperlegible-mono/latin-400-italic.css";
 import "@fontsource/atkinson-hyperlegible-mono/latin-700.css";
+// Geist Sans and Fira Mono have no italic of their own; the browser slants the upright.
+import "@fontsource/geist-sans/latin-400.css";
+import "@fontsource/geist-sans/latin-700.css";
+import "@fontsource/geist-mono/latin-400.css";
+import "@fontsource/geist-mono/latin-400-italic.css";
+import "@fontsource/geist-mono/latin-700.css";
+import "@fontsource/source-sans-3/latin-400.css";
+import "@fontsource/source-sans-3/latin-400-italic.css";
+import "@fontsource/source-sans-3/latin-700.css";
+import "@fontsource/source-code-pro/latin-400.css";
+import "@fontsource/source-code-pro/latin-400-italic.css";
+import "@fontsource/source-code-pro/latin-700.css";
+import "@fontsource/fira-sans/latin-400.css";
+import "@fontsource/fira-sans/latin-400-italic.css";
+import "@fontsource/fira-sans/latin-700.css";
+import "@fontsource/fira-mono/latin-400.css";
+import "@fontsource/fira-mono/latin-700.css";
 // Variable faces: Inter by weight, and Recursive with every axis, its monospace one among them.
 import "@fontsource-variable/inter/wght.css";
 import "@fontsource-variable/inter/wght-italic.css";
@@ -39,9 +56,15 @@ export const READING_FONTS = [
   "inter",
   "atkinson",
   "recursive",
+  "geist",
+  "source",
+  "fira",
   "proportional",
   "atkinson-hybrid",
   "recursive-hybrid",
+  "geist-hybrid",
+  "source-hybrid",
+  "fira-hybrid",
   "hybrid",
   "duospace",
 ] as const;
@@ -54,9 +77,15 @@ export const READING_FONT_LABELS: Record<ReadingFont, string> = {
   inter: "Proportional: Inter",
   atkinson: "Proportional: Atkinson Hyperlegible",
   recursive: "Proportional: Recursive",
+  geist: "Proportional: Geist",
+  source: "Proportional: Source Sans 3",
+  fira: "Proportional: Fira Sans",
   proportional: "Proportional: IBM Plex Sans",
   "atkinson-hybrid": "Hybrid: Atkinson Hyperlegible, with its Mono for code",
   "recursive-hybrid": "Hybrid: Recursive, monospace for code",
+  "geist-hybrid": "Hybrid: Geist, with Geist Mono for code",
+  "source-hybrid": "Hybrid: Source Sans 3, with Source Code Pro for code",
+  "fira-hybrid": "Hybrid: Fira Sans, with Fira Mono for code",
   hybrid: "Hybrid: IBM Plex Sans, with Plex Mono for code",
   duospace: "Duospace: iA Writer Quattro",
 };
