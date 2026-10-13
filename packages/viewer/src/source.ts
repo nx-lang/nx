@@ -112,6 +112,11 @@ export function renderSource(
       element.className = "n";
       element.dataset["role"] = node.role;
       element.dataset["key"] = node.key;
+      // Prose is what a person wrote to be read: a string, a comment, an element's text. A host may
+      // set it in another font than the code around it.
+      if (isProse(node)) {
+        element.classList.add("prose");
+      }
       writeNodes(element, index.children[child] ?? [], start, end);
       parent.append(element);
       at = end;
@@ -121,5 +126,69 @@ export function renderSource(
 
   const top = tree.nodes.flatMap((node, at) => (node.parent === undefined ? [at] : []));
   writeNodes(root, top, 0, text.length);
+  markIndentation(document, root);
   return root;
+}
+
+function isProse(node: SourceNode): boolean {
+  return (
+    node.role === "comment" ||
+    node.role === "docComment" ||
+    node.role === "text" ||
+    (node.role === "literal" && (node.value ?? "").startsWith('"'))
+  );
+}
+
+/**
+ * Wraps each line's leading whitespace in a span, so indentation keeps a fixed width whatever font
+ * the text around it is set in. Nothing is added or removed: the spans hold the spaces themselves.
+ */
+function markIndentation(document: Document, root: HTMLElement): void {
+  const texts: Text[] = [];
+  const collect = (node: Node): void => {
+    for (const child of Array.from(node.childNodes)) {
+      if (child.nodeType === 3) {
+        texts.push(child as Text);
+      } else {
+        collect(child);
+      }
+    }
+  };
+  collect(root);
+  let lineStart = true;
+  for (const node of texts) {
+    const value = node.data;
+    const fragment = document.createDocumentFragment();
+    let at = 0;
+    let changed = false;
+    while (at < value.length) {
+      if (lineStart) {
+        let end = at;
+        while (end < value.length && (value[end] === " " || value[end] === "\t")) {
+          end += 1;
+        }
+        if (end > at) {
+          const indent = document.createElement("span");
+          indent.className = "indent";
+          indent.textContent = value.slice(at, end);
+          fragment.append(indent);
+          changed = true;
+          at = end;
+        }
+        if (at >= value.length) {
+          // The line's indentation may go on in the next piece of text.
+          break;
+        }
+        lineStart = false;
+      }
+      const newline = value.indexOf("\n", at);
+      const end = newline < 0 ? value.length : newline + 1;
+      fragment.append(value.slice(at, end));
+      at = end;
+      lineStart = newline >= 0;
+    }
+    if (changed) {
+      node.replaceWith(fragment);
+    }
+  }
 }

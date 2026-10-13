@@ -73,7 +73,7 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 .source {
   margin: 0;
   padding: 4px 2px 12px;
-  font-family: var(--mono);
+  font-family: var(--nx-viewer-source-font-family, var(--mono));
   font-size: var(--nx-viewer-source-font-size, 13px);
   line-height: var(--nx-viewer-source-line-height, 18px);
   white-space: pre;
@@ -82,6 +82,9 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 :host([stale]) .source { opacity: 0.55; }
 .source .t { color: light-dark(var(--l, inherit), var(--d, inherit)); }
 .source .n { border-radius: 2px; }
+/* Strings, comments and text may be set in another font, and indentation keeps a fixed width. */
+.source .prose { font-family: var(--nx-viewer-prose-font-family, inherit); }
+.source .indent { font-family: var(--nx-viewer-indent-font-family, var(--mono)); }
 .source .n.selected { outline: none; background: var(--nx-viewer-selection, light-dark(#0969da1f, #388bfd33)); }
 .source .n.hovered { background: none; }
 

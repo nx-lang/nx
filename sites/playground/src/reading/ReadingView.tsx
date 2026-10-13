@@ -4,18 +4,44 @@ import { NX_SELECT_EVENT, type NxSelectDetail, type NxViewerElement, type NxView
 import { colorize, loadHighlighter, type NxValueHighlighter } from "@nx-lang/value-view";
 import { EDITOR_THEMES } from "../theme.ts";
 import type { Reading } from "./reading.ts";
+// The faces the source reading is being tried in. Latin only, in the weights and styles a theme asks for.
+import "@fontsource/ibm-plex-sans/latin-400.css";
+import "@fontsource/ibm-plex-sans/latin-400-italic.css";
+import "@fontsource/ibm-plex-sans/latin-700.css";
+import "@fontsource/ibm-plex-mono/latin-400.css";
+import "@fontsource/ibm-plex-mono/latin-400-italic.css";
+import "@fontsource/ibm-plex-mono/latin-700.css";
+import "@fontsource/ia-writer-quattro/latin-400.css";
+import "@fontsource/ia-writer-quattro/latin-400-italic.css";
+import "@fontsource/ia-writer-quattro/latin-700.css";
+
+/**
+ * The fonts the source reading can be set in while they are compared: the editor's monospace, one
+ * proportional face throughout, a proportional face for prose with a monospace one for code, and a
+ * duospace face.
+ */
+export const READING_FONTS = ["monospace", "proportional", "hybrid", "duospace"] as const;
+export type ReadingFont = (typeof READING_FONTS)[number];
+export const READING_FONT_LABELS: Record<ReadingFont, string> = {
+  monospace: "Monospace (as Edit)",
+  proportional: "Proportional (IBM Plex Sans)",
+  hybrid: "Hybrid (Plex Sans prose, Plex Mono code)",
+  duospace: "Duospace (iA Writer Quattro)",
+};
 
 export interface ReadingViewProps {
   readonly reading: Reading;
   /** The source's own text with its nodes marked, or the reading that draws cards. */
   readonly view: NxViewerView;
+  /** The font the source reading is set in. */
+  readonly font: ReadingFont;
   /** The selected node's key. */
   readonly selection: string | undefined;
   readonly onSelect: (key: string) => void;
 }
 
 /** The source pane's Read side: `<nx-viewer>` showing the source tree, or why it cannot. */
-export function ReadingView({ reading, view, selection, onSelect }: ReadingViewProps) {
+export function ReadingView({ reading, view, font, selection, onSelect }: ReadingViewProps) {
   const element = useRef<NxViewerElement>(null);
   // The highlighter the output pane colors with, loaded with the editor's themes, so the source
   // reading takes the colors the editor shows.
@@ -76,7 +102,7 @@ export function ReadingView({ reading, view, selection, onSelect }: ReadingViewP
         </p>
       )}
       {reading.tree === null && reading.failure === null && <p className="reading-message quiet">Reading…</p>}
-      {reading.tree !== null && <nx-viewer ref={element} stale={reading.stale} />}
+      {reading.tree !== null && <nx-viewer ref={element} stale={reading.stale} className={`reading-font-${font}`} />}
     </div>
   );
 }

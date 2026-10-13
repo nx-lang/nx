@@ -294,6 +294,39 @@ nx-viewer {
   padding: 8px 16px;
 }
 
+/* The fonts the source reading is being tried in. Indentation stays in the monospace face that
+   goes with each, so it keeps its width. */
+nx-viewer.reading-font-proportional {
+  --nx-viewer-source-font-family: "IBM Plex Sans", system-ui, sans-serif;
+  --nx-viewer-indent-font-family: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+nx-viewer.reading-font-hybrid {
+  --nx-viewer-source-font-family: "IBM Plex Mono", ui-monospace, monospace;
+  --nx-viewer-prose-font-family: "IBM Plex Sans", system-ui, sans-serif;
+  --nx-viewer-indent-font-family: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+nx-viewer.reading-font-duospace {
+  --nx-viewer-source-font-family: "iA Writer Quattro", ui-monospace, monospace;
+  --nx-viewer-indent-font-family: "iA Writer Quattro", ui-monospace, monospace;
+}
+
+.reading-font {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.reading-font select {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--sl-color-hairline);
+  border-radius: 4px;
+  padding: 0 0.25rem;
+}
+
 .reading-message {
   margin: 1rem;
   font-size: var(--sl-text-sm);

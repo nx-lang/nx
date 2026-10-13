@@ -216,6 +216,20 @@ describe("the source view", () => {
     assert.ok(root(element).querySelector(".declaration"), "the cards come back");
   });
 
+  it("marks prose and indentation, so a host can set each in a font of its own", async () => {
+    const tasks = await fixture("tasks");
+    const element = show(tasks);
+    element.view = "source";
+    const source = root(element).querySelector<HTMLElement>(".source")!;
+    const prose = Array.from(source.querySelectorAll(".prose"), read);
+    assert.ok(prose.includes('"Ship the site"'), "a string is prose");
+    assert.ok(!prose.some((text) => text === "1" || text === "2"), "a number is not");
+    const indents = Array.from(source.querySelectorAll(".indent"), (indent) => indent.textContent!);
+    assert.ok(indents.length > 0 && indents.every((indent) => /^[ \t]+$/.test(indent)), "indentation is whitespace only");
+    assert.equal(indents.join("").length, (tasks.text.match(/^[ \t]+/gm) ?? []).join("").length, "every line's is marked");
+    assert.equal(source.textContent, tasks.text, "marking adds and removes nothing");
+  });
+
   it("keeps offsets right after a character outside the basic plane", async () => {
     const emoji = await fixture("emoji");
     const element = show(emoji);

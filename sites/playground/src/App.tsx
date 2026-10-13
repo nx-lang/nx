@@ -16,7 +16,7 @@ import { SiteHeader } from "./header/SiteHeader";
 import { OutputPane, type OutputView } from "./output/OutputPane";
 import { PreviewView } from "./preview/PreviewView";
 import { usePreview } from "./preview/usePreview.ts";
-import { ReadingView } from "./reading/ReadingView";
+import { READING_FONT_LABELS, READING_FONTS, ReadingView, type ReadingFont } from "./reading/ReadingView";
 import { keyAtOffset, offsetOfKey } from "./reading/selection.ts";
 import { useSourceTree } from "./reading/useSourceTree.ts";
 import { SITE_ROOT } from "./paths.ts";
@@ -167,6 +167,8 @@ export function App() {
 
   const [mode, setMode] = useState<SourceMode>("edit");
   const [selection, setSelection] = useState<string | undefined>(undefined);
+  // The font the source reading is tried in. A comparison, not a setting: it is not kept.
+  const [readingFont, setReadingFont] = useState<ReadingFont>("monospace");
   const reading = useSourceTree(source, mode !== "edit");
   // The editor's cursor, carried into Read until a tree of the same text can say what it is on.
   const cursorToSelect = useRef<number | null>(null);
@@ -308,6 +310,18 @@ export function App() {
             <span>Source</span>
             <span className="pane-note">NX</span>
             <span className="spacer" />
+            {mode === "read" && (
+              <label className="reading-font">
+                Font
+                <select value={readingFont} onChange={(event) => setReadingFont(event.target.value as ReadingFont)}>
+                  {READING_FONTS.map((option) => (
+                    <option key={option} value={option}>
+                      {READING_FONT_LABELS[option]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <span className="mode-switch" role="group" aria-label="Show the source as">
               {(["edit", "read", "cards"] as const).map((option) => (
                 <button
@@ -325,6 +339,7 @@ export function App() {
             <ReadingView
               reading={reading}
               view={mode === "read" ? "source" : "cards"}
+              font={readingFont}
               selection={selection}
               onSelect={setSelection}
             />
