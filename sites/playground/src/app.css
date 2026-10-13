@@ -346,13 +346,13 @@ nx-viewer.reading-font-recursive-hybrid {
 
 /* Three more matched pairs: a proportional face, and the monospace face drawn to go with it. */
 nx-viewer.reading-font-geist {
-  --nx-viewer-source-font-family: "Geist Sans", system-ui, sans-serif;
+  --nx-viewer-source-font-family: "Geist", system-ui, sans-serif;
   --nx-viewer-indent-font-family: "Geist Mono", ui-monospace, monospace;
 }
 
 nx-viewer.reading-font-geist-hybrid {
   --nx-viewer-source-font-family: "Geist Mono", ui-monospace, monospace;
-  --nx-viewer-prose-font-family: "Geist Sans", system-ui, sans-serif;
+  --nx-viewer-prose-font-family: "Geist", system-ui, sans-serif;
   --nx-viewer-indent-font-family: "Geist Mono", ui-monospace, monospace;
 }
 

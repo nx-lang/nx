@@ -20,9 +20,10 @@ import "@fontsource/atkinson-hyperlegible-next/latin-700.css";
 import "@fontsource/atkinson-hyperlegible-mono/latin-400.css";
 import "@fontsource/atkinson-hyperlegible-mono/latin-400-italic.css";
 import "@fontsource/atkinson-hyperlegible-mono/latin-700.css";
-// Geist Sans and Fira Mono have no italic of their own; the browser slants the upright.
-import "@fontsource/geist-sans/latin-400.css";
-import "@fontsource/geist-sans/latin-700.css";
+// Fira Mono has no italic of its own; the browser slants the upright.
+import "@fontsource/geist/latin-400.css";
+import "@fontsource/geist/latin-400-italic.css";
+import "@fontsource/geist/latin-700.css";
 import "@fontsource/geist-mono/latin-400.css";
 import "@fontsource/geist-mono/latin-400-italic.css";
 import "@fontsource/geist-mono/latin-700.css";
