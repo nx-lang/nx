@@ -94,7 +94,7 @@ describe("<nx-viewer>", () => {
     assert.equal(element.getAttribute("stale"), "");
     assert.equal(root(element).querySelector<HTMLElement>(".badge")!.hidden, false);
     rendered(element, "User.id").click();
-    assert.equal(element.selection, "User.id");
+    assert.equal(element.selection, "User");
   });
 
   it("still hovers a stale tree", async () => {
@@ -137,15 +137,6 @@ describe("the reading is lossless", () => {
     const key = keyWhere(emoji, (node) => node.role === "literal" && node.key.endsWith("title.value"));
     element.showSource(key);
     assert.equal(root(element).querySelector(".source-panel pre")!.textContent, '"after"');
-  });
-
-  it("offers the source of whatever is selected", async () => {
-    const element = show(await fixture("operators"));
-    element.selection = "sum.body.left";
-    const button = root(element).querySelector<HTMLButtonElement>(".selection-source")!;
-    assert.equal(button.hidden, false);
-    button.click();
-    assert.equal(root(element).querySelector(".source-panel pre")!.textContent, "(a + b) * 2");
   });
 
   it("shows an unparsed region as its text, marked", async () => {
@@ -470,6 +461,20 @@ describe("selection", () => {
     assert.equal(events[0]!.role, "literal");
     assert.match(root(element).querySelector('[role="status"]')!.textContent ?? "", /^Selected literal: /);
     assert.ok(rendered(element, key).classList.contains("selected"));
+  });
+
+  it("selects the declaration when a member or the header is clicked", async () => {
+    const element = show(await fixture("user"));
+    const events: string[] = [];
+    element.addEventListener(NX_SELECT_EVENT, (event) => events.push((event as CustomEvent<NxSelectDetail>).detail.key));
+    rendered(element, "User.id").click();
+    rendered(element, "User.name").querySelector<HTMLElement>(".type")!.click();
+    rendered(element, "User").querySelector<HTMLElement>(".declaration-name")!.click();
+    assert.deepEqual(events, ["User", "User", "User"]);
+    assert.ok(rendered(element, "User").classList.contains("selected"));
+    // The host can still select a member, as it does for the editor's cursor.
+    element.selection = "User.id";
+    assert.ok(rendered(element, "User.id").classList.contains("selected"));
   });
 
   it("selects from the host without an event, opening what is folded", async () => {

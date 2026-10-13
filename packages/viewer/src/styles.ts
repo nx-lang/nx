@@ -20,6 +20,7 @@ export const styles = `
   --blue-soft: light-dark(#e5ecff, #1f2a4d);
   --gold: light-dark(#8a5a00, #ffb020);
   --gold-soft: light-dark(#fff1d1, #3a2d12);
+  --teal: light-dark(#0b7285, #5fc9d8);
   --green: light-dark(#1d7a4a, #5ccb8f);
   --green-soft: light-dark(#e2f4ea, #173528);
   --red: light-dark(#b42318, #ff8a7a);
@@ -108,7 +109,7 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 .member-default-label { font-size: 12px; color: var(--ink-3); }
 .nested { flex-basis: 100%; padding-left: 14px; display: grid; grid-template-columns: max-content max-content minmax(0, 1fr); gap: 1px 16px; }
 code, .type { font-family: var(--mono); font-size: 12.5px; }
-.type { color: var(--ink-2); }
+.type { color: var(--teal); }
 .tag { font-size: 11px; color: var(--ink-3); border: 1px solid var(--rule); border-radius: 4px; padding: 0 5px; }
 
 .card { display: flex; flex-direction: column; gap: 4px; min-width: 0; }

@@ -110,7 +110,6 @@ export class NxViewerElement extends ElementBase {
   readonly #frame: HTMLDivElement;
   readonly #toolbar: HTMLDivElement;
   readonly #badge: HTMLSpanElement;
-  readonly #selectionSource: HTMLButtonElement;
   readonly #body: HTMLDivElement;
   /** Says what the arrow keys selected, for a screen reader, since focus stays on the body. */
   readonly #announcer: HTMLDivElement;
@@ -136,12 +135,7 @@ export class NxViewerElement extends ElementBase {
     this.#badge.className = "badge";
     this.#badge.textContent = "Out of date";
     this.#badge.hidden = true;
-    this.#selectionSource = document.createElement("button");
-    this.#selectionSource.type = "button";
-    this.#selectionSource.className = "selection-source";
-    this.#selectionSource.textContent = "Source of selection";
-    this.#selectionSource.hidden = true;
-    this.#toolbar.append(this.#badge, this.#selectionSource);
+    this.#toolbar.append(this.#badge);
 
     this.#body = document.createElement("div");
     this.#body.className = "body";
@@ -181,11 +175,6 @@ export class NxViewerElement extends ElementBase {
     shadow.append(style, this.#frame);
 
     close.addEventListener("click", () => this.#closeSource());
-    this.#selectionSource.addEventListener("click", () => {
-      if (this.#selection !== undefined) {
-        this.#openSource(this.#selection, this.#selectionSource);
-      }
-    });
     this.#body.addEventListener("click", (event) => this.#onClick(event));
     this.#frame.addEventListener("keydown", (event) => this.#onKeyDown(event));
     this.#body.addEventListener("pointerover", (event) => this.#onPointerOver(event));
@@ -329,7 +318,6 @@ export class NxViewerElement extends ElementBase {
     this.#body.replaceChildren();
     this.#index = undefined;
     if (tree === undefined) {
-      this.#selectionSource.hidden = true;
       return;
     }
     const index = indexTree(tree, this.#text);
@@ -360,11 +348,9 @@ export class NxViewerElement extends ElementBase {
     const at = key === undefined ? undefined : index?.byKey.get(key);
     if (index === undefined || key === undefined || at === undefined) {
       this.#selection = undefined;
-      this.#selectionSource.hidden = true;
       return;
     }
     this.#selection = key;
-    this.#selectionSource.hidden = false;
     const original = this.#rendered.get(key);
     original?.classList.add("selected");
     original?.setAttribute("aria-current", "true");
@@ -413,7 +399,10 @@ export class NxViewerElement extends ElementBase {
     if (textSelection !== null && textSelection !== undefined && !textSelection.isCollapsed) {
       return;
     }
-    const keyed = target.closest?.(KEYED);
+    const clicked = target.closest?.(KEYED);
+    // A click on a declaration's header or on one of its members chooses the declaration: a field
+    // is read with its record, and the arrow keys still reach it on its own.
+    const keyed = clicked?.closest(".member, .declaration-header") ? clicked.closest(".declaration[data-key]") : clicked;
     if (keyed !== null && keyed !== undefined && this.#body.contains(keyed)) {
       this.#select(keyOf(keyed), true);
     }
