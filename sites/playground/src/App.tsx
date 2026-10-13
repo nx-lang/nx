@@ -167,8 +167,9 @@ export function App() {
 
   const [mode, setMode] = useState<SourceMode>("edit");
   const [selection, setSelection] = useState<string | undefined>(undefined);
-  // The font the source reading is tried in. A comparison, not a setting: it is not kept.
-  const [readingFont, setReadingFont] = useState<ReadingFont>("monospace");
+  // The font the source reading is set in: Geist for prose with Geist Mono for code, unless another
+  // is chosen to compare it with. A comparison, not a setting: the choice is not kept.
+  const [readingFont, setReadingFont] = useState<ReadingFont>("geist-hybrid");
   const reading = useSourceTree(source, mode !== "edit");
   // The editor's cursor, carried into Read until a tree of the same text can say what it is on.
   const cursorToSelect = useRef<number | null>(null);

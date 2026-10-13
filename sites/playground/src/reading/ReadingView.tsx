@@ -84,7 +84,7 @@ export const READING_FONT_LABELS: Record<ReadingFont, string> = {
   proportional: "Proportional: IBM Plex Sans",
   "atkinson-hybrid": "Hybrid: Atkinson Hyperlegible, with its Mono for code",
   "recursive-hybrid": "Hybrid: Recursive, monospace for code",
-  "geist-hybrid": "Hybrid: Geist, with Geist Mono for code",
+  "geist-hybrid": "Hybrid: Geist, with Geist Mono for code (default)",
   "source-hybrid": "Hybrid: Source Sans 3, with Source Code Pro for code",
   "fira-hybrid": "Hybrid: Fira Sans, with Fira Mono for code",
   hybrid: "Hybrid: IBM Plex Sans, with Plex Mono for code",
