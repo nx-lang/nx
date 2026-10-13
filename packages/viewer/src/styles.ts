@@ -109,7 +109,9 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 .group-label { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
 .member { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: baseline; line-height: 1.4; }
 .member.union-case, .member.emit { display: flex; flex-wrap: wrap; gap: 2px 6px; }
-.member.union-case + .member.union-case { margin-top: 3px; }
+/* One-line cases sit as close as a record's rows. A case with rows of fields under it stands a
+   little apart, so its fields read as its own. */
+.member.union-case:has(> .nested:not(.inline-fields)) { margin-block: 3px; }
 .brace { color: var(--ink-3); }
 .nested.inline-fields { flex-basis: auto; padding-left: 0; display: inline-flex; flex-wrap: wrap; gap: 0 16px; }
 .inline-fields > .member { display: inline-flex; gap: 8px; }
