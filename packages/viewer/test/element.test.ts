@@ -177,6 +177,21 @@ describe("elements read as cards", () => {
   });
 });
 
+describe("an element's properties", () => {
+  it("read beside its heading when they are few and short, and as rows when they are not", async () => {
+    const tasks = await fixture("tasks");
+    const element = show(tasks);
+    const [short, long] = Array.from(root(element).querySelectorAll<HTMLElement>(".card"));
+    const inline = short!.querySelector<HTMLElement>(":scope > .card-header > .rows.inline-rows");
+    assert.ok(inline, "two short properties read on the heading's line");
+    assert.equal(read(inline), "title=Ship the site priority=1");
+    assert.equal(short!.querySelector(":scope > .rows"), null);
+    assert.ok(inline.querySelector(".row[data-key]"), "each still carries its key");
+    assert.ok(long!.querySelector(":scope > .rows > .row"), "a long value keeps a row to each property");
+    assert.equal(long!.querySelector(".inline-rows"), null);
+  });
+});
+
 describe("values", () => {
   it("drops a string's quotes and shows a case as a pill", async () => {
     const element = show(await fixture("questionFlow"));

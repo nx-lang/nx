@@ -116,6 +116,9 @@ a value it shows.
   kind's viewer gives its property a label, a phrase or a place; the rest stay out unless `ghosts`
   is set.
   A kind that names no declaration is marked unresolved.
+- **Properties**: an element's properties read beside its heading as `name=value` when there are
+  at most four and they are short, as a tag's attributes do in the source, and as a row each
+  otherwise.
 - **Values**: strings lose their quotes, booleans read ✓ and ✗, union cases read as pills, a list
   on one line reads with commas, and text content whose type is markdown is rendered as markdown.
 - **Logic**: `if` reads "Only when … / Otherwise", a `match` as a table of its arms, a `for` as "For

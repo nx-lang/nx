@@ -90,5 +90,8 @@
   },
   "members": {
     "source": "type ThemeMode = light | dark\n\ntype LoadState =\n  | idle\n  | failed { message:string }\n\ntype Toggle = {\n  on:boolean = true\n  note?:string\n}\n"
+  },
+  "tasks": {
+    "source": "type Task = {\n  title:string\n  priority:int = 2\n  notes?:string\n}\n\nlet root(): Task+ = {\n  <Task title=\"Ship the site\" priority=1 />\n  <Task title=\"Plan the next release, and then write down every step of it for the whole team\" notes=\"After the site ships\" />\n}\n"
   }
 }

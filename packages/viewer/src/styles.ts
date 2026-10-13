@@ -126,6 +126,9 @@ code, .type { font-family: var(--mono); font-size: 12.5px; }
 .card-name { font-family: var(--mono); font-size: 12px; color: var(--ink-3); }
 .rows { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 1px 14px; align-items: baseline; line-height: 1.4; }
 .rows > :not(.row) { grid-column: 1 / -1; }
+.rows.inline-rows { display: inline-flex; flex-wrap: wrap; gap: 0 16px; min-width: 0; }
+.inline-rows > .row { display: inline-flex; align-items: baseline; }
+.equals { color: var(--ink-3); }
 .row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: baseline; }
 .row > .label, .row > .when { color: var(--ink-3); font-size: 13px; }
 .row > .label, .row > .when { cursor: help; }

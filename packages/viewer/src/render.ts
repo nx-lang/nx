@@ -500,7 +500,7 @@ function renderViewerDeclaration(context: RenderContext, at: number, options: Re
 /**
  * An element of a viewer declaration on one line: its name, then each attribute as its name and
  * value, with the elements it holds indented under it. An element that says what it is `of` leads
- * with that in place of its name, so `<PropertyViewer of=id label="Key" />` reads "id label Key".
+ * with that in place of its name, so `<PropertyViewer of=id label="Key" />` reads "id label=Key".
  */
 function renderViewerElement(context: RenderContext, at: number): HTMLElement {
   const { document, index } = context;
@@ -560,7 +560,7 @@ function viewerAttribute(context: RenderContext, at: number, named: boolean): HT
     const name = span(document, "label", source.name ?? "");
     name.dataset["property"] = source.name ?? "";
     name.tabIndex = 0;
-    element.append(name, " ");
+    element.append(name, span(document, "equals", "="));
   }
   // A viewer's own values read as written: the case a `CaseViewer` is `of` is its name, not the
   // label the viewer gives it.
@@ -826,7 +826,23 @@ const renderElement: Renderer = (context, at, options) => {
     }
   }
   if (rows.childElementCount > 0) {
-    card.append(rows);
+    if (readsOnOneLine(rows)) {
+      // A few short properties read beside the heading, as a tag's attributes do in the source.
+      rows.className = "rows inline-rows";
+      for (const row of Array.from(rows.children)) {
+        row.querySelector(":scope > .label")?.after(span(document, "equals", "="));
+        // A space after each, so the line reads as words to a screen reader and when copied.
+        row.after(" ");
+      }
+      const button = header.querySelector(":scope > .source-toggle");
+      if (button === null) {
+        header.append(" ", rows);
+      } else {
+        button.before(" ", rows);
+      }
+    } else {
+      card.append(rows);
+    }
   }
 
   // What the element holds: text, embeds, nested elements and logic, in source order.
@@ -848,6 +864,29 @@ const renderElement: Renderer = (context, at, options) => {
   }
   return card;
 };
+
+/** The most properties, and the most characters of them, that read beside an element's heading. */
+const INLINE_ROWS = 4;
+const INLINE_CHARACTERS = 72;
+
+/**
+ * Whether an element's rows are few and short enough to read on its heading's line: each a name and
+ * a value on one line, with no handler, content, nested element, logic or comment among them.
+ */
+function readsOnOneLine(rows: HTMLElement): boolean {
+  const all = Array.from(rows.children);
+  return (
+    all.length <= INLINE_ROWS &&
+    (rows.textContent ?? "").length <= INLINE_CHARACTERS &&
+    all.every(
+      (row) =>
+        row.classList.contains("row") &&
+        !row.classList.contains("handler") &&
+        !row.classList.contains("content-row") &&
+        row.querySelector(".card, .condition, .match, .loop, .update, .sequence.blocks, .text-body, .comment, .doc, .expansion") === null
+    )
+  );
+}
 
 /** An attribute bound to a part of its card: its value alone, marked with the attribute's key. */
 function renderPart(context: RenderContext, at: number, part: Part): HTMLElement {

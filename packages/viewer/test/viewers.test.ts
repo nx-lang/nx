@@ -225,7 +225,7 @@ describe("viewers", () => {
     const element = show({ ...survey, tree });
     const engineer = cards(element, "Choice")[0]!;
     assert.ok(!engineer.classList.contains("bogus-layout"));
-    assert.ok(engineer.querySelector(":scope > .rows"), "an unknown layout folds nothing away");
+    assert.ok(engineer.querySelector(":scope > .rows, :scope > .card-header > .rows"), "an unknown layout folds nothing away");
     assert.ok(read(engineer).includes("Engineer"));
     for (const value of Array.from(root(element).querySelectorAll(".value.formatted"))) {
       assert.notEqual(read(value), "", "a formatted value keeps its text");
@@ -247,7 +247,7 @@ describe("viewers", () => {
       (attribute) => read(attribute.querySelector(".label")) === "title"
     );
     assert.ok(title, "the line names the title");
-    assert.equal(read(title), "title label");
+    assert.equal(read(title), "title=label");
     assert.equal(strip.querySelector(".row.ghost"), null, "a viewer shows no default nobody wrote");
   });
 });
