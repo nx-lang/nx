@@ -91,16 +91,20 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 :host([attribute-spacing]) .source .attribute-equals { padding: 0 var(--nx-viewer-attribute-equals-space, 0.125ch); }
 :host([attribute-spacing]) .source .attribute-space { font-size: 0; }
 /* Text shown to people, as a \`uitext\` property holds: its words in the prose font and a plain,
-   strong color of their own, since they are content and every hue in a theme means code; its quotes
+   clear color of their own, since they are content and every hue in a theme means code; its quotes
    quiet. The words sit in a box no wider than the room left on their line, so a long string wraps
    and a string of several lines continues under its first. */
 .source .uitext-body {
   font-family: var(--nx-viewer-prose-font-family, inherit);
   font-variation-settings: var(--nx-viewer-prose-font-variation, inherit);
-  color: var(--nx-viewer-uitext-color, light-dark(#111111, #f4f4f4));
+  color: var(--nx-viewer-uitext-color, light-dark(#222222, #e4e4e4));
 }
-.source .uitext-quote { color: var(--nx-viewer-uitext-quote-color, light-dark(#8e8e8e, #808080)); }
-.source .uitext-body > .uitext-quote { font-family: var(--nx-viewer-source-font-family, var(--mono)); }
+/* The quotes are in the words' font, so they sit against the words and not a character away. */
+.source .uitext-quote {
+  font-family: var(--nx-viewer-prose-font-family, inherit);
+  font-variation-settings: var(--nx-viewer-prose-font-variation, inherit);
+  color: var(--nx-viewer-uitext-quote-color, light-dark(#8e8e8e, #808080));
+}
 .source .uitext-block {
   display: inline-flex;
   vertical-align: baseline;
