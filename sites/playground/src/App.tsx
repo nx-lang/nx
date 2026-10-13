@@ -64,7 +64,13 @@ async function openLocation(): Promise<Opened> {
 }
 
 /** Whether the source pane shows the editor or the reading view. */
-type SourceMode = "edit" | "read";
+/**
+ * How the source pane shows the source: the editor, the source reading, or the card reading. The
+ * two readings are kept side by side while the source reading is tried out.
+ */
+type SourceMode = "edit" | "read" | "cards";
+
+const MODE_LABELS: Record<SourceMode, string> = { edit: "Edit", read: "Read", cards: "Cards" };
 
 /** The site: the header, the toolbar, and the source and output panes. */
 export function App() {
@@ -161,7 +167,7 @@ export function App() {
 
   const [mode, setMode] = useState<SourceMode>("edit");
   const [selection, setSelection] = useState<string | undefined>(undefined);
-  const reading = useSourceTree(source, mode === "read");
+  const reading = useSourceTree(source, mode !== "edit");
   // The editor's cursor, carried into Read until a tree of the same text can say what it is on.
   const cursorToSelect = useRef<number | null>(null);
   // The selected node's start, carried into Edit until the editor is shown again.
@@ -172,7 +178,7 @@ export function App() {
   useEffect(() => {
     const offset = cursorToSelect.current;
     const { tree, text } = reading;
-    if (mode !== "read" || offset === null || tree === null || text === null || text !== source) {
+    if (mode === "edit" || offset === null || tree === null || text === null || text !== source) {
       return;
     }
     cursorToSelect.current = null;
@@ -193,7 +199,9 @@ export function App() {
     if (next === mode) {
       return;
     }
-    if (next === "read") {
+    if (next !== "edit" && mode !== "edit") {
+      // From one reading to the other: the selection goes along as it is.
+    } else if (next !== "edit") {
       cursorToSelect.current = editor.current?.cursor() ?? null;
       selectedOnEntry.current = undefined;
     } else {
@@ -301,21 +309,28 @@ export function App() {
             <span className="pane-note">NX</span>
             <span className="spacer" />
             <span className="mode-switch" role="group" aria-label="Show the source as">
-              {(["edit", "read"] as const).map((option) => (
+              {(["edit", "read", "cards"] as const).map((option) => (
                 <button
                   key={option}
                   type="button"
                   aria-pressed={mode === option}
                   onClick={() => switchTo(option)}
                 >
-                  {option === "edit" ? "Edit" : "Read"}
+                  {MODE_LABELS[option]}
                 </button>
               ))}
             </span>
           </div>
-          {mode === "read" && <ReadingView reading={reading} selection={selection} onSelect={setSelection} />}
+          {mode !== "edit" && (
+            <ReadingView
+              reading={reading}
+              view={mode === "read" ? "source" : "cards"}
+              selection={selection}
+              onSelect={setSelection}
+            />
+          )}
           {/* The editor stays mounted while hidden, keeping its undo history and scroll position. */}
-          <div className="editor" hidden={mode === "read"}>
+          <div className="editor" hidden={mode !== "edit"}>
             {source !== null && (
               <NxEditor
                 ref={editor}

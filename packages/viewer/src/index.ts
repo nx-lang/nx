@@ -11,12 +11,14 @@ import type { EditorRange, SourceRole, SourceTree } from "@nx-lang/language-prot
 
 import { caseHover, declarationHover, handlerHover, propertyHover } from "./hover.js";
 import { inWords } from "./words.js";
+import { renderSource, type NxViewerColor } from "./source.js";
 import { renderDocument, renderNode, type RenderContext } from "./render.js";
 import { styles } from "./styles.js";
 import { indexedNodeAtSpan, indexTree, nodeOf, sourceTextOf, type TreeIndex } from "./tree.js";
 
 export { nodeAtSpan } from "./tree.js";
 export { inWords, eventWords } from "./words.js";
+export type { NxViewerColor } from "./source.js";
 
 /** The tag the element is defined under. */
 export const NX_VIEWER_TAG = "nx-viewer";
@@ -35,7 +37,10 @@ export interface NxSelectDetail {
 }
 
 /** The element's properties, which a host may set before the element is defined. */
-const PROPERTIES = ["tree", "text", "ghosts", "images", "selection", "stale"] as const;
+const PROPERTIES = ["tree", "text", "view", "colors", "ghosts", "images", "selection", "stale"] as const;
+
+/** How the element shows a document: as its own text, or as cards. */
+export type NxViewerView = "source" | "cards";
 
 /** How long the pointer rests on a name before its hover shows, in milliseconds. */
 const hoverDelay = 250;
@@ -97,6 +102,8 @@ export class NxViewerElement extends ElementBase {
   #text = "";
   #ghosts = false;
   #images = true;
+  #view: NxViewerView = "cards";
+  #colors: readonly NxViewerColor[] = [];
   #index: TreeIndex | undefined;
   #selection: string | undefined;
   /** Each key's original rendering. */
@@ -238,6 +245,35 @@ export class NxViewerElement extends ElementBase {
     return this.#images;
   }
 
+  /**
+   * How the document is shown: `cards`, the reading that draws declarations and elements as cards,
+   * or `source`, the document's own text with every node marked. `cards` unless set `source`.
+   */
+  get view(): NxViewerView {
+    return this.#view;
+  }
+
+  set view(view: NxViewerView) {
+    this.#view = view === "source" ? "source" : "cards";
+    this.#render();
+  }
+
+  /**
+   * The colors of the source view, as ranges over `text` in UTF-16 offsets, in text order. A host
+   * supplies them from the highlighter and themes it colors its editor with, so the two agree.
+   * Without them the text reads in the element's foreground color.
+   */
+  get colors(): readonly NxViewerColor[] {
+    return this.#colors;
+  }
+
+  set colors(colors: readonly NxViewerColor[]) {
+    this.#colors = colors ?? [];
+    if (this.#view === "source") {
+      this.#render();
+    }
+  }
+
   set images(images: boolean) {
     this.#images = images !== false;
     this.#render();
@@ -333,7 +369,9 @@ export class NxViewerElement extends ElementBase {
       copy: false,
       images: this.#images,
     };
-    this.#body.append(renderDocument(context));
+    this.#body.append(
+      this.#view === "source" ? renderSource(this.ownerDocument, index, this.#colors) : renderDocument(context)
+    );
     for (const element of this.#body.querySelectorAll<HTMLElement>("[data-key]")) {
       this.#rendered.set(element.dataset["key"]!, element);
     }

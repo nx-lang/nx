@@ -177,6 +177,53 @@ describe("elements read as cards", () => {
   });
 });
 
+describe("the source view", () => {
+  it("shows the document's own text, with every node marked and none written twice", async () => {
+    const tasks = await fixture("tasks");
+    const element = show(tasks);
+    element.view = "source";
+    const source = root(element).querySelector<HTMLElement>("pre.source")!;
+    assert.equal(source.textContent, tasks.text, "the text is the source, character for character");
+    assert.equal(root(element).querySelector(".declaration, .card"), null, "there are no cards");
+    const keys = Array.from(source.querySelectorAll<HTMLElement>("[data-key]"), (node) => node.dataset["key"]!);
+    assert.equal(new Set(keys).size, keys.length);
+    assert.deepEqual([...keys].sort(), tasks.tree.nodes.map((node) => node.key).sort(), "every node has its span");
+    const type = rendered(element, "Task");
+    assert.ok(type.textContent!.startsWith("type Task = {"));
+  });
+
+  it("colors the text by the ranges its host gives, and selects a node without an outline", async () => {
+    const tasks = await fixture("tasks");
+    const element = show(tasks);
+    const start = tasks.text.indexOf("Task");
+    Object.assign(element, {
+      view: "source",
+      colors: [{ start, end: start + 4, light: "#111111", dark: "#eeeeee", fontStyle: 2 }],
+    });
+    const colored = root(element).querySelector<HTMLElement>(".source .t")!;
+    assert.equal(colored.textContent, "Task");
+    assert.equal(colored.style.getPropertyValue("--l"), "#111111");
+    assert.equal(colored.style.getPropertyValue("--d"), "#eeeeee");
+    assert.equal(colored.style.fontWeight, "bold");
+    assert.equal(root(element).querySelector(".source")!.textContent, tasks.text, "coloring changes no text");
+
+    const events: string[] = [];
+    element.addEventListener(NX_SELECT_EVENT, (event) => events.push((event as CustomEvent<NxSelectDetail>).detail.key));
+    rendered(element, "Task.title").click();
+    assert.deepEqual(events, ["Task.title"], "a field is selected on its own in the source view");
+    assert.ok(rendered(element, "Task.title").classList.contains("selected"));
+    element.view = "cards";
+    assert.ok(root(element).querySelector(".declaration"), "the cards come back");
+  });
+
+  it("keeps offsets right after a character outside the basic plane", async () => {
+    const emoji = await fixture("emoji");
+    const element = show(emoji);
+    element.view = "source";
+    assert.equal(root(element).querySelector(".source")!.textContent, emoji.text);
+  });
+});
+
 describe("an element's properties", () => {
   it("read beside its heading when they are few and short, and as rows when they are not", async () => {
     const tasks = await fixture("tasks");

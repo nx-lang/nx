@@ -85,6 +85,8 @@ declare module "react" {
 | ----------- | ---------------------- | ---------------------------------------------------------------------------- |
 | `tree`      | property               | The `SourceTree` to show                                                     |
 | `text`      | property               | The document's text, which a node's source is sliced from by byte offsets    |
+| `view`      | property               | `cards`, the default, or `source`: the document's own text with every node marked |
+| `colors`    | property               | The source view's colors, as ranges over `text`, from the host's highlighter |
 | `ghosts`    | property               | Whether every omitted default shows as a ghost row; `false` unless set `true` |
 | `images`    | property               | Whether a value formatted `image` loads its picture; `true` unless set `false` |
 | `stale`     | property and attribute | The reading is muted and badged "Out of date"; selection and hover still work |

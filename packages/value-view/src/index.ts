@@ -23,9 +23,12 @@ import type { NxValueAction, NxValueNode, NxValueSpan, NxValueText } from "./typ
 
 export type { NxValueAction, NxValueNode, NxValueRole, NxValueSpan, NxValueText } from "./types.js";
 export {
+  colorize,
   DEFAULT_THEMES,
+  loadHighlighter,
   NX_LANGUAGE_ID,
   nxShikiLanguage,
+  type ColoredRange,
   type NxValueHighlighter,
   type NxValueThemes
 } from "./highlight.js";

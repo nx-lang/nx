@@ -68,6 +68,23 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 .n.selected { outline: 2px solid var(--blue); outline-offset: 2px; }
 .n.hovered { background: var(--blue-soft); }
 
+/* The source view: the document's text as an editor shows it. A node is an inline span, so marking
+   one changes no line's height. */
+.source {
+  margin: 0;
+  padding: 4px 2px 12px;
+  font-family: var(--mono);
+  font-size: var(--nx-viewer-source-font-size, 13px);
+  line-height: var(--nx-viewer-source-line-height, 18px);
+  white-space: pre;
+  tab-size: 2;
+}
+:host([stale]) .source { opacity: 0.55; }
+.source .t { color: light-dark(var(--l, inherit), var(--d, inherit)); }
+.source .n { border-radius: 2px; }
+.source .n.selected { outline: none; background: var(--nx-viewer-selection, light-dark(#0969da1f, #388bfd33)); }
+.source .n.hovered { background: none; }
+
 .details { border: 1px solid var(--rule); border-radius: 6px; padding: 2px 10px; font-size: 13px; color: var(--ink-2); }
 .document > .details { background: var(--sheet); border-radius: 8px; padding: 4px 12px; }
 .details summary { cursor: pointer; }
