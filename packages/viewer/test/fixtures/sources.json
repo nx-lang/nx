@@ -99,5 +99,8 @@
   },
   "spacing": {
     "source": "type Task = { title:string priority:int = 2 done:boolean = false }\n\nlet root(): Task+ = {\n  <Task title=\"Ship\" priority = 1 done  =  {true} />\n}\n"
+  },
+  "uitext": {
+    "source": "// A note for whoever reads the source.\ntype uitext = string\ntype WebUIText = uitext\ntype Choice = { value:string label:uitext hint?:WebUIText note:uitext = \"Fine\" }\nexternal component <Text tone:string = \"plain\" content text:uitext />\nlet greet(name:string): uitext = { \"Hello, \" + name }\nlet root() = {\n  <Choice value=\"a\" label=\"First choice\" hint=\"Pick me\" />\n  <Text>Shown to people</Text>\n  <Choice value=\"b\" label={\"Second \" + \"choice\"} />\n}\n"
   }
 }

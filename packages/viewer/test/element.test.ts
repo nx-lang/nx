@@ -221,9 +221,7 @@ describe("the source view", () => {
     const element = show(tasks);
     element.view = "source";
     const source = root(element).querySelector<HTMLElement>(".source")!;
-    const prose = Array.from(source.querySelectorAll(".prose"), read);
-    assert.ok(prose.includes('"Ship the site"'), "a string is prose");
-    assert.ok(!prose.some((text) => text === "1" || text === "2"), "a number is not");
+    assert.equal(source.querySelector(".prose"), null, "a string is code unless its type says a person reads it");
     const indents = Array.from(source.querySelectorAll(".indent"), (indent) => indent.textContent!);
     assert.ok(indents.length > 0 && indents.every((indent) => /^[ \t]+$/.test(indent)), "indentation is whitespace only");
     assert.equal(indents.join("").length, (tasks.text.match(/^[ \t]+/gm) ?? []).join("").length, "every line's is marked");
@@ -249,6 +247,30 @@ describe("the source view", () => {
     assert.equal(classes("done", ".attribute-equals"), 0);
     // A default's `=` in a declaration is not an attribute's.
     assert.equal(rendered(element, "Task").querySelector(".attribute-equals"), null);
+  });
+
+  it("sets text shown to people apart, by the type of what holds it and never by how it looks", async () => {
+    const fixtureText = await fixture("uitext");
+    const element = show(fixtureText);
+    element.view = "source";
+    const source = root(element).querySelector<HTMLElement>(".source")!;
+    assert.equal(source.textContent, fixtureText.text, "the text is unchanged");
+    assert.deepEqual(Array.from(source.querySelectorAll(".prose"), read), ["// A note for whoever reads the source."]);
+    const shown = Array.from(source.querySelectorAll<HTMLElement>(".uitext"), (node) => node.textContent);
+    assert.deepEqual(shown, [
+      '"Fine"', // a field's default
+      '"Hello, "', // in a function that returns uitext
+      '"First choice"', // a uitext property
+      '"Pick me"', // a property whose type is an alias of uitext
+      "Shown to people", // an element's text, bound to a uitext content property
+      '"Second "', // inside an expression a uitext property holds
+      '"choice"',
+    ]);
+    assert.ok(!shown.includes('"a"') && !shown.includes('"plain"'), "a string property's value stays code");
+    const first = Array.from(source.querySelectorAll<HTMLElement>(".uitext")).find((node) => node.textContent === '"First choice"')!;
+    assert.equal(first.querySelectorAll(".uitext-quote").length, 2, "its quotes are set apart from its words");
+    const block = first.querySelector<HTMLElement>(".uitext-block")!;
+    assert.equal(block.style.getPropertyValue("--column"), String('  <Choice value="a" label="'.length), "the words' column is known");
   });
 
   it("keeps offsets right after a character outside the basic plane", async () => {

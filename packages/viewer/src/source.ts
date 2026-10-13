@@ -118,6 +118,31 @@ export function renderSource(
     }
   };
 
+  const uiText = uiTextNodes(index);
+
+  // A string a person will read: its words in the prose font and the reading's own color, between
+  // quotes left quiet. The words sit in a box that begins after the opening quote, so a line the
+  // string breaks, or one too long for the pane, continues under the first and not at the margin.
+  const writeUIText = (element: HTMLElement, start: number, end: number): void => {
+    element.classList.add("uitext");
+    const quote = (): HTMLElement => {
+      const mark = document.createElement("span");
+      mark.className = "uitext-quote";
+      mark.textContent = '"';
+      return mark;
+    };
+    const block = document.createElement("span");
+    block.className = "uitext-block";
+    // How far into its line the words begin, which is what the box may not be wider than the pane by.
+    const lineStart = text.lastIndexOf("\n", start) + 1;
+    block.style.setProperty("--column", String(start + 1 - lineStart));
+    const body = document.createElement("span");
+    body.className = "uitext-body";
+    body.append(text.slice(start + 1, end - 1), quote());
+    block.append(body);
+    element.append(quote(), block);
+  };
+
   // Writes the nodes at `children` and the text between them, from `from` to `to`. A node whose
   // range does not sit inside what is left to write is left unmarked rather than written twice.
   const writeNodes = (parent: HTMLElement, children: readonly number[], from: number, to: number): void => {
@@ -135,12 +160,18 @@ export function renderSource(
       element.className = "n";
       element.dataset["role"] = node.role;
       element.dataset["key"] = node.key;
-      // Prose is what a person wrote to be read: a string, a comment, an element's text. A host may
-      // set it in another font than the code around it.
-      if (isProse(node)) {
+      // A comment is prose, which a host may set in another font than the code around it.
+      if (node.role === "comment" || node.role === "docComment") {
         element.classList.add("prose");
       }
-      writeNodes(element, index.children[child] ?? [], start, end);
+      if (uiText.has(child) && node.role === "literal" && end - start >= 2 && text[start] === '"' && text[end - 1] === '"') {
+        writeUIText(element, start, end);
+      } else {
+        if (uiText.has(child)) {
+          element.classList.add("uitext", "uitext-body");
+        }
+        writeNodes(element, index.children[child] ?? [], start, end);
+      }
       parent.append(element);
       at = end;
     }
@@ -203,13 +234,72 @@ function spacingMarks(index: TreeIndex, startOf: (node: SourceNode) => number): 
   return marks;
 }
 
-function isProse(node: SourceNode): boolean {
-  return (
-    node.role === "comment" ||
-    node.role === "docComment" ||
-    node.role === "text" ||
-    (node.role === "literal" && (node.value ?? "").startsWith('"'))
-  );
+/** The name the type of text shown to people goes by. An alias for now; it may become built in. */
+const UI_TEXT = "uitext";
+
+/**
+ * The nodes that are text shown to people: the string literals and element text that a property,
+ * a field, a parameter or a declaration typed `uitext` holds, where `uitext` is the type itself
+ * or any alias that leads to it. Which strings these are comes from the declarations, never from
+ * how a string looks.
+ */
+function uiTextNodes(index: TreeIndex): Set<number> {
+  const { tree } = index;
+  const declarations = tree.declarations;
+  const known = new Map<string, boolean>();
+  const isUIText = (spelled: string | undefined, depth = 0): boolean => {
+    const name = (spelled ?? "").replace(/[?+*]$/, "").trim();
+    if (name === UI_TEXT) {
+      return true;
+    }
+    if (name === "" || depth > 8) {
+      return false;
+    }
+    const cached = known.get(name);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const alias = declarations.find((entry) => entry.kind === "alias" && entry.name === name);
+    const result = alias !== undefined && isUIText(alias.type, depth + 1);
+    known.set(name, result);
+    return result;
+  };
+
+  const found = new Set<number>();
+  // The strings and text under `at`, through any expression, but not inside an element it holds:
+  // that element's properties have types of their own.
+  const mark = (at: number): void => {
+    for (const child of index.children[at] ?? []) {
+      const node = tree.nodes[child]!;
+      if (node.role === "text" || (node.role === "literal" && (node.value ?? "").startsWith('"'))) {
+        found.add(child);
+      } else if (node.role !== "element" && node.role !== "typeReference") {
+        mark(child);
+      }
+    }
+  };
+
+  tree.nodes.forEach((node, at) => {
+    if (node.role === "attribute") {
+      const element = node.parent === undefined ? undefined : tree.nodes[node.parent];
+      const declared = element?.declaration === undefined ? undefined : declarations[element.declaration];
+      const property = declared?.properties?.find((candidate) => candidate.name === node.name);
+      if (isUIText(property?.type)) {
+        mark(at);
+      }
+      return;
+    }
+    if (node.role === "field" || node.role === "parameter" || node.role === "stateField" || node.role === "declaration") {
+      const typed = (index.children[at] ?? []).some((child) => {
+        const candidate = tree.nodes[child]!;
+        return candidate.role === "typeReference" && index.slots[child] !== "extends" && isUIText(candidate.value);
+      });
+      if (typed) {
+        mark(at);
+      }
+    }
+  });
+  return found;
 }
 
 /**

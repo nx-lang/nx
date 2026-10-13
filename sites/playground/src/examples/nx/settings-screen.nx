@@ -2,6 +2,9 @@
 // small design system declared as external components, the data the screen shows, and the screen
 // itself, a component whose state follows what the person changes before they save.
 
+/// Text a person reads: a title, a label, a message. It is what a translator translates.
+type uitext = string
+
 type Tone = neutral | success | warning | danger
 type ButtonKind = primary | secondary | destructive | link
 type TextStyle = title | heading | body | caption
@@ -9,34 +12,34 @@ type Gap = none | small | medium | large
 
 abstract external component <View />
 
-external component <Page extends View title:string subtitle?:string content children:View+ />
-external component <Section extends View title:string description?:string content children:View+ />
+external component <Page extends View title:uitext subtitle?:uitext content children:View+ />
+external component <Section extends View title:uitext description?:uitext content children:View+ />
 external component <Stack extends View gap:Gap = medium content children:View+ />
 external component <Row extends View gap:Gap = small content children:View+ />
-external component <Text extends View style:TextStyle = body tone:Tone = neutral content text:string />
-external component <Badge extends View label:string tone:Tone = neutral />
+external component <Text extends View style:TextStyle = body tone:Tone = neutral content text:uitext />
+external component <Badge extends View label:uitext tone:Tone = neutral />
 external component <Avatar extends View name:string imageUrl?:string />
 external component <Divider extends View />
-external component <Banner extends View tone:Tone title:string body?:string />
+external component <Banner extends View tone:Tone title:uitext body?:uitext />
 
 external component <TextField extends View
-  label:string
+  label:uitext
   value:string
-  placeholder?:string
-  help?:string
-  error?:string
+  placeholder?:uitext
+  help?:uitext
+  error?:uitext
   emits { Changed { value:string } }
 />
 
 external component <Toggle extends View
-  label:string
+  label:uitext
   on:boolean
-  help?:string
+  help?:uitext
   emits { Toggled { on:boolean } }
 />
 
 external component <Button extends View
-  label:string
+  label:uitext
   kind:ButtonKind = secondary
   disabled:boolean = false
   emits { Tapped { } }
@@ -81,7 +84,7 @@ let workspace =
     }
   />
 
-let roleLabel(role:Role): string = {
+let roleLabel(role:Role): uitext = {
   if role is {
     Role.owner => "Owner"
     Role.admin => "Admin"
@@ -98,7 +101,7 @@ let roleTone(role:Role): Tone = {
   }
 }
 
-let planSummary(plan:Plan, seats:int, used:int): string = {
+let planSummary(plan:Plan, seats:int, used:int): uitext = {
   if plan is {
     Plan.free => "Free plan, up to 3 people"
     Plan.team => "Team plan, " + used + " of " + seats + " seats in use"

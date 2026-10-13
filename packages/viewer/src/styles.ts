@@ -90,6 +90,29 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
    a selection's tint runs through it, and a space beside the \`=\` is kept in the text at no width. */
 :host([attribute-spacing]) .source .attribute-equals { padding: 0 var(--nx-viewer-attribute-equals-space, 0.125ch); }
 :host([attribute-spacing]) .source .attribute-space { font-size: 0; }
+/* Text shown to people, as a \`uitext\` property holds: its words in the prose font and a plain,
+   strong color of their own, since they are content and every hue in a theme means code; its quotes
+   quiet. The words sit in a box no wider than the room left on their line, so a long string wraps
+   and a string of several lines continues under its first. */
+.source .uitext-body {
+  font-family: var(--nx-viewer-prose-font-family, inherit);
+  font-variation-settings: var(--nx-viewer-prose-font-variation, inherit);
+  color: var(--nx-viewer-uitext-color, light-dark(#111111, #f4f4f4));
+}
+.source .uitext-quote { color: var(--nx-viewer-uitext-quote-color, light-dark(#8e8e8e, #808080)); }
+.source .uitext-body > .uitext-quote { font-family: var(--nx-viewer-source-font-family, var(--mono)); }
+.source .uitext-block {
+  display: inline-flex;
+  vertical-align: baseline;
+  max-width: max(20ch, calc(100% - var(--column, 0) * 1ch));
+}
+.source .uitext-block > .uitext-body {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: var(--nx-viewer-source-line-height, 18px);
+}
+.source .n.selected .uitext-block { background: var(--nx-viewer-selection, light-dark(#0969da1f, #388bfd33)); }
 /* A span in another font takes no line height of its own, so every line keeps the height the
    text's own font gives it, whichever fonts meet on it. */
 .source .prose, .source .indent { line-height: 0; }

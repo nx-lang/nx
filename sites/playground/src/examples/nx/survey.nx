@@ -11,6 +11,9 @@ type CarryForwardMode = selected | unselected | all
 type ShortTextInputType = text | number | email | url | tel
 type ChatAssistantStatus = ai | human | hybrid | none
 
+/// Text a person reads: a question, a label, a button. It is what a translator translates.
+type uitext = string
+
 /// The address of a picture.
 type ImageUrl = string
 /// A color, as CSS writes one.
@@ -18,16 +21,16 @@ type Color = string
 
 type Choice = {
   value:string
-  label:string
-  description?:string
+  label:uitext
+  description?:uitext
   pinned:boolean = false
   exclusive:boolean = false
 }
 
 type CompletionScreen = {
-  eyebrow?:string
-  headline:string
-  body?:string
+  eyebrow?:uitext
+  headline:uitext
+  body?:uitext
 }
 
 /// What happens after the last step.
@@ -40,17 +43,17 @@ abstract external component <FlowStep id:string />
 
 /// A screen that says something and asks nothing.
 external component <StatementStep extends FlowStep
-  eyebrow?:string
-  headline:string
-  body?:string
-  cta?:string
+  eyebrow?:uitext
+  headline:uitext
+  body?:uitext
+  cta?:uitext
 />
 
 abstract external component <Question extends FlowStep
-  label:string
-  description?:string
+  label:uitext
+  description?:uitext
   required:boolean = false
-  requiredMessage?:string
+  requiredMessage?:uitext
   mediaPosition:QuestionMediaPosition = top
 />
 
@@ -58,27 +61,27 @@ external component <SelectQuestion extends Question
   choices:Choice+
   multiple:boolean = false
   other:boolean = false
-  otherLabel?:string
+  otherLabel?:uitext
   layout:SelectLayout = vertical
   carryForwardMode:CarryForwardMode = all
 />
 
 external component <ShortTextQuestion extends Question
-  placeholder?:string
+  placeholder?:uitext
   minLength:int = 0
   maxLength?:int
   inputType:ShortTextInputType = text
 />
 
 external component <EmailQuestion extends Question
-  placeholder?:string
+  placeholder?:uitext
   mapsToContactEmail:boolean = false
 />
 
 external component <QuestionFlow
   id:string
-  title?:string
-  description?:string
+  title?:uitext
+  description?:uitext
   presentation:QuestionFlowPresentation
   showQuestionNumbers:boolean = true
   showProgressBar:boolean = true
@@ -98,10 +101,10 @@ type QuestionFlowStyle = {
 }
 
 type ChatIdentity = {
-  name?:string
-  tagline?:string
+  name?:uitext
+  tagline?:uitext
   avatarUrl?:ImageUrl
-  responseLabel?:string
+  responseLabel?:uitext
   status?:ChatAssistantStatus
 }
 
@@ -117,8 +120,8 @@ type ImmersiveAppearance = {
 
 /// What the link shows where its URL is posted, before anyone opens it.
 type LinkPreview = {
-  title?:string
-  description?:string
+  title?:uitext
+  description?:uitext
   imageUrl?:ImageUrl
 }
 

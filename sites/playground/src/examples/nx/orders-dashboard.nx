@@ -2,24 +2,27 @@
 // records, functions that derive what to show from them, an element-style function and a
 // component for the repeated pieces, and a dashboard component that keeps which order is open.
 
+/// Text a person reads: a title, a label, a message. It is what a translator translates.
+type uitext = string
+
 type Tone = neutral | info | success | warning | danger
 type Align = start | center | end
 type Money = float64
 
 abstract external component <View />
 
-external component <Screen extends View title:string content children:View+ />
+external component <Screen extends View title:uitext content children:View+ />
 external component <Grid extends View columns:int = 2 content children:View+ />
-external component <Card extends View title?:string footer?:string content children:View+ />
+external component <Card extends View title?:uitext footer?:uitext content children:View+ />
 external component <Stack extends View content children:View+ />
 external component <Row extends View align:Align = start content children:View+ />
-external component <Heading extends View level:int = 2 content text:string />
-external component <Text extends View muted:boolean = false content text:string />
-external component <Stat extends View label:string value:string delta?:string tone:Tone = neutral />
-external component <Badge extends View label:string tone:Tone = neutral />
-external component <Link extends View label:string href:string />
-external component <EmptyState extends View title:string body?:string />
-external component <Button extends View label:string primary:boolean = false emits { Tapped { } } />
+external component <Heading extends View level:int = 2 content text:uitext />
+external component <Text extends View muted:boolean = false content text:uitext />
+external component <Stat extends View label:uitext value:uitext delta?:uitext tone:Tone = neutral />
+external component <Badge extends View label:uitext tone:Tone = neutral />
+external component <Link extends View label:uitext href:string />
+external component <EmptyState extends View title:uitext body?:uitext />
+external component <Button extends View label:uitext primary:boolean = false emits { Tapped { } } />
 
 type Customer = {
   name:string
@@ -104,7 +107,7 @@ let money(amount:Money): string = { "$" + amount }
 
 let lineTotal(item:LineItem): Money = { item.quantity * item.unitPrice }
 
-let statusLabel(status:OrderStatus): string = {
+let statusLabel(status:OrderStatus): uitext = {
   if status is {
     OrderStatus.pending => "Awaiting payment"
     OrderStatus.paid => "Ready to ship"
@@ -125,7 +128,7 @@ let statusTone(status:OrderStatus): Tone = {
 }
 
 /// What to do next about an order, or nothing when it needs no one.
-let nextStep(status:OrderStatus): string? = {
+let nextStep(status:OrderStatus): uitext? = {
   if status is {
     OrderStatus.pending => "Send a payment reminder"
     OrderStatus.paid => "Print the label and pack it"
