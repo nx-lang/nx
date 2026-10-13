@@ -53,6 +53,48 @@ export function renderSource(
   const root = document.createElement("pre");
   root.className = "source";
 
+  const marks = spacingMarks(index, startOf);
+
+  // A piece of the text in one color, or in none: a text node, or a span when it has a color or a
+  // spacing class to carry.
+  const piece = (parent: HTMLElement, from: number, to: number, range: NxViewerColor | undefined): void => {
+    // The piece is cut where its spacing changes, so each run takes one class.
+    let at = from;
+    while (at < to) {
+      const mark = marks.get(at);
+      let end = at + 1;
+      while (end < to && marks.get(end) === mark) {
+        end += 1;
+      }
+      if (range === undefined && mark === undefined) {
+        parent.append(text.slice(at, end));
+        at = end;
+        continue;
+      }
+      const element = document.createElement("span");
+      element.className = [range === undefined ? "" : "t", mark ?? ""].filter((name) => name !== "").join(" ");
+      if (range?.light !== undefined) {
+        element.style.setProperty("--l", range.light);
+      }
+      if (range?.dark !== undefined) {
+        element.style.setProperty("--d", range.dark);
+      }
+      const style = range?.fontStyle ?? 0;
+      if ((style & 1) !== 0) {
+        element.style.fontStyle = "italic";
+      }
+      if ((style & 2) !== 0) {
+        element.style.fontWeight = "bold";
+      }
+      if ((style & 4) !== 0) {
+        element.style.textDecoration = "underline";
+      }
+      element.textContent = text.slice(at, end);
+      parent.append(element);
+      at = end;
+    }
+  };
+
   // The colors are in text order and the text is written in order, so one cursor walks them.
   let color = 0;
   const writeText = (parent: HTMLElement, from: number, to: number): void => {
@@ -63,34 +105,15 @@ export function renderSource(
       }
       const range = colors[color];
       if (range === undefined || range.start >= to) {
-        parent.append(text.slice(at, to));
+        piece(parent, at, to, undefined);
         return;
       }
       if (range.start > at) {
-        parent.append(text.slice(at, range.start));
+        piece(parent, at, range.start, undefined);
         at = range.start;
       }
       const end = Math.min(range.end, to);
-      const piece = document.createElement("span");
-      piece.className = "t";
-      if (range.light !== undefined) {
-        piece.style.setProperty("--l", range.light);
-      }
-      if (range.dark !== undefined) {
-        piece.style.setProperty("--d", range.dark);
-      }
-      const style = range.fontStyle ?? 0;
-      if ((style & 1) !== 0) {
-        piece.style.fontStyle = "italic";
-      }
-      if ((style & 2) !== 0) {
-        piece.style.fontWeight = "bold";
-      }
-      if ((style & 4) !== 0) {
-        piece.style.textDecoration = "underline";
-      }
-      piece.textContent = text.slice(at, end);
-      parent.append(piece);
+      piece(parent, at, end, range);
       at = end;
     }
   };
@@ -128,6 +151,56 @@ export function renderSource(
   writeNodes(root, top, 0, text.length);
   markIndentation(document, root);
   return root;
+}
+
+/** How a character of the text is spaced in the reading, where that differs from how it is written. */
+type SpacingMark = "attribute-equals" | "attribute-space";
+
+/**
+ * The spacing the reading gives an attribute's `=`: a little room on each side, whether the source
+ * writes `name=value` or `name = value`. The `=` is marked to take that room, and a single space
+ * beside it is marked to give its own up, so both spellings read alike. An `=` set off by more than
+ * one space is left as its author spaced it. Keyed by UTF-16 offset.
+ */
+function spacingMarks(index: TreeIndex, startOf: (node: SourceNode) => number): Map<number, SpacingMark> {
+  const { text, tree } = index;
+  const marks = new Map<number, SpacingMark>();
+  tree.nodes.forEach((node, at) => {
+    if (node.role !== "attribute" || node.name === undefined) {
+      return;
+    }
+    const values = index.children[at] ?? [];
+    if (values.length === 0) {
+      return;
+    }
+    const start = startOf(node);
+    const value = Math.min(...values.map((child) => startOf(tree.nodes[child]!)));
+    // Between the attribute's name and its value: spaces, `=`, spaces, and at most the `{` or `<`
+    // that opens the value.
+    const equals = text.indexOf("=", start + node.name.length);
+    if (equals < 0 || equals >= value || text.slice(start + node.name.length, equals).trim() !== "") {
+      return;
+    }
+    let before = equals;
+    while (before > start && text[before - 1] === " ") {
+      before -= 1;
+    }
+    let after = equals + 1;
+    while (after < text.length && text[after] === " ") {
+      after += 1;
+    }
+    if (equals - before > 1 || after - (equals + 1) > 1) {
+      return;
+    }
+    marks.set(equals, "attribute-equals");
+    for (let space = before; space < equals; space++) {
+      marks.set(space, "attribute-space");
+    }
+    for (let space = equals + 1; space < after; space++) {
+      marks.set(space, "attribute-space");
+    }
+  });
+  return marks;
 }
 
 function isProse(node: SourceNode): boolean {

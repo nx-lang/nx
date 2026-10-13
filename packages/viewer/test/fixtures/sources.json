@@ -96,5 +96,8 @@
   },
   "bases": {
     "source": "abstract external component <View />\nexternal component <Control extends View disabled:boolean = false help?:string />\nexternal component <Button extends Control label:string />\nexternal component <Divider extends View />\n"
+  },
+  "spacing": {
+    "source": "type Task = { title:string priority:int = 2 done:boolean = false }\n\nlet root(): Task+ = {\n  <Task title=\"Ship\" priority = 1 done  =  {true} />\n}\n"
   }
 }

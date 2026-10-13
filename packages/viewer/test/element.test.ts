@@ -230,6 +230,27 @@ describe("the source view", () => {
     assert.equal(source.textContent, tasks.text, "marking adds and removes nothing");
   });
 
+  it("gives an attribute's equals sign room, whether or not the source puts a space beside it", async () => {
+    const spacing = await fixture("spacing");
+    const element = show(spacing);
+    element.view = "source";
+    const source = root(element).querySelector<HTMLElement>(".source")!;
+    assert.equal(source.textContent, spacing.text, "the text is unchanged");
+    const attribute = (name: string): HTMLElement =>
+      Array.from(source.querySelectorAll<HTMLElement>('[data-role="attribute"]')).find((node) => node.textContent!.startsWith(name))!;
+    const classes = (name: string, selector: string): number => attribute(name).querySelectorAll(selector).length;
+    // `title="Ship"`: the sign takes the room, and there is no space to give any up.
+    assert.equal(classes("title", ".attribute-equals"), 1);
+    assert.equal(classes("title", ".attribute-space"), 0);
+    // `priority = 1`: the sign takes the room, and the space on each side gives its own up.
+    assert.equal(classes("priority", ".attribute-equals"), 1);
+    assert.deepEqual(Array.from(attribute("priority").querySelectorAll(".attribute-space"), (space) => space.textContent), [" ", " "]);
+    // `done  =  {true}`: set off by more than one space, it stays as its author spaced it.
+    assert.equal(classes("done", ".attribute-equals"), 0);
+    // A default's `=` in a declaration is not an attribute's.
+    assert.equal(rendered(element, "Task").querySelector(".attribute-equals"), null);
+  });
+
   it("keeps offsets right after a character outside the basic plane", async () => {
     const emoji = await fixture("emoji");
     const element = show(emoji);
