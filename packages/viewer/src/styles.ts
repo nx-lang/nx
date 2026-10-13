@@ -85,11 +85,11 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 .source .t { color: light-dark(var(--l, inherit), var(--d, inherit)); }
 .source .n { border-radius: 2px; }
 /* Strings, comments and text may be set in another font, and indentation keeps a fixed width. */
-/* An attribute's \`=\` has an eighth of a character of room on each side, however the source spaces it. The
-   room is padding, so a selection's tint runs through it, and a space beside the \`=\` is kept in
-   the text at no width. */
-.source .attribute-equals { padding: 0 var(--nx-viewer-attribute-equals-space, 0.125ch); }
-.source .attribute-space { font-size: 0; }
+/* Off unless the host sets the \`attribute-spacing\` attribute: an attribute's \`=\` then has an
+   eighth of a character of room on each side, however the source spaces it. The room is padding, so
+   a selection's tint runs through it, and a space beside the \`=\` is kept in the text at no width. */
+:host([attribute-spacing]) .source .attribute-equals { padding: 0 var(--nx-viewer-attribute-equals-space, 0.125ch); }
+:host([attribute-spacing]) .source .attribute-space { font-size: 0; }
 /* A span in another font takes no line height of its own, so every line keeps the height the
    text's own font gives it, whichever fonts meet on it. */
 .source .prose, .source .indent { line-height: 0; }
