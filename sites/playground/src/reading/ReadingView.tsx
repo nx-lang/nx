@@ -21,11 +21,12 @@ import "@fontsource/ia-writer-quattro/latin-700.css";
  * face throughout, a bundled proportional face for prose with its monospace one for code, and a
  * duospace face.
  */
-export const READING_FONTS = ["monospace", "hybrid-system", "proportional", "hybrid", "duospace"] as const;
+export const READING_FONTS = ["monospace", "hybrid-system", "proportional-system", "proportional", "hybrid", "duospace"] as const;
 export type ReadingFont = (typeof READING_FONTS)[number];
 export const READING_FONT_LABELS: Record<ReadingFont, string> = {
   monospace: "Monospace (as Edit)",
   "hybrid-system": "Hybrid, system fonts (Segoe UI prose, Consolas code)",
+  "proportional-system": "Proportional, system font (Segoe UI)",
   proportional: "Proportional (IBM Plex Sans)",
   hybrid: "Hybrid (Plex Sans prose, Plex Mono code)",
   duospace: "Duospace (iA Writer Quattro)",

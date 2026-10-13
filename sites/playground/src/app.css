@@ -302,6 +302,11 @@ nx-viewer.reading-font-hybrid-system {
   --nx-viewer-prose-font-family: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
 }
 
+/* The system's interface font throughout. Indentation keeps the monospace font's width. */
+nx-viewer.reading-font-proportional-system {
+  --nx-viewer-source-font-family: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
+}
+
 nx-viewer.reading-font-proportional {
   --nx-viewer-source-font-family: "IBM Plex Sans", system-ui, sans-serif;
   --nx-viewer-indent-font-family: "IBM Plex Mono", ui-monospace, monospace;
