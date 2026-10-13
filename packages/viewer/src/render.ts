@@ -632,10 +632,13 @@ const renderMember: Renderer = (context, at) => {
 const renderUnionCase: Renderer = (context, at, options) => {
   const { document, index } = context;
   const row = marked(context, at, "div", "member union-case");
+  // The bar and the name are one cell, so what the cases carry lines up down the union.
+  const head = span(document, "case-head", "");
   if (options.barred === true) {
-    row.append(span(document, "case-bar", "|"), " ");
+    head.append(span(document, "case-bar", "|"), " ");
   }
-  row.append(span(document, "pill", node(context, at).name ?? ""));
+  head.append(span(document, "case-name", node(context, at).name ?? ""));
+  row.append(head);
   const children = index.children[at] ?? [];
   const fields = document.createElement("div");
   fields.className = "nested";
@@ -647,7 +650,9 @@ const renderUnionCase: Renderer = (context, at, options) => {
   // `end { screen?:CompletionScreen }` reads "end { screen CompletionScreen optional }".
   if (children.length <= CASE_FIELDS_INLINE && children.every((child) => node(context, child).role === "field")) {
     fields.className = "nested inline-fields";
-    row.append(" ", span(document, "brace", "{"), " ", fields, " ", span(document, "brace", "}"));
+    const carried = span(document, "case-fields", "");
+    carried.append(span(document, "brace", "{"), " ", fields, " ", span(document, "brace", "}"));
+    row.append(" ", carried);
   } else {
     row.append(fields);
   }
