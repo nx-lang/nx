@@ -108,6 +108,7 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 .member.union-case, .member.emit { display: flex; flex-wrap: wrap; gap: 6px; }
 .member-name { font-family: var(--mono); font-size: 13px; font-weight: 500; }
 .member-default-label { font-size: 12px; color: var(--ink-3); }
+.member-qualifier { font-size: 12px; color: var(--ink-3); }
 .nested { flex-basis: 100%; padding-left: 14px; display: grid; grid-template-columns: max-content max-content minmax(0, 1fr); gap: 1px 16px; }
 code, .type { font-family: var(--mono); font-size: 12.5px; }
 .type { color: var(--teal); }

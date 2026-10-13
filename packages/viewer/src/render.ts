@@ -605,11 +605,12 @@ const renderMember: Renderer = (context, at) => {
   const row = marked(context, at, "div", "member");
   const type = span(document, "member-type", "");
   const rest = span(document, "member-rest", "");
+  // Qualifiers read as plain words beside the defaults, not as boxed tags.
   if (has(source, "optional")) {
-    rest.append(span(document, "tag", "optional"));
+    rest.append(span(document, "member-qualifier", "optional"));
   }
   if (has(source, "content")) {
-    rest.append(rest.childNodes.length > 0 ? " " : "", span(document, "tag", "content"));
+    rest.append(rest.childNodes.length > 0 ? " " : "", span(document, "member-qualifier", "content"));
   }
   for (const child of index.children[at] ?? []) {
     const isDefault = index.slots[child] === "default";
