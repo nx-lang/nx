@@ -16,14 +16,16 @@ import "@fontsource/ia-writer-quattro/latin-400-italic.css";
 import "@fontsource/ia-writer-quattro/latin-700.css";
 
 /**
- * The fonts the source reading can be set in while they are compared: the editor's monospace, one
- * proportional face throughout, a proportional face for prose with a monospace one for code, and a
+ * The fonts the source reading can be set in while they are compared: the editor's monospace, the
+ * system's proportional face for prose with its monospace one for code, one bundled proportional
+ * face throughout, a bundled proportional face for prose with its monospace one for code, and a
  * duospace face.
  */
-export const READING_FONTS = ["monospace", "proportional", "hybrid", "duospace"] as const;
+export const READING_FONTS = ["monospace", "hybrid-system", "proportional", "hybrid", "duospace"] as const;
 export type ReadingFont = (typeof READING_FONTS)[number];
 export const READING_FONT_LABELS: Record<ReadingFont, string> = {
   monospace: "Monospace (as Edit)",
+  "hybrid-system": "Hybrid, system fonts (Segoe UI prose, Consolas code)",
   proportional: "Proportional (IBM Plex Sans)",
   hybrid: "Hybrid (Plex Sans prose, Plex Mono code)",
   duospace: "Duospace (iA Writer Quattro)",

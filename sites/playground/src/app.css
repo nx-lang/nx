@@ -296,6 +296,12 @@ nx-viewer {
 
 /* The fonts the source reading is being tried in. Indentation stays in the monospace face that
    goes with each, so it keeps its width. */
+/* The system's own faces: its interface font for prose, and for code the monospace font the
+   element and the editor already use, which is left as it is. */
+nx-viewer.reading-font-hybrid-system {
+  --nx-viewer-prose-font-family: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
+}
+
 nx-viewer.reading-font-proportional {
   --nx-viewer-source-font-family: "IBM Plex Sans", system-ui, sans-serif;
   --nx-viewer-indent-font-family: "IBM Plex Mono", ui-monospace, monospace;
