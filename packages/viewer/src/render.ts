@@ -430,10 +430,23 @@ const renderDeclaration: Renderer = (context, at, options) => {
     appendNode(context, body, child);
   }
   if (body.childElementCount > 0) {
+    // `=` ends the header when a definition follows, as it does before one that fits beside the name.
+    endHeader(document, header);
     section.append(body);
   }
   return section;
 };
+
+/** Ends a declaration's header with `=`, before its Source button. */
+function endHeader(document: Document, header: HTMLElement): void {
+  const sign = span(document, "declaration-sign", "=");
+  const button = header.querySelector(":scope > .source-toggle");
+  if (button === null) {
+    header.append(" ", sign);
+  } else {
+    button.before(" ", sign);
+  }
+}
 
 /** The sign between a declaration's name and its type in its header. */
 function typeSign(kind: string | undefined): string {
@@ -477,7 +490,10 @@ function renderViewerDeclaration(context: RenderContext, at: number, options: Re
       appendNode(context, body, child);
     }
   }
-  section.append(body);
+  if (body.childElementCount > 0) {
+    endHeader(document, header);
+    section.append(body);
+  }
   return section;
 }
 
@@ -579,28 +595,36 @@ function memberGroup(role: SourceRole, kind: string | undefined): string {
   }
 }
 
-/** A field, a parameter or a state field: its name, its type, and its default. */
+/**
+ * A field, a parameter or a state field, in three cells that line up down its group: its name, its
+ * type, and what happens when it is left out, which is its default or that it is optional.
+ */
 const renderMember: Renderer = (context, at) => {
   const { document, index } = context;
   const source = node(context, at);
   const row = marked(context, at, "div", "member");
-  // Spaces between the parts, so the row reads as words to a screen reader and when copied.
-  row.append(span(document, "member-name", source.name ?? ""));
+  const type = span(document, "member-type", "");
+  const rest = span(document, "member-rest", "");
   if (has(source, "optional")) {
-    row.append(" ", span(document, "tag", "optional"));
+    rest.append(span(document, "tag", "optional"));
   }
   if (has(source, "content")) {
-    row.append(" ", span(document, "tag", "content"));
+    rest.append(rest.childNodes.length > 0 ? " " : "", span(document, "tag", "content"));
   }
   for (const child of index.children[at] ?? []) {
     const isDefault = index.slots[child] === "default";
-    if (isDefault) {
-      row.append(" ", span(document, "member-default-label", "="));
+    const cell = isDefault || index.slots[child] !== "type" ? rest : type;
+    if (cell.childNodes.length > 0) {
+      cell.append(" ");
     }
-    row.append(" ");
+    if (isDefault) {
+      cell.append(span(document, "member-default-label", "="), " ");
+    }
     // A default reads as it is written: `required:boolean = true` reads "required boolean = true".
-    appendNode(context, row, child, isDefault ? { asWritten: true } : {});
+    appendNode(context, cell, child, isDefault ? { asWritten: true } : {});
   }
+  // Spaces between the cells, so the row reads as words to a screen reader and when copied.
+  row.append(span(document, "member-name", source.name ?? ""), " ", type, " ", rest);
   return row;
 };
 

@@ -89,6 +89,6 @@
     "viewers": []
   },
   "members": {
-    "source": "type ThemeMode = light | dark\n\ntype LoadState =\n  | idle\n  | failed { message:string }\n\ntype Toggle = {\n  on:boolean = true\n}\n"
+    "source": "type ThemeMode = light | dark\n\ntype LoadState =\n  | idle\n  | failed { message:string }\n\ntype Toggle = {\n  on:boolean = true\n  note?:string\n}\n"
   }
 }

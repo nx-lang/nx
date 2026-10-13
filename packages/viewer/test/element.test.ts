@@ -321,6 +321,8 @@ describe("declarations, references and comments", () => {
     const state = rendered(element, "LoadState");
     assert.equal(state.querySelector(".case-line"), null, "a case with fields keeps a row to each case");
     assert.equal(read(rendered(element, "Toggle.on")), "on boolean = true");
+    assert.equal(read(rendered(element, "Toggle.note")), "note string optional", "optional reads after the type");
+    assert.equal(read(rendered(element, "Toggle").querySelector(".declaration-header > .declaration-sign")!), "=");
     assert.equal(rendered(element, "Toggle").querySelector(".group-label"), null, "a record's fields need no heading");
   });
 
@@ -351,9 +353,9 @@ describe("declarations, references and comments", () => {
       copy.querySelector(".source-toggle")?.remove();
       return read(copy);
     };
-    assert.equal(header("total"), "Function total → int");
+    assert.equal(header("total"), "Function total → int =");
     assert.deepEqual(headings("total"), ["Takes", "Returns"]);
-    assert.equal(header("answer"), "Value answer : int");
+    assert.equal(header("answer"), "Value answer : int =");
     assert.deepEqual(headings("answer"), [], "a lone group needs no heading");
     assert.equal(header("Count"), "Type Count = int");
     assert.equal(rendered(element, "Count").querySelector(".declaration-body"), null, "an alias is its header");
