@@ -97,16 +97,16 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 .n.selected > .card-header > .source-toggle,
 .source-toggle:focus-visible { opacity: 1; }
 @media (hover: none) { .declaration-header .source-toggle, .card-header .source-toggle { opacity: 0.7; } }
-.declaration-body { display: grid; grid-template-columns: max-content max-content minmax(0, 1fr); gap: 4px 16px; padding-left: 16px; }
+.declaration-body { display: grid; grid-template-columns: max-content max-content minmax(0, 1fr); gap: 1px 16px; padding-left: 16px; }
 .declaration-body > :not(.member), .nested > :not(.member) { grid-column: 1 / -1; }
 .declaration > .doc { padding-left: 16px; }
 .declaration-body > .type { justify-self: start; }
 .group-label { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
-.member { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: baseline; }
+.member { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: baseline; line-height: 1.4; }
 .member.union-case, .member.emit { display: flex; flex-wrap: wrap; gap: 6px; }
 .member-name { font-family: var(--mono); font-size: 13px; font-weight: 500; }
 .member-default-label { font-size: 12px; color: var(--ink-3); }
-.nested { flex-basis: 100%; padding-left: 14px; display: grid; grid-template-columns: max-content max-content minmax(0, 1fr); gap: 2px 16px; }
+.nested { flex-basis: 100%; padding-left: 14px; display: grid; grid-template-columns: max-content max-content minmax(0, 1fr); gap: 1px 16px; }
 code, .type { font-family: var(--mono); font-size: 12.5px; }
 .type { color: var(--ink-2); }
 .tag { font-size: 11px; color: var(--ink-3); border: 1px solid var(--rule); border-radius: 4px; padding: 0 5px; }
@@ -123,7 +123,7 @@ code, .type { font-family: var(--mono); font-size: 12.5px; }
 .kind.unresolved { color: var(--red); background: transparent; border: 1px dashed var(--red); font-family: var(--mono); }
 .unresolved-marker { font-size: 11px; color: var(--red); }
 .card-name { font-family: var(--mono); font-size: 12px; color: var(--ink-3); }
-.rows { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; align-items: baseline; }
+.rows { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 1px 14px; align-items: baseline; line-height: 1.4; }
 .rows > :not(.row) { grid-column: 1 / -1; }
 .row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: baseline; }
 .row > .label, .row > .when { color: var(--ink-3); font-size: 13px; }
