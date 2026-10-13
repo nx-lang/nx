@@ -127,7 +127,8 @@ a value it shows.
   String concatenation reads as a sentence with its slots marked.
 - **Handlers** read "When integer answered →" with one "set … to …" line per state change.
 - **Declarations** read as cards (Type, Action, Component, Function, Value) with their members,
-  and doc comments as prose inside the card they are written over. What fits beside the name reads
+  and doc comments as prose at the top of the card they are written over. A union case with fields
+  reads after a bar, with one or two fields beside it in braces and more on rows under it. What fits beside the name reads
   in the header, as in the source: an alias's type (`Type Swatch = string`), a union whose cases
   carry no fields (`Type Size = small | medium | large`), a function's return type after an arrow
   and a value's type after a colon. A member's default reads as it is written

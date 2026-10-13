@@ -326,6 +326,8 @@ describe("declarations, references and comments", () => {
     assert.equal(mode.querySelector(".group-label"), null);
     const state = rendered(element, "LoadState");
     assert.equal(state.querySelector(".case-line"), null, "a case with fields keeps a row to each case");
+    const cases = Array.from(state.querySelectorAll(".union-case"), read);
+    assert.deepEqual(cases, ["| idle", "| failed { message string }"], "a case reads after a bar, its field or two beside it");
     assert.equal(read(rendered(element, "Toggle.on")), "on boolean = true");
     assert.equal(read(rendered(element, "Toggle.note")), "note string optional", "optional reads after the type");
     assert.equal(read(rendered(element, "Toggle").querySelector(".declaration-header > .declaration-sign")!), "=");
@@ -371,6 +373,7 @@ describe("declarations, references and comments", () => {
     const element = show(await fixture("user"));
     const doc = rendered(element, "User").querySelector(":scope > .doc");
     assert.equal(read(doc!), "A person the survey is about.");
+    assert.ok(doc!.nextElementSibling?.classList.contains("declaration-header"), "the comment reads over the header");
     assert.equal(root(element).querySelector(".document > .doc"), null);
   });
 

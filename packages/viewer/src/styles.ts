@@ -104,11 +104,17 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 @media (hover: none) { .declaration-header .source-toggle, .card-header .source-toggle { opacity: 0.7; } }
 .declaration-body { display: grid; grid-template-columns: max-content max-content minmax(0, 1fr); gap: 1px 16px; padding-left: 16px; }
 .declaration-body > :not(.member), .nested > :not(.member) { grid-column: 1 / -1; }
-.declaration > .doc { padding-left: 16px; }
+.declaration > .doc { color: var(--ink-2); }
 .declaration-body > .type { justify-self: start; }
 .group-label { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
 .member { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: baseline; line-height: 1.4; }
-.member.union-case, .member.emit { display: flex; flex-wrap: wrap; gap: 6px; }
+.member.union-case, .member.emit { display: flex; flex-wrap: wrap; gap: 2px 6px; }
+.member.union-case + .member.union-case { margin-top: 3px; }
+.brace { color: var(--ink-3); }
+.nested.inline-fields { flex-basis: auto; padding-left: 0; display: inline-flex; flex-wrap: wrap; gap: 0 16px; }
+.inline-fields > .member { display: inline-flex; gap: 8px; }
+.inline-fields > .member > :empty { display: none; }
+.union-case > .nested:not(.inline-fields) { padding-left: 30px; }
 .member-name { font-family: var(--mono); font-size: 13px; font-weight: 500; }
 .member-default-label { font-size: 12px; color: var(--ink-3); }
 .member-qualifier { font-size: 12px; color: var(--ink-3); }

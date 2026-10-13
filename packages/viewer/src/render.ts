@@ -63,6 +63,8 @@ export interface RenderOptions {
   readonly asWritten?: boolean;
   /** The doc comments written over a declaration, which read inside its card. */
   readonly docs?: readonly number[];
+  /** Whether a union case stands on a line of its own, and so reads after a bar as the source has it. */
+  readonly barred?: boolean;
 }
 
 /** Renders the node at `at` by its role; nothing when no renderer draws the role. */
@@ -332,17 +334,12 @@ const renderDeclaration: Renderer = (context, at, options) => {
     for (const child of children) {
       appendNode(context, section, child, child === onlyValue ? { declarationName: source.name ?? "" } : {});
     }
-    // The declaration's doc comments read under the card's heading.
-    const heading = section.querySelector(":scope > .card > .card-header");
+    // The declaration's doc comments read over the card's heading.
     const docs = document.createElement("div");
     docs.className = "declaration-docs";
     appendAll(context, docs, options.docs ?? []);
     if (docs.childElementCount > 0) {
-      if (heading === null) {
-        section.prepend(docs);
-      } else {
-        heading.after(docs);
-      }
+      section.prepend(docs);
     }
     return section;
   }
@@ -385,8 +382,9 @@ const renderDeclaration: Renderer = (context, at, options) => {
   if (!context.copy) {
     header.append(sourceButton(document, source.key));
   }
-  section.append(header);
+  // A doc comment reads over the header it is written over, inside the card.
   appendAll(context, section, options.docs ?? []);
+  section.append(header);
 
   const groupOf = (child: number): string | undefined => {
     const childNode = node(context, child);
@@ -427,7 +425,7 @@ const renderDeclaration: Renderer = (context, at, options) => {
       }
       group = groupName;
     }
-    appendNode(context, body, child);
+    appendNode(context, body, child, node(context, child).role === "unionCase" ? { barred: true } : {});
   }
   if (body.childElementCount > 0) {
     // `=` ends the header when a definition follows, as it does before one that fits beside the name.
@@ -479,8 +477,9 @@ function renderViewerDeclaration(context: RenderContext, at: number, options: Re
   if (!context.copy) {
     header.append(sourceButton(document, source.key));
   }
-  section.append(header);
+  // A doc comment reads over the header it is written over, inside the card.
   appendAll(context, section, options.docs ?? []);
+  section.append(header);
   const body = document.createElement("div");
   body.className = "declaration-body";
   for (const child of index.children[at] ?? []) {
@@ -630,18 +629,33 @@ const renderMember: Renderer = (context, at) => {
 };
 
 /** A case of a union, with the fields it carries. */
-const renderUnionCase: Renderer = (context, at) => {
+const renderUnionCase: Renderer = (context, at, options) => {
   const { document, index } = context;
   const row = marked(context, at, "div", "member union-case");
+  if (options.barred === true) {
+    row.append(span(document, "case-bar", "|"), " ");
+  }
   row.append(span(document, "pill", node(context, at).name ?? ""));
+  const children = index.children[at] ?? [];
   const fields = document.createElement("div");
   fields.className = "nested";
-  appendAll(context, fields, index.children[at] ?? []);
-  if (fields.childElementCount > 0) {
+  appendAll(context, fields, children);
+  if (fields.childElementCount === 0) {
+    return row;
+  }
+  // A case with a field or two reads on one line, in braces as it is written:
+  // `end { screen?:CompletionScreen }` reads "end { screen CompletionScreen optional }".
+  if (children.length <= CASE_FIELDS_INLINE && children.every((child) => node(context, child).role === "field")) {
+    fields.className = "nested inline-fields";
+    row.append(" ", span(document, "brace", "{"), " ", fields, " ", span(document, "brace", "}"));
+  } else {
     row.append(fields);
   }
   return row;
 };
+
+/** The most fields a union case carries and still reads on its own line. */
+const CASE_FIELDS_INLINE = 2;
 
 /** An action a component emits, with what it extends and the fields it carries. */
 const renderEmit: Renderer = (context, at) => {
