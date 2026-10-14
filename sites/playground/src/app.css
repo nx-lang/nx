@@ -300,18 +300,8 @@ code {
   overflow: auto;
 }
 
-/* JetBrains Mono's `/>` ligature, cut down to the glyphs that draw it, for the `/>` that closes a
-   one-line element in Read: Geist Mono has no ligature for it. SIL Open Font License; see
-   reading/fonts/close-tag.LICENSE. */
-@font-face {
-  font-family: "NX Close Tag";
-  src: url("./reading/fonts/close-tag.woff2") format("woff2");
-  font-display: swap;
-}
-
 nx-viewer {
   --nx-viewer-foreground: var(--pane-foreground);
-  --nx-viewer-close-font-family: "NX Close Tag", var(--nx-viewer-source-font-family, ui-monospace), monospace;
   padding: 8px 16px;
 }
 
