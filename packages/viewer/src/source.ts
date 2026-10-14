@@ -478,8 +478,8 @@ export function renderSource(
   // ---- Elements on one line ------------------------------------------------------------------
 
   /**
-   * Whether an element written on one line reads as one: its name, then its properties, each a name
-   * and a value, with no angle brackets, no `=`, no quotes and no closing `/>`. It must set only
+   * Whether an element written on one line reads as one: its name, then its properties, each a name,
+   * an `=` and a value, with no angle brackets, no quotes and no closing `/>`. It must set only
    * properties, with nothing it holds and no comment in its tag.
    */
   const oneLineable = (at: number): boolean => {
@@ -549,7 +549,12 @@ export function renderSource(
         name.className = "line-name";
         const nameAt = startOf(tree.nodes[child]!);
         writeText(name, nameAt, nameAt + (tree.nodes[child]!.name ?? "").length);
-        part.append(name, " ");
+        // On a line, a named property keeps its `=`: it ties the name to a value that may hold
+        // spaces, where a sheet's columns do that for it.
+        const equals = document.createElement("span");
+        equals.className = "line-equals";
+        equals.textContent = "=";
+        part.append(name, equals);
       }
       writeLineValue(part, child);
       line.append("  ", part);
