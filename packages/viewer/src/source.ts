@@ -166,7 +166,7 @@ export function renderSource(
     const attribute = tree.nodes[plan.attribute]!;
     const literal = tree.nodes[plan.literal]!;
     const chip = document.createElement("span");
-    chip.className = "n id-value id-part";
+    chip.className = plan.atEnd ? "n id-value id-part id-end" : "n id-value id-part";
     chip.dataset["role"] = attribute.role;
     chip.dataset["key"] = attribute.key;
     chip.title = attribute.name ?? "";

@@ -126,6 +126,8 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
   border-radius: 6px;
   padding: 0 6px;
 }
+/* A chip last in its tag closes it with a small gap, less than a space, before the \`/>\`. */
+.source .id-end { margin-right: 3px; }
 .source .id-quote { color: var(--nx-viewer-id-quote-color, light-dark(#afb8c1, #6e6e6e)); }
 /* A span in another font takes no line height of its own, so every line keeps the height the
    text's own font gives it, whichever fonts meet on it. */
