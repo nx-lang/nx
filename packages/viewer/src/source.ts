@@ -469,7 +469,7 @@ export function renderSource(
 
   /**
    * Whether an element written on one line reads as one: its name, then its properties, each a name,
-   * an `=` and a value, with no angle brackets, no quotes and no closing `/>`. It must set only
+   * an `=` and a value, with no quotes, between its `<` and `/>`. It must set only
    * properties, with nothing it holds and no comment in its tag.
    */
   const oneLineable = (at: number): boolean => {
@@ -591,10 +591,27 @@ export function renderSource(
     });
   };
 
-  /** An element on one line: its name and id, its title's value alone, then its other properties. */
+  /**
+   * An element on one line: its name and id, its title's value alone, then its other properties,
+   * between the `<` and `/>` the source writes, which show where it starts and ends among what
+   * shares its line.
+   */
   const writeLine = (at: number, start: number, end: number): HTMLElement => {
     const line = marked(at, "span", "line-element");
-    flow(line, lineParts(at, start));
+    const open = document.createElement("span");
+    open.className = "line-open";
+    open.textContent = "<";
+    line.append(open);
+    const parts = lineParts(at, start);
+    flow(line, parts);
+    const close = document.createElement("span");
+    close.className = "line-close";
+    close.textContent = "/>";
+    // An id last in the tag keeps its own small gap before the `/>`, in place of a space.
+    if (parts.at(-1)?.key !== "id-end") {
+      line.append(" ");
+    }
+    line.append(close);
     void end;
     return line;
   };

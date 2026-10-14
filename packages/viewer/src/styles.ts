@@ -153,6 +153,13 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 /* An element on one line: its name, then its properties, a name in the same quiet tone as a
    sheet's and its value after it. */
 .source .line-name { opacity: 0.75; }
+/* A one-line element's \`<\` and \`/>\`, quiet like its \`=\`. The \`/>\` may be set in a face that joins it
+   into one mark. */
+.source .line-open, .source .line-close { color: var(--nx-viewer-tag-color, light-dark(#6e6e6e, #9a9a9a)); }
+.source .line-close {
+  font-family: var(--nx-viewer-close-font-family, inherit);
+  font-feature-settings: "calt", "liga";
+}
 .source .line-equals { color: var(--nx-viewer-equals-color, light-dark(#6e6e6e, #9a9a9a)); }
 /* A boolean reads as a mark, a check for true and a cross for false, never as a box to click. */
 .source .sheet-boolean { color: var(--nx-viewer-boolean-color, light-dark(#0451a5, #569cd6)); font-weight: 600; }
