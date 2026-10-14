@@ -604,7 +604,16 @@ export function renderSource(
    * them has, by property name, when they mostly share their properties; when they do not, only
    * their names and titles line up. Nothing when the list is not such a list.
    */
-  const alignment = (items: readonly number[]): { columns: string[]; full: boolean } | undefined => {
+  /** Whether a cell is far wider than the middle cell of its column. */
+  const runsOnFromCell = (_key: string, width: number, cells: readonly { width: number }[]): boolean => {
+    const sorted = cells.map((cell) => cell.width).sort((a, b) => a - b);
+    const median = sorted[Math.floor((sorted.length - 1) / 2)]!;
+    return width > median * OUTLIER_RATIO && width - median > OUTLIER_CHARACTERS;
+  };
+
+  const alignment = (
+    items: readonly number[]
+  ): { columns: string[]; full: boolean; runsOnFrom: Map<number, string> } | undefined => {
     if (items.length < 2) {
       return undefined;
     }
@@ -629,25 +638,32 @@ export function renderSource(
       const ib = order.indexOf(b);
       return ia < 0 || ib < 0 ? 0 : ia - ib;
     });
-    // One row far wider than the rest in some column would push that column, and all after it, far
-    // from the rows it belongs to: such a list is left to flow.
-    const widths = new Map<number, number[]>();
+    // A row far wider than the rest in some column would push that column, and all after it, far
+    // from the rows it belongs to. Such a row runs on from that column, as a long cell does in a
+    // spreadsheet, and the columns are sized by the other rows. A list with many such rows is left
+    // to flow.
+    const widths = new Map<string, { item: number; width: number }[]>();
     for (const item of items) {
       const title = titleOf(item);
       for (const child of [...(title === undefined ? [] : [title]), ...namedOf(item)]) {
-        const key = child === title ? -1 : used.indexOf(tree.nodes[child]!.name ?? "");
         const node = tree.nodes[child]!;
+        const key = child === title ? "title" : `property:${node.name ?? ""}`;
         const width = child === title ? endOf(node) - startOf(node) - (node.name ?? "").length - 3 : endOf(node) - startOf(node);
-        widths.set(key, [...(widths.get(key) ?? []), width]);
+        widths.set(key, [...(widths.get(key) ?? []), { item, width }]);
       }
     }
-    for (const column of widths.values()) {
-      const sorted = [...column].sort((a, b) => a - b);
+    const runsOnFrom = new Map<number, string>();
+    for (const [key, cells] of widths) {
+      const sorted = cells.map((cell) => cell.width).sort((a, b) => a - b);
       const median = sorted[Math.floor((sorted.length - 1) / 2)]!;
-      const widest = sorted[sorted.length - 1]!;
-      if (widest > median * OUTLIER_RATIO && widest - median > OUTLIER_CHARACTERS) {
-        return undefined;
+      for (const cell of cells) {
+        if (cell.width > median * OUTLIER_RATIO && cell.width - median > OUTLIER_CHARACTERS && !runsOnFrom.has(cell.item)) {
+          runsOnFrom.set(cell.item, key);
+        }
       }
+    }
+    if (runsOnFrom.size * 4 > items.length) {
+      return undefined;
     }
     const filled = named.reduce((sum, names) => sum + names.length, 0);
     // Columns pay their way when most rows fill most of them; otherwise they would be mostly gaps.
@@ -668,7 +684,13 @@ export function renderSource(
     } else {
       columns.push("rest");
     }
-    return { columns, full };
+    // A row runs on from the earliest column where it is too wide.
+    for (const [item, key] of runsOnFrom) {
+      const keys = [...widths.keys()].sort((a, b) => columns.indexOf(a) - columns.indexOf(b));
+      const earliest = keys.find((candidate) => widths.get(candidate)!.some((cell) => cell.item === item && runsOnFromCell(candidate, cell.width, widths.get(candidate)!)));
+      runsOnFrom.set(item, earliest ?? key);
+    }
+    return { columns, full, runsOnFrom };
   };
 
   /**
@@ -695,14 +717,30 @@ export function renderSource(
       const line = marked(item, "span", "line-element line-row");
       const parts = lineParts(item, startOf(node));
       const rest: LinePart[] = [];
+      const runsOn = aligned.runsOnFrom.get(item);
+      const runsOnAt = runsOn === undefined ? -1 : aligned.columns.indexOf(runsOn);
+      const runOn: LinePart[] = [];
       for (const part of parts) {
         const column = aligned.columns.indexOf(part.key);
+        if (runsOnAt >= 0 && (column < 0 || column >= runsOnAt)) {
+          runOn.push(part);
+          continue;
+        }
         if (column < 0) {
           rest.push(part);
           continue;
         }
         part.element.style.gridColumn = String(column + 1);
         line.append(part.element);
+      }
+      if (runOn.length > 0) {
+        // The row's wide cell and all after it flow from its column, taking no width there, so the
+        // columns stay as wide as the other rows need.
+        const flowing = document.createElement("span");
+        flowing.className = "line-runs-on";
+        flowing.style.gridColumn = String(runsOnAt + 1);
+        flow(flowing, runOn);
+        line.append(flowing);
       }
       if (rest.length > 0) {
         // What does not line up flows in the last column, as it would on its own.
