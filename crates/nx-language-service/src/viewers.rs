@@ -144,6 +144,7 @@ pub(crate) struct ResolvedViewer {
     pub image: Option<String>,
     pub id: Option<String>,
     pub id_position: Option<String>,
+    pub icon: Option<String>,
     pub layout: Option<String>,
     pub format: Option<String>,
     /// The property viewers, in their resolved order.
@@ -204,6 +205,7 @@ impl ResolvedViewer {
             (&mut self.image, "image"),
             (&mut self.id, "id"),
             (&mut self.id_position, "idPosition"),
+            (&mut self.icon, "icon"),
             (&mut self.layout, "layout"),
             (&mut self.format, "format"),
         ] {

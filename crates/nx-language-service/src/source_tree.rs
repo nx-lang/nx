@@ -283,6 +283,9 @@ pub struct SourceViewer {
     /// `beginning` or `end`: where the element's id reads, when it has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id_position: Option<String>,
+    /// The name of the Lucide icon that marks the element.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
     /// `card`, `row` or `inline`, for a record, an action or a component.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layout: Option<String>,
@@ -2028,6 +2031,7 @@ impl<'a> TreeBuilder<'a> {
                 .as_ref()
                 .map(|_| resolved.id_position.unwrap_or_else(|| "beginning".to_string())),
             id: resolved.id,
+            icon: resolved.icon,
             layout: Some(resolved.layout.unwrap_or_else(|| "card".to_string())),
             properties,
             ..SourceViewer::default()

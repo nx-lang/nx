@@ -439,6 +439,8 @@ export interface SourceViewer {
   id?: string;
   /** Where the element's id reads: right after its name, or last in its tag. */
   idPosition?: "beginning" | "end";
+  /** The name of the Lucide icon that marks the element where it starts. */
+  icon?: string;
   /** How a record's, action's or component's element is laid out. */
   layout?: SourceViewerLayout;
   /** Every property, in the order to show them. */

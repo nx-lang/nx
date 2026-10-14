@@ -178,6 +178,21 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 .source .sheet-boolean.false { color: var(--nx-viewer-boolean-false-color, light-dark(#8e8e8e, #808080)); }
 /* A list or a nested sheet sits under its name, a step in, across both columns. */
 .source .sheet-below { grid-column: 1 / -1; display: block; padding-left: 2ch; }
+/* The icon an element on lines of its own starts with, as a design tool's layers list marks each
+   layer: an outline the size of a letter, as quiet as the brackets, before the element's name. */
+.source .element-icon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-right: 0.6ch;
+  vertical-align: -0.15em;
+  color: var(--nx-viewer-icon-color, light-dark(#6e7781, #8b949e));
+  user-select: none;
+}
+.source .element-icon > svg { display: block; width: 100%; height: 100%; stroke-width: 1.75; }
+/* A sheet that starts with an icon drops its bracket from under the icon's middle. */
+:host([grouping="brackets"]) .source .sheet:has(> .sheet-head > .element-icon)::after { left: calc(0.5em - 0.5px); }
+:host([grouping="guides"]) .source .sheet:has(> .sheet-head > .element-icon) { background-position: calc(0.5em - 0.5px) var(--nx-viewer-source-line-height, 18px); }
 /* A little room between siblings where either is a sheet, so each group stands apart from the next:
    between the elements of a list or of what an element holds, between sheets that follow one
    another, and around a row whose value is a sheet under its name. Not between one-line elements,

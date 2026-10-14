@@ -5,7 +5,7 @@
  * reading. Colors come from the host, as ranges over the text, so a host colors the reading with
  * the highlighter and themes it colors its editor with.
  */
-import type { SourceNode, SourceValueFormat } from "@nx-lang/language-protocol";
+import type { SourceDeclarationKind, SourceNode, SourceValueFormat } from "@nx-lang/language-protocol";
 
 import type { TreeIndex } from "./tree.js";
 
@@ -47,7 +47,24 @@ export interface SourceLayout {
    * then a name and a value to a row, with no `=`, no quotes and no closing tag.
    */
   readonly sheets?: boolean;
+  /**
+   * Draws the icon of the given name, from the Lucide set, or nothing when it has none. With it, an
+   * element on lines of its own starts with an icon: the one its viewer names, or else one for its
+   * kind of declaration. Without it, no element has an icon.
+   */
+  readonly icons?: NxViewerIcons | undefined;
 }
+
+/** Draws an icon by its Lucide name: an element the viewer copies, or nothing. */
+export type NxViewerIcons = (name: string) => Element | undefined;
+
+/** The icon an element starts with when its viewer names none, by its kind of declaration. */
+const KIND_ICONS: Partial<Record<SourceDeclarationKind, string>> = {
+  component: "component",
+  record: "box",
+  action: "zap",
+  union: "tag",
+};
 
 export function renderSource(
   document: Document,
@@ -271,6 +288,12 @@ export function renderSource(
       element.className = "n";
       element.dataset["role"] = node.role;
       element.dataset["key"] = node.key;
+      // An element written as it is, tag and all, starting a line of its own, starts with its icon
+      // like a sheet or a one-line element does.
+      const marker = layout.sheets === true && node.role === "element" && startsItsLine(start) ? elementIcon(child) : undefined;
+      if (marker !== undefined) {
+        element.append(marker);
+      }
       // A comment is prose, which a host may set in another font than the code around it.
       if (node.role === "comment" || node.role === "docComment") {
         element.classList.add("prose");
@@ -297,6 +320,30 @@ export function renderSource(
   };
 
   // ---- Property sheets ----------------------------------------------------------------------
+
+  /**
+   * The icon an element on lines of its own starts with, labelled with its kind's name for a reader
+   * who cannot see it and for the pointer. Nothing when the host draws no icons.
+   */
+  const elementIcon = (at: number): HTMLElement | undefined => {
+    if (layout.icons === undefined) {
+      return undefined;
+    }
+    const node = tree.nodes[at]!;
+    const declaration = node.declaration === undefined ? undefined : tree.declarations[node.declaration];
+    const name = declaration?.viewer?.icon ?? (declaration === undefined ? undefined : KIND_ICONS[declaration.kind]);
+    const drawn = name === undefined ? undefined : layout.icons(name);
+    if (drawn === undefined) {
+      return undefined;
+    }
+    const icon = document.createElement("span");
+    icon.className = "element-icon";
+    icon.setAttribute("role", "img");
+    icon.setAttribute("aria-label", node.name ?? "");
+    icon.title = node.name ?? "";
+    icon.append(drawn.cloneNode(true));
+    return icon;
+  };
 
   const childrenOf = (at: number): number[] =>
     [...(index.children[at] ?? [])].sort((a, b) => tree.nodes[a]!.range.startByte - tree.nodes[b]!.range.startByte);
@@ -446,6 +493,10 @@ export function renderSource(
     sheet.style.setProperty("--indent", String(start - (text.lastIndexOf("\n", start - 1) + 1)));
     const head = document.createElement("span");
     head.className = "sheet-head";
+    const marker = elementIcon(at);
+    if (marker !== undefined) {
+      head.append(marker);
+    }
     const nameStart = start + 1;
     writeText(head, nameStart, nameStart + (node.name ?? "").length);
     if (plan !== undefined) {
@@ -631,6 +682,10 @@ export function renderSource(
   const writeLine = (at: number, start: number, end: number): HTMLElement => {
     const line = marked(at, "span", "line-element");
     const alone = startsItsLine(start) && endsItsLine(end);
+    const marker = alone ? elementIcon(at) : undefined;
+    if (marker !== undefined) {
+      line.append(marker);
+    }
     if (!alone) {
       const open = document.createElement("span");
       open.className = "line-open";

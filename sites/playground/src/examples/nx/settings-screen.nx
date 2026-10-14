@@ -2,6 +2,8 @@
 // small design system declared as external components, the data the screen shows, and the screen
 // itself, a component whose state follows what the person changes before they save.
 
+import "@nx/viewer"
+
 /// Text a person reads: a title, a label, a message. It is what a translator translates.
 type uitext = string
 
@@ -64,6 +66,21 @@ type Workspace = {
   seatsUsed:int
   members:Member+
 }
+
+viewer Page = <ElementViewer icon="app-window" />
+viewer Section = <ElementViewer icon="panel-top" />
+viewer Stack = <ElementViewer icon="rows-3" />
+viewer Row = <ElementViewer icon="columns-3" />
+viewer Text = <ElementViewer icon="type" />
+viewer Badge = <ElementViewer icon="badge" />
+viewer Avatar = <ElementViewer icon="circle-user-round" />
+viewer Banner = <ElementViewer icon="megaphone" />
+viewer TextField = <ElementViewer icon="text-cursor-input" />
+viewer Toggle = <ElementViewer icon="toggle-right" />
+viewer Button = <ElementViewer icon="mouse-pointer-click" />
+viewer Divider = <ElementViewer icon="minus" />
+viewer Workspace = <ElementViewer title=name id=slug icon="building" />
+viewer Member = <ElementViewer title=name icon="user-round" />
 
 action Saved = { name:string slug:string requireTwoFactor:boolean }
 action MemberRemoved = { email:string }

@@ -114,5 +114,9 @@
   "colors": {
     "source": "import \"@nx/viewer\"\n\ntype Color = string\n\ntype Brand = { name:string primary:Color accent?:Color note?:string }\n\nviewer Color = <ValueViewer format=color />\n\nlet brand = <Brand name=\"Hive5\" primary=\"#b6695d\" accent=\"not a color\" note=\"#ffffff\" />\n",
     "viewers": []
+  },
+  "icons": {
+    "source": "import \"@nx/viewer\"\n\ntype Choice = { value:string label:string }\ntype Note = { text:string }\n\nviewer Choice = <ElementViewer title=label icon=\"circle-dot\" />\n\nlet items = {\n  <Choice value=\"a\" label=\"First\" />\n  <Note text=\"Plain\" />\n}\n\nlet held = <Note text=\"Inline\" />\n",
+    "viewers": []
   }
 }

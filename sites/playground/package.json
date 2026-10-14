@@ -36,6 +36,7 @@
     "@nx-lang/value-view": "workspace:*",
     "@nx-lang/viewer": "workspace:*",
     "@shikijs/monaco": "^4.4.3",
+    "lucide": "^1.57.0",
     "monaco-editor": "^0.56.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

@@ -141,24 +141,24 @@ viewer SelectLayout =
     <CaseViewer of=columns_3 label="three columns" />
   </UnionViewer>
 viewer Choice =
-  <ElementViewer layout=row title=label subtitle=description badge=value id=value idPosition=end>
+  <ElementViewer layout=row title=label subtitle=description badge=value id=value idPosition=end icon="circle-dot">
     <PropertyViewer of=exclusive whenTrue="Clears the other choices" />
   </ElementViewer>
 viewer StatementStep =
-  <ElementViewer name="Statement" title=headline subtitle=eyebrow id=id>
+  <ElementViewer name="Statement" title=headline subtitle=eyebrow id=id icon="message-square-text">
     <PropertyViewer of=body format=markdown />
     <PropertyViewer of=cta label="Button" />
     <PropertyViewer of=id label="Key" place=details />
   </ElementViewer>
 viewer Question =
-  <ElementViewer title=label subtitle=description id=id>
+  <ElementViewer title=label subtitle=description id=id icon="circle-question-mark">
     <PropertyViewer of=required whenTrue="Required" whenFalse="Optional" />
     <PropertyViewer of=requiredMessage label="If left empty" />
     <PropertyViewer of=id label="Key" place=details />
     <PropertyViewer of=mediaPosition place=details />
   </ElementViewer>
 viewer SelectQuestion =
-  <ElementViewer name="Select" title=label subtitle=description id=id>
+  <ElementViewer name="Select" title=label subtitle=description id=id icon="list-checks">
     <PropertyViewer of=required whenTrue="Required" whenFalse="Optional" />
     <PropertyViewer of=multiple whenTrue="Pick any number" whenFalse="Pick one" />
     <PropertyViewer of=other whenTrue="Allows another answer" whenFalse="Listed choices only" />
@@ -170,12 +170,16 @@ viewer SelectQuestion =
     <PropertyViewer of=carryForwardMode place=details />
   </ElementViewer>
 viewer QuestionFlow =
-  <ElementViewer name="Survey" title=title subtitle=description id=id>
+  <ElementViewer name="Survey" title=title subtitle=description id=id icon="clipboard-list">
     <PropertyViewer of=id label="Key" place=details />
   </ElementViewer>
-viewer CompletionScreen = <ElementViewer title=headline subtitle=eyebrow />
-viewer LinkPreview = <ElementViewer title=title subtitle=description image=imageUrl />
-viewer ChatIdentity = <ElementViewer title=name subtitle=tagline image=avatarUrl />
+viewer ShortTextQuestion = <ElementViewer icon="text-cursor-input" />
+viewer EmailQuestion = <ElementViewer icon="mail" />
+viewer CompletionScreen = <ElementViewer title=headline subtitle=eyebrow icon="flag" />
+viewer LinkPreview = <ElementViewer title=title subtitle=description image=imageUrl icon="link" />
+viewer ChatIdentity = <ElementViewer title=name subtitle=tagline image=avatarUrl icon="bot" />
+viewer ChatLinkConfig = <ElementViewer icon="message-circle" />
+viewer ImmersiveAppearance = <ElementViewer icon="palette" />
 
 let screener =
   <QuestionFlow

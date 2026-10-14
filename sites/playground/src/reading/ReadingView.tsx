@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import "@nx-lang/viewer";
-import { NX_SELECT_EVENT, type NxSelectDetail, type NxViewerElement, type NxViewerView } from "@nx-lang/viewer";
+import { NX_SELECT_EVENT, type NxSelectDetail, type NxViewerElement, type NxViewerIcons, type NxViewerView } from "@nx-lang/viewer";
 import { colorize, loadHighlighter, type NxValueHighlighter } from "@nx-lang/value-view";
 import { useEditorThemes, type EditorThemes } from "../theme.ts";
 import type { Reading } from "./reading.ts";
@@ -116,6 +116,27 @@ export interface ReadingViewProps {
   readonly onSelect: (key: string) => void;
 }
 
+/**
+ * Draws Lucide icons by name, for the source reading to mark elements with. The whole set loads
+ * once, apart from the rest of the playground, when the reading first needs it.
+ */
+let lucideIcons: Promise<NxViewerIcons> | undefined;
+function loadIcons(): Promise<NxViewerIcons> {
+  lucideIcons ??= import("lucide").then(({ icons, createElement }) => {
+    const drawn = new Map<string, Element | undefined>();
+    return (name: string) => {
+      if (!drawn.has(name)) {
+        // Lucide names its icons in kebab case and exports them in Pascal case.
+        const exported = name.replace(/(^|-)([a-z0-9])/g, (_match, _dash: string, letter: string) => letter.toUpperCase());
+        const node = (icons as Record<string, Parameters<typeof createElement>[0] | undefined>)[exported];
+        drawn.set(name, node === undefined ? undefined : createElement(node));
+      }
+      return drawn.get(name);
+    };
+  });
+  return lucideIcons;
+}
+
 /** The source pane's Read side: `<nx-viewer>` showing the source tree, or why it cannot. */
 export function ReadingView({ reading, view, font, sheets, grouping, selection, onSelect }: ReadingViewProps) {
   const element = useRef<NxViewerElement>(null);
@@ -139,6 +160,22 @@ export function ReadingView({ reading, view, font, sheets, grouping, selection, 
       current = false;
     };
   }, [themes]);
+  const [icons, setIcons] = useState<NxViewerIcons | undefined>(undefined);
+  useEffect(() => {
+    let current = true;
+    loadIcons().then(
+      (loaded) => {
+        if (current) {
+          setIcons(() => loaded);
+        }
+      },
+      // Without icons the reading is the same, unmarked.
+      () => undefined
+    );
+    return () => {
+      current = false;
+    };
+  }, []);
   const latestSelect = useRef(onSelect);
   latestSelect.current = onSelect;
 
@@ -153,9 +190,10 @@ export function ReadingView({ reading, view, font, sheets, grouping, selection, 
     target.text = reading.text;
     target.view = view;
     target.sheets = sheets;
+    target.icons = icons;
     target.colors = view === "source" && highlighter !== null ? colorize(highlighter.value, reading.text, highlighter.themes) : [];
     target.tree = reading.tree;
-  }, [reading.tree, reading.text, view, highlighter, sheets]);
+  }, [reading.tree, reading.text, view, highlighter, sheets, icons]);
 
   useLayoutEffect(() => {
     if (element.current !== null && element.current.selection !== selection) {

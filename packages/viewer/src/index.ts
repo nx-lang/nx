@@ -11,14 +11,14 @@ import type { EditorRange, SourceRole, SourceTree } from "@nx-lang/language-prot
 
 import { caseHover, declarationHover, handlerHover, propertyHover } from "./hover.js";
 import { inWords } from "./words.js";
-import { renderSource, type NxViewerColor } from "./source.js";
+import { renderSource, type NxViewerColor, type NxViewerIcons } from "./source.js";
 import { renderDocument, renderNode, type RenderContext } from "./render.js";
 import { styles } from "./styles.js";
 import { indexedNodeAtSpan, indexTree, nodeOf, sourceTextOf, type TreeIndex } from "./tree.js";
 
 export { nodeAtSpan } from "./tree.js";
 export { inWords, eventWords } from "./words.js";
-export type { NxViewerColor } from "./source.js";
+export type { NxViewerColor, NxViewerIcons } from "./source.js";
 
 /** The tag the element is defined under. */
 export const NX_VIEWER_TAG = "nx-viewer";
@@ -37,7 +37,7 @@ export interface NxSelectDetail {
 }
 
 /** The element's properties, which a host may set before the element is defined. */
-const PROPERTIES = ["tree", "text", "view", "colors", "sheets", "ghosts", "images", "selection", "stale"] as const;
+const PROPERTIES = ["tree", "text", "view", "colors", "sheets", "icons", "ghosts", "images", "selection", "stale"] as const;
 
 /** How the element shows a document: as its own text, or as cards. */
 export type NxViewerView = "source" | "cards";
@@ -105,6 +105,7 @@ export class NxViewerElement extends ElementBase {
   #view: NxViewerView = "cards";
   #colors: readonly NxViewerColor[] = [];
   #sheets = false;
+  #icons: NxViewerIcons | undefined;
   #index: TreeIndex | undefined;
   #selection: string | undefined;
   /** Each key's original rendering. */
@@ -283,6 +284,22 @@ export class NxViewerElement extends ElementBase {
     }
   }
 
+  /**
+   * Draws icons by their Lucide names, for the source view to start each element on lines of its
+   * own with one: the icon its viewer names, or one for its kind. The host chooses how icons are
+   * drawn and loaded; without it, no element has an icon.
+   */
+  get icons(): NxViewerIcons | undefined {
+    return this.#icons;
+  }
+
+  set icons(icons: NxViewerIcons | undefined) {
+    this.#icons = typeof icons === "function" ? icons : undefined;
+    if (this.#view === "source") {
+      this.#render();
+    }
+  }
+
   set colors(colors: readonly NxViewerColor[]) {
     this.#colors = colors ?? [];
     if (this.#view === "source") {
@@ -386,7 +403,7 @@ export class NxViewerElement extends ElementBase {
       images: this.#images,
     };
     this.#body.append(
-      this.#view === "source" ? renderSource(this.ownerDocument, index, this.#colors, { sheets: this.#sheets }) : renderDocument(context)
+      this.#view === "source" ? renderSource(this.ownerDocument, index, this.#colors, { sheets: this.#sheets, icons: this.#icons }) : renderDocument(context)
     );
     for (const element of this.#body.querySelectorAll<HTMLElement>("[data-key]")) {
       this.#rendered.set(element.dataset["key"]!, element);

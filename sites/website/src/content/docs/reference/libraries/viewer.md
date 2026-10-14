@@ -60,7 +60,7 @@ Which record a viewer declaration takes depends on its target:
 
 | Type | Fields | Notes |
 | --- | --- | --- |
-| `ElementViewer` | `name?`, `title?`, `subtitle?`, `badge?`, `image?`, `id?`, `idPosition: IdPosition = beginning`, `layout: ElementLayout = card`, content `properties?: PropertyViewer+` | `title`, `subtitle`, `badge`, `image` and `id` each name a property of the target. |
+| `ElementViewer` | `name?`, `title?`, `subtitle?`, `badge?`, `image?`, `id?`, `idPosition: IdPosition = beginning`, `icon?`, `layout: ElementLayout = card`, content `properties?: PropertyViewer+` | `title`, `subtitle`, `badge`, `image` and `id` each name a property of the target. |
 | `IdPosition` | `beginning`, `end` | Where the element's id reads. |
 | `ElementLayout` | `card`, `row`, `inline` | How the element is laid out. |
 | `PropertyViewer` | `of`, `label?`, `whenTrue?`, `whenFalse?`, `format?: ValueFormat`, `place: Placement = body` | `of` names the property it describes. |
@@ -77,6 +77,10 @@ Which record a viewer declaration takes depends on its target:
   `beginning`, the default, or last in its tag, after the properties that stay, when it is `end`.
   `end` suits an element that reads on one line, such as a choice, so its label comes first and
   the labels of a list line up.
+- `icon` names the icon that marks the element where it starts, from the
+  [Lucide](https://lucide.dev/icons) set, such as `"list-checks"`. A source reading shows it before
+  an element that starts a line of its own; an element with none takes one for its kind of
+  declaration. A kind that extends another inherits it.
 - `card` is a heading and a row per property. `row` is one line holding the heading, title,
   subtitle, badge and picture, with the rest folded. `inline` shows the element within the line that
   holds it, as its heading and title, with the rest folded.
@@ -192,6 +196,9 @@ export type ElementViewer = {
   id?: Target.Property
   /// Where the element's id reads.
   idPosition: IdPosition = beginning
+  /// The name of the icon that marks the element where it starts, from the Lucide set
+  /// (https://lucide.dev/icons), such as `"list-checks"`. A kind that extends another inherits it.
+  icon?: string
   /// How the element is laid out.
   layout: ElementLayout = card
   /// How individual properties read, in the order they should be listed. Properties not named

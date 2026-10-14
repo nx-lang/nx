@@ -302,6 +302,30 @@ describe("the source view", () => {
     assert.equal(sheet!.parentElement!.textContent, "#b6695d");
   });
 
+  it("starts an element on a line of its own with the icon its viewer names, or its kind's", async () => {
+    const icons = await fixture("icons");
+    const element = show(icons);
+    element.view = "source";
+    element.sheets = true;
+    const source = (): HTMLElement => root(element).querySelector<HTMLElement>(".source")!;
+    assert.equal(source().querySelector(".element-icon"), null, "no icons until the host draws them");
+    const asked: string[] = [];
+    element.icons = (name) => {
+      asked.push(name);
+      const drawn = element.ownerDocument.createElementNS("http://www.w3.org/2000/svg", "svg");
+      drawn.dataset["icon"] = name;
+      return drawn;
+    };
+    const marks = Array.from(source().querySelectorAll<HTMLElement>(".element-icon"));
+    assert.deepEqual(
+      marks.map((mark) => [mark.getAttribute("aria-label"), mark.querySelector("svg")!.dataset["icon"]]),
+      [["Choice", "circle-dot"], ["Note", "box"]],
+      "the viewer's icon, then a record's; an element sharing its line has none"
+    );
+    assert.ok(asked.includes("circle-dot"));
+    assert.equal(marks[0]!.textContent, "", "an icon adds no text");
+  });
+
   it("moves an element's id to where its viewer puts it, as its value alone", async () => {
     const ids = await fixture("elementIds");
     const element = show(ids);
