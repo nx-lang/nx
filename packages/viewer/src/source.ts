@@ -191,6 +191,10 @@ export function renderSource(
       if (!plan.written && at === plan.insertAt) {
         parent.append(" ", idChip(plan));
         plan.written = true;
+        // A chip last in its tag closes it with no space between: its padding is gap enough.
+        if (plan.atEnd && text[at] === " " && /^\s*\/?>/.test(text.slice(at, at + 3))) {
+          at += 1;
+        }
         continue;
       }
       if (at >= plan.removeFrom && at < plan.removeTo) {
@@ -267,6 +271,8 @@ interface ElementIdPlan {
   readonly removeFrom: number;
   readonly removeTo: number;
   readonly insertAt: number;
+  /** Whether the id goes last in its tag, not right after the element's name. */
+  readonly atEnd: boolean;
   written: boolean;
 }
 
@@ -331,8 +337,8 @@ function elementIdPlans(
       }
     }
     const others = attributes.filter((child) => child !== attribute);
-    const insertAt =
-      viewer.idPosition === "end" && others.length > 0 ? Math.max(...others.map((child) => endOf(tree.nodes[child]!))) : nameEnd;
+    const atEnd = viewer.idPosition === "end" && others.length > 0;
+    const insertAt = atEnd ? Math.max(...others.map((child) => endOf(tree.nodes[child]!))) : nameEnd;
     plans.set(at, {
       attribute,
       literal,
@@ -340,6 +346,7 @@ function elementIdPlans(
       removeFrom,
       removeTo,
       insertAt,
+      atEnd,
       written: false,
     });
   });

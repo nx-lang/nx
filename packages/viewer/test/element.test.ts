@@ -295,8 +295,8 @@ describe("the source view", () => {
     // At the beginning, after the name; the line it stood on goes with it.
     assert.ok(reading.includes("<Step welcome\n    title="), reading);
     assert.ok(!reading.includes('id="welcome"'));
-    // At the end, after the attributes that stay.
-    assert.ok(reading.includes('<Choice label="Yes" yes />'), reading);
+    // At the end, after the attributes that stay, and closing the tag with no space between.
+    assert.ok(reading.includes('<Choice label="Yes" yes/>'), reading);
     const chips = Array.from(source.querySelectorAll<HTMLElement>(".id-part"));
     assert.deepEqual(chips.map((chip) => chip.textContent), ["welcome", "yes"]);
     // Each chip keeps the keys of the attribute and its value, so selection still finds them.
