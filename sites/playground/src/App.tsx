@@ -171,6 +171,9 @@ export function App() {
   // The font the source reading is set in: Geist for prose with Geist Mono for code, unless another
   // is chosen to compare it with. A comparison, not a setting: the choice is not kept.
   const [readingFont, setReadingFont] = useState<ReadingFont>("geist-hybrid");
+  // Whether Read shows an element written an attribute to a line as a property sheet. On unless
+  // turned off to compare; not kept.
+  const [sheets, setSheets] = useState(true);
   const reading = useSourceTree(source, mode !== "edit");
   // The editor's cursor, carried into Read until a tree of the same text can say what it is on.
   const cursorToSelect = useRef<number | null>(null);
@@ -324,6 +327,12 @@ export function App() {
             </label>
             {mode === "read" && (
               <label className="reading-font">
+                <input type="checkbox" checked={sheets} onChange={(event) => setSheets(event.target.checked)} />
+                Sheets
+              </label>
+            )}
+            {mode === "read" && (
+              <label className="reading-font">
                 Font
                 <select value={readingFont} onChange={(event) => setReadingFont(event.target.value as ReadingFont)}>
                   {READING_FONTS.map((option) => (
@@ -352,6 +361,7 @@ export function App() {
               reading={reading}
               view={mode === "read" ? "source" : "cards"}
               font={readingFont}
+              sheets={sheets}
               selection={selection}
               onSelect={setSelection}
             />

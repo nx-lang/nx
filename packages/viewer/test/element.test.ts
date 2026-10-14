@@ -304,6 +304,24 @@ describe("the source view", () => {
     assert.deepEqual([...keys].sort(), ids.tree.nodes.map((node) => node.key).sort(), "every node is still there once");
   });
 
+  it("reads an element written an attribute to a line as a property sheet, when asked", async () => {
+    const ids = await fixture("elementIds");
+    const element = show(ids);
+    Object.assign(element, { view: "source", sheets: true });
+    const source = root(element).querySelector<HTMLElement>(".source")!;
+    const sheet = source.querySelector<HTMLElement>(".sheet")!;
+    assert.ok(sheet, "the Step written over several lines is a sheet");
+    assert.equal(read(sheet.querySelector(".sheet-head")!), "Step welcome", "its name and id, with no angle bracket");
+    const rows = Array.from(sheet.querySelectorAll<HTMLElement>(".sheet-row"));
+    assert.deepEqual(rows.map((row) => [read(row.querySelector(".sheet-name")!), read(row.querySelector(".sheet-value")!)]), [["title", "Welcome"]]);
+    assert.ok(!sheet.textContent!.includes("/>") && !sheet.textContent!.includes('"'), "no closer, no quotes");
+    assert.equal(source.querySelectorAll(".sheet").length, 1, "the Choice written on one line stays a line");
+    const keys = Array.from(source.querySelectorAll<HTMLElement>("[data-key]"), (node) => node.dataset["key"]!);
+    assert.deepEqual([...keys].sort(), ids.tree.nodes.map((node) => node.key).sort(), "every node is still there once");
+    element.sheets = false;
+    assert.equal(root(element).querySelector(".sheet"), null, "and not when not asked");
+  });
+
   it("keeps offsets right after a character outside the basic plane", async () => {
     const emoji = await fixture("emoji");
     const element = show(emoji);

@@ -129,6 +129,47 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 /* A chip last in its tag closes it with a small gap, less than a space, before the \`/>\`. */
 .source .id-end { margin-right: 3px; }
 .source .id-quote { color: var(--nx-viewer-id-quote-color, light-dark(#afb8c1, #6e6e6e)); }
+/* An element as a property sheet: its name, then a row to an attribute, its names in one quiet
+   column and its values in another, and what it holds under them. It sits where the element began
+   on its line and is no wider than the room left there. */
+.source .sheet {
+  display: inline-grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 2ch;
+  vertical-align: top;
+  max-width: calc(100% - var(--indent, 0) * 1ch);
+}
+.source .sheet-head, .source .sheet-held, .source .sheet-note { grid-column: 1 / -1; }
+.source .sheet-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; padding-left: 2ch; }
+.source .sheet-held, .source .sheet-note { padding-left: 2ch; }
+.source .sheet-name { opacity: 0.75; }
+.source .sheet-value { min-width: 0; }
+.source .sheet-value .uitext-block { max-width: 100%; }
+.source .sheet-list, .source .sheet-held { display: block; }
+.source .sheet-item { display: block; }
+.source .sheet-boolean {
+  --box: var(--nx-viewer-boolean-color, light-dark(#0451a5, #569cd6));
+  display: inline-block;
+  position: relative;
+  width: 12px;
+  height: 12px;
+  vertical-align: -1px;
+  font-size: 0;
+  border: 1.5px solid var(--box);
+  border-radius: 3px;
+}
+.source .sheet-boolean.true { background: var(--box); }
+.source .sheet-boolean.true::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0;
+  width: 3px;
+  height: 7px;
+  border: solid light-dark(#ffffff, #1e1e1e);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
 /* A span in another font takes no line height of its own, so every line keeps the height the
    text's own font gives it, whichever fonts meet on it. */
 .source .prose, .source .indent { line-height: 0; }

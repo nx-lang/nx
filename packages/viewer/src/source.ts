@@ -40,10 +40,20 @@ function utf16Offsets(text: string, byteLength: number): Uint32Array {
 }
 
 /** Renders the document's text with its nodes marked, colored by `colors`. */
+/** How the source view lays the text out, beyond writing it as it is. */
+export interface SourceLayout {
+  /**
+   * Whether an element written with one attribute to a line reads as a property sheet: its name,
+   * then a name and a value to a row, with no `=`, no quotes and no closing tag.
+   */
+  readonly sheets?: boolean;
+}
+
 export function renderSource(
   document: Document,
   index: TreeIndex,
-  colors: readonly NxViewerColor[]
+  colors: readonly NxViewerColor[],
+  layout: SourceLayout = {}
 ): HTMLElement {
   const { text, tree } = index;
   const offsets = utf16Offsets(text, index.bytes.length);
@@ -229,6 +239,11 @@ export function renderSource(
         continue;
       }
       writeGap(parent, at, start, plan);
+      if (layout.sheets === true && node.role === "element" && sheetable(child)) {
+        parent.append(writeSheet(child, start, end));
+        at = end;
+        continue;
+      }
       const element = document.createElement("span");
       element.className = "n";
       element.dataset["role"] = node.role;
@@ -252,6 +267,183 @@ export function renderSource(
       at = end;
     }
     writeGap(parent, at, to, plan);
+  };
+
+  // ---- Property sheets ----------------------------------------------------------------------
+
+  const childrenOf = (at: number): number[] =>
+    [...(index.children[at] ?? [])].sort((a, b) => tree.nodes[a]!.range.startByte - tree.nodes[b]!.range.startByte);
+  const isContent = (at: number): boolean => tree.nodes[at]!.flags?.includes("content") ?? false;
+  const isNote = (at: number): boolean => {
+    const role = tree.nodes[at]!.role;
+    return role === "comment" || role === "docComment";
+  };
+  const onOneLine = (from: number, to: number): boolean => !text.slice(from, to).includes("\n");
+  const startsItsLine = (offset: number): boolean => text.slice(text.lastIndexOf("\n", offset - 1) + 1, offset).trim() === "";
+
+  /**
+   * Whether an element reads as a sheet: the author put each of its attributes on a line of its own, and every value is one the sheet can show in a cell: a literal, an element, a
+   * list of elements or literals, or anything else on one line. Content it holds must be elements.
+   */
+  const sheetable = (at: number): boolean => {
+    const plan = idPlans.get(at);
+    const children = childrenOf(at);
+    const attributes = children.filter(
+      (child) => tree.nodes[child]!.role === "attribute" && !isContent(child) && child !== plan?.attribute
+    );
+    if (attributes.length === 0 || !attributes.every((child) => startsItsLine(startOf(tree.nodes[child]!)))) {
+      return false;
+    }
+    for (const child of children) {
+      const node = tree.nodes[child]!;
+      if (isNote(child) || child === plan?.attribute) {
+        continue;
+      }
+      if (node.role !== "attribute") {
+        return false;
+      }
+      const values = childrenOf(child).filter((value) => !isNote(value));
+      if (isContent(child)) {
+        if (!values.every((value) => tree.nodes[value]!.role === "element")) {
+          return false;
+        }
+        continue;
+      }
+      if (values.length !== 1) {
+        return false;
+      }
+      const value = tree.nodes[values[0]!]!;
+      const simple =
+        value.role === "literal" ||
+        value.role === "element" ||
+        (value.role === "sequence" &&
+          childrenOf(values[0]!).every((item) => ["element", "literal", "comment", "docComment"].includes(tree.nodes[item]!.role))) ||
+        onOneLine(startOf(value), endOf(value));
+      if (!simple) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const marked = (at: number, tag: "span", className: string): HTMLElement => {
+    const node = tree.nodes[at]!;
+    const element = document.createElement(tag);
+    element.className = className === "" ? "n" : `n ${className}`;
+    element.dataset["role"] = node.role;
+    element.dataset["key"] = node.key;
+    return element;
+  };
+
+  /** One attribute's value in its cell: a string without its quotes, a boolean as a box, or as written. */
+  const writeValue = (cell: HTMLElement, attribute: number): void => {
+    const values = childrenOf(attribute).filter((value) => !isNote(value));
+    if (values.length !== 1) {
+      const nodes = childrenOf(attribute);
+      if (nodes.length > 0) {
+        writeNodes(cell, nodes, startOf(tree.nodes[nodes[0]!]!), endOf(tree.nodes[nodes[nodes.length - 1]!]!));
+      }
+      return;
+    }
+    const at = values[0]!;
+    const value = tree.nodes[at]!;
+    const start = startOf(value);
+    const end = endOf(value);
+    const written = value.value ?? "";
+    if (value.role === "literal" && written.startsWith('"') && end - start >= 2) {
+      if (identifiers.has(at)) {
+        const chip = marked(at, "span", "id-value");
+        chip.textContent = text.slice(start + 1, end - 1);
+        cell.append(chip);
+      } else if (uiText.has(at)) {
+        const words = marked(at, "span", "uitext");
+        const block = document.createElement("span");
+        block.className = "uitext-block";
+        const body = document.createElement("span");
+        body.className = "uitext-body";
+        body.textContent = text.slice(start + 1, end - 1);
+        block.append(body);
+        words.append(block);
+        cell.append(words);
+      } else {
+        const words = marked(at, "span", "");
+        writeText(words, start + 1, end - 1);
+        cell.append(words);
+      }
+      return;
+    }
+    if (value.role === "literal" && (written === "true" || written === "false")) {
+      // A box, checked for true, drawn by the stylesheet; the word stays in the text for copying.
+      const box = marked(at, "span", `sheet-boolean ${written}`);
+      box.textContent = written;
+      box.title = written;
+      box.setAttribute("aria-label", written);
+      cell.append(box);
+      return;
+    }
+    if (value.role === "sequence") {
+      // A list reads an item to a line, without the braces around it.
+      const list = marked(at, "span", "sheet-list");
+      for (const item of childrenOf(at)) {
+        const line = document.createElement("span");
+        line.className = "sheet-item";
+        writeNodes(line, [item], startOf(tree.nodes[item]!), endOf(tree.nodes[item]!));
+        list.append(line);
+      }
+      cell.append(list);
+      return;
+    }
+    writeNodes(cell, [at], start, end);
+  };
+
+  /** An element as a property sheet: its name and id, then a row to an attribute, then what it holds. */
+  const writeSheet = (at: number, start: number, end: number): HTMLElement => {
+    const node = tree.nodes[at]!;
+    const plan = idPlans.get(at);
+    const sheet = marked(at, "span", "sheet");
+    sheet.style.setProperty("--indent", String(start - (text.lastIndexOf("\n", start - 1) + 1)));
+    const head = document.createElement("span");
+    head.className = "sheet-head";
+    const nameStart = start + 1;
+    writeText(head, nameStart, nameStart + (node.name ?? "").length);
+    if (plan !== undefined) {
+      head.append(" ", idChip(plan));
+      plan.written = true;
+    }
+    sheet.append(head);
+    for (const child of childrenOf(at)) {
+      const childNode = tree.nodes[child]!;
+      if (child === plan?.attribute) {
+        continue;
+      }
+      if (childNode.role === "attribute" && !isContent(child)) {
+        const row = marked(child, "span", "sheet-row");
+        const name = document.createElement("span");
+        name.className = "sheet-name";
+        const nameAt = startOf(childNode);
+        writeText(name, nameAt, nameAt + (childNode.name ?? "").length);
+        const cell = document.createElement("span");
+        cell.className = "sheet-value";
+        writeValue(cell, child);
+        row.append(name, cell);
+        sheet.append(row);
+      } else if (childNode.role === "attribute") {
+        const held = marked(child, "span", "sheet-held");
+        for (const item of childrenOf(child)) {
+          const line = document.createElement("span");
+          line.className = "sheet-item";
+          writeNodes(line, [item], startOf(tree.nodes[item]!), endOf(tree.nodes[item]!));
+          held.append(line);
+        }
+        sheet.append(held);
+      } else {
+        const line = document.createElement("span");
+        line.className = "sheet-note";
+        writeNodes(line, [child], startOf(childNode), endOf(childNode));
+        sheet.append(line);
+      }
+    }
+    return sheet;
   };
 
   const top = tree.nodes.flatMap((node, at) => (node.parent === undefined ? [at] : []));

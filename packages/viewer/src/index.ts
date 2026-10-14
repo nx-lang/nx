@@ -37,7 +37,7 @@ export interface NxSelectDetail {
 }
 
 /** The element's properties, which a host may set before the element is defined. */
-const PROPERTIES = ["tree", "text", "view", "colors", "ghosts", "images", "selection", "stale"] as const;
+const PROPERTIES = ["tree", "text", "view", "colors", "sheets", "ghosts", "images", "selection", "stale"] as const;
 
 /** How the element shows a document: as its own text, or as cards. */
 export type NxViewerView = "source" | "cards";
@@ -104,6 +104,7 @@ export class NxViewerElement extends ElementBase {
   #images = true;
   #view: NxViewerView = "cards";
   #colors: readonly NxViewerColor[] = [];
+  #sheets = false;
   #index: TreeIndex | undefined;
   #selection: string | undefined;
   /** Each key's original rendering. */
@@ -267,6 +268,21 @@ export class NxViewerElement extends ElementBase {
     return this.#colors;
   }
 
+  /**
+   * Whether the source view reads an element written with one attribute to a line as a property
+   * sheet: a row to an attribute, with no `=`, no quotes and no closing tag. False unless set true.
+   */
+  get sheets(): boolean {
+    return this.#sheets;
+  }
+
+  set sheets(sheets: boolean) {
+    this.#sheets = sheets === true;
+    if (this.#view === "source") {
+      this.#render();
+    }
+  }
+
   set colors(colors: readonly NxViewerColor[]) {
     this.#colors = colors ?? [];
     if (this.#view === "source") {
@@ -370,7 +386,7 @@ export class NxViewerElement extends ElementBase {
       images: this.#images,
     };
     this.#body.append(
-      this.#view === "source" ? renderSource(this.ownerDocument, index, this.#colors) : renderDocument(context)
+      this.#view === "source" ? renderSource(this.ownerDocument, index, this.#colors, { sheets: this.#sheets }) : renderDocument(context)
     );
     for (const element of this.#body.querySelectorAll<HTMLElement>("[data-key]")) {
       this.#rendered.set(element.dataset["key"]!, element);

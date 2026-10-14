@@ -97,13 +97,15 @@ export interface ReadingViewProps {
   readonly view: NxViewerView;
   /** The font the source reading is set in. */
   readonly font: ReadingFont;
+  /** Whether an element written an attribute to a line reads as a property sheet. */
+  readonly sheets: boolean;
   /** The selected node's key. */
   readonly selection: string | undefined;
   readonly onSelect: (key: string) => void;
 }
 
 /** The source pane's Read side: `<nx-viewer>` showing the source tree, or why it cannot. */
-export function ReadingView({ reading, view, font, selection, onSelect }: ReadingViewProps) {
+export function ReadingView({ reading, view, font, sheets, selection, onSelect }: ReadingViewProps) {
   const element = useRef<NxViewerElement>(null);
   // The highlighter the output pane colors with, loaded with the editor's themes, so the source
   // reading takes the colors the editor shows.
@@ -138,9 +140,10 @@ export function ReadingView({ reading, view, font, selection, onSelect }: Readin
     target.tree = undefined;
     target.text = reading.text;
     target.view = view;
+    target.sheets = sheets;
     target.colors = view === "source" && highlighter !== null ? colorize(highlighter.value, reading.text, highlighter.themes) : [];
     target.tree = reading.tree;
-  }, [reading.tree, reading.text, view, highlighter]);
+  }, [reading.tree, reading.text, view, highlighter, sheets]);
 
   useLayoutEffect(() => {
     if (element.current !== null && element.current.selection !== selection) {
