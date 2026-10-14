@@ -141,7 +141,7 @@ viewer SelectLayout =
     <CaseViewer of=columns_3 label="three columns" />
   </UnionViewer>
 viewer Choice =
-  <ElementViewer layout=row title=label subtitle=description badge=value id=value idPosition=end icon="type">
+  <ElementViewer layout=row title=label subtitle=description badge=value id=value idPosition=end icon="circle-dot">
     <PropertyViewer of=exclusive whenTrue="Clears the other choices" />
   </ElementViewer>
 viewer StatementStep =
@@ -173,7 +173,7 @@ viewer QuestionFlow =
   <ElementViewer name="Survey" title=title subtitle=description id=id icon="clipboard-list">
     <PropertyViewer of=id label="Key" place=details />
   </ElementViewer>
-viewer ShortTextQuestion = <ElementViewer icon="text-cursor-input" />
+viewer ShortTextQuestion = <ElementViewer icon="text-cursor" />
 viewer EmailQuestion = <ElementViewer icon="mail" />
 viewer CompletionScreen = <ElementViewer title=headline subtitle=eyebrow icon="flag" />
 viewer LinkPreview = <ElementViewer title=title subtitle=description image=imageUrl icon="link" />
