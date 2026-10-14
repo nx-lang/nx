@@ -389,12 +389,7 @@ export function renderSource(
     if (value.role === "sequence") {
       // A list reads an item to a line, without the braces around it.
       const list = marked(at, "span", "sheet-list");
-      for (const item of childrenOf(at)) {
-        const line = document.createElement("span");
-        line.className = "sheet-item";
-        writeNodes(line, [item], startOf(tree.nodes[item]!), endOf(tree.nodes[item]!));
-        list.append(line);
-      }
+      writeItems(list, childrenOf(at));
       cell.append(list);
       return;
     }
@@ -458,12 +453,7 @@ export function renderSource(
         }
       } else if (childNode.role === "attribute") {
         const held = marked(child, "span", "sheet-held");
-        for (const item of childrenOf(child)) {
-          const line = document.createElement("span");
-          line.className = "sheet-item";
-          writeNodes(line, [item], startOf(tree.nodes[item]!), endOf(tree.nodes[item]!));
-          held.append(line);
-        }
+        writeItems(held, childrenOf(child));
         sheet.append(held);
       } else {
         const line = document.createElement("span");
@@ -517,56 +507,194 @@ export function renderSource(
     writeNodes(parent, [at], afterEquals, endOf(attributeNode));
   };
 
-  /** An element on one line: its name and id, its title's value alone, then its other properties. */
-  const writeLine = (at: number, start: number, end: number): HTMLElement => {
+  /** One piece of an element's line: what column it belongs to when lines are aligned, and its DOM. */
+  interface LinePart {
+    readonly key: string;
+    readonly element: HTMLElement;
+  }
+
+  /** The attribute whose string the element's viewer names as its title, if it sets one. */
+  const titleOf = (at: number): number | undefined => {
     const node = tree.nodes[at]!;
-    const plan = idPlans.get(at);
     const viewer = node.declaration === undefined ? undefined : tree.declarations[node.declaration]?.viewer;
-    const line = marked(at, "span", "line-element");
-    const kind = document.createElement("span");
-    kind.className = "line-kind";
-    writeText(kind, start + 1, start + 1 + (node.name ?? "").length);
-    line.append(kind);
-    if (plan !== undefined && !plan.atEnd) {
-      line.append(" ", idChip(plan));
-    }
-    const attributes = childrenOf(at).filter((child) => child !== plan?.attribute);
-    // The title reads first, by its value alone, when it is a string: the viewer has said what it is.
-    const titled = attributes.find((child) => {
+    return childrenOf(at).find((child) => {
       const candidate = tree.nodes[child]!;
       const values = childrenOf(child);
       return (
         candidate.name === viewer?.title &&
+        child !== idPlans.get(at)?.attribute &&
         values.length === 1 &&
         tree.nodes[values[0]!]!.role === "literal" &&
         (tree.nodes[values[0]!]!.value ?? "").startsWith('"')
       );
     });
-    for (const child of [...(titled === undefined ? [] : [titled]), ...attributes.filter((other) => other !== titled)]) {
+  };
+
+  /** The properties of a one-line element shown by name: all but its id and its title. */
+  const namedOf = (at: number): number[] => {
+    const title = titleOf(at);
+    return childrenOf(at).filter((child) => child !== idPlans.get(at)?.attribute && child !== title);
+  };
+
+  /** The pieces of an element's line, in reading order: name, id, title, properties, id. */
+  const lineParts = (at: number, start: number): LinePart[] => {
+    const node = tree.nodes[at]!;
+    const plan = idPlans.get(at);
+    const parts: LinePart[] = [];
+    const kind = document.createElement("span");
+    kind.className = "line-kind";
+    writeText(kind, start + 1, start + 1 + (node.name ?? "").length);
+    parts.push({ key: "kind", element: kind });
+    if (plan !== undefined && !plan.atEnd) {
+      parts.push({ key: "id-start", element: idChip(plan) });
+    }
+    const title = titleOf(at);
+    if (title !== undefined) {
+      const part = marked(title, "span", "line-property");
+      writeLineValue(part, title);
+      parts.push({ key: "title", element: part });
+    }
+    for (const child of namedOf(at)) {
       const part = marked(child, "span", "line-property");
-      if (child !== titled) {
-        const name = document.createElement("span");
-        name.className = "line-name";
-        const nameAt = startOf(tree.nodes[child]!);
-        writeText(name, nameAt, nameAt + (tree.nodes[child]!.name ?? "").length);
-        // On a line, a named property keeps its `=`: it ties the name to a value that may hold
-        // spaces, where a sheet's columns do that for it.
-        const equals = document.createElement("span");
-        equals.className = "line-equals";
-        equals.textContent = "=";
-        part.append(name, equals);
-      }
+      const name = document.createElement("span");
+      name.className = "line-name";
+      const nameAt = startOf(tree.nodes[child]!);
+      writeText(name, nameAt, nameAt + (tree.nodes[child]!.name ?? "").length);
+      // On a line, a named property keeps its `=`: it ties the name to a value that may hold
+      // spaces, where a sheet's columns do that for it.
+      const equals = document.createElement("span");
+      equals.className = "line-equals";
+      equals.textContent = "=";
+      part.append(name, equals);
       writeLineValue(part, child);
-      line.append("  ", part);
+      parts.push({ key: `property:${tree.nodes[child]!.name ?? ""}`, element: part });
     }
     if (plan !== undefined && plan.atEnd) {
-      line.append("  ", idChip(plan));
+      parts.push({ key: "id-end", element: idChip(plan) });
     }
     if (plan !== undefined) {
       plan.written = true;
     }
+    return parts;
+  };
+
+  /** Lays parts out one after another, with a space after the name before an id and two otherwise. */
+  const flow = (parent: HTMLElement, parts: readonly LinePart[]): void => {
+    parts.forEach((part, position) => {
+      if (position > 0) {
+        const gap = document.createElement("span");
+        gap.className = "line-gap";
+        gap.textContent = position === 1 && part.key === "id-start" ? " " : "  ";
+        parent.append(gap);
+      }
+      parent.append(part.element);
+    });
+  };
+
+  /** An element on one line: its name and id, its title's value alone, then its other properties. */
+  const writeLine = (at: number, start: number, end: number): HTMLElement => {
+    const line = marked(at, "span", "line-element");
+    flow(line, lineParts(at, start));
     void end;
     return line;
+  };
+
+  /**
+   * How a list of elements of one kind, each on one line, lines up: a column to each piece any of
+   * them has, by property name, when they mostly share their properties; when they do not, only
+   * their names and titles line up. Nothing when the list is not such a list.
+   */
+  const alignment = (items: readonly number[]): { columns: string[]; full: boolean } | undefined => {
+    if (items.length < 2) {
+      return undefined;
+    }
+    const kinds = new Set(items.map((item) => tree.nodes[item]!.role === "element" ? tree.nodes[item]!.name : undefined));
+    if (kinds.size !== 1 || kinds.has(undefined) || !items.every((item) => oneLineable(item) && !sheetable(item))) {
+      return undefined;
+    }
+    const first = tree.nodes[items[0]!]!;
+    const viewer = first.declaration === undefined ? undefined : tree.declarations[first.declaration]?.viewer;
+    const order = viewer?.properties?.map((property) => property.name) ?? [];
+    const named = items.map((item) => namedOf(item).map((child) => tree.nodes[child]!.name ?? ""));
+    const used: string[] = [];
+    for (const names of named) {
+      for (const name of names) {
+        if (!used.includes(name)) {
+          used.push(name);
+        }
+      }
+    }
+    used.sort((a, b) => {
+      const ia = order.indexOf(a);
+      const ib = order.indexOf(b);
+      return ia < 0 || ib < 0 ? 0 : ia - ib;
+    });
+    const filled = named.reduce((sum, names) => sum + names.length, 0);
+    // Columns pay their way when most rows fill most of them; otherwise they would be mostly gaps.
+    const full = used.length === 0 || filled / (used.length * items.length) >= 0.6;
+    const plans = items.map((item) => idPlans.get(item));
+    const columns = ["kind"];
+    if (plans.some((plan) => plan !== undefined && !plan.atEnd)) {
+      columns.push("id-start");
+    }
+    if (items.some((item) => titleOf(item) !== undefined)) {
+      columns.push("title");
+    }
+    if (full) {
+      columns.push(...used.map((name) => `property:${name}`));
+      if (plans.some((plan) => plan?.atEnd === true)) {
+        columns.push("id-end");
+      }
+    } else {
+      columns.push("rest");
+    }
+    return { columns, full };
+  };
+
+  /**
+   * The items of a list or of what an element holds, a line to each. A run of one-line elements of
+   * one kind lines up in columns, as a table does, with a gap where one lacks a property the others
+   * set.
+   */
+  const writeItems = (parent: HTMLElement, items: readonly number[]): void => {
+    const aligned = items.some((item) => isNote(item)) ? undefined : alignment(items);
+    if (aligned === undefined) {
+      for (const item of items) {
+        const line = document.createElement("span");
+        line.className = "sheet-item";
+        writeNodes(line, [item], startOf(tree.nodes[item]!), endOf(tree.nodes[item]!));
+        parent.append(line);
+      }
+      return;
+    }
+    const table = document.createElement("span");
+    table.className = "line-table";
+    table.style.gridTemplateColumns = `repeat(${aligned.columns.length}, max-content)`;
+    for (const item of items) {
+      const node = tree.nodes[item]!;
+      const line = marked(item, "span", "line-element line-row");
+      const parts = lineParts(item, startOf(node));
+      const rest: LinePart[] = [];
+      for (const part of parts) {
+        const column = aligned.columns.indexOf(part.key);
+        if (column < 0) {
+          rest.push(part);
+          continue;
+        }
+        part.element.style.gridColumn = String(column + 1);
+        line.append(part.element);
+      }
+      if (rest.length > 0) {
+        // What does not line up flows in the last column, as it would on its own.
+        const flowing = document.createElement("span");
+        flowing.className = "line-rest";
+        flowing.style.gridColumn = String(aligned.columns.length);
+        flow(flowing, rest);
+        line.append(flowing);
+      }
+      table.append(line);
+    }
+    parent.append(table);
   };
 
   const top = tree.nodes.flatMap((node, at) => (node.parent === undefined ? [at] : []));
