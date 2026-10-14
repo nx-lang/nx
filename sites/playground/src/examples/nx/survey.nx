@@ -141,7 +141,7 @@ viewer SelectLayout =
     <CaseViewer of=columns_3 label="three columns" />
   </UnionViewer>
 viewer Choice =
-  <ElementViewer layout=row title=label subtitle=description badge=value id=value idPosition=end icon="circle-dot">
+  <ElementViewer layout=row title=label subtitle=description badge=value id=value idPosition=end icon="type">
     <PropertyViewer of=exclusive whenTrue="Clears the other choices" />
   </ElementViewer>
 viewer StatementStep =
