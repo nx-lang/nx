@@ -153,14 +153,6 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 /* An element on one line: its name, then its properties, a name in the same quiet tone as a
    sheet's and its value after it. */
 .source .line-name { opacity: 0.75; }
-/* A run of one-line elements of one kind, lined up a column to a piece, as a table. */
-.source .line-table { display: grid; column-gap: 2ch; justify-content: start; }
-.source .line-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; }
-.source .line-row > * { grid-row: 1; justify-self: start; }
-/* A row too wide for a column runs on past it without widening it, as a long cell does in a
-   spreadsheet. */
-.source .line-runs-on { width: 0; min-width: 0; overflow: visible; white-space: pre; }
-.source .line-runs-on * { white-space: pre !important; overflow-wrap: normal !important; }
 .source .line-equals { color: var(--nx-viewer-equals-color, light-dark(#6e6e6e, #9a9a9a)); }
 /* A boolean reads as a mark, a check for true and a cross for false, never as a box to click. */
 .source .sheet-boolean { color: var(--nx-viewer-boolean-color, light-dark(#0451a5, #569cd6)); font-weight: 600; }

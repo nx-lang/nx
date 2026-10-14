@@ -600,159 +600,16 @@ export function renderSource(
   };
 
   /**
-   * How a list of elements of one kind, each on one line, lines up: a column to each piece any of
-   * them has, by property name, when they mostly share their properties; when they do not, only
-   * their names and titles line up. Nothing when the list is not such a list.
-   */
-  /** Whether a cell is far wider than the middle cell of its column. */
-  const runsOnFromCell = (_key: string, width: number, cells: readonly { width: number }[]): boolean => {
-    const sorted = cells.map((cell) => cell.width).sort((a, b) => a - b);
-    const median = sorted[Math.floor((sorted.length - 1) / 2)]!;
-    return width > median * OUTLIER_RATIO && width - median > OUTLIER_CHARACTERS;
-  };
-
-  const alignment = (
-    items: readonly number[]
-  ): { columns: string[]; full: boolean; runsOnFrom: Map<number, string> } | undefined => {
-    if (items.length < 2) {
-      return undefined;
-    }
-    const kinds = new Set(items.map((item) => tree.nodes[item]!.role === "element" ? tree.nodes[item]!.name : undefined));
-    if (kinds.size !== 1 || kinds.has(undefined) || !items.every((item) => oneLineable(item) && !sheetable(item))) {
-      return undefined;
-    }
-    const first = tree.nodes[items[0]!]!;
-    const viewer = first.declaration === undefined ? undefined : tree.declarations[first.declaration]?.viewer;
-    const order = viewer?.properties?.map((property) => property.name) ?? [];
-    const named = items.map((item) => namedOf(item).map((child) => tree.nodes[child]!.name ?? ""));
-    const used: string[] = [];
-    for (const names of named) {
-      for (const name of names) {
-        if (!used.includes(name)) {
-          used.push(name);
-        }
-      }
-    }
-    used.sort((a, b) => {
-      const ia = order.indexOf(a);
-      const ib = order.indexOf(b);
-      return ia < 0 || ib < 0 ? 0 : ia - ib;
-    });
-    // A row far wider than the rest in some column would push that column, and all after it, far
-    // from the rows it belongs to. Such a row runs on from that column, as a long cell does in a
-    // spreadsheet, and the columns are sized by the other rows. A list with many such rows is left
-    // to flow.
-    const widths = new Map<string, { item: number; width: number }[]>();
-    for (const item of items) {
-      const title = titleOf(item);
-      for (const child of [...(title === undefined ? [] : [title]), ...namedOf(item)]) {
-        const node = tree.nodes[child]!;
-        const key = child === title ? "title" : `property:${node.name ?? ""}`;
-        const width = child === title ? endOf(node) - startOf(node) - (node.name ?? "").length - 3 : endOf(node) - startOf(node);
-        widths.set(key, [...(widths.get(key) ?? []), { item, width }]);
-      }
-    }
-    const runsOnFrom = new Map<number, string>();
-    for (const [key, cells] of widths) {
-      const sorted = cells.map((cell) => cell.width).sort((a, b) => a - b);
-      const median = sorted[Math.floor((sorted.length - 1) / 2)]!;
-      for (const cell of cells) {
-        if (cell.width > median * OUTLIER_RATIO && cell.width - median > OUTLIER_CHARACTERS && !runsOnFrom.has(cell.item)) {
-          runsOnFrom.set(cell.item, key);
-        }
-      }
-    }
-    if (runsOnFrom.size * 4 > items.length) {
-      return undefined;
-    }
-    const filled = named.reduce((sum, names) => sum + names.length, 0);
-    // Columns pay their way when most rows fill most of them; otherwise they would be mostly gaps.
-    const full = used.length === 0 || filled / (used.length * items.length) >= 0.6;
-    const plans = items.map((item) => idPlans.get(item));
-    const columns = ["kind"];
-    if (plans.some((plan) => plan !== undefined && !plan.atEnd)) {
-      columns.push("id-start");
-    }
-    if (items.some((item) => titleOf(item) !== undefined)) {
-      columns.push("title");
-    }
-    if (full) {
-      columns.push(...used.map((name) => `property:${name}`));
-      if (plans.some((plan) => plan?.atEnd === true)) {
-        columns.push("id-end");
-      }
-    } else {
-      columns.push("rest");
-    }
-    // A row runs on from the earliest column where it is too wide.
-    for (const [item, key] of runsOnFrom) {
-      const keys = [...widths.keys()].sort((a, b) => columns.indexOf(a) - columns.indexOf(b));
-      const earliest = keys.find((candidate) => widths.get(candidate)!.some((cell) => cell.item === item && runsOnFromCell(candidate, cell.width, widths.get(candidate)!)));
-      runsOnFrom.set(item, earliest ?? key);
-    }
-    return { columns, full, runsOnFrom };
-  };
-
-  /**
-   * The items of a list or of what an element holds, a line to each. A run of one-line elements of
-   * one kind lines up in columns, as a table does, with a gap where one lacks a property the others
-   * set.
+   * The items of a list or of what an element holds, a line to each. Siblings do not line up with
+   * each other: each reads on its own, as it is written.
    */
   const writeItems = (parent: HTMLElement, items: readonly number[]): void => {
-    const aligned = items.some((item) => isNote(item)) ? undefined : alignment(items);
-    if (aligned === undefined) {
-      for (const item of items) {
-        const line = document.createElement("span");
-        line.className = "sheet-item";
-        writeNodes(line, [item], startOf(tree.nodes[item]!), endOf(tree.nodes[item]!));
-        parent.append(line);
-      }
-      return;
-    }
-    const table = document.createElement("span");
-    table.className = "line-table";
-    table.style.gridTemplateColumns = `repeat(${aligned.columns.length}, max-content)`;
     for (const item of items) {
-      const node = tree.nodes[item]!;
-      const line = marked(item, "span", "line-element line-row");
-      const parts = lineParts(item, startOf(node));
-      const rest: LinePart[] = [];
-      const runsOn = aligned.runsOnFrom.get(item);
-      const runsOnAt = runsOn === undefined ? -1 : aligned.columns.indexOf(runsOn);
-      const runOn: LinePart[] = [];
-      for (const part of parts) {
-        const column = aligned.columns.indexOf(part.key);
-        if (runsOnAt >= 0 && (column < 0 || column >= runsOnAt)) {
-          runOn.push(part);
-          continue;
-        }
-        if (column < 0) {
-          rest.push(part);
-          continue;
-        }
-        part.element.style.gridColumn = String(column + 1);
-        line.append(part.element);
-      }
-      if (runOn.length > 0) {
-        // The row's wide cell and all after it flow from its column, taking no width there, so the
-        // columns stay as wide as the other rows need.
-        const flowing = document.createElement("span");
-        flowing.className = "line-runs-on";
-        flowing.style.gridColumn = String(runsOnAt + 1);
-        flow(flowing, runOn);
-        line.append(flowing);
-      }
-      if (rest.length > 0) {
-        // What does not line up flows in the last column, as it would on its own.
-        const flowing = document.createElement("span");
-        flowing.className = "line-rest";
-        flowing.style.gridColumn = String(aligned.columns.length);
-        flow(flowing, rest);
-        line.append(flowing);
-      }
-      table.append(line);
+      const line = document.createElement("span");
+      line.className = "sheet-item";
+      writeNodes(line, [item], startOf(tree.nodes[item]!), endOf(tree.nodes[item]!));
+      parent.append(line);
     }
-    parent.append(table);
   };
 
   const top = tree.nodes.flatMap((node, at) => (node.parent === undefined ? [at] : []));
@@ -853,13 +710,6 @@ function elementIdPlans(
   });
   return plans;
 }
-
-/**
- * How much wider than the middle row of a column its widest row may be before a list is left
- * unaligned: both a ratio and a number of characters must be passed.
- */
-const OUTLIER_RATIO = 1.5;
-const OUTLIER_CHARACTERS = 12;
 
 /** How a character of the text is spaced in the reading, where that differs from how it is written. */
 type SpacingMark = "attribute-equals" | "attribute-space";
