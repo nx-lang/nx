@@ -157,6 +157,10 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
    nearly touching it, so the two read as one mark. */
 .source .line-open, .source .line-close { color: var(--nx-viewer-tag-color, light-dark(#6e6e6e, #9a9a9a)); }
 .source .line-close-slash { margin-right: -0.18em; }
+/* Half a space before the \`/>\`: a whole one reads as a gap, since the slash leans away from what it
+   follows. An id last in the tag keeps its own smaller gap. */
+.source .line-close { margin-left: 0.3em; }
+.source .id-end + .line-close { margin-left: 0; }
 .source .line-equals { color: var(--nx-viewer-equals-color, light-dark(#6e6e6e, #9a9a9a)); }
 /* A boolean reads as a mark, a check for true and a cross for false, never as a box to click. */
 .source .sheet-boolean { color: var(--nx-viewer-boolean-color, light-dark(#0451a5, #569cd6)); font-weight: 600; }

@@ -602,8 +602,7 @@ export function renderSource(
     open.className = "line-open";
     open.textContent = "<";
     line.append(open);
-    const parts = lineParts(at, start);
-    flow(line, parts);
+    flow(line, lineParts(at, start));
     const close = document.createElement("span");
     close.className = "line-close";
     // The `/` stands in its own span so the `>` can be drawn in close to it, as one mark.
@@ -611,10 +610,6 @@ export function renderSource(
     slash.className = "line-close-slash";
     slash.textContent = "/";
     close.append(slash, ">");
-    // An id last in the tag keeps its own small gap before the `/>`, in place of a space.
-    if (parts.at(-1)?.key !== "id-end") {
-      line.append(" ");
-    }
     line.append(close);
     void end;
     return line;
