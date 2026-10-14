@@ -139,37 +139,22 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
   vertical-align: top;
   max-width: calc(100% - var(--indent, 0) * 1ch);
 }
+/* A sheet inside another is already set in by it, so only its container bounds it. */
+.source .sheet .sheet { max-width: 100%; }
 .source .sheet-head, .source .sheet-held, .source .sheet-note { grid-column: 1 / -1; }
 .source .sheet-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; padding-left: 2ch; }
 .source .sheet-held, .source .sheet-note { padding-left: 2ch; }
 .source .sheet-name { opacity: 0.75; }
 .source .sheet-value { min-width: 0; }
-.source .sheet-value .uitext-block { max-width: 100%; }
+/* Inside a sheet, UI text wraps where its line does: the sheet already sets it in from the margin. */
+.source .sheet .uitext-block { display: inline; max-width: none; }
 .source .sheet-list, .source .sheet-held { display: block; }
 .source .sheet-item { display: block; }
-.source .sheet-boolean {
-  --box: var(--nx-viewer-boolean-color, light-dark(#0451a5, #569cd6));
-  display: inline-block;
-  position: relative;
-  width: 12px;
-  height: 12px;
-  vertical-align: -1px;
-  font-size: 0;
-  border: 1.5px solid var(--box);
-  border-radius: 3px;
-}
-.source .sheet-boolean.true { background: var(--box); }
-.source .sheet-boolean.true::after {
-  content: "";
-  position: absolute;
-  left: 3px;
-  top: 0;
-  width: 3px;
-  height: 7px;
-  border: solid light-dark(#ffffff, #1e1e1e);
-  border-width: 0 2px 2px 0;
-  transform: rotate(45deg);
-}
+/* A boolean reads as a mark, a check for true and a cross for false, never as a box to click. */
+.source .sheet-boolean { color: var(--nx-viewer-boolean-color, light-dark(#0451a5, #569cd6)); font-weight: 600; }
+.source .sheet-boolean.false { color: var(--nx-viewer-boolean-false-color, light-dark(#8e8e8e, #808080)); }
+/* A value of several lines sits under its name, a step in, across both columns. */
+.source .sheet-below { grid-column: 1 / -1; display: block; padding-left: 2ch; }
 /* A span in another font takes no line height of its own, so every line keeps the height the
    text's own font gives it, whichever fonts meet on it. */
 .source .prose, .source .indent { line-height: 0; }

@@ -373,9 +373,9 @@ export function renderSource(
       return;
     }
     if (value.role === "literal" && (written === "true" || written === "false")) {
-      // A box, checked for true, drawn by the stylesheet; the word stays in the text for copying.
+      // A mark, not a box: a check box looks like something to click, and this only reads.
       const box = marked(at, "span", `sheet-boolean ${written}`);
-      box.textContent = written;
+      box.textContent = written === "true" ? "\u2713" : "\u2717";
       box.title = written;
       box.setAttribute("aria-label", written);
       cell.append(box);
@@ -394,6 +394,22 @@ export function renderSource(
       return;
     }
     writeNodes(cell, [at], start, end);
+  };
+
+  /** Whether an attribute's value takes several lines in the sheet: a list, a sheet, a string with line breaks. */
+  const spansLines = (attribute: number): boolean => {
+    const values = childrenOf(attribute).filter((value) => !isNote(value));
+    if (values.length !== 1) {
+      return false;
+    }
+    const value = tree.nodes[values[0]!]!;
+    if (value.role === "sequence") {
+      return true;
+    }
+    if (value.role === "element") {
+      return sheetable(values[0]!);
+    }
+    return value.role === "literal" && (value.value ?? "").includes("\n");
   };
 
   /** An element as a property sheet: its name and id, then a row to an attribute, then what it holds. */
@@ -424,9 +440,17 @@ export function renderSource(
         writeText(name, nameAt, nameAt + (childNode.name ?? "").length);
         const cell = document.createElement("span");
         cell.className = "sheet-value";
-        writeValue(cell, child);
         row.append(name, cell);
         sheet.append(row);
+        // A value of several lines reads under its name, indented, and not in the value column.
+        if (spansLines(child)) {
+          const below = document.createElement("span");
+          below.className = "sheet-below";
+          writeValue(below, child);
+          row.append(below);
+        } else {
+          writeValue(cell, child);
+        }
       } else if (childNode.role === "attribute") {
         const held = marked(child, "span", "sheet-held");
         for (const item of childrenOf(child)) {
