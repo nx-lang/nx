@@ -617,27 +617,37 @@ export function renderSource(
     });
   };
 
+  /** Whether nothing but spaces follows an offset on its line. */
+  const endsItsLine = (offset: number): boolean => {
+    const next = text.indexOf("\n", offset);
+    return text.slice(offset, next < 0 ? text.length : next).trim() === "";
+  };
+
   /**
-   * An element on one line: its name and id, its title's value alone, then its other properties,
-   * between the `<` and `/>` the source writes, which show where it starts and ends among what
-   * shares its line.
+   * An element on one line: its name and id, its title's value alone, then its other properties.
+   * When it shares its line, with a property's name or anything else, it keeps the `<` and `/>` the
+   * source writes, which show where it starts and ends; alone on its line, it needs neither.
    */
   const writeLine = (at: number, start: number, end: number): HTMLElement => {
     const line = marked(at, "span", "line-element");
-    const open = document.createElement("span");
-    open.className = "line-open";
-    open.textContent = "<";
-    line.append(open);
+    const alone = startsItsLine(start) && endsItsLine(end);
+    if (!alone) {
+      const open = document.createElement("span");
+      open.className = "line-open";
+      open.textContent = "<";
+      line.append(open);
+    }
     flow(line, lineParts(at, start));
-    const close = document.createElement("span");
-    close.className = "line-close";
-    // The `/` stands in its own span so the `>` can be drawn in close to it, as one mark.
-    const slash = document.createElement("span");
-    slash.className = "line-close-slash";
-    slash.textContent = "/";
-    close.append(slash, ">");
-    line.append(close);
-    void end;
+    if (!alone) {
+      const close = document.createElement("span");
+      close.className = "line-close";
+      // The `/` stands in its own span so the `>` can be drawn in close to it, as one mark.
+      const slash = document.createElement("span");
+      slash.className = "line-close-slash";
+      slash.textContent = "/";
+      close.append(slash, ">");
+      line.append(close);
+    }
     return line;
   };
 
