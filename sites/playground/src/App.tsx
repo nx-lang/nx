@@ -183,7 +183,7 @@ export function App() {
   // turned off to compare; not kept.
   const [sheets, setSheets] = useState(true);
   // How sheets show what belongs to what, while the ways are compared; not kept.
-  const [grouping, setGrouping] = useState<ReadingGrouping>("outline");
+  const [grouping, setGrouping] = useState<ReadingGrouping>("brackets");
   const reading = useSourceTree(source, mode !== "edit");
   // The editor's cursor, carried into Read until a tree of the same text can say what it is on.
   const cursorToSelect = useRef<number | null>(null);

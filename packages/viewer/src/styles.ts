@@ -164,6 +164,8 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 /* How a sheet shows what belongs to it, set by the host's grouping attribute.
    outline: names a step bolder, a hairline above each sheet that follows another, a tint over the
    sheet under the pointer, and a rule beside a sheet that is a property's value.
+   brackets: names a step bolder, a bracket down each sheet that turns right at its end, and a
+   tint over the sheet under the pointer.
    guides: a faint line down each sheet from under its name, as an editor's indent guides. */
 :host([grouping="outline"]) .source .sheet-head { font-weight: 600; }
 :host([grouping="outline"]) .source .sheet-head .id-value { font-weight: 400; }
@@ -180,6 +182,27 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 :host([grouping="outline"]) .source .sheet-below > .sheet {
   border-left: 2px solid var(--nx-viewer-rule, light-dark(#0000001f, #ffffff1f));
   padding-left: 1ch;
+}
+:host([grouping="brackets"]) .source .sheet-head { font-weight: 600; }
+:host([grouping="brackets"]) .source .sheet-head .id-value { font-weight: 400; }
+:host([grouping="brackets"]) .source .sheet { position: relative; }
+/* A bracket down the sheet from under its name, turning right at its end, as a tree's connectors
+   and an editor's bracket guides do, so each sheet visibly closes. */
+:host([grouping="brackets"]) .source .sheet::after {
+  content: "";
+  position: absolute;
+  left: 0.5ch;
+  top: var(--nx-viewer-source-line-height, 18px);
+  bottom: 2px;
+  width: 7px;
+  border-left: 1px solid var(--nx-viewer-rule, light-dark(#0000002e, #ffffff2e));
+  border-bottom: 1px solid var(--nx-viewer-rule, light-dark(#0000002e, #ffffff2e));
+  border-bottom-left-radius: 3px;
+  pointer-events: none;
+}
+:host([grouping="brackets"]) .source .sheet:hover:not(:has(.sheet:hover)) {
+  background: var(--nx-viewer-hover, light-dark(#0000000a, #ffffff0a));
+  border-radius: 4px;
 }
 :host([grouping="guides"]) .source .sheet {
   background-image: linear-gradient(var(--nx-viewer-rule, light-dark(#00000024, #ffffff24)), var(--nx-viewer-rule, light-dark(#00000024, #ffffff24)));

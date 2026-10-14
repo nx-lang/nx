@@ -72,10 +72,11 @@ export const READING_FONTS = [
 export type ReadingFont = (typeof READING_FONTS)[number];
 
 /** How Read's sheets show what belongs to what, while the ways are compared. */
-export const READING_GROUPINGS = ["outline", "guides", "none"] as const;
+export const READING_GROUPINGS = ["brackets", "outline", "guides", "none"] as const;
 export type ReadingGrouping = (typeof READING_GROUPINGS)[number];
 export const READING_GROUPING_LABELS: Record<ReadingGrouping, string> = {
-  outline: "Outline (default)",
+  brackets: "Brackets (default)",
+  outline: "Outline",
   guides: "Guides",
   none: "None",
 };
