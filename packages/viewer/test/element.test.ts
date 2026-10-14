@@ -286,6 +286,22 @@ describe("the source view", () => {
     assert.ok(root(element).querySelector(".value.formatted.id"), "the card reading formats it too");
   });
 
+  it("shows the color a string its viewer formats as a color names, as a square before it", async () => {
+    const colors = await fixture("colors");
+    const element = show(colors);
+    element.view = "source";
+    const source = root(element).querySelector<HTMLElement>(".source")!;
+    assert.equal(source.textContent, colors.text, "the text is unchanged");
+    const squares = Array.from(source.querySelectorAll<HTMLElement>(".swatch"));
+    assert.equal(squares.length, 1, "only a color the type's viewer formats, and only one that names a color");
+    assert.equal(squares[0]!.parentElement!.textContent, '"#b6695d"');
+    assert.equal(squares[0]!.getAttribute("aria-hidden"), "true");
+    element.sheets = true;
+    const sheet = root(element).querySelector<HTMLElement>(".source .swatch");
+    assert.ok(sheet, "a one-line element shows it too");
+    assert.equal(sheet!.parentElement!.textContent, "#b6695d");
+  });
+
   it("moves an element's id to where its viewer puts it, as its value alone", async () => {
     const ids = await fixture("elementIds");
     const element = show(ids);

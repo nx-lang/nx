@@ -110,5 +110,9 @@
   "elementIds": {
     "source": "import \"@nx/viewer\"\n\ntype Step = { id:string title:string }\ntype Choice = { value:string label:string }\n\nviewer Step = <ElementViewer title=title id=id />\nviewer Choice = <ElementViewer title=label id=value idPosition=end />\n\nlet steps = {\n  <Step\n    id=\"welcome\"\n    title=\"Welcome\"\n  />\n  <Choice value=\"yes\" label=\"Yes\" />\n}\n",
     "viewers": []
+  },
+  "colors": {
+    "source": "import \"@nx/viewer\"\n\ntype Color = string\n\ntype Brand = { name:string primary:Color accent?:Color note?:string }\n\nviewer Color = <ValueViewer format=color />\n\nlet brand = <Brand name=\"Hive5\" primary=\"#b6695d\" accent=\"not a color\" note=\"#ffffff\" />\n",
+    "viewers": []
   }
 }

@@ -161,6 +161,17 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
    follows. An id last in the tag keeps its own smaller gap. */
 .source .line-close { margin-left: 0.3em; }
 .source .id-end + .line-close { margin-left: 0; }
+/* The color a string names, as a small square before it. */
+.source .swatch {
+  display: inline-block;
+  width: 0.75em;
+  height: 0.75em;
+  margin: 0 0.25em 0 0.1em;
+  border-radius: 2px;
+  border: 0;
+  box-shadow: inset 0 0 0 1px light-dark(rgb(0 0 0 / 0.2), rgb(255 255 255 / 0.25));
+  vertical-align: -0.05em;
+}
 .source .line-equals { color: var(--nx-viewer-equals-color, light-dark(#6e6e6e, #9a9a9a)); }
 /* A boolean reads as a mark, a check for true and a cross for false, never as a box to click. */
 .source .sheet-boolean { color: var(--nx-viewer-boolean-color, light-dark(#0451a5, #569cd6)); font-weight: 600; }

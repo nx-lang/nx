@@ -5,7 +5,7 @@
  * reading. Colors come from the host, as ranges over the text, so a host colors the reading with
  * the highlighter and themes it colors its editor with.
  */
-import type { SourceNode } from "@nx-lang/language-protocol";
+import type { SourceNode, SourceValueFormat } from "@nx-lang/language-protocol";
 
 import type { TreeIndex } from "./tree.js";
 
@@ -129,7 +129,25 @@ export function renderSource(
   };
 
   const uiText = uiTextNodes(index);
-  const identifiers = identifierNodes(index);
+  const formats = formattedNodes(index);
+  const identifiers = new Set([...formats].flatMap(([at, format]) => (format === "id" ? [at] : [])));
+
+  // A small square of the color a string names, before it, for a string its viewer formats as a
+  // color. Nothing when the string names no color: the square would show a color that is not there.
+  const swatch = (at: number, start: number, end: number): HTMLElement | undefined => {
+    if (formats.get(at) !== "color") {
+      return undefined;
+    }
+    const square = document.createElement("span");
+    square.className = "swatch";
+    // A color, never anything else: `background-color` takes no URL.
+    square.style.backgroundColor = text.slice(start + 1, end - 1).trim();
+    if (square.style.backgroundColor === "") {
+      return undefined;
+    }
+    square.setAttribute("aria-hidden", "true");
+    return square;
+  };
 
   // A string its viewer formats as an identifier: one quiet token, its quotes inside it.
   const writeIdentifier = (element: HTMLElement, start: number, end: number): void => {
@@ -266,6 +284,10 @@ export function renderSource(
         if (uiText.has(child)) {
           element.classList.add("uitext", "uitext-body");
         }
+        const square = quoted ? swatch(child, start, end) : undefined;
+        if (square !== undefined) {
+          element.append(square);
+        }
         writeNodes(element, index.children[child] ?? [], start, end, idPlans.get(child));
       }
       parent.append(element);
@@ -372,6 +394,10 @@ export function renderSource(
         cell.append(words);
       } else {
         const words = marked(at, "span", "");
+        const square = swatch(at, start, end);
+        if (square !== undefined) {
+          words.append(square);
+        }
         writeText(words, start + 1, end - 1);
         cell.append(words);
       }
@@ -846,12 +872,12 @@ function uiTextNodes(index: TreeIndex): Set<number> {
 }
 
 /**
- * The string literals an attribute holds directly when its property's viewer formats it as an
- * identifier: `<PropertyViewer of=id format=id />`, or the viewer of an alias its type names.
+ * The string literals an attribute holds directly, with the format its property's viewer gives
+ * them: from `<PropertyViewer of=id format=id />`, or from the viewer of the alias its type names.
  */
-function identifierNodes(index: TreeIndex): Set<number> {
+function formattedNodes(index: TreeIndex): Map<number, SourceValueFormat> {
   const { tree } = index;
-  const found = new Set<number>();
+  const found = new Map<number, SourceValueFormat>();
   tree.nodes.forEach((node, at) => {
     if (node.role !== "literal" || !(node.value ?? "").startsWith('"') || node.parent === undefined) {
       return;
@@ -862,8 +888,9 @@ function identifierNodes(index: TreeIndex): Set<number> {
       return;
     }
     const viewer = tree.declarations[element.declaration]?.viewer;
-    if (viewer?.properties?.find((property) => property.name === attribute.name)?.format === "id") {
-      found.add(at);
+    const format = viewer?.properties?.find((property) => property.name === attribute.name)?.format;
+    if (format !== undefined) {
+      found.set(at, format);
     }
   });
   return found;
