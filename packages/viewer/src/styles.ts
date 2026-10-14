@@ -197,11 +197,12 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 .source .sheet-head .line-property { font-weight: 400; }
 /* An item written as it is over several lines starts where its group puts it, and its later lines
    keep their indentation from the source, measured from the item's own start. */
+.source .sheet-item.as-written * { text-indent: 0; }
+/* After the reset above, so an item written as it is inside another keeps its own first-line indent. */
 .source .sheet-item.as-written {
   margin-left: calc(var(--column, 0) * -1ch);
   text-indent: calc(var(--column, 0) * 1ch);
 }
-.source .sheet-item.as-written * { text-indent: 0; }
 /* A little room between siblings where either is a sheet, so each group stands apart from the next:
    between the elements of a list or of what an element holds, between sheets that follow one
    another, and around a row whose value is a sheet under its name. Not between one-line elements,
