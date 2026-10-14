@@ -629,6 +629,26 @@ export function renderSource(
       const ib = order.indexOf(b);
       return ia < 0 || ib < 0 ? 0 : ia - ib;
     });
+    // One row far wider than the rest in some column would push that column, and all after it, far
+    // from the rows it belongs to: such a list is left to flow.
+    const widths = new Map<number, number[]>();
+    for (const item of items) {
+      const title = titleOf(item);
+      for (const child of [...(title === undefined ? [] : [title]), ...namedOf(item)]) {
+        const key = child === title ? -1 : used.indexOf(tree.nodes[child]!.name ?? "");
+        const node = tree.nodes[child]!;
+        const width = child === title ? endOf(node) - startOf(node) - (node.name ?? "").length - 3 : endOf(node) - startOf(node);
+        widths.set(key, [...(widths.get(key) ?? []), width]);
+      }
+    }
+    for (const column of widths.values()) {
+      const sorted = [...column].sort((a, b) => a - b);
+      const median = sorted[Math.floor((sorted.length - 1) / 2)]!;
+      const widest = sorted[sorted.length - 1]!;
+      if (widest > median * OUTLIER_RATIO && widest - median > OUTLIER_CHARACTERS) {
+        return undefined;
+      }
+    }
     const filled = named.reduce((sum, names) => sum + names.length, 0);
     // Columns pay their way when most rows fill most of them; otherwise they would be mostly gaps.
     const full = used.length === 0 || filled / (used.length * items.length) >= 0.6;
@@ -795,6 +815,13 @@ function elementIdPlans(
   });
   return plans;
 }
+
+/**
+ * How much wider than the middle row of a column its widest row may be before a list is left
+ * unaligned: both a ratio and a number of characters must be passed.
+ */
+const OUTLIER_RATIO = 1.5;
+const OUTLIER_CHARACTERS = 12;
 
 /** How a character of the text is spaced in the reading, where that differs from how it is written. */
 type SpacingMark = "attribute-equals" | "attribute-space";
