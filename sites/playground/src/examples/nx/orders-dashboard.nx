@@ -2,6 +2,8 @@
 // records, functions that derive what to show from them, an element-style function and a
 // component for the repeated pieces, and a dashboard component that keeps which order is open.
 
+import "@nx/viewer"
+
 /// Text a person reads: a title, a label, a message. It is what a translator translates.
 type uitext = string
 
@@ -54,6 +56,9 @@ type Order = {
   status:OrderStatus
   note?:string
 }
+
+viewer Order = <ElementViewer id=id />
+viewer LineItem = <ElementViewer title=product />
 
 action OrderOpened = { id:string }
 
