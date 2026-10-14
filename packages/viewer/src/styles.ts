@@ -124,7 +124,7 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
   color: var(--nx-viewer-id-color, light-dark(#6e7781, #a0a0a0));
   background: var(--nx-viewer-id-background, light-dark(#0000000d, #ffffff14));
   border-radius: 6px;
-  padding: 0 4px;
+  padding: 0 6px;
 }
 .source .id-quote { color: var(--nx-viewer-id-quote-color, light-dark(#afb8c1, #6e6e6e)); }
 /* A span in another font takes no line height of its own, so every line keeps the height the
