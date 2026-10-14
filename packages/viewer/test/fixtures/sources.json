@@ -102,5 +102,9 @@
   },
   "uitext": {
     "source": "// A note for whoever reads the source.\ntype uitext = string\ntype WebUIText = uitext\ntype Choice = { value:string label:uitext hint?:WebUIText note:uitext = \"Fine\" }\nexternal component <Text tone:string = \"plain\" content text:uitext />\nlet greet(name:string): uitext = { \"Hello, \" + name }\nlet root() = {\n  <Choice value=\"a\" label=\"First choice\" hint=\"Pick me\" />\n  <Text>Shown to people</Text>\n  <Choice value=\"b\" label={\"Second \" + \"choice\"} />\n}\n"
+  },
+  "identifiers": {
+    "source": "import \"@nx/viewer\"\n\ntype Step = { id:string title:string next?:string }\n\nviewer Step =\n  <ElementViewer title=title>\n    <PropertyViewer of=id format=id />\n  </ElementViewer>\n\nlet first = <Step id=\"welcome\" title=\"Welcome\" next=\"details\" />\n",
+    "viewers": []
   }
 }

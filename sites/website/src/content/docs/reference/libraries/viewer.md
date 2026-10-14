@@ -122,7 +122,7 @@ its payload.
 | Type | Fields | Notes |
 | --- | --- | --- |
 | `ValueViewer` | `format: ValueFormat` | How a string value of the alias is shown. |
-| `ValueFormat` | `text`, `markdown`, `url`, `image`, `color`, `email`, `phone` | A format changes how the value looks, never what it is. |
+| `ValueFormat` | `text`, `markdown`, `url`, `image`, `color`, `email`, `phone`, `id` | A format changes how the value looks, never what it is. |
 
 | Format | Shows a string value |
 | --- | --- |
@@ -133,6 +133,7 @@ its payload.
 | `color` | As a swatch beside the text. |
 | `email` | As a link that writes an email. |
 | `phone` | As a link that dials. |
+| `id` | As an identifier: a key that names one thing and is kept, such as an id stored in a database. |
 
 A `ValueViewer` on an alias formats every property typed by that alias. A `PropertyViewer`'s
 `format` overrides it for one property:
@@ -264,6 +265,8 @@ export type ValueFormat =
   | email
   /// As a link that dials.
   | phone
+  /// As an identifier: a key that names one thing and is kept, such as an id stored in a database.
+  | id
 ```
 
 ## See also

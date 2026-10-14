@@ -117,6 +117,16 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
   line-height: var(--nx-viewer-source-line-height, 18px);
 }
 .source .n.selected .uitext-block { background: var(--nx-viewer-selection, light-dark(#0969da1f, #388bfd33)); }
+/* A string its viewer formats as an identifier: one quiet token, as products that show ids do,
+   in muted gray on a faint tint, with no border and no added height. */
+.source .id-value, .value.formatted.id {
+  font-family: var(--nx-viewer-source-font-family, var(--mono));
+  color: var(--nx-viewer-id-color, light-dark(#6e7781, #a0a0a0));
+  background: var(--nx-viewer-id-background, light-dark(#0000000d, #ffffff14));
+  border-radius: 4px;
+  padding: 0 3px;
+}
+.source .id-quote { color: var(--nx-viewer-id-quote-color, light-dark(#afb8c1, #6e6e6e)); }
 /* A span in another font takes no line height of its own, so every line keeps the height the
    text's own font gives it, whichever fonts meet on it. */
 .source .prose, .source .indent { line-height: 0; }

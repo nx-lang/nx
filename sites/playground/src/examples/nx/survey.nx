@@ -148,13 +148,13 @@ viewer StatementStep =
   <ElementViewer name="Statement" title=headline subtitle=eyebrow>
     <PropertyViewer of=body format=markdown />
     <PropertyViewer of=cta label="Button" />
-    <PropertyViewer of=id label="Key" place=details />
+    <PropertyViewer of=id label="Key" place=details format=id />
   </ElementViewer>
 viewer Question =
   <ElementViewer title=label subtitle=description>
     <PropertyViewer of=required whenTrue="Required" whenFalse="Optional" />
     <PropertyViewer of=requiredMessage label="If left empty" />
-    <PropertyViewer of=id label="Key" place=details />
+    <PropertyViewer of=id label="Key" place=details format=id />
     <PropertyViewer of=mediaPosition place=details />
   </ElementViewer>
 viewer SelectQuestion =
@@ -163,7 +163,7 @@ viewer SelectQuestion =
     <PropertyViewer of=multiple whenTrue="Pick any number" whenFalse="Pick one" />
     <PropertyViewer of=other whenTrue="Allows another answer" whenFalse="Listed choices only" />
     <PropertyViewer of=requiredMessage label="If left empty" />
-    <PropertyViewer of=id label="Key" place=details />
+    <PropertyViewer of=id label="Key" place=details format=id />
     <PropertyViewer of=otherLabel place=details />
     <PropertyViewer of=mediaPosition place=details />
     <PropertyViewer of=layout place=details />
@@ -171,7 +171,7 @@ viewer SelectQuestion =
   </ElementViewer>
 viewer QuestionFlow =
   <ElementViewer name="Survey" title=title subtitle=description>
-    <PropertyViewer of=id label="Key" place=details />
+    <PropertyViewer of=id label="Key" place=details format=id />
   </ElementViewer>
 viewer CompletionScreen = <ElementViewer title=headline subtitle=eyebrow />
 viewer LinkPreview = <ElementViewer title=title subtitle=description image=imageUrl />

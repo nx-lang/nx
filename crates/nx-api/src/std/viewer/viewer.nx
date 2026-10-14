@@ -109,3 +109,5 @@ export type ValueFormat =
   | email
   /// As a link that dials.
   | phone
+  /// As an identifier: a key that names one thing and is kept, such as an id stored in a database.
+  | id

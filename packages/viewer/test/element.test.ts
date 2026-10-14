@@ -273,6 +273,19 @@ describe("the source view", () => {
     assert.equal(block.style.getPropertyValue("--column"), String('  <Choice value="a" label="'.length), "the words' column is known");
   });
 
+  it("sets a string its viewer formats as an identifier apart as one quiet token", async () => {
+    const identifiers = await fixture("identifiers");
+    const element = show(identifiers);
+    element.view = "source";
+    const source = root(element).querySelector<HTMLElement>(".source")!;
+    assert.equal(source.textContent, identifiers.text, "the text is unchanged");
+    const tokens = Array.from(source.querySelectorAll<HTMLElement>(".id-value"), (node) => node.textContent);
+    assert.deepEqual(tokens, ['"welcome"'], "only the property the viewer names; next is a plain string");
+    assert.equal(source.querySelector(".id-value")!.querySelectorAll(".id-quote").length, 2);
+    element.view = "cards";
+    assert.ok(root(element).querySelector(".value.formatted.id"), "the card reading formats it too");
+  });
+
   it("keeps offsets right after a character outside the basic plane", async () => {
     const emoji = await fixture("emoji");
     const element = show(emoji);

@@ -281,7 +281,7 @@ fn is_known_value(name: &str, text: &str) -> bool {
         "place" => matches!(text, "body" | "details"),
         "format" => matches!(
             text,
-            "text" | "markdown" | "url" | "image" | "color" | "email" | "phone"
+            "text" | "markdown" | "url" | "image" | "color" | "email" | "phone" | "id"
         ),
         _ => true,
     }

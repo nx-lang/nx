@@ -449,7 +449,7 @@ export interface SourceViewer {
 export type SourceViewerLayout = "card" | "row" | "inline";
 
 /** How a string value is shown. A format changes how the value looks, never what it is. */
-export type SourceValueFormat = "text" | "markdown" | "url" | "image" | "color" | "email" | "phone";
+export type SourceValueFormat = "text" | "markdown" | "url" | "image" | "color" | "email" | "phone" | "id";
 
 /** How one property of a declaration reads. */
 export interface SourcePropertyViewer {

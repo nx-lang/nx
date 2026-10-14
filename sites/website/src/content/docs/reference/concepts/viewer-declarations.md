@@ -184,7 +184,8 @@ A viewer such as `<nx-viewer>` uses the resolved viewer declarations this way:
 - **Cases.** A case's `label` shows in its pill, with the case name and its `example` in the hover.
 - **Formats.** A string literal bound to a property with a format is shown by it: `url` and `email`
   as links, `phone` as a link that dials, `image` as a small picture with its URL, `color` with a
-  swatch, `markdown` as prose and `text` as a plain value. A format changes how a value looks, never
+  swatch, `markdown` as prose, `text` as a plain value and `id` as an identifier, quiet and set
+  apart as one token. A format changes how a value looks, never
   what it is, and does nothing to a value that is not a string literal.
 
 The reading stays lossless: a viewer declaration can fold a property into the details strip but

@@ -119,6 +119,19 @@ export function renderSource(
   };
 
   const uiText = uiTextNodes(index);
+  const identifiers = identifierNodes(index);
+
+  // A string its viewer formats as an identifier: one quiet token, its quotes inside it.
+  const writeIdentifier = (element: HTMLElement, start: number, end: number): void => {
+    element.classList.add("id-value");
+    const quote = (): HTMLElement => {
+      const mark = document.createElement("span");
+      mark.className = "id-quote";
+      mark.textContent = '"';
+      return mark;
+    };
+    element.append(quote(), text.slice(start + 1, end - 1), quote());
+  };
 
   // A string a person will read: its words in the prose font and the reading's own color, between
   // quotes left quiet. The words sit in a box that begins after the opening quote, so a line the
@@ -164,7 +177,10 @@ export function renderSource(
       if (node.role === "comment" || node.role === "docComment") {
         element.classList.add("prose");
       }
-      if (uiText.has(child) && node.role === "literal" && end - start >= 2 && text[start] === '"' && text[end - 1] === '"') {
+      const quoted = node.role === "literal" && end - start >= 2 && text[start] === '"' && text[end - 1] === '"';
+      if (quoted && identifiers.has(child)) {
+        writeIdentifier(element, start, end);
+      } else if (quoted && uiText.has(child)) {
         writeUIText(element, start, end);
       } else {
         if (uiText.has(child)) {
@@ -297,6 +313,30 @@ function uiTextNodes(index: TreeIndex): Set<number> {
       if (typed) {
         mark(at);
       }
+    }
+  });
+  return found;
+}
+
+/**
+ * The string literals an attribute holds directly when its property's viewer formats it as an
+ * identifier: `<PropertyViewer of=id format=id />`, or the viewer of an alias its type names.
+ */
+function identifierNodes(index: TreeIndex): Set<number> {
+  const { tree } = index;
+  const found = new Set<number>();
+  tree.nodes.forEach((node, at) => {
+    if (node.role !== "literal" || !(node.value ?? "").startsWith('"') || node.parent === undefined) {
+      return;
+    }
+    const attribute = tree.nodes[node.parent]!;
+    const element = attribute.parent === undefined ? undefined : tree.nodes[attribute.parent];
+    if (attribute.role !== "attribute" || element?.declaration === undefined) {
+      return;
+    }
+    const viewer = tree.declarations[element.declaration]?.viewer;
+    if (viewer?.properties?.find((property) => property.name === attribute.name)?.format === "id") {
+      found.add(at);
     }
   });
   return found;
