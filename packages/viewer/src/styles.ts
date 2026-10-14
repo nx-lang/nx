@@ -121,8 +121,8 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
    in muted gray on a faint tint, with no border and no added height. */
 .source .id-value, .value.formatted.id {
   font-family: var(--nx-viewer-source-font-family, var(--mono));
-  color: var(--nx-viewer-id-color, light-dark(#6e7781, #a0a0a0));
-  background: var(--nx-viewer-id-background, light-dark(#0000000d, #ffffff14));
+  color: var(--nx-viewer-id-color, light-dark(#8c959f, #858585));
+  background: var(--nx-viewer-id-background, light-dark(#0000000a, #ffffff0f));
   border-radius: 6px;
   padding: 0 6px;
 }
