@@ -178,6 +178,17 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 .source .sheet-boolean.false { color: var(--nx-viewer-boolean-false-color, light-dark(#8e8e8e, #808080)); }
 /* A list or a nested sheet sits under its name, a step in, across both columns. */
 .source .sheet-below { grid-column: 1 / -1; display: block; padding-left: 2ch; }
+/* A little room between siblings where either is a sheet, so each group stands apart from the next:
+   between the elements of a list or of what an element holds, between sheets that follow one
+   another, and around a row whose value is a sheet under its name. Not between one-line elements,
+   which read as one list, nor between a sheet's own rows. */
+.source .sheet-item:has(> .sheet) + .sheet-item,
+.source .sheet-item + .sheet-item:has(> .sheet),
+.source .sheet ~ .sheet,
+.source .sheet-row:has(> .sheet-below > .sheet) + :is(.sheet-row, .sheet-held),
+.source .sheet-row + .sheet-row:has(> .sheet-below > .sheet) {
+  margin-top: var(--nx-viewer-group-gap, 0.25lh);
+}
 /* In a narrow pane every value moves under its name, so text never runs down a thin column. */
 .source { container-type: inline-size; }
 @container (width < 64ch) {
