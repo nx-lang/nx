@@ -396,7 +396,10 @@ export function renderSource(
     writeNodes(cell, [at], start, end);
   };
 
-  /** Whether an attribute's value takes several lines in the sheet: a list, a sheet, a string with line breaks. */
+  /**
+   * Whether an attribute's value is structure that reads under its name: a list, or an element shown
+   * as a sheet. Text stays in the value column however many lines it takes.
+   */
   const spansLines = (attribute: number): boolean => {
     const values = childrenOf(attribute).filter((value) => !isNote(value));
     if (values.length !== 1) {
@@ -406,10 +409,7 @@ export function renderSource(
     if (value.role === "sequence") {
       return true;
     }
-    if (value.role === "element") {
-      return sheetable(values[0]!);
-    }
-    return value.role === "literal" && (value.value ?? "").includes("\n");
+    return value.role === "element" && sheetable(values[0]!);
   };
 
   /** An element as a property sheet: its name and id, then a row to an attribute, then what it holds. */

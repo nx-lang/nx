@@ -6,7 +6,7 @@ declare module "react" {
   namespace JSX {
     interface IntrinsicElements {
       "nx-viewer": DetailedHTMLProps<HTMLAttributes<NxViewerElement>, NxViewerElement> &
-        Partial<Pick<NxViewerElement, "stale" | "ghosts">>;
+        Partial<Pick<NxViewerElement, "stale" | "ghosts">> & { grouping?: string };
     }
   }
 }

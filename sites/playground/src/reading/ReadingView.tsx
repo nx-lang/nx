@@ -70,6 +70,15 @@ export const READING_FONTS = [
   "duospace",
 ] as const;
 export type ReadingFont = (typeof READING_FONTS)[number];
+
+/** How Read's sheets show what belongs to what, while the ways are compared. */
+export const READING_GROUPINGS = ["outline", "guides", "none"] as const;
+export type ReadingGrouping = (typeof READING_GROUPINGS)[number];
+export const READING_GROUPING_LABELS: Record<ReadingGrouping, string> = {
+  outline: "Outline (default)",
+  guides: "Guides",
+  none: "None",
+};
 export const READING_FONT_LABELS: Record<ReadingFont, string> = {
   monospace: "Monospace (as Edit)",
   "hybrid-system": "Hybrid, system: Segoe UI prose, Consolas code",
@@ -99,13 +108,15 @@ export interface ReadingViewProps {
   readonly font: ReadingFont;
   /** Whether an element written an attribute to a line reads as a property sheet. */
   readonly sheets: boolean;
+  /** How a sheet shows what belongs to it: `outline`, `guides`, or nothing. */
+  readonly grouping: ReadingGrouping;
   /** The selected node's key. */
   readonly selection: string | undefined;
   readonly onSelect: (key: string) => void;
 }
 
 /** The source pane's Read side: `<nx-viewer>` showing the source tree, or why it cannot. */
-export function ReadingView({ reading, view, font, sheets, selection, onSelect }: ReadingViewProps) {
+export function ReadingView({ reading, view, font, sheets, grouping, selection, onSelect }: ReadingViewProps) {
   const element = useRef<NxViewerElement>(null);
   // The highlighter the output pane colors with, loaded with the editor's themes, so the source
   // reading takes the colors the editor shows.
@@ -169,7 +180,12 @@ export function ReadingView({ reading, view, font, sheets, selection, onSelect }
         </p>
       )}
       {reading.tree === null && reading.failure === null && <p className="reading-message quiet">Reading…</p>}
-      {reading.tree !== null && <nx-viewer ref={element} stale={reading.stale} className={`reading-font-${font}`} />}
+      {reading.tree !== null && <nx-viewer
+          ref={element}
+          stale={reading.stale}
+          className={`reading-font-${font}`}
+          {...(grouping === "none" ? {} : { grouping })}
+        />}
     </div>
   );
 }

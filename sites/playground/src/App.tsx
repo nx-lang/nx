@@ -16,7 +16,15 @@ import { SiteHeader } from "./header/SiteHeader";
 import { OutputPane, type OutputView } from "./output/OutputPane";
 import { PreviewView } from "./preview/PreviewView";
 import { usePreview } from "./preview/usePreview.ts";
-import { READING_FONT_LABELS, READING_FONTS, ReadingView, type ReadingFont } from "./reading/ReadingView";
+import {
+  READING_FONT_LABELS,
+  READING_FONTS,
+  READING_GROUPING_LABELS,
+  READING_GROUPINGS,
+  ReadingView,
+  type ReadingFont,
+  type ReadingGrouping,
+} from "./reading/ReadingView";
 import { keyAtOffset, offsetOfKey } from "./reading/selection.ts";
 import { useSourceTree } from "./reading/useSourceTree.ts";
 import { SITE_ROOT } from "./paths.ts";
@@ -174,6 +182,8 @@ export function App() {
   // Whether Read shows an element written an attribute to a line as a property sheet. On unless
   // turned off to compare; not kept.
   const [sheets, setSheets] = useState(true);
+  // How sheets show what belongs to what, while the ways are compared; not kept.
+  const [grouping, setGrouping] = useState<ReadingGrouping>("outline");
   const reading = useSourceTree(source, mode !== "edit");
   // The editor's cursor, carried into Read until a tree of the same text can say what it is on.
   const cursorToSelect = useRef<number | null>(null);
@@ -331,6 +341,18 @@ export function App() {
                 Sheets
               </label>
             )}
+            {mode === "read" && sheets && (
+              <label className="reading-font">
+                Grouping
+                <select value={grouping} onChange={(event) => setGrouping(event.target.value as ReadingGrouping)}>
+                  {READING_GROUPINGS.map((option) => (
+                    <option key={option} value={option}>
+                      {READING_GROUPING_LABELS[option]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             {mode === "read" && (
               <label className="reading-font">
                 Font
@@ -362,6 +384,7 @@ export function App() {
               view={mode === "read" ? "source" : "cards"}
               font={readingFont}
               sheets={sheets}
+              grouping={grouping}
               selection={selection}
               onSelect={setSelection}
             />

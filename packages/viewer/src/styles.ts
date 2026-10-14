@@ -153,8 +153,40 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 /* A boolean reads as a mark, a check for true and a cross for false, never as a box to click. */
 .source .sheet-boolean { color: var(--nx-viewer-boolean-color, light-dark(#0451a5, #569cd6)); font-weight: 600; }
 .source .sheet-boolean.false { color: var(--nx-viewer-boolean-false-color, light-dark(#8e8e8e, #808080)); }
-/* A value of several lines sits under its name, a step in, across both columns. */
+/* A list or a nested sheet sits under its name, a step in, across both columns. */
 .source .sheet-below { grid-column: 1 / -1; display: block; padding-left: 2ch; }
+/* In a narrow pane every value moves under its name, so text never runs down a thin column. */
+.source { container-type: inline-size; }
+@container (width < 64ch) {
+  .source .sheet-row > .sheet-value { grid-column: 1 / -1; padding-left: 2ch; }
+}
+
+/* How a sheet shows what belongs to it, set by the host's grouping attribute.
+   outline: names a step bolder, a hairline above each sheet that follows another, a tint over the
+   sheet under the pointer, and a rule beside a sheet that is a property's value.
+   guides: a faint line down each sheet from under its name, as an editor's indent guides. */
+:host([grouping="outline"]) .source .sheet-head { font-weight: 600; }
+:host([grouping="outline"]) .source .sheet-head .id-value { font-weight: 400; }
+:host([grouping="outline"]) .source .sheet { width: calc(100% - var(--indent, 0) * 1ch); }
+:host([grouping="outline"]) .source .sheet .sheet { width: 100%; }
+:host([grouping="outline"]) .source .sheet-item + .sheet-item > .sheet,
+:host([grouping="outline"]) .source .sheet ~ .sheet {
+  border-top: 1px solid var(--nx-viewer-rule, light-dark(#0000001f, #ffffff1f));
+}
+:host([grouping="outline"]) .source .sheet:hover:not(:has(.sheet:hover)) {
+  background: var(--nx-viewer-hover, light-dark(#0000000a, #ffffff0a));
+  border-radius: 4px;
+}
+:host([grouping="outline"]) .source .sheet-below > .sheet {
+  border-left: 2px solid var(--nx-viewer-rule, light-dark(#0000001f, #ffffff1f));
+  padding-left: 1ch;
+}
+:host([grouping="guides"]) .source .sheet {
+  background-image: linear-gradient(var(--nx-viewer-rule, light-dark(#00000024, #ffffff24)), var(--nx-viewer-rule, light-dark(#00000024, #ffffff24)));
+  background-size: 1px calc(100% - var(--nx-viewer-source-line-height, 18px));
+  background-position: 0.5ch var(--nx-viewer-source-line-height, 18px);
+  background-repeat: no-repeat;
+}
 /* A span in another font takes no line height of its own, so every line keeps the height the
    text's own font gives it, whichever fonts meet on it. */
 .source .prose, .source .indent { line-height: 0; }
