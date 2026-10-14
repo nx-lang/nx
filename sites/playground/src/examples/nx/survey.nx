@@ -142,6 +142,7 @@ viewer SelectLayout =
   </UnionViewer>
 viewer Choice =
   <ElementViewer layout=row title=label subtitle=description badge=value>
+    <PropertyViewer of=value format=id />
     <PropertyViewer of=exclusive whenTrue="Clears the other choices" />
   </ElementViewer>
 viewer StatementStep =
