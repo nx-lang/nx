@@ -614,14 +614,16 @@ export function renderSource(
   };
 
   /** The pieces of an element's line, in reading order: name, id, title, properties, id. */
-  const lineParts = (at: number, start: number): LinePart[] => {
+  const lineParts = (at: number, start: number, named = true): LinePart[] => {
     const node = tree.nodes[at]!;
     const plan = idPlans.get(at);
     const parts: LinePart[] = [];
-    const kind = document.createElement("span");
-    kind.className = "line-kind";
-    writeText(kind, start + 1, start + 1 + (node.name ?? "").length);
-    parts.push({ key: "kind", element: kind });
+    if (named) {
+      const kind = document.createElement("span");
+      kind.className = "line-kind";
+      writeText(kind, start + 1, start + 1 + (node.name ?? "").length);
+      parts.push({ key: "kind", element: kind });
+    }
     if (plan !== undefined && !plan.atEnd) {
       parts.push({ key: "id-start", element: idChip(plan) });
     }
@@ -668,6 +670,34 @@ export function renderSource(
     });
   };
 
+  /**
+   * The type the place an element sits in declares, spelled without its `?`, `+` or `*`: the type
+   * of the property or the declaration that holds it, through any list. Nothing when the place
+   * declares none.
+   */
+  const slotType = (at: number): string | undefined => {
+    let place = tree.nodes[at]!.parent;
+    while (place !== undefined && tree.nodes[place]!.role === "sequence") {
+      place = tree.nodes[place]!.parent;
+    }
+    if (place === undefined) {
+      return undefined;
+    }
+    const holder = tree.nodes[place]!;
+    let spelled: string | undefined;
+    if (holder.role === "attribute") {
+      const owner = holder.parent === undefined ? undefined : tree.nodes[holder.parent];
+      const declared = owner?.declaration === undefined ? undefined : tree.declarations[owner.declaration];
+      spelled = declared?.properties?.find((property) => property.name === holder.name)?.type;
+    } else if (holder.role === "declaration") {
+      const typed = (index.children[place] ?? []).find(
+        (child) => tree.nodes[child]!.role === "typeReference" && index.slots[child] !== "extends"
+      );
+      spelled = typed === undefined ? undefined : tree.nodes[typed]!.value;
+    }
+    return spelled?.replace(/[?+*]+$/, "").trim();
+  };
+
   /** Whether nothing but spaces follows an offset on its line. */
   const endsItsLine = (offset: number): boolean => {
     const next = text.indexOf("\n", offset);
@@ -692,7 +722,10 @@ export function renderSource(
       open.textContent = "<";
       line.append(open);
     }
-    flow(line, lineParts(at, start));
+    // An element of just the type its place declares needs no name: its icon stands for it, and
+    // names it to the pointer and to a reader.
+    const named = marker === undefined || slotType(at) !== tree.nodes[at]!.name;
+    flow(line, lineParts(at, start, named));
     if (!alone) {
       const close = document.createElement("span");
       close.className = "line-close";

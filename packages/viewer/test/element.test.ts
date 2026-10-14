@@ -319,11 +319,13 @@ describe("the source view", () => {
     const marks = Array.from(source().querySelectorAll<HTMLElement>(".element-icon"));
     assert.deepEqual(
       marks.map((mark) => [mark.getAttribute("aria-label"), mark.querySelector("svg")!.dataset["icon"]]),
-      [["Choice", "circle-dot"], ["Note", "box"]],
+      [["Choice", "circle-dot"], ["Note", "box"], ["Choice", "circle-dot"]],
       "the viewer's icon, then a record's; an element sharing its line has none"
     );
     assert.ok(asked.includes("circle-dot"));
     assert.equal(marks[0]!.textContent, "", "an icon adds no text");
+    const names = Array.from(source().querySelectorAll<HTMLElement>(".line-element"), (line) => line.querySelector(".line-kind")?.textContent);
+    assert.deepEqual(names, ["ElementViewer", "Choice", "Note", "Note", undefined], "a place typed Choice+ leaves its Choice unnamed; its icon names it");
   });
 
   it("moves an element's id to where its viewer puts it, as its value alone", async () => {

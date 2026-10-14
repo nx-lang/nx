@@ -116,7 +116,7 @@
     "viewers": []
   },
   "icons": {
-    "source": "import \"@nx/viewer\"\n\ntype Choice = { value:string label:string }\ntype Note = { text:string }\n\nviewer Choice = <ElementViewer title=label icon=\"circle-dot\" />\n\nlet items = {\n  <Choice value=\"a\" label=\"First\" />\n  <Note text=\"Plain\" />\n}\n\nlet held = <Note text=\"Inline\" />\n",
+    "source": "import \"@nx/viewer\"\n\ntype Choice = { value:string label:string }\ntype Note = { text:string }\n\nviewer Choice = <ElementViewer title=label icon=\"circle-dot\" />\n\nlet items = {\n  <Choice value=\"a\" label=\"First\" />\n  <Note text=\"Plain\" />\n}\n\nlet held = <Note text=\"Inline\" />\n\nlet picks:Choice+ = {\n  <Choice value=\"b\" label=\"Second\" />\n}\n",
     "viewers": []
   }
 }
