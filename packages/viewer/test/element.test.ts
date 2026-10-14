@@ -328,6 +328,22 @@ describe("the source view", () => {
     assert.deepEqual(names, ["ElementViewer", "Choice", "Note", "Note", undefined], "a place typed Choice+ leaves its Choice unnamed; its icon names it");
   });
 
+  it("reads an element written over several lines as a group, without its tags", async () => {
+    const groups = await fixture("groups");
+    const element = show(groups);
+    element.view = "source";
+    element.sheets = true;
+    const source = root(element).querySelector<HTMLElement>(".source")!;
+    const sheet = source.querySelector<HTMLElement>(".sheet")!;
+    assert.ok(sheet, "the element reads as a group");
+    const head = sheet.querySelector<HTMLElement>(".sheet-head")!;
+    assert.equal(head.textContent, "Row  gap=wide", "its first line's attributes follow its name");
+    assert.ok(!source.textContent!.includes("</Row>"), "no closing tag");
+    const items = Array.from(sheet.querySelectorAll<HTMLElement>(".sheet-item"));
+    assert.deepEqual(items.map((item) => item.textContent), ["Item  name=a", "Item  name=b"]);
+    assert.ok(items[1]!.classList.contains("after-blank"), "a blank line between items is kept as room");
+  });
+
   it("moves an element's id to where its viewer puts it, as its value alone", async () => {
     const ids = await fixture("elementIds");
     const element = show(ids);

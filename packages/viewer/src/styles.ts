@@ -193,6 +193,15 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 /* A sheet that starts with an icon drops its bracket from under the icon's middle. */
 :host([grouping="brackets"]) .source .sheet:has(> .sheet-head > .element-icon)::after { left: calc(0.5em - 0.5px); }
 :host([grouping="guides"]) .source .sheet:has(> .sheet-head > .element-icon) { background-position: calc(0.5em - 0.5px) var(--nx-viewer-source-line-height, 18px); }
+/* A group's header bolds its name only, not the attributes written after it. */
+.source .sheet-head .line-property { font-weight: 400; }
+/* An item written as it is over several lines starts where its group puts it, and its later lines
+   keep their indentation from the source, measured from the item's own start. */
+.source .sheet-item.as-written {
+  margin-left: calc(var(--column, 0) * -1ch);
+  text-indent: calc(var(--column, 0) * 1ch);
+}
+.source .sheet-item.as-written * { text-indent: 0; }
 /* A little room between siblings where either is a sheet, so each group stands apart from the next:
    between the elements of a list or of what an element holds, between sheets that follow one
    another, and around a row whose value is a sheet under its name. Not between one-line elements,
@@ -201,7 +210,8 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 .source .sheet-item + .sheet-item:has(> .sheet),
 .source .sheet ~ .sheet,
 .source .sheet-row:has(> .sheet-below > .sheet) + :is(.sheet-row, .sheet-held),
-.source .sheet-row + .sheet-row:has(> .sheet-below > .sheet) {
+.source .sheet-row + .sheet-row:has(> .sheet-below > .sheet),
+.source .sheet-item.after-blank {
   margin-top: var(--nx-viewer-group-gap, 0.25lh);
 }
 /* In a narrow pane every value moves under its name, so text never runs down a thin column. */

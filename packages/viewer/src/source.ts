@@ -355,34 +355,46 @@ export function renderSource(
   const onOneLine = (from: number, to: number): boolean => !text.slice(from, to).includes("\n");
   const startsItsLine = (offset: number): boolean => text.slice(text.lastIndexOf("\n", offset - 1) + 1, offset).trim() === "";
 
+  /** Whether two offsets fall on the same line. */
+  const sameLine = (from: number, to: number): boolean => onOneLine(Math.min(from, to), Math.max(from, to));
+
   /**
-   * Whether an element reads as a sheet: the author put each of its attributes on a line of its own, and every value is one the sheet can show in a cell: a literal, an element, a
-   * list of elements or literals, or anything else on one line. Content it holds must be elements.
+   * Whether an attribute reads on its element's header line, after the name, as a one-line element
+   * shows its properties: the author wrote it on the line the tag starts on, and all on that line.
+   */
+  const onHeader = (element: number, attribute: number): boolean => {
+    const node = tree.nodes[attribute]!;
+    return sameLine(startOf(tree.nodes[element]!), startOf(node)) && onOneLine(startOf(node), endOf(node));
+  };
+
+  /**
+   * Whether an element reads as a group: written over several lines, it shows a header (its icon,
+   * name, id and the attributes written on its first line), a row to each attribute written on a
+   * line of its own, and under them what it holds, with no angle brackets and no closing tag. Each
+   * row's value must be one a cell can show: a literal, an element, a list of elements or literals,
+   * or anything else on one line.
    */
   const sheetable = (at: number): boolean => {
-    const plan = idPlans.get(at);
-    const children = childrenOf(at);
-    const attributes = children.filter(
-      (child) => tree.nodes[child]!.role === "attribute" && !isContent(child) && child !== plan?.attribute
-    );
-    if (attributes.length === 0 || !attributes.every((child) => startsItsLine(startOf(tree.nodes[child]!)))) {
+    const node = tree.nodes[at]!;
+    if (onOneLine(startOf(node), endOf(node))) {
       return false;
     }
-    for (const child of children) {
-      const node = tree.nodes[child]!;
+    const plan = idPlans.get(at);
+    for (const child of childrenOf(at)) {
+      const childNode = tree.nodes[child]!;
       if (isNote(child) || child === plan?.attribute) {
         continue;
       }
-      if (node.role !== "attribute") {
+      if (childNode.role !== "attribute") {
+        return false;
+      }
+      if (isContent(child) || onHeader(at, child)) {
+        continue;
+      }
+      if (!startsItsLine(startOf(childNode))) {
         return false;
       }
       const values = childrenOf(child).filter((value) => !isNote(value));
-      if (isContent(child)) {
-        if (!values.every((value) => tree.nodes[value]!.role === "element")) {
-          return false;
-        }
-        continue;
-      }
       if (values.length !== 1) {
         return false;
       }
@@ -509,6 +521,14 @@ export function renderSource(
       if (child === plan?.attribute) {
         continue;
       }
+      if (childNode.role === "attribute" && !isContent(child) && onHeader(at, child)) {
+        // On the header, after the name, as a one-line element shows it.
+        const gap = document.createElement("span");
+        gap.className = "line-gap";
+        gap.textContent = "  ";
+        head.append(gap, namedPart(child));
+        continue;
+      }
       if (childNode.role === "attribute" && !isContent(child)) {
         const row = marked(child, "span", "sheet-row");
         const name = document.createElement("span");
@@ -613,6 +633,24 @@ export function renderSource(
     return childrenOf(at).filter((child) => child !== idPlans.get(at)?.attribute && child !== title);
   };
 
+  /**
+   * A property on a line, by name: its name, an `=` and its value. On a line, a named property keeps
+   * its `=`: it ties the name to a value that may hold spaces, where a sheet's columns do that for it.
+   */
+  const namedPart = (attribute: number): HTMLElement => {
+    const part = marked(attribute, "span", "line-property");
+    const name = document.createElement("span");
+    name.className = "line-name";
+    const nameAt = startOf(tree.nodes[attribute]!);
+    writeText(name, nameAt, nameAt + (tree.nodes[attribute]!.name ?? "").length);
+    const equals = document.createElement("span");
+    equals.className = "line-equals";
+    equals.textContent = "=";
+    part.append(name, equals);
+    writeLineValue(part, attribute);
+    return part;
+  };
+
   /** The pieces of an element's line, in reading order: name, id, title, properties, id. */
   const lineParts = (at: number, start: number, named = true): LinePart[] => {
     const node = tree.nodes[at]!;
@@ -634,19 +672,7 @@ export function renderSource(
       parts.push({ key: "title", element: part });
     }
     for (const child of namedOf(at)) {
-      const part = marked(child, "span", "line-property");
-      const name = document.createElement("span");
-      name.className = "line-name";
-      const nameAt = startOf(tree.nodes[child]!);
-      writeText(name, nameAt, nameAt + (tree.nodes[child]!.name ?? "").length);
-      // On a line, a named property keeps its `=`: it ties the name to a value that may hold
-      // spaces, where a sheet's columns do that for it.
-      const equals = document.createElement("span");
-      equals.className = "line-equals";
-      equals.textContent = "=";
-      part.append(name, equals);
-      writeLineValue(part, child);
-      parts.push({ key: `property:${tree.nodes[child]!.name ?? ""}`, element: part });
+      parts.push({ key: `property:${tree.nodes[child]!.name ?? ""}`, element: namedPart(child) });
     }
     if (plan !== undefined && plan.atEnd) {
       parts.push({ key: "id-end", element: idChip(plan) });
@@ -695,7 +721,9 @@ export function renderSource(
       );
       spelled = typed === undefined ? undefined : tree.nodes[typed]!.value;
     }
-    return spelled?.replace(/[?+*]+$/, "").trim();
+    // A type spelled as an element, as `<PropertyViewer Target=Target/>+`, names its element.
+    const trimmed = spelled?.replace(/[?+*]+$/, "").trim();
+    return trimmed?.startsWith("<") ? /^<\s*([\w.]+)/.exec(trimmed)?.[1] : trimmed;
   };
 
   /** Whether nothing but spaces follows an offset on its line. */
@@ -744,11 +772,26 @@ export function renderSource(
    * each other: each reads on its own, as it is written.
    */
   const writeItems = (parent: HTMLElement, items: readonly number[]): void => {
+    let previous: number | undefined;
     for (const item of items) {
+      const node = tree.nodes[item]!;
+      const start = startOf(node);
+      const end = endOf(node);
       const line = document.createElement("span");
       line.className = "sheet-item";
-      writeNodes(line, [item], startOf(tree.nodes[item]!), endOf(tree.nodes[item]!));
+      // A blank line the author left between two items keeps them apart, as a little room.
+      if (previous !== undefined && /\n[ \t]*\n/.test(text.slice(previous, start))) {
+        line.classList.add("after-blank");
+      }
+      // An item written as it is over several lines keeps the indentation of its later lines as the
+      // source has it, measured from where the item starts, wherever the group puts it.
+      if (!onOneLine(start, end) && !(node.role === "element" && sheetable(item))) {
+        line.classList.add("as-written");
+        line.style.setProperty("--column", String(start - (text.lastIndexOf("\n", start - 1) + 1)));
+      }
+      writeNodes(line, [item], start, end);
       parent.append(line);
+      previous = end;
     }
   };
 
