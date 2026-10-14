@@ -244,6 +244,11 @@ export function renderSource(
         at = end;
         continue;
       }
+      if (layout.sheets === true && node.role === "element" && oneLineable(child)) {
+        parent.append(writeLine(child, start, end));
+        at = end;
+        continue;
+      }
       const element = document.createElement("span");
       element.className = "n";
       element.dataset["role"] = node.role;
@@ -468,6 +473,95 @@ export function renderSource(
       }
     }
     return sheet;
+  };
+
+  // ---- Elements on one line ------------------------------------------------------------------
+
+  /**
+   * Whether an element written on one line reads as one: its name, then its properties, each a name
+   * and a value, with no angle brackets, no `=`, no quotes and no closing `/>`. It must set only
+   * properties, with nothing it holds and no comment in its tag.
+   */
+  const oneLineable = (at: number): boolean => {
+    const node = tree.nodes[at]!;
+    if (!onOneLine(startOf(node), endOf(node))) {
+      return false;
+    }
+    return childrenOf(at).every((child) => {
+      const candidate = tree.nodes[child]!;
+      return (
+        candidate.role === "attribute" &&
+        !isContent(child) &&
+        childrenOf(child).filter((value) => !isNote(value)).length === 1 &&
+        childrenOf(child).every((value) => !isNote(value))
+      );
+    });
+  };
+
+  /** A property's value on an element's line: as a sheet shows it, or as written with its braces. */
+  const writeLineValue = (parent: HTMLElement, attribute: number): void => {
+    const at = childrenOf(attribute)[0]!;
+    const value = tree.nodes[at]!;
+    const written = value.value ?? "";
+    if (value.role === "literal" && (written.startsWith('"') || written === "true" || written === "false")) {
+      writeValue(parent, attribute);
+      return;
+    }
+    if (value.role === "element" && oneLineable(at)) {
+      parent.append(writeLine(at, startOf(value), endOf(value)));
+      return;
+    }
+    // Anything else, braces and all, as it is written after the `=`.
+    const attributeNode = tree.nodes[attribute]!;
+    const afterEquals = text.indexOf("=", startOf(attributeNode)) + 1;
+    writeNodes(parent, [at], afterEquals, endOf(attributeNode));
+  };
+
+  /** An element on one line: its name and id, its title's value alone, then its other properties. */
+  const writeLine = (at: number, start: number, end: number): HTMLElement => {
+    const node = tree.nodes[at]!;
+    const plan = idPlans.get(at);
+    const viewer = node.declaration === undefined ? undefined : tree.declarations[node.declaration]?.viewer;
+    const line = marked(at, "span", "line-element");
+    const kind = document.createElement("span");
+    kind.className = "line-kind";
+    writeText(kind, start + 1, start + 1 + (node.name ?? "").length);
+    line.append(kind);
+    if (plan !== undefined && !plan.atEnd) {
+      line.append(" ", idChip(plan));
+    }
+    const attributes = childrenOf(at).filter((child) => child !== plan?.attribute);
+    // The title reads first, by its value alone, when it is a string: the viewer has said what it is.
+    const titled = attributes.find((child) => {
+      const candidate = tree.nodes[child]!;
+      const values = childrenOf(child);
+      return (
+        candidate.name === viewer?.title &&
+        values.length === 1 &&
+        tree.nodes[values[0]!]!.role === "literal" &&
+        (tree.nodes[values[0]!]!.value ?? "").startsWith('"')
+      );
+    });
+    for (const child of [...(titled === undefined ? [] : [titled]), ...attributes.filter((other) => other !== titled)]) {
+      const part = marked(child, "span", "line-property");
+      if (child !== titled) {
+        const name = document.createElement("span");
+        name.className = "line-name";
+        const nameAt = startOf(tree.nodes[child]!);
+        writeText(name, nameAt, nameAt + (tree.nodes[child]!.name ?? "").length);
+        part.append(name, " ");
+      }
+      writeLineValue(part, child);
+      line.append("  ", part);
+    }
+    if (plan !== undefined && plan.atEnd) {
+      line.append("  ", idChip(plan));
+    }
+    if (plan !== undefined) {
+      plan.written = true;
+    }
+    void end;
+    return line;
   };
 
   const top = tree.nodes.flatMap((node, at) => (node.parent === undefined ? [at] : []));
