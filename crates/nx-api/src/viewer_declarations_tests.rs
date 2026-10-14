@@ -10,10 +10,11 @@ use nx_value::NxValue;
 
 const VIEWER_ROOT: &str = "@nx/viewer";
 
-const VIEWER_TYPES: [&str; 8] = [
+const VIEWER_TYPES: [&str; 9] = [
     "CaseViewer",
     "ElementLayout",
     "ElementViewer",
+    "IdPosition",
     "Placement",
     "PropertyViewer",
     "UnionViewer",
@@ -68,7 +69,7 @@ fn assert_error(body: &str, code: Option<&str>, fragments: &[&str]) {
 // --- The library ------------------------------------------------------------------------------
 
 #[test]
-fn the_viewer_library_exports_exactly_its_eight_types() {
+fn the_viewer_library_exports_exactly_its_nine_types() {
     let library = standard_library(VIEWER_ROOT).expect("the viewer library");
     assert!(library.diagnostics.is_empty(), "{:#?}", library.diagnostics);
     let mut exported = library

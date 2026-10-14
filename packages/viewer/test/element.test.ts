@@ -286,6 +286,24 @@ describe("the source view", () => {
     assert.ok(root(element).querySelector(".value.formatted.id"), "the card reading formats it too");
   });
 
+  it("moves an element's id to where its viewer puts it, as its value alone", async () => {
+    const ids = await fixture("elementIds");
+    const element = show(ids);
+    element.view = "source";
+    const source = root(element).querySelector<HTMLElement>(".source")!;
+    const reading = source.textContent!;
+    // At the beginning, after the name; the line it stood on goes with it.
+    assert.ok(reading.includes("<Step welcome\n    title="), reading);
+    assert.ok(!reading.includes('id="welcome"'));
+    // At the end, after the attributes that stay.
+    assert.ok(reading.includes('<Choice label="Yes" yes />'), reading);
+    const chips = Array.from(source.querySelectorAll<HTMLElement>(".id-part"));
+    assert.deepEqual(chips.map((chip) => chip.textContent), ["welcome", "yes"]);
+    // Each chip keeps the keys of the attribute and its value, so selection still finds them.
+    const keys = Array.from(source.querySelectorAll<HTMLElement>("[data-key]"), (node) => node.dataset["key"]!);
+    assert.deepEqual([...keys].sort(), ids.tree.nodes.map((node) => node.key).sort(), "every node is still there once");
+  });
+
   it("keeps offsets right after a character outside the basic plane", async () => {
     const emoji = await fixture("emoji");
     const element = show(emoji);

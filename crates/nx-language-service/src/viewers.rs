@@ -142,6 +142,8 @@ pub(crate) struct ResolvedViewer {
     pub subtitle: Option<String>,
     pub badge: Option<String>,
     pub image: Option<String>,
+    pub id: Option<String>,
+    pub id_position: Option<String>,
     pub layout: Option<String>,
     pub format: Option<String>,
     /// The property viewers, in their resolved order.
@@ -200,6 +202,8 @@ impl ResolvedViewer {
             (&mut self.subtitle, "subtitle"),
             (&mut self.badge, "badge"),
             (&mut self.image, "image"),
+            (&mut self.id, "id"),
+            (&mut self.id_position, "idPosition"),
             (&mut self.layout, "layout"),
             (&mut self.format, "format"),
         ] {
@@ -279,6 +283,7 @@ fn is_known_value(name: &str, text: &str) -> bool {
     match name {
         "layout" => matches!(text, "card" | "row" | "inline"),
         "place" => matches!(text, "body" | "details"),
+        "idPosition" => matches!(text, "beginning" | "end"),
         "format" => matches!(
             text,
             "text" | "markdown" | "url" | "image" | "color" | "email" | "phone" | "id"

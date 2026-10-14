@@ -435,6 +435,10 @@ export interface SourceViewer {
   badge?: string;
   /** The property whose value is the URL of the element's picture. */
   image?: string;
+  /** The property whose value identifies the element. */
+  id?: string;
+  /** Where the element's id reads: right after its name, or last in its tag. */
+  idPosition?: "beginning" | "end";
   /** How a record's, action's or component's element is laid out. */
   layout?: SourceViewerLayout;
   /** Every property, in the order to show them. */

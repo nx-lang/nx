@@ -24,12 +24,24 @@ export type ElementViewer = {
   badge?: Target.Property
   /// The property whose value is the URL of the element's picture.
   image?: Target.Property
+  /// The property whose value identifies the element: a key that names it and is kept. It reads as
+  /// one quiet token, its value alone, where `idPosition` puts it.
+  id?: Target.Property
+  /// Where the element's id reads.
+  idPosition: IdPosition = beginning
   /// How the element is laid out.
   layout: ElementLayout = card
   /// How individual properties read, in the order they should be listed. Properties not named
   /// here follow in declaration order.
   content properties?: <PropertyViewer Target=Target/>+
 }
+
+/// Where an element's id reads.
+export type IdPosition =
+  /// Right after the element's name.
+  | beginning
+  /// Last in the element's tag, after its other properties.
+  | end
 
 /// How an element is laid out.
 export type ElementLayout =

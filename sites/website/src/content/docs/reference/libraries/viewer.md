@@ -60,7 +60,8 @@ Which record a viewer declaration takes depends on its target:
 
 | Type | Fields | Notes |
 | --- | --- | --- |
-| `ElementViewer` | `name?`, `title?`, `subtitle?`, `badge?`, `image?`, `layout: ElementLayout = card`, content `properties?: PropertyViewer+` | `title`, `subtitle`, `badge` and `image` each name a property of the target. |
+| `ElementViewer` | `name?`, `title?`, `subtitle?`, `badge?`, `image?`, `id?`, `idPosition: IdPosition = beginning`, `layout: ElementLayout = card`, content `properties?: PropertyViewer+` | `title`, `subtitle`, `badge`, `image` and `id` each name a property of the target. |
+| `IdPosition` | `beginning`, `end` | Where the element's id reads. |
 | `ElementLayout` | `card`, `row`, `inline` | How the element is laid out. |
 | `PropertyViewer` | `of`, `label?`, `whenTrue?`, `whenFalse?`, `format?: ValueFormat`, `place: Placement = body` | `of` names the property it describes. |
 | `Placement` | `body`, `details` | Where the property is shown. |
@@ -70,6 +71,12 @@ Which record a viewer declaration takes depends on its target:
 - `title` is the property whose value is the element's title, `subtitle` the one that reads under
   it, `badge` the one shown as a badge beside the heading, and `image` the one whose value is the
   URL of the element's picture.
+- `id` is the property whose value identifies the element: a key that names it and is kept, such
+  as an id stored in a database. A source reading shows its value alone, without the property's
+  name or quotes, as one quiet token: right after the element's name when `idPosition` is
+  `beginning`, the default, or last in its tag, after the properties that stay, when it is `end`.
+  `end` suits an element that reads on one line, such as a choice, so its label comes first and
+  the labels of a list line up.
 - `card` is a heading and a row per property. `row` is one line holding the heading, title,
   subtitle, badge and picture, with the rest folded. `inline` shows the element within the line that
   holds it, as its heading and title, with the rest folded.
@@ -180,12 +187,24 @@ export type ElementViewer = {
   badge?: Target.Property
   /// The property whose value is the URL of the element's picture.
   image?: Target.Property
+  /// The property whose value identifies the element: a key that names it and is kept. It reads as
+  /// one quiet token, its value alone, where `idPosition` puts it.
+  id?: Target.Property
+  /// Where the element's id reads.
+  idPosition: IdPosition = beginning
   /// How the element is laid out.
   layout: ElementLayout = card
   /// How individual properties read, in the order they should be listed. Properties not named
   /// here follow in declaration order.
   content properties?: <PropertyViewer Target=Target/>+
 }
+
+/// Where an element's id reads.
+export type IdPosition =
+  /// Right after the element's name.
+  | beginning
+  /// Last in the element's tag, after its other properties.
+  | end
 
 /// How an element is laid out.
 export type ElementLayout =

@@ -277,6 +277,12 @@ pub struct SourceViewer {
     /// The property whose value is the URL of the element's picture.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image: Option<String>,
+    /// The property whose value identifies the element.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    /// `beginning` or `end`: where the element's id reads, when it has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id_position: Option<String>,
     /// `card`, `row` or `inline`, for a record, an action or a component.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layout: Option<String>,
@@ -2017,6 +2023,11 @@ impl<'a> TreeBuilder<'a> {
             subtitle: resolved.subtitle,
             badge: resolved.badge,
             image: resolved.image,
+            id_position: resolved
+                .id
+                .as_ref()
+                .map(|_| resolved.id_position.unwrap_or_else(|| "beginning".to_string())),
+            id: resolved.id,
             layout: Some(resolved.layout.unwrap_or_else(|| "card".to_string())),
             properties,
             ..SourceViewer::default()

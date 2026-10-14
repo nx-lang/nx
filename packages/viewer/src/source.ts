@@ -158,17 +158,73 @@ export function renderSource(
 
   // Writes the nodes at `children` and the text between them, from `from` to `to`. A node whose
   // range does not sit inside what is left to write is left unmarked rather than written twice.
-  const writeNodes = (parent: HTMLElement, children: readonly number[], from: number, to: number): void => {
+  const idPlans = elementIdPlans(index, startOf, endOf);
+
+  // An element's id, moved to where its viewer puts it: its value alone, as one quiet token that
+  // keeps the attribute's key and its value's.
+  const idChip = (plan: ElementIdPlan): HTMLElement => {
+    const attribute = tree.nodes[plan.attribute]!;
+    const literal = tree.nodes[plan.literal]!;
+    const chip = document.createElement("span");
+    chip.className = "n id-value id-part";
+    chip.dataset["role"] = attribute.role;
+    chip.dataset["key"] = attribute.key;
+    chip.title = attribute.name ?? "";
+    const value = document.createElement("span");
+    value.className = "n";
+    value.dataset["role"] = literal.role;
+    value.dataset["key"] = literal.key;
+    value.textContent = plan.value;
+    chip.append(value);
+    return chip;
+  };
+
+  // The text from `from` to `to` around an element's children, less what its id plan takes out,
+  // and with the id put in where the plan says.
+  const writeGap = (parent: HTMLElement, from: number, to: number, plan: ElementIdPlan | undefined): void => {
+    if (plan === undefined) {
+      writeText(parent, from, to);
+      return;
+    }
+    let at = from;
+    while (at < to || (!plan.written && at === plan.insertAt && at === to)) {
+      if (!plan.written && at === plan.insertAt) {
+        parent.append(" ", idChip(plan));
+        plan.written = true;
+        continue;
+      }
+      if (at >= plan.removeFrom && at < plan.removeTo) {
+        at = Math.min(plan.removeTo, to);
+        continue;
+      }
+      let next = to;
+      for (const point of [plan.removeFrom, plan.written ? to : plan.insertAt]) {
+        if (point > at && point < next) {
+          next = point;
+        }
+      }
+      writeText(parent, at, next);
+      at = next;
+    }
+  };
+
+  const writeNodes = (
+    parent: HTMLElement,
+    children: readonly number[],
+    from: number,
+    to: number,
+    plan?: ElementIdPlan
+  ): void => {
     let at = from;
     const ordered = [...children].sort((a, b) => tree.nodes[a]!.range.startByte - tree.nodes[b]!.range.startByte);
     for (const child of ordered) {
       const node = tree.nodes[child]!;
       const start = startOf(node);
       const end = endOf(node);
-      if (start < at || end > to || end < start) {
+      if (start < at || end > to || end < start || child === plan?.attribute) {
         continue;
       }
-      writeText(parent, at, start);
+      writeGap(parent, at, start, plan);
       const element = document.createElement("span");
       element.className = "n";
       element.dataset["role"] = node.role;
@@ -186,18 +242,108 @@ export function renderSource(
         if (uiText.has(child)) {
           element.classList.add("uitext", "uitext-body");
         }
-        writeNodes(element, index.children[child] ?? [], start, end);
+        writeNodes(element, index.children[child] ?? [], start, end, idPlans.get(child));
       }
       parent.append(element);
       at = end;
     }
-    writeText(parent, at, to);
+    writeGap(parent, at, to, plan);
   };
 
   const top = tree.nodes.flatMap((node, at) => (node.parent === undefined ? [at] : []));
   writeNodes(root, top, 0, text.length);
   markIndentation(document, root);
   return root;
+}
+
+/**
+ * Where an element's id goes: the attribute that holds it and the string it holds, the text taken
+ * out for it, and the offset it is put in at, as a space and a chip.
+ */
+interface ElementIdPlan {
+  readonly attribute: number;
+  readonly literal: number;
+  readonly value: string;
+  readonly removeFrom: number;
+  readonly removeTo: number;
+  readonly insertAt: number;
+  written: boolean;
+}
+
+/**
+ * The plan for each element whose viewer names an id property it sets to a string: the attribute
+ * comes out of its place, with its own line when it stands alone on one, and its value reads right
+ * after the element's name, or last in its tag, after the attributes that stay.
+ */
+function elementIdPlans(
+  index: TreeIndex,
+  startOf: (node: SourceNode) => number,
+  endOf: (node: SourceNode) => number
+): Map<number, ElementIdPlan> {
+  const { tree, text } = index;
+  const plans = new Map<number, ElementIdPlan>();
+  tree.nodes.forEach((node, at) => {
+    if (node.role !== "element" || node.declaration === undefined) {
+      return;
+    }
+    const viewer = tree.declarations[node.declaration]?.viewer;
+    if (viewer?.id === undefined) {
+      return;
+    }
+    const children = index.children[at] ?? [];
+    const attributes = children.filter((child) => {
+      const candidate = tree.nodes[child]!;
+      return candidate.role === "attribute" && !(candidate.flags?.includes("content") ?? false);
+    });
+    const attribute = attributes.find((child) => tree.nodes[child]!.name === viewer.id);
+    if (attribute === undefined) {
+      return;
+    }
+    const values = (index.children[attribute] ?? []).filter((child) => tree.nodes[child]!.role !== "comment");
+    const literal = values.length === 1 ? values[0]! : undefined;
+    const literalNode = literal === undefined ? undefined : tree.nodes[literal]!;
+    if (literal === undefined || literalNode?.role !== "literal" || !(literalNode.value ?? "").startsWith('"')) {
+      return;
+    }
+    const start = startOf(tree.nodes[attribute]!);
+    const end = endOf(tree.nodes[attribute]!);
+    // An attribute alone on its line takes the line with it; one beside others takes the space before it.
+    const lineStart = text.lastIndexOf("\n", start - 1) + 1;
+    const lineEnd = text.indexOf("\n", end);
+    const alone = text.slice(lineStart, start).trim() === "" && text.slice(end, lineEnd < 0 ? text.length : lineEnd).trim() === "";
+    let removeFrom = start;
+    let removeTo = end;
+    if (alone && lineEnd >= 0) {
+      removeFrom = lineStart;
+      removeTo = lineEnd + 1;
+    } else {
+      while (removeFrom > 0 && (text[removeFrom - 1] === " " || text[removeFrom - 1] === "\t")) {
+        removeFrom -= 1;
+      }
+    }
+    const elementStart = startOf(node);
+    let nameEnd = elementStart + 1 + (node.name ?? "").length;
+    if (text[nameEnd] === ":") {
+      // A text type after the name, `<Note:markdown`, belongs with the name.
+      nameEnd += 1;
+      while (nameEnd < text.length && /[A-Za-z0-9_.-]/.test(text[nameEnd]!)) {
+        nameEnd += 1;
+      }
+    }
+    const others = attributes.filter((child) => child !== attribute);
+    const insertAt =
+      viewer.idPosition === "end" && others.length > 0 ? Math.max(...others.map((child) => endOf(tree.nodes[child]!))) : nameEnd;
+    plans.set(at, {
+      attribute,
+      literal,
+      value: (literalNode.value ?? "").slice(1, -1),
+      removeFrom,
+      removeTo,
+      insertAt,
+      written: false,
+    });
+  });
+  return plans;
 }
 
 /** How a character of the text is spaced in the reading, where that differs from how it is written. */

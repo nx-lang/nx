@@ -106,5 +106,9 @@
   "identifiers": {
     "source": "import \"@nx/viewer\"\n\ntype Step = { id:string title:string next?:string }\n\nviewer Step =\n  <ElementViewer title=title>\n    <PropertyViewer of=id format=id />\n  </ElementViewer>\n\nlet first = <Step id=\"welcome\" title=\"Welcome\" next=\"details\" />\n",
     "viewers": []
+  },
+  "elementIds": {
+    "source": "import \"@nx/viewer\"\n\ntype Step = { id:string title:string }\ntype Choice = { value:string label:string }\n\nviewer Step = <ElementViewer title=title id=id />\nviewer Choice = <ElementViewer title=label id=value idPosition=end />\n\nlet steps = {\n  <Step\n    id=\"welcome\"\n    title=\"Welcome\"\n  />\n  <Choice value=\"yes\" label=\"Yes\" />\n}\n",
+    "viewers": []
   }
 }
