@@ -65,17 +65,17 @@ and each SHALL link to the documentation page for its topic.
 
 ## ADDED Requirements
 
-### Requirement: The Visual view uses the program's viewers
-The playground's Visual view SHALL ask for the source tree with `viewers`, naming no host viewer declaration
-modules, so that viewer declarations in the visitor's source and in the standard libraries it imports shape the
-reading. Viewer diagnostics SHALL be reported against the visitor's source like any other diagnostic.
+### Requirement: The Visual view uses the program's visualizers
+The playground's Visual view SHALL ask for the source tree with `visualizers`, naming no host visualizer declaration
+modules, so that visualizer declarations in the visitor's source and in the standard libraries it imports shape the
+reading. Visualizer diagnostics SHALL be reported against the visitor's source like any other diagnostic.
 
-#### Scenario: A viewer declaration in the visitor's source
-- **WHEN** a visitor's source declares `type Choice = { value:string label:string }`, a viewer declaration
-  `viewer Choice = <ElementViewer title=label id=value />`, and a value
+#### Scenario: A visualizer declaration in the visitor's source
+- **WHEN** a visitor's source declares `type Choice = { value:string label:string }`, a visualizer declaration
+  `visualizer Choice = <ElementVisualizer title=label id=value />`, and a value
   `let pick = <Choice value="a" label="Apples" />`, and the visitor switches to Visual
 - **THEN** the reading of `pick` SHALL show `Apples` as its title and `a` as its id, without quotes
 
-#### Scenario: A misspelled viewer declaration
-- **WHEN** the visitor writes `viewer Choice = <ElementViewer title=lable />`
+#### Scenario: A misspelled visualizer declaration
+- **WHEN** the visitor writes `visualizer Choice = <ElementVisualizer title=lable />`
 - **THEN** the source pane SHALL show a diagnostic on `lable`

@@ -20,7 +20,7 @@ import {
   type LanguageQueryName,
   type LanguageServiceErrorBody,
   type LanguageServiceErrorCode,
-  type SourceTreeViewersOption,
+  type SourceTreeVisualizersOption,
   type TextPosition,
 } from "@nx-lang/language-protocol";
 import {
@@ -46,13 +46,13 @@ export interface NxLanguageHandlerOptions {
   /** Libraries every query can see. Without one, names declared only in a library are unresolved. */
   buildContext?: NxProgramBuildContext;
   /**
-   * The host's own declarations, served with every query: documents that join every query's set, and
-   * the identities every queried document imports implicitly.
+   * The host's own declarations, served with every query: documents that join every query's set,
+   * and the identities every queried document imports implicitly.
    *
-   * <para>The queried document's text is analyzed exactly as the client sent it, so every position in
-   * a query and every range in an answer is in the document's own coordinates. A diagnostic located
-   * in a context document is reported under that document's URI. A request whose documents include
-   * one with a context document's identity is refused as malformed.</para>
+   * <para>The queried document's text is analyzed exactly as the client sent it, so every position
+   * in a query and every range in an answer is in the document's own coordinates. A diagnostic
+   * located in a context document is reported under that document's URI. A request whose documents
+   * include one with a context document's identity is refused as malformed.</para>
    */
   context?: HostContext;
   /** Largest request body accepted, in bytes. Default 1 MiB. */
@@ -62,8 +62,8 @@ export interface NxLanguageHandlerOptions {
   /** Called with any failure the handler turns into a 500, so the host can log it. */
   onError?: (error: unknown, context: { query: string }) => void;
   /**
-   * Builds the snapshot for a document set. Defaults to `new NxLanguageSnapshot(documents, { buildContext })`;
-   * a test injects a counting or throwing factory here.
+   * Builds the snapshot for a document set. Defaults to `new NxLanguageSnapshot(documents, {
+   * buildContext })`; a test injects a counting or throwing factory here.
    */
   createSnapshot?: (
     documents: readonly LanguageDocument[],
@@ -124,7 +124,7 @@ export function createNxLanguageHandler(options: NxLanguageHandlerOptions = {}):
     if ("problem" in validated) {
       return errorResponse(400, "invalid-request", validated.problem, query);
     }
-    const { documents, uri, position, viewers } = validated;
+    const { documents, uri, position, visualizers } = validated;
     const collision = contextCollision(documents, context);
     if (collision !== undefined) {
       return errorResponse(
@@ -136,7 +136,7 @@ export function createNxLanguageHandler(options: NxLanguageHandlerOptions = {}):
     }
 
     try {
-      const answer = answerQuery(query, { documents, uri, position, viewers }, context, (analyzed) =>
+      const answer = answerQuery(query, { documents, uri, position, visualizers }, context, (analyzed) =>
         cache.getOrCreate(documentSetKey(analyzed), () => createSnapshot(analyzed, snapshotOptions)),
       );
       return jsonResponse(200, answer);
@@ -216,7 +216,7 @@ type ValidatedQuery =
       documents: LanguageDocument[];
       uri: string;
       position: TextPosition | undefined;
-      viewers?: SourceTreeViewersOption;
+      visualizers?: SourceTreeVisualizersOption;
     }
   | { problem: string };
 
@@ -279,23 +279,23 @@ function validateQuery(query: LanguageQueryName, body: unknown): ValidatedQuery 
     }
     position = { line: candidate.line as number, character: candidate.character as number };
   }
-  if (query === "sourceTree" && record.viewers !== undefined) {
-    const viewers = record.viewers as Record<string, unknown> | null;
-    const modules = viewers?.modules;
+  if (query === "sourceTree" && record.visualizers !== undefined) {
+    const visualizers = record.visualizers as Record<string, unknown> | null;
+    const modules = visualizers?.modules;
     if (
-      typeof viewers !== "object" ||
-      viewers === null ||
-      Array.isArray(viewers) ||
+      typeof visualizers !== "object" ||
+      visualizers === null ||
+      Array.isArray(visualizers) ||
       (modules !== undefined &&
         (!Array.isArray(modules) || modules.some((module) => typeof module !== "string")))
     ) {
-      return { problem: "'viewers' must be an object whose optional 'modules' is an array of module identities." };
+      return { problem: "'visualizers' must be an object whose optional 'modules' is an array of module identities." };
     }
     return {
       documents,
       uri,
       position,
-      viewers: modules === undefined ? {} : { modules: modules as string[] },
+      visualizers: modules === undefined ? {} : { modules: modules as string[] },
     };
   }
   return { documents, uri, position };

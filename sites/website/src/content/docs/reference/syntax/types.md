@@ -702,7 +702,7 @@ let byPhone = <Column T=Contact of=phone />   // error: `phone` is not a case of
 
 Only a record's own type parameters have `.Property`. A component's type parameter has none, and no
 type parameter has `.Update` or `.State`. This is what lets the records of
-[`@nx/viewer`](/reference/libraries/viewer) name the properties of the declaration they describe.
+[`@nx/visualizer`](/reference/libraries/visualizer) name the properties of the declaration they describe.
 
 ### Not part of inheritance
 A record that declares type parameters cannot be `abstract` and cannot have an `extends` clause.

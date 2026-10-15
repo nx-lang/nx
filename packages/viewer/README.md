@@ -34,7 +34,7 @@ let users = {
   const viewer = document.getElementById("reading");
   try {
     viewer.text = text;
-    viewer.tree = snapshot.sourceTree("nx:///user.nx", { viewers: {} });
+    viewer.tree = snapshot.sourceTree("nx:///user.nx", { visualizers: {} });
   } finally {
     snapshot.dispose();
   }
@@ -114,31 +114,31 @@ declare module "react" {
   siblings where either is a group, becomes a little room.
 - **Values**: strings lose their quotes, and booleans read ✓ and ✗. A string typed `uitext` (an alias
   `type uitext = string`, or any alias that leads to it) reads as text shown to people, in the prose
-  font. A string a viewer names as an element's `id`, or formats as `id`, reads as one quiet token; a
+  font. A string a visualizer names as an element's `id`, or formats as `id`, reads as one quiet token; a
   string formatted as `color` reads with a swatch.
 - **Everything else** (declarations, function bodies, comments) reads as written, in `colors`.
 - **Long lines** wrap a step in from where their unit starts: a group's header, a row's value, an
   element on one line alone on its line, and an item a group holds as written. Code read as written
   elsewhere keeps its lines.
 
-## Viewer declarations
+## Visualizer declarations
 
-Ask the language service for the tree with `viewers`, and the declaration table carries each
-declaration's resolved viewer, from the `viewer` declarations of the document's program and of any
+Ask the language service for the tree with `visualizers`, and the declaration table carries each
+declaration's resolved visualizer, from the `visualizer` declarations of the document's program and of any
 host modules named:
 
 ```ts
-viewer.tree = snapshot.sourceTree("nx:///survey/form.nx", { viewers: { modules: ["tenant/viewers.nx"] } });
+viewer.tree = snapshot.sourceTree("nx:///survey/form.nx", { visualizers: { modules: ["tenant/visualizers.nx"] } });
 ```
 
-The reading uses an element viewer's `title` (its value reads alone on the element's line), `id` and
+The reading uses an element visualizer's `title` (its value reads alone on the element's line), `id` and
 `idPosition` (the id reads as a quiet token after the name, or last on the line), and `icon` (the
 Lucide icon the element starts with; a kind inherits it), and a value's `format` of `id` or `color`.
 
 ## Icons
 
 The element draws no icons of its own. Give it a function that draws one by its Lucide name, and every
-element that starts a line of its own starts with an icon: the one its viewer's `icon` names, or, when
+element that starts a line of its own starts with an icon: the one its visualizer's `icon` names, or, when
 there is none or the function draws nothing for that name, one for its kind (`component`, `box` for a record, `zap` for an action, `tag` for a union case,
 `square-function` for a function). The playground loads Lucide apart from the rest of its code:
 

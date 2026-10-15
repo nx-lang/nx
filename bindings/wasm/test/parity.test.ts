@@ -232,31 +232,31 @@ describe("language answer parity with the Node SDK", () => {
     }
   });
 
-  it("answers the source tree with resolved viewers identically", () => {
-    const source = `import "@nx/viewer"
+  it("answers the source tree with resolved visualizers identically", () => {
+    const source = `import "@nx/visualizer"
 
 type Question = { label:string required:boolean = false }
 type Answer = yes | no
 
-viewer Question =
-  <ElementViewer name="Question" title=label layout=row>
-    <PropertyViewer of=required label="Required" whenTrue="Must be answered" />
-  </ElementViewer>
+visualizer Question =
+  <ElementVisualizer name="Question" title=label layout=row>
+    <PropertyVisualizer of=required label="Required" whenTrue="Must be answered" />
+  </ElementVisualizer>
 
-viewer Answer =
-  <UnionViewer>
-    <CaseViewer of=yes label="Yes" />
-  </UnionViewer>
+visualizer Answer =
+  <UnionVisualizer>
+    <CaseVisualizer of=yes label="Yes" />
+  </UnionVisualizer>
 `;
     const corpus = [{ uri, source, identity: "demo/input.nx", version: 7 }];
     const fromNode = new NodeLanguageSnapshot(corpus);
     const fromWasm = host.createLanguageSnapshot(corpus);
     try {
-      const options = { viewers: { modules: ["demo/missing.nx"] } };
+      const options = { visualizers: { modules: ["demo/missing.nx"] } };
       const tree = JSON.parse(JSON.stringify(fromWasm.sourceTree(uri, options)));
       expect(tree).toEqual(fromNode.sourceTree(uri, options));
-      expect(JSON.stringify(tree)).toContain('"viewer":{');
-      expect(tree.missingViewerModules).toEqual(["demo/missing.nx"]);
+      expect(JSON.stringify(tree)).toContain('"visualizer":{');
+      expect(tree.missingVisualizerModules).toEqual(["demo/missing.nx"]);
     } finally {
       fromWasm.dispose();
       fromNode.dispose();

@@ -93,7 +93,8 @@ enum Commands {
         #[arg(long)]
         csharp_namespace: Option<String>,
 
-        /// Package prefix for TypeScript dependency-library imports (only used for --language typescript)
+        /// Package prefix for TypeScript dependency-library imports (only used for --language
+        /// typescript)
         #[arg(long = "typescript-package-prefix")]
         typescript_package_prefix: Option<String>,
     },
@@ -2653,14 +2654,14 @@ export type AssistantConfig = { agent?:Agent }
     }
 
     #[test]
-    fn test_cli_typegen_viewer_library_spells_target_property_names() {
+    fn test_cli_typegen_visualizer_library_spells_target_property_names() {
         let dir = TempDir::new().unwrap();
         let ts_path = dir.path().join("generated-ts");
         let cs_path = dir.path().join("generated-cs");
 
         let output = run_cli(&[
             "typegen",
-            "@nx/viewer",
+            "@nx/visualizer",
             "--language",
             "typescript",
             "--output",
@@ -2669,24 +2670,24 @@ export type AssistantConfig = { agent?:Agent }
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(output.status.success(), "{stderr}");
         assert!(!stderr.contains("Warning:"), "{stderr}");
-        let viewer = fs::read_to_string(ts_path.join("viewer.ts")).unwrap();
+        let visualizer = fs::read_to_string(ts_path.join("visualizer.ts")).unwrap();
         assert!(
-            viewer.contains("export interface ElementViewer<Target> "),
-            "{viewer}"
+            visualizer.contains("export interface ElementVisualizer<Target> "),
+            "{visualizer}"
         );
         assert!(
-            viewer.contains("title?: Extract<keyof Target, string>;"),
-            "{viewer}"
+            visualizer.contains("title?: Extract<keyof Target, string>;"),
+            "{visualizer}"
         );
         assert!(
-            viewer.contains("of: Extract<keyof Target, string>;"),
-            "{viewer}"
+            visualizer.contains("of: Extract<keyof Target, string>;"),
+            "{visualizer}"
         );
-        assert!(!viewer.contains("#property-of"), "{viewer}");
+        assert!(!visualizer.contains("#property-of"), "{visualizer}");
 
         let output = run_cli(&[
             "typegen",
-            "@nx/viewer",
+            "@nx/visualizer",
             "--language",
             "csharp",
             "--output",
@@ -2694,10 +2695,13 @@ export type AssistantConfig = { agent?:Agent }
         ]);
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(output.status.success(), "{stderr}");
-        let viewer = fs::read_to_string(cs_path.join("viewer.g.cs")).unwrap();
-        assert!(viewer.contains("namespace NxLang.Viewer"), "{viewer}");
-        assert!(viewer.contains("public string? Title"), "{viewer}");
-        assert!(!viewer.contains("#property-of"), "{viewer}");
+        let visualizer = fs::read_to_string(cs_path.join("visualizer.g.cs")).unwrap();
+        assert!(
+            visualizer.contains("namespace NxLang.Visualizer"),
+            "{visualizer}"
+        );
+        assert!(visualizer.contains("public string? Title"), "{visualizer}");
+        assert!(!visualizer.contains("#property-of"), "{visualizer}");
     }
 
     #[test]
@@ -2728,12 +2732,14 @@ export type AssistantConfig = { agent?:Agent }
     }
 
     #[test]
-    fn test_cli_typegen_viewer_declarations_change_nothing() {
-        // The import stays: what is compared is the viewer declaration alone.
-        let choice = "import \"@nx/viewer\"\nexport type Choice = { label:string }\n";
+    fn test_cli_typegen_visualizer_declarations_change_nothing() {
+        // The import stays: what is compared is the visualizer declaration alone.
+        let choice = "import \"@nx/visualizer\"\nexport type Choice = { label:string }\n";
         let (plain_dir, plain_path) = create_temp_library(&[("choice.nx", choice)]);
-        let with_viewer = format!("{choice}viewer Choice = <ElementViewer title=label />\n");
-        let (viewer_dir, viewer_path) = create_temp_library(&[("choice.nx", with_viewer.as_str())]);
+        let with_visualizer =
+            format!("{choice}visualizer Choice = <ElementVisualizer title=label />\n");
+        let (visualizer_dir, visualizer_path) =
+            create_temp_library(&[("choice.nx", with_visualizer.as_str())]);
         for language in ["typescript", "csharp"] {
             let generate = |dir: &TempDir, library: &Path| {
                 let output_path = dir.path().join(format!("generated-{language}"));
@@ -2763,7 +2769,7 @@ export type AssistantConfig = { agent?:Agent }
             };
             assert_eq!(
                 generate(&plain_dir, &plain_path),
-                generate(&viewer_dir, &viewer_path),
+                generate(&visualizer_dir, &visualizer_path),
                 "{language}"
             );
         }

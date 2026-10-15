@@ -47,8 +47,8 @@ async function repositoryTrees(): Promise<{ path: string; fixture: Fixture }[]> 
   try {
     return documents.map((document) => ({
       path: document.identity,
-      // With viewers, so every node a viewer moves, as an element's id, is checked too.
-      fixture: { text: document.source, tree: snapshot.sourceTree(document.uri, { viewers: {} }) as SourceTree }
+      // With visualizers, so every node a visualizer moves, as an element's id, is checked too.
+      fixture: { text: document.source, tree: snapshot.sourceTree(document.uri, { visualizers: {} }) as SourceTree }
     }));
   } finally {
     snapshot.dispose();
@@ -76,7 +76,7 @@ describe("coverage", () => {
   });
 
   it("renders every node of every fixture exactly once, shapes the repository lacks included", async () => {
-    // Among them, ids a viewer moves and comments inside a group's attributes.
+    // Among them, ids a visualizer moves and comments inside a group's attributes.
     const trees = await Promise.all(fixtureNames.map(async (name) => ({ path: name, fixture: await fixture(name) })));
     assert.ok(trees.some(({ path }) => path === "attributeComments"));
     const failures = failuresOf(trees);

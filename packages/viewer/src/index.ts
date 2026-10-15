@@ -207,7 +207,7 @@ export class NxViewerElement extends ElementBase {
 
   /**
    * Draws icons by their Lucide names, for each element on lines of its own to start with one: the
-   * icon its viewer names, or one for its kind. The host chooses how icons are drawn and loaded;
+   * icon its visualizer names, or one for its kind. The host chooses how icons are drawn and loaded;
    * without it, no element has an icon.
    */
   get icons(): NxViewerIcons | undefined {

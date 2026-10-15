@@ -88,18 +88,18 @@ export type DocumentSymbolsRequest = LanguageQuery;
  */
 export interface SourceTreeRequest extends LanguageQuery {
   /**
-   * Resolve the viewer declarations that apply to the document's program, and attach each
-   * declaration's resolved viewer to its entry in the answer's declaration table. Absent, the
-   * answer carries no viewers.
+   * Resolve the visualizer declarations that apply to the document's program, and attach each
+   * declaration's resolved visualizer to its entry in the answer's declaration table. Absent, the
+   * answer carries no visualizers.
    */
-  viewers?: SourceTreeViewersOption;
+  visualizers?: SourceTreeVisualizersOption;
 }
 
-/** Which viewer declarations a source-tree request resolves. */
-export interface SourceTreeViewersOption {
+/** Which visualizer declarations a source-tree request resolves. */
+export interface SourceTreeVisualizersOption {
   /**
-   * Further viewer modules the host supplies, by module identity, applied after the program's own
-   * viewer declarations in the order named.
+   * Further visualizer modules the host supplies, by module identity, applied after the program's
+   * own visualizer declarations in the order named.
    */
   modules?: string[];
 }
@@ -328,7 +328,7 @@ export type SourceFlag =
   | "external"
   | "export"
   | "private"
-  | "viewer";
+  | "visualizer";
 
 /**
  * One piece of the source. Every token of the document belongs to exactly one node, the smallest
@@ -413,18 +413,18 @@ export interface SourceDeclaration {
   /** The range of a value declaration's value, when the queried document declares it. */
   valueRange?: EditorRange;
   /**
-   * How a viewer presents the declaration, resolved from every viewer declaration that applies to
-   * it; present only when the request asked for `viewers`.
+   * How a viewer presents the declaration, resolved from every visualizer declaration that applies
+   * to it; present only when the request asked for `visualizers`.
    */
-  viewer?: SourceViewer;
+  visualizer?: SourceVisualizer;
 }
 
 /**
- * A declaration's resolved viewer. A record, an action or a component has its heading parts, its
- * layout and every property once, in the order to show them; a union every case once; an alias of
- * a primitive type its format.
+ * A declaration's resolved visualizer. A record, an action or a component has its heading parts,
+ * its layout and every property once, in the order to show them; a union every case once; an alias
+ * of a primitive type its format.
  */
-export interface SourceViewer {
+export interface SourceVisualizer {
   /** The kind's name as readers see it. */
   name?: string;
   /** The property whose value is the element's title. */
@@ -442,23 +442,23 @@ export interface SourceViewer {
   /** The name of the Lucide icon that marks the element where it starts. */
   icon?: string;
   /** How a record's, action's or component's element is laid out. */
-  layout?: SourceViewerLayout;
+  layout?: SourceVisualizerLayout;
   /** Every property, in the order to show them. */
-  properties?: SourcePropertyViewer[];
+  properties?: SourcePropertyVisualizer[];
   /** Every case of a union, in declaration order. */
-  cases?: SourceCaseViewer[];
+  cases?: SourceCaseVisualizer[];
   /** How an alias's string values are shown. */
   format?: SourceValueFormat;
 }
 
 /** How an element is laid out. */
-export type SourceViewerLayout = "card" | "row" | "inline";
+export type SourceVisualizerLayout = "card" | "row" | "inline";
 
 /** How a string value is shown. A format changes how the value looks, never what it is. */
 export type SourceValueFormat = "text" | "markdown" | "url" | "image" | "color" | "email" | "phone" | "id";
 
 /** How one property of a declaration reads. */
-export interface SourcePropertyViewer {
+export interface SourcePropertyVisualizer {
   name: string;
   /** The label to show in place of the name. */
   label?: string;
@@ -467,8 +467,8 @@ export interface SourcePropertyViewer {
   /** What a boolean property reads as when it is false. */
   whenFalse?: string;
   /**
-   * How the property's string value is shown: from its property viewer, or else from the viewer
-   * of the alias its type names.
+   * How the property's string value is shown: from its property visualizer, or else from the
+   * visualizer of the alias its type names.
    */
   format?: SourceValueFormat;
   /** Where the property is shown: among the element's rows, or in its details strip. */
@@ -476,7 +476,7 @@ export interface SourcePropertyViewer {
 }
 
 /** How one case of a union reads. */
-export interface SourceCaseViewer {
+export interface SourceCaseVisualizer {
   name: string;
   /** The label to show in place of the name. */
   label?: string;
@@ -496,8 +496,8 @@ export interface SourceTree {
   version: number | null;
   nodes: SourceNode[];
   declarations: SourceDeclaration[];
-  /** The host viewer modules the request named that the analyzed documents do not include. */
-  missingViewerModules?: string[];
+  /** The host visualizer modules the request named that the analyzed documents do not include. */
+  missingVisualizerModules?: string[];
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -606,7 +606,8 @@ export class LanguageServiceTimeoutError extends Error {
  * Returns whether `error` is the rejection a cancelled signal produces.
  *
  * `fetch` rejects with a `DOMException` named `AbortError`; an in-process implementation may throw
- * `signal.reason`, which is the same when the caller used `AbortController.abort()` without a reason.
+ * `signal.reason`, which is the same when the caller used `AbortController.abort()` without a
+ * reason.
  */
 export function isAbortError(error: unknown): boolean {
   return (

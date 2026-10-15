@@ -361,12 +361,12 @@ test("a source tree through host context is the document's own, its declarations
   assert.equal(tree.declarations[element.declaration!]!.module, "tenant/catalog.nx");
 });
 
-test("a source tree asked with viewers carries resolved viewers and the host modules it lacks", async () => {
+test("a source tree asked with visualizers carries resolved visualizers and the host modules it lacks", async () => {
   const handler = createNxLanguageHandler();
   const source = [
-    'import "@nx/viewer"',
+    'import "@nx/visualizer"',
     "type Question = { label:string required:boolean = false }",
-    'viewer Question = <ElementViewer title=label><PropertyViewer of=required whenTrue="Required" /></ElementViewer>',
+    'visualizer Question = <ElementVisualizer title=label><PropertyVisualizer of=required whenTrue="Required" /></ElementVisualizer>',
     '<Question label="Name" />',
     "",
   ].join("\n");
@@ -374,22 +374,22 @@ test("a source tree asked with viewers carries resolved viewers and the host mod
 
   const plain = await json<SourceTree>(await handler(post("sourceTree", { documents, uri: FORM })));
   const question = plain.declarations.find((declaration) => declaration.name === "Question")!;
-  assert.equal(question.viewer, undefined);
+  assert.equal(question.visualizer, undefined);
 
   const tree = await json<SourceTree>(
-    await handler(post("sourceTree", { documents, uri: FORM, viewers: { modules: ["tenant/missing.nx"] } })),
+    await handler(post("sourceTree", { documents, uri: FORM, visualizers: { modules: ["tenant/missing.nx"] } })),
   );
-  const viewer = tree.declarations.find((declaration) => declaration.name === "Question")!.viewer!;
-  assert.equal(viewer.title, "label");
+  const visualizer = tree.declarations.find((declaration) => declaration.name === "Question")!.visualizer!;
+  assert.equal(visualizer.title, "label");
   assert.deepEqual(
-    viewer.properties!.map((property) => [property.name, property.whenTrue]),
+    visualizer.properties!.map((property) => [property.name, property.whenTrue]),
     [["required", "Required"], ["label", undefined]],
   );
-  assert.deepEqual(tree.missingViewerModules, ["tenant/missing.nx"]);
+  assert.deepEqual(tree.missingVisualizerModules, ["tenant/missing.nx"]);
 
-  const refused = await handler(post("sourceTree", { documents, uri: FORM, viewers: { modules: "tenant/x.nx" } }));
+  const refused = await handler(post("sourceTree", { documents, uri: FORM, visualizers: { modules: "tenant/x.nx" } }));
   assert.equal(refused.status, 400);
-  assert.match((await json<LanguageServiceErrorBody>(refused)).error.message, /'viewers'/);
+  assert.match((await json<LanguageServiceErrorBody>(refused)).error.message, /'visualizers'/);
 });
 
 test("a request cannot replace a context document, and says what collided", async () => {

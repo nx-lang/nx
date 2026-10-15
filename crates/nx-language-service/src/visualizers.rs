@@ -1,35 +1,39 @@
-//! Resolving the viewer declarations a document's program loads, and a host's viewer modules,
-//! into one viewer per declaration.
+//! Resolving the visualizer declarations a document's program loads, and a host's visualizer
+//! modules, into one visualizer per declaration.
 //!
-//! <para>Viewer declarations apply in order, each later one overriding only what it sets: along
-//! inheritance from the furthest base to the declaration itself, and at each step the viewer in
-//! the declaring module, then those in the program's other modules, then the host's viewer modules
-//! in the order the host names them. `PropertyViewer`s and `CaseViewer`s merge by `of`. A base's
-//! `name` is not inherited, since it names the base.</para>
+//! <para>Visualizer declarations apply in order, each later one overriding only what it sets: along
+//! inheritance from the furthest base to the declaration itself, and at each step the visualizer in
+//! the declaring module, then those in the program's other modules, then the host's visualizer
+//! modules in the order the host names them. `PropertyVisualizer`s and `CaseVisualizer`s merge by
+//! `of`. A base's `name` is not inherited, since it names the base.</para>
 
 use crate::{DeclarationOrigin, WorkspaceDeclarations};
-use nx_api::{ProgramModule, ProgramViewer, ViewerAttribute, ViewerChild, ViewerValue};
-use nx_hir::ViewerRecord;
+use nx_api::{
+    ProgramModule, ProgramVisualizer, VisualizerAttribute, VisualizerChild, VisualizerValue,
+};
+use nx_hir::VisualizerRecord;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-/// The viewer declarations that apply to one document's program, by target.
+/// The visualizer declarations that apply to one document's program, by target.
 #[derive(Debug, Default)]
-pub(crate) struct ProgramViewers {
-    /// Each target's viewer declarations from the program, the declaring module's first.
-    program: FxHashMap<DeclarationOrigin, Vec<ProgramViewer>>,
-    /// Each target's viewer declarations from the host's viewer modules, in the order named.
-    host: FxHashMap<DeclarationOrigin, Vec<ProgramViewer>>,
-    /// The host viewer modules the snapshot does not hold.
+pub(crate) struct ProgramVisualizers {
+    /// Each target's visualizer declarations from the program, the declaring module's first.
+    program: FxHashMap<DeclarationOrigin, Vec<ProgramVisualizer>>,
+    /// Each target's visualizer declarations from the host's visualizer modules, in the order
+    /// named.
+    host: FxHashMap<DeclarationOrigin, Vec<ProgramVisualizer>>,
+    /// The host visualizer modules the snapshot does not hold.
     pub missing: Vec<String>,
 }
 
-impl ProgramViewers {
-    /// Gathers the viewer declarations of the program whose entry is `entry`, and of the host
-    /// viewer modules named in `hosts`.
+impl ProgramVisualizers {
+    /// Gathers the visualizer declarations of the program whose entry is `entry`, and of the host
+    /// visualizer modules named in `hosts`.
     ///
-    /// <para>Two viewer declarations of one target in two program modules that do not declare it
-    /// are a `duplicate-viewer` error, which analysis reports, and neither applies. A viewer
-    /// declaration with errors counts as one of two such, and never applies itself.</para>
+    /// <para>Two visualizer declarations of one target in two program modules that do not declare
+    /// it are a `duplicate-visualizer` error, which analysis reports, and neither applies. A
+    /// visualizer declaration with errors counts as one of two such, and never applies
+    /// itself.</para>
     pub fn gather(
         workspace: &WorkspaceDeclarations,
         entry: &str,
@@ -47,31 +51,32 @@ impl ProgramViewers {
             },
             build_context,
         );
-        let viewers = nx_api::program_viewers(&modules, |identity| workspace.artifact(identity));
-        let duplicates = nx_api::duplicate_program_viewers(&viewers)
+        let visualizers =
+            nx_api::program_visualizers(&modules, |identity| workspace.artifact(identity));
+        let duplicates = nx_api::duplicate_program_visualizers(&visualizers)
             .into_iter()
             .map(|(origin, _)| origin)
             .collect::<FxHashSet<_>>();
 
-        let mut gathered = ProgramViewers::default();
-        // The declaring module's viewer declaration applies before any other module's.
-        let (declaring, others): (Vec<_>, Vec<_>) = viewers
+        let mut gathered = ProgramVisualizers::default();
+        // The declaring module's visualizer declaration applies before any other module's.
+        let (declaring, others): (Vec<_>, Vec<_>) = visualizers
             .into_iter()
-            .partition(ProgramViewer::is_in_declaring_module);
-        for viewer in declaring
+            .partition(ProgramVisualizer::is_in_declaring_module);
+        for visualizer in declaring
             .into_iter()
             .chain(
                 others
                     .into_iter()
-                    .filter(|viewer| !duplicates.contains(&viewer.target.origin)),
+                    .filter(|visualizer| !duplicates.contains(&visualizer.target.origin)),
             )
-            .filter(|viewer| viewer.clean)
+            .filter(|visualizer| visualizer.clean)
         {
             gathered
                 .program
-                .entry(origin_of(&viewer))
+                .entry(origin_of(&visualizer))
                 .or_default()
-                .push(viewer);
+                .push(visualizer);
         }
 
         for host in hosts {
@@ -83,22 +88,23 @@ impl ProgramViewers {
                 identity: host.clone(),
                 via: None,
             }];
-            for viewer in nx_api::program_viewers(&module, |identity| workspace.artifact(identity))
-                .into_iter()
-                .filter(|viewer| viewer.clean)
+            for visualizer in
+                nx_api::program_visualizers(&module, |identity| workspace.artifact(identity))
+                    .into_iter()
+                    .filter(|visualizer| visualizer.clean)
             {
                 gathered
                     .host
-                    .entry(origin_of(&viewer))
+                    .entry(origin_of(&visualizer))
                     .or_default()
-                    .push(viewer);
+                    .push(visualizer);
             }
         }
         gathered
     }
 
-    /// The viewer declarations of `origin`, in the order they apply.
-    fn of(&self, origin: &DeclarationOrigin) -> impl Iterator<Item = &ProgramViewer> {
+    /// The visualizer declarations of `origin`, in the order they apply.
+    fn of(&self, origin: &DeclarationOrigin) -> impl Iterator<Item = &ProgramVisualizer> {
         self.program
             .get(origin)
             .into_iter()
@@ -106,37 +112,37 @@ impl ProgramViewers {
             .chain(self.host.get(origin).into_iter().flatten())
     }
 
-    /// The resolved viewer of the declaration at `origin`, whose bases are `chain`, nearest first;
-    /// `None` when no viewer declaration of it or of a base applies.
+    /// The resolved visualizer of the declaration at `origin`, whose bases are `chain`, nearest
+    /// first; `None` when no visualizer declaration of it or of a base applies.
     pub fn resolve(
         &self,
         origin: &DeclarationOrigin,
         chain: &[DeclarationOrigin],
-    ) -> Option<ResolvedViewer> {
-        let mut resolved: Option<ResolvedViewer> = None;
+    ) -> Option<ResolvedVisualizer> {
+        let mut resolved: Option<ResolvedVisualizer> = None;
         for step in chain.iter().rev().chain(std::iter::once(origin)) {
             let own = step == origin;
-            for viewer in self.of(step) {
-                let current =
-                    resolved.get_or_insert_with(|| ResolvedViewer::new(viewer.value.record));
-                current.apply(&viewer.value, own);
+            for visualizer in self.of(step) {
+                let current = resolved
+                    .get_or_insert_with(|| ResolvedVisualizer::new(visualizer.value.record));
+                current.apply(&visualizer.value, own);
             }
         }
         resolved
     }
 }
 
-fn origin_of(viewer: &ProgramViewer) -> DeclarationOrigin {
+fn origin_of(visualizer: &ProgramVisualizer) -> DeclarationOrigin {
     (
-        viewer.target.origin.module_identity().to_string(),
-        viewer.target.origin.definition_id(),
+        visualizer.target.origin.module_identity().to_string(),
+        visualizer.target.origin.definition_id(),
     )
 }
 
-/// One declaration's viewer, with every viewer declaration that applies to it merged in.
+/// One declaration's visualizer, with every visualizer declaration that applies to it merged in.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct ResolvedViewer {
-    pub record: Option<ViewerRecord>,
+pub(crate) struct ResolvedVisualizer {
+    pub record: Option<VisualizerRecord>,
     pub name: Option<String>,
     pub title: Option<String>,
     pub subtitle: Option<String>,
@@ -147,13 +153,14 @@ pub(crate) struct ResolvedViewer {
     pub icon: Option<String>,
     pub layout: Option<String>,
     pub format: Option<String>,
-    /// The property viewers, in their resolved order.
+    /// The property visualizers, in their resolved order.
     pub properties: Vec<ResolvedChild>,
-    /// The case viewers, in the order they were first written.
+    /// The case visualizers, in the order they were first written.
     pub cases: Vec<ResolvedChild>,
 }
 
-/// One merged `PropertyViewer` or `CaseViewer`: what it describes and the attributes it sets.
+/// One merged `PropertyVisualizer` or `CaseVisualizer`: what it describes and the attributes it
+/// sets.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ResolvedChild {
     pub of: String,
@@ -176,21 +183,21 @@ impl ResolvedChild {
     }
 }
 
-impl ResolvedViewer {
-    fn new(record: ViewerRecord) -> Self {
+impl ResolvedVisualizer {
+    fn new(record: VisualizerRecord) -> Self {
         Self {
             record: Some(record),
             ..Self::default()
         }
     }
 
-    /// Applies one viewer declaration's value over what earlier ones resolved; `own` says whether
-    /// it is a viewer of the declaration itself rather than of a base.
-    fn apply(&mut self, value: &ViewerValue, own: bool) {
+    /// Applies one visualizer declaration's value over what earlier ones resolved; `own` says
+    /// whether it is a visualizer of the declaration itself rather than of a base.
+    fn apply(&mut self, value: &VisualizerValue, own: bool) {
         let text = |name: &str| {
             value
                 .attribute(name)
-                .map(ViewerAttribute::text)
+                .map(VisualizerAttribute::text)
                 .filter(|text| is_known_value(name, text))
         };
         if own {
@@ -214,9 +221,10 @@ impl ResolvedViewer {
             }
         }
         match value.record {
-            ViewerRecord::Element => {
-                // The later viewer's property viewers come first, in its order; the earlier ones
-                // it does not name follow in theirs. Two of one property in one viewer merge too.
+            VisualizerRecord::Element => {
+                // The later visualizer's property visualizers come first, in its order; the earlier
+                // ones it does not name follow in theirs. Two of one property in one visualizer
+                // merge too.
                 let mut earlier = std::mem::take(&mut self.properties);
                 for child in &value.children {
                     let Some(of) = child_of(child) else {
@@ -242,7 +250,7 @@ impl ResolvedViewer {
                 }
                 self.properties.extend(earlier);
             }
-            ViewerRecord::Union => {
+            VisualizerRecord::Union => {
                 for child in &value.children {
                     let Some(of) = child_of(child) else {
                         continue;
@@ -260,16 +268,16 @@ impl ResolvedViewer {
                     }
                 }
             }
-            ViewerRecord::Value => {}
+            VisualizerRecord::Value => {}
         }
     }
 }
 
-fn child_of(child: &ViewerChild) -> Option<String> {
-    child.attribute("of").map(ViewerAttribute::text)
+fn child_of(child: &VisualizerChild) -> Option<String> {
+    child.attribute("of").map(VisualizerAttribute::text)
 }
 
-fn merge_child(merged: &mut ResolvedChild, child: &ViewerChild) {
+fn merge_child(merged: &mut ResolvedChild, child: &VisualizerChild) {
     for (name, value) in &child.attributes {
         let text = value.text();
         if name != "of" && is_known_value(name, &text) {
@@ -278,9 +286,9 @@ fn merge_child(merged: &mut ResolvedChild, child: &ViewerChild) {
     }
 }
 
-/// Whether `text` is a value the viewer protocol allows for the attribute `name`. Analysis already
-/// rejects any other, and a viewer declaration with an error never applies; this keeps a value
-/// outside the protocol's unions from reaching a reader all the same.
+/// Whether `text` is a value the visualizer protocol allows for the attribute `name`. Analysis
+/// already rejects any other, and a visualizer declaration with an error never applies; this keeps
+/// a value outside the protocol's unions from reaching a reader all the same.
 fn is_known_value(name: &str, text: &str) -> bool {
     match name {
         "layout" => matches!(text, "card" | "row" | "inline"),

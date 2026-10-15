@@ -30,7 +30,7 @@ Keywords
 - IF ("if"), ELSE ("else"), IS ("is")
 - FOR ("for"), IN ("in")
 - RAW ("raw")
-- VIEWER ("viewer"; a keyword only as the first token of a module member, an IDENTIFIER elsewhere)
+- VISUALIZER ("visualizer"; a keyword only as the first token of a module member, an IDENTIFIER elsewhere)
 
 Primitive types (keywords)
 - STRING ("string")
@@ -188,7 +188,7 @@ ModuleMember (AST: ModuleMemberSyntax is a sum type)
 - ModuleMember → ValueDefinition
 - ModuleMember → FunctionDefinition
 - ModuleMember → ComponentDefinition
-- ModuleMember → ViewerDefinition
+- ModuleMember → VisualizerDefinition
 
 ImportStatement (AST: ImportStatementSyntax)
 - ImportStatement → IMPORT WildcardImport
@@ -285,8 +285,8 @@ ValueDefinitionTypeOpt
 - ValueDefinitionTypeOpt → COLON Type
 - ValueDefinitionTypeOpt → ε
 
-ViewerDefinition (AST: ViewerDefSyntax)
-- ViewerDefinition → VisibilityModifier? VIEWER QualifiedName EQ RhsExpression
+VisualizerDefinition (AST: VisualizerDefSyntax)
+- VisualizerDefinition → VisibilityModifier? VISUALIZER QualifiedName EQ RhsExpression
   - fields: visibility?: "private"|"export" (parsed so lowering can reject it), target: QualifiedNameSyntax, value: ExpressionSyntax
 
 Type (AST: TypeSyntax)

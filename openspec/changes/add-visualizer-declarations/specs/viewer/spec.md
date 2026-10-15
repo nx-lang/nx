@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: One element shows a source tree in any host
-The repository SHALL publish `@nx-lang/viewer`, which defines an `<nx-viewer>` custom element that
+The repository SHALL publish `@nx-lang/visualizer`, which defines an `<nx-visualizer>` custom element that
 shows a `SourceTree`, as `@nx-lang/language-protocol` types it, together with the text of the
 document the tree describes, as a reading of that text. The element SHALL depend on no UI framework,
 SHALL keep its markup and styles in a shadow root, and SHALL follow the page's light or dark scheme.
@@ -11,7 +11,7 @@ package SHALL do nothing, and the package SHALL export a function that defines t
 registry the host chooses.
 
 #### Scenario: A plain page
-- **WHEN** a page with no framework imports the package, adds `<nx-viewer>` and sets its `tree` and
+- **WHEN** a page with no framework imports the package, adds `<nx-visualizer>` and sets its `tree` and
   `text`
 - **THEN** the element SHALL show the document's reading
 
@@ -88,8 +88,8 @@ element SHALL color the text by the ranges its host gives in `colors`, each a st
 UTF-16 code units with a light color, a dark color and a font style, so the reading takes the colors
 of the host's editor. The element SHALL mark comments and text shown to people as prose and each
 line's indentation as indentation, so a host can set prose in a proportional font through
-`--nx-viewer-prose-font-family` while indentation keeps a fixed width through
-`--nx-viewer-indent-font-family`, and code is set through `--nx-viewer-source-font-family`.
+`--nx-visualizer-prose-font-family` while indentation keeps a fixed width through
+`--nx-visualizer-indent-font-family`, and code is set through `--nx-visualizer-source-font-family`.
 
 #### Scenario: A type declaration
 - **WHEN** a document declares `type Task = { title:string priority:int = 2 }` over several lines
@@ -102,7 +102,7 @@ line's indentation as indentation, so a host can set prose in a proportional fon
 ### Requirement: An element over several lines reads as a group
 An element the document writes over several lines SHALL read as a group: a header holding its icon,
 its name, its id, and the attributes written on the line its tag starts on as `name=value`, the id
-after those attributes when its viewer puts it at the end; a row for
+after those attributes when its visualizer puts it at the end; a row for
 each attribute written on a line of its own, with the attribute's name in one column and its value in
 another; and what the element holds under them, indented. The group SHALL show no angle brackets and
 no closing tag. A bracket SHALL run down the group from under its name and turn right at its end. A
@@ -117,7 +117,7 @@ group holds as written; code read as written elsewhere SHALL keep its lines.
 
 #### Scenario: Attributes a line each
 - **WHEN** a document holds `<Step` with `id="welcome"` and `title="Welcome"` each on a line of its
-  own, and the viewer of `Step` names `id` as its id
+  own, and the visualizer of `Step` names `id` as its id
 - **THEN** the reading SHALL show a group headed `Step welcome` with one row, `title` and `Welcome`,
   and no `<`, `/>` or quotes
 
@@ -128,8 +128,8 @@ group holds as written; code read as written elsewhere SHALL keep its lines.
   room between them, and no closing tag
 
 ### Requirement: An element on one line reads as a line
-An element the document writes on one line SHALL read as its icon and name, its id where its viewer
-puts it, the value of the attribute its viewer names as its title alone, each other attribute as
+An element the document writes on one line SHALL read as its icon and name, its id where its visualizer
+puts it, the value of the attribute its visualizer names as its title alone, each other attribute as
 `name=value`, and then what it holds as written, with no tags of its own. When the element shares
 its line with other text, such as a property's name in a group or a `let` before it, the line SHALL
 keep the `<` before its name and a `/>` after it, so its extent stays clear; alone on its line, it
@@ -138,7 +138,7 @@ through any list, SHALL leave out its name when it has an icon, which then names
 
 #### Scenario: A list of choices
 - **WHEN** a property typed `Choice+` holds `<Choice value="yes-one" label="Yes, one" />` on a line
-  of its own, and the viewer of `Choice` names `label` as its title, `value` as its id at the end and
+  of its own, and the visualizer of `Choice` names `label` as its title, `value` as its id at the end and
   an icon
 - **THEN** the reading SHALL show the icon, `Yes, one` and the id `yes-one`, without the name
   `Choice`
@@ -155,9 +155,9 @@ through any list, SHALL leave out its name when it has an icon, which then names
 In a group or a line, a string SHALL read without its quotes, and a boolean SHALL read as a check for
 `true` and a cross for `false`. A string that a property, a field, a parameter or a declaration typed
 `uitext`, or an alias that leads to it, holds SHALL read as text shown to people: in the prose font, in
-a color of its own, with any quotes it keeps quiet. A string an element's viewer names as its `id`, or
-that a property's viewer formats as `id`, SHALL read as one quiet token, the element's id moved to where
-`idPosition` puts it. A string a viewer formats as `color` SHALL read with a small square of that color
+a color of its own, with any quotes it keeps quiet. A string an element's visualizer names as its `id`, or
+that a property's visualizer formats as `id`, SHALL read as one quiet token, the element's id moved to where
+`idPosition` puts it. A string a visualizer formats as `color` SHALL read with a small square of that color
 before it when it names a color.
 
 #### Scenario: Text shown to people
@@ -165,25 +165,25 @@ before it when it names a color.
 - **THEN** the reading SHALL show `First choice` as text shown to people, without quotes
 
 #### Scenario: A color
-- **WHEN** a property typed by an alias with `viewer Color = <ValueViewer format=color />` holds
+- **WHEN** a property typed by an alias with `visualizer Color = <ValueVisualizer format=color />` holds
   `"#b6695d"`
 - **THEN** the reading SHALL show a square of that color before `#b6695d`
 
 ### Requirement: Elements start with icons the host draws
 The element SHALL take, through its `icons` property, a function that draws an icon by its Lucide name.
-With it, every element that starts a line of its own SHALL start with an icon: the one its viewer's
+With it, every element that starts a line of its own SHALL start with an icon: the one its visualizer's
 `icon` names, or else one for its kind of declaration, `component` for a component, `box` for a record,
 `zap` for an action, `tag` for a union case and `square-function` for a function. When the function
-draws nothing for the viewer's icon, the element SHALL start with its kind's icon. The icon SHALL carry
+draws nothing for the visualizer's icon, the element SHALL start with its kind's icon. The icon SHALL carry
 the element's name as its label and add no text. Without the function, no element SHALL have an icon.
 
-#### Scenario: A viewer's icon and a kind's
-- **WHEN** the host draws icons, the viewer of `Choice` sets `icon="circle-dot"`, and a list holds a
-  `Choice` and a record `Note` with no viewer, each on a line of its own
+#### Scenario: A visualizer's icon and a kind's
+- **WHEN** the host draws icons, the visualizer of `Choice` sets `icon="circle-dot"`, and a list holds a
+  `Choice` and a record `Note` with no visualizer, each on a line of its own
 - **THEN** the `Choice` SHALL start with the icon `circle-dot` and the `Note` with `box`
 
 #### Scenario: An icon the host cannot draw, and a union case
-- **WHEN** the host draws nothing for `no-such-icon`, the viewer of a record `Tip` sets
+- **WHEN** the host draws nothing for `no-such-icon`, the visualizer of a record `Tip` sets
   `icon="no-such-icon"`, and a list holds a `Tip` and `<Status.closed reason="done" />`, each on a line
   of its own
 - **THEN** the `Tip` SHALL start with `box` and the case with `tag`
@@ -201,8 +201,8 @@ selection that is not itself a unit, such as a node the host selects inside a ro
 unit that holds it, or, outside every unit, to the nearest unit after or before it. The
 selected unit and the one under the pointer SHALL be drawn as rows behind the text, from just before
 the unit's start to near the reading's right edge, a selected group's first line stronger than the rest
-of it, in colors a host sets through `--nx-viewer-selection`, `--nx-viewer-selection-inactive` and
-`--nx-viewer-hover`.
+of it, in colors a host sets through `--nx-visualizer-selection`, `--nx-visualizer-selection-inactive` and
+`--nx-visualizer-hover`.
 
 #### Scenario: Selecting a line
 - **WHEN** a reader clicks a word of an element on one line

@@ -11,7 +11,7 @@ mod validation;
 
 pub use ast::{
     property_definition_is_type_parameter, AstNode, ComponentDef, Element, FunctionDef, RecordDef,
-    SyntaxNodeExt, TypeDef, UnionDef, ViewerDef,
+    SyntaxNodeExt, TypeDef, UnionDef, VisualizerDef,
 };
 pub use doc_comments::{doc_comments, doc_text_source_offset, DocComment, DocComments};
 pub use syntax_kind::{syntax_kind_from_str, SyntaxKind};

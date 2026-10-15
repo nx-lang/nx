@@ -29,8 +29,8 @@ interface Entry {
   readonly source?: string;
   /** Further documents analyzed with the first, by identity. */
   readonly with?: Readonly<Record<string, string>>;
-  /** The host viewer modules to resolve viewers with; viewers are resolved when this is set. */
-  readonly viewers?: readonly string[];
+  /** The host visualizer modules to resolve visualizers with; visualizers are resolved when this is set. */
+  readonly visualizers?: readonly string[];
 }
 
 const entries = JSON.parse(
@@ -79,7 +79,7 @@ async function compute(name: string): Promise<Fixture> {
   if (entry === undefined) {
     throw new Error(`No fixture '${name}' in test/fixtures/sources.json.`);
   }
-  const options = entry.viewers === undefined ? undefined : { viewers: { modules: [...entry.viewers] } };
+  const options = entry.visualizers === undefined ? undefined : { visualizers: { modules: [...entry.visualizers] } };
   const others = Object.entries(entry.with ?? {}).map(([identity, source]) => ({
     uri: `nx:///${identity}`,
     identity,

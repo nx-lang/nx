@@ -1201,7 +1201,7 @@
           "named": true
         },
         {
-          "type": "viewer_definition",
+          "type": "visualizer_definition",
           "named": true
         }
       ]
@@ -2488,7 +2488,12 @@
     }
   },
   {
-    "type": "viewer_definition",
+    "type": "visibility_modifier",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "visualizer_definition",
     "named": true,
     "fields": {
       "target": {
@@ -2522,11 +2527,6 @@
         ]
       }
     }
-  },
-  {
-    "type": "visibility_modifier",
-    "named": true,
-    "fields": {}
   },
   {
     "type": "wildcard_import",
@@ -2863,7 +2863,7 @@
     "named": false
   },
   {
-    "type": "viewer",
+    "type": "visualizer",
     "named": false
   },
   {

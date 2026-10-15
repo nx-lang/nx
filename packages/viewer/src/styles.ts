@@ -87,7 +87,7 @@ export const styles = `
   line-height: var(--nx-viewer-source-line-height, 18px);
 }
 .source .n.selected > .uitext-block { background: var(--nx-viewer-selection, light-dark(#0969da1f, #388bfd33)); }
-/* A string its viewer formats as an identifier: one quiet token, as products that show ids do,
+/* A string its visualizer formats as an identifier: one quiet token, as products that show ids do,
    in muted gray on a faint tint, with no border and no added height. */
 .source .id-value {
   font-family: var(--nx-viewer-source-font-family, var(--mono));

@@ -1,10 +1,10 @@
 //! The source tree: every piece of one document as a typed node, with the declarations the nodes
 //! refer to beside them.
 //!
-//! <para>Hover answers what one position is. A tool that renders or compares a whole document —
-//! the NX viewer, a change view, an outline — needs that answer for every piece of the source at
-//! once, from the same analysis, so it does not issue a query per token or disagree with the
-//! editor by running an analysis of its own. This is that answer.</para>
+//! <para>Hover answers what one position is. A tool that renders or compares a whole document — the
+//! NX visualizer, a change view, an outline — needs that answer for every piece of the source at
+//! once, from the same analysis, so it does not issue a query per token or disagree with the editor
+//! by running an analysis of its own. This is that answer.</para>
 //!
 //! <para>The walk follows the syntax tree, because coverage is a property of the source text and
 //! the syntax tree is what keeps every token, comments included. Each construct is then matched to
@@ -13,10 +13,10 @@
 //! lowered counterpart (an import, a comment, a region that did not parse) is still a node; it
 //! simply carries no type.</para>
 //!
-//! <para>The shape is unstable: it is published for the viewer and the change view to build on,
+//! <para>The shape is unstable: it is published for the visualizer and the change view to build on,
 //! and a later change commits to it.</para>
 
-use crate::viewers::{ProgramViewers, ResolvedViewer};
+use crate::visualizers::{ProgramVisualizers, ResolvedVisualizer};
 use crate::{
     is_unresolved_type, type_ref_display, DeclarationOrigin, DocumentScope, DocumentUri,
     DocumentVersion, EditorRange, LineIndex, ModuleAnalysis, NxIdentity, SnapshotError,
@@ -44,27 +44,27 @@ pub struct SourceTree {
     pub nodes: Vec<SourceNode>,
     /// Each declaration a node refers to, listed once, from this module or any other.
     pub declarations: Vec<SourceDeclaration>,
-    /// The host viewer modules the request named that the snapshot does not hold.
+    /// The host visualizer modules the request named that the snapshot does not hold.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub missing_viewer_modules: Vec<String>,
+    pub missing_visualizer_modules: Vec<String>,
 }
 
 /// What a source-tree request asks for beyond the tree itself.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceTreeOptions {
-    /// Resolve the viewer declarations that apply to the document's program, and attach each
-    /// declaration's resolved viewer to its table entry.
+    /// Resolve the visualizer declarations that apply to the document's program, and attach each
+    /// declaration's resolved visualizer to its table entry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub viewers: Option<SourceTreeViewers>,
+    pub visualizers: Option<SourceTreeVisualizers>,
 }
 
-/// The viewer declarations a source-tree request asks to have resolved.
+/// The visualizer declarations a source-tree request asks to have resolved.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SourceTreeViewers {
-    /// Further viewer modules the host supplies, by module identity, applied after the program's
-    /// own viewer declarations in the order named.
+pub struct SourceTreeVisualizers {
+    /// Further visualizer modules the host supplies, by module identity, applied after the
+    /// program's own visualizer declarations in the order named.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub modules: Vec<String>,
 }
@@ -123,8 +123,8 @@ pub struct SourceNode {
 pub enum SourceRole {
     /// An import statement.
     Import,
-    /// A `let`, `type`, `action`, `component`, `viewer` or function declaration, with its name; a
-    /// `viewer` declaration's name is its target as written.
+    /// A `let`, `type`, `action`, `component`, `visualizer` or function declaration, with its name;
+    /// a `visualizer` declaration's name is its target as written.
     Declaration,
     /// A parameter of a function or a property of a component.
     Parameter,
@@ -209,8 +209,8 @@ pub enum SourceFlag {
     Export,
     /// The declaration is `private`.
     Private,
-    /// The declaration is a `viewer` declaration, named by its target.
-    Viewer,
+    /// The declaration is a `visualizer` declaration, named by its target.
+    Visualizer,
 }
 
 /// One declaration a node refers to.
@@ -248,20 +248,20 @@ pub struct SourceDeclaration {
     /// The range of a value declaration's value, when this document declares it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value_range: Option<EditorRange>,
-    /// How a viewer presents the declaration, resolved from every viewer declaration that applies
-    /// to it; present only when the request asked for viewers.
+    /// How a viewer presents the declaration, resolved from every visualizer declaration that
+    /// applies to it; present only when the request asked for visualizers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub viewer: Option<SourceViewer>,
+    pub visualizer: Option<SourceVisualizer>,
 }
 
-/// A declaration's resolved viewer.
+/// A declaration's resolved visualizer.
 ///
 /// <para>For a record, an action or a component it holds the heading parts, the layout and every
 /// property once, in the order to show them; for a union, every case once; for an alias of a
 /// primitive type, the format.</para>
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SourceViewer {
+pub struct SourceVisualizer {
     /// The kind's name as readers see it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -291,10 +291,10 @@ pub struct SourceViewer {
     pub layout: Option<String>,
     /// Every property, in the order to show them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub properties: Vec<SourcePropertyViewer>,
+    pub properties: Vec<SourcePropertyVisualizer>,
     /// Every case of a union, in declaration order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub cases: Vec<SourceCaseViewer>,
+    pub cases: Vec<SourceCaseVisualizer>,
     /// How an alias's string values are shown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format: Option<String>,
@@ -303,7 +303,7 @@ pub struct SourceViewer {
 /// How one property of a declaration reads.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SourcePropertyViewer {
+pub struct SourcePropertyVisualizer {
     /// The property's name.
     pub name: String,
     /// The label to show in place of the name.
@@ -315,8 +315,8 @@ pub struct SourcePropertyViewer {
     /// What a boolean property reads as when it is false.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub when_false: Option<String>,
-    /// How the property's string value is shown: from its property viewer, or else from the
-    /// viewer of the alias its type names.
+    /// How the property's string value is shown: from its property visualizer, or else from the
+    /// visualizer of the alias its type names.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format: Option<String>,
     /// `body` or `details`.
@@ -326,7 +326,7 @@ pub struct SourcePropertyViewer {
 /// How one case of a union reads.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SourceCaseViewer {
+pub struct SourceCaseVisualizer {
     /// The case's name.
     pub name: String,
     /// The label to show in place of the name.
@@ -404,9 +404,9 @@ impl WorkspaceSnapshot {
 
     /// Returns the source tree of the requested document, with what `options` asks for besides.
     ///
-    /// <para>With `viewers`, each declaration entry with a resolved viewer carries it, and the
-    /// table also lists each union and alias with a viewer that types a listed property, so a
-    /// reader needs no second query. Without it the answer is the plain source tree.</para>
+    /// <para>With `visualizers`, each declaration entry with a resolved visualizer carries it, and
+    /// the table also lists each union and alias with a visualizer that types a listed property, so
+    /// a reader needs no second query. Without it the answer is the plain source tree.</para>
     pub fn source_tree_with_options(
         &self,
         uri: &DocumentUri,
@@ -425,18 +425,18 @@ impl WorkspaceSnapshot {
         if let Some(tree) = parse_str(document.source(), identity).tree {
             builder.module(tree.root());
         }
-        let mut missing_viewer_modules = Vec::new();
-        if let Some(request) = &options.viewers {
+        let mut missing_visualizer_modules = Vec::new();
+        if let Some(request) = &options.visualizers {
             let workspace = Arc::clone(&builder.scope.workspace);
-            let viewers = ProgramViewers::gather(
+            let visualizers = ProgramVisualizers::gather(
                 &workspace,
                 identity,
                 |identity| self.has_identity(identity),
                 self.build_context(),
                 &request.modules,
             );
-            builder.attach_viewers(&viewers);
-            missing_viewer_modules = viewers.missing;
+            builder.attach_visualizers(&visualizers);
+            missing_visualizer_modules = visualizers.missing;
         }
         let (nodes, declarations) = builder.finish();
 
@@ -446,7 +446,7 @@ impl WorkspaceSnapshot {
             version: document.version,
             nodes,
             declarations,
-            missing_viewer_modules,
+            missing_visualizer_modules,
         })
     }
 }
@@ -646,7 +646,7 @@ impl<'a> TreeBuilder<'a> {
                     | SyntaxKind::VALUE_DEFINITION
                     | SyntaxKind::FUNCTION_DEFINITION
                     | SyntaxKind::COMPONENT_DEFINITION
-                    | SyntaxKind::VIEWER_DEFINITION
+                    | SyntaxKind::VISUALIZER_DEFINITION
             );
             let part = !error
                 && (declaration
@@ -719,8 +719,8 @@ impl<'a> TreeBuilder<'a> {
     }
 
     fn declaration(&mut self, node: SyntaxNode<'_>) {
-        if node.kind() == SyntaxKind::VIEWER_DEFINITION {
-            self.viewer_declaration(node);
+        if node.kind() == SyntaxKind::VISUALIZER_DEFINITION {
+            self.visualizer_declaration(node);
             return;
         }
         let name_node = node.child_by_field("name").or_else(|| {
@@ -767,17 +767,17 @@ impl<'a> TreeBuilder<'a> {
         self.component = enclosing;
     }
 
-    /// A `viewer Target = Value` declaration: named by its target as written, keyed apart from the
-    /// target's own declaration, and referring to the target's entry.
-    fn viewer_declaration(&mut self, node: SyntaxNode<'_>) {
+    /// A `visualizer Target = Value` declaration: named by its target as written, keyed apart from
+    /// the target's own declaration, and referring to the target's entry.
+    fn visualizer_declaration(&mut self, node: SyntaxNode<'_>) {
         let target = node.child_by_field("target").map(spell).unwrap_or_default();
         let index = self.push(
             SourceRole::Declaration,
             node.span(),
             None,
-            format!("viewer {target}"),
+            format!("visualizer {target}"),
         );
-        self.nodes[index].flags.push(SourceFlag::Viewer);
+        self.nodes[index].flags.push(SourceFlag::Visualizer);
         if let Some(visibility) = node.child_by_field("visibility") {
             self.unparsed(visibility, Some(index));
         }
@@ -1803,7 +1803,7 @@ impl<'a> TreeBuilder<'a> {
             cases: Vec::new(),
             ty: None,
             value_range: None,
-            viewer: None,
+            visualizer: None,
         });
 
         let chain = base_chain(&workspace, origin);
@@ -1905,12 +1905,12 @@ impl<'a> TreeBuilder<'a> {
     }
 
     // -----------------------------------------------------------------------------------------
-    // Viewers
+    // Visualizers
     // -----------------------------------------------------------------------------------------
 
-    /// Attaches each listed declaration's resolved viewer, and lists each union and alias with a
-    /// viewer that types a property of a listed declaration.
-    fn attach_viewers(&mut self, viewers: &ProgramViewers) {
+    /// Attaches each listed declaration's resolved visualizer, and lists each union and alias with
+    /// a visualizer that types a property of a listed declaration.
+    fn attach_visualizers(&mut self, visualizers: &ProgramVisualizers) {
         let workspace = Arc::clone(&self.scope.workspace);
         let mut index = 0;
         while index < self.table.len() {
@@ -1924,32 +1924,33 @@ impl<'a> TreeBuilder<'a> {
                 continue;
             };
             let chain = base_chain(&workspace, &origin);
-            let resolved = viewers.resolve(&origin, &chain);
-            let viewer = match self.table[index].kind {
+            let resolved = visualizers.resolve(&origin, &chain);
+            let visualizer = match self.table[index].kind {
                 SourceDeclarationKind::Record
                 | SourceDeclarationKind::Action
                 | SourceDeclarationKind::Component => {
                     let types = property_types(&workspace, &origin, &chain);
-                    // A property typed by a union or an alias with a viewer brings that declaration
-                    // into the table, so a reader can read the property's cases or format.
+                    // A property typed by a union or an alias with a visualizer brings that
+                    // declaration into the table, so a reader can read the property's cases or
+                    // format.
                     for (_, _, typed) in &types {
                         if let Some(typed) = typed {
                             let chain = base_chain(&workspace, typed);
-                            if viewers.resolve(typed, &chain).is_some() {
+                            if visualizers.resolve(typed, &chain).is_some() {
                                 self.entry(typed);
                             }
                         }
                     }
-                    self.element_viewer(index, resolved, &types, viewers)
+                    self.element_visualizer(index, resolved, &types, visualizers)
                 }
-                SourceDeclarationKind::Union => resolved.map(|resolved| SourceViewer {
+                SourceDeclarationKind::Union => resolved.map(|resolved| SourceVisualizer {
                     cases: self.table[index]
                         .cases
                         .iter()
                         .map(|case| {
                             let merged =
                                 resolved.cases.iter().find(|merged| merged.of == case.name);
-                            SourceCaseViewer {
+                            SourceCaseVisualizer {
                                 name: case.name.clone(),
                                 label: merged
                                     .and_then(|merged| merged.get("label"))
@@ -1960,34 +1961,34 @@ impl<'a> TreeBuilder<'a> {
                             }
                         })
                         .collect(),
-                    ..SourceViewer::default()
+                    ..SourceVisualizer::default()
                 }),
-                SourceDeclarationKind::Alias => resolved.map(|resolved| SourceViewer {
+                SourceDeclarationKind::Alias => resolved.map(|resolved| SourceVisualizer {
                     format: resolved.format,
-                    ..SourceViewer::default()
+                    ..SourceVisualizer::default()
                 }),
                 SourceDeclarationKind::Function | SourceDeclarationKind::Value => None,
             };
-            self.table[index].viewer = viewer;
+            self.table[index].visualizer = visualizer;
             index += 1;
         }
     }
 
-    /// The viewer of a record, an action or a component: its heading parts, its layout and every
-    /// property once, those its property viewers name first in their resolved order and the rest
-    /// in declaration order. A declaration with no viewer of its own still has one when a property
-    /// takes a format from its type.
-    fn element_viewer(
+    /// The visualizer of a record, an action or a component: its heading parts, its layout and
+    /// every property once, those its property visualizers name first in their resolved order and
+    /// the rest in declaration order. A declaration with no visualizer of its own still has one
+    /// when a property takes a format from its type.
+    fn element_visualizer(
         &self,
         index: usize,
-        resolved: Option<ResolvedViewer>,
+        resolved: Option<ResolvedVisualizer>,
         types: &[(String, String, Option<DeclarationOrigin>)],
-        viewers: &ProgramViewers,
-    ) -> Option<SourceViewer> {
+        visualizers: &ProgramVisualizers,
+    ) -> Option<SourceVisualizer> {
         let workspace = &self.scope.workspace;
         let type_format = |name: &str| {
             let (_, _, typed) = types.iter().find(|(property, _, _)| property == name)?;
-            alias_format(workspace, typed.as_ref()?, viewers)
+            alias_format(workspace, typed.as_ref()?, visualizers)
         };
         let names = self.table[index]
             .properties
@@ -2002,7 +2003,7 @@ impl<'a> TreeBuilder<'a> {
             .properties
             .iter()
             .filter(|merged| names.contains(&merged.of))
-            .map(|merged| SourcePropertyViewer {
+            .map(|merged| SourcePropertyVisualizer {
                 name: merged.of.clone(),
                 label: merged.get("label").map(str::to_string),
                 when_true: merged.get("whenTrue").map(str::to_string),
@@ -2016,15 +2017,15 @@ impl<'a> TreeBuilder<'a> {
             .collect::<Vec<_>>();
         for name in names {
             if !properties.iter().any(|property| property.name == name) {
-                properties.push(SourcePropertyViewer {
+                properties.push(SourcePropertyVisualizer {
                     format: type_format(&name),
                     name,
                     place: "body".to_string(),
-                    ..SourcePropertyViewer::default()
+                    ..SourcePropertyVisualizer::default()
                 });
             }
         }
-        Some(SourceViewer {
+        Some(SourceVisualizer {
             name: resolved.name,
             title: resolved.title,
             subtitle: resolved.subtitle,
@@ -2039,7 +2040,7 @@ impl<'a> TreeBuilder<'a> {
             icon: resolved.icon,
             layout: Some(resolved.layout.unwrap_or_else(|| "card".to_string())),
             properties,
-            ..SourceViewer::default()
+            ..SourceVisualizer::default()
         })
     }
 
@@ -2137,12 +2138,12 @@ fn written_type_name(ty: &nx_hir::ast::TypeRef) -> Option<&nx_hir::Name> {
     }
 }
 
-/// The format of the alias at `origin`: its own viewer's, or else that of the alias it names, as
-/// written.
+/// The format of the alias at `origin`: its own visualizer's, or else that of the alias it names,
+/// as written.
 fn alias_format(
     workspace: &WorkspaceDeclarations,
     origin: &DeclarationOrigin,
-    viewers: &ProgramViewers,
+    visualizers: &ProgramVisualizers,
 ) -> Option<String> {
     let mut current = origin.clone();
     let mut seen = Vec::new();
@@ -2150,7 +2151,7 @@ fn alias_format(
         let Some(Item::TypeAlias(alias)) = item_at(workspace, &current) else {
             return None;
         };
-        if let Some(format) = viewers
+        if let Some(format) = visualizers
             .resolve(&current, &[])
             .and_then(|resolved| resolved.format)
         {

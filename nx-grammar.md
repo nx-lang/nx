@@ -19,7 +19,7 @@ language bindings. That is also a reasonable limit for other implementations.
 ModuleDefinition ::=
     {ImportStatement}
     { ActionDefinition | TypeDefinition | ValueDefinition | FunctionDefinition | ComponentDefinition
-      | ViewerDefinition }
+      | VisualizerDefinition }
     [Element]
 
 ImportStatement ::=
@@ -45,7 +45,7 @@ LibraryPath ::=
     StringLiteral
 ```
 
-A module can include any number of imports, followed by top-level declarations and viewer
+A module can include any number of imports, followed by top-level declarations and visualizer
 declarations, and an optional trailing root `Element` for rendered markup. Imports target libraries
 rather than individual source files. A local library is a directory containing `.nx` files, and every `.nx` file under that
 directory contributes declarations to the imported library recursively.
@@ -333,40 +333,40 @@ Within a single record, function signature, component signature, emitted action 
 block, at most one `PropertyDefinition` may be prefixed by `content`. That content-marked property
 receives element body content during markup-style invocation.
 
-<a id="viewer-declarations"></a>
-## Viewer Declarations
+<a id="visualizer-declarations"></a>
+## Visualizer Declarations
 
 ```ebnf
-(* "viewer" is a keyword only as the first token of a module member; elsewhere it is an
-   identifier. A VisibilityModifier parses before it so that lowering can report that a viewer
+(* "visualizer" is a keyword only as the first token of a module member; elsewhere it is an
+   identifier. A VisibilityModifier parses before it so that lowering can report that a visualizer
    declaration takes none. *)
-ViewerDefinition ::=
-    [VisibilityModifier] "viewer" QualifiedName "=" RhsExpression
+VisualizerDefinition ::=
+    [VisibilityModifier] "visualizer" QualifiedName "=" RhsExpression
 ```
 
-A viewer declaration tells a viewer, such as a reading view of the source, how to present one
-declaration: `viewer Choice = <ElementViewer title=label />`. The `QualifiedName` is its target, a
+A visualizer declaration tells a viewer, such as a reading view of the source, how to present one
+declaration: `visualizer Choice = <ElementVisualizer title=label />`. The `QualifiedName` is its target, a
 record, action, inline emitted action (`Form.Submitted`), component, constant union, or alias of a
-primitive type that the module can see. The value is built from the records of the `@nx/viewer`
+primitive type that the module can see. The value is built from the records of the `@nx/visualizer`
 standard library, which the module imports.
 
-A viewer declaration declares no name, takes no visibility modifier, and cannot be referred to. Its
-value is checked like any other, but only written-out values are accepted: viewer records, string
+A visualizer declaration declares no name, takes no visibility modifier, and cannot be referred to. Its
+value is checked like any other, but only written-out values are accepted: visualizer records, string
 and boolean literals, and bare property or case names. Nothing in it is evaluated, and it does not
-reach NX IR, generated code, or a declaration schema. Because `viewer` is a keyword only in this
-position, a prop, field, parameter, binding, or function named `viewer` keeps working:
+reach NX IR, generated code, or a declaration schema. Because `visualizer` is a keyword only in this
+position, a prop, field, parameter, binding, or function named `visualizer` keeps working:
 
 ```nx
-import "@nx/viewer"
+import "@nx/visualizer"
 
 type Choice = { value:string label:string }
-type Settings = { viewer:string }
+type Settings = { visualizer:string }
 
-viewer Choice = <ElementViewer title=label badge=value />
+visualizer Choice = <ElementVisualizer title=label badge=value />
 ```
 
-See [Viewer Declarations](https://nxlang.org/reference/concepts/viewer-declarations/) for how the
-target is bound and how viewer declarations from several modules combine.
+See [Visualizer Declarations](https://nxlang.org/reference/concepts/visualizer-declarations/) for how the
+target is bound and how visualizer declarations from several modules combine.
 
 <a id="expressions"></a>
 ## Expressions

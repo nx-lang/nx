@@ -20,43 +20,43 @@
     "source": "// A note for whoever reads the source.\ntype uitext = string\ntype WebUIText = uitext\ntype Choice = { value:string label:uitext hint?:WebUIText note:uitext = \"Fine\" }\nexternal component <Text tone:string = \"plain\" content text:uitext />\nlet greet(name:string): uitext = { \"Hello, \" + name }\nlet root() = {\n  <Choice value=\"a\" label=\"First choice\" hint=\"Pick me\" />\n  <Text>Shown to people</Text>\n  <Choice value=\"b\" label={\"Second \" + \"choice\"} />\n}\n"
   },
   "identifiers": {
-    "source": "import \"@nx/viewer\"\n\ntype Step = { id:string title:string next?:string }\n\nviewer Step =\n  <ElementViewer title=title>\n    <PropertyViewer of=id format=id />\n  </ElementViewer>\n\nlet first = <Step id=\"welcome\" title=\"Welcome\" next=\"details\" />\n",
-    "viewers": []
+    "source": "import \"@nx/visualizer\"\n\ntype Step = { id:string title:string next?:string }\n\nvisualizer Step =\n  <ElementVisualizer title=title>\n    <PropertyVisualizer of=id format=id />\n  </ElementVisualizer>\n\nlet first = <Step id=\"welcome\" title=\"Welcome\" next=\"details\" />\n",
+    "visualizers": []
   },
   "elementIds": {
-    "source": "import \"@nx/viewer\"\n\ntype Step = { id:string title:string }\ntype Choice = { value:string label:string }\n\nviewer Step = <ElementViewer title=title id=id />\nviewer Choice = <ElementViewer title=label id=value idPosition=end />\n\nlet steps = {\n  <Step\n    id=\"welcome\"\n    title=\"Welcome\"\n  />\n  <Choice value=\"yes\" label=\"Yes\" />\n}\n",
-    "viewers": []
+    "source": "import \"@nx/visualizer\"\n\ntype Step = { id:string title:string }\ntype Choice = { value:string label:string }\n\nvisualizer Step = <ElementVisualizer title=title id=id />\nvisualizer Choice = <ElementVisualizer title=label id=value idPosition=end />\n\nlet steps = {\n  <Step\n    id=\"welcome\"\n    title=\"Welcome\"\n  />\n  <Choice value=\"yes\" label=\"Yes\" />\n}\n",
+    "visualizers": []
   },
   "colors": {
-    "source": "import \"@nx/viewer\"\n\ntype Color = string\n\ntype Brand = { name:string primary:Color accent?:Color note?:string }\n\nviewer Color = <ValueViewer format=color />\n\nlet brand = <Brand name=\"Hive5\" primary=\"#b6695d\" accent=\"not a color\" note=\"#ffffff\" />\n",
-    "viewers": []
+    "source": "import \"@nx/visualizer\"\n\ntype Color = string\n\ntype Brand = { name:string primary:Color accent?:Color note?:string }\n\nvisualizer Color = <ValueVisualizer format=color />\n\nlet brand = <Brand name=\"Hive5\" primary=\"#b6695d\" accent=\"not a color\" note=\"#ffffff\" />\n",
+    "visualizers": []
   },
   "icons": {
-    "source": "import \"@nx/viewer\"\n\ntype Choice = { value:string label:string }\ntype Note = { text:string }\ntype Tip = { text:string }\ntype Status =\n  | open\n  | closed { reason:string }\n\nviewer Choice = <ElementViewer title=label icon=\"circle-dot\" />\nviewer Tip = <ElementViewer icon=\"no-such-icon\" />\n\nlet items = {\n  <Choice value=\"a\" label=\"First\" />\n  <Note text=\"Plain\" />\n  <Tip text=\"Unknown icon\" />\n  <Status.closed reason=\"done\" />\n}\n\nlet held = <Note text=\"Inline\" />\n\nlet picks:Choice+ = {\n  <Choice value=\"b\" label=\"Second\" />\n}\n",
-    "viewers": []
+    "source": "import \"@nx/visualizer\"\n\ntype Choice = { value:string label:string }\ntype Note = { text:string }\ntype Tip = { text:string }\ntype Status =\n  | open\n  | closed { reason:string }\n\nvisualizer Choice = <ElementVisualizer title=label icon=\"circle-dot\" />\nvisualizer Tip = <ElementVisualizer icon=\"no-such-icon\" />\n\nlet items = {\n  <Choice value=\"a\" label=\"First\" />\n  <Note text=\"Plain\" />\n  <Tip text=\"Unknown icon\" />\n  <Status.closed reason=\"done\" />\n}\n\nlet held = <Note text=\"Inline\" />\n\nlet picks:Choice+ = {\n  <Choice value=\"b\" label=\"Second\" />\n}\n",
+    "visualizers": []
   },
   "groups": {
     "source": "type Item = { name:string }\ntype Row = { gap:string content items:Item+ }\n\nlet row =\n  <Row gap=\"wide\">\n    <Item name=\"a\" />\n\n    <Item name=\"b\" />\n  </Row>\n",
-    "viewers": []
+    "visualizers": []
   },
   "content": {
     "source": "type Label = { tone:string content text:string }\n\nlet who = \"Ada\"\n\nlet labels = {\n  <Label tone=\"quiet\">Hello {who}</Label>\n}\n",
-    "viewers": []
+    "visualizers": []
   },
   "attributeComments": {
-    "source": "import \"@nx/viewer\"\n\ntype Item = { name:string note:string }\ntype Step = { id:string title:string }\n\nviewer Step = <ElementViewer id=id />\n\nlet rowed =\n  <Item\n    name= /* why */ \"a\"\n    note=\"n\"\n  />\n\nlet headed =\n  <Item name= /* c */ \"a\"\n    note=\"n\"\n  />\n\nlet keyed =\n  <Step id= /* key */ \"s\"\n    title=\"t\"\n  />\n",
-    "viewers": []
+    "source": "import \"@nx/visualizer\"\n\ntype Item = { name:string note:string }\ntype Step = { id:string title:string }\n\nvisualizer Step = <ElementVisualizer id=id />\n\nlet rowed =\n  <Item\n    name= /* why */ \"a\"\n    note=\"n\"\n  />\n\nlet headed =\n  <Item name= /* c */ \"a\"\n    note=\"n\"\n  />\n\nlet keyed =\n  <Step id= /* key */ \"s\"\n    title=\"t\"\n  />\n",
+    "visualizers": []
   },
   "textTypes": {
     "source": "type Note = { content text:string }\n\nlet short = <Note:markdown>Hello *there*</Note>\n\nlet long =\n  <Note:markdown>\n    Hello *there*\n  </Note>\n",
-    "viewers": []
+    "visualizers": []
   },
   "groupIdAtEnd": {
-    "source": "import \"@nx/viewer\"\n\ntype Choice = { value:string label:string note:string }\n\nviewer Choice = <ElementViewer title=label id=value idPosition=end />\n\nlet choice =\n  <Choice value=\"yes\" label=\"Yes\"\n    note=\"Agrees\"\n  />\n",
-    "viewers": []
+    "source": "import \"@nx/visualizer\"\n\ntype Choice = { value:string label:string note:string }\n\nvisualizer Choice = <ElementVisualizer title=label id=value idPosition=end />\n\nlet choice =\n  <Choice value=\"yes\" label=\"Yes\"\n    note=\"Agrees\"\n  />\n",
+    "visualizers": []
   },
   "rows": {
     "source": "type Item = { name:string }\ntype Panel = { title:string note:string content items:Item+ }\n\nlet panel =\n  <Panel\n    title=\"x\"\n    note=\"z\"\n  >\n    <Item name=\"a\" />\n  </Panel>\n",
-    "viewers": []
+    "visualizers": []
   }
 }

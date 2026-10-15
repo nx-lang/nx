@@ -4,8 +4,8 @@
  * <para>This is the half of NX language serving that has nothing to do with a transport. The HTTP
  * handler calls it after parsing a request; the in-process service calls it directly. Neither can
  * disagree with the other about a line number, because the queried text is analyzed exactly as the
- * caller sent it: a host's own declarations join the document set as context documents and are named
- * as implicit imports, so nothing is prepended and no position is ever rewritten.</para>
+ * caller sent it: a host's own declarations join the document set as context documents and are
+ * named as implicit imports, so nothing is prepended and no position is ever rewritten.</para>
  */
 import type {
   CompletionList,
@@ -15,7 +15,7 @@ import type {
   LanguageDocument,
   LanguageQueryName,
   SourceTree,
-  SourceTreeViewersOption,
+  SourceTreeVisualizersOption,
   TextPosition
 } from "@nx-lang/language-protocol";
 
@@ -26,7 +26,8 @@ import type { SnapshotLike } from "./cache.js";
  *
  * <para>`documents` join every query's document set without the client sending them, and
  * `implicitImports` are the identities every queried document imports without writing an import
- * line. A diagnostic located in a context document is reported under that document's own URI.</para>
+ * line. A diagnostic located in a context document is reported under that document's own
+ * URI.</para>
  */
 export interface HostContext {
   readonly documents?: readonly LanguageDocument[];
@@ -39,7 +40,7 @@ export interface AnswerRequest {
   uri: string;
   position: TextPosition | undefined;
   /** What a source-tree query asks to have resolved besides the tree. */
-  viewers?: SourceTreeViewersOption | undefined;
+  visualizers?: SourceTreeVisualizersOption | undefined;
 }
 
 /**
@@ -149,9 +150,9 @@ export function answerQuery(
       return snapshot.documentSymbols(request.uri) as DocumentSymbol[];
     case "sourceTree":
       return withVersion(
-        (request.viewers === undefined
+        (request.visualizers === undefined
           ? snapshot.sourceTree(request.uri)
-          : snapshot.sourceTree(request.uri, { viewers: request.viewers })) as SourceTree
+          : snapshot.sourceTree(request.uri, { visualizers: request.visualizers })) as SourceTree
       );
   }
 }

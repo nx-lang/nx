@@ -386,19 +386,20 @@ pub struct InferenceContext<'a> {
     /// expands to was written where the alias was declared, outside any component, and is resolved
     /// there.</para>
     type_parameter_scope: FxHashMap<Name, Type>,
-    /// The type a `viewer` declaration binds `Target` to, while its value is being checked.
+    /// The type a `visualizer` declaration binds `Target` to, while its value is being checked.
     ///
-    /// <para>Every construction of an `@nx/viewer` record in the value that leaves `Target`
+    /// <para>Every construction of an `@nx/visualizer` record in the value that leaves `Target`
     /// unbound gets this, and one that binds it to anything else is reported. `None` everywhere
     /// else, where a generic record binds every parameter itself.</para>
     ///
-    /// <para>The viewer record the target calls for comes with it, when the target resolved. A
-    /// viewer record that does not fit it binds the error type instead, so the one
-    /// `viewer-record-mismatch` stands alone rather than above an error for each property.</para>
-    viewer_target: Option<(Type, Option<nx_hir::ViewerRecord>)>,
-    /// The first viewer declaration of each target in this module, by the declaration the
+    /// <para>The visualizer record the target calls for comes with it, when the target resolved. A
+    /// visualizer record that does not fit it binds the error type instead, so the one
+    /// `visualizer-record-mismatch` stands alone rather than above an error for each
+    /// property.</para>
+    visualizer_target: Option<(Type, Option<nx_hir::VisualizerRecord>)>,
+    /// The first visualizer declaration of each target in this module, by the declaration the
     /// target names.
-    viewer_targets: FxHashMap<nx_hir::DeclaringOrigin, (Name, TextSpan)>,
+    visualizer_targets: FxHashMap<nx_hir::DeclaringOrigin, (Name, TextSpan)>,
     /// The component whose declaration is being checked, if any.
     ///
     /// <para>Only diagnostics read it: an unknown bare `Update` or `Property` written inside a
@@ -499,8 +500,8 @@ impl<'a> InferenceContext<'a> {
             resolved_type_aliases: FxHashMap::default(),
             local_type_alias_spans: FxHashMap::default(),
             type_parameter_scope: FxHashMap::default(),
-            viewer_target: None,
-            viewer_targets: FxHashMap::default(),
+            visualizer_target: None,
+            visualizer_targets: FxHashMap::default(),
             current_component: None,
             type_ref_span: TextSpan::new(0.into(), 0.into()),
             consumed_type_arguments: FxHashSet::default(),
@@ -1299,9 +1300,9 @@ impl<'a> InferenceContext<'a> {
     /// Infers a component's prop and state defaults and its body.
     ///
     /// <para>A component body is markup written against the same binding sites an element in a
-    /// function body has, so it is inferred the same way. Props and state are bound by name, because
-    /// the body reads them, and they are bound in a pushed scope so a prop cannot outlive the
-    /// component that declared it.</para>
+    /// function body has, so it is inferred the same way. Props and state are bound by name,
+    /// because the body reads them, and they are bound in a pushed scope so a prop cannot outlive
+    /// the component that declared it.</para>
     ///
     /// <para>The props bound are the component's *effective* ones, so a prop reached through the
     /// base chain reads at its declared type the way a directly declared one does. Scope building
@@ -1438,24 +1439,26 @@ impl<'a> InferenceContext<'a> {
             .collect()
     }
 
-    /// Binds `Target` for a construction of an `@nx/viewer` record inside a viewer declaration's
-    /// value: to the declaration's target when the construction leaves it unbound, and reports a
-    /// construction that binds it to anything else.
-    fn bind_viewer_target(
+    /// Binds `Target` for a construction of an `@nx/visualizer` record inside a visualizer
+    /// declaration's value: to the declaration's target when the construction leaves it unbound,
+    /// and reports a construction that binds it to anything else.
+    fn bind_visualizer_target(
         &mut self,
         arguments: &mut ResolvedTypeArguments,
         record_name: &Name,
         type_params: &[Name],
         span: TextSpan,
     ) {
-        let Some((target, expected)) = self.viewer_target.clone() else {
+        let Some((target, expected)) = self.visualizer_target.clone() else {
             return;
         };
         let target = match expected {
-            Some(expected) if !viewer_record_fits(expected, record_name.as_str()) => Type::Error,
+            Some(expected) if !visualizer_record_fits(expected, record_name.as_str()) => {
+                Type::Error
+            }
             _ => target,
         };
-        let param = Name::new(nx_hir::VIEWER_TARGET_PARAMETER);
+        let param = Name::new(nx_hir::VISUALIZER_TARGET_PARAMETER);
         if !type_params.contains(&param) {
             return;
         }
@@ -1475,9 +1478,9 @@ impl<'a> InferenceContext<'a> {
         };
         if bound != target && !matches!(bound, Type::Error) && !matches!(target, Type::Error) {
             self.error(
-                "viewer-target-mismatch",
+                "visualizer-target-mismatch",
                 format!(
-                    "'{}' binds Target={}, but this viewer declaration's target is '{}'; leave Target out and the declaration binds it",
+                    "'{}' binds Target={}, but this visualizer declaration's target is '{}'; leave Target out and the declaration binds it",
                     record_name, bound, target
                 ),
                 span,
@@ -1485,55 +1488,60 @@ impl<'a> InferenceContext<'a> {
         }
     }
 
-    /// Checks one `viewer Target = Value` declaration.
+    /// Checks one `visualizer Target = Value` declaration.
     ///
-    /// <para>The target must name a declaration that can have a viewer, and the value must be the
-    /// `@nx/viewer` record for the target's kind. While the value is checked, every viewer record
-    /// in it binds `Target` to the target, or to its props record for a component, so property and
-    /// case names check against the target. A second viewer declaration of one target in a module
-    /// is reported.</para>
-    pub fn infer_viewer(&mut self, viewer: &nx_hir::ViewerDecl) {
-        let target = match nx_hir::resolve_viewer_target(self.module, &viewer.target) {
+    /// <para>The target must name a declaration that can have a visualizer, and the value must be
+    /// the `@nx/visualizer` record for the target's kind. While the value is checked, every
+    /// visualizer record in it binds `Target` to the target, or to its props record for a
+    /// component, so property and case names check against the target. A second visualizer
+    /// declaration of one target in a module is reported.</para>
+    pub fn infer_visualizer(&mut self, visualizer: &nx_hir::VisualizerDecl) {
+        let target = match nx_hir::resolve_visualizer_target(self.module, &visualizer.target) {
             Ok(target) => Some(target),
-            Err(nx_hir::ViewerTargetError::Unknown) => {
+            Err(nx_hir::VisualizerTargetError::Unknown) => {
                 self.error(
-                    "unknown-viewer-target",
+                    "unknown-visualizer-target",
                     format!(
-                        "Unknown name '{}': a viewer declaration's target must name a declaration visible here",
-                        viewer.target
+                        "Unknown name '{}': a visualizer declaration's target must name a declaration visible here",
+                        visualizer.target
                     ),
-                    viewer.target_span,
+                    visualizer.target_span,
                 );
                 None
             }
-            Err(nx_hir::ViewerTargetError::NotAllowed { reason }) => {
+            Err(nx_hir::VisualizerTargetError::NotAllowed { reason }) => {
                 self.error(
-                    "viewer-target-not-allowed",
-                    format!("'{}' cannot have a viewer: {}", viewer.target, reason),
-                    viewer.target_span,
+                    "visualizer-target-not-allowed",
+                    format!(
+                        "'{}' cannot have a visualizer: {}",
+                        visualizer.target, reason
+                    ),
+                    visualizer.target_span,
                 );
                 None
             }
         };
 
         if let Some(target) = target.as_ref() {
-            match self.viewer_targets.get(&target.origin).cloned() {
+            match self.visualizer_targets.get(&target.origin).cloned() {
                 Some((first, first_span)) => {
-                    let builder = Diagnostic::error("duplicate-viewer")
+                    let builder = Diagnostic::error("duplicate-visualizer")
                         .with_message(format!(
-                            "'{}' already has a viewer in this module, declared as 'viewer {}'; a module declares at most one viewer for a declaration",
-                            viewer.target, first
+                            "'{}' already has a visualizer in this module, declared as 'visualizer {}'; a module declares at most one visualizer for a declaration",
+                            visualizer.target, first
                         ))
-                        .with_label(Label::primary(self.file_name.clone(), viewer.span))
+                        .with_label(Label::primary(self.file_name.clone(), visualizer.span))
                         .with_label(
                             Label::secondary(self.file_name.clone(), first_span)
-                                .with_message("the first viewer is declared here"),
+                                .with_message("the first visualizer is declared here"),
                         );
                     self.diagnostics.push(builder.build());
                 }
                 None => {
-                    self.viewer_targets
-                        .insert(target.origin.clone(), (viewer.target.clone(), viewer.span));
+                    self.visualizer_targets.insert(
+                        target.origin.clone(),
+                        (visualizer.target.clone(), visualizer.span),
+                    );
                 }
             }
         }
@@ -1546,10 +1554,10 @@ impl<'a> InferenceContext<'a> {
             None => Type::Error,
         };
         let previous = self
-            .viewer_target
+            .visualizer_target
             .replace((target_ty, target.as_ref().map(|target| target.record)));
-        let actual = self.infer_expr(viewer.value);
-        self.viewer_target = previous;
+        let actual = self.infer_expr(visualizer.value);
+        self.visualizer_target = previous;
 
         let Some(target) = target else {
             return;
@@ -1558,9 +1566,10 @@ impl<'a> InferenceContext<'a> {
         let found = match &actual {
             Type::Error => return,
             Type::Named(named) => match named.origin() {
-                Some(origin) if origin.module_identity() == nx_hir::VIEWER_LIBRARY_MODULE => self
-                    .record_definition_for(named)
-                    .map(|record| record.name.as_str().to_string()),
+                Some(origin) if origin.module_identity() == nx_hir::VISUALIZER_LIBRARY_MODULE => {
+                    self.record_definition_for(named)
+                        .map(|record| record.name.as_str().to_string())
+                }
                 _ => None,
             },
             _ => None,
@@ -1574,36 +1583,36 @@ impl<'a> InferenceContext<'a> {
                     .raw_module()
                     .imports
                     .iter()
-                    .any(|import| import.library_path == nx_hir::VIEWER_LIBRARY_ROOT);
+                    .any(|import| import.library_path == nx_hir::VISUALIZER_LIBRARY_ROOT);
                 format!(
-                    "The viewer of {} '{}' must be {} '{}' from \"{}\", and this '{}' is not that one{}",
+                    "The visualizer of {} '{}' must be {} '{}' from \"{}\", and this '{}' is not that one{}",
                     target.kind_label,
-                    viewer.target,
+                    visualizer.target,
                     article(expected),
                     expected,
-                    nx_hir::VIEWER_LIBRARY_ROOT,
+                    nx_hir::VISUALIZER_LIBRARY_ROOT,
                     expected,
                     if imported {
                         String::new()
                     } else {
-                        format!("; add `import \"{}\"`", nx_hir::VIEWER_LIBRARY_ROOT)
+                        format!("; add `import \"{}\"`", nx_hir::VISUALIZER_LIBRARY_ROOT)
                     }
                 )
             } else {
                 format!(
-                    "The viewer of {} '{}' must be {} '{}' from \"{}\", not '{}'",
+                    "The visualizer of {} '{}' must be {} '{}' from \"{}\", not '{}'",
                     target.kind_label,
-                    viewer.target,
+                    visualizer.target,
                     article(expected),
                     expected,
-                    nx_hir::VIEWER_LIBRARY_ROOT,
+                    nx_hir::VISUALIZER_LIBRARY_ROOT,
                     written
                 )
             };
             self.error(
-                "viewer-record-mismatch",
+                "visualizer-record-mismatch",
                 message,
-                self.module.raw_module().expr_span(viewer.value),
+                self.module.raw_module().expr_span(visualizer.value),
             );
         }
     }
@@ -4288,13 +4297,13 @@ impl<'a> InferenceContext<'a> {
         owner: Option<DeclaringOrigin>,
         span: TextSpan,
     ) -> ResolvedTypeArguments {
-        let viewer_record = owner
+        let visualizer_record = owner
             .as_ref()
-            .is_some_and(|origin| origin.module_identity() == nx_hir::VIEWER_LIBRARY_MODULE);
+            .is_some_and(|origin| origin.module_identity() == nx_hir::VISUALIZER_LIBRARY_MODULE);
         let mut arguments =
             self.resolve_type_argument_bindings(bindings, record_name, type_params, owner);
-        if viewer_record {
-            self.bind_viewer_target(&mut arguments, record_name, type_params, span);
+        if visualizer_record {
+            self.bind_visualizer_target(&mut arguments, record_name, type_params, span);
         }
         self.bind_parameter_property_unions(
             &mut arguments.scope,
@@ -8253,19 +8262,20 @@ pub(crate) fn widened_type(ty: &Type, target: nx_hir::ast::PrimitiveType) -> Typ
     widen(ty, Primitive::from_hir_type(target))
 }
 
-/// Whether the `@nx/viewer` record `record` belongs in the value of a viewer declaration whose
-/// target calls for `expected`: that record itself, or the record of one of its children. A record
-/// outside the library fits anywhere.
-fn viewer_record_fits(expected: nx_hir::ViewerRecord, record: &str) -> bool {
+/// Whether the `@nx/visualizer` record `record` belongs in the value of a visualizer declaration
+/// whose target calls for `expected`: that record itself, or the record of one of its children. A
+/// record outside the library fits anywhere.
+fn visualizer_record_fits(expected: nx_hir::VisualizerRecord, record: &str) -> bool {
     match record {
-        "ElementViewer" | "UnionViewer" | "ValueViewer" => record == expected.name(),
-        "PropertyViewer" => expected == nx_hir::ViewerRecord::Element,
-        "CaseViewer" => expected == nx_hir::ViewerRecord::Union,
+        "ElementVisualizer" | "UnionVisualizer" | "ValueVisualizer" => record == expected.name(),
+        "PropertyVisualizer" => expected == nx_hir::VisualizerRecord::Element,
+        "CaseVisualizer" => expected == nx_hir::VisualizerRecord::Union,
         _ => true,
     }
 }
 
-/// The indefinite article for a viewer record's name: "an ElementViewer", "a UnionViewer".
+/// The indefinite article for a visualizer record's name: "an ElementVisualizer", "a
+/// UnionVisualizer".
 fn article(name: &str) -> &'static str {
     match name.chars().next() {
         Some('A' | 'E' | 'I' | 'O') => "an",

@@ -1,9 +1,9 @@
 /**
  * The source reading: the document's text with each node of the source tree wrapped in a span that
  * carries its key. Code reads as written; an element over several lines reads as a group and one on
- * a line as its name and properties, without tags or quotes, with its id moved to where its viewer
- * puts it and its booleans read as marks. Colors come from the host, as ranges over the text, so a
- * host colors the reading with the highlighter and themes it colors its editor with.
+ * a line as its name and properties, without tags or quotes, with its id moved to where its
+ * visualizer puts it and its booleans read as marks. Colors come from the host, as ranges over the
+ * text, so a host colors the reading with the highlighter and themes it colors its editor with.
  */
 import type { SourceDeclarationKind, SourceNode, SourceValueFormat } from "@nx-lang/language-protocol";
 
@@ -43,8 +43,8 @@ function utf16Offsets(text: string, byteLength: number): Uint32Array {
 export interface SourceLayout {
   /**
    * Draws the icon of the given name, from the Lucide set, or nothing when it has none. With it, an
-   * element on lines of its own starts with an icon: the one its viewer names, or else one for its
-   * kind of declaration. Without it, no element has an icon.
+   * element on lines of its own starts with an icon: the one its visualizer names, or else one for
+   * its kind of declaration. Without it, no element has an icon.
    */
   readonly icons?: NxViewerIcons | undefined;
 }
@@ -52,7 +52,7 @@ export interface SourceLayout {
 /** Draws an icon by its Lucide name: an element the viewer copies, or nothing. */
 export type NxViewerIcons = (name: string) => Element | undefined;
 
-/** The icon an element starts with when its viewer names none, by its kind of declaration. */
+/** The icon an element starts with when its visualizer names none, by its kind of declaration. */
 const KIND_ICONS: Partial<Record<SourceDeclarationKind, string>> = {
   component: "component",
   record: "box",
@@ -135,7 +135,7 @@ export function renderSource(
   const formats = formattedNodes(index);
   const identifiers = new Set([...formats].flatMap(([at, format]) => (format === "id" ? [at] : [])));
 
-  // A small square of the color a string names, before it, for a string its viewer formats as a
+  // A small square of the color a string names, before it, for a string its visualizer formats as a
   // color. Nothing when the string names no color: the square would show a color that is not there.
   const swatch = (at: number, start: number, end: number): HTMLElement | undefined => {
     if (formats.get(at) !== "color") {
@@ -152,7 +152,7 @@ export function renderSource(
     return square;
   };
 
-  // A string its viewer formats as an identifier: one quiet token, its quotes inside it.
+  // A string its visualizer formats as an identifier: one quiet token, its quotes inside it.
   const writeIdentifier = (element: HTMLElement, start: number, end: number): void => {
     element.classList.add("id-value");
     const quote = (): HTMLElement => {
@@ -177,7 +177,8 @@ export function renderSource(
     };
     const block = document.createElement("span");
     block.className = "uitext-block";
-    // How far into its line the words begin, which is what the box may not be wider than the pane by.
+    // How far into its line the words begin, which is what the box may not be wider than the pane
+    // by.
     const lineStart = text.lastIndexOf("\n", start) + 1;
     block.style.setProperty("--column", String(start + 1 - lineStart));
     const body = document.createElement("span");
@@ -191,8 +192,8 @@ export function renderSource(
   // range does not sit inside what is left to write is left unmarked rather than written twice.
   const idPlans = elementIdPlans(index, startOf, endOf);
 
-  // An element's id, moved to where its viewer puts it: its value alone, as one quiet token that
-  // keeps the attribute's key and its value's.
+  // An element's id, moved to where its visualizer puts it: its value alone, as one quiet token
+  // that keeps the attribute's key and its value's.
   const idChip = (plan: ElementIdPlan): HTMLElement => {
     const attribute = tree.nodes[plan.attribute]!;
     const literal = tree.nodes[plan.literal]!;
@@ -322,7 +323,7 @@ export function renderSource(
     const declaration = node.declaration === undefined ? undefined : tree.declarations[node.declaration];
     const draw = (name: string | undefined): Element | undefined => (name === undefined ? undefined : layout.icons?.(name));
     // An icon the host cannot draw, as a name Lucide does not have, gives way to the kind's.
-    const drawn = draw(declaration?.viewer?.icon) ?? draw(declaration === undefined ? undefined : KIND_ICONS[declaration.kind]);
+    const drawn = draw(declaration?.visualizer?.icon) ?? draw(declaration === undefined ? undefined : KIND_ICONS[declaration.kind]);
     if (drawn === undefined) {
       return undefined;
     }
@@ -477,8 +478,8 @@ export function renderSource(
   };
 
   /**
-   * Whether an attribute's value is structure that reads under its name: a list, or an element shown
-   * as a sheet. Text stays in the value column however many lines it takes.
+   * Whether an attribute's value is structure that reads under its name: a list, or an element
+   * shown as a sheet. Text stays in the value column however many lines it takes.
    */
   const spansLines = (attribute: number): boolean => {
     const values = childrenOf(attribute).filter((value) => !isNote(value));
@@ -556,7 +557,8 @@ export function renderSource(
       }
     }
     if (plan !== undefined && plan.atEnd) {
-      // Last in its tag: after the attributes on the header, as a line puts it after its properties.
+      // Last in its tag: after the attributes on the header, as a line puts it after its
+      // properties.
       const gap = document.createElement("span");
       gap.className = "line-gap";
       gap.textContent = "  ";
@@ -568,9 +570,9 @@ export function renderSource(
   // ---- Elements on one line ------------------------------------------------------------------
 
   /**
-   * Whether an element written on one line reads as one: its name, then its properties, each a name,
-   * an `=` and a value, with no quotes, then what it holds as written, with no tags of its own. It
-   * must have no comment in its tag.
+   * Whether an element written on one line reads as one: its name, then its properties, each a
+   * name, an `=` and a value, with no quotes, then what it holds as written, with no tags of its
+   * own. It must have no comment in its tag.
    */
   const oneLineable = (at: number): boolean => {
     const node = tree.nodes[at]!;
@@ -616,15 +618,15 @@ export function renderSource(
     readonly element: HTMLElement;
   }
 
-  /** The attribute whose string the element's viewer names as its title, if it sets one. */
+  /** The attribute whose string the element's visualizer names as its title, if it sets one. */
   const titleOf = (at: number): number | undefined => {
     const node = tree.nodes[at]!;
-    const viewer = node.declaration === undefined ? undefined : tree.declarations[node.declaration]?.viewer;
+    const visualizer = node.declaration === undefined ? undefined : tree.declarations[node.declaration]?.visualizer;
     return childrenOf(at).find((child) => {
       const candidate = tree.nodes[child]!;
       const values = childrenOf(child);
       return (
-        candidate.name === viewer?.title &&
+        candidate.name === visualizer?.title &&
         child !== idPlans.get(at)?.attribute &&
         values.length === 1 &&
         tree.nodes[values[0]!]!.role === "literal" &&
@@ -640,8 +642,9 @@ export function renderSource(
   };
 
   /**
-   * A property on a line, by name: its name, an `=` and its value. On a line, a named property keeps
-   * its `=`: it ties the name to a value that may hold spaces, where a sheet's columns do that for it.
+   * A property on a line, by name: its name, an `=` and its value. On a line, a named property
+   * keeps its `=`: it ties the name to a value that may hold spaces, where a sheet's columns do
+   * that for it.
    */
   const namedPart = (attribute: number): HTMLElement => {
     const part = marked(attribute, "span", "line-property");
@@ -734,7 +737,7 @@ export function renderSource(
       );
       spelled = typed === undefined ? undefined : tree.nodes[typed]!.value;
     }
-    // A type spelled as an element, as `<PropertyViewer Target=Target/>+`, names its element.
+    // A type spelled as an element, as `<PropertyVisualizer Target=Target/>+`, names its element.
     const trimmed = spelled?.replace(/[?+*]+$/, "").trim();
     return trimmed?.startsWith("<") ? /^<\s*([\w.]+)/.exec(trimmed)?.[1] : trimmed;
   };
@@ -843,9 +846,9 @@ interface ElementIdPlan {
 }
 
 /**
- * The plan for each element whose viewer names an id property it sets to a string: the attribute
- * comes out of its place, with its own line when it stands alone on one, and its value reads right
- * after the element's name, or last in its tag, after the attributes that stay.
+ * The plan for each element whose visualizer names an id property it sets to a string: the
+ * attribute comes out of its place, with its own line when it stands alone on one, and its value
+ * reads right after the element's name, or last in its tag, after the attributes that stay.
  */
 function elementIdPlans(
   index: TreeIndex,
@@ -858,8 +861,8 @@ function elementIdPlans(
     if (node.role !== "element" || node.declaration === undefined) {
       return;
     }
-    const viewer = tree.declarations[node.declaration]?.viewer;
-    if (viewer?.id === undefined) {
+    const visualizer = tree.declarations[node.declaration]?.visualizer;
+    if (visualizer?.id === undefined) {
       return;
     }
     const children = index.children[at] ?? [];
@@ -867,7 +870,7 @@ function elementIdPlans(
       const candidate = tree.nodes[child]!;
       return candidate.role === "attribute" && !(candidate.flags?.includes("content") ?? false);
     });
-    const attribute = attributes.find((child) => tree.nodes[child]!.name === viewer.id);
+    const attribute = attributes.find((child) => tree.nodes[child]!.name === visualizer.id);
     if (attribute === undefined) {
       return;
     }
@@ -880,7 +883,8 @@ function elementIdPlans(
     }
     const start = startOf(tree.nodes[attribute]!);
     const end = endOf(tree.nodes[attribute]!);
-    // An attribute alone on its line takes the line with it; one beside others takes the space before it.
+    // An attribute alone on its line takes the line with it; one beside others takes the space
+    // before it.
     const lineStart = text.lastIndexOf("\n", start - 1) + 1;
     const lineEnd = text.indexOf("\n", end);
     const alone = text.slice(lineStart, start).trim() === "" && text.slice(end, lineEnd < 0 ? text.length : lineEnd).trim() === "";
@@ -895,7 +899,7 @@ function elementIdPlans(
       }
     }
     const others = attributes.filter((child) => child !== attribute);
-    const atEnd = viewer.idPosition === "end" && others.length > 0;
+    const atEnd = visualizer.idPosition === "end" && others.length > 0;
     const insertAt = atEnd ? Math.max(...others.map((child) => endOf(tree.nodes[child]!))) : nameEnd(text, node, startOf(node));
     plans.set(at, {
       attribute,
@@ -912,8 +916,8 @@ function elementIdPlans(
 }
 
 /**
- * Where an element's name ends in `text`, for the element starting at `start`: after its `<` and its
- * name, and after a text type that follows the name, as `:markdown` in `<Note:markdown`.
+ * Where an element's name ends in `text`, for the element starting at `start`: after its `<` and
+ * its name, and after a text type that follows the name, as `:markdown` in `<Note:markdown`.
  */
 function nameEnd(text: string, node: SourceNode, start: number): number {
   let end = start + 1 + (node.name ?? "").length;
@@ -995,8 +999,9 @@ function uiTextNodes(index: TreeIndex): Set<number> {
 }
 
 /**
- * The string literals an attribute holds directly, with the format its property's viewer gives
- * them: from `<PropertyViewer of=id format=id />`, or from the viewer of the alias its type names.
+ * The string literals an attribute holds directly, with the format its property's visualizer gives
+ * them: from `<PropertyVisualizer of=id format=id />`, or from the visualizer of the alias its type
+ * names.
  */
 function formattedNodes(index: TreeIndex): Map<number, SourceValueFormat> {
   const { tree } = index;
@@ -1010,8 +1015,8 @@ function formattedNodes(index: TreeIndex): Map<number, SourceValueFormat> {
     if (attribute.role !== "attribute" || element?.declaration === undefined) {
       return;
     }
-    const viewer = tree.declarations[element.declaration]?.viewer;
-    const format = viewer?.properties?.find((property) => property.name === attribute.name)?.format;
+    const visualizer = tree.declarations[element.declaration]?.visualizer;
+    const format = visualizer?.properties?.find((property) => property.name === attribute.name)?.format;
     if (format !== undefined) {
       found.set(at, format);
     }

@@ -13,8 +13,8 @@ use crate::{
     ImportKind, Item, LoweredModule, LoweringDiagnostic, Name, Param, Property,
     PropertyConditionArm, PropertyEntry, PropertyMatchArm, RecordDef, RecordField, RecordKind,
     SelectiveImport, SourceId, TypeAlias, TypeParameter, UnionCaseDef, UnionCaseField, UnionDef,
-    ValueDef, ViewerDecl, Visibility, WhitespaceRun, PROPERTY_UNION_SUFFIX, PROPS_RECORD_SUFFIX,
-    STATE_RECORD_SUFFIX, UPDATE_RECORD_SUFFIX,
+    ValueDef, Visibility, VisualizerDecl, WhitespaceRun, PROPERTY_UNION_SUFFIX,
+    PROPS_RECORD_SUFFIX, STATE_RECORD_SUFFIX, UPDATE_RECORD_SUFFIX,
 };
 use nx_diagnostics::{TextSize, TextSpan};
 use nx_syntax::{property_definition_is_type_parameter, SyntaxKind, SyntaxNode};
@@ -804,7 +804,8 @@ impl LoweringContext {
     /// The type parameters `node` declares, without diagnostics.
     ///
     /// <para>The mirror of [`Self::lower_field_signatures`]: predeclaration runs before the
-    /// declaration itself is lowered, and a duplicate should be reported once, by the lowering.</para>
+    /// declaration itself is lowered, and a duplicate should be reported once, by the
+    /// lowering.</para>
     fn type_parameter_signatures(&self, node: SyntaxNode) -> Vec<TypeParameter> {
         let mut params: Vec<TypeParameter> = Vec::new();
         for prop in node
@@ -2042,8 +2043,8 @@ impl LoweringContext {
                     }
                 }
 
-                // Build nested if-else from the arms (in reverse order)
-                // if { a => x, b => y, else => z } becomes: if a { x } else { if b { y } else { z } }
+                // Build nested if-else from the arms (in reverse order) if { a => x, b => y, else
+                // => z } becomes: if a { x } else { if b { y } else { z } }
                 let mut result = else_expr;
                 for (condition, body) in arms.into_iter().rev() {
                     result = Some(self.alloc_expr(Expr::If {
@@ -2310,15 +2311,15 @@ impl LoweringContext {
         }
     }
 
-    /// Lowers a `viewer Target = Value` declaration.
+    /// Lowers a `visualizer Target = Value` declaration.
     ///
-    /// <para>A visibility modifier is reported here: a viewer declaration applies wherever its
+    /// <para>A visibility modifier is reported here: a visualizer declaration applies wherever its
     /// module is loaded, so there is nothing for `export` or `private` to change.</para>
-    fn lower_viewer_definition(&mut self, node: SyntaxNode) -> Option<ViewerDecl> {
+    fn lower_visualizer_definition(&mut self, node: SyntaxNode) -> Option<VisualizerDecl> {
         if let Some(visibility) = node.child_by_field("visibility") {
             self.add_diagnostic(
                 format!(
-                    "A viewer declaration takes no visibility modifier; remove '{}': a viewer applies wherever its module is loaded",
+                    "A visualizer declaration takes no visibility modifier; remove '{}': a visualizer applies wherever its module is loaded",
                     visibility.text()
                 ),
                 visibility.span(),
@@ -2326,14 +2327,14 @@ impl LoweringContext {
         }
         let target = node.child_by_field("target")?;
         if let Some(value_node) = node.child_by_field("value") {
-            self.check_viewer_value_is_written_out(value_node);
+            self.check_visualizer_value_is_written_out(value_node);
         }
         let first_expr = self.module.exprs().len();
         let value = node
             .child_by_field("value")
             .map(|value_node| self.lower_expr(value_node))
             .unwrap_or_else(|| self.error_expr(node.span()));
-        Some(ViewerDecl {
+        Some(VisualizerDecl {
             target: Name::new(target.text()),
             target_span: target.span(),
             value,
@@ -2342,30 +2343,30 @@ impl LoweringContext {
         })
     }
 
-    /// Reports every part of a viewer declaration's value that is not written out.
+    /// Reports every part of a visualizer declaration's value that is not written out.
     ///
-    /// <para>A viewer's value is built only from element constructions, string and boolean
+    /// <para>A visualizer's value is built only from element constructions, string and boolean
     /// literals, and bare names, which name properties or cases. Anything computed — a braced
     /// expression, a conditional, a loop, a number, text or an embed in an element's body — is
-    /// reported, so every viewer declaration can be read without evaluating it. The rule is
+    /// reported, so every visualizer declaration can be read without evaluating it. The rule is
     /// checked on the syntax, because a braced literal and a bare one lower alike.</para>
-    fn check_viewer_value_is_written_out(&mut self, node: SyntaxNode) {
+    fn check_visualizer_value_is_written_out(&mut self, node: SyntaxNode) {
         match node.kind() {
             SyntaxKind::RHS_EXPRESSION | SyntaxKind::PROPERTY_LIST | SyntaxKind::MIXED_CONTENT => {
                 for child in node.children() {
-                    self.check_viewer_value_is_written_out(child);
+                    self.check_visualizer_value_is_written_out(child);
                 }
             }
             SyntaxKind::ELEMENT => {
                 for child in node.children() {
                     if child.kind() != SyntaxKind::ELEMENT_NAME {
-                        self.check_viewer_value_is_written_out(child);
+                        self.check_visualizer_value_is_written_out(child);
                     }
                 }
             }
             SyntaxKind::PROPERTY_VALUE => {
                 if let Some(value) = node.child_by_field("value") {
-                    self.check_viewer_value_is_written_out(value);
+                    self.check_visualizer_value_is_written_out(value);
                 }
             }
             SyntaxKind::LITERAL => {
@@ -2376,19 +2377,19 @@ impl LoweringContext {
                     )
                 });
                 if !written_out {
-                    self.report_viewer_value_not_written_out(node);
+                    self.report_visualizer_value_not_written_out(node);
                 }
             }
             SyntaxKind::CONTEXTUAL_NAME => {}
             kind if kind.is_comment() => {}
-            _ => self.report_viewer_value_not_written_out(node),
+            _ => self.report_visualizer_value_not_written_out(node),
         }
     }
 
-    fn report_viewer_value_not_written_out(&mut self, node: SyntaxNode) {
+    fn report_visualizer_value_not_written_out(&mut self, node: SyntaxNode) {
         self.add_diagnostic(
             format!(
-                "A viewer's values must be written out: use a viewer record, a string or boolean literal, or a bare property or case name, not '{}'",
+                "A visualizer's values must be written out: use a visualizer record, a string or boolean literal, or a bare property or case name, not '{}'",
                 node.text().trim()
             ),
             node.span(),
@@ -3103,9 +3104,9 @@ impl LoweringContext {
                     let union_def = self.lower_union_definition(child);
                     self.module.add_item(Item::Union(union_def));
                 }
-                SyntaxKind::VIEWER_DEFINITION => {
-                    if let Some(viewer) = self.lower_viewer_definition(child) {
-                        self.module.add_viewer(viewer);
+                SyntaxKind::VISUALIZER_DEFINITION => {
+                    if let Some(visualizer) = self.lower_visualizer_definition(child) {
+                        self.module.add_visualizer(visualizer);
                     }
                 }
                 SyntaxKind::ELEMENT => {

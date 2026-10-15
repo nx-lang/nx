@@ -128,7 +128,7 @@ type Record_ = {
   analyses: number;
   sources: string[];
   implicitImports: string[][];
-  treeOptions: ({ viewers?: { modules?: string[] } } | undefined)[];
+  treeOptions: ({ visualizers?: { modules?: string[] } } | undefined)[];
 };
 
 function newRecord(): Record_ {
@@ -225,8 +225,8 @@ test("a client cannot supply a document with a context document's URI", async ()
 });
 
 // The context document is declared the way both READMEs declare one — a URI and a source, with no
-// identity — so its identity is the derived `tenant/catalog.nx`. A client naming that identity under
-// a URI of its own would replace the host's declarations, which is the refusal this asserts.
+// identity — so its identity is the derived `tenant/catalog.nx`. A client naming that identity
+// under a URI of its own would replace the host's declarations, which is the refusal this asserts.
 test("a client cannot supply a document with a context document's derived identity", async () => {
   const service = serviceOver(newRecord());
 
@@ -289,7 +289,7 @@ test("a source tree through host context is the document's own, at this request'
   assert.deepEqual(record.implicitImports, [["tenant/catalog.nx"]]);
 });
 
-test("a source tree asked with viewers passes them to the snapshot, and one asked without passes none", async () => {
+test("a source tree asked with visualizers passes them to the snapshot, and one asked without passes none", async () => {
   const record = newRecord();
   const service = serviceOver(record);
 
@@ -297,10 +297,10 @@ test("a source tree asked with viewers passes them to the snapshot, and one aske
   await service.sourceTree({
     documents: [{ uri: FORM, source: SOURCE }],
     uri: FORM,
-    viewers: { modules: ["tenant/viewers.nx"] },
+    visualizers: { modules: ["tenant/visualizers.nx"] },
   });
 
-  assert.deepEqual(record.treeOptions, [undefined, { viewers: { modules: ["tenant/viewers.nx"] } }]);
+  assert.deepEqual(record.treeOptions, [undefined, { visualizers: { modules: ["tenant/visualizers.nx"] } }]);
 });
 
 test("repeated queries over unchanged text analyze once, and each answer carries its own version", async () => {

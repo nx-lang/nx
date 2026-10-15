@@ -48,7 +48,7 @@
               },
               {
                 "type": "SYMBOL",
-                "name": "viewer_definition"
+                "name": "visualizer_definition"
               }
             ]
           }
@@ -752,7 +752,7 @@
         }
       ]
     },
-    "viewer_definition": {
+    "visualizer_definition": {
       "type": "SEQ",
       "members": [
         {
@@ -773,7 +773,7 @@
         },
         {
           "type": "STRING",
-          "value": "viewer"
+          "value": "visualizer"
         },
         {
           "type": "FIELD",

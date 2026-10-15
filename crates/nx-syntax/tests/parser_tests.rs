@@ -262,64 +262,68 @@ fn test_parse_content_remains_identifier_outside_modifier_position() {
 }
 
 #[test]
-fn test_parse_viewer_definition() {
+fn test_parse_visualizer_definition() {
     let source = r#"
         type Choice = { value:string label:string }
-        viewer Choice = <ElementViewer title=label><PropertyViewer of=value /></ElementViewer>
-        viewer ui.Question = <ElementViewer name="Question" />
+        visualizer Choice = <ElementVisualizer title=label><PropertyVisualizer of=value /></ElementVisualizer>
+        visualizer ui.Question = <ElementVisualizer name="Question" />
     "#;
-    let result = parse_str(source, "viewer.nx");
+    let result = parse_str(source, "visualizer.nx");
 
-    assert!(result.is_ok(), "Viewer declarations should parse");
+    assert!(result.is_ok(), "Visualizer declarations should parse");
     let root = result.root().expect("Should have root node");
-    let viewers = root
+    let visualizers = root
         .children()
-        .filter(|child| child.kind() == SyntaxKind::VIEWER_DEFINITION)
+        .filter(|child| child.kind() == SyntaxKind::VISUALIZER_DEFINITION)
         .collect::<Vec<_>>();
-    assert_eq!(viewers.len(), 2);
+    assert_eq!(visualizers.len(), 2);
     assert_eq!(
-        viewers[0].child_by_field("target").map(|node| node.text()),
+        visualizers[0]
+            .child_by_field("target")
+            .map(|node| node.text()),
         Some("Choice")
     );
     assert_eq!(
-        viewers[1].child_by_field("target").map(|node| node.text()),
+        visualizers[1]
+            .child_by_field("target")
+            .map(|node| node.text()),
         Some("ui.Question")
     );
-    assert!(viewers[0].child_by_field("value").is_some());
+    assert!(visualizers[0].child_by_field("value").is_some());
 }
 
 #[test]
-fn test_parse_viewer_remains_identifier_outside_module_member_position() {
+fn test_parse_visualizer_remains_identifier_outside_module_member_position() {
     let source = r#"
-        type Settings = { viewer:string }
-        let viewer = "Ada"
-        component <Panel viewer:string /> = { <Label text={viewer} /> }
-        let read = { viewer }
+        type Settings = { visualizer:string }
+        let visualizer = "Ada"
+        component <Panel visualizer:string /> = { <Label text={visualizer} /> }
+        let read = { visualizer }
     "#;
-    let result = parse_str(source, "viewer-contextual.nx");
+    let result = parse_str(source, "visualizer-contextual.nx");
 
     assert!(
         result.is_ok(),
-        "viewer should remain a valid identifier outside a module member's first token"
+        "visualizer should remain a valid identifier outside a module member's first token"
     );
     let root = result.root().expect("Should have root node");
-    assert!(!contains_kind(&root, SyntaxKind::VIEWER_DEFINITION));
+    assert!(!contains_kind(&root, SyntaxKind::VISUALIZER_DEFINITION));
     assert_eq!(count_kind(&root, SyntaxKind::VALUE_DEFINITION), 2);
 }
 
 #[test]
-fn test_parse_exported_viewer_definition_parses_for_lowering_to_reject() {
+fn test_parse_exported_visualizer_definition_parses_for_lowering_to_reject() {
     let result = parse_str(
-        "export viewer Choice = <ElementViewer />",
-        "viewer-export.nx",
+        "export visualizer Choice = <ElementVisualizer />",
+        "visualizer-export.nx",
     );
     assert!(result.is_ok());
     let root = result.root().expect("Should have root node");
-    let viewer = root
+    let visualizer = root
         .children()
-        .find(|child| child.kind() == SyntaxKind::VIEWER_DEFINITION)
-        .expect("Expected viewer definition");
-    assert!(viewer.child_by_field("visibility").is_some());
+        .find(|child| child.kind() == SyntaxKind::VISUALIZER_DEFINITION)
+        .expect("Expected visualizer definition");
+    assert!(visualizer.child_by_field("visibility").is_some());
 }
 
 #[test]

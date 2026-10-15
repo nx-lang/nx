@@ -1,69 +1,69 @@
 ---
-title: 'The viewer library'
-description: 'Reference for @nx/viewer, the standard library of records that viewer declarations are written with.'
+title: 'The visualizer library'
+description: 'Reference for @nx/visualizer, the standard library of records that visualizer declarations are written with.'
 sidebar:
-  label: '@nx/viewer'
+  label: '@nx/visualizer'
 ---
 
-`@nx/viewer` is a [standard library](/reference/syntax/modules#standard-libraries): NX source the
+`@nx/visualizer` is a [standard library](/reference/syntax/modules#standard-libraries): NX source the
 compiler carries. It declares the records a
-[viewer declaration](/reference/concepts/viewer-declarations) is written with, which tell a viewer
+[visualizer declaration](/reference/concepts/visualizer-declarations) is written with, which tell a viewer
 how to present a declaration. Import it by name:
 
 ```nx
-import "@nx/viewer"
+import "@nx/visualizer"
 
 type Choice = { value:string label:string }
 
-viewer Choice = <ElementViewer title=label badge=value />
+visualizer Choice = <ElementVisualizer title=label badge=value />
 ```
 
 :::caution[Unstable]
-`@nx/viewer` is **unstable**. Its declarations may change incompatibly in any NX release, including
+`@nx/visualizer` is **unstable**. Its declarations may change incompatibly in any NX release, including
 a patch release, with no deprecation period. A change reaches you only when you move to a new
 release of the NX packages, and every release that changes the library lists the change under
-`@nx/viewer` in its release notes. Viewer declarations you have written may need updating when a
-record changes; nothing you have compiled does, because viewer declarations never reach NX IR.
+`@nx/visualizer` in its release notes. Visualizer declarations you have written may need updating when a
+record changes; nothing you have compiled does, because visualizer declarations never reach NX IR.
 :::
 
 The library holds types only. It has no functions and runs nothing: a viewer reads the resolved
-viewer declarations from the language service and decides how to draw them.
+visualizer declarations from the language service and decides how to draw them.
 
 ## The `Target` parameter
 
 Every record in the library takes the declaration it describes as its type parameter `Target`, and
 names that declaration's properties through `Target.Property`, so `title=label` is checked against
-the target's fields. Inside a `viewer` declaration, `Target` is bound for you: write
-`<ElementViewer title=label />`, not `<ElementViewer Target=Choice title=label />`. For a component,
+the target's fields. Inside a `visualizer` declaration, `Target` is bound for you: write
+`<ElementVisualizer title=label />`, not `<ElementVisualizer Target=Choice title=label />`. For a component,
 `Target` is its props record, [`T.Props`](/reference/syntax/functions#component-props-and-state), so
 property names are its props.
 
-Outside a viewer declaration the ordinary rule for
+Outside a visualizer declaration the ordinary rule for
 [generic records](/reference/syntax/types#generic-records) holds, and a construction that leaves
 `Target` out is rejected:
 
 ```nx invalid
-import "@nx/viewer"
+import "@nx/visualizer"
 
-let viewer = <ElementViewer />   // error: `Target` was not specified
+let visualizer = <ElementVisualizer />   // error: `Target` was not specified
 ```
 
-Which record a viewer declaration takes depends on its target:
+Which record a visualizer declaration takes depends on its target:
 
 | Target | Record |
 | --- | --- |
-| A record, an action, an inline emitted action, or a component | `ElementViewer` |
-| A union whose cases all carry no payload | `UnionViewer` |
-| An alias of a primitive type | `ValueViewer` |
+| A record, an action, an inline emitted action, or a component | `ElementVisualizer` |
+| A union whose cases all carry no payload | `UnionVisualizer` |
+| An alias of a primitive type | `ValueVisualizer` |
 
 ## Elements
 
 | Type | Fields | Notes |
 | --- | --- | --- |
-| `ElementViewer` | `name?`, `title?`, `subtitle?`, `badge?`, `image?`, `id?`, `idPosition: IdPosition = beginning`, `icon?`, `layout: ElementLayout = card`, content `properties?: PropertyViewer+` | `title`, `subtitle`, `badge`, `image` and `id` each name a property of the target. |
+| `ElementVisualizer` | `name?`, `title?`, `subtitle?`, `badge?`, `image?`, `id?`, `idPosition: IdPosition = beginning`, `icon?`, `layout: ElementLayout = card`, content `properties?: PropertyVisualizer+` | `title`, `subtitle`, `badge`, `image` and `id` each name a property of the target. |
 | `IdPosition` | `beginning`, `end` | Where the element's id reads. |
 | `ElementLayout` | `card`, `row`, `inline` | How the element is laid out. |
-| `PropertyViewer` | `of`, `label?`, `whenTrue?`, `whenFalse?`, `format?: ValueFormat`, `place: Placement = body` | `of` names the property it describes. |
+| `PropertyVisualizer` | `of`, `label?`, `whenTrue?`, `whenFalse?`, `format?: ValueFormat`, `place: Placement = body` | `of` names the property it describes. |
 | `Placement` | `body`, `details` | Where the property is shown. |
 
 - `name` is the kind's name as readers see it, in place of the declaration's name split into words.
@@ -92,47 +92,47 @@ Which record a viewer declaration takes depends on its target:
   the element, folded until a reader opens it. Nothing is hidden.
 
 ```nx
-import "@nx/viewer"
+import "@nx/visualizer"
 
 export abstract component <Question id:string label:string help?:string required:boolean = true />
 
-viewer Question =
-  <ElementViewer title=label subtitle=help>
-    <PropertyViewer of=required whenTrue="Required" whenFalse="Optional" />
-    <PropertyViewer of=id label="Key" place=details />
-  </ElementViewer>
+visualizer Question =
+  <ElementVisualizer title=label subtitle=help>
+    <PropertyVisualizer of=required whenTrue="Required" whenFalse="Optional" />
+    <PropertyVisualizer of=id label="Key" place=details />
+  </ElementVisualizer>
 ```
 
 ## Unions
 
 | Type | Fields | Notes |
 | --- | --- | --- |
-| `UnionViewer` | content `cases?: CaseViewer+` | How individual cases read. |
-| `CaseViewer` | `of`, `label?`, `example?` | `of` names a case of the target union. |
+| `UnionVisualizer` | content `cases?: CaseVisualizer+` | How individual cases read. |
+| `CaseVisualizer` | `of`, `label?`, `example?` | `of` names a case of the target union. |
 
 A case's `label` replaces its name. Its `example` is a short example of what the case looks like,
 shown with its name:
 
 ```nx
-import "@nx/viewer"
+import "@nx/visualizer"
 
 export type ChoiceLayout = list | grid | chips
 
-viewer ChoiceLayout =
-  <UnionViewer>
-    <CaseViewer of=list label="a list" />
-    <CaseViewer of=chips label="chips" example="A B C" />
-  </UnionViewer>
+visualizer ChoiceLayout =
+  <UnionVisualizer>
+    <CaseVisualizer of=list label="a list" />
+    <CaseVisualizer of=chips label="chips" example="A B C" />
+  </UnionVisualizer>
 ```
 
-A union with a payload case cannot have a viewer, because a payload case cannot be named without
+A union with a payload case cannot have a visualizer, because a payload case cannot be named without
 its payload.
 
 ## Values
 
 | Type | Fields | Notes |
 | --- | --- | --- |
-| `ValueViewer` | `format: ValueFormat` | How a string value of the alias is shown. |
+| `ValueVisualizer` | `format: ValueFormat` | How a string value of the alias is shown. |
 | `ValueFormat` | `text`, `markdown`, `url`, `image`, `color`, `email`, `phone`, `id` | A format changes how the value looks, never what it is. |
 
 | Format | Shows a string value |
@@ -146,39 +146,39 @@ its payload.
 | `phone` | As a link that dials. |
 | `id` | As an identifier: a key that names one thing and is kept, such as an id stored in a database. |
 
-A `ValueViewer` on an alias formats every property typed by that alias. A `PropertyViewer`'s
+A `ValueVisualizer` on an alias formats every property typed by that alias. A `PropertyVisualizer`'s
 `format` overrides it for one property:
 
 ```nx
-import "@nx/viewer"
+import "@nx/visualizer"
 
 export type ImageUrl = string
 export type Choice = { label:string imageUrl?:ImageUrl website?:string }
 
-viewer ImageUrl = <ValueViewer format=image />
-viewer Choice =
-  <ElementViewer title=label image=imageUrl>
-    <PropertyViewer of=website format=url />
-  </ElementViewer>
+visualizer ImageUrl = <ValueVisualizer format=image />
+visualizer Choice =
+  <ElementVisualizer title=label image=imageUrl>
+    <PropertyVisualizer of=website format=url />
+  </ElementVisualizer>
 ```
 
 ## The library source
 
 ```nx
-// The NX viewer library: the records a `viewer` declaration is written with, which tell a viewer
-// how to present a declaration. Import it with `import "@nx/viewer"`.
+// The NX visualizer library: the records a `visualizer` declaration is written with, which tell a
+// viewer how to present a declaration. Import it with `import "@nx/visualizer"`.
 //
 // UNSTABLE. These declarations may change incompatibly in any NX release, including a patch
-// release. See https://nxlang.org/reference/libraries/viewer.
+// release. See https://nxlang.org/reference/libraries/visualizer.
 //
 // Each record takes the declaration it describes as its type parameter `Target`. Inside a
-// `viewer` declaration, `Target` is bound for you: write `viewer Choice = <ElementViewer
-// title=label />`, not `<ElementViewer Target=Choice ... />`. For a component, `Target` is its
-// props record, so property names are its props.
+// `visualizer` declaration, `Target` is bound for you: write `visualizer Choice =
+// <ElementVisualizer title=label />`, not `<ElementVisualizer Target=Choice ... />`. For a
+// component, `Target` is its props record, so property names are its props.
 
 /// How a viewer presents an element of a record, action or component.
-export type ElementViewer = {
-  // The declaration this viewer describes. Bound by the `viewer` declaration.
+export type ElementVisualizer = {
+  // The declaration this visualizer describes. Bound by the `visualizer` declaration.
   Target: type
   /// The kind's name as readers see it, in place of the declaration's name split into words. A
   /// kind that extends another does not inherit it.
@@ -203,7 +203,7 @@ export type ElementViewer = {
   layout: ElementLayout = card
   /// How individual properties read, in the order they should be listed. Properties not named
   /// here follow in declaration order.
-  content properties?: <PropertyViewer Target=Target/>+
+  content properties?: <PropertyVisualizer Target=Target/>+
 }
 
 /// Where an element's id reads.
@@ -223,8 +223,8 @@ export type ElementLayout =
   | inline
 
 /// How one property of an element reads.
-export type PropertyViewer = {
-  // The declaration whose property this describes. Bound by the `viewer` declaration.
+export type PropertyVisualizer = {
+  // The declaration whose property this describes. Bound by the `visualizer` declaration.
   Target: type
   /// The property this describes.
   of: Target.Property
@@ -248,16 +248,16 @@ export type Placement =
   | details
 
 /// How a viewer presents the cases of a union.
-export type UnionViewer = {
-  // The union this viewer describes. Bound by the `viewer` declaration.
+export type UnionVisualizer = {
+  // The union this visualizer describes. Bound by the `visualizer` declaration.
   Target: type
   /// How individual cases read.
-  content cases?: <CaseViewer Target=Target/>+
+  content cases?: <CaseVisualizer Target=Target/>+
 }
 
 /// How one case of a union reads.
-export type CaseViewer = {
-  // The union whose case this describes. Bound by the `viewer` declaration.
+export type CaseVisualizer = {
+  // The union whose case this describes. Bound by the `visualizer` declaration.
   Target: type
   /// The case this describes.
   of: Target
@@ -268,8 +268,8 @@ export type CaseViewer = {
 }
 
 /// How a viewer presents values of a scalar type.
-export type ValueViewer = {
-  // The type this viewer describes. Bound by the `viewer` declaration.
+export type ValueVisualizer = {
+  // The type this visualizer describes. Bound by the `visualizer` declaration.
   Target: type
   /// How a string value of the type is shown.
   format: ValueFormat
@@ -296,6 +296,6 @@ export type ValueFormat =
 ```
 
 ## See also
-- Reference: [Viewer Declarations](/reference/concepts/viewer-declarations)
+- Reference: [Visualizer Declarations](/reference/concepts/visualizer-declarations)
 - Reference: [Modules](/reference/syntax/modules#standard-libraries)
 - Reference: [Generic records](/reference/syntax/types#generic-records)

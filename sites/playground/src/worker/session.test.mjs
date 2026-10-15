@@ -120,11 +120,11 @@ test("answers hover on the visitor's own declarations, with no catalog behind th
   assert.deepEqual(report.documents[0].diagnostics, []);
 });
 
-test("reads viewer declarations in the visitor's source, and reports a misspelled one", async () => {
+test("reads visualizer declarations in the visitor's source, and reports a misspelled one", async () => {
   const source = [
-    'import "@nx/viewer"',
+    'import "@nx/visualizer"',
     "type Choice = { value:string label:string }",
-    "viewer Choice = <ElementViewer title=label id=value />",
+    "visualizer Choice = <ElementVisualizer title=label id=value />",
     'let pick = <Choice value="a" label="Apples" />',
     "",
   ].join("\n");
@@ -132,19 +132,19 @@ test("reads viewer declarations in the visitor's source, and reports a misspelle
     kind: "language",
     id: ++id,
     query: "sourceTree",
-    request: { documents: [{ uri, source, version: 1 }], uri, viewers: {} },
+    request: { documents: [{ uri, source, version: 1 }], uri, visualizers: {} },
   });
   const choice = tree.declarations.find((entry) => entry.name === "Choice");
-  assert.equal(choice.viewer.title, "label");
-  assert.equal(choice.viewer.id, "value");
-  assert.equal(choice.viewer.idPosition, "beginning");
+  assert.equal(choice.visualizer.title, "label");
+  assert.equal(choice.visualizer.id, "value");
+  assert.equal(choice.visualizer.idPosition, "beginning");
   // The reading of `pick` takes its title from `label` and its id from `value`: `Apples` and `a`.
   const valueOf = (name) => {
     const attribute = tree.nodes.findIndex((node) => node.role === "attribute" && node.name === name);
     return tree.nodes.find((node) => node.parent === attribute && node.role === "literal")?.value;
   };
-  assert.equal(valueOf(choice.viewer.title), '"Apples"');
-  assert.equal(valueOf(choice.viewer.id), '"a"');
+  assert.equal(valueOf(choice.visualizer.title), '"Apples"');
+  assert.equal(valueOf(choice.visualizer.id), '"a"');
 
   const misspelled = source.replace("title=label", "title=lable");
   const report = await session.answer({

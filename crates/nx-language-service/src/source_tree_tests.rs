@@ -168,7 +168,7 @@ fn punctuation(role: SourceRole) -> &'static [&'static str] {
         SourceRole::Import => &["import", "from", "as", "{", "}", ","],
         SourceRole::Declaration => &[
             "let",
-            "viewer",
+            "visualizer",
             "type",
             "action",
             "component",
@@ -200,7 +200,8 @@ fn punctuation(role: SourceRole) -> &'static [&'static str] {
         SourceRole::Attribute => &["=", "{", "}", "(", ")"],
         SourceRole::Embed => &["@{", "}", "{", "(", ")"],
         SourceRole::Empty => &["{", "}"],
-        // A parenthesized object's parentheses, `(a ?? b).title`, as an operator owns its operands'.
+        // A parenthesized object's parentheses, `(a ?? b).title`, as an operator owns its
+        // operands'.
         SourceRole::Case => &[".", "(", ")"],
         SourceRole::Member => &[".", "?.", "(", ")"],
         SourceRole::Operator | SourceRole::Literal => EXPRESSION,
@@ -1400,11 +1401,11 @@ fn measure_question_flow_source_tree() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Viewer declarations
+// Visualizer declarations
 // ---------------------------------------------------------------------------------------------
 
-/// A survey library with viewers, and a document that constructs one of its kinds.
-const SURVEY: &str = r#"import "@nx/viewer"
+/// A survey library with visualizers, and a document that constructs one of its kinds.
+const SURVEY: &str = r#"import "@nx/visualizer"
 
 export type ImageUrl = string
 export type ChoiceLayout = list | grid | chips
@@ -1415,17 +1416,17 @@ export component <SingleChoice extends Question layout:ChoiceLayout = list allow
   content choices:Choice+ /> = { <Panel /> }
 export component <MultiChoice extends Question /> = { <Panel /> }
 
-viewer ImageUrl = <ValueViewer format=image />
-viewer ChoiceLayout = <UnionViewer><CaseViewer of=list label="a list" /><CaseViewer of=chips label="chips" example="A B" /></UnionViewer>
-viewer Choice = <ElementViewer layout=row title=label badge=value />
-viewer Question = <ElementViewer name="Question" title=label subtitle=help>
-  <PropertyViewer of=required whenTrue="Required" whenFalse="Optional" />
-  <PropertyViewer of=id label="Key" place=details />
-</ElementViewer>
-viewer SingleChoice = <ElementViewer name="Single choice">
-  <PropertyViewer of=layout label="Shown as" />
-  <PropertyViewer of=allowsOther whenTrue="Allows other" />
-</ElementViewer>
+visualizer ImageUrl = <ValueVisualizer format=image />
+visualizer ChoiceLayout = <UnionVisualizer><CaseVisualizer of=list label="a list" /><CaseVisualizer of=chips label="chips" example="A B" /></UnionVisualizer>
+visualizer Choice = <ElementVisualizer layout=row title=label badge=value />
+visualizer Question = <ElementVisualizer name="Question" title=label subtitle=help>
+  <PropertyVisualizer of=required whenTrue="Required" whenFalse="Optional" />
+  <PropertyVisualizer of=id label="Key" place=details />
+</ElementVisualizer>
+visualizer SingleChoice = <ElementVisualizer name="Single choice">
+  <PropertyVisualizer of=layout label="Shown as" />
+  <PropertyVisualizer of=allowsOther whenTrue="Allows other" />
+</ElementVisualizer>
 "#;
 
 const SURVEY_FORM: &str = r#"import "./survey.nx"
@@ -1450,12 +1451,12 @@ fn survey_snapshot(extra: &[(&str, &str)]) -> WorkspaceSnapshot {
     WorkspaceSnapshot::from_documents(Option::<PathBuf>::None, documents).expect("snapshot")
 }
 
-fn with_viewers(snapshot: &WorkspaceSnapshot, modules: &[&str]) -> SourceTree {
+fn with_visualizers(snapshot: &WorkspaceSnapshot, modules: &[&str]) -> SourceTree {
     snapshot
         .source_tree_with_options(
             &DocumentUri::from(URI),
             &SourceTreeOptions {
-                viewers: Some(SourceTreeViewers {
+                visualizers: Some(SourceTreeVisualizers {
                     modules: modules.iter().map(|module| module.to_string()).collect(),
                 }),
             },
@@ -1470,15 +1471,15 @@ fn entry<'t>(tree: &'t SourceTree, name: &str) -> &'t SourceDeclaration {
         .unwrap_or_else(|| panic!("no entry for {name}: {:#?}", tree.declarations))
 }
 
-fn viewer<'t>(tree: &'t SourceTree, name: &str) -> &'t SourceViewer {
+fn visualizer<'t>(tree: &'t SourceTree, name: &str) -> &'t SourceVisualizer {
     entry(tree, name)
-        .viewer
+        .visualizer
         .as_ref()
-        .unwrap_or_else(|| panic!("{name} has no viewer: {:#?}", entry(tree, name)))
+        .unwrap_or_else(|| panic!("{name} has no visualizer: {:#?}", entry(tree, name)))
 }
 
-fn property_names(viewer: &SourceViewer) -> Vec<&str> {
-    viewer
+fn property_names(visualizer: &SourceVisualizer) -> Vec<&str> {
+    visualizer
         .properties
         .iter()
         .map(|property| property.name.as_str())
@@ -1486,16 +1487,19 @@ fn property_names(viewer: &SourceViewer) -> Vec<&str> {
 }
 
 #[test]
-fn a_viewer_declaration_is_a_declaration_node() {
-    let source = "import \"@nx/viewer\"\ntype Choice = { label:string }\nviewer Choice = <ElementViewer title=label />\n";
+fn a_visualizer_declaration_is_a_declaration_node() {
+    let source = "import \"@nx/visualizer\"\ntype Choice = { label:string }\nvisualizer Choice = <ElementVisualizer title=label />\n";
     let tree = tree_for(source);
-    let viewer = keyed(&tree, "viewer Choice");
-    assert_eq!(viewer.role, SourceRole::Declaration);
-    assert_eq!(viewer.name.as_deref(), Some("Choice"));
-    assert!(viewer.flags.contains(&SourceFlag::Viewer), "{viewer:?}");
-    assert_eq!(declaration(&tree, viewer).name, "Choice");
-    let element = named(&tree, SourceRole::Element, "ElementViewer");
-    assert_eq!(declaration(&tree, element).name, "ElementViewer");
+    let visualizer = keyed(&tree, "visualizer Choice");
+    assert_eq!(visualizer.role, SourceRole::Declaration);
+    assert_eq!(visualizer.name.as_deref(), Some("Choice"));
+    assert!(
+        visualizer.flags.contains(&SourceFlag::Visualizer),
+        "{visualizer:?}"
+    );
+    assert_eq!(declaration(&tree, visualizer).name, "Choice");
+    let element = named(&tree, SourceRole::Element, "ElementVisualizer");
+    assert_eq!(declaration(&tree, element).name, "ElementVisualizer");
     let title = named(&tree, SourceRole::Attribute, "title");
     let label = named(&tree, SourceRole::Case, "label");
     assert_eq!(parent(&tree, label), title);
@@ -1503,16 +1507,16 @@ fn a_viewer_declaration_is_a_declaration_node() {
 }
 
 #[test]
-fn a_question_with_viewers() {
-    let tree = with_viewers(&survey_snapshot(&[]), &[]);
-    assert!(tree.missing_viewer_modules.is_empty());
-    let single = viewer(&tree, "SingleChoice");
+fn a_question_with_visualizers() {
+    let tree = with_visualizers(&survey_snapshot(&[]), &[]);
+    assert!(tree.missing_visualizer_modules.is_empty());
+    let single = visualizer(&tree, "SingleChoice");
     assert_eq!(single.name.as_deref(), Some("Single choice"));
     assert_eq!(single.title.as_deref(), Some("label"));
     assert_eq!(single.subtitle.as_deref(), Some("help"));
     assert_eq!(single.layout.as_deref(), Some("card"));
-    // The later viewer's property viewers first, then the base's, then the rest in declaration
-    // order, every property once.
+    // The later visualizer's property visualizers first, then the base's, then the rest in
+    // declaration order, every property once.
     assert_eq!(
         property_names(single),
         [
@@ -1547,50 +1551,50 @@ let root() = { <MultiChoice id="a" label="Pick" /> }
         ],
     )
     .expect("snapshot");
-    let tree = with_viewers(&snapshot, &[]);
-    let multi = viewer(&tree, "MultiChoice");
+    let tree = with_visualizers(&snapshot, &[]);
+    let multi = visualizer(&tree, "MultiChoice");
     assert_eq!(multi.name, None);
     assert_eq!(multi.title.as_deref(), Some("label"));
 }
 
 #[test]
 fn an_id_reads_where_its_position_puts_it() {
-    let source = r#"import "@nx/viewer"
+    let source = r#"import "@nx/visualizer"
 type Step = { id:string title:string }
 type Choice = { value:string label:string }
 type Note = { text:string }
-viewer Step = <ElementViewer id=id />
-viewer Choice = <ElementViewer id=value idPosition=end />
-viewer Note = <ElementViewer idPosition=end />
+visualizer Step = <ElementVisualizer id=id />
+visualizer Choice = <ElementVisualizer id=value idPosition=end />
+visualizer Note = <ElementVisualizer idPosition=end />
 let items = { <Step id="a" title="A" /> <Choice value="b" label="B" /> <Note text="c" /> }
 "#;
     let tree = snapshot_for(source)
         .source_tree_with_options(
             &DocumentUri::from(URI),
             &SourceTreeOptions {
-                viewers: Some(SourceTreeViewers::default()),
+                visualizers: Some(SourceTreeVisualizers::default()),
             },
         )
         .expect("source tree");
     // Without `idPosition`, an id reads at the beginning.
-    let step = viewer(&tree, "Step");
+    let step = visualizer(&tree, "Step");
     assert_eq!(step.id.as_deref(), Some("id"));
     assert_eq!(step.id_position.as_deref(), Some("beginning"));
-    let choice = viewer(&tree, "Choice");
+    let choice = visualizer(&tree, "Choice");
     assert_eq!(choice.id.as_deref(), Some("value"));
     assert_eq!(choice.id_position.as_deref(), Some("end"));
     // A position with no id places nothing, so it is left out.
-    let note = viewer(&tree, "Note");
+    let note = visualizer(&tree, "Note");
     assert_eq!(note.id, None);
     assert_eq!(note.id_position, None);
 }
 
 #[test]
 fn an_icon_is_inherited_through_extends() {
-    let host = r#"import "@nx/viewer"
+    let host = r#"import "@nx/visualizer"
 import "./survey.nx"
-viewer Question = <ElementViewer icon="list-checks" />
-viewer MultiChoice = <ElementViewer icon="list-todo" />
+visualizer Question = <ElementVisualizer icon="list-checks" />
+visualizer MultiChoice = <ElementVisualizer icon="list-todo" />
 "#;
     let form = r#"import "./survey.nx"
 let root() = { <SingleChoice id="a" label="Pick"><Choice value="v" label="V" /></SingleChoice> <MultiChoice id="b" label="Pick" /> }
@@ -1604,22 +1608,22 @@ let root() = { <SingleChoice id="a" label="Pick"><Choice value="v" label="V" /><
         ],
     )
     .expect("snapshot");
-    let tree = with_viewers(&snapshot, &["tenant/host.nx"]);
+    let tree = with_visualizers(&snapshot, &["tenant/host.nx"]);
     assert_eq!(
-        viewer(&tree, "Question").icon.as_deref(),
+        visualizer(&tree, "Question").icon.as_deref(),
         Some("list-checks")
     );
-    // SingleChoice's own viewer names no icon, so it takes its base's.
+    // SingleChoice's own visualizer names no icon, so it takes its base's.
     assert_eq!(
-        viewer(&tree, "SingleChoice").icon.as_deref(),
+        visualizer(&tree, "SingleChoice").icon.as_deref(),
         Some("list-checks")
     );
     // A kind's own icon wins over its base's.
     assert_eq!(
-        viewer(&tree, "MultiChoice").icon.as_deref(),
+        visualizer(&tree, "MultiChoice").icon.as_deref(),
         Some("list-todo")
     );
-    assert_eq!(viewer(&tree, "Choice").icon, None);
+    assert_eq!(visualizer(&tree, "Choice").icon, None);
 }
 
 #[test]
@@ -1636,11 +1640,11 @@ let root() = { <SingleChoice id="a" label="Pick"><Choice value="v" label="V" /><
         ],
     )
     .expect("snapshot");
-    let tree = with_viewers(&snapshot, &[]);
+    let tree = with_visualizers(&snapshot, &[]);
     assert!(!tree.nodes.iter().any(|node| node
         .declaration
         .is_some_and(|at| tree.declarations[at as usize].name == "ChoiceLayout")));
-    let layout = viewer(&tree, "ChoiceLayout");
+    let layout = visualizer(&tree, "ChoiceLayout");
     let cases = layout
         .cases
         .iter()
@@ -1664,8 +1668,8 @@ let root() = { <SingleChoice id="a" label="Pick"><Choice value="v" label="V" /><
 
 #[test]
 fn an_alias_formats_every_property_that_uses_it() {
-    let tree = with_viewers(&survey_snapshot(&[]), &[]);
-    let choice = viewer(&tree, "Choice");
+    let tree = with_visualizers(&survey_snapshot(&[]), &[]);
+    let choice = visualizer(&tree, "Choice");
     assert_eq!(choice.layout.as_deref(), Some("row"));
     let image = choice
         .properties
@@ -1673,7 +1677,10 @@ fn an_alias_formats_every_property_that_uses_it() {
         .find(|property| property.name == "imageUrl")
         .expect("imageUrl");
     assert_eq!(image.format.as_deref(), Some("image"));
-    assert_eq!(viewer(&tree, "ImageUrl").format.as_deref(), Some("image"));
+    assert_eq!(
+        visualizer(&tree, "ImageUrl").format.as_deref(),
+        Some("image")
+    );
 }
 
 #[test]
@@ -1685,25 +1692,25 @@ fn without_the_option_nothing_changes() {
     assert!(tree
         .declarations
         .iter()
-        .all(|declaration| declaration.viewer.is_none()));
+        .all(|declaration| declaration.visualizer.is_none()));
     assert!(!serde_json::to_string(&tree)
         .expect("serialize")
-        .contains("\"viewer\""));
+        .contains("\"visualizer\""));
 }
 
 #[test]
-fn a_host_module_rewords_a_kind_and_merges_property_viewers() {
-    let host = r#"import "@nx/viewer"
+fn a_host_module_rewords_a_kind_and_merges_property_visualizers() {
+    let host = r#"import "@nx/visualizer"
 import "./survey.nx"
-viewer SingleChoice = <ElementViewer name="Pick one" />
-viewer Question = <ElementViewer><PropertyViewer of=required whenTrue="Must answer" /></ElementViewer>
-viewer Choice = <ElementViewer><PropertyViewer of=imageUrl format=url /></ElementViewer>
-viewer ChoiceLayout = <UnionViewer><CaseViewer of=chips label="tags" /></UnionViewer>
+visualizer SingleChoice = <ElementVisualizer name="Pick one" />
+visualizer Question = <ElementVisualizer><PropertyVisualizer of=required whenTrue="Must answer" /></ElementVisualizer>
+visualizer Choice = <ElementVisualizer><PropertyVisualizer of=imageUrl format=url /></ElementVisualizer>
+visualizer ChoiceLayout = <UnionVisualizer><CaseVisualizer of=chips label="tags" /></UnionVisualizer>
 "#;
     let snapshot = survey_snapshot(&[("nx://tenant/host.nx", host)]);
-    let tree = with_viewers(&snapshot, &["tenant/host.nx"]);
-    assert!(tree.missing_viewer_modules.is_empty());
-    let single = viewer(&tree, "SingleChoice");
+    let tree = with_visualizers(&snapshot, &["tenant/host.nx"]);
+    assert!(tree.missing_visualizer_modules.is_empty());
+    let single = visualizer(&tree, "SingleChoice");
     assert_eq!(single.name.as_deref(), Some("Pick one"));
     let required = single
         .properties
@@ -1712,14 +1719,14 @@ viewer ChoiceLayout = <UnionViewer><CaseViewer of=chips label="tags" /></UnionVi
         .expect("required");
     assert_eq!(required.when_true.as_deref(), Some("Must answer"));
     assert_eq!(required.when_false.as_deref(), Some("Optional"));
-    let image = viewer(&tree, "Choice")
+    let image = visualizer(&tree, "Choice")
         .properties
         .iter()
         .find(|property| property.name == "imageUrl")
         .expect("imageUrl")
         .clone();
     assert_eq!(image.format.as_deref(), Some("url"));
-    let chips = viewer(&tree, "ChoiceLayout")
+    let chips = visualizer(&tree, "ChoiceLayout")
         .cases
         .iter()
         .find(|case| case.name == "chips")
@@ -1730,21 +1737,21 @@ viewer ChoiceLayout = <UnionViewer><CaseViewer of=chips label="tags" /></UnionVi
 }
 
 #[test]
-fn a_viewer_declaration_with_an_error_does_not_apply() {
-    let host = r#"import "@nx/viewer"
+fn a_visualizer_declaration_with_an_error_does_not_apply() {
+    let host = r#"import "@nx/visualizer"
 import "./survey.nx"
-viewer SingleChoice = <ElementViewer name="Host" title=lable />
-viewer Choice = <ElementViewer layout="inline"><PropertyViewer of="value" format="image" /></ElementViewer>
+visualizer SingleChoice = <ElementVisualizer name="Host" title=lable />
+visualizer Choice = <ElementVisualizer layout="inline"><PropertyVisualizer of="value" format="image" /></ElementVisualizer>
 "#;
     let snapshot = survey_snapshot(&[("nx://tenant/host.nx", host)]);
-    let tree = with_viewers(&snapshot, &["tenant/host.nx"]);
-    // The misspelled host viewer for SingleChoice contributes nothing, its name included.
+    let tree = with_visualizers(&snapshot, &["tenant/host.nx"]);
+    // The misspelled host visualizer for SingleChoice contributes nothing, its name included.
     assert_eq!(
-        viewer(&tree, "SingleChoice").name.as_deref(),
+        visualizer(&tree, "SingleChoice").name.as_deref(),
         Some("Single choice")
     );
     // A quoted layout and format are type errors, so the library's row layout still holds.
-    let choice = viewer(&tree, "Choice");
+    let choice = visualizer(&tree, "Choice");
     assert_eq!(choice.layout.as_deref(), Some("row"));
     let value = choice
         .properties
@@ -1755,17 +1762,17 @@ viewer Choice = <ElementViewer layout="inline"><PropertyViewer of="value" format
 }
 
 #[test]
-fn two_property_viewers_of_one_property_in_one_viewer_merge() {
-    let host = r#"import "@nx/viewer"
+fn two_property_visualizers_of_one_property_in_one_visualizer_merge() {
+    let host = r#"import "@nx/visualizer"
 import "./survey.nx"
-viewer Choice = <ElementViewer>
-  <PropertyViewer of=label label="First" />
-  <PropertyViewer of=label place=details />
-</ElementViewer>
+visualizer Choice = <ElementVisualizer>
+  <PropertyVisualizer of=label label="First" />
+  <PropertyVisualizer of=label place=details />
+</ElementVisualizer>
 "#;
     let snapshot = survey_snapshot(&[("nx://tenant/host.nx", host)]);
-    let tree = with_viewers(&snapshot, &["tenant/host.nx"]);
-    let label = viewer(&tree, "Choice")
+    let tree = with_visualizers(&snapshot, &["tenant/host.nx"]);
+    let label = visualizer(&tree, "Choice")
         .properties
         .iter()
         .find(|property| property.name == "label")
@@ -1777,37 +1784,37 @@ viewer Choice = <ElementViewer>
 
 #[test]
 fn a_missing_host_module_is_listed() {
-    let tree = with_viewers(&survey_snapshot(&[]), &["nowhere.nx"]);
-    assert_eq!(tree.missing_viewer_modules, ["nowhere.nx"]);
+    let tree = with_visualizers(&survey_snapshot(&[]), &["nowhere.nx"]);
+    assert_eq!(tree.missing_visualizer_modules, ["nowhere.nx"]);
     assert_eq!(
-        viewer(&tree, "SingleChoice").name.as_deref(),
+        visualizer(&tree, "SingleChoice").name.as_deref(),
         Some("Single choice")
     );
 }
 
 #[test]
-fn an_unloaded_modules_viewers_do_not_apply() {
-    let stray = r#"import "@nx/viewer"
+fn an_unloaded_modules_visualizers_do_not_apply() {
+    let stray = r#"import "@nx/visualizer"
 import "./survey.nx"
-viewer SingleChoice = <ElementViewer name="Option" />
+visualizer SingleChoice = <ElementVisualizer name="Option" />
 "#;
-    let tree = with_viewers(&survey_snapshot(&[("nx://tenant/stray.nx", stray)]), &[]);
+    let tree = with_visualizers(&survey_snapshot(&[("nx://tenant/stray.nx", stray)]), &[]);
     assert_eq!(
-        viewer(&tree, "SingleChoice").name.as_deref(),
+        visualizer(&tree, "SingleChoice").name.as_deref(),
         Some("Single choice")
     );
 }
 
 #[test]
-fn duplicate_program_viewers_apply_neither() {
-    let a = r#"import "@nx/viewer"
+fn duplicate_program_visualizers_apply_neither() {
+    let a = r#"import "@nx/visualizer"
 import "./survey.nx"
-viewer Choice = <ElementViewer name="A" />
+visualizer Choice = <ElementVisualizer name="A" />
 export let a = 1
 "#;
-    let b = r#"import "@nx/viewer"
+    let b = r#"import "@nx/visualizer"
 import "./survey.nx"
-viewer Choice = <ElementViewer name="B" />
+visualizer Choice = <ElementVisualizer name="B" />
 export let b = 1
 "#;
     let form = format!("import \"./a.nx\"\nimport \"./b.nx\"\n{SURVEY_FORM}");
@@ -1821,8 +1828,8 @@ export let b = 1
         ],
     )
     .expect("snapshot");
-    let tree = with_viewers(&snapshot, &[]);
-    assert_eq!(viewer(&tree, "Choice").name, None);
+    let tree = with_visualizers(&snapshot, &[]);
+    assert_eq!(visualizer(&tree, "Choice").name, None);
     let report = snapshot.diagnostics().expect("diagnostics");
     let form_diagnostics = report
         .iter()
@@ -1832,33 +1839,33 @@ export let b = 1
         form_diagnostics
             .diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.code.as_deref() == Some("duplicate-viewer")),
+            .any(|diagnostic| diagnostic.code.as_deref() == Some("duplicate-visualizer")),
         "{form_diagnostics:#?}"
     );
 }
 
 #[test]
-fn the_second_of_two_viewers_in_one_module_does_not_apply_when_the_first_has_errors() {
-    let host = r#"import "@nx/viewer"
+fn the_second_of_two_visualizers_in_one_module_does_not_apply_when_the_first_has_errors() {
+    let host = r#"import "@nx/visualizer"
 import "./survey.nx"
-viewer Choice = <ElementViewer name="One" title=lable />
-viewer Choice = <ElementViewer name="Two" />
+visualizer Choice = <ElementVisualizer name="One" title=lable />
+visualizer Choice = <ElementVisualizer name="Two" />
 "#;
     let snapshot = survey_snapshot(&[("nx://tenant/host.nx", host)]);
-    let tree = with_viewers(&snapshot, &["tenant/host.nx"]);
-    assert_eq!(viewer(&tree, "Choice").name, None);
+    let tree = with_visualizers(&snapshot, &["tenant/host.nx"]);
+    assert_eq!(visualizer(&tree, "Choice").name, None);
 }
 
 #[test]
 fn a_duplicate_with_errors_still_conflicts() {
-    let a = r#"import "@nx/viewer"
+    let a = r#"import "@nx/visualizer"
 import "./survey.nx"
-viewer Choice = <ElementViewer name="A" title=lable />
+visualizer Choice = <ElementVisualizer name="A" title=lable />
 export let a = 1
 "#;
-    let b = r#"import "@nx/viewer"
+    let b = r#"import "@nx/visualizer"
 import "./survey.nx"
-viewer Choice = <ElementViewer name="B" />
+visualizer Choice = <ElementVisualizer name="B" />
 export let b = 1
 "#;
     let form = format!("import \"./a.nx\"\nimport \"./b.nx\"\n{SURVEY_FORM}");
@@ -1872,8 +1879,8 @@ export let b = 1
         ],
     )
     .expect("snapshot");
-    let tree = with_viewers(&snapshot, &[]);
-    assert_eq!(viewer(&tree, "Choice").name, None);
+    let tree = with_visualizers(&snapshot, &[]);
+    assert_eq!(visualizer(&tree, "Choice").name, None);
     let report = snapshot.diagnostics().expect("diagnostics");
     let form_diagnostics = report
         .iter()
@@ -1883,14 +1890,14 @@ export let b = 1
         form_diagnostics
             .diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.code.as_deref() == Some("duplicate-viewer")),
+            .any(|diagnostic| diagnostic.code.as_deref() == Some("duplicate-visualizer")),
         "{form_diagnostics:#?}"
     );
 }
 
 #[test]
-fn viewers_round_trip_through_json() {
-    let tree = with_viewers(&survey_snapshot(&[]), &[]);
+fn visualizers_round_trip_through_json() {
+    let tree = with_visualizers(&survey_snapshot(&[]), &[]);
     let json = serde_json::to_string(&tree).expect("serialize");
     let back: SourceTree = serde_json::from_str(&json).expect("deserialize");
     assert_eq!(back, tree);

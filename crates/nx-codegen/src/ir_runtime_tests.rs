@@ -3995,16 +3995,16 @@ fn a_components_props_record_is_an_ordinary_record() {
 }
 
 #[test]
-fn viewer_declarations_leave_the_image_unchanged() {
-    let declarations = "import \"@nx/viewer\"
+fn visualizer_declarations_leave_the_image_unchanged() {
+    let declarations = "import \"@nx/visualizer\"
 type Choice = { value:string label:string }
 type ChoiceLayout = list | grid
 component <Card title:string /> = { <Panel /> }
 let root(): Choice = { <Choice value=\"a\" label=\"A\" /> }
 ";
-    let viewers = "viewer Choice = <ElementViewer title=label><PropertyViewer of=value place=details /></ElementViewer>
-viewer ChoiceLayout = <UnionViewer><CaseViewer of=grid label=\"a grid\" /></UnionViewer>
-viewer Card = <ElementViewer title=title />
+    let visualizers = "visualizer Choice = <ElementVisualizer title=label><PropertyVisualizer of=value place=details /></ElementVisualizer>
+visualizer ChoiceLayout = <UnionVisualizer><CaseVisualizer of=grid label=\"a grid\" /></UnionVisualizer>
+visualizer Card = <ElementVisualizer title=title />
 ";
     let image = |source: &str| {
         let artifact = artifact(source);
@@ -4023,8 +4023,8 @@ viewer Card = <ElementViewer title=title />
         .expect("nx ir")
         .into_iter()
         .map(|image| {
-            // The fingerprint hashes the module's source text, which the viewer declarations are
-            // part of; everything else must match.
+            // The fingerprint hashes the module's source text, which the visualizer declarations
+            // are part of; everything else must match.
             let fingerprint = image.metadata.fingerprint.to_le_bytes();
             let mut bytes = image.bytes;
             let at = bytes
@@ -4038,9 +4038,9 @@ viewer Card = <ElementViewer title=title />
     };
     assert_eq!(
         image(declarations),
-        image(&format!("{declarations}{viewers}"))
+        image(&format!("{declarations}{visualizers}"))
     );
-    let program = link(&artifact(&format!("{declarations}{viewers}")), false);
+    let program = link(&artifact(&format!("{declarations}{visualizers}")), false);
     assert_same(
         &program.evaluate_function("root", &[], &options()).unwrap(),
         r#"{ "$type": "Choice", "value": "a", "label": "A" }"#,

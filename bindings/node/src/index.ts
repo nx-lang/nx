@@ -5,7 +5,7 @@ import type {
   DocumentSymbol,
   Hover,
   SourceTree,
-  SourceTreeViewersOption,
+  SourceTreeVisualizersOption,
   TextPosition
 } from "@nx-lang/language-protocol";
 import {
@@ -67,17 +67,17 @@ export type {
   Hover,
   RelatedLocation,
   SourceCase,
-  SourceCaseViewer,
+  SourceCaseVisualizer,
   SourceDeclaration,
   SourceDeclarationKind,
   SourceFlag,
   SourceNode,
   SourceProperty,
-  SourcePropertyViewer,
+  SourcePropertyVisualizer,
   SourceRole,
   SourceTree,
-  SourceTreeViewersOption,
-  SourceViewer,
+  SourceTreeVisualizersOption,
+  SourceVisualizer,
   TextPosition,
   WorkspaceDiagnostic,
   WorkspaceDiagnosticLabel
@@ -129,7 +129,8 @@ const disposedPrefix = "NX_DISPOSED:";
 /**
  * In-memory NX workspace made from source modules with stable logical identities.
  *
- * Workspace modules are submitted directly to the native host; ordinary workspace builds do not require temp files.
+ * Workspace modules are submitted directly to the native host; ordinary workspace builds do not
+ * require temp files.
  */
 export class NxWorkspace {
   /**
@@ -146,7 +147,8 @@ export class NxWorkspace {
   }
 
   /**
-   * Validates this workspace against a supplied build context and returns all NX diagnostics as data.
+   * Validates this workspace against a supplied build context and returns all NX diagnostics as
+   * data.
    *
    * @throws NxDisposedResourceError when this workspace or the build context has already been disposed.
    * @throws NxNativeError when the native binding cannot run validation.
@@ -167,7 +169,8 @@ export class NxWorkspace {
   /**
    * Releases the native workspace resource.
    *
-   * Calling `dispose` more than once is allowed. Operations after disposal throw `NxDisposedResourceError`.
+   * Calling `dispose` more than once is allowed. Operations after disposal throw
+   * `NxDisposedResourceError`.
    */
   public dispose(): void {
     const native = workspaceNatives.get(this);
@@ -186,7 +189,8 @@ export class NxWorkspace {
 }
 
 /**
- * Reusable registry of analyzed NX libraries that can create build contexts for compilation and evaluation.
+ * Reusable registry of analyzed NX libraries that can create build contexts for compilation and
+ * evaluation.
  */
 export class NxLibraryRegistry {
   /**
@@ -255,7 +259,8 @@ export class NxLibraryRegistry {
   /**
    * Creates a program build context backed by the current registry contents.
    *
-   * The returned build context owns a separate native resource and should be disposed by the caller.
+   * The returned build context owns a separate native resource and should be disposed by the
+   * caller.
    *
    * @throws NxDisposedResourceError when this registry has already been disposed.
    * @throws NxNativeError when the native binding cannot create the context.
@@ -268,7 +273,8 @@ export class NxLibraryRegistry {
   /**
    * Releases the native registry resource.
    *
-   * Calling `dispose` more than once is allowed. Operations after disposal throw `NxDisposedResourceError`.
+   * Calling `dispose` more than once is allowed. Operations after disposal throw
+   * `NxDisposedResourceError`.
    */
   public dispose(): void {
     const native = registryNatives.get(this);
@@ -326,8 +332,8 @@ export class NxProgramBuildContext {
   /**
    * Releases the native build-context resource.
    *
-   * Program artifacts created from this context remain usable after the context is disposed. Calling `dispose` more
-   * than once is allowed.
+   * Program artifacts created from this context remain usable after the context is disposed.
+   * Calling `dispose` more than once is allowed.
    */
   public dispose(): void {
     const native = buildContextNatives.get(this);
@@ -357,8 +363,8 @@ export class NxProgramBuildContext {
 /**
  * Reusable analyzed NX program artifact.
  *
- * Program artifacts can generate deterministic NX IR and evaluate supported entrypoints after their originating build
- * context has been disposed.
+ * Program artifacts can generate deterministic NX IR and evaluate supported entrypoints after their
+ * originating build context has been disposed.
  */
 export class NxProgramArtifact {
   private constructor(native: NativeNxProgramArtifact) {
@@ -507,7 +513,8 @@ export class NxProgramArtifact {
   /**
    * Releases the native program-artifact resource.
    *
-   * Calling `dispose` more than once is allowed. Operations after disposal throw `NxDisposedResourceError`.
+   * Calling `dispose` more than once is allowed. Operations after disposal throw
+   * `NxDisposedResourceError`.
    */
   public dispose(): void {
     const native = artifactNatives.get(this);
@@ -530,7 +537,8 @@ export class NxProgramArtifact {
  */
 export interface NxLanguageDocumentInput {
   /**
-   * Logical URI the document is addressed by in queries, such as `nx://tenant/form.nx` or a `file:` URI.
+   * Logical URI the document is addressed by in queries, such as `nx://tenant/form.nx` or a `file:`
+   * URI.
    */
   readonly uri: string;
   /**
@@ -538,7 +546,8 @@ export interface NxLanguageDocumentInput {
    */
   readonly source: string;
   /**
-   * Workspace identity NX resolves imports by, such as `tenant/form.nx`. Derived from the URI when omitted.
+   * Workspace identity NX resolves imports by, such as `tenant/form.nx`. Derived from the URI when
+   * omitted.
    */
   readonly identity?: string;
   /**
@@ -552,13 +561,15 @@ export interface NxLanguageDocumentInput {
  */
 export interface NxLanguageSnapshotOptions {
   /**
-   * Build context whose libraries every query can see. Without one, names declared only in a library are unresolved.
+   * Build context whose libraries every query can see. Without one, names declared only in a
+   * library are unresolved.
    */
   readonly buildContext?: NxProgramBuildContext;
   /**
-   * Identities every other document imports implicitly, with the meaning `NxWorkspaceBuildOptions.implicitImports`
-   * gives them: the names those documents export are in scope for hover, completions and diagnostics without an import
-   * line, and each document's own text and positions are unchanged.
+   * Identities every other document imports implicitly, with the meaning
+   * `NxWorkspaceBuildOptions.implicitImports` gives them: the names those documents export are in
+   * scope for hover, completions and diagnostics without an import line, and each document's own
+   * text and positions are unchanged.
    *
    * An identity no document in the snapshot has is reported as a diagnostic naming it.
    */
@@ -566,17 +577,17 @@ export interface NxLanguageSnapshotOptions {
 }
 
 /**
- * Immutable analysis of a set of in-memory documents that answers editor queries: hover, completions, diagnostics,
- * and document symbols.
+ * Immutable analysis of a set of in-memory documents that answers editor queries: hover,
+ * completions, diagnostics, and document symbols.
  *
- * Positions count UTF-16 code units, the way JavaScript strings and browser editors count. Results are the
- * `@nx-lang/language-protocol` answer shapes. The snapshot analyzes lazily and caches the analysis for its lifetime,
- * so a new snapshot is needed whenever a document changes.
+ * Positions count UTF-16 code units, the way JavaScript strings and browser editors count. Results
+ * are the `@nx-lang/language-protocol` answer shapes. The snapshot analyzes lazily and caches the
+ * analysis for its lifetime, so a new snapshot is needed whenever a document changes.
  */
 export class NxLanguageSnapshot {
   /**
-   * Analyzes `documents`, optionally against the libraries `options.buildContext` makes visible and with
-   * `options.implicitImports` in scope for every other document.
+   * Analyzes `documents`, optionally against the libraries `options.buildContext` makes visible and
+   * with `options.implicitImports` in scope for every other document.
    *
    * @throws NxEvaluationError when a URI is unparseable, two documents share a URI or identity, or an identity is
    * invalid; the message names the offending URI or identity.
@@ -655,11 +666,11 @@ export class NxLanguageSnapshot {
    * @throws NxEvaluationError when `uri` names no document in the snapshot.
    * @throws NxDisposedResourceError when this snapshot has already been disposed.
    */
-  public sourceTree(uri: string, options?: { viewers?: SourceTreeViewersOption }): SourceTree {
+  public sourceTree(uri: string, options?: { visualizers?: SourceTreeVisualizersOption }): SourceTree {
     const json = invokeNative(() =>
       getLanguageSnapshotNative(this).sourceTree(
         uri,
-        options?.viewers === undefined ? undefined : JSON.stringify({ viewers: options.viewers })
+        options?.visualizers === undefined ? undefined : JSON.stringify({ visualizers: options.visualizers })
       )
     );
     return parseResultJson(json) as SourceTree;
@@ -668,7 +679,8 @@ export class NxLanguageSnapshot {
   /**
    * Releases the native snapshot resource.
    *
-   * Calling `dispose` more than once is allowed. Operations after disposal throw `NxDisposedResourceError`.
+   * Calling `dispose` more than once is allowed. Operations after disposal throw
+   * `NxDisposedResourceError`.
    */
   public dispose(): void {
     const native = languageSnapshotNatives.get(this);
@@ -687,7 +699,8 @@ export class NxLanguageSnapshot {
 }
 
 /**
- * Validates an in-memory workspace against a supplied build context and returns all NX diagnostics as data.
+ * Validates an in-memory workspace against a supplied build context and returns all NX diagnostics
+ * as data.
  */
 export function validateWorkspace(
   workspace: NxWorkspace,
@@ -734,7 +747,8 @@ export function explainNxIr(image: Uint8Array): string {
 }
 
 /**
- * Builds a short-lived source artifact, generates its NX IR image and metadata, then disposes the artifact.
+ * Builds a short-lived source artifact, generates its NX IR image and metadata, then disposes the
+ * artifact.
  *
  * @throws NxEvaluationError when build or IR generation reports diagnostics.
  */

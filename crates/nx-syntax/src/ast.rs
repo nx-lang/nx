@@ -424,15 +424,15 @@ mod tests {
     }
 }
 
-/// Represents a viewer declaration in the AST: `viewer Target = Value`.
+/// Represents a visualizer declaration in the AST: `visualizer Target = Value`.
 #[derive(Debug, Clone, Copy)]
-pub struct ViewerDef<'tree> {
+pub struct VisualizerDef<'tree> {
     syntax: SyntaxNode<'tree>,
 }
 
-impl<'tree> AstNode<'tree> for ViewerDef<'tree> {
+impl<'tree> AstNode<'tree> for VisualizerDef<'tree> {
     fn can_cast(kind: SyntaxKind) -> bool {
-        kind == SyntaxKind::VIEWER_DEFINITION
+        kind == SyntaxKind::VISUALIZER_DEFINITION
     }
 
     fn cast(node: SyntaxNode<'tree>) -> Option<Self> {
@@ -448,18 +448,18 @@ impl<'tree> AstNode<'tree> for ViewerDef<'tree> {
     }
 }
 
-impl<'tree> ViewerDef<'tree> {
+impl<'tree> VisualizerDef<'tree> {
     /// Returns the target, the name of the declaration the viewer presents, as written.
     pub fn target(&self) -> Option<SyntaxNode<'tree>> {
         self.syntax.child_by_field("target")
     }
 
-    /// Returns the value, the viewer record construction.
+    /// Returns the value, the visualizer record construction.
     pub fn value(&self) -> Option<SyntaxNode<'tree>> {
         self.syntax.child_by_field("value")
     }
 
-    /// Returns the visibility modifier, which a viewer declaration may not carry.
+    /// Returns the visibility modifier, which a visualizer declaration may not carry.
     pub fn visibility(&self) -> Option<SyntaxNode<'tree>> {
         self.syntax.child_by_field("visibility")
     }

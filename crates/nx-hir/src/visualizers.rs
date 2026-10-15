@@ -1,5 +1,5 @@
-//! `viewer` declarations: what a viewer declaration's target is, and which `@nx/viewer` record its
-//! value must be.
+//! `visualizer` declarations: what a visualizer declaration's target is, and which `@nx/visualizer`
+//! record its value must be.
 
 use crate::{
     ast, interface_component, interface_record, interface_type_alias, interface_union,
@@ -7,76 +7,78 @@ use crate::{
     PreparedModule, PreparedNamespace, RecordKind, ResolvedPreparedItem,
 };
 
-/// The root of the viewer standard library, which is also its import path.
-pub const VIEWER_LIBRARY_ROOT: &str = "@nx/viewer";
+/// The root of the visualizer standard library, which is also its import path.
+pub const VISUALIZER_LIBRARY_ROOT: &str = "@nx/visualizer";
 
-/// The identity of the viewer standard library's one module, which declares every viewer record.
-pub const VIEWER_LIBRARY_MODULE: &str = "@nx/viewer/viewer.nx";
+/// The identity of the visualizer standard library's one module, which declares every visualizer
+/// record.
+pub const VISUALIZER_LIBRARY_MODULE: &str = "@nx/visualizer/visualizer.nx";
 
-/// The name of the type parameter every viewer record takes, which a viewer declaration binds.
-pub const VIEWER_TARGET_PARAMETER: &str = "Target";
+/// The name of the type parameter every visualizer record takes, which a visualizer declaration
+/// binds.
+pub const VISUALIZER_TARGET_PARAMETER: &str = "Target";
 
-/// The `@nx/viewer` record a viewer declaration's value is, chosen by its target's kind.
+/// The `@nx/visualizer` record a visualizer declaration's value is, chosen by its target's kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ViewerRecord {
-    /// `ElementViewer`, for a record, an action or a component.
+pub enum VisualizerRecord {
+    /// `ElementVisualizer`, for a record, an action or a component.
     Element,
-    /// `UnionViewer`, for a union whose cases are all constant cases.
+    /// `UnionVisualizer`, for a union whose cases are all constant cases.
     Union,
-    /// `ValueViewer`, for an alias of a primitive type.
+    /// `ValueVisualizer`, for an alias of a primitive type.
     Value,
 }
 
-impl ViewerRecord {
-    /// The record's name in `@nx/viewer`.
+impl VisualizerRecord {
+    /// The record's name in `@nx/visualizer`.
     pub fn name(self) -> &'static str {
         match self {
-            ViewerRecord::Element => "ElementViewer",
-            ViewerRecord::Union => "UnionViewer",
-            ViewerRecord::Value => "ValueViewer",
+            VisualizerRecord::Element => "ElementVisualizer",
+            VisualizerRecord::Union => "UnionVisualizer",
+            VisualizerRecord::Value => "ValueVisualizer",
         }
     }
 }
 
-/// What a viewer declaration's target resolved to.
+/// What a visualizer declaration's target resolved to.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ViewerTarget {
+pub struct VisualizerTarget {
     /// The declaration the target names.
     pub origin: DeclaringOrigin,
     /// The name the declaring module gave the declaration.
     pub declared_name: Name,
     /// What the declaration is, in the words a diagnostic uses: "record", "union", ...
     pub kind_label: &'static str,
-    /// The viewer record the value must be.
-    pub record: ViewerRecord,
-    /// The type `Target` binds to, spelled as the viewer declaration's module sees it: the target
-    /// itself, or its derived props record when it is a component.
+    /// The visualizer record the value must be.
+    pub record: VisualizerRecord,
+    /// The type `Target` binds to, spelled as the visualizer declaration's module sees it: the
+    /// target itself, or its derived props record when it is a component.
     pub target_type: Name,
     /// Whether the target is a component, whose `Target` is its props record.
     pub is_component: bool,
 }
 
-/// Why a viewer declaration's target cannot have a viewer.
+/// Why a visualizer declaration's target cannot have a visualizer.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ViewerTargetError {
+pub enum VisualizerTargetError {
     /// The target names nothing visible in the module.
     Unknown,
-    /// The target names a declaration that cannot have a viewer, for the reason given.
+    /// The target names a declaration that cannot have a visualizer, for the reason given.
     NotAllowed { reason: String },
 }
 
-/// Resolves a viewer declaration's target, written `target`, in `module`'s namespace and decides
-/// which viewer record it takes.
+/// Resolves a visualizer declaration's target, written `target`, in `module`'s namespace and
+/// decides which visualizer record it takes.
 ///
 /// <para>A record, an action (an inline emitted action included) or a component takes an
-/// `ElementViewer`; a union whose cases are all constant cases a `UnionViewer`; an alias of a
-/// primitive type a `ValueViewer`. A generic declaration, a derived one, a function, a value, a
-/// union with a payload case and an alias of any other type cannot have a viewer in this
+/// `ElementVisualizer`; a union whose cases are all constant cases a `UnionVisualizer`; an alias of
+/// a primitive type a `ValueVisualizer`. A generic declaration, a derived one, a function, a value,
+/// a union with a payload case and an alias of any other type cannot have a visualizer in this
 /// release.</para>
-pub fn resolve_viewer_target(
+pub fn resolve_visualizer_target(
     module: &PreparedModule,
     target: &Name,
-) -> Result<ViewerTarget, ViewerTargetError> {
+) -> Result<VisualizerTarget, VisualizerTargetError> {
     for namespace in [
         PreparedNamespace::Type,
         PreparedNamespace::Element,
@@ -94,7 +96,7 @@ pub fn resolve_viewer_target(
         };
         return classify(target, origin, &item);
     }
-    Err(ViewerTargetError::Unknown)
+    Err(VisualizerTargetError::Unknown)
 }
 
 /// The item a resolved binding reaches, read from its declaring module where it can be and from
@@ -119,8 +121,8 @@ fn interface_item(item: &InterfaceItem) -> Option<Item> {
     }
 }
 
-fn not_allowed(reason: impl Into<String>) -> Result<ViewerTarget, ViewerTargetError> {
-    Err(ViewerTargetError::NotAllowed {
+fn not_allowed(reason: impl Into<String>) -> Result<VisualizerTarget, VisualizerTargetError> {
+    Err(VisualizerTargetError::NotAllowed {
         reason: reason.into(),
     })
 }
@@ -129,12 +131,12 @@ fn classify(
     target: &Name,
     origin: DeclaringOrigin,
     item: &Item,
-) -> Result<ViewerTarget, ViewerTargetError> {
-    let element = |kind_label: &'static str, declared_name: &Name| ViewerTarget {
+) -> Result<VisualizerTarget, VisualizerTargetError> {
+    let element = |kind_label: &'static str, declared_name: &Name| VisualizerTarget {
         origin: origin.clone(),
         declared_name: declared_name.clone(),
         kind_label,
-        record: ViewerRecord::Element,
+        record: VisualizerRecord::Element,
         target_type: target.clone(),
         is_component: false,
     };
@@ -150,16 +152,16 @@ fn classify(
                 return not_allowed(format!("it is {derived}"));
             }
             if !record.type_params.is_empty() {
-                return not_allowed("it is a generic record, and generic declarations cannot have viewers yet");
+                return not_allowed("it is a generic record, and generic declarations cannot have visualizers yet");
             }
             let kind_label = if record.is_action() { "action" } else { "record" };
             Ok(element(kind_label, &record.name))
         }
         Item::Component(component) => {
             if !component.type_params.is_empty() {
-                return not_allowed("it is a generic component, and generic declarations cannot have viewers yet");
+                return not_allowed("it is a generic component, and generic declarations cannot have visualizers yet");
             }
-            Ok(ViewerTarget {
+            Ok(VisualizerTarget {
                 target_type: props_record_name(target.as_str()),
                 is_component: true,
                 ..element("component", &component.name)
@@ -171,29 +173,29 @@ fn classify(
             }
             if !union_def.is_constant_union() {
                 return not_allowed(
-                    "it is a union with a payload case, and only a union of constant cases can have a viewer",
+                    "it is a union with a payload case, and only a union of constant cases can have a visualizer",
                 );
             }
-            Ok(ViewerTarget {
+            Ok(VisualizerTarget {
                 origin,
                 declared_name: union_def.name.clone(),
                 kind_label: "union",
-                record: ViewerRecord::Union,
+                record: VisualizerRecord::Union,
                 target_type: target.clone(),
                 is_component: false,
             })
         }
         Item::TypeAlias(alias) => match &alias.ty {
-            ast::TypeRef::Name(name) if is_primitive_type_name(name.as_str()) => Ok(ViewerTarget {
+            ast::TypeRef::Name(name) if is_primitive_type_name(name.as_str()) => Ok(VisualizerTarget {
                 origin,
                 declared_name: alias.name.clone(),
                 kind_label: "alias",
-                record: ViewerRecord::Value,
+                record: VisualizerRecord::Value,
                 target_type: target.clone(),
                 is_component: false,
             }),
             _ => not_allowed(
-                "it is an alias of a type that is not a primitive type, and only an alias of a primitive type can have a viewer",
+                "it is an alias of a type that is not a primitive type, and only an alias of a primitive type can have a visualizer",
             ),
         },
         Item::Function(_) => not_allowed("it is a function"),

@@ -6,7 +6,7 @@ import { after, describe, it } from "node:test";
 import { fixture, nxHost, type Fixture } from "./fixtures.js";
 import type { NxSelectDetail, NxViewerElement } from "../src/index.js";
 
-const { NX_SELECT_EVENT, NxViewerElement: ViewerClass, nodeAtSpan } = await import("../src/index.js");
+const { NX_SELECT_EVENT, NxViewerElement: VisualizerClass, nodeAtSpan } = await import("../src/index.js");
 
 const created: NxViewerElement[] = [];
 
@@ -81,9 +81,9 @@ describe("<nx-viewer>", () => {
     const element = document.createElement(tag) as NxViewerElement;
     document.body.append(element);
     Object.assign(element, { text, tree, stale: true });
-    customElements.define(tag, class extends ViewerClass {});
+    customElements.define(tag, class extends VisualizerClass {});
     created.push(element);
-    assert.ok(element instanceof ViewerClass, "the element upgraded");
+    assert.ok(element instanceof VisualizerClass, "the element upgraded");
     assert.equal(element.tree, tree);
     assert.ok(root(element).querySelector(".line-element"), "the tree set early is rendered");
     assert.equal(element.hasAttribute("stale"), true);
@@ -157,25 +157,25 @@ describe("the reading", () => {
     assert.equal(block.style.getPropertyValue("--column"), String(fixtureText.text.split("\n")[3]!.indexOf('"Fine"') + 1), "the words' column is known");
   });
 
-  it("sets a string its viewer formats as an identifier apart as one quiet token", async () => {
+  it("sets a string its visualizer formats as an identifier apart as one quiet token", async () => {
     const identifiers = await fixture("identifiers");
     const element = show(identifiers);
     const source = root(element).querySelector<HTMLElement>(".source")!;
     const tokens = Array.from(source.querySelectorAll<HTMLElement>(".id-value"), (node) => node.textContent);
-    assert.deepEqual(tokens, ["welcome"], "only the property the viewer names, without its quotes; next is a plain string");
+    assert.deepEqual(tokens, ["welcome"], "only the property the visualizer names, without its quotes; next is a plain string");
   });
 
-  it("shows the color a string its viewer formats as a color names, as a square before it", async () => {
+  it("shows the color a string its visualizer formats as a color names, as a square before it", async () => {
     const colors = await fixture("colors");
     const element = show(colors);
     const source = root(element).querySelector<HTMLElement>(".source")!;
     const squares = Array.from(source.querySelectorAll<HTMLElement>(".swatch"));
-    assert.equal(squares.length, 1, "only a color the type's viewer formats, and only one that names a color");
+    assert.equal(squares.length, 1, "only a color the type's visualizer formats, and only one that names a color");
     assert.equal(squares[0]!.parentElement!.textContent, "#b6695d");
     assert.equal(squares[0]!.getAttribute("aria-hidden"), "true");
   });
 
-  it("starts an element on a line of its own with the icon its viewer names, or its kind's", async () => {
+  it("starts an element on a line of its own with the icon its visualizer names, or its kind's", async () => {
     const icons = await fixture("icons");
     const element = show(icons);
     const source = (): HTMLElement => root(element).querySelector<HTMLElement>(".source")!;
@@ -194,12 +194,12 @@ describe("the reading", () => {
     assert.deepEqual(
       marks.map((mark) => [mark.getAttribute("aria-label"), mark.querySelector("svg")!.dataset["icon"]]),
       [["Choice", "circle-dot"], ["Note", "box"], ["Tip", "box"], ["Status.closed", "tag"], ["Choice", "circle-dot"]],
-      "the viewer's icon, a record's, a record's for an icon the host cannot draw, and a union case's; an element sharing its line has none"
+      "the visualizer's icon, a record's, a record's for an icon the host cannot draw, and a union case's; an element sharing its line has none"
     );
     assert.ok(asked.includes("circle-dot") && asked.includes("no-such-icon"));
     assert.equal(marks[0]!.textContent, "", "an icon adds no text");
     const names = Array.from(source().querySelectorAll<HTMLElement>(".line-element"), (line) => line.querySelector(".line-kind")?.textContent);
-    assert.deepEqual(names, ["ElementViewer", "ElementViewer", "Choice", "Note", "Tip", "Status.closed", "Note", undefined], "a place typed Choice+ leaves its Choice unnamed; its icon names it");
+    assert.deepEqual(names, ["ElementVisualizer", "ElementVisualizer", "Choice", "Note", "Tip", "Status.closed", "Note", undefined], "a place typed Choice+ leaves its Choice unnamed; its icon names it");
   });
 
   it("reads an element written over several lines as a group, without its tags", async () => {
@@ -225,7 +225,7 @@ describe("the reading", () => {
     assert.ok(!source.textContent!.includes("</Label>"), "no closing tag");
   });
 
-  it("moves an element's id to where its viewer puts it, as its value alone", async () => {
+  it("moves an element's id to where its visualizer puts it, as its value alone", async () => {
     const ids = await fixture("elementIds");
     const element = show(ids);
     const source = root(element).querySelector<HTMLElement>(".source")!;
@@ -254,7 +254,7 @@ describe("the reading", () => {
     assert.deepEqual([...keys].sort(), ids.tree.nodes.map((node) => node.key).sort(), "every node is still there once");
   });
 
-  it("puts an id last in a group's header when its viewer puts it at the end", async () => {
+  it("puts an id last in a group's header when its visualizer puts it at the end", async () => {
     const ids = await fixture("groupIdAtEnd");
     const element = show(ids);
     const head = root(element).querySelector<HTMLElement>(".sheet-head")!;
@@ -378,7 +378,8 @@ describe("the keyboard", () => {
       key(body, move);
     }
     assert.deepEqual(events, [attribute("note"), item, attribute("title")], "the row holding it, then the units around that row");
-    // Outside every unit, as a type's field, down selects the first unit after it, and up finds none.
+    // Outside every unit, as a type's field, down selects the first unit after it, and up finds
+    // none.
     element.selection = keyWhere(rows, (node) => node.role === "field" && node.name === "name");
     key(body, "ArrowUp");
     key(body, "ArrowDown");

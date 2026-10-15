@@ -1,4 +1,5 @@
-//! The viewer library `@nx/viewer` and the analysis of `viewer` declarations written with it.
+//! The visualizer library `@nx/visualizer` and the analysis of `visualizer` declarations written
+//! with it.
 
 use crate::{
     build_workspace_program_artifact, eval_program_artifact, standard_library, validate_workspace,
@@ -8,18 +9,18 @@ use crate::{
 use nx_hir::{InterfaceItemKind, Visibility};
 use nx_value::NxValue;
 
-const VIEWER_ROOT: &str = "@nx/viewer";
+const VISUALIZER_ROOT: &str = "@nx/visualizer";
 
-const VIEWER_TYPES: [&str; 9] = [
-    "CaseViewer",
+const VISUALIZER_TYPES: [&str; 9] = [
+    "CaseVisualizer",
     "ElementLayout",
-    "ElementViewer",
+    "ElementVisualizer",
     "IdPosition",
     "Placement",
-    "PropertyViewer",
-    "UnionViewer",
+    "PropertyVisualizer",
+    "UnionVisualizer",
     "ValueFormat",
-    "ValueViewer",
+    "ValueVisualizer",
 ];
 
 fn workspace(files: &[(&str, &str)]) -> NxWorkspace {
@@ -39,13 +40,13 @@ fn diagnostics(files: &[(&str, &str)]) -> Vec<NxDiagnostic> {
     validate_workspace(&workspace(files), &ProgramBuildContext::empty())
 }
 
-/// Every diagnostic of one module that begins with `import "@nx/viewer"`.
-fn viewer_diagnostics(body: &str) -> Vec<NxDiagnostic> {
-    diagnostics(&[("main.nx", &format!("import \"@nx/viewer\"\n{body}"))])
+/// Every diagnostic of one module that begins with `import "@nx/visualizer"`.
+fn visualizer_diagnostics(body: &str) -> Vec<NxDiagnostic> {
+    diagnostics(&[("main.nx", &format!("import \"@nx/visualizer\"\n{body}"))])
 }
 
 fn assert_clean(body: &str) {
-    let diagnostics = viewer_diagnostics(body);
+    let diagnostics = visualizer_diagnostics(body);
     assert!(
         diagnostics.is_empty(),
         "expected no diagnostics for {body:?}: {diagnostics:#?}"
@@ -53,7 +54,7 @@ fn assert_clean(body: &str) {
 }
 
 fn assert_error(body: &str, code: Option<&str>, fragments: &[&str]) {
-    let diagnostics = viewer_diagnostics(body);
+    let diagnostics = visualizer_diagnostics(body);
     assert!(
         diagnostics.iter().any(|diagnostic| {
             diagnostic.severity == NxSeverity::Error
@@ -69,8 +70,8 @@ fn assert_error(body: &str, code: Option<&str>, fragments: &[&str]) {
 // --- The library ------------------------------------------------------------------------------
 
 #[test]
-fn the_viewer_library_exports_exactly_its_nine_types() {
-    let library = standard_library(VIEWER_ROOT).expect("the viewer library");
+fn the_visualizer_library_exports_exactly_its_nine_types() {
+    let library = standard_library(VISUALIZER_ROOT).expect("the visualizer library");
     assert!(library.diagnostics.is_empty(), "{:#?}", library.diagnostics);
     let mut exported = library
         .interface_items
@@ -80,7 +81,7 @@ fn the_viewer_library_exports_exactly_its_nine_types() {
         .filter(|name| !name.contains('.'))
         .collect::<Vec<_>>();
     exported.sort();
-    assert_eq!(exported, VIEWER_TYPES);
+    assert_eq!(exported, VISUALIZER_TYPES);
     assert!(
         library.interface_items.iter().all(|item| !matches!(
             item.item,
@@ -91,8 +92,8 @@ fn the_viewer_library_exports_exactly_its_nine_types() {
 }
 
 #[test]
-fn every_viewer_type_field_and_case_is_documented() {
-    let library = standard_library(VIEWER_ROOT).expect("the viewer library");
+fn every_visualizer_type_field_and_case_is_documented() {
+    let library = standard_library(VISUALIZER_ROOT).expect("the visualizer library");
     let mut undocumented = Vec::new();
     for item in &library.interface_items {
         if item.item_name.contains('.') {
@@ -116,25 +117,25 @@ fn every_viewer_type_field_and_case_is_documented() {
                     }
                 }
             }
-            other => panic!("unexpected declaration in the viewer library: {other:?}"),
+            other => panic!("unexpected declaration in the visualizer library: {other:?}"),
         }
     }
     assert!(undocumented.is_empty(), "undocumented: {undocumented:?}");
 }
 
 #[test]
-fn an_element_viewer_with_property_viewers() {
+fn an_element_visualizer_with_property_visualizers() {
     assert_clean(
         "type Choice = { value:string label:string description?:string }\n\
-         viewer Choice = <ElementViewer layout=row title=label subtitle=description badge=value><PropertyViewer of=value place=details /></ElementViewer>",
+         visualizer Choice = <ElementVisualizer layout=row title=label subtitle=description badge=value><PropertyVisualizer of=value place=details /></ElementVisualizer>",
     );
 }
 
 #[test]
-fn a_property_viewer_names_a_property_of_its_target() {
+fn a_property_visualizer_names_a_property_of_its_target() {
     assert_error(
         "type Choice = { label:string }\n\
-         viewer Choice = <ElementViewer><PropertyViewer of=value /></ElementViewer>",
+         visualizer Choice = <ElementVisualizer><PropertyVisualizer of=value /></ElementVisualizer>",
         None,
         &["value"],
     );
@@ -144,7 +145,7 @@ fn a_property_viewer_names_a_property_of_its_target() {
 fn case_labels() {
     assert_clean(
         "type ChoiceLayout = list | grid | chips\n\
-         viewer ChoiceLayout = <UnionViewer><CaseViewer of=list label=\"a list\" /><CaseViewer of=chips label=\"chips\" example=\"◉ A  ○ B\" /></UnionViewer>",
+         visualizer ChoiceLayout = <UnionVisualizer><CaseVisualizer of=list label=\"a list\" /><CaseVisualizer of=chips label=\"chips\" example=\"◉ A  ○ B\" /></UnionVisualizer>",
     );
 }
 
@@ -152,7 +153,7 @@ fn case_labels() {
 fn a_case_that_is_not_in_the_union() {
     assert_error(
         "type ChoiceLayout = list | grid | chips\n\
-         viewer ChoiceLayout = <UnionViewer><CaseViewer of=table /></UnionViewer>",
+         visualizer ChoiceLayout = <UnionVisualizer><CaseVisualizer of=table /></UnionVisualizer>",
         None,
         &["table"],
     );
@@ -162,27 +163,28 @@ fn a_case_that_is_not_in_the_union() {
 fn an_image_url_alias() {
     assert_clean(
         "type ImageUrl = string\n\
-         viewer ImageUrl = <ValueViewer format=image />",
+         visualizer ImageUrl = <ValueVisualizer format=image />",
     );
 }
 
-// --- Viewer declarations ----------------------------------------------------------------------
+// --- Visualizer declarations
+// ----------------------------------------------------------------------
 
 #[test]
-fn a_viewer_beside_its_type() {
+fn a_visualizer_beside_its_type() {
     assert_clean(
         "type Choice = { value:string label:string }\n\
-         viewer Choice = <ElementViewer title=label badge=value />",
+         visualizer Choice = <ElementVisualizer title=label badge=value />",
     );
 }
 
 #[test]
-fn viewer_stays_an_ordinary_name_elsewhere() {
+fn visualizer_stays_an_ordinary_name_elsewhere() {
     let diagnostics = diagnostics(&[(
         "main.nx",
-        "type Settings = { viewer:string }\n\
-         let viewer = \"Ada\"\n\
-         component <Panel viewer:string /> = { <Label text={viewer} /> }",
+        "type Settings = { visualizer:string }\n\
+         let visualizer = \"Ada\"\n\
+         component <Panel visualizer:string /> = { <Label text={visualizer} /> }",
     )]);
     assert!(
         diagnostics
@@ -193,10 +195,10 @@ fn viewer_stays_an_ordinary_name_elsewhere() {
 }
 
 #[test]
-fn a_viewer_declaration_takes_no_visibility() {
+fn a_visualizer_declaration_takes_no_visibility() {
     assert_error(
         "type Choice = { label:string }\n\
-         export viewer Choice = <ElementViewer title=label />",
+         export visualizer Choice = <ElementVisualizer title=label />",
         None,
         &["takes no visibility modifier"],
     );
@@ -212,13 +214,13 @@ fn each_kind_takes_its_record() {
          abstract component <Question label:string />\n\
          external component <SearchBox placeholder?:string />\n\
          action Saved = { id:string }\n\
-         viewer Choice = <ElementViewer title=label />\n\
-         viewer ChoiceLayout = <UnionViewer />\n\
-         viewer ImageUrl = <ValueViewer format=image />\n\
-         viewer Card = <ElementViewer title=title />\n\
-         viewer Question = <ElementViewer title=label />\n\
-         viewer SearchBox = <ElementViewer subtitle=placeholder />\n\
-         viewer Saved = <ElementViewer title=id />",
+         visualizer Choice = <ElementVisualizer title=label />\n\
+         visualizer ChoiceLayout = <UnionVisualizer />\n\
+         visualizer ImageUrl = <ValueVisualizer format=image />\n\
+         visualizer Card = <ElementVisualizer title=title />\n\
+         visualizer Question = <ElementVisualizer title=label />\n\
+         visualizer SearchBox = <ElementVisualizer subtitle=placeholder />\n\
+         visualizer Saved = <ElementVisualizer title=id />",
     );
 }
 
@@ -226,46 +228,47 @@ fn each_kind_takes_its_record() {
 fn the_wrong_record_for_the_kind() {
     assert_error(
         "type ChoiceLayout = list | grid\n\
-         viewer ChoiceLayout = <ElementViewer />",
-        Some("viewer-record-mismatch"),
-        &["UnionViewer", "ElementViewer"],
+         visualizer ChoiceLayout = <ElementVisualizer />",
+        Some("visualizer-record-mismatch"),
+        &["UnionVisualizer", "ElementVisualizer"],
     );
     assert_error(
         "type Choice = { label:string }\n\
-         viewer Choice = \"Choice\"",
-        Some("viewer-record-mismatch"),
-        &["ElementViewer"],
+         visualizer Choice = \"Choice\"",
+        Some("visualizer-record-mismatch"),
+        &["ElementVisualizer"],
     );
 }
 
 #[test]
-fn a_viewer_without_the_library_imported_says_to_import_it() {
-    // No `import "@nx/viewer"`, so `ElementViewer` is an unknown element of the same name.
+fn a_visualizer_without_the_library_imported_says_to_import_it() {
+    // No `import "@nx/visualizer"`, so `ElementVisualizer` is an unknown element of the same name.
     let diagnostics = diagnostics(&[(
         "main.nx",
-        "type Choice = { label:string }\nviewer Choice = <ElementViewer title=label />",
+        "type Choice = { label:string }\nvisualizer Choice = <ElementVisualizer title=label />",
     )]);
     let mismatch = diagnostics
         .iter()
-        .find(|diagnostic| diagnostic.code.as_deref() == Some("viewer-record-mismatch"))
-        .unwrap_or_else(|| panic!("no viewer-record-mismatch in {diagnostics:#?}"));
+        .find(|diagnostic| diagnostic.code.as_deref() == Some("visualizer-record-mismatch"))
+        .unwrap_or_else(|| panic!("no visualizer-record-mismatch in {diagnostics:#?}"));
     assert_eq!(
         mismatch.message,
-        "The viewer of record 'Choice' must be an 'ElementViewer' from \"@nx/viewer\", and this \
-         'ElementViewer' is not that one; add `import \"@nx/viewer\"`"
+        "The visualizer of record 'Choice' must be an 'ElementVisualizer' from \"@nx/visualizer\", and this \
+         'ElementVisualizer' is not that one; add `import \"@nx/visualizer\"`"
     );
 }
 
 #[test]
-fn the_wrong_viewer_record_is_one_error() {
-    // A union's viewer written as an element viewer, property viewers and all: one mismatch, not
-    // an error for each property the element viewer could name.
+fn the_wrong_visualizer_record_is_one_error() {
+    // A union's visualizer written as an element visualizer, property visualizers and all: one
+    // mismatch, not an error for each property the element visualizer could name.
     for value in [
-        "<ElementViewer title=small />",
-        "<ElementViewer><PropertyViewer of=small /></ElementViewer>",
+        "<ElementVisualizer title=small />",
+        "<ElementVisualizer><PropertyVisualizer of=small /></ElementVisualizer>",
     ] {
-        let source =
-            format!("import \"@nx/viewer\"\ntype Size = small | large\nviewer Size = {value}");
+        let source = format!(
+            "import \"@nx/visualizer\"\ntype Size = small | large\nvisualizer Size = {value}"
+        );
         let diagnostics = diagnostics(&[("main.nx", source.as_str())]);
         let errors = diagnostics
             .iter()
@@ -274,44 +277,44 @@ fn the_wrong_viewer_record_is_one_error() {
             .collect::<Vec<_>>();
         assert_eq!(
             errors,
-            ["viewer-record-mismatch"],
+            ["visualizer-record-mismatch"],
             "{value}: {diagnostics:#?}"
         );
     }
 }
 
 #[test]
-fn a_target_that_cannot_have_a_viewer() {
+fn a_target_that_cannot_have_a_visualizer() {
     assert_error(
         "let answer = 42\n\
-         viewer answer = <ValueViewer format=text />",
-        Some("viewer-target-not-allowed"),
-        &["'answer' cannot have a viewer"],
+         visualizer answer = <ValueVisualizer format=text />",
+        Some("visualizer-target-not-allowed"),
+        &["'answer' cannot have a visualizer"],
     );
     assert_error(
         "type Range = { T:type start:T end:T }\n\
-         viewer Range = <ElementViewer />",
-        Some("viewer-target-not-allowed"),
-        &["'Range' cannot have a viewer"],
+         visualizer Range = <ElementVisualizer />",
+        Some("visualizer-target-not-allowed"),
+        &["'Range' cannot have a visualizer"],
     );
     assert_error(
         "let greet(name:string) = { name }\n\
-         viewer greet = <ElementViewer />",
-        Some("viewer-target-not-allowed"),
-        &["'greet' cannot have a viewer"],
+         visualizer greet = <ElementVisualizer />",
+        Some("visualizer-target-not-allowed"),
+        &["'greet' cannot have a visualizer"],
     );
     assert_error(
         "type Shape = | circle { radius:int } | square\n\
-         viewer Shape = <UnionViewer />",
-        Some("viewer-target-not-allowed"),
-        &["'Shape' cannot have a viewer"],
+         visualizer Shape = <UnionVisualizer />",
+        Some("visualizer-target-not-allowed"),
+        &["'Shape' cannot have a visualizer"],
     );
     assert_error(
         "type Choice = { label:string }\n\
          type Choices = Choice+\n\
-         viewer Choices = <ValueViewer format=text />",
-        Some("viewer-target-not-allowed"),
-        &["'Choices' cannot have a viewer"],
+         visualizer Choices = <ValueVisualizer format=text />",
+        Some("visualizer-target-not-allowed"),
+        &["'Choices' cannot have a visualizer"],
     );
 }
 
@@ -329,10 +332,10 @@ fn a_derived_declaration_is_not_a_target() {
             &format!(
                 "type User = {{ name:string }}\n\
                  component <Card title:string /> = {{ state {{ open:boolean = false }} <Panel /> }}\n\
-                 viewer {target} = <ElementViewer />"
+                 visualizer {target} = <ElementVisualizer />"
             ),
-            Some("viewer-target-not-allowed"),
-            &[&format!("'{target}' cannot have a viewer")],
+            Some("visualizer-target-not-allowed"),
+            &[&format!("'{target}' cannot have a visualizer")],
         );
     }
 }
@@ -340,8 +343,8 @@ fn a_derived_declaration_is_not_a_target() {
 #[test]
 fn an_unknown_target_is_an_unknown_name() {
     assert_error(
-        "viewer Nothing = <ElementViewer />",
-        Some("unknown-viewer-target"),
+        "visualizer Nothing = <ElementVisualizer />",
+        Some("unknown-visualizer-target"),
         &["Nothing"],
     );
 }
@@ -350,7 +353,7 @@ fn an_unknown_target_is_an_unknown_name() {
 fn an_emitted_action_is_a_target() {
     assert_clean(
         "component <Form emits { Submitted { email:string } } /> = { <Panel /> }\n\
-         viewer Form.Submitted = <ElementViewer title=email />",
+         visualizer Form.Submitted = <ElementVisualizer title=email />",
     );
 }
 
@@ -358,20 +361,20 @@ fn an_emitted_action_is_a_target() {
 fn children_take_the_target_too() {
     assert_clean(
         "type Choice = { value:string label:string }\n\
-         viewer Choice = <ElementViewer title=label><PropertyViewer of=value label=\"Stored as\" /></ElementViewer>",
+         visualizer Choice = <ElementVisualizer title=label><PropertyVisualizer of=value label=\"Stored as\" /></ElementVisualizer>",
     );
 }
 
 #[test]
-fn a_components_viewer_names_its_props() {
+fn a_components_visualizer_names_its_props() {
     assert_clean(
         "component <Question label:string help?:string /> = { <Panel /> }\n\
-         viewer Question = <ElementViewer title=label subtitle=help />",
+         visualizer Question = <ElementVisualizer title=label subtitle=help />",
     );
     // A component's state is not among its props.
     assert_error(
         "component <Counter step:int /> = { state { count:int = 0 } <Panel /> }\n\
-         viewer Counter = <ElementViewer title=count />",
+         visualizer Counter = <ElementVisualizer title=count />",
         None,
         &["count"],
     );
@@ -381,7 +384,7 @@ fn a_components_viewer_names_its_props() {
 fn a_misspelled_property_is_a_type_error() {
     assert_error(
         "type Choice = { label:string }\n\
-         viewer Choice = <ElementViewer title=lable />",
+         visualizer Choice = <ElementVisualizer title=lable />",
         None,
         &["lable"],
     );
@@ -392,46 +395,46 @@ fn a_wrong_explicit_target() {
     assert_error(
         "type Choice = { label:string }\n\
          type Other = { name:string }\n\
-         viewer Choice = <ElementViewer Target=Other title=name />",
-        Some("viewer-target-mismatch"),
+         visualizer Choice = <ElementVisualizer Target=Other title=name />",
+        Some("visualizer-target-mismatch"),
         &["Target=Other", "Choice"],
     );
     // Binding the target itself is allowed.
     assert_clean(
         "type Choice = { label:string }\n\
-         viewer Choice = <ElementViewer Target=Choice title=label />",
+         visualizer Choice = <ElementVisualizer Target=Choice title=label />",
     );
 }
 
 #[test]
-fn outside_a_viewer_declaration_the_rule_is_unchanged() {
-    assert_error("let h = <ElementViewer />", None, &["Target"]);
+fn outside_a_visualizer_declaration_the_rule_is_unchanged() {
+    assert_error("let h = <ElementVisualizer />", None, &["Target"]);
 }
 
 #[test]
 fn a_computed_label_is_rejected() {
     for value in [
-        "<ElementViewer name={prefix} />",
-        "<ElementViewer>Pick {prefix}</ElementViewer>",
-        "<ElementViewer>{if true { <PropertyViewer of=label /> }}</ElementViewer>",
-        "<ElementViewer>{for x in { 1 2 } { <PropertyViewer of=label /> }}</ElementViewer>",
-        "{ <ElementViewer /> }",
+        "<ElementVisualizer name={prefix} />",
+        "<ElementVisualizer>Pick {prefix}</ElementVisualizer>",
+        "<ElementVisualizer>{if true { <PropertyVisualizer of=label /> }}</ElementVisualizer>",
+        "<ElementVisualizer>{for x in { 1 2 } { <PropertyVisualizer of=label /> }}</ElementVisualizer>",
+        "{ <ElementVisualizer /> }",
     ] {
         assert_error(
             &format!(
                 "type Choice = {{ label:string }}\n\
                  let prefix = \"Pick\"\n\
-                 viewer Choice = {value}"
+                 visualizer Choice = {value}"
             ),
             None,
-            &["A viewer's values must be written out"],
+            &["A visualizer's values must be written out"],
         );
     }
     // A bare name resolves only against a union's cases, never to a value.
     assert_error(
         "type Choice = { label:string }\n\
          let prefix = \"Pick\"\n\
-         viewer Choice = <ElementViewer name=prefix />",
+         visualizer Choice = <ElementVisualizer name=prefix />",
         None,
         &["prefix"],
     );
@@ -441,20 +444,20 @@ fn a_computed_label_is_rejected() {
 fn literals_and_bare_names_are_accepted() {
     assert_clean(
         "component <Question label:string required:boolean = true /> = { <Panel /> }\n\
-         viewer Question = <ElementViewer name=\"Question\" title=label><PropertyViewer of=required whenTrue=\"Required\" whenFalse=\"Optional\" /></ElementViewer>",
+         visualizer Question = <ElementVisualizer name=\"Question\" title=label><PropertyVisualizer of=required whenTrue=\"Required\" whenFalse=\"Optional\" /></ElementVisualizer>",
     );
 }
 
 #[test]
 fn twice_in_one_module() {
-    let diagnostics = viewer_diagnostics(
+    let diagnostics = visualizer_diagnostics(
         "type Choice = { label:string }\n\
-         viewer Choice = <ElementViewer title=label />\n\
-         viewer Choice = <ElementViewer name=\"Option\" />",
+         visualizer Choice = <ElementVisualizer title=label />\n\
+         visualizer Choice = <ElementVisualizer name=\"Option\" />",
     );
     let duplicates = diagnostics
         .iter()
-        .filter(|diagnostic| diagnostic.code.as_deref() == Some("duplicate-viewer"))
+        .filter(|diagnostic| diagnostic.code.as_deref() == Some("duplicate-visualizer"))
         .collect::<Vec<_>>();
     assert_eq!(duplicates.len(), 1, "{diagnostics:#?}");
     assert!(duplicates[0].message.contains("Choice"));
@@ -462,13 +465,13 @@ fn twice_in_one_module() {
 }
 
 #[test]
-fn a_viewer_of_an_imported_declaration() {
+fn a_visualizer_of_an_imported_declaration() {
     let diagnostics = diagnostics(&[
         (
             "main.nx",
-            "import \"@nx/viewer\"\nimport { Choice, Card } from \"./lib.nx\"\n\
-             viewer Choice = <ElementViewer title=label />\n\
-             viewer Card = <ElementViewer title=title />",
+            "import \"@nx/visualizer\"\nimport { Choice, Card } from \"./lib.nx\"\n\
+             visualizer Choice = <ElementVisualizer title=label />\n\
+             visualizer Card = <ElementVisualizer title=title />",
         ),
         (
             "lib.nx",
@@ -483,7 +486,7 @@ fn a_viewer_of_an_imported_declaration() {
 
 const UI_ROOT: &str = "libraries/ui";
 
-/// A library with components, one of them abstract, and its own viewer declarations.
+/// A library with components, one of them abstract, and its own visualizer declarations.
 fn ui_registry() -> LibraryRegistry {
     let registry = LibraryRegistry::new();
     registry
@@ -491,10 +494,10 @@ fn ui_registry() -> LibraryRegistry {
             UI_ROOT,
             vec![NxLibraryModule::new(
                 "ui.nx",
-                "import \"@nx/viewer\"
+                "import \"@nx/visualizer\"
 export abstract component <Question label:string help?:string />
 export component <Card extends Question title:string /> = { <Panel /> }
-viewer Question = <ElementViewer title=label subtitle=help />
+visualizer Question = <ElementVisualizer title=label subtitle=help />
 ",
             )],
         ))
@@ -540,13 +543,13 @@ let key(): Card.Props.Property = {{ Card.Props.Property.label }}"
 }
 
 #[test]
-fn a_viewer_of_an_imported_component_and_a_library_with_viewers() {
-    // The library's own viewer declarations analyze cleanly, and a document may declare a viewer
-    // for a declaration it imports from the library.
+fn a_visualizer_of_an_imported_component_and_a_library_with_visualizers() {
+    // The library's own visualizer declarations analyze cleanly, and a document may declare a
+    // visualizer for a declaration it imports from the library.
     let artifact = library_artifact(&format!(
-        "import \"@nx/viewer\"
+        "import \"@nx/visualizer\"
 import {{ Card }} from \"./{UI_ROOT}\"
-viewer Card = <ElementViewer name=\"Card\" title=title badge=label />
+visualizer Card = <ElementVisualizer name=\"Card\" title=title badge=label />
 let root(): Card.Props = {{ <Card.Props label=\"Q\" title=\"Hi\" /> }}"
     ));
     assert!(
@@ -556,13 +559,13 @@ let root(): Card.Props = {{ <Card.Props label=\"Q\" title=\"Hi\" /> }}"
     );
 }
 
-// --- Viewer declarations across a program ----------------------------------------------------
+// --- Visualizer declarations across a program ----------------------------------------------------
 
 const CHOICE_LIBRARY: (&str, &str) = ("lib.nx", "export type Choice = { label:string }");
 
 fn rewording(name: &str) -> String {
     format!(
-        "import \"@nx/viewer\"\nimport {{ Choice }} from \"./lib.nx\"\nviewer Choice = <ElementViewer name=\"{name}\" />\nexport let marker = 1"
+        "import \"@nx/visualizer\"\nimport {{ Choice }} from \"./lib.nx\"\nvisualizer Choice = <ElementVisualizer name=\"{name}\" />\nexport let marker = 1"
     )
 }
 
@@ -570,7 +573,7 @@ fn duplicates_in(diagnostics: &[NxDiagnostic], file: &str) -> Vec<NxDiagnostic> 
     diagnostics
         .iter()
         .filter(|diagnostic| {
-            diagnostic.code.as_deref() == Some("duplicate-viewer")
+            diagnostic.code.as_deref() == Some("duplicate-visualizer")
                 && diagnostic
                     .labels
                     .first()
@@ -581,7 +584,7 @@ fn duplicates_in(diagnostics: &[NxDiagnostic], file: &str) -> Vec<NxDiagnostic> 
 }
 
 #[test]
-fn two_program_modules_declare_a_viewer_for_the_same_target() {
+fn two_program_modules_declare_a_visualizer_for_the_same_target() {
     let a = rewording("A");
     let b = rewording("B");
     let diagnostics = diagnostics(&[
@@ -600,7 +603,7 @@ fn two_program_modules_declare_a_viewer_for_the_same_target() {
         "{:#?}",
         main[0]
     );
-    // Each of the two modules loads only its own viewer declaration.
+    // Each of the two modules loads only its own visualizer declaration.
     assert!(duplicates_in(&diagnostics, "a.nx").is_empty());
     assert!(duplicates_in(&diagnostics, "b.nx").is_empty());
 }
@@ -612,35 +615,37 @@ fn a_document_holding_one_of_two_duplicates_is_told_at_its_own() {
     let diagnostics = diagnostics(&[("main.nx", &main), ("a.nx", &a), CHOICE_LIBRARY]);
     let main_duplicates = duplicates_in(&diagnostics, "main.nx");
     assert_eq!(main_duplicates.len(), 1, "{diagnostics:#?}");
-    let viewer_line = main.find("viewer Choice").expect("the viewer declaration");
+    let visualizer_line = main
+        .find("visualizer Choice")
+        .expect("the visualizer declaration");
     assert_eq!(
-        main_duplicates[0].labels[0].span.start_byte as usize, viewer_line,
+        main_duplicates[0].labels[0].span.start_byte as usize, visualizer_line,
         "{:#?}",
         main_duplicates[0]
     );
 }
 
 #[test]
-fn the_declaring_modules_viewer_never_conflicts() {
+fn the_declaring_modules_visualizer_never_conflicts() {
     let a = rewording("A");
     let diagnostics = diagnostics(&[
         ("main.nx", "import \"./a.nx\"\nlet root() = { 1 }"),
         ("a.nx", &a),
         (
             "lib.nx",
-            "import \"@nx/viewer\"\nexport type Choice = { label:string }\nviewer Choice = <ElementViewer title=label />",
+            "import \"@nx/visualizer\"\nexport type Choice = { label:string }\nvisualizer Choice = <ElementVisualizer title=label />",
         ),
     ]);
     assert!(
         diagnostics
             .iter()
-            .all(|diagnostic| diagnostic.code.as_deref() != Some("duplicate-viewer")),
+            .all(|diagnostic| diagnostic.code.as_deref() != Some("duplicate-visualizer")),
         "{diagnostics:#?}"
     );
 }
 
 #[test]
-fn an_unloaded_modules_viewer_does_not_count() {
+fn an_unloaded_modules_visualizer_does_not_count() {
     let a = rewording("A");
     let c = rewording("C");
     let diagnostics = diagnostics(&[
@@ -652,7 +657,7 @@ fn an_unloaded_modules_viewer_does_not_count() {
     assert!(
         diagnostics
             .iter()
-            .all(|diagnostic| diagnostic.code.as_deref() != Some("duplicate-viewer")),
+            .all(|diagnostic| diagnostic.code.as_deref() != Some("duplicate-visualizer")),
         "{diagnostics:#?}"
     );
 }

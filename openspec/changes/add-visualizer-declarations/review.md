@@ -1,14 +1,14 @@
-# Review: add-viewer-declarations
+# Review: add-visualizer-declarations
 
 ## Scope
-**Reviewed artifacts:** proposal.md, design.md, tasks.md, specs/viewer-declarations, specs/viewer-library,
+**Reviewed artifacts:** proposal.md, design.md, tasks.md, specs/visualizer-declarations, specs/visualizer-library,
 specs/component-props-type, specs/record-type-parameters, specs/property-references, specs/update-records,
 specs/component-syntax, specs/source-tree, specs/viewer, specs/playground, specs/cli-code-generation,
 specs/editor-syntax-highlighting  
 **Reviewed code:** every commit in `origin/main..HEAD`: `crates/nx-syntax` (grammar, ast), `crates/nx-hir`
-(`lower.rs`, `records.rs`, `viewers.rs`, `lib.rs`, `components.rs`), `crates/nx-types` (`infer.rs`, `check.rs`,
-tests), `crates/nx-api` (`program_viewers.rs`, `artifacts.rs`, `std/viewer/viewer.nx`, tests),
-`crates/nx-codegen/src/builder.rs`, `crates/nx-cli/src/typegen`, `crates/nx-language-service` (`viewers.rs`,
+(`lower.rs`, `records.rs`, `visualizers.rs`, `lib.rs`, `components.rs`), `crates/nx-types` (`infer.rs`, `check.rs`,
+tests), `crates/nx-api` (`program_visualizers.rs`, `artifacts.rs`, `std/visualizer/visualizer.nx`, tests),
+`crates/nx-codegen/src/builder.rs`, `crates/nx-cli/src/typegen`, `crates/nx-language-service` (`visualizers.rs`,
 `source_tree.rs`, tests), wasm and Node bindings, `packages/language-protocol`, `language-core`,
 `language-http`, `packages/viewer` (`render.ts`, `index.ts`, `hover.ts`, `styles.ts`, tests),
 `sites/playground`, `src/vscode` grammar, website docs.  
@@ -18,45 +18,45 @@ through the wasm SDK's language snapshot and `<nx-viewer>` under jsdom, and the 
 
 ## Findings
 
-### ✅ Verified - RF1 Viewer declarations that fail type checking still apply, so type-invalid values reach the source tree
+### ✅ Verified - RF1 Visualizer declarations that fail type checking still apply, so type-invalid values reach the source tree
 - **Severity:** Medium (confidence: high, reproduced)
-- **Evidence:** `program_viewers` (`crates/nx-api/src/program_viewers.rs:130`) keeps every viewer declaration
-  whose target resolves and whose tag *spelling* matches the record, and `read_viewer_value` /
+- **Evidence:** `program_visualizers` (`crates/nx-api/src/program_visualizers.rs:130`) keeps every visualizer declaration
+  whose target resolves and whose tag *spelling* matches the record, and `read_visualizer_value` /
   `attribute_value` (`:308`, `:370`) read the attributes syntactically, so a declaration with type errors
   still contributes whatever it wrote. Probes:
-  - A host module with `viewer Choice = <ElementViewer name="Host" title=lable><PropertyViewer of=valu … />`
+  - A host module with `visualizer Choice = <ElementVisualizer name="Host" title=lable><PropertyVisualizer of=valu … />`
     (two `unresolved-contextual-name` errors in `host.nx`) still overrides the library's `name="Lib"`:
-    the resolved viewer reads `name: "Host"`. The spec says a host viewer module that does not analyze
-    cleanly "SHALL contribute the viewer declarations that do" (viewer-declarations, "gathered from the
+    the resolved visualizer reads `name: "Host"`. The spec says a host visualizer module that does not analyze
+    cleanly "SHALL contribute the visualizer declarations that do" (visualizer-declarations, "gathered from the
     program and from host modules"), i.e. not the ones that don't.
-  - `viewer Choice = <ElementViewer layout="row bogus" title="label"><PropertyViewer of="value" format="image" /></ElementViewer>`
+  - `visualizer Choice = <ElementVisualizer layout="row bogus" title="label"><PropertyVisualizer of="value" format="image" /></ElementVisualizer>`
     reports four `record-field-type-mismatch` errors, yet the answer carries
     `{"title":"label","layout":"row bogus","properties":[{"name":"value","format":"image",…}]}`. The
     `layout`, `place` and `format` strings are passed through unvalidated
     (`crates/nx-language-service/src/source_tree.rs:2001`, `:2020`), violating the protocol's
-    `SourceViewerLayout` / `SourceValueFormat` / `"body" | "details"` unions; the viewer then treats
+    `SourceVisualizerLayout` / `SourceValueFormat` / `"body" | "details"` unions; the viewer then treats
     `"row bogus"` as a non-card layout and folds every row into the details strip.
-- **Recommendation:** Only gather viewer declarations that type-checked cleanly. For example, have
-  `infer_viewer` record a per-declaration "clean" flag (no error diagnostic within `viewer.span`) on the
-  module artifact, or filter in `program_viewers` by the module's error diagnostics whose primary span lies
-  inside the viewer declaration. Independently, read case-typed attributes (`layout`, `place`, `format`,
+- **Recommendation:** Only gather visualizer declarations that type-checked cleanly. For example, have
+  `infer_visualizer` record a per-declaration "clean" flag (no error diagnostic within `visualizer.span`) on the
+  module artifact, or filter in `program_visualizers` by the module's error diagnostics whose primary span lies
+  inside the visualizer declaration. Independently, read case-typed attributes (`layout`, `place`, `format`,
   `of`, `title`…) only from `Expr::ResolvedUnionCase` (not string literals), and validate `layout`/`place`/
   `format` against their known cases before emitting them. Add tests: a host module with a misspelled
   property does not override the library's name; a quoted `layout="row"` is not applied.
-- **Fix:** `program_viewers` (`crates/nx-api/src/program_viewers.rs`) now leaves out, whole, any viewer
+- **Fix:** `program_visualizers` (`crates/nx-api/src/program_visualizers.rs`) now leaves out, whole, any visualizer
   declaration with an error diagnostic whose primary label lies inside its span (`has_errors_within`;
-  `duplicate-viewer` is excluded so duplicate detection does not feed back on itself). As defense in depth,
-  `ResolvedViewer::apply` and `merge_child` (`crates/nx-language-service/src/viewers.rs`) drop any `layout`,
+  `duplicate-visualizer` is excluded so duplicate detection does not feed back on itself). As defense in depth,
+  `ResolvedVisualizer::apply` and `merge_child` (`crates/nx-language-service/src/visualizers.rs`) drop any `layout`,
   `place` or `format` value outside the protocol's unions (`is_known_value`). Test
-  `a_viewer_declaration_with_an_error_does_not_apply` covers a host module with `title=lable` (the library's
+  `a_visualizer_declaration_with_an_error_does_not_apply` covers a host module with `title=lable` (the library's
   name stands) and a quoted `layout="inline"` / `format="image"` (neither applies).
-- **Verification:** Re-ran the original probes against the rebuilt wasm. The host module with `title=lable` / `of=valu` no longer overrides the library: `name` stays "Lib". The quoted `layout="row bogus"` / `format="image"` declaration and the one with an unknown `whatever` attribute now contribute nothing. An error elsewhere in the module, outside the viewer's span, does not drop the viewer. `is_known_value` also filters `layout`, `place` and `format` in `apply` and `merge_child`. `a_viewer_declaration_with_an_error_does_not_apply` passes. Applying the rule before duplicate detection opens a new gap, filed as RF8.
+- **Verification:** Re-ran the original probes against the rebuilt wasm. The host module with `title=lable` / `of=valu` no longer overrides the library: `name` stays "Lib". The quoted `layout="row bogus"` / `format="image"` declaration and the one with an unknown `whatever` attribute now contribute nothing. An error elsewhere in the module, outside the viewer's span, does not drop the viewer. `is_known_value` also filters `layout`, `place` and `format` in `apply` and `merge_child`. `a_visualizer_declaration_with_an_error_does_not_apply` passes. Applying the rule before duplicate detection opens a new gap, filed as RF8.
 
 ### ✅ Verified - RF2 An unknown format makes the viewer render a string literal as an empty span, losing its text
 - **Severity:** Low (confidence: high, reproduced)
 - **Evidence:** `formatted()` (`packages/viewer/src/render.ts:855`) switches over the known formats with no
   default branch, so any other `format` value leaves the marked span empty. With
-  `<PropertyViewer of=value format="bogus" />` (see RF1) and `<Choice value="SECRET-TEXT" />`, the rendered
+  `<PropertyVisualizer of=value format="bogus" />` (see RF1) and `<Choice value="SECRET-TEXT" />`, the rendered
   literal is `<span … data-key="c.value.value.value"></span>` and the text appears nowhere in the reading.
   The key is still present, so the coverage test cannot catch it, but the reading is no longer lossless
   in substance ("A viewer SHALL never hide a node"). The same trust-the-tree pattern applies to `layout`
@@ -76,7 +76,7 @@ through the wasm SDK's language snapshot and `<nx-viewer>` under jsdom, and the 
   as its heading and title, with every other row in its details strip"; the website page and the
   `ElementLayout.inline` doc comment say the same. `renderElement` moves every part in `PARTS`
   (`render.ts:498`, loop at `:553`–`:562`) into the header regardless of layout. Probe:
-  `viewer Tag = <ElementViewer layout=inline title=name subtitle=note badge=code />` renders an
+  `visualizer Tag = <ElementVisualizer layout=inline title=name subtitle=note badge=code />` renders an
   `inline-layout` span whose header holds the `title`, `subtitle` and `badge` parts.
 - **Recommendation:** For `layout === "inline"`, only bind `title` into the header and let `subtitle`,
   `badge` and `image` attributes fall through to `detailRows` (they would then read as ordinary rows with
@@ -107,38 +107,38 @@ through the wasm SDK's language snapshot and `<nx-viewer>` under jsdom, and the 
   layout from the probe; the existing `Card.Props` rejection test still passes.
 - **Verification:** Re-ran the `nxlang typegen` probe. `shared.Props` imported through `import "../shared" as shared` now generates `p: shared_Props`. `ui.Card.Props` from another library is still rejected with the props-record message, so the resolution reaches imported `RecordKind::Props` interface items. The nx-cli typegen tests pass (216).
 
-### ✅ Verified - RF5 A second `PropertyViewer` for the same property in one viewer declaration is silently dropped
+### ✅ Verified - RF5 A second `PropertyVisualizer` for the same property in one visualizer declaration is silently dropped
 - **Severity:** Low (confidence: high, reproduced)
-- **Evidence:** In `ResolvedViewer::apply` (`crates/nx-language-service/src/viewers.rs:203`–`:220`), the
+- **Evidence:** In `ResolvedVisualizer::apply` (`crates/nx-language-service/src/visualizers.rs:203`–`:220`), the
   second child with the same `of` starts from an empty `ResolvedChild` (the first was already moved out of
   `earlier`) and is then discarded by the `!self.properties.iter().any(…)` guard. With
-  `<PropertyViewer of=label label="First" /><PropertyViewer of=label place=details />`, the resolved viewer
+  `<PropertyVisualizer of=label label="First" /><PropertyVisualizer of=label place=details />`, the resolved visualizer
   has `label: "First"` and `place: "body"`; the `place=details` is lost, and analysis reports nothing.
 - **Recommendation:** Either merge the later child into the entry already in `self.properties`
   (consistent with "merge by `of`, attribute by attribute") or report a diagnostic for a repeated `of`
-  within one viewer declaration. The same applies to repeated `CaseViewer`s, which currently merge.
-- **Fix:** In `ResolvedViewer::apply`, a later `PropertyViewer` whose `of` is already in the resolved
-  properties merges into that entry, attribute by attribute, as `CaseViewer`s do. Test
-  `two_property_viewers_of_one_property_in_one_viewer_merge` asserts `label: "First"` and `place: details`.
-- **Verification:** Re-ran the probe. `<PropertyViewer of=label label="First" /><PropertyViewer of=label place=details />` now resolves to `label: "First", place: "details"`, and the entry is listed once at the first one's position. `two_property_viewers_of_one_property_in_one_viewer_merge` passes.
+  within one visualizer declaration. The same applies to repeated `CaseVisualizer`s, which currently merge.
+- **Fix:** In `ResolvedVisualizer::apply`, a later `PropertyVisualizer` whose `of` is already in the resolved
+  properties merges into that entry, attribute by attribute, as `CaseVisualizer`s do. Test
+  `two_property_visualizers_of_one_property_in_one_visualizer_merge` asserts `label: "First"` and `place: details`.
+- **Verification:** Re-ran the probe. `<PropertyVisualizer of=label label="First" /><PropertyVisualizer of=label place=details />` now resolves to `label: "First", place: "details"`, and the entry is listed once at the first one's position. `two_property_visualizers_of_one_property_in_one_visualizer_merge` passes.
 
-### ✅ Verified - RF6 Forgetting `import "@nx/viewer"` gives a self-contradictory diagnostic
+### ✅ Verified - RF6 Forgetting `import "@nx/visualizer"` gives a self-contradictory diagnostic
 - **Severity:** Low (confidence: high, reproduced)
-- **Evidence:** Without the import, `viewer Choice = <ElementViewer title=label />` reports only
-  `viewer-record-mismatch`: "The viewer of record 'Choice' must be a 'ElementViewer' from "@nx/viewer", not
-  'ElementViewer'" (`crates/nx-types/src/infer.rs:1558`). The tag falls back to an unknown host element whose
+- **Evidence:** Without the import, `visualizer Choice = <ElementVisualizer title=label />` reports only
+  `visualizer-record-mismatch`: "The visualizer of record 'Choice' must be a 'ElementVisualizer' from "@nx/visualizer", not
+  'ElementVisualizer'" (`crates/nx-types/src/infer.rs:1558`). The tag falls back to an unknown host element whose
   type prints as the same name, so the message names the right record as the wrong one and does not say
   what to do. This is likely the most common first mistake (the docs say the module "must
-  `import "@nx/viewer"`").
-- **Recommendation:** When the value's type has no origin in `@nx/viewer` but its name equals the expected
-  record, say that the record is not imported and suggest `import "@nx/viewer"`. Also fix the article
-  ("an 'ElementViewer'").
-- **Fix:** When the written record's name equals the expected one, the `viewer-record-mismatch` message
-  (`crates/nx-types/src/infer.rs`) now reads "must be an 'ElementViewer' from "@nx/viewer", and this
-  'ElementViewer' is not that one", followed by "; add `import "@nx/viewer"`" when the module does not
+  `import "@nx/visualizer"`").
+- **Recommendation:** When the value's type has no origin in `@nx/visualizer` but its name equals the expected
+  record, say that the record is not imported and suggest `import "@nx/visualizer"`. Also fix the article
+  ("an 'ElementVisualizer'").
+- **Fix:** When the written record's name equals the expected one, the `visualizer-record-mismatch` message
+  (`crates/nx-types/src/infer.rs`) now reads "must be an 'ElementVisualizer' from "@nx/visualizer", and this
+  'ElementVisualizer' is not that one", followed by "; add `import "@nx/visualizer"`" when the module does not
   import the library; the article is chosen by the name (`article`). Test
-  `a_viewer_without_the_library_imported_says_to_import_it` asserts the exact message.
-- **Verification:** Re-ran the probe without the import. It now reads: "The viewer of record 'Choice' must be an 'ElementViewer' from "@nx/viewer", and this 'ElementViewer' is not that one; add `import "@nx/viewer"`". The component case reads the same way. The article is right, and the import hint is given only when the import is missing.
+  `a_visualizer_without_the_library_imported_says_to_import_it` asserts the exact message.
+- **Verification:** Re-ran the probe without the import. It now reads: "The visualizer of record 'Choice' must be an 'ElementVisualizer' from "@nx/visualizer", and this 'ElementVisualizer' is not that one; add `import "@nx/visualizer"`". The component case reads the same way. The article is right, and the import hint is given only when the import is missing.
 
 ### ✅ Verified - RF7 The "union a property uses comes along" test does not exercise the case it is named for
 - **Severity:** Low (confidence: medium)
@@ -146,49 +146,49 @@ through the wasm SDK's language snapshot and `<nx-viewer>` under jsdom, and the 
   names `ChoiceLayout`". `the_union_a_property_uses_comes_along`
   (`crates/nx-language-service/src/source_tree_tests.rs:1538`) uses `SURVEY_FORM`, which writes
   `layout=chips`, a `case` node that already brings `ChoiceLayout` into the table. The property-type path in
-  `attach_viewers` is covered only for the alias (`ImageUrl`).
+  `attach_visualizers` is covered only for the alias (`ImageUrl`).
 - **Recommendation:** Use a form that leaves `layout` unset (as `the_base_name_is_not_inherited` does with
-  `MultiChoice`) and assert `ChoiceLayout` still carries its case viewers.
+  `MultiChoice`) and assert `ChoiceLayout` still carries its case visualizers.
 - **Fix:** `the_union_a_property_uses_comes_along` now uses a form that leaves `layout` unset, asserts no
-  node names `ChoiceLayout`, and checks `ChoiceLayout` still carries its three case viewers.
-- **Verification:** The test now uses a `SingleChoice` that leaves `layout` unset. It asserts that no node refers to `ChoiceLayout` and that `ChoiceLayout` still carries its three case viewers, so it exercises the property-type path in `attach_viewers`. It passes.
+  node names `ChoiceLayout`, and checks `ChoiceLayout` still carries its three case visualizers.
+- **Verification:** The test now uses a `SingleChoice` that leaves `layout` unset. It asserts that no node refers to `ChoiceLayout` and that `ChoiceLayout` still carries its three case visualizers, so it exercises the property-type path in `attach_visualizers`. It passes.
 
 ## New Findings Discovered During 2026-10-12 18:40 Verification
 
-### ✅ Verified - RF8 Dropping an erroneous viewer declaration before duplicate detection lets a reported duplicate apply, and hides a cross-module duplicate
+### ✅ Verified - RF8 Dropping an erroneous visualizer declaration before duplicate detection lets a reported duplicate apply, and hides a cross-module duplicate
 - **Severity:** Low (confidence: high, reproduced)
-- **Evidence:** In `program_viewers` (`crates/nx-api/src/program_viewers.rs`), `has_errors_within` is checked
-  before `targets.insert(...)`, and the cross-module duplicate check (`duplicate_program_viewers`) runs over
+- **Evidence:** In `program_visualizers` (`crates/nx-api/src/program_visualizers.rs`), `has_errors_within` is checked
+  before `targets.insert(...)`, and the cross-module duplicate check (`duplicate_program_visualizers`) runs over
   that filtered list. RF1's fix introduced this. Two probes:
-  - **Same module:** `viewer Choice = <ElementViewer name="One" title=lable />` followed by
-    `viewer Choice = <ElementViewer name="Two" />`. Analysis reports `duplicate-viewer` at the second
-    declaration, yet the resolved viewer has `name: "Two"`. The skipped first declaration never claimed the
+  - **Same module:** `visualizer Choice = <ElementVisualizer name="One" title=lable />` followed by
+    `visualizer Choice = <ElementVisualizer name="Two" />`. Analysis reports `duplicate-visualizer` at the second
+    declaration, yet the resolved visualizer has `name: "Two"`. The skipped first declaration never claimed the
     target, so the second one applies even though it carries an error. That contradicts the spec ("a
-    duplicate-viewer error at the second") and the function's own doc comment ("So is the second ... left
+    duplicate-visualizer error at the second") and the function's own doc comment ("So is the second ... left
     out"). It also breaks RF1's answer that a declaration with any error contributes nothing.
-  - **Across modules:** two modules each declare `viewer Choice`, and the one in `a.nx` has `title=lable`.
-    The program reports no `duplicate-viewer`, and the resolved viewer takes `b.nx`'s `name: "B"`. The spec
-    says two program modules that both declare a viewer for a target are a `duplicate-viewer` error and
+  - **Across modules:** two modules each declare `visualizer Choice`, and the one in `a.nx` has `title=lable`.
+    The program reports no `duplicate-visualizer`, and the resolved visualizer takes `b.nx`'s `name: "B"`. The spec
+    says two program modules that both declare a viewer for a target are a `duplicate-visualizer` error and
     neither applies. Fixing the typo in `a.nx` would then make a duplicate error appear and remove the
     viewer the reader had been seeing.
-- **Recommendation:** Run duplicate detection over every viewer declaration whose target resolves and
+- **Recommendation:** Run duplicate detection over every visualizer declaration whose target resolves and
   whose record matches, before the error filter. In one module, call `targets.insert` before checking
   `has_errors_within`. Across modules, compute duplicates on the unfiltered list. After that, leave out
   the declarations that have errors and both members of any duplicate. Add tests for both probes.
-- **Fix:** In `program_viewers`, the first viewer declaration whose target resolves now claims the target
+- **Fix:** In `program_visualizers`, the first visualizer declaration whose target resolves now claims the target
   before anything else is checked, as analysis decides, so a second one in the module never applies. A
-  declaration with errors is kept with `clean: false` (new `ProgramViewer::clean`), so
-  `duplicate_program_viewers` and the `duplicate-viewer` diagnostic count it; `ProgramViewers::gather`
+  declaration with errors is kept with `clean: false` (new `ProgramVisualizer::clean`), so
+  `duplicate_program_visualizers` and the `duplicate-visualizer` diagnostic count it; `ProgramVisualizers::gather`
   applies only clean declarations, after removing duplicates, for the program and for host modules. Tests
-  `the_second_of_two_viewers_in_one_module_does_not_apply_when_the_first_has_errors` and
+  `the_second_of_two_visualizers_in_one_module_does_not_apply_when_the_first_has_errors` and
   `a_duplicate_with_errors_still_conflicts` fail without the fix.
-- **Verification:** Rebuilt the wasm from f55faf4 and re-ran both probes. In the same-module probe, the first declaration (with `title=lable`) now claims the target. The second is reported as `duplicate-viewer`, and `Choice` has no viewer. In the cross-module probe, `duplicate-viewer` is now reported at `main.nx` for `t/a.nx` and `t/b.nx` with an error in `a.nx`, and neither applies. The same holds when `a.nx` lacks `import "@nx/viewer"` or writes a computed `name={p}`. RF1 still holds: a host module with misspelled properties leaves the library's `name` "Lib" in place; a declaration with quoted case values, an unknown attribute or a repeated `title` contributes nothing; a clean viewer next to an unrelated error in its module still applies. Host modules filter by `clean` too. The viewer tests pass (94/94).
+- **Verification:** Rebuilt the wasm from f55faf4 and re-ran both probes. In the same-module probe, the first declaration (with `title=lable`) now claims the target. The second is reported as `duplicate-visualizer`, and `Choice` has no viewer. In the cross-module probe, `duplicate-visualizer` is now reported at `main.nx` for `t/a.nx` and `t/b.nx` with an error in `a.nx`, and neither applies. The same holds when `a.nx` lacks `import "@nx/visualizer"` or writes a computed `name={p}`. RF1 still holds: a host module with misspelled properties leaves the library's `name` "Lib" in place; a declaration with quoted case values, an unknown attribute or a repeated `title` contributes nothing; a clean viewer next to an unrelated error in its module still applies. Host modules filter by `clean` too. The viewer tests pass (94/94).
 
 ## Questions
-- RF1: should a viewer declaration with errors contribute nothing (all-or-nothing per declaration), or
+- RF1: should a visualizer declaration with errors contribute nothing (all-or-nothing per declaration), or
   contribute the attributes that checked? The spec text reads as all-or-nothing per declaration; the
   recommendation assumes that.
-  - **Answer:** All-or-nothing per declaration: a viewer declaration with any error contributes nothing
+  - **Answer:** All-or-nothing per declaration: a visualizer declaration with any error contributes nothing
     (RF1's fix).
 
 ## Summary
@@ -199,7 +199,7 @@ through the wasm SDK's language snapshot and `<nx-viewer>` under jsdom, and the 
   (with `noopener noreferrer`, `no-referrer`, lazy loading and a host off switch), `tel:` keeps digits
   only, markdown renders no links, and colours go through the CSSOM `backgroundColor` setter, which cannot
   trigger a fetch.
-- The main gap is RF1: viewer declarations are read syntactically and applied even when they fail to
+- The main gap is RF1: visualizer declarations are read syntactically and applied even when they fail to
   type-check, which contradicts the spec and pushes out-of-protocol values to readers; RF2 makes the viewer
   robust to such values. RF3–RF7 are smaller spec divergences, a typegen false positive, a silent merge
   loss, a confusing diagnostic and a test gap.
@@ -371,18 +371,18 @@ program with `build_program_artifact_from_source` and evaluates it:
 
 **Scope of this pass:** the source-first Read view merged in at 9b4278f (`git log 9b4278f^2..5372545`,
 diffed against `eced3fe`, the PR head before it).  
-**Reviewed artifacts:** proposal.md, design.md, tasks.md, specs/viewer, specs/viewer-library,
+**Reviewed artifacts:** proposal.md, design.md, tasks.md, specs/viewer, specs/visualizer-library,
 specs/source-tree, specs/playground.  
 **Reviewed code:** `packages/viewer/src/{index,source,styles,tree}.ts` and its tests and fixtures,
-`crates/nx-language-service/src/{source_tree,viewers}.rs`, `crates/nx-api/src/std/viewer/viewer.nx`,
+`crates/nx-language-service/src/{source_tree,visualizers}.rs`, `crates/nx-api/src/std/visualizer/visualizer.nx`,
 `packages/language-protocol`, `packages/value-view` exports, `sites/playground` (`App.tsx`, `app.css`,
 `theme.ts`, `reading/ReadingView.tsx`, `NxEditor.tsx`, `OutputPane.tsx`, `PreviewView.tsx`, examples,
 `check-examples.mjs`, package.json), `packages/viewer/README.md`, `sites/playground/README.md`, and the
-website's viewer-declarations and `@nx/viewer` pages.  
+website's visualizer-declarations and `@nx/visualizer` pages.  
 **Checks run:**
 - `cargo fmt --all --check`: clean.
 - `cargo test -p nx-language-service -p nx-api`: all pass (439 + 10 + 29 nx-api, 222 nx-language-service).
-- `openspec validate add-viewer-declarations --strict`: **fails** (RF11).
+- `openspec validate add-visualizer-declarations --strict`: **fails** (RF11).
 - `packages/viewer` `pnpm test`: 26/26 pass. That needed a rebuild first: the checked-out
   `language-protocol` dist and wasm SDK were stale (5 tsc errors, then 4 test failures), and the old
   `dist` still held the deleted tests (17 failures until it was removed; see RF22).
@@ -392,7 +392,7 @@ website's viewer-declarations and `@nx/viewer` pages.
 - Probes of `<nx-viewer>` under jsdom on trees from the rebuilt wasm SDK, to confirm RF12 to RF16
   and RF18.
 
-### ✅ Verified - RF11 `openspec validate add-viewer-declarations --strict` fails on the new "Code reads as written" requirement
+### ✅ Verified - RF11 `openspec validate add-visualizer-declarations --strict` fails on the new "Code reads as written" requirement
 - **Severity:** Medium (confidence: high)
 - **Evidence:** The validator reports `viewer/spec.md: ADDED "Code reads as written, in the editor's
   colors" must contain SHALL or MUST`. It reads the requirement's first line, and that line
@@ -403,8 +403,8 @@ website's viewer-declarations and `@nx/viewer` pages.
   example "The element SHALL read text that is not part of an element read as a group or a line …".
   Then rerun the strict validation.
 - **Fix:** Opened the requirement with "The element SHALL read text as the document writes it …", so SHALL
-  is on its first line. `openspec validate add-viewer-declarations --strict` passes.
-- **Verification:** `openspec validate add-viewer-declarations --strict` now reports the change valid. The
+  is on its first line. `openspec validate add-visualizer-declarations --strict` passes.
+- **Verification:** `openspec validate add-visualizer-declarations --strict` now reports the change valid. The
   requirement opens with "The element SHALL read text as the document writes it …".
 
 ### ✅ Verified - RF12 A union case element never gets an icon, though the spec, README and docs promise `tag`
@@ -498,10 +498,10 @@ website's viewer-declarations and `@nx/viewer` pages.
 ### ✅ Verified - RF16 In a group, `idPosition=end` is ignored and the id always follows the name
 - **Severity:** Low (confidence: high)
 - **Evidence:** `writeSheet` puts the id chip right after the name whatever `plan.atEnd` says
-  (`source.ts:503-506`). With `viewer Choice = <ElementViewer title=label id=value idPosition=end />`, a
+  (`source.ts:503-506`). With `visualizer Choice = <ElementVisualizer title=label id=value idPosition=end />`, a
   `<Choice value="yes" label="Yes"` written over several lines renders the header `Choice yes  label=Yes`.
   The id comes before the header attribute, and the chip still gets the `id-end` class meant for a
-  chip that closes a tag. The `@nx/viewer` reference page says `end` puts the id "last in its tag, after
+  chip that closes a tag. The `@nx/visualizer` reference page says `end` puts the id "last in its tag, after
   the properties that stay".
 - **Recommendation:** For `atEnd`, append the chip after the header's attributes. Or state in the spec
   and the docs that a group always shows its id after its name, and leave off the `id-end` class there.
@@ -540,7 +540,7 @@ website's viewer-declarations and `@nx/viewer` pages.
 ### ✅ Verified - RF18 An `icon` that Lucide does not have removes the element's icon instead of falling back to its kind's
 - **Severity:** Low (confidence: high)
 - **Evidence:** `elementIcon` (`source.ts:323-327`) picks the viewer's `icon` when it is set and returns
-  nothing when the host cannot draw it. In a probe, `viewer A = <ElementViewer icon="no-such-icon" />`
+  nothing when the host cannot draw it. In a probe, `visualizer A = <ElementVisualizer icon="no-such-icon" />`
   left `<A …/>` with no icon, where without the attribute it gets `box`. Nothing reports the bad name:
   `icon` is a plain `string`. The spec says the icon is "the one its viewer's `icon` names, or else one
   for its kind".
@@ -565,12 +565,12 @@ website's viewer-declarations and `@nx/viewer` pages.
   - 8.1 records a strict `openspec validate` that now fails (RF11).
   - No task covers the Read view itself: groups, lines, ids, icons, colors, Geist and Lucide in the
     playground, and the larger examples.
-- **Recommendation:** Rewrite section 6 to match the design's "What the viewer does with viewer
+- **Recommendation:** Rewrite section 6 to match the design's "What the viewer does with visualizer
   declarations" and the new viewer spec, and add the Read view and larger-examples tasks.
 - **Fix:** Rewrote section 6 of tasks.md for the Read view: a note on the replaced cards work, then the
-  Read view's tasks (reading, viewer values, selection and keys, coverage and fixtures, the playground's
+  Read view's tasks (reading, visualizer values, selection and keys, coverage and fixtures, the playground's
   Read view, the larger examples), all checked. 8.1 holds again now that strict validation passes.
-- **Verification:** tasks.md section 6 now describes the Read view: the reading, viewer values, selection and
+- **Verification:** tasks.md section 6 now describes the Read view: the reading, visualizer values, selection and
   keys, coverage and fixtures, the playground's Read view, and the larger examples. 8.1 holds now that strict
   validation passes. My original evidence was partly wrong: the six cards-era fixtures were still used by the
   coverage test's viewer case. That case now covers every fixture.
@@ -616,7 +616,7 @@ website's viewer-declarations and `@nx/viewer` pages.
     `extends`. The JS tests reach `id` and `icon` only through the wasm SDK, and none covers
     inheritance or the `idPosition` default.
   - `sites/playground/src/worker/session.test.mjs:123-139` still asserts
-    `<ElementViewer name="Option" title=label />`. The playground spec's scenario changed to
+    `<ElementVisualizer name="Option" title=label />`. The playground spec's scenario changed to
     `title=label id=value`, read as `Apples` with the id `a`.
 - **Recommendation:** Add a `source_tree_tests` case covering `id` + `idPosition` (default, `end`, and
   `idPosition` without `id`) and an inherited `icon`. Update the playground test to the spec's scenario.
@@ -628,7 +628,7 @@ website's viewer-declarations and `@nx/viewer` pages.
   (nx-language-service now has 225 tests, up from 222). `session.test.mjs` asserts the spec's `title=label
   id=value` scenario.
 
-### ✅ Verified - RF22 The build does not clean `dist`, so deleted viewer modules and tests survive a rebuild
+### ✅ Verified - RF22 The build does not clean `dist`, so deleted visualizer modules and tests survive a rebuild
 - **Severity:** Low (confidence: medium)
 - **Evidence:** `packages/viewer` builds with plain `tsc -p tsconfig.json`. A checkout that built before
   cf8edda keeps these files in `dist`:

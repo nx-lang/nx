@@ -5,12 +5,12 @@ mod positions;
 mod source_tree;
 #[cfg(test)]
 mod source_tree_tests;
-mod viewers;
+mod visualizers;
 
 pub use source_tree::{
-    SourceCase, SourceCaseViewer, SourceDeclaration, SourceDeclarationKind, SourceFlag, SourceNode,
-    SourceProperty, SourcePropertyViewer, SourceRole, SourceTree, SourceTreeOptions,
-    SourceTreeViewers, SourceViewer,
+    SourceCase, SourceCaseVisualizer, SourceDeclaration, SourceDeclarationKind, SourceFlag,
+    SourceNode, SourceProperty, SourcePropertyVisualizer, SourceRole, SourceTree,
+    SourceTreeOptions, SourceTreeVisualizers, SourceVisualizer,
 };
 
 use nx_api::{
@@ -628,8 +628,8 @@ impl WorkspaceSnapshot {
         };
         let signature = hover::item_signature(item, declaration.kind, inferred.as_deref());
         // A prelude declaration is a built-in: the same label `Element` carries, over the real
-        // declaration, because an author meeting `Range` needs both — that it is the language's, and
-        // what it holds.
+        // declaration, because an author meeting `Range` needs both — that it is the language's,
+        // and what it holds.
         let mut content = if declaration.origin.0 == nx_hir::PRELUDE_MODULE_IDENTITY {
             hover::fenced(format!(
                 "{}\n{signature}",

@@ -4,7 +4,7 @@ import type {
   DocumentSymbol,
   Hover,
   SourceTree,
-  SourceTreeViewersOption,
+  SourceTreeVisualizersOption,
   TextPosition
 } from "@nx-lang/language-protocol";
 
@@ -55,8 +55,8 @@ import type {
 
 /** What a source-tree query asks for besides the tree. */
 export interface SourceTreeOptions {
-  /** Resolve viewer declarations and attach each declaration's resolved viewer. */
-  viewers?: SourceTreeViewersOption;
+  /** Resolve visualizer declarations and attach each declaration's resolved visualizer. */
+  visualizers?: SourceTreeVisualizersOption;
 }
 
 const encoder = new TextEncoder();
@@ -348,7 +348,7 @@ export interface NxLanguageSnapshot {
    *
    * Unstable: the answer's shape may change in any release until a later one commits to it.
    *
-   * With `options.viewers`, each declaration entry with a resolved viewer carries it.
+   * With `options.visualizers`, each declaration entry with a resolved visualizer carries it.
    */
   sourceTree(uri: string, options?: SourceTreeOptions): SourceTree;
 
@@ -945,7 +945,7 @@ class WasmLanguageSnapshot implements NxLanguageSnapshot {
     return this.#host.callWithArgument<SourceTree>(
       "nx_wasm_snapshot_source_tree",
       (exports, pointer, length) => exports.nx_wasm_snapshot_source_tree(handle, pointer, length),
-      options?.viewers === undefined ? { uri } : { uri, viewers: options.viewers }
+      options?.visualizers === undefined ? { uri } : { uri, visualizers: options.visualizers }
     );
   }
 

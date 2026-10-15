@@ -1,17 +1,17 @@
-// The NX viewer library: the records a `viewer` declaration is written with, which tell a viewer
-// how to present a declaration. Import it with `import "@nx/viewer"`.
+// The NX visualizer library: the records a `visualizer` declaration is written with, which tell a
+// viewer how to present a declaration. Import it with `import "@nx/visualizer"`.
 //
 // UNSTABLE. These declarations may change incompatibly in any NX release, including a patch
-// release. See https://nxlang.org/reference/libraries/viewer.
+// release. See https://nxlang.org/reference/libraries/visualizer.
 //
 // Each record takes the declaration it describes as its type parameter `Target`. Inside a
-// `viewer` declaration, `Target` is bound for you: write `viewer Choice = <ElementViewer
-// title=label />`, not `<ElementViewer Target=Choice ... />`. For a component, `Target` is its
-// props record, so property names are its props.
+// `visualizer` declaration, `Target` is bound for you: write `visualizer Choice =
+// <ElementVisualizer title=label />`, not `<ElementVisualizer Target=Choice ... />`. For a
+// component, `Target` is its props record, so property names are its props.
 
 /// How a viewer presents an element of a record, action or component.
-export type ElementViewer = {
-  // The declaration this viewer describes. Bound by the `viewer` declaration.
+export type ElementVisualizer = {
+  // The declaration this visualizer describes. Bound by the `visualizer` declaration.
   Target: type
   /// The kind's name as readers see it, in place of the declaration's name split into words. A
   /// kind that extends another does not inherit it.
@@ -36,7 +36,7 @@ export type ElementViewer = {
   layout: ElementLayout = card
   /// How individual properties read, in the order they should be listed. Properties not named
   /// here follow in declaration order.
-  content properties?: <PropertyViewer Target=Target/>+
+  content properties?: <PropertyVisualizer Target=Target/>+
 }
 
 /// Where an element's id reads.
@@ -56,8 +56,8 @@ export type ElementLayout =
   | inline
 
 /// How one property of an element reads.
-export type PropertyViewer = {
-  // The declaration whose property this describes. Bound by the `viewer` declaration.
+export type PropertyVisualizer = {
+  // The declaration whose property this describes. Bound by the `visualizer` declaration.
   Target: type
   /// The property this describes.
   of: Target.Property
@@ -81,16 +81,16 @@ export type Placement =
   | details
 
 /// How a viewer presents the cases of a union.
-export type UnionViewer = {
-  // The union this viewer describes. Bound by the `viewer` declaration.
+export type UnionVisualizer = {
+  // The union this visualizer describes. Bound by the `visualizer` declaration.
   Target: type
   /// How individual cases read.
-  content cases?: <CaseViewer Target=Target/>+
+  content cases?: <CaseVisualizer Target=Target/>+
 }
 
 /// How one case of a union reads.
-export type CaseViewer = {
-  // The union whose case this describes. Bound by the `viewer` declaration.
+export type CaseVisualizer = {
+  // The union whose case this describes. Bound by the `visualizer` declaration.
   Target: type
   /// The case this describes.
   of: Target
@@ -101,8 +101,8 @@ export type CaseViewer = {
 }
 
 /// How a viewer presents values of a scalar type.
-export type ValueViewer = {
-  // The type this viewer describes. Bound by the `viewer` declaration.
+export type ValueVisualizer = {
+  // The type this visualizer describes. Bound by the `visualizer` declaration.
   Target: type
   /// How a string value of the type is shown.
   format: ValueFormat

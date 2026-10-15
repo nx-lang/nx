@@ -1,8 +1,8 @@
-import "@nx/viewer"
+import "@nx/visualizer"
 
 // A whole survey, written as data: a research screener for hobbyist woodworkers. A host reads this
-// value, shows one step at a time and collects the answers. The types come first, then the viewer
-// declarations that say how a step reads, then the survey itself.
+// value, shows one step at a time and collects the answers. The types come first, then the
+// visualizer declarations that say how a step reads, then the survey itself.
 
 type QuestionMediaPosition = left | right | top | bottom | background
 type QuestionFlowPresentation = stepped | threaded
@@ -131,55 +131,55 @@ type ChatLinkConfig = {
   preview?:LinkPreview
 }
 
-viewer ImageUrl = <ValueViewer format=image />
-viewer Color = <ValueViewer format=color />
-viewer SelectLayout =
-  <UnionViewer>
-    <CaseViewer of=vertical label="one per line" />
-    <CaseViewer of=horizontal label="side by side" />
-    <CaseViewer of=columns_2 label="two columns" />
-    <CaseViewer of=columns_3 label="three columns" />
-  </UnionViewer>
-viewer Choice =
-  <ElementViewer layout=row title=label subtitle=description badge=value id=value idPosition=end icon="circle-dot">
-    <PropertyViewer of=exclusive whenTrue="Clears the other choices" />
-  </ElementViewer>
-viewer StatementStep =
-  <ElementViewer name="Statement" title=headline subtitle=eyebrow id=id icon="message-square-text">
-    <PropertyViewer of=body format=markdown />
-    <PropertyViewer of=cta label="Button" />
-    <PropertyViewer of=id label="Key" place=details />
-  </ElementViewer>
-viewer Question =
-  <ElementViewer title=label subtitle=description id=id icon="circle-question-mark">
-    <PropertyViewer of=required whenTrue="Required" whenFalse="Optional" />
-    <PropertyViewer of=requiredMessage label="If left empty" />
-    <PropertyViewer of=id label="Key" place=details />
-    <PropertyViewer of=mediaPosition place=details />
-  </ElementViewer>
-viewer SelectQuestion =
-  <ElementViewer name="Select" title=label subtitle=description id=id icon="list-checks">
-    <PropertyViewer of=required whenTrue="Required" whenFalse="Optional" />
-    <PropertyViewer of=multiple whenTrue="Pick any number" whenFalse="Pick one" />
-    <PropertyViewer of=other whenTrue="Allows another answer" whenFalse="Listed choices only" />
-    <PropertyViewer of=requiredMessage label="If left empty" />
-    <PropertyViewer of=id label="Key" place=details />
-    <PropertyViewer of=otherLabel place=details />
-    <PropertyViewer of=mediaPosition place=details />
-    <PropertyViewer of=layout place=details />
-    <PropertyViewer of=carryForwardMode place=details />
-  </ElementViewer>
-viewer QuestionFlow =
-  <ElementViewer name="Survey" title=title subtitle=description id=id icon="clipboard-list">
-    <PropertyViewer of=id label="Key" place=details />
-  </ElementViewer>
-viewer ShortTextQuestion = <ElementViewer icon="text-cursor-input" />
-viewer EmailQuestion = <ElementViewer icon="mail" />
-viewer CompletionScreen = <ElementViewer title=headline subtitle=eyebrow icon="flag" />
-viewer LinkPreview = <ElementViewer title=title subtitle=description image=imageUrl icon="link" />
-viewer ChatIdentity = <ElementViewer title=name subtitle=tagline image=avatarUrl icon="bot" />
-viewer ChatLinkConfig = <ElementViewer icon="message-circle" />
-viewer ImmersiveAppearance = <ElementViewer icon="palette" />
+visualizer ImageUrl = <ValueVisualizer format=image />
+visualizer Color = <ValueVisualizer format=color />
+visualizer SelectLayout =
+  <UnionVisualizer>
+    <CaseVisualizer of=vertical label="one per line" />
+    <CaseVisualizer of=horizontal label="side by side" />
+    <CaseVisualizer of=columns_2 label="two columns" />
+    <CaseVisualizer of=columns_3 label="three columns" />
+  </UnionVisualizer>
+visualizer Choice =
+  <ElementVisualizer layout=row title=label subtitle=description badge=value id=value idPosition=end icon="circle-dot">
+    <PropertyVisualizer of=exclusive whenTrue="Clears the other choices" />
+  </ElementVisualizer>
+visualizer StatementStep =
+  <ElementVisualizer name="Statement" title=headline subtitle=eyebrow id=id icon="message-square-text">
+    <PropertyVisualizer of=body format=markdown />
+    <PropertyVisualizer of=cta label="Button" />
+    <PropertyVisualizer of=id label="Key" place=details />
+  </ElementVisualizer>
+visualizer Question =
+  <ElementVisualizer title=label subtitle=description id=id icon="circle-question-mark">
+    <PropertyVisualizer of=required whenTrue="Required" whenFalse="Optional" />
+    <PropertyVisualizer of=requiredMessage label="If left empty" />
+    <PropertyVisualizer of=id label="Key" place=details />
+    <PropertyVisualizer of=mediaPosition place=details />
+  </ElementVisualizer>
+visualizer SelectQuestion =
+  <ElementVisualizer name="Select" title=label subtitle=description id=id icon="list-checks">
+    <PropertyVisualizer of=required whenTrue="Required" whenFalse="Optional" />
+    <PropertyVisualizer of=multiple whenTrue="Pick any number" whenFalse="Pick one" />
+    <PropertyVisualizer of=other whenTrue="Allows another answer" whenFalse="Listed choices only" />
+    <PropertyVisualizer of=requiredMessage label="If left empty" />
+    <PropertyVisualizer of=id label="Key" place=details />
+    <PropertyVisualizer of=otherLabel place=details />
+    <PropertyVisualizer of=mediaPosition place=details />
+    <PropertyVisualizer of=layout place=details />
+    <PropertyVisualizer of=carryForwardMode place=details />
+  </ElementVisualizer>
+visualizer QuestionFlow =
+  <ElementVisualizer name="Survey" title=title subtitle=description id=id icon="clipboard-list">
+    <PropertyVisualizer of=id label="Key" place=details />
+  </ElementVisualizer>
+visualizer ShortTextQuestion = <ElementVisualizer icon="text-cursor-input" />
+visualizer EmailQuestion = <ElementVisualizer icon="mail" />
+visualizer CompletionScreen = <ElementVisualizer title=headline subtitle=eyebrow icon="flag" />
+visualizer LinkPreview = <ElementVisualizer title=title subtitle=description image=imageUrl icon="link" />
+visualizer ChatIdentity = <ElementVisualizer title=name subtitle=tagline image=avatarUrl icon="bot" />
+visualizer ChatLinkConfig = <ElementVisualizer icon="message-circle" />
+visualizer ImmersiveAppearance = <ElementVisualizer icon="palette" />
 
 let screener =
   <QuestionFlow

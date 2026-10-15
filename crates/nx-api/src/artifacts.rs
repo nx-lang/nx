@@ -316,10 +316,11 @@ impl LibraryRegistry {
 
     /// Loads several in-memory libraries, in dependency order whatever order they are given in.
     ///
-    /// <para>Each library is loaded as [`load_library_from_sources`](Self::load_library_from_sources)
-    /// loads one, after every library of the batch it imports. A dependency outside the batch must
-    /// already be loaded, and a cycle among the batch's libraries fails the load before any of them
-    /// is analyzed. The artifacts are returned in the order the libraries were given.</para>
+    /// <para>Each library is loaded as
+    /// [`load_library_from_sources`](Self::load_library_from_sources) loads one, after every
+    /// library of the batch it imports. A dependency outside the batch must already be loaded, and
+    /// a cycle among the batch's libraries fails the load before any of them is analyzed. The
+    /// artifacts are returned in the order the libraries were given.</para>
     pub fn load_libraries_from_sources(
         &self,
         libraries: &[NxLibrarySource],
@@ -711,9 +712,10 @@ impl ProgramBuildContext {
     }
 
     /// Whether a visible library's root is spelled exactly `identity`, as an in-memory library's
-    /// logical root is. Unlike [`visible_library_by_logical_identity`](Self::visible_library_by_logical_identity)
-    /// this ignores suffix matches, so a directory library whose path merely ends in `identity` is
-    /// not a claim on the name.
+    /// logical root is. Unlike
+    /// [`visible_library_by_logical_identity`](Self::visible_library_by_logical_identity) this
+    /// ignores suffix matches, so a directory library whose path merely ends in `identity` is not a
+    /// claim on the name.
     fn has_visible_library_root(&self, identity: &str) -> bool {
         self.visible_roots.iter().any(|root| {
             logical_identity_for_path(root).as_deref() == Some(identity)
@@ -1254,14 +1256,14 @@ static STANDARD_LIBRARIES: [StandardLibrary; 2] = [
         "NxLang.Agent",
     ),
     StandardLibrary::new(
-        "@nx/viewer",
+        "@nx/visualizer",
         StandardLibraryStability::Unstable,
         &[StandardLibraryModule {
-            identity: "viewer.nx",
-            source: include_str!("std/viewer/viewer.nx"),
+            identity: "visualizer.nx",
+            source: include_str!("std/visualizer/visualizer.nx"),
         }],
         "@nx-lang/viewer",
-        "NxLang.Viewer",
+        "NxLang.Visualizer",
     ),
 ];
 
@@ -1652,7 +1654,8 @@ fn prepare_in_memory_library(
 /// batch it imports, and otherwise in the order given.
 ///
 /// <para>The same root given twice with the same sources is loaded once; given with different
-/// sources it is a conflict. A cycle among the batch's libraries is refused naming its chain.</para>
+/// sources it is a conflict. A cycle among the batch's libraries is refused naming its
+/// chain.</para>
 fn in_memory_load_order(
     libraries: &[PreparedInMemoryLibrary],
 ) -> Result<Vec<usize>, Box<Diagnostic>> {
@@ -2052,7 +2055,7 @@ fn analyze_logical_module_graph(
         build_context,
         &libraries,
     ));
-    add_duplicate_viewer_diagnostics(&mut modules, &libraries, build_context);
+    add_duplicate_visualizer_diagnostics(&mut modules, &libraries, build_context);
 
     LogicalProgramAnalysis {
         modules,
@@ -2062,13 +2065,13 @@ fn analyze_logical_module_graph(
     }
 }
 
-/// Reports, on each workspace module, the viewer declarations two other modules of its program
+/// Reports, on each workspace module, the visualizer declarations two other modules of its program
 /// declare for one target, which neither then applies.
 ///
 /// <para>Each workspace module is the entry of the program a host would build from it, so each is
 /// told about the duplicates its own program loads. Nothing is walked when no module the analysis
-/// holds declares a viewer.</para>
-fn add_duplicate_viewer_diagnostics(
+/// holds declares a visualizer.</para>
+fn add_duplicate_visualizer_diagnostics(
     modules: &mut [ModuleArtifact],
     libraries: &[Arc<LibraryArtifact>],
     build_context: &ProgramBuildContext,
@@ -2077,13 +2080,14 @@ fn add_duplicate_viewer_diagnostics(
         .iter()
         .flat_map(|library| library.modules.iter())
         .collect::<Vec<_>>();
-    let has_viewers = |module: &ModuleArtifact| {
+    let has_visualizers = |module: &ModuleArtifact| {
         module
             .lowered_module
             .as_deref()
-            .is_some_and(|lowered| !lowered.viewers().is_empty())
+            .is_some_and(|lowered| !lowered.visualizers().is_empty())
     };
-    if !modules.iter().any(has_viewers) && !library_modules.iter().any(|module| has_viewers(module))
+    if !modules.iter().any(has_visualizers)
+        && !library_modules.iter().any(|module| has_visualizers(module))
     {
         return;
     }
@@ -2101,7 +2105,7 @@ fn add_duplicate_viewer_diagnostics(
         .iter()
         .enumerate()
         .filter_map(|(index, module)| {
-            let program = crate::program_viewers::program_modules(
+            let program = crate::program_visualizers::program_modules(
                 &module.file_name,
                 |identity| {
                     workspace
@@ -2110,11 +2114,14 @@ fn add_duplicate_viewer_diagnostics(
                 },
                 build_context,
             );
-            let viewers = crate::program_viewers::program_viewers(&program, |identity| {
-                by_identity.get(identity).copied()
-            });
-            let diagnostics =
-                crate::program_viewers::duplicate_viewer_diagnostics(&module.file_name, &viewers);
+            let visualizers =
+                crate::program_visualizers::program_visualizers(&program, |identity| {
+                    by_identity.get(identity).copied()
+                });
+            let diagnostics = crate::program_visualizers::duplicate_visualizer_diagnostics(
+                &module.file_name,
+                &visualizers,
+            );
             (!diagnostics.is_empty()).then_some((index, diagnostics))
         })
         .collect::<Vec<_>>();
@@ -2362,10 +2369,10 @@ fn prepare_logical_source_file(
 ///
 /// An implicit import is the host's claim about what the workspace and its build context contain; a
 /// claim they do not bear out is a fault in the build request, not in any module's text, so it is
-/// reported with no file or span and fails the build. An identity is looked up among the workspace's
-/// modules and the context's visible library roots exactly as a written import of it would be, and
-/// one that is both a workspace module and exactly a visible library's root is refused rather than
-/// silently resolved to the workspace module.
+/// reported with no file or span and fails the build. An identity is looked up among the
+/// workspace's modules and the context's visible library roots exactly as a written import of it
+/// would be, and one that is both a workspace module and exactly a visible library's root is
+/// refused rather than silently resolved to the workspace module.
 fn unknown_implicit_import_diagnostics(
     graph: &LogicalModuleGraph,
     build_context: &ProgramBuildContext,
@@ -2770,9 +2777,10 @@ fn add_library_wildcard_bindings(
 /// <para>Only a module with an error can have lost one. It has when an error lies outside every
 /// declaration that lowered — an unclosed `export type Contact = {` at the end of the file, a
 /// removed `enum` form — or when a declaration begins at the start of a line where no lowered
-/// declaration begins: an unclosed declaration before it ran on over it and swallowed it. An
-/// error inside a declaration that lowered and swallowed nothing — a validation error such as
-/// `tags:string[]`, or a syntax error in a field type or a body — leaves every name in place.</para>
+/// declaration begins: an unclosed declaration before it ran on over it and swallowed it. An error
+/// inside a declaration that lowered and swallowed nothing — a validation error such as
+/// `tags:string[]`, or a syntax error in a field type or a body — leaves every name in
+/// place.</para>
 fn lost_a_declaration(source_file: &GraphSourceFile, module: &LoweredModule) -> bool {
     let error_spans: Vec<TextSpan> = source_file
         .diagnostics
@@ -3066,7 +3074,8 @@ fn add_workspace_item_bindings(
     }
 }
 
-/// Builds a file-preserving program artifact from source text against a caller-supplied build context.
+/// Builds a file-preserving program artifact from source text against a caller-supplied build
+/// context.
 pub fn build_program_artifact_from_source(
     source: &str,
     file_name: &str,
@@ -4346,8 +4355,8 @@ fn is_logical_library_path(path: &Path) -> bool {
     !path.is_absolute()
 }
 
-/// Resolves `library_path` against the logical module `base_file` with the workspace identity rules:
-/// `.` and `..` are normalized, and a path that climbs above the logical root is refused.
+/// Resolves `library_path` against the logical module `base_file` with the workspace identity
+/// rules: `.` and `..` are normalized, and a path that climbs above the logical root is refused.
 fn normalize_logical_library_path(
     base_file: &Path,
     library_path: &str,
@@ -5651,7 +5660,8 @@ export type Saved = {
         );
     }
 
-    /// A wildcard import brings a derived declaration only beside its base, as a selective one does.
+    /// A wildcard import brings a derived declaration only beside its base, as a selective one
+    /// does.
     #[test]
     fn a_library_wildcard_import_does_not_bring_derived_declarations_of_a_name_it_lost() {
         for saved in [
