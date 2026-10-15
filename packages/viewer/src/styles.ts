@@ -205,6 +205,20 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
   text-indent: calc((var(--column, 0) + 4) * 1ch) hanging each-line;
 }
 .source .sheet-item.as-written > .as-written-lead { display: inline-block; width: calc(var(--column, 0) * 1ch); }
+/* An element on a line of its own inside such an item wraps within itself, its later lines a step in
+   from where it starts, as the item's other lines wrap from the item's start. */
+.source .sheet-item.as-written :is(.line-element, .tag-line) {
+  display: inline-block;
+  vertical-align: top;
+  /* The reading's width less the element's column: a percentage here would be of a box that is
+     itself sized by its content. */
+  max-width: calc(100cqw - (var(--line-column, 0) + 1) * 1ch);
+  padding-left: 4ch;
+  text-indent: -4ch;
+}
+/* A sheet's header wraps the same way, its later lines a step in from its icon. */
+.source .sheet > .sheet-head { padding-left: 4ch; text-indent: -4ch; }
+.source .sheet > .sheet-head * { text-indent: 0; }
 /* A little room between siblings where either is a sheet, so each group stands apart from the next:
    between the elements of a list or of what an element holds, between sheets that follow one
    another, and around a row whose value is a sheet under its name. Not between one-line elements,

@@ -295,6 +295,7 @@ export function renderSource(
       if (marker !== undefined) {
         // It is a unit of the reading too, selected and hovered as a whole like a one-line element.
         element.classList.add("tag-line");
+        element.style.setProperty("--line-column", String(start - (text.lastIndexOf("\n", start - 1) + 1)));
         element.append(marker);
       }
       // A comment is prose, which a host may set in another font than the code around it.
@@ -746,6 +747,9 @@ export function renderSource(
     const marker = alone ? elementIcon(at) : undefined;
     if (marker !== undefined) {
       line.append(marker);
+    }
+    if (alone) {
+      line.style.setProperty("--line-column", String(start - (text.lastIndexOf("\n", start - 1) + 1)));
     }
     if (!alone) {
       const open = document.createElement("span");
