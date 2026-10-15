@@ -215,9 +215,12 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
   max-width: calc(100cqw - (var(--line-column, 0) + 1) * 1ch);
   padding-left: 4ch;
   text-indent: -4ch;
+  /* At its own spaces, so a wrapped line starts with a word, not inside a string. */
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
 }
 /* A sheet's header wraps the same way, its later lines a step in from its icon. */
-.source .sheet > .sheet-head { padding-left: 4ch; text-indent: -4ch; }
+.source .sheet > .sheet-head { padding-left: 4ch; text-indent: -4ch; white-space: pre-wrap; overflow-wrap: break-word; }
 .source .sheet > .sheet-head * { text-indent: 0; }
 /* A little room between siblings where either is a sheet, so each group stands apart from the next:
    between the elements of a list or of what an element holds, between sheets that follow one
