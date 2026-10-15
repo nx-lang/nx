@@ -1408,7 +1408,11 @@ impl<'a> TreeBuilder<'a> {
             .children_with_tokens()
             .any(|child| !child.raw().is_named() && child.text() == "raw");
         let origin = self.element_origin(&tag, node.span());
-        let declaration = origin.as_ref().and_then(|origin| self.entry(origin));
+        // A union case's element, `<Status.shipped … />`, refers to its union.
+        let declaration = match origin.as_ref() {
+            Some(origin) => self.entry(origin),
+            None => self.case_declaration(node.span()),
+        };
         if self.is_state_update(origin.as_ref()) {
             self.nodes[index].flags.push(SourceFlag::StateUpdate);
         }

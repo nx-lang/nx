@@ -750,6 +750,25 @@ fn cases_bare_and_qualified_name_their_union() {
 }
 
 #[test]
+fn a_case_element_refers_to_its_union() {
+    let tree = tree_for(
+        "type Status =\n  | pending\n  | shipped { carrier:string }\n\
+         let a = <Status.shipped carrier=\"x\" />\n\
+         type Order = { status:Status }\nlet b = <Order status=<Status.shipped carrier=\"y\" /> />",
+    );
+    let elements = nodes(&tree, SourceRole::Element)
+        .into_iter()
+        .filter(|node| node.name.as_deref() == Some("Status.shipped"))
+        .collect::<Vec<_>>();
+    assert_eq!(elements.len(), 2, "{}", outline(&tree));
+    for element in elements {
+        let entry = declaration(&tree, element);
+        assert_eq!(entry.name, "Status");
+        assert_eq!(entry.kind, SourceDeclarationKind::Union);
+    }
+}
+
+#[test]
 fn references_and_members() {
     let tree = tree_for(
         "type Card = { title:string }\nlet card = <Card title=\"x\" />\n\
@@ -1532,6 +1551,75 @@ let root() = { <MultiChoice id="a" label="Pick" /> }
     let multi = viewer(&tree, "MultiChoice");
     assert_eq!(multi.name, None);
     assert_eq!(multi.title.as_deref(), Some("label"));
+}
+
+#[test]
+fn an_id_reads_where_its_position_puts_it() {
+    let source = r#"import "@nx/viewer"
+type Step = { id:string title:string }
+type Choice = { value:string label:string }
+type Note = { text:string }
+viewer Step = <ElementViewer id=id />
+viewer Choice = <ElementViewer id=value idPosition=end />
+viewer Note = <ElementViewer idPosition=end />
+let items = { <Step id="a" title="A" /> <Choice value="b" label="B" /> <Note text="c" /> }
+"#;
+    let tree = snapshot_for(source)
+        .source_tree_with_options(
+            &DocumentUri::from(URI),
+            &SourceTreeOptions {
+                viewers: Some(SourceTreeViewers::default()),
+            },
+        )
+        .expect("source tree");
+    // Without `idPosition`, an id reads at the beginning.
+    let step = viewer(&tree, "Step");
+    assert_eq!(step.id.as_deref(), Some("id"));
+    assert_eq!(step.id_position.as_deref(), Some("beginning"));
+    let choice = viewer(&tree, "Choice");
+    assert_eq!(choice.id.as_deref(), Some("value"));
+    assert_eq!(choice.id_position.as_deref(), Some("end"));
+    // A position with no id places nothing, so it is left out.
+    let note = viewer(&tree, "Note");
+    assert_eq!(note.id, None);
+    assert_eq!(note.id_position, None);
+}
+
+#[test]
+fn an_icon_is_inherited_through_extends() {
+    let host = r#"import "@nx/viewer"
+import "./survey.nx"
+viewer Question = <ElementViewer icon="list-checks" />
+viewer MultiChoice = <ElementViewer icon="list-todo" />
+"#;
+    let form = r#"import "./survey.nx"
+let root() = { <SingleChoice id="a" label="Pick"><Choice value="v" label="V" /></SingleChoice> <MultiChoice id="b" label="Pick" /> }
+"#;
+    let snapshot = WorkspaceSnapshot::from_documents(
+        Option::<PathBuf>::None,
+        vec![
+            DocumentInput::new(SURVEY_URI, SURVEY).with_version(1),
+            DocumentInput::new("nx://tenant/host.nx", host).with_version(1),
+            DocumentInput::new(URI, form).with_version(1),
+        ],
+    )
+    .expect("snapshot");
+    let tree = with_viewers(&snapshot, &["tenant/host.nx"]);
+    assert_eq!(
+        viewer(&tree, "Question").icon.as_deref(),
+        Some("list-checks")
+    );
+    // SingleChoice's own viewer names no icon, so it takes its base's.
+    assert_eq!(
+        viewer(&tree, "SingleChoice").icon.as_deref(),
+        Some("list-checks")
+    );
+    // A kind's own icon wins over its base's.
+    assert_eq!(
+        viewer(&tree, "MultiChoice").icon.as_deref(),
+        Some("list-todo")
+    );
+    assert_eq!(viewer(&tree, "Choice").icon, None);
 }
 
 #[test]

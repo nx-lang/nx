@@ -9,7 +9,8 @@ Each node SHALL have exactly one of these roles, covering the source shown:
 - `parameter`, `stateField`, `field`, `unionCase`, `emit`: one member of a declaration, with its
   name, its declared type and, when it has one, its default as a child.
 - `typeReference`: a type written in the source, with the type spelled in NX.
-- `element`: an element construction, with the declaration of its kind when it resolves.
+- `element`: an element construction, with the declaration of its kind when it resolves; a union
+  case's element, as `<Status.shipped … />`, refers to its union.
 - `attribute`: a `name=value` attribute, or the run of element content bound to a content
   property, with the property's name.
 - `text`: a run of element text, with its text type when it has one (`markdown` in
