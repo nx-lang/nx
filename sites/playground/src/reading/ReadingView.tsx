@@ -41,7 +41,7 @@ function loadIcons(): Promise<NxViewerIcons> {
   return lucideIcons;
 }
 
-/** The source pane's Read side: `<nx-viewer>` showing the source tree, or why it cannot. */
+/** The NX pane's Visual view: `<nx-viewer>` showing the source tree, or why it cannot. */
 export function ReadingView({ reading, selection, onSelect }: ReadingViewProps) {
   const element = useRef<NxViewerElement>(null);
   // The highlighter the output pane colors with, loaded with the editor's themes, so the source

@@ -47,7 +47,7 @@ rule Bret chose on 2026-10-10.
   carried by the source tree for any reader, and the reading uses them as it grows. The reading itself
   replaces the viewer's cards: an element over several lines reads as a group with a row to each
   property, an element on one line as its name and properties, and the rest as written.
-- The playground's Read view asks for viewer declarations.
+- The playground's Visual view, which replaces its Read view, asks for viewer declarations.
 - Viewer declarations exist for tools only: a `viewer` declaration emits no NX IR, no generated code
   and no declaration-schema entry, and `T.Props` emits no typegen companion in this change.
 
@@ -73,7 +73,7 @@ rule Bret chose on 2026-10-10.
 - `source-tree`: a `viewer` declaration is a `declaration` node, and the answer carries resolved
   viewers when asked.
 - `viewer`: viewer declarations shape the reading, and a property can fold into a details strip.
-- `playground`: the Read view asks for viewer declarations.
+- `playground`: the Visual view asks for viewer declarations, and the source pane switches between Source and Visual.
 - `cli-code-generation`: `viewer` declarations and `T.Props` generate nothing.
 - `editor-syntax-highlighting`: the `viewer` keyword is scoped as a declaration keyword.
 

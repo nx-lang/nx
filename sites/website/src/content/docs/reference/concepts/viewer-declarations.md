@@ -5,7 +5,7 @@ description: 'How a viewer declaration tells a viewer, such as the NX reading vi
 
 A **viewer declaration** tells a viewer how to present one declaration. A viewer is a tool that
 shows NX source to people, such as the `<nx-viewer>` reading view from `@nx-lang/viewer` that the
-Read view of the [playground](/play) shows. It reads an element written over several lines as a
+Visual view of the [playground](/play) shows. It reads an element written over several lines as a
 group with a row to each property, and an element on one line as its name and its properties as
 `name=value`, without quotes. Without viewer declarations it reads every element the same way. A
 library author knows better, and a viewer declaration says so:
@@ -102,10 +102,10 @@ declaration of its own, so the viewer for `Question` applies to it: its title is
 subtitle `help`, `required` reads as "Required" or "Optional", and `id` is labelled "Key" and placed
 in details. Each choice's title is its `label`, its subtitle its `description` and its badge its
 `value`, and every `ImageUrl` is a picture. A viewer presents as much of this as it has room for;
-[what a reading shows](#what-a-reading-shows) says what the playground's Read view uses today.
+[what a reading shows](#what-a-reading-shows) says what the playground's Visual view uses today.
 
 The playground's *Viewer declarations* example is a smaller library of the same kind. Open it in
-the [playground](/play) and switch to Read to see the reading follow its viewer declarations.
+the [playground](/play) and switch to Visual to see the reading follow its viewer declarations.
 
 ## The target is bound for you
 
@@ -163,7 +163,7 @@ order of the `PropertyViewer`s, then the rest in declaration order. A viewer dec
 source reads, never what it means, and it hides nothing: a property placed in details is still there
 for a viewer to show.
 
-The playground's Read view uses:
+The playground's Visual view uses:
 
 - **Title.** The value of the property bound to `title` reads alone on an element's line, without its
   name: `Engineering` rather than `label=Engineering`.

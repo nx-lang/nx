@@ -7,11 +7,12 @@ its output, shown as NX text — the text `nxlang run` prints — by the `<nx-va
 name, property or case in the output shows the same hover its declaration shows in the source.
 Clicking one selects the declaration.
 
-The source pane's Edit and Read switch shows the source itself as a reading view, through the
+The NX pane's Source and Visual switch shows the source itself visually, through the
 `<nx-viewer>` element of [`@nx-lang/viewer`](../../packages/viewer/README.md): an element over
-several lines as a group with a row to each property and no tags, an element on one line as its name
-and properties, and the rest as written, in the editor's colors, for a reader who does not write NX. The reading comes from the worker's
-`sourceTree` query, refreshed when typing pauses, as evaluation is. Switching to Read selects the
+several lines as a group with a row to each property and no tags, an element on one line as its
+name and properties, and the rest as written, in the editor's colors, for a reader who does not
+write NX. The reading comes from the worker's `sourceTree` query, refreshed when typing pauses, as
+evaluation is. Switching to Visual selects the
 node at the cursor, and switching back puts the cursor at the start of the selected node.
 
 The output pane's Output and Preview switch runs a component instead. Preview starts a preview
@@ -176,7 +177,7 @@ so what is checked is what ships, and it keeps the set between 10 and 20 example
 | `src/worker/` | the compiler worker: its module load, its session, and the main thread's channel to it |
 | `src/language/` | the language service the editor and the output's hover ask |
 | `src/editor/` | Monaco through `@nx-lang/monaco` (grammar, highlighting, hover, completion) |
-| `src/reading/` | the source pane's Read side: the source tree query and the selection carried to and from the editor |
+| `src/reading/` | the NX pane's Visual view: the source tree query and the selection carried to and from the editor |
 | `src/output/` | the output pane, `<nx-value>` or why there is nothing to show, and its Output and Preview switch |
 | `src/preview/` | Preview: the worker's session (`workbench.ts`), the calls to it, and the page's timeline, buttons, forms and state |
 | `src/header/` | the website's header |
