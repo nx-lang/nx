@@ -43,12 +43,17 @@
 
 ## 6. Viewer and playground
 
-- [x] 6.1 Read `viewer` values in `packages/viewer`: kind names, title, subtitle, badge and image parts, labels, boolean phrases, the property order, and the details strip
-- [x] 6.2 Add the `row` and `inline` layouts
-- [x] 6.3 Show case labels and examples, and value formats (`url`, `email`, `phone`, `image`, `color`, `markdown`, `text`), with the `images` property
-- [x] 6.4 Read a `viewer` declaration as "Viewer for …"
-- [x] 6.5 Keep the coverage test passing over the repository, and add a fixture with viewer declarations (the survey question library with the proposal's viewer declarations) to the viewer tests
-- [x] 6.6 Ask for viewer declarations in the playground's Read view and add the playground scenarios to its tests
+The viewer first read `viewer` values on cards (kind names, subtitle, badge and image parts, labels,
+boolean phrases, the details strip, the `row` and `inline` layouts, case labels, the other formats and
+"Viewer for …"). The Read view replaced the cards within this change; those parts stay in the source
+tree for any reader.
+
+- [x] 6.1 Replace the cards in `packages/viewer` with a reading of the document's text: code as written in the colors the host gives, an element over several lines as a group with a row to each attribute, an element on one line as its name and properties, every node rendered once with its key
+- [x] 6.2 Read `viewer` values in the reading: the title alone on an element's line, the id as one quiet token where `idPosition` puts it, the icon the viewer names or the kind's on an element that starts its line, and the `id` and `color` formats
+- [x] 6.3 Select units of the reading by click and by the arrow keys, draw the selection and the hovered unit as rows, and announce what is selected
+- [x] 6.4 Keep the coverage test passing over the repository's `.nx` files and every fixture, with fixtures for groups, lines, content, ids, icons, colors, text types and comments inside attributes
+- [x] 6.5 Ask for viewer declarations in the playground's Read view, color it with the editor's themes, set it in Geist and Geist Mono, draw Lucide icons, carry the editor's cursor into Read and the selection back, and add the playground scenarios to its tests
+- [x] 6.6 Add a "Larger examples" topic to the playground (a full survey, a settings screen, an orders dashboard), longer programs for judging the Read view
 
 ## 7. Editor, docs and examples
 
