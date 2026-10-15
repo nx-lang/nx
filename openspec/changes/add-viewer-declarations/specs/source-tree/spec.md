@@ -76,8 +76,8 @@ unchanged from an answer without this feature. When it is present, the answer SH
 program's viewer declarations and the named host viewer modules, as the viewer-declarations capability defines, and
 SHALL attach to each declaration entry with a resolved viewer a `viewer` value:
 
-- for a record, an action or a component: its `name`, `title`, `subtitle`, `badge` and `image` when
-  set, its `layout`, and a `properties` list holding every property of the entry once, in the
+- for a record, an action or a component: its `name`, `title`, `subtitle`, `badge`, `image`, `id` and
+  `icon` when set, its `idPosition` when it has an `id`, its `layout`, and a `properties` list holding every property of the entry once, in the
   resolved order (the properties the viewer lists, then the rest in declaration order), each with its
   name, its `label`, `whenTrue`, `whenFalse` and resolved `format` when set, and its `place`;
 - for a union: a `cases` list holding every case once, in declaration order, each with its name and

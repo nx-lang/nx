@@ -40,10 +40,13 @@ rule Bret chose on 2026-10-10.
   target in one module, or in two modules at the same level, are a `duplicate-viewer` error.
 - The source tree carries the resolved viewers when a client asks for them, on the declaration
   entries it already lists, and a client may name extra host viewer modules.
-- The viewer reads with viewer declarations: a kind's name, a card's title, subtitle, badge and image,
-  property labels and order, phrases for booleans, properties placed in a details strip, case labels,
-  and value formats such as links, images and colour swatches. The reading stays lossless: a viewer
-  declaration can move a property into the folded details strip but cannot hide it.
+- The viewer's reading uses viewer declarations: an element's title reads alone on its line, its id
+  as one quiet token where `idPosition` puts it, its icon before its name, and values formatted as
+  `id` or `color` as a token or with a swatch. The other parts a viewer declaration sets (a kind's
+  name, subtitle, badge, image, property labels, boolean phrases, places, layouts and case labels) are
+  carried by the source tree for any reader, and the reading uses them as it grows. The reading itself
+  replaces the viewer's cards: an element over several lines reads as a group with a row to each
+  property, an element on one line as its name and properties, and the rest as written.
 - The playground's Read view asks for viewer declarations.
 - Viewer declarations exist for tools only: a `viewer` declaration emits no NX IR, no generated code
   and no declaration-schema entry, and `T.Props` emits no typegen companion in this change.

@@ -1,128 +1,210 @@
 ## MODIFIED Requirements
 
+### Requirement: One element shows a source tree in any host
+The repository SHALL publish `@nx-lang/viewer`, which defines an `<nx-viewer>` custom element that
+shows a `SourceTree`, as `@nx-lang/language-protocol` types it, together with the text of the
+document the tree describes, as a reading of that text. The element SHALL depend on no UI framework,
+SHALL keep its markup and styles in a shadow root, and SHALL follow the page's light or dark scheme.
+Its properties SHALL be `tree`, `text`, `colors`, `icons`, `selection` and `stale`, and a property set
+before the element is defined SHALL take effect once it is. Where there is no DOM, importing the
+package SHALL do nothing, and the package SHALL export a function that defines the element in a
+registry the host chooses.
+
+#### Scenario: A plain page
+- **WHEN** a page with no framework imports the package, adds `<nx-viewer>` and sets its `tree` and
+  `text`
+- **THEN** the element SHALL show the document's reading
+
+#### Scenario: Host styles don't reach in
+- **WHEN** the host page styles `div`, `span` or `button` elements globally
+- **THEN** the element's rendering SHALL not change
+
+#### Scenario: A stale tree
+- **WHEN** the host sets the element's `stale` property while it computes a newer tree
+- **THEN** the element SHALL mute its reading and mark it out of date, and selection SHALL still work
+
+## REMOVED Requirements
+
 ### Requirement: The reading is lossless
-The element SHALL render every node of the tree, either inline or in a details strip that one
-action opens, and the rendering of each node SHALL carry the node's key. Import nodes SHALL be folded
-into a details strip at the top of the document, and an element's attributes SHALL be folded into a
-details strip at the foot of its card only where a viewer places them there; no other node SHALL be
-folded, and comments SHALL read in place. A viewer SHALL never hide a node.
-An `unparsed`
-node SHALL be shown as its source text, marked as a region that could not be read. Every rendered
-node SHALL offer its source: an action that shows the exact text of the node's range, sliced from
-the document's text by the range's UTF-8 byte offsets.
-
-#### Scenario: Coverage over the repository
-- **WHEN** the viewer's coverage test renders the source tree of every `.nx` file in the repository
-  with its details strips open
-- **THEN** the key of every node SHALL appear in the rendering exactly once
-
-#### Scenario: A forgotten role fails the test
-- **WHEN** the renderer for a role is removed
-- **THEN** the coverage test SHALL fail naming a file and the key of a node it did not render
-
-#### Scenario: The source of a card
-- **WHEN** a reader opens the source of the card for `<Choice value="other" label="Something else" />`
-- **THEN** the element SHALL show exactly `<Choice value="other" label="Something else" />`
-
-#### Scenario: Text after an emoji
-- **WHEN** a reader opens the source of a literal that follows an emoji on its line
-- **THEN** the element SHALL show exactly the literal's text
-
-#### Scenario: A property placed in details folds but stays
-- **WHEN** the tree carries viewers that place `id` in details, and a card's element sets `id="role"`
-- **THEN** the card's details strip SHALL hold the `id` row with the key of its attribute node
-- **AND** the coverage test SHALL still find that key exactly once
+**Reason**: The reading no longer offers each node's source text in a panel, or folds imports into a
+details strip; it is the document's text itself, read as groups and lines.
+**Migration**: See "The reading keeps every node".
 
 ### Requirement: Elements read as cards
-The element SHALL render an `element` node as a card headed by the `name` of its kind's `viewer`
-value when the declaration entry carries one, and otherwise by its kind's name split at its
-capitals into sentence case, so `SingleChoice` reads "Single choice", and SHALL show the name as
-written, marked as unresolved, when the node refers to no declaration. A declaration whose value is
-an element SHALL show the declaration's name on the card. The card SHALL list the element's
-attributes in the order of the `properties` of its kind's `viewer` value when it carries one, and
-otherwise in the order its declaration lists their properties, inherited properties first, followed
-in both cases by any attribute the declaration does not list, in source order. Attributes bound by content SHALL
-list their items under the property's name, and nested elements SHALL be nested cards.
+**Reason**: Elements read as groups and lines in the document's own layout, not as cards.
+**Migration**: See "An element over several lines reads as a group" and "An element on one line reads as
+a line".
 
-#### Scenario: A survey question
-- **WHEN** the tree is that of `let roleQuestion = <SingleChoice id="role" label="Which describes your work best?" layout=chips allowsOther={true}>`
-  with four `<Choice … />` children, and `SingleChoice` declares `id`, `label`, `help`, `required`
-  and `requiredMessage` through its base before `allowsOther`, `layout` and `choices`
-- **THEN** the card SHALL be headed "Single choice" and name `roleQuestion`
-- **AND** its rows SHALL be `id`, `label`, `allowsOther` and `layout` in that order, followed by
-  `choices` holding four nested "Choice" cards
+### Requirement: Values have a style and lose their quotes
+**Reason**: Replaced by the reading's own treatment of values in groups and lines.
+**Migration**: See "Values lose their quotes and keep a style".
 
-#### Scenario: An unknown kind
-- **WHEN** an element's kind refers to no declaration
-- **THEN** its card SHALL be headed by the kind as written and marked as unresolved
+### Requirement: Omitted defaults show as ghosts
+**Reason**: The reading shows what the source writes; an omitted default is not shown.
+**Migration**: None.
 
-#### Scenario: A kind named by its viewer
-- **WHEN** the tree carries a `viewer` value for `SingleChoice` with the name `Pick one`
-- **THEN** a `SingleChoice` card SHALL be headed "Pick one"
+### Requirement: Logic reads as sentences
+**Reason**: Code that is not an element reads as written, in the editor's colors.
+**Migration**: See "Code reads as written, in the editor's colors".
+
+### Requirement: Handlers read as events
+**Reason**: A handler is an attribute and reads as one, by name and value.
+**Migration**: See "An element on one line reads as a line" and "An element over several lines reads as
+a group".
+
+### Requirement: Declarations, references and comments read in place
+**Reason**: Declarations and comments read as written; there are no declaration cards or reference
+links.
+**Migration**: See "Code reads as written, in the editor's colors".
+
+### Requirement: Hover and peek explain what a node refers to
+**Reason**: The reading has no hover panel or reference expansion.
+**Migration**: None.
+
+### Requirement: A selection is shared by key
+**Reason**: A click now selects a unit of the reading rather than the smallest node under the pointer.
+**Migration**: See "A selection is a unit of the reading".
 
 ## ADDED Requirements
 
-### Requirement: Viewers shape a card
-When an element's kind carries a `viewer` value, the card SHALL show the attribute bound to the
-viewer declaration's `title` as the card's title, the one bound to `subtitle` under it, the one bound to `badge`
-as a badge beside the heading, and the one bound to `image` as a picture, each still carrying its
-node's key and offering its source, and SHALL NOT show those attributes again as rows. A row SHALL be
-labelled with its property's `label` when the viewer sets one and with the property's name otherwise.
-A boolean property with `whenTrue` or `whenFalse` SHALL read as that phrase, in place of its row,
-when the attribute or its ghost has that value, and as an ordinary row when the matching phrase is
-not set. A property placed in `details` SHALL be shown, row and ghost alike, in a details strip at
-the foot of the card that one action opens. A `row` layout SHALL show the card as one line holding
-its heading, title, subtitle, badge and image, with every other row in its details strip, and an
-`inline` layout SHALL show the element within the line that holds it, as its heading and title, with
-every other row in its details strip. A ghost row SHALL follow the same viewer as the property it
-stands for.
+### Requirement: The reading keeps every node
+The element SHALL render every node of the tree once, and the rendering of each node SHALL carry the
+node's key. Offsets into the text SHALL be taken from each range's UTF-8 byte offsets, so text after a
+character outside the basic multilingual plane is cut where it begins.
 
-#### Scenario: A question with a title and a phrase
-- **WHEN** the tree carries a viewer for `Question` with `title=label`, a property viewer for `required` with
-  `whenTrue="Required"` and `whenFalse="Optional"`, and one for `id` placed in details, and a
-  `SingleChoice` element sets `id="role"` and `label="Which describes your work best?"` and leaves
-  `required` to its default `true`
-- **THEN** the card's title SHALL read "Which describes your work best?" with the key of the
-  `label` attribute node
-- **AND** the card SHALL show the ghost phrase "Required" and no `required` row
-- **AND** the `id` row SHALL be in the card's details strip
+#### Scenario: Coverage over the repository
+- **WHEN** the viewer's coverage test renders the source tree of every `.nx` file in the repository
+- **THEN** the key of every node SHALL appear in the rendering exactly once
 
-#### Scenario: Choices as rows
-- **WHEN** the tree carries a viewer for `Choice` with `layout=row`, `title=label`, `subtitle=description` and
-  `badge=value`
-- **THEN** each `Choice` element SHALL read as one line with its label, its description and its
-  value as a badge
+#### Scenario: Text after an emoji
+- **WHEN** a document holds `let wave = <Label text="😀 hello" title="after" />`
+- **THEN** the reading of the element SHALL show `after` as the value of `title`
 
-### Requirement: Viewers label cases and format values
-A `case` node of a union whose entry carries a `viewer` value SHALL show its case's `label` in its
-pill when the viewer sets one, with the case name and the `example` in its hover. A string literal
-bound to a property with a resolved format SHALL be shown by that format, still without its quotes
-and still offering its source: `url` and `email` as links, `phone` as a link that dials, `image` as
-a small picture with the URL beside it when the URL is `https:` or `http:` and the element's
-`images` property is not false, and as a link otherwise, `color` as a swatch beside the text, `markdown` as prose, and
-`text` as a plain value. A format SHALL NOT change a value that is not a string literal, such as an
-embed or a reference.
+### Requirement: Code reads as written, in the editor's colors
+Text that is not part of an element read as a group or a line, such as a declaration, a function's
+body or a comment, SHALL read as the document writes it, keeping its line breaks and indentation. The
+element SHALL color the text by the ranges its host gives in `colors`, each a start and end offset in
+UTF-16 code units with a light color, a dark color and a font style, so the reading takes the colors
+of the host's editor. The element SHALL mark comments and text shown to people as prose and each
+line's indentation as indentation, so a host can set prose in a proportional font through
+`--nx-viewer-prose-font-family` while indentation keeps a fixed width through
+`--nx-viewer-indent-font-family`, and code is set through `--nx-viewer-source-font-family`.
 
-#### Scenario: A labelled case
-- **WHEN** the tree carries a viewer for `ChoiceLayout` with the label "chips" for `chips` and "a list" for `list`,
-  and an element sets `layout=list`
-- **THEN** the layout row SHALL show a pill reading "a list"
+#### Scenario: A type declaration
+- **WHEN** a document declares `type Task = { title:string priority:int = 2 }` over several lines
+- **THEN** the reading SHALL show the declaration as written
 
-#### Scenario: An image URL
-- **WHEN** a `Choice` element sets `imageUrl="https://example.com/a.png"` and `imageUrl`'s resolved
-  format is `image`
-- **THEN** the row SHALL show a picture loaded from that URL and the URL beside it
+#### Scenario: Colors from the host
+- **WHEN** the host gives a range over `Task` with a light color, a dark color and bold
+- **THEN** the reading SHALL show `Task` in those colors, bold, and its text SHALL not change
 
-#### Scenario: Images turned off
-- **WHEN** the host sets the element's `images` property to false
-- **THEN** the same row SHALL show the URL as a link and load nothing
+### Requirement: An element over several lines reads as a group
+An element the document writes over several lines SHALL read as a group: a header holding its icon,
+its name, its id, and the attributes written on the line its tag starts on as `name=value`; a row for
+each attribute written on a line of its own, with the attribute's name in one column and its value in
+another; and what the element holds under them, indented. The group SHALL show no angle brackets and
+no closing tag. A bracket SHALL run down the group from under its name and turn right at its end. A
+value of several lines SHALL read under its name rather than in the value column, and in a pane
+narrower than about 64 characters every value SHALL read under its name. What the element holds SHALL
+read an item to a line: an element in its own form, and anything else, such as an `if` or a `for`
+block, as written, its later lines keeping their indentation relative to its own start. A blank line
+the document leaves between two held items SHALL become a little room, and so SHALL the space between
+two siblings where either is a group. A line too long for the pane SHALL wrap a step in from where its
+unit starts.
 
-### Requirement: A viewer declaration reads as a declaration
-The element SHALL render a `viewer` declaration as a declaration headed "Viewer for" its target,
-with its value read as any element is, so a reader sees how a kind's viewer is declared in the same terms as
-the rest of the document.
+#### Scenario: Attributes a line each
+- **WHEN** a document holds `<Step` with `id="welcome"` and `title="Welcome"` each on a line of its
+  own, and the viewer of `Step` names `id` as its id
+- **THEN** the reading SHALL show a group headed `Step welcome` with one row, `title` and `Welcome`,
+  and no `<`, `/>` or quotes
 
-#### Scenario: A viewer declaration in the document
-- **WHEN** a document holds `viewer Choice = <ElementViewer title=label />`
-- **THEN** the element SHALL show a declaration headed "Viewer for Choice" holding an "Element
-  viewer" card with a `title` row reading `label`
+#### Scenario: Content under a header
+- **WHEN** a document holds `<Row gap="wide">` on one line, two `<Item />` elements on the lines after
+  it with a blank line between them, and `</Row>`
+- **THEN** the reading SHALL show the header `Row  gap=wide`, the two items under it with a little
+  room between them, and no closing tag
+
+### Requirement: An element on one line reads as a line
+An element the document writes on one line SHALL read as its icon and name, its id where its viewer
+puts it, the value of the attribute its viewer names as its title alone, each other attribute as
+`name=value`, and then what it holds as written, with no tags of its own. When the element shares
+its line with other text, such as a property's name in a group or a `let` before it, the line SHALL
+keep the `<` before its name and a `/>` after it, so its extent stays clear; alone on its line, it
+SHALL show neither. An element alone on its line whose type is exactly the type its place declares,
+through any list, SHALL leave out its name when it has an icon, which then names it.
+
+#### Scenario: A list of choices
+- **WHEN** a property typed `Choice+` holds `<Choice value="yes-one" label="Yes, one" />` on a line
+  of its own, and the viewer of `Choice` names `label` as its title, `value` as its id at the end and
+  an icon
+- **THEN** the reading SHALL show the icon, `Yes, one` and the id `yes-one`, without the name
+  `Choice`
+
+#### Scenario: An element sharing its line
+- **WHEN** a group's row `status` holds `<OrderStatus.shipped carrier="Royal Mail" />`
+- **THEN** the row's value SHALL read `<OrderStatus.shipped  carrier=Royal Mail />`
+
+#### Scenario: Content on one line
+- **WHEN** a document holds `<Label tone="quiet">Hello {who}</Label>` alone on its line
+- **THEN** the reading SHALL show `Label  tone=quiet  Hello {who}` and no closing tag
+
+### Requirement: Values lose their quotes and keep a style
+In a group or a line, a string SHALL read without its quotes, and a boolean SHALL read as a check for
+`true` and a cross for `false`. A string that a property, a field, a parameter or a declaration typed
+`uitext`, or an alias that leads to it, holds SHALL read as text shown to people: in the prose font, in
+a color of its own, with any quotes it keeps quiet. A string an element's viewer names as its `id`, or
+that a property's viewer formats as `id`, SHALL read as one quiet token, the element's id moved to where
+`idPosition` puts it. A string a viewer formats as `color` SHALL read with a small square of that color
+before it when it names a color.
+
+#### Scenario: Text shown to people
+- **WHEN** a type declares `label:uitext` and an element sets `label="First choice"` on one line
+- **THEN** the reading SHALL show `First choice` as text shown to people, without quotes
+
+#### Scenario: A color
+- **WHEN** a property typed by an alias with `viewer Color = <ValueViewer format=color />` holds
+  `"#b6695d"`
+- **THEN** the reading SHALL show a square of that color before `#b6695d`
+
+### Requirement: Elements start with icons the host draws
+The element SHALL take, through its `icons` property, a function that draws an icon by its Lucide name.
+With it, every element that starts a line of its own SHALL start with an icon: the one its viewer's
+`icon` names, or else one for its kind of declaration, `component` for a component, `box` for a record,
+`zap` for an action, `tag` for a union case and `square-function` for a function. The icon SHALL carry
+the element's name as its label and add no text. Without the function, no element SHALL have an icon.
+
+#### Scenario: A viewer's icon and a kind's
+- **WHEN** the host draws icons, the viewer of `Choice` sets `icon="circle-dot"`, and a list holds a
+  `Choice` and a record `Note` with no viewer, each on a line of its own
+- **THEN** the `Choice` SHALL start with the icon `circle-dot` and the `Note` with `box`
+
+### Requirement: A selection is a unit of the reading
+A click SHALL select the unit it falls in: an element over several lines, by its header or the room
+between its rows; a row of a group; an element on one line; an element written as its tags that starts
+a line; or a block written as it is, such as an `if`. Outside every unit, a click SHALL select the
+smallest node under it, and a drag that selects text SHALL select nothing. Selecting SHALL fire
+`nx-select` with the node's key, role and range, and tell a screen reader what was selected. The host
+SHALL be able to select a node by key through `selection` without the event; a key the tree does not
+hold SHALL clear the selection. The up and down arrow keys SHALL select the previous and next unit, the
+left arrow the unit that holds the selected one, and the right arrow the first one it holds. The
+selected unit and the one under the pointer SHALL be drawn as rows behind the text, from just before
+the unit's start to near the reading's right edge, a selected group's first line stronger than the rest
+of it, in colors a host sets through `--nx-viewer-selection`, `--nx-viewer-selection-inactive` and
+`--nx-viewer-hover`.
+
+#### Scenario: Selecting a line
+- **WHEN** a reader clicks a word of an element on one line
+- **THEN** the element SHALL be selected and `nx-select` SHALL carry its key
+
+#### Scenario: Selecting from the host
+- **WHEN** the host sets `selection` to a node's key
+- **THEN** that node SHALL be selected and no `nx-select` SHALL fire
+
+#### Scenario: Walking the tree
+- **WHEN** a group is selected and the reader presses the right arrow, the down arrow and the left
+  arrow
+- **THEN** the selection SHALL move to the group's first item, to its second, and back to the group
+
+#### Scenario: From an origin to a node
+- **WHEN** a value's origin names a byte range
+- **THEN** `nodeAtSpan` SHALL give the node with exactly that range, an element where several share it

@@ -4,23 +4,22 @@ description: 'How a viewer declaration tells a viewer, such as the NX reading vi
 ---
 
 A **viewer declaration** tells a viewer how to present one declaration. A viewer is a tool that
-shows NX source to people, such as the `<nx-viewer>` reading view from `@nx-lang/viewer`, which
-draws elements as cards and values without their quotes, or the Read view of the
-[playground](/play). Without viewer declarations it reads every element the same way: a card headed
-by its kind's name split into words, with one row per attribute in declaration order. A library
-author knows better, and a viewer declaration says so:
+shows NX source to people, such as the `<nx-viewer>` reading view from `@nx-lang/viewer` that the
+Read view of the [playground](/play) shows. It reads an element written over several lines as a
+group with a row to each property, and an element on one line as its name and its properties as
+`name=value`, without quotes. Without viewer declarations it reads every element the same way. A
+library author knows better, and a viewer declaration says so:
 
 ```nx
 import "@nx/viewer"
 
 type Choice = { value:string label:string description?:string }
 
-viewer Choice = <ElementViewer layout=row title=label subtitle=description badge=value />
+viewer Choice = <ElementViewer title=label id=value idPosition=end icon="circle-dot" />
 ```
 
-Now a `<Choice value="eng" label="Engineering" description="Building and running software" />`
-reads as one line: "Engineering", with "Building and running software" under it and `eng` as a
-badge.
+Now each `<Choice value="eng" label="Engineering" />` in a list of choices reads as one line: a
+circle-dot icon, "Engineering", and `eng` as a quiet identifier at the end.
 
 A viewer declaration is applied, not weighed. The compiler resolves every viewer declaration that
 applies to a declaration into one result, the same for every reader, and a viewer presents the
@@ -98,19 +97,12 @@ let roleQuestion =
   </SingleChoice>
 ```
 
-In a reading of `roleQuestion`:
-
-- The card is headed "Single choice", the declaration's name split into words, with
-  "Which describes your work best?" as its title. `SingleChoice` has no viewer declaration of its
-  own, so the viewer for `Question` applies to it.
-- `required` is left to its default, `true`, so the card shows the phrase "Required" in place of a
-  `required` row.
-- The `id` row is labelled "Key" and folded into the details strip at the foot of the card.
-- The `layout` row shows a pill reading "chips", with the case name and the example "A B C" in its
-  hover.
-- Each choice reads as one line: its label, its description under it and its value as a badge.
-  Everything else, here the second choice's `imageUrl`, is folded into the line's details strip,
-  where it shows as a small picture beside its URL.
+The compiler resolves these into one viewer for each declaration. `SingleChoice` has no viewer
+declaration of its own, so the viewer for `Question` applies to it: its title is `label`, its
+subtitle `help`, `required` reads as "Required" or "Optional", and `id` is labelled "Key" and placed
+in details. Each choice's title is its `label`, its subtitle its `description` and its badge its
+`value`, and every `ImageUrl` is a picture. A viewer presents as much of this as it has room for;
+[what a reading shows](#what-a-reading-shows) says what the playground's Read view uses today.
 
 The playground's *Viewer declarations* example is a smaller library of the same kind. Open it in
 the [playground](/play) and switch to Read to see the reading follow its viewer declarations.
@@ -163,40 +155,32 @@ viewer Choice = <ElementViewer name={prefix} />   // error: a viewer's values mu
 
 ## What a reading shows
 
-A viewer such as `<nx-viewer>` uses the resolved viewer declarations this way:
+The source tree a viewer reads carries each declaration's resolved viewer: its kind's `name`, the
+properties bound to `title`, `subtitle`, `badge`, `image` and `id`, where the id reads, its icon and
+layout, and for each property its `label`, its boolean phrases (`whenTrue` and `whenFalse`), its
+`place` and its format; for a union, each case's `label` and `example`. Properties are listed in the
+order of the `PropertyViewer`s, then the rest in declaration order. A viewer declaration changes how
+source reads, never what it means, and it hides nothing: a property placed in details is still there
+for a viewer to show.
 
-- **Kind name.** A card is headed by the viewer's `name` when it sets one, and otherwise by the
-  declaration's name split into words, so `SingleChoice` reads "Single choice".
-- **Title, subtitle, badge and image.** The attributes bound to these properties move into those
-  parts of the card, and are not shown again as rows. A reader can still open each one's source.
-- **Labels.** A row is labelled with its property's `label`, and otherwise with the property's
-  name.
-- **Order.** Rows follow the order of the `PropertyViewer`s, then the remaining properties in
-  declaration order.
-- **Boolean phrases.** A boolean property with `whenTrue` or `whenFalse` reads as that phrase in
-  place of its row, for a value written out or left to its default. When the phrase for the value
-  is not set, the row reads as usual, so nothing turns blank.
-- **Details.** `place=details` moves a property into a strip at the foot of the card, folded until
-  a reader opens it.
-- **Layouts.** `card` is the default. `row` shows the element as one line holding its heading,
-  title, subtitle, badge and picture, and `inline` shows it within the line that holds it, as its
-  heading and title. Either way every other row goes into the details strip.
-- **Cases.** A case's `label` shows in its pill, with the case name and its `example` in the hover.
-- **Formats.** A string literal bound to a property with a format is shown by it: `url` and `email`
-  as links, `phone` as a link that dials, `image` as a small picture with its URL, `color` with a
-  swatch, `markdown` as prose, `text` as a plain value and `id` as an identifier, quiet and set
-  apart as one token. A format changes how a value looks, never
-  what it is, and does nothing to a value that is not a string literal.
+The playground's Read view uses:
 
-The reading stays lossless: a viewer declaration can fold a property into the details strip but
-cannot hide it.
+- **Title.** The value of the property bound to `title` reads alone on an element's line, without its
+  name: `Engineering` rather than `label=Engineering`.
+- **Id.** The value of the property bound to `id` reads as one quiet token: after the element's name,
+  or with `idPosition=end`, last on its line, so a list's labels come first.
+- **Icon.** `icon` names a [Lucide](https://lucide.dev/icons) icon that an element starts with when
+  it starts a line of its own. A kind that extends another inherits it, and an element with none takes
+  one for its kind of declaration.
+- **Formats.** A string bound to a property with the format `id` reads as a quiet token, and one with
+  the format `color` reads with a small square of its color before it. A format changes how a value
+  looks, never what it is, and does nothing to a value that is not a string literal.
 
 A property's format comes from its `PropertyViewer` when that sets one, and otherwise from the
 `ValueViewer` of the alias its type names, read as written, through `?`, `+` and `*`. In the survey
 library every property typed `ImageUrl` shows as a picture, and
-`<PropertyViewer of=imageUrl format=url />` would show one as a link instead. An `image` or `url`
-value is loaded or linked only when it is an `http:` or `https:` URL, and a host can turn image
-loading off.
+`<PropertyViewer of=imageUrl format=url />` would make it a link instead. A viewer should load an
+`image` or link a `url` only when it is an `http:` or `https:` URL.
 
 ## Viewer declarations in another module
 
@@ -266,11 +250,11 @@ above relabels only `chips`, so `list` keeps "a list".
 
 Property order follows the later viewer declaration: its `PropertyViewer`s in its order, then the
 earlier ones it does not name, in theirs. If `Question`'s viewer lists `required` then `id`, and a
-viewer for `SingleChoice` lists `layout` then `allowsOther`, a `SingleChoice` card lists `layout`,
+viewer for `SingleChoice` lists `layout` then `allowsOther`, a `SingleChoice`'s properties are listed `layout`,
 `allowsOther`, `required`, `id`, then the rest in declaration order.
 
 A base's `name` is not inherited, because it names the base itself. If `Question`'s viewer set
-`name="Question"`, a `SingleChoice` card would still read "Single choice" unless its own viewer
+`name="Question"`, a `SingleChoice` would still be named "Single choice" unless its own viewer
 declaration named it. Every other attribute is inherited.
 
 ## Duplicate viewer declarations

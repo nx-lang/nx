@@ -8,8 +8,9 @@ name, property or case in the output shows the same hover its declaration shows 
 Clicking one selects the declaration.
 
 The source pane's Edit and Read switch shows the source itself as a reading view, through the
-`<nx-viewer>` element of [`@nx-lang/viewer`](../../packages/viewer/README.md): elements as cards,
-logic as sentences, for a reader who does not write NX. The reading comes from the worker's
+`<nx-viewer>` element of [`@nx-lang/viewer`](../../packages/viewer/README.md): an element over
+several lines as a group with a row to each property and no tags, an element on one line as its name
+and properties, and the rest as written, in the editor's colors, for a reader who does not write NX. The reading comes from the worker's
 `sourceTree` query, refreshed when typing pauses, as evaluation is. Switching to Read selects the
 node at the cursor, and switching back puts the cursor at the start of the selected node.
 

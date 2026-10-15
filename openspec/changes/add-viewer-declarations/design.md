@@ -1,7 +1,7 @@
 ## Context
 
-The viewer (`@nx-lang/viewer`, spec `viewer`) reads a source tree as cards, rows and sentences, using
-only what the tree's declaration table says about each kind: its name, its properties in order, their
+The viewer (`@nx-lang/viewer`, spec `viewer`) read a source tree as cards, rows and sentences when
+this change began, using only what the tree's declaration table says about each kind: its name, its properties in order, their
 types and defaults. The NX Viewer Hints proposal (https://claude.ai/artifact/9o4DL9vaJFKKV1WxTeethK)
 adds a way for authors and hosts to say more. Bret settled its main choices on 2026-10-10: a
 standalone `viewer Target = <…Viewer …/>` module member rather than annotations, the keyword `viewer`
@@ -142,18 +142,20 @@ order. Two host modules can both declare a viewer for a target because the host 
 
 ### What the viewer does with viewer declarations
 
-- **Card parts:** the attributes bound to `title`, `subtitle`, `badge` and `image` move into those
-  parts of the card and keep their keys.
-- **Rows:** labels replace property names on rows. Boolean phrases (`whenTrue`/`whenFalse`) replace
-  a row only when the matching phrase is set, so nothing turns blank.
-- **Details:** `place=details` moves a row or ghost into a details strip at the foot of the card.
-  The lossless requirement now allows that strip beside the import strip.
-- **Layouts:** `row` and `inline` put everything except the heading, title, subtitle, badge and
-  image into the details strip.
-- **Cases:** case labels show in the pill, with the case name and example in the hover.
-- **Formats:** these change how a string literal shows, never what it is. `image` loads a picture
-  only for `http:` and `https:` URLs, and a host can turn image loading off. A reading of untrusted
-  source should not have to fetch from arbitrary hosts.
+The viewer's cards gave way, during this change, to a reading of the document's own text: an
+element over several lines reads as a group with a row to each property, an element on one line as
+its name and properties, and the rest as written, in the editor's colors. The reading uses:
+
+- **Title:** the attribute bound to `title` reads as its value alone on an element's line.
+- **Id:** the attribute bound to `id` reads as one quiet token, its value alone, after the element's
+  name or, with `idPosition=end`, last on its line.
+- **Icon:** `icon` names a Lucide icon an element starts with when it starts a line; a kind inherits it.
+- **Formats:** `id` reads a string as a quiet token, and `color` puts a swatch before a string that
+  names a color. A format changes how a string shows, never what it is.
+
+The other parts a viewer declaration sets (`name`, `subtitle`, `badge`, `image`, labels, boolean
+phrases, places, layouts and case labels) stay in the source tree for any reader; the reading takes
+them up as it grows.
 
 ### What is left out of version one
 
