@@ -55,10 +55,10 @@ const KEYED = "[data-key], [data-ref-key], [data-part-of]";
 /**
  * What a click selects in the source view's reading, and what the pointer and the arrow keys move
  * between: an element on lines of its own (through its header), a row of a sheet, an element on
- * one line, or an element written as its tags that starts a line. A sheet's header stands for its
- * sheet.
+ * one line, an element written as its tags that starts a line, or a block written as it is, as an
+ * `if` or a `for`. A sheet's header stands for its sheet.
  */
-const UNITS = ".sheet-head, .sheet-row, .line-element, .tag-line";
+const UNITS = ".sheet-head, .sheet-row, .line-element, .tag-line, .block-line";
 
 /**
  * What `element` reads as, word by word: its text with pieces kept apart, an image by its label,
@@ -453,10 +453,12 @@ export class NxViewerElement extends ElementBase {
       return undefined;
     }
     const found = target?.closest?.(UNITS) as HTMLElement | null | undefined;
-    if (found === null || found === undefined || !this.#body.contains(found)) {
-      return undefined;
+    if (found !== null && found !== undefined && this.#body.contains(found)) {
+      return found.classList.contains("sheet-head") ? (found.parentElement as HTMLElement) : found;
     }
-    return found.classList.contains("sheet-head") ? (found.parentElement as HTMLElement) : found;
+    // Room between a group's rows, or beside them, belongs to the group.
+    const group = target?.closest?.(".sheet") as HTMLElement | null | undefined;
+    return group !== null && group !== undefined && this.#body.contains(group) ? group : undefined;
   }
 
   #setHoveredUnit(unit: HTMLElement | undefined): void {
@@ -484,7 +486,9 @@ export class NxViewerElement extends ElementBase {
     }
     const draw = (from: HTMLElement, rows: DOMRect, className: string): void => {
       const start = (from.matches(".sheet-row") ? from.querySelector<HTMLElement>(":scope > .sheet-name") : from) ?? from;
-      const left = start.getBoundingClientRect().left - frame.left - 4 + this.#body.scrollLeft;
+      // A block's later lines start further left, at its source indentation; it starts where its first line does.
+      const first = from.matches(".block-line") ? from.getClientRects()[0] : undefined;
+      const left = (first ?? start.getBoundingClientRect()).left - frame.left - 4 + this.#body.scrollLeft;
       const box = this.ownerDocument.createElement("div");
       box.className = `highlight ${className}`;
       box.style.left = `${left}px`;
@@ -494,21 +498,27 @@ export class NxViewerElement extends ElementBase {
       layer.append(box);
     };
     const selected = this.#selection === undefined ? undefined : this.#rendered.get(this.#selection);
-    const unit = selected?.matches(".sheet, .sheet-row, .line-element, .tag-line") === true ? selected : undefined;
+    const unit = selected?.matches(".sheet, .sheet-row, .line-element, .tag-line, .block-line") === true ? selected : undefined;
+    // A group's first line: a sheet's header, or a block's first line.
+    const firstLine = (group: HTMLElement): DOMRect | undefined =>
+      group.matches(".sheet")
+        ? group.querySelector<HTMLElement>(":scope > .sheet-head")?.getBoundingClientRect()
+        : group.matches(".block-line")
+          ? group.getClientRects()[0]
+          : undefined;
     if (unit !== undefined) {
-      const head = unit.matches(".sheet") ? unit.querySelector<HTMLElement>(":scope > .sheet-head") : null;
-      if (head !== null) {
+      const head = firstLine(unit);
+      if (head !== undefined) {
         draw(unit, unit.getBoundingClientRect(), "selected-body");
-        draw(unit, head.getBoundingClientRect(), "selected");
+        draw(unit, head, "selected");
       } else {
         draw(unit, unit.getBoundingClientRect(), "selected");
       }
     }
     const hovered = this.#hoveredUnit;
     if (hovered !== undefined && this.#body.contains(hovered)) {
-      const head = hovered.matches(".sheet") ? hovered.querySelector<HTMLElement>(":scope > .sheet-head") : null;
       const within = unit !== undefined && unit.contains(hovered);
-      draw(hovered, (head ?? hovered).getBoundingClientRect(), within ? "hovered in-selection" : "hovered");
+      draw(hovered, firstLine(hovered) ?? hovered.getBoundingClientRect(), within ? "hovered in-selection" : "hovered");
     }
   }
 

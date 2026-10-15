@@ -293,8 +293,8 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 .source .n.selected { outline: none; background: var(--nx-viewer-selection, light-dark(#0969da1f, #388bfd33)); }
 /* A unit of the reading (an element on lines of its own, a sheet's row, an element on one line) is
    drawn selected and hovered by the highlights behind it, as a list's rows are, not by its own box. */
-.source :is(.sheet, .sheet-row, .line-element, .tag-line).selected { background: none; }
-.source .sheet-head, .source .sheet-row, .source .line-element, .source .tag-line { cursor: default; }
+.source :is(.sheet, .sheet-row, .line-element, .tag-line, .block-line, .sheet-held).selected { background: none; }
+.source :is(.sheet, .block-line, .line-element, .tag-line) { cursor: default; }
 .body:has(> .highlights) { position: relative; isolation: isolate; }
 .highlights { position: absolute; inset: 0; pointer-events: none; z-index: -1; }
 .highlight { position: absolute; border-radius: 4px; }

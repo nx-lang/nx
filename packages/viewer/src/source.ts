@@ -801,6 +801,10 @@ export function renderSource(
         line.append(lead);
       }
       writeNodes(line, [item], start, end);
+      if (line.classList.contains("as-written")) {
+        // A block written as it is, as an `if` or a `for`, is a unit of the reading as a whole.
+        line.querySelector(":scope > .n")?.classList.add("block-line");
+      }
       parent.append(line);
       previous = end;
     }
