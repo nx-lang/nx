@@ -1,116 +1,20 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import "@nx-lang/viewer";
-import { NX_SELECT_EVENT, type NxSelectDetail, type NxViewerElement, type NxViewerIcons, type NxViewerView } from "@nx-lang/viewer";
+import { NX_SELECT_EVENT, type NxSelectDetail, type NxViewerElement, type NxViewerIcons } from "@nx-lang/viewer";
 import { colorize, loadHighlighter, type NxValueHighlighter } from "@nx-lang/value-view";
-import { useEditorThemes, type EditorThemes } from "../theme.ts";
+import { EDITOR_THEMES, type EditorThemes } from "../theme.ts";
 import type { Reading } from "./reading.ts";
-// The faces the source reading is being tried in. Latin only, in the weights and styles a theme asks for.
-import "@fontsource/ibm-plex-sans/latin-400.css";
-import "@fontsource/ibm-plex-sans/latin-400-italic.css";
-import "@fontsource/ibm-plex-sans/latin-700.css";
-import "@fontsource/ibm-plex-mono/latin-400.css";
-import "@fontsource/ibm-plex-mono/latin-400-italic.css";
-import "@fontsource/ibm-plex-mono/latin-700.css";
-import "@fontsource/ia-writer-quattro/latin-400.css";
-import "@fontsource/ia-writer-quattro/latin-400-italic.css";
-import "@fontsource/ia-writer-quattro/latin-700.css";
-import "@fontsource/atkinson-hyperlegible-next/latin-400.css";
-import "@fontsource/atkinson-hyperlegible-next/latin-400-italic.css";
-import "@fontsource/atkinson-hyperlegible-next/latin-700.css";
-import "@fontsource/atkinson-hyperlegible-mono/latin-400.css";
-import "@fontsource/atkinson-hyperlegible-mono/latin-400-italic.css";
-import "@fontsource/atkinson-hyperlegible-mono/latin-700.css";
-// Fira Mono has no italic of its own; the browser slants the upright.
+// The reading's faces: Geist for prose and Geist Mono for code. Latin only, in the weights and
+// styles the theme asks for.
 import "@fontsource/geist/latin-400.css";
 import "@fontsource/geist/latin-400-italic.css";
 import "@fontsource/geist/latin-700.css";
 import "@fontsource/geist-mono/latin-400.css";
 import "@fontsource/geist-mono/latin-400-italic.css";
 import "@fontsource/geist-mono/latin-700.css";
-import "@fontsource/source-sans-3/latin-400.css";
-import "@fontsource/source-sans-3/latin-400-italic.css";
-import "@fontsource/source-sans-3/latin-700.css";
-import "@fontsource/source-code-pro/latin-400.css";
-import "@fontsource/source-code-pro/latin-400-italic.css";
-import "@fontsource/source-code-pro/latin-700.css";
-import "@fontsource/fira-sans/latin-400.css";
-import "@fontsource/fira-sans/latin-400-italic.css";
-import "@fontsource/fira-sans/latin-700.css";
-import "@fontsource/fira-mono/latin-400.css";
-import "@fontsource/fira-mono/latin-700.css";
-// Variable faces: Inter by weight, and Recursive with every axis, its monospace one among them.
-import "@fontsource-variable/inter/wght.css";
-import "@fontsource-variable/inter/wght-italic.css";
-import "@fontsource-variable/recursive/full.css";
-
-/**
- * The fonts the source reading can be set in while they are compared: the editor's monospace, the
- * system's proportional face for prose with its monospace one for code, one bundled proportional
- * face throughout, a bundled proportional face for prose with its monospace one for code, and a
- * duospace face.
- */
-export const READING_FONTS = [
-  "monospace",
-  "hybrid-system",
-  "proportional-system",
-  "verdana",
-  "inter",
-  "atkinson",
-  "recursive",
-  "geist",
-  "source",
-  "fira",
-  "proportional",
-  "atkinson-hybrid",
-  "recursive-hybrid",
-  "geist-hybrid",
-  "source-hybrid",
-  "fira-hybrid",
-  "hybrid",
-  "duospace",
-] as const;
-export type ReadingFont = (typeof READING_FONTS)[number];
-
-/** How Read's sheets show what belongs to what, while the ways are compared. */
-export const READING_GROUPINGS = ["brackets", "outline", "guides", "none"] as const;
-export type ReadingGrouping = (typeof READING_GROUPINGS)[number];
-export const READING_GROUPING_LABELS: Record<ReadingGrouping, string> = {
-  brackets: "Brackets (default)",
-  outline: "Outline",
-  guides: "Guides",
-  none: "None",
-};
-export const READING_FONT_LABELS: Record<ReadingFont, string> = {
-  monospace: "Monospace (as Edit)",
-  "hybrid-system": "Hybrid, system: Segoe UI prose, Consolas code",
-  "proportional-system": "Proportional, system: Segoe UI",
-  verdana: "Proportional, system: Verdana",
-  inter: "Proportional: Inter",
-  atkinson: "Proportional: Atkinson Hyperlegible",
-  recursive: "Proportional: Recursive",
-  geist: "Proportional: Geist",
-  source: "Proportional: Source Sans 3",
-  fira: "Proportional: Fira Sans",
-  proportional: "Proportional: IBM Plex Sans",
-  "atkinson-hybrid": "Hybrid: Atkinson Hyperlegible, with its Mono for code",
-  "recursive-hybrid": "Hybrid: Recursive, monospace for code",
-  "geist-hybrid": "Hybrid: Geist, with Geist Mono for code (default)",
-  "source-hybrid": "Hybrid: Source Sans 3, with Source Code Pro for code",
-  "fira-hybrid": "Hybrid: Fira Sans, with Fira Mono for code",
-  hybrid: "Hybrid: IBM Plex Sans, with Plex Mono for code",
-  duospace: "Duospace: iA Writer Quattro",
-};
 
 export interface ReadingViewProps {
   readonly reading: Reading;
-  /** The source's own text with its nodes marked, or the reading that draws cards. */
-  readonly view: NxViewerView;
-  /** The font the source reading is set in. */
-  readonly font: ReadingFont;
-  /** Whether an element written an attribute to a line reads as a property sheet. */
-  readonly sheets: boolean;
-  /** How a sheet shows what belongs to it: `outline`, `guides`, or nothing. */
-  readonly grouping: ReadingGrouping;
   /** The selected node's key. */
   readonly selection: string | undefined;
   readonly onSelect: (key: string) => void;
@@ -138,11 +42,11 @@ function loadIcons(): Promise<NxViewerIcons> {
 }
 
 /** The source pane's Read side: `<nx-viewer>` showing the source tree, or why it cannot. */
-export function ReadingView({ reading, view, font, sheets, grouping, selection, onSelect }: ReadingViewProps) {
+export function ReadingView({ reading, selection, onSelect }: ReadingViewProps) {
   const element = useRef<NxViewerElement>(null);
   // The highlighter the output pane colors with, loaded with the editor's themes, so the source
   // reading takes the colors the editor shows.
-  const themes = useEditorThemes();
+  const themes = EDITOR_THEMES;
   // A highlighter is loaded for one pair of themes, so it is kept with the pair it colors with.
   const [highlighter, setHighlighter] = useState<{ value: NxValueHighlighter; themes: EditorThemes } | null>(null);
   useEffect(() => {
@@ -188,18 +92,16 @@ export function ReadingView({ reading, view, font, sheets, grouping, selection, 
     }
     target.tree = undefined;
     target.text = reading.text;
-    target.view = view;
-    target.sheets = sheets;
     target.icons = icons;
-    target.colors = view === "source" && highlighter !== null ? colorize(highlighter.value, reading.text, highlighter.themes) : [];
+    target.colors = highlighter !== null ? colorize(highlighter.value, reading.text, highlighter.themes) : [];
     target.tree = reading.tree;
-  }, [reading.tree, reading.text, view, highlighter, sheets, icons]);
+  }, [reading.tree, reading.text, highlighter, icons]);
 
   useLayoutEffect(() => {
     if (element.current !== null && element.current.selection !== selection) {
       element.current.selection = selection;
     }
-  }, [selection, reading.tree, view, highlighter]);
+  }, [selection, reading.tree, highlighter]);
 
   useEffect(() => {
     const target = element.current;
@@ -219,12 +121,7 @@ export function ReadingView({ reading, view, font, sheets, grouping, selection, 
         </p>
       )}
       {reading.tree === null && reading.failure === null && <p className="reading-message quiet">Reading…</p>}
-      {reading.tree !== null && <nx-viewer
-          ref={element}
-          stale={reading.stale}
-          className={`reading-font-${font}`}
-          {...(grouping === "none" ? {} : { grouping })}
-        />}
+      {reading.tree !== null && <nx-viewer ref={element} stale={reading.stale} />}
     </div>
   );
 }

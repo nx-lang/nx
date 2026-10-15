@@ -247,45 +247,12 @@ importers:
 
   sites/playground:
     dependencies:
-      '@fontsource-variable/inter':
-        specifier: ^5.3.0
-        version: 5.3.0
-      '@fontsource-variable/recursive':
-        specifier: ^5.3.0
-        version: 5.3.0
-      '@fontsource/atkinson-hyperlegible-mono':
-        specifier: ^5.3.0
-        version: 5.3.0
-      '@fontsource/atkinson-hyperlegible-next':
-        specifier: ^5.3.0
-        version: 5.3.0
-      '@fontsource/fira-mono':
-        specifier: ^5.3.0
-        version: 5.3.0
-      '@fontsource/fira-sans':
-        specifier: ^5.3.0
-        version: 5.3.0
       '@fontsource/geist':
         specifier: ^5.3.0
         version: 5.3.0
       '@fontsource/geist-mono':
         specifier: ^5.3.0
         version: 5.3.0
-      '@fontsource/ia-writer-quattro':
-        specifier: ^5.3.0
-        version: 5.3.0
-      '@fontsource/ibm-plex-mono':
-        specifier: ^5.3.0
-        version: 5.3.0
-      '@fontsource/ibm-plex-sans':
-        specifier: ^5.3.0
-        version: 5.3.0
-      '@fontsource/source-code-pro':
-        specifier: ^5.3.1
-        version: 5.3.1
-      '@fontsource/source-sans-3':
-        specifier: ^5.3.1
-        version: 5.3.1
       '@nx-lang/ir-runtime':
         specifier: workspace:*
         version: link:../../runtime/typescript
@@ -892,44 +859,11 @@ packages:
   '@expressive-code/plugin-text-markers@0.44.2':
     resolution: {integrity: sha512-SNI7EgUSiADqbqUzzMbj1ZeC/r2pa5eg3KyFOGAd3a7EsIA4qzjXQLp+ODWQtHVDKFCdGs4J3ovSJUqvKIK96g==}
 
-  '@fontsource-variable/inter@5.3.0':
-    resolution: {integrity: sha512-OupL48va4JNofb97w6NYeF9S7W/kHNKM0Er8Dem5nqi4jeOLrVJDoE8tZEpnMJmtkvNbB1EIPPwHcdkF6b1oUA==}
-
-  '@fontsource-variable/recursive@5.3.0':
-    resolution: {integrity: sha512-4B4/lWCVeZgdbpJdIIU1sOVO/ECjjM673ohuxvyQ6uCK41TPlGzKRNokKY84noUgGYnpwc//MW4k2KrOMY19jQ==}
-
-  '@fontsource/atkinson-hyperlegible-mono@5.3.0':
-    resolution: {integrity: sha512-7Iha5azCRXJVk4NdxbVdKAE+4p/rMJoW6dslvhktugDFPSp7kxFRGAavBtwtSTrnyNhKXW8w1NHgMnrh/6OshA==}
-
-  '@fontsource/atkinson-hyperlegible-next@5.3.0':
-    resolution: {integrity: sha512-8p1tHVoPDo6oYwSO3sMw5snGwFwSf3TmeSF9Gcj792GXdsg6oqvhoItbj6Hj/XZIk0Xs+Cwu6pkLBAl3Q5HrwA==}
-
-  '@fontsource/fira-mono@5.3.0':
-    resolution: {integrity: sha512-FZzRwKhpoXQU1uhEGKUg5AHUUdfiaTXxGCdBBeGHUmcZaqEDEmndSVvpXHkSViH25f/UiWfhcWTib+6A8o4qeQ==}
-
-  '@fontsource/fira-sans@5.3.0':
-    resolution: {integrity: sha512-z1SKSG7eRhm3srlb7rQ3j77QP4TP7OFxCZ4wUWhCdt+3hOF9K0AyvybpAsz6+JWNcCVV7AqC7dbOT3e67P2r5A==}
-
   '@fontsource/geist-mono@5.3.0':
     resolution: {integrity: sha512-UtJ1BBBCVpMYdIcW7nEB45UAoAw5M53ZXs2t0ciPW+IokuAAIc56M8+kW5tXbRJCTpDw4XTtU7proT6NdQAHTg==}
 
   '@fontsource/geist@5.3.0':
     resolution: {integrity: sha512-u03ftlfVwb05uijq2jGDJ03/HKGqMKaNFk7KOhkpBUex8+BhrAOfMs/XciJ2UUNUX9fEsZbZQld/RWMA2oFU7g==}
-
-  '@fontsource/ia-writer-quattro@5.3.0':
-    resolution: {integrity: sha512-J249e+/1kBy9YzJ1JKRPDm0V3ELGwqSlxf3WlB7qNiExLA+kXGN+VwOhILNH21ZcezFVilvA9+ev2r/kZSyy/g==}
-
-  '@fontsource/ibm-plex-mono@5.3.0':
-    resolution: {integrity: sha512-eTgnZjZEGk1QtD3ZstF+Vclo2HLAni8YMy34/DxllwZvyz1lR/1RF/xTiAquOBO7MvqBx8D2Ig2WCPMVfdZu7Q==}
-
-  '@fontsource/ibm-plex-sans@5.3.0':
-    resolution: {integrity: sha512-CbE4CbbEEZJX860XyUiRpsksXIQR8Rp2XDva2VO53NJox9tVNtusrysd2x5YkUEY3ErQ66W1IiiQL8/wihhw5w==}
-
-  '@fontsource/source-code-pro@5.3.1':
-    resolution: {integrity: sha512-qsJEkwJWXYP/9clmtt3BsIlZ+Lr4cuRgNAgu0vyZdCgESMRMhRkAmEFFHHNM81VdeURqg5D5+Rr3bALDFav78A==}
-
-  '@fontsource/source-sans-3@5.3.1':
-    resolution: {integrity: sha512-O3YxvbotUOgYI2Zx0bBcEMNjnwitRf9P2+9pd54sMoux1NHrdXnMwZusw2P78lFhEzOPN4glOEQmX0ASaS68uA==}
 
   '@img/colour@1.1.0':
     resolution: {integrity: sha512-Td76q7j57o/tLVdgS746cYARfSyxk8iEfRxewL9h4OMzYhbW4TAcppl0mT4eyqXddh6L/jwoM75mo7ixa/pCeQ==}
@@ -4407,31 +4341,9 @@ snapshots:
     dependencies:
       '@expressive-code/core': 0.44.2
 
-  '@fontsource-variable/inter@5.3.0': {}
-
-  '@fontsource-variable/recursive@5.3.0': {}
-
-  '@fontsource/atkinson-hyperlegible-mono@5.3.0': {}
-
-  '@fontsource/atkinson-hyperlegible-next@5.3.0': {}
-
-  '@fontsource/fira-mono@5.3.0': {}
-
-  '@fontsource/fira-sans@5.3.0': {}
-
   '@fontsource/geist-mono@5.3.0': {}
 
   '@fontsource/geist@5.3.0': {}
-
-  '@fontsource/ia-writer-quattro@5.3.0': {}
-
-  '@fontsource/ibm-plex-mono@5.3.0': {}
-
-  '@fontsource/ibm-plex-sans@5.3.0': {}
-
-  '@fontsource/source-code-pro@5.3.1': {}
-
-  '@fontsource/source-sans-3@5.3.1': {}
 
   '@img/colour@1.1.0':
     optional: true

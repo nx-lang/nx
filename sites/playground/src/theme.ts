@@ -6,7 +6,7 @@
  * preference. The playground follows the same choice, so moving between the docs and the
  * playground does not flip the page's colors.</para>
  */
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useState } from "react";
 import type { BundledTheme } from "shiki";
 
 export type Theme = "light" | "dark";
@@ -18,65 +18,14 @@ export interface EditorThemes {
 }
 
 /**
- * The pairs of Shiki themes the source, the reading and the output can be colored with, while they
- * are compared. `vscode` is the long-standing default of VS Code, Dark+ and Light+, whose colors
- * tell an attribute's name from its value and leave punctuation quiet. `github` is GitHub's current
- * pair, whose comments are the more readable.
+ * The Shiki themes the source, the reading and the output are colored with: VS Code's long-standing
+ * default pair, Dark+ and Light+, whose colors tell an attribute's name from its value and leave
+ * punctuation quiet.
  */
-export const THEME_FAMILIES = {
-  vscode: { dark: "dark-plus", light: "light-plus" },
-  github: { dark: "github-dark-default", light: "github-light-default" },
-} as const satisfies Record<string, EditorThemes>;
+export const EDITOR_THEMES: EditorThemes = { dark: "dark-plus", light: "light-plus" };
 
-export type ThemeFamily = keyof typeof THEME_FAMILIES;
-
-export const THEME_FAMILY_LABELS: Record<ThemeFamily, string> = {
-  vscode: "VS Code Dark+ / Light+ (default)",
-  github: "GitHub",
-};
-
-/** Every theme of every family, for an editor to load up front. */
-export const ALL_EDITOR_THEMES: readonly BundledTheme[] = Object.values(THEME_FAMILIES).flatMap((family) => [
-  family.dark,
-  family.light,
-]);
-
-let family: ThemeFamily = "vscode";
-const familyListeners = new Set<() => void>();
-
-/** Tells the stylesheet which family is in use, so the panes take that family's background. */
-function markFamily(): void {
-  if (typeof document !== "undefined") {
-    document.documentElement.dataset["themeFamily"] = family;
-  }
-}
-markFamily();
-
-/** Chooses the family everything is colored with. A comparison, not a setting: it is not kept. */
-export function setThemeFamily(next: ThemeFamily): void {
-  if (next !== family) {
-    family = next;
-    markFamily();
-    for (const listener of familyListeners) {
-      listener();
-    }
-  }
-}
-
-function subscribeToFamily(listener: () => void): () => void {
-  familyListeners.add(listener);
-  return () => familyListeners.delete(listener);
-}
-
-/** The family everything is colored with now. */
-export function useThemeFamily(): ThemeFamily {
-  return useSyncExternalStore(subscribeToFamily, () => family);
-}
-
-/** The pair of themes everything is colored with now. */
-export function useEditorThemes(): EditorThemes {
-  return THEME_FAMILIES[useThemeFamily()];
-}
+/** Both themes, for an editor to load up front. */
+export const ALL_EDITOR_THEMES: readonly BundledTheme[] = [EDITOR_THEMES.dark, EDITOR_THEMES.light];
 
 const STORAGE_KEY = "starlight-theme";
 

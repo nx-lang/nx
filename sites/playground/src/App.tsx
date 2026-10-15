@@ -16,15 +16,7 @@ import { SiteHeader } from "./header/SiteHeader";
 import { OutputPane, type OutputView } from "./output/OutputPane";
 import { PreviewView } from "./preview/PreviewView";
 import { usePreview } from "./preview/usePreview.ts";
-import {
-  READING_FONT_LABELS,
-  READING_FONTS,
-  READING_GROUPING_LABELS,
-  READING_GROUPINGS,
-  ReadingView,
-  type ReadingFont,
-  type ReadingGrouping,
-} from "./reading/ReadingView";
+import { ReadingView } from "./reading/ReadingView";
 import { keyAtOffset, offsetOfKey } from "./reading/selection.ts";
 import { useSourceTree } from "./reading/useSourceTree.ts";
 import { SITE_ROOT } from "./paths.ts";
@@ -32,7 +24,7 @@ import { createAddressKeeper } from "./address.ts";
 import { pathForPayload, routeFromLocation } from "./routes.ts";
 import { decodeSource, encodeSource } from "./share/codec.ts";
 import type { PreviewReloadNotice, PreviewState } from "./preview/protocol.ts";
-import { setThemeFamily, THEME_FAMILIES, THEME_FAMILY_LABELS, useSiteTheme, useThemeFamily, type ThemeFamily } from "./theme.ts";
+import { useSiteTheme } from "./theme.ts";
 import { useEvaluation } from "./useEvaluation.ts";
 import { startNxWorker } from "./worker/index.ts";
 
@@ -72,18 +64,14 @@ async function openLocation(): Promise<Opened> {
 }
 
 /** Whether the source pane shows the editor or the reading view. */
-/**
- * How the source pane shows the source: the editor, the source reading, or the card reading. The
- * two readings are kept side by side while the source reading is tried out.
- */
-type SourceMode = "edit" | "read" | "cards";
+/** How the source pane shows the source: the editor, or the reading. */
+type SourceMode = "edit" | "read";
 
-const MODE_LABELS: Record<SourceMode, string> = { edit: "Edit", read: "Read", cards: "Cards" };
+const MODE_LABELS: Record<SourceMode, string> = { edit: "Edit", read: "Read" };
 
 /** The site: the header, the toolbar, and the source and output panes. */
 export function App() {
   const theme = useSiteTheme();
-  const themeFamily = useThemeFamily();
   const [source, setSource] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [shareState, setShareState] = useState<"idle" | "copied" | "failed">("idle");
@@ -176,14 +164,6 @@ export function App() {
 
   const [mode, setMode] = useState<SourceMode>("edit");
   const [selection, setSelection] = useState<string | undefined>(undefined);
-  // The font the source reading is set in: Geist for prose with Geist Mono for code, unless another
-  // is chosen to compare it with. A comparison, not a setting: the choice is not kept.
-  const [readingFont, setReadingFont] = useState<ReadingFont>("geist-hybrid");
-  // Whether Read shows an element written an attribute to a line as a property sheet. On unless
-  // turned off to compare; not kept.
-  const [sheets, setSheets] = useState(true);
-  // How sheets show what belongs to what, while the ways are compared; not kept.
-  const [grouping, setGrouping] = useState<ReadingGrouping>("brackets");
   const reading = useSourceTree(source, mode !== "edit");
   // The editor's cursor, carried into Read until a tree of the same text can say what it is on.
   const cursorToSelect = useRef<number | null>(null);
@@ -216,9 +196,7 @@ export function App() {
     if (next === mode) {
       return;
     }
-    if (next !== "edit" && mode !== "edit") {
-      // From one reading to the other: the selection goes along as it is.
-    } else if (next !== "edit") {
+    if (next !== "edit") {
       cursorToSelect.current = editor.current?.cursor() ?? null;
       selectedOnEntry.current = undefined;
     } else {
@@ -325,48 +303,8 @@ export function App() {
             <span>Source</span>
             <span className="pane-note">NX</span>
             <span className="spacer" />
-            <label className="reading-font">
-              Theme
-              <select value={themeFamily} onChange={(event) => setThemeFamily(event.target.value as ThemeFamily)}>
-                {(Object.keys(THEME_FAMILIES) as ThemeFamily[]).map((option) => (
-                  <option key={option} value={option}>
-                    {THEME_FAMILY_LABELS[option]}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {mode === "read" && (
-              <label className="reading-font">
-                <input type="checkbox" checked={sheets} onChange={(event) => setSheets(event.target.checked)} />
-                Sheets
-              </label>
-            )}
-            {mode === "read" && sheets && (
-              <label className="reading-font">
-                Grouping
-                <select value={grouping} onChange={(event) => setGrouping(event.target.value as ReadingGrouping)}>
-                  {READING_GROUPINGS.map((option) => (
-                    <option key={option} value={option}>
-                      {READING_GROUPING_LABELS[option]}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            {mode === "read" && (
-              <label className="reading-font">
-                Font
-                <select value={readingFont} onChange={(event) => setReadingFont(event.target.value as ReadingFont)}>
-                  {READING_FONTS.map((option) => (
-                    <option key={option} value={option}>
-                      {READING_FONT_LABELS[option]}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
             <span className="mode-switch" role="group" aria-label="Show the source as">
-              {(["edit", "read", "cards"] as const).map((option) => (
+              {(["edit", "read"] as const).map((option) => (
                 <button
                   key={option}
                   type="button"
@@ -379,15 +317,7 @@ export function App() {
             </span>
           </div>
           {mode !== "edit" && (
-            <ReadingView
-              reading={reading}
-              view={mode === "read" ? "source" : "cards"}
-              font={readingFont}
-              sheets={sheets}
-              grouping={grouping}
-              selection={selection}
-              onSelect={setSelection}
-            />
+            <ReadingView reading={reading} selection={selection} onSelect={setSelection} />
           )}
           {/* The editor stays mounted while hidden, keeping its undo history and scroll position. */}
           <div className="editor" hidden={mode !== "edit"}>

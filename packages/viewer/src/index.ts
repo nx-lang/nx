@@ -2,22 +2,19 @@
  * `<nx-viewer>`: an NX document's source tree as a reading view.
  *
  * <para>The element takes a `SourceTree`, as the language service's `sourceTree` query answers it,
- * and the text of the document it describes. Syntax becomes style and meaning stays visible: each
- * element reads as a card, each condition as a sentence, and every rendered piece carries its
- * node's key and opens to the exact text behind it. It has no framework dependency and keeps its
- * markup and styles in a shadow root.</para>
+ * and the text of the document it describes, and shows that text as it reads rather than as it is
+ * typed: an element written over several lines reads as a group under its name, with a row to each
+ * property and no tags; an element on one line reads as its name and properties; and the rest
+ * reads as written, in the colors the host's editor gives it. Every piece carries its node's key.
+ * It has no framework dependency and keeps its markup and styles in a shadow root.</para>
  */
 import type { EditorRange, SourceRole, SourceTree } from "@nx-lang/language-protocol";
 
-import { caseHover, declarationHover, handlerHover, propertyHover } from "./hover.js";
-import { inWords } from "./words.js";
 import { renderSource, type NxViewerColor, type NxViewerIcons } from "./source.js";
-import { renderDocument, renderNode, type RenderContext } from "./render.js";
 import { styles } from "./styles.js";
-import { indexedNodeAtSpan, indexTree, nodeOf, sourceTextOf, type TreeIndex } from "./tree.js";
+import { indexTree, nodeOf, type TreeIndex } from "./tree.js";
 
 export { nodeAtSpan } from "./tree.js";
-export { inWords, eventWords } from "./words.js";
 export type { NxViewerColor, NxViewerIcons } from "./source.js";
 
 /** The tag the element is defined under. */
@@ -37,34 +34,28 @@ export interface NxSelectDetail {
 }
 
 /** The element's properties, which a host may set before the element is defined. */
-const PROPERTIES = ["tree", "text", "view", "colors", "sheets", "icons", "ghosts", "images", "selection", "stale"] as const;
-
-/** How the element shows a document: as its own text, or as cards. */
-export type NxViewerView = "source" | "cards";
-
-/** How long the pointer rests on a name before its hover shows, in milliseconds. */
-const hoverDelay = 250;
+const PROPERTIES = ["tree", "text", "colors", "icons", "selection", "stale"] as const;
 
 // A module imported where there is no DOM still loads; the element is only defined where
 // `HTMLElement` exists.
 const ElementBase = (typeof HTMLElement === "undefined" ? class {} : HTMLElement) as typeof HTMLElement;
 
-/** The attributes that carry a rendered node's key: an original, a copy, a later part of a run. */
-const KEYED = "[data-key], [data-ref-key], [data-part-of]";
-
 /**
- * What a click selects in the source view's reading, and what the pointer and the arrow keys move
- * between: an element on lines of its own (through its header), a row of a sheet, an element on
- * one line, an element written as its tags that starts a line, or a block written as it is, as an
- * `if` or a `for`. A sheet's header stands for its sheet.
+ * What a click selects, and what the pointer and the arrow keys move between: an element on lines
+ * of its own (through its header), a row of a group, an element on one line, an element written as
+ * its tags that starts a line, or a block written as it is, as an `if` or a `for`. A group's header
+ * stands for its group.
  */
 const UNITS = ".sheet-head, .sheet-row, .line-element, .tag-line, .block-line";
 
+/** The units as they are drawn selected: a group stands for itself, not through its header. */
+const DRAWN_UNITS = ".sheet, .sheet-row, .line-element, .tag-line, .block-line";
+
 /**
- * What `element` reads as, word by word: its text with pieces kept apart, an image by its label,
- * and without the controls and tags that only decorate it.
+ * What `element` reads as, word by word: its text, with an icon read by its label, for telling a
+ * screen reader what is selected.
  */
-function spoken(element: Element | null): string {
+function spoken(element: Element): string {
   const words: string[] = [];
   const walk = (node: Node) => {
     if (node.nodeType === 3) {
@@ -75,69 +66,47 @@ function spoken(element: Element | null): string {
       return;
     }
     const child = node as Element;
-    if (child.tagName === "BUTTON" || child.classList.contains("tag") || child.classList.contains("expansion")) {
-      return;
-    }
     const label = child.getAttribute("role") === "img" ? child.getAttribute("aria-label") : null;
     if (label !== null) {
-      words.push(label);
+      words.push(`${label} `);
       return;
     }
     child.childNodes.forEach(walk);
-    words.push(" ");
   };
-  if (element !== null) {
-    walk(element);
-  }
-  return words.join("").replace(/\s+/g, " ").replace(/ ([,.!?;:])/g, "$1").trim();
+  walk(element);
+  return words.join("").replace(/\s+/g, " ").trim();
 }
 
 function keyOf(element: Element): string | undefined {
-  const data = (element as HTMLElement).dataset;
-  return data["key"] ?? data["refKey"] ?? data["partOf"];
+  return (element as HTMLElement).dataset["key"];
 }
 
 /**
  * The `<nx-viewer>` element.
  *
  * <para>The attribute `stale` mirrors the property of the same name. Everything else is a property:
- * `tree`, `text`, `ghosts`, `images` and `selection`.</para>
+ * `tree`, `text`, `colors`, `icons` and `selection`.</para>
  */
 export class NxViewerElement extends ElementBase {
   static observedAttributes = ["stale"];
 
   #tree: SourceTree | undefined;
   #text = "";
-  #ghosts = false;
-  #images = true;
-  #view: NxViewerView = "cards";
   #colors: readonly NxViewerColor[] = [];
-  #sheets = false;
   #icons: NxViewerIcons | undefined;
   #index: TreeIndex | undefined;
   #selection: string | undefined;
-  /** Each key's original rendering. */
+  /** Each key's rendering. */
   #rendered = new Map<string, HTMLElement>();
-  #hovered: HTMLElement | undefined;
-  /** The unit of the reading under the pointer, highlighted as a row. */
+  /** The unit under the pointer, highlighted as a row. */
   #hoveredUnit: HTMLElement | undefined;
-  /** The highlights of the selected and the hovered unit, drawn behind the text. */
-  readonly #highlights: HTMLDivElement;
-  #hoverTimer: ReturnType<typeof setTimeout> | undefined;
-  #shownSource: string | undefined;
-  /** The control that opened the source panel from the keyboard or pointer, to return focus to. */
-  #sourceOpener: HTMLElement | undefined;
 
-  readonly #frame: HTMLDivElement;
-  readonly #toolbar: HTMLDivElement;
   readonly #badge: HTMLSpanElement;
   readonly #body: HTMLDivElement;
+  /** The highlights of the selected and the hovered unit, drawn behind the text. */
+  readonly #highlights: HTMLDivElement;
   /** Says what the arrow keys selected, for a screen reader, since focus stays on the body. */
   readonly #announcer: HTMLDivElement;
-  readonly #hover: HTMLDivElement;
-  readonly #sourcePanel: HTMLDivElement;
-  readonly #sourceTitle: HTMLSpanElement;
-  readonly #sourceText: HTMLPreElement;
 
   constructor() {
     super();
@@ -147,76 +116,50 @@ export class NxViewerElement extends ElementBase {
     const style = document.createElement("style");
     style.textContent = styles;
 
-    this.#frame = document.createElement("div");
-    this.#frame.className = "frame";
+    const frame = document.createElement("div");
+    frame.className = "frame";
 
-    this.#toolbar = document.createElement("div");
-    this.#toolbar.className = "toolbar";
+    const toolbar = document.createElement("div");
+    toolbar.className = "toolbar";
     this.#badge = document.createElement("span");
     this.#badge.className = "badge";
     this.#badge.textContent = "Out of date";
     this.#badge.hidden = true;
-    this.#toolbar.append(this.#badge);
+    toolbar.append(this.#badge);
 
     this.#body = document.createElement("div");
     this.#body.className = "body";
-    // The body takes focus so the arrow keys can walk the selection through every node.
+    // The body takes focus so the arrow keys can walk the selection.
     this.#body.tabIndex = 0;
     this.#body.setAttribute("role", "region");
-    this.#body.setAttribute("aria-label", "Reading view; the up and down arrows select the next node");
+    this.#body.setAttribute(
+      "aria-label",
+      "Reading view; the up and down arrows select the next row, left its group and right what it holds"
+    );
 
     this.#highlights = document.createElement("div");
     this.#highlights.className = "highlights";
     this.#highlights.setAttribute("aria-hidden", "true");
-
-    this.#hover = document.createElement("div");
-    this.#hover.className = "hover";
-    this.#hover.setAttribute("role", "tooltip");
-    this.#hover.id = "hover";
-    this.#hover.hidden = true;
-
-    this.#sourcePanel = document.createElement("div");
-    this.#sourcePanel.className = "source-panel";
-    this.#sourcePanel.setAttribute("role", "dialog");
-    this.#sourcePanel.setAttribute("aria-label", "Source");
-    this.#sourcePanel.hidden = true;
-    const bar = document.createElement("div");
-    bar.className = "source-bar";
-    this.#sourceTitle = document.createElement("span");
-    const close = document.createElement("button");
-    close.type = "button";
-    close.className = "source-close";
-    close.textContent = "Close";
-    bar.append(this.#sourceTitle, close);
-    this.#sourceText = document.createElement("pre");
-    this.#sourcePanel.append(bar, this.#sourceText);
 
     this.#announcer = document.createElement("div");
     this.#announcer.className = "announcer";
     this.#announcer.setAttribute("role", "status");
     this.#announcer.setAttribute("aria-live", "polite");
 
-    this.#frame.append(this.#toolbar, this.#body, this.#hover, this.#sourcePanel, this.#announcer);
-    shadow.append(style, this.#frame);
+    frame.append(toolbar, this.#body, this.#announcer);
+    shadow.append(style, frame);
 
-    close.addEventListener("click", () => this.#closeSource());
     this.#body.addEventListener("click", (event) => this.#onClick(event));
-    // A focus ring is for a reader on the keyboard; after a click, the selection's outline says
-    // where they are.
+    // A focus ring is for a reader on the keyboard; after a click, the selection says where they are.
     this.#body.addEventListener("pointerdown", () => this.#body.classList.add("by-pointer"));
-    this.#frame.addEventListener("keydown", () => this.#body.classList.remove("by-pointer"));
-    this.#frame.addEventListener("keydown", (event) => this.#onKeyDown(event));
-    this.#body.addEventListener("pointerover", (event) => this.#onPointerOver(event));
-    this.#body.addEventListener("pointerleave", () => {
-      this.#setHovered(undefined);
-      this.#setHoveredUnit(undefined);
-    });
+    frame.addEventListener("keydown", () => this.#body.classList.remove("by-pointer"));
+    frame.addEventListener("keydown", (event) => this.#onKeyDown(event));
+    this.#body.addEventListener("pointerover", (event) => this.#setHoveredUnit(this.#unitOf(event.target as Element)));
+    this.#body.addEventListener("pointerleave", () => this.#setHoveredUnit(undefined));
     // The highlights follow the layout: a wider pane moves the right edge they run to.
     if (typeof ResizeObserver !== "undefined") {
       new ResizeObserver(() => this.#paintHighlights()).observe(this.#body);
     }
-    this.#body.addEventListener("focusin", (event) => this.#onFocusIn(event));
-    this.#body.addEventListener("focusout", (event) => this.#onFocusOut(event));
 
     // A property set before the element was defined hides the accessor; set it again through it.
     for (const name of PROPERTIES) {
@@ -238,7 +181,7 @@ export class NxViewerElement extends ElementBase {
     this.#render();
   }
 
-  /** The text of the document the tree describes, for showing a node's source. */
+  /** The text of the document the tree describes. */
   get text(): string {
     return this.#text;
   }
@@ -249,68 +192,23 @@ export class NxViewerElement extends ElementBase {
   }
 
   /**
-   * Whether every omitted default shows as a ghost row; false unless set true. A default whose
-   * property the kind's viewer gives a label, a phrase or a place shows either way.
-   */
-  get ghosts(): boolean {
-    return this.#ghosts;
-  }
-
-  set ghosts(ghosts: boolean) {
-    this.#ghosts = ghosts === true;
-    this.#render();
-  }
-
-  /**
-   * Whether a value its viewer formats as `image` loads its picture; true unless set false. Only
-   * `http:` and `https:` URLs ever load. A host showing untrusted source can turn loading off, and
-   * the value then reads as a link.
-   */
-  get images(): boolean {
-    return this.#images;
-  }
-
-  /**
-   * How the document is shown: `cards`, the reading that draws declarations and elements as cards,
-   * or `source`, the document's own text with every node marked. `cards` unless set `source`.
-   */
-  get view(): NxViewerView {
-    return this.#view;
-  }
-
-  set view(view: NxViewerView) {
-    this.#view = view === "source" ? "source" : "cards";
-    this.#render();
-  }
-
-  /**
-   * The colors of the source view, as ranges over `text` in UTF-16 offsets, in text order. A host
-   * supplies them from the highlighter and themes it colors its editor with, so the two agree.
-   * Without them the text reads in the element's foreground color.
+   * The colors of the text, as ranges over `text` in UTF-16 offsets, in text order. A host supplies
+   * them from the highlighter and themes it colors its editor with, so the two agree. Without them
+   * the text reads in the element's foreground color.
    */
   get colors(): readonly NxViewerColor[] {
     return this.#colors;
   }
 
-  /**
-   * Whether the source view reads an element written with one attribute to a line as a property
-   * sheet: a row to an attribute, with no `=`, no quotes and no closing tag. False unless set true.
-   */
-  get sheets(): boolean {
-    return this.#sheets;
-  }
-
-  set sheets(sheets: boolean) {
-    this.#sheets = sheets === true;
-    if (this.#view === "source") {
-      this.#render();
-    }
+  set colors(colors: readonly NxViewerColor[]) {
+    this.#colors = colors ?? [];
+    this.#render();
   }
 
   /**
-   * Draws icons by their Lucide names, for the source view to start each element on lines of its
-   * own with one: the icon its viewer names, or one for its kind. The host chooses how icons are
-   * drawn and loaded; without it, no element has an icon.
+   * Draws icons by their Lucide names, for each element on lines of its own to start with one: the
+   * icon its viewer names, or one for its kind. The host chooses how icons are drawn and loaded;
+   * without it, no element has an icon.
    */
   get icons(): NxViewerIcons | undefined {
     return this.#icons;
@@ -318,20 +216,6 @@ export class NxViewerElement extends ElementBase {
 
   set icons(icons: NxViewerIcons | undefined) {
     this.#icons = typeof icons === "function" ? icons : undefined;
-    if (this.#view === "source") {
-      this.#render();
-    }
-  }
-
-  set colors(colors: readonly NxViewerColor[]) {
-    this.#colors = colors ?? [];
-    if (this.#view === "source") {
-      this.#render();
-    }
-  }
-
-  set images(images: boolean) {
-    this.#images = images !== false;
     this.#render();
   }
 
@@ -347,8 +231,8 @@ export class NxViewerElement extends ElementBase {
   }
 
   /**
-   * The selected node's key. Setting it selects that node, opening anything folded around it and
-   * scrolling it into view, without firing `nx-select`; a key the tree does not hold clears it.
+   * The selected node's key. Setting it selects that node and scrolls it into view, without firing
+   * `nx-select`; a key the tree does not hold clears it.
    */
   get selection(): string | undefined {
     return this.#selection;
@@ -364,53 +248,10 @@ export class NxViewerElement extends ElementBase {
     }
   }
 
-  /** The key of the node whose source is shown, if any. */
-  get shownSource(): string | undefined {
-    return this.#shownSource;
-  }
-
-  /** Shows the exact source text of the node with `key`, beside its rendering. */
-  showSource(key: string): void {
-    const index = this.#index;
-    const at = index?.byKey.get(key);
-    if (index === undefined || at === undefined) {
-      return;
-    }
-    this.#setHovered(undefined);
-    this.#shownSource = key;
-    this.#sourceTitle.textContent = `Source · ${nodeOf(index, at).role}`;
-    this.#sourceText.textContent = sourceTextOf(index, at);
-    this.#sourcePanel.hidden = false;
-    this.#position(this.#sourcePanel, this.#rendered.get(key));
-  }
-
-  /** Shows a node's source for the reader, moving focus into the panel and back when it closes. */
-  #openSource(key: string, opener: HTMLElement): void {
-    this.showSource(key);
-    if (!this.#sourcePanel.hidden) {
-      this.#sourceOpener = opener;
-      this.#sourcePanel.querySelector<HTMLElement>(".source-close")?.focus();
-    }
-  }
-
-  #closeSource(): void {
-    const opener = this.#sourceOpener;
-    this.hideSource();
-    opener?.focus();
-  }
-
-  /** Hides the source shown by `showSource`. */
-  hideSource(): void {
-    this.#sourceOpener = undefined;
-    this.#shownSource = undefined;
-    this.#sourcePanel.hidden = true;
-  }
-
   #render(): void {
     const tree = this.#tree;
-    this.#setHovered(undefined);
-    this.hideSource();
     this.#rendered.clear();
+    this.#hoveredUnit = undefined;
     this.#body.replaceChildren();
     this.#index = undefined;
     if (tree === undefined) {
@@ -418,17 +259,7 @@ export class NxViewerElement extends ElementBase {
     }
     const index = indexTree(tree, this.#text);
     this.#index = index;
-    const context: RenderContext = {
-      document: this.ownerDocument,
-      index,
-      ghosts: this.#ghosts,
-      copy: false,
-      images: this.#images,
-    };
-    this.#hoveredUnit = undefined;
-    this.#body.append(
-      this.#view === "source" ? renderSource(this.ownerDocument, index, this.#colors, { sheets: this.#sheets, icons: this.#icons }) : renderDocument(context)
-    );
+    this.#body.append(renderSource(this.ownerDocument, index, this.#colors, { icons: this.#icons }));
     for (const element of this.#body.querySelectorAll<HTMLElement>("[data-key]")) {
       this.#rendered.set(element.dataset["key"]!, element);
     }
@@ -442,16 +273,8 @@ export class NxViewerElement extends ElementBase {
     void this.ownerDocument.fonts?.ready.then(() => this.#paintHighlights());
   }
 
-  /** Whether the reading has units: the source view with its sheets. */
-  get #inUnits(): boolean {
-    return this.#view === "source" && this.#sheets;
-  }
-
-  /** The unit `target` is in, or nothing outside a unit or outside the reading's units. */
+  /** The unit `target` is in, or the group it falls in between rows, or nothing. */
   #unitOf(target: Element | null | undefined): HTMLElement | undefined {
-    if (!this.#inUnits) {
-      return undefined;
-    }
     const found = target?.closest?.(UNITS) as HTMLElement | null | undefined;
     if (found !== null && found !== undefined && this.#body.contains(found)) {
       return found.classList.contains("sheet-head") ? (found.parentElement as HTMLElement) : found;
@@ -470,14 +293,14 @@ export class NxViewerElement extends ElementBase {
 
   /**
    * Draws the selected unit and the one under the pointer as rows behind the text, from just before
-   * the unit's start to near the reading's right edge, as a list's rows are. A selected sheet's
-   * header is drawn stronger than the rest of it, and the row under the pointer, lighter over a
+   * the unit's start to near the reading's right edge, as a list's rows are. A selected group's
+   * first line is drawn stronger than the rest of it, and the row under the pointer, lighter over a
    * selection.
    */
   #paintHighlights(): void {
     const layer = this.#highlights;
     layer.replaceChildren();
-    if (!this.#inUnits || !this.#body.contains(layer)) {
+    if (!this.#body.contains(layer)) {
       return;
     }
     const frame = this.#body.getBoundingClientRect();
@@ -486,7 +309,8 @@ export class NxViewerElement extends ElementBase {
     }
     const draw = (from: HTMLElement, rows: DOMRect, className: string): void => {
       const start = (from.matches(".sheet-row") ? from.querySelector<HTMLElement>(":scope > .sheet-name") : from) ?? from;
-      // A block's later lines start further left, at its source indentation; it starts where its first line does.
+      // A block's later lines start further left, at its source indentation; it starts where its
+      // first line does.
       const first = from.matches(".block-line") ? from.getClientRects()[0] : undefined;
       const left = (first ?? start.getBoundingClientRect()).left - frame.left - 4 + this.#body.scrollLeft;
       const box = this.ownerDocument.createElement("div");
@@ -497,8 +321,6 @@ export class NxViewerElement extends ElementBase {
       box.style.height = `${rows.height}px`;
       layer.append(box);
     };
-    const selected = this.#selection === undefined ? undefined : this.#rendered.get(this.#selection);
-    const unit = selected?.matches(".sheet, .sheet-row, .line-element, .tag-line, .block-line") === true ? selected : undefined;
     // A group's first line: a sheet's header, or a block's first line.
     const firstLine = (group: HTMLElement): DOMRect | undefined =>
       group.matches(".sheet")
@@ -506,6 +328,8 @@ export class NxViewerElement extends ElementBase {
         : group.matches(".block-line")
           ? group.getClientRects()[0]
           : undefined;
+    const selected = this.#selection === undefined ? undefined : this.#rendered.get(this.#selection);
+    const unit = selected?.matches(DRAWN_UNITS) === true ? selected : undefined;
     if (unit !== undefined) {
       const head = firstLine(unit);
       if (head !== undefined) {
@@ -522,7 +346,7 @@ export class NxViewerElement extends ElementBase {
     }
   }
 
-  /** Every unit the reader can see, in reading order. */
+  /** Every unit, in reading order. */
   #units(): HTMLElement[] {
     const units: HTMLElement[] = [];
     for (const found of this.#body.querySelectorAll<HTMLElement>(UNITS)) {
@@ -563,56 +387,32 @@ export class NxViewerElement extends ElementBase {
       element.classList.remove("selected");
       element.removeAttribute("aria-current");
     }
+    queueMicrotask(() => this.#paintHighlights());
     const index = this.#index;
     const at = key === undefined ? undefined : index?.byKey.get(key);
     if (index === undefined || key === undefined || at === undefined) {
       this.#selection = undefined;
-      queueMicrotask(() => this.#paintHighlights());
       return;
     }
     this.#selection = key;
-    queueMicrotask(() => this.#paintHighlights());
     const original = this.#rendered.get(key);
     original?.classList.add("selected");
     original?.setAttribute("aria-current", "true");
-    for (const element of this.#body.querySelectorAll<HTMLElement>("[data-ref-key], [data-part-of]")) {
-      if (keyOf(element) === key) {
-        element.classList.add("selected");
-      }
-    }
     if (fire) {
       if (original !== undefined) {
-        this.#announce(original);
+        const words = spoken(original);
+        this.#announcer.textContent = `Selected ${words.length > 140 ? `${words.slice(0, 139)}…` : words}`;
       }
       const node = nodeOf(index, at);
       const detail: NxSelectDetail = { key, role: node.role, range: node.range };
       this.dispatchEvent(new CustomEvent(NX_SELECT_EVENT, { detail, bubbles: true, composed: true }));
-    } else if (original !== undefined) {
-      for (let parent = original.parentElement; parent !== null; parent = parent.parentElement) {
-        if (parent.tagName === "DETAILS") {
-          (parent as HTMLDetailsElement).open = true;
-        }
-      }
-      original.scrollIntoView?.({ block: "nearest" });
+    } else {
+      original?.scrollIntoView?.({ block: "nearest" });
     }
   }
 
   #onClick(event: MouseEvent): void {
     const target = event.target as Element;
-    const button = target.closest?.("button");
-    if (button !== null && button !== undefined) {
-      if (button.classList.contains("source-toggle")) {
-        const key = button.dataset["sourceFor"]!;
-        if (this.#shownSource === key) {
-          this.hideSource();
-        } else {
-          this.#openSource(key, button);
-        }
-      } else if (button.classList.contains("expand")) {
-        this.#toggleExpansion(button);
-      }
-      return;
-    }
     // A drag that selected text is a text selection, not a choice of node.
     // Chromium reports a selection inside a shadow root only through the root itself.
     const root = this.shadowRoot as (ShadowRoot & { getSelection?(): Selection | null }) | null;
@@ -620,237 +420,27 @@ export class NxViewerElement extends ElementBase {
     if (textSelection !== null && textSelection !== undefined && !textSelection.isCollapsed) {
       return;
     }
-    // In the reading's units, a click chooses the unit: the element, row or line, not a word in it.
-    const unit = this.#unitOf(target);
-    if (unit !== undefined) {
-      this.#select(keyOf(unit), true);
-      return;
-    }
-    const clicked = target.closest?.(KEYED);
-    // A click on a declaration's header or on one of its members chooses the declaration: a field
-    // is read with its record, and the arrow keys still reach it on its own.
-    const keyed = clicked?.closest(".member, .declaration-header") ? clicked.closest(".declaration[data-key]") : clicked;
-    if (keyed !== null && keyed !== undefined && this.#body.contains(keyed)) {
-      this.#select(keyOf(keyed), true);
+    // A click chooses the unit it falls in: the element, row or line, not a word in it. Outside
+    // every unit, as in a function's body, it chooses the smallest node there.
+    const chosen = this.#unitOf(target) ?? (target.closest?.("[data-key]") as HTMLElement | null | undefined);
+    if (chosen !== null && chosen !== undefined && this.#body.contains(chosen)) {
+      this.#select(keyOf(chosen), true);
     }
   }
 
   #onKeyDown(event: KeyboardEvent): void {
     const target = event.target as Element;
-    const inBody = this.#body.contains(target) && !target.closest?.("button");
-    if (event.key === "Enter" && inBody) {
-      const keyed = target.closest?.(KEYED);
-      if (keyed !== null && keyed !== undefined) {
-        event.preventDefault();
-        this.#select(keyOf(keyed), true);
-      }
-    } else if (this.#inUnits && inBody && ["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"].includes(event.key)) {
-      // The units read as a tree: up and down walk its rows, left goes to the unit that holds this
-      // one, and right into the first one it holds.
+    if (!this.#body.contains(target)) {
+      return;
+    }
+    // The units read as a tree: up and down walk its rows, left goes to the unit that holds this one,
+    // and right into the first one it holds.
+    const moves = { ArrowDown: "next", ArrowUp: "previous", ArrowLeft: "out", ArrowRight: "in" } as const;
+    const move = moves[event.key as keyof typeof moves];
+    if (move !== undefined) {
       event.preventDefault();
-      const moves = { ArrowDown: "next", ArrowUp: "previous", ArrowLeft: "out", ArrowRight: "in" } as const;
-      this.#stepUnit(moves[event.key as keyof typeof moves]);
-    } else if ((event.key === "ArrowDown" || event.key === "ArrowUp") && inBody) {
-      event.preventDefault();
-      this.#step(event.key === "ArrowDown" ? 1 : -1);
-    } else if (event.key === "Escape") {
-      this.#setHovered(undefined);
-      if (!this.#sourcePanel.hidden) {
-        this.#closeSource();
-      }
+      this.#stepUnit(move);
     }
-  }
-
-  /**
-   * Selects the next or previous node in reading order that the reader can see, so every node,
-   * not only the focusable ones, can be selected and its source shown from the keyboard.
-   */
-  #step(direction: 1 | -1): void {
-    const visible = [...this.#body.querySelectorAll<HTMLElement>("[data-key]")].filter(
-      (element) => element.closest("details:not([open]) > :not(summary)") === null
-    );
-    if (visible.length === 0) {
-      return;
-    }
-    const current = this.#selection === undefined ? -1 : visible.indexOf(this.#rendered.get(this.#selection)!);
-    const next = current < 0 ? (direction === 1 ? 0 : visible.length - 1) : current + direction;
-    const element = visible[Math.max(0, Math.min(visible.length - 1, next))]!;
-    this.#select(keyOf(element), true);
-    element.scrollIntoView?.({ block: "nearest" });
-  }
-
-  /**
-   * Tells a screen reader what is selected, in words: a card by its kind and name, an attribute
-   * as "name: value", anything else by its role and what it reads as.
-   */
-  #announce(element: HTMLElement): void {
-    const role = element.dataset["role"] ?? "";
-    let words: string;
-    if (element.classList.contains("card")) {
-      const kind = spoken(element.querySelector(":scope > .card-header > .kind"));
-      const name = spoken(element.querySelector(":scope > .card-header > .card-name"));
-      words = `${kind} card${name === "" ? "" : `, ${name}`}`;
-    } else if (role === "attribute") {
-      const name = spoken(element.querySelector(":scope > .label, :scope > .when"));
-      words = `${name}: ${spoken(element.querySelector(":scope > .row-value"))}`;
-    } else {
-      const reading = spoken(element);
-      words = reading === "" ? inWords(role).toLowerCase() : `${inWords(role).toLowerCase()}: ${reading}`;
-    }
-    this.#announcer.textContent = `Selected ${words.length > 140 ? `${words.slice(0, 139)}…` : words}`;
-  }
-
-  /** Shows or hides a reference's target in place, rendered as a copy of its original. */
-  #toggleExpansion(button: HTMLButtonElement): void {
-    const wrapper = button.parentElement;
-    const index = this.#index;
-    if (wrapper === null || index === undefined) {
-      return;
-    }
-    const existing = wrapper.querySelector<HTMLElement>(":scope > .expansion");
-    if (existing !== null) {
-      existing.hidden = !existing.hidden;
-      button.setAttribute("aria-expanded", String(!existing.hidden));
-      button.textContent = existing.hidden ? "▸" : "▾";
-      return;
-    }
-    const key = keyOf(wrapper);
-    const at = key === undefined ? undefined : index.byKey.get(key);
-    const entry = at === undefined ? undefined : index.tree.declarations[nodeOf(index, at).declaration ?? -1];
-    if (entry?.valueRange === undefined) {
-      return;
-    }
-    const context: RenderContext = {
-      document: this.ownerDocument,
-      index,
-      ghosts: this.#ghosts,
-      copy: true,
-      images: this.#images,
-    };
-    const target = indexedNodeAtSpan(index, entry.valueRange.startByte, entry.valueRange.endByte);
-    const rendered = target === undefined ? undefined : renderNode(context, target);
-    if (rendered === undefined) {
-      return;
-    }
-    const expansion = this.ownerDocument.createElement("div");
-    expansion.className = "expansion";
-    expansion.append(rendered);
-    wrapper.append(expansion);
-    button.setAttribute("aria-expanded", "true");
-    button.textContent = "▾";
-  }
-
-  #hoverTarget(target: Element | null): HTMLElement | undefined {
-    const found = target?.closest?.(".label, .when, .ref, .kind, .part, .phrase, .case.labelled");
-    return found === null || found === undefined || !this.#body.contains(found) ? undefined : (found as HTMLElement);
-  }
-
-  #onPointerOver(event: PointerEvent): void {
-    this.#setHovered(this.#hoverTarget(event.target as Element));
-    this.#setHoveredUnit(this.#unitOf(event.target as Element));
-  }
-
-  #onFocusIn(event: FocusEvent): void {
-    const target = this.#hoverTarget(event.target as Element);
-    if (target !== undefined) {
-      this.#setHovered(target, true);
-    }
-  }
-
-  #onFocusOut(event: FocusEvent): void {
-    const next = event.relatedTarget as Node | null;
-    if (this.#hovered !== undefined && (next === null || !this.#hovered.contains(next))) {
-      this.#setHovered(undefined);
-    }
-  }
-
-  #setHovered(target: HTMLElement | undefined, immediately = false): void {
-    if (target === this.#hovered) {
-      return;
-    }
-    this.#hovered?.classList.remove("hovered");
-    this.#hovered?.removeAttribute("aria-describedby");
-    this.#hovered = target;
-    clearTimeout(this.#hoverTimer);
-    this.#hover.hidden = true;
-    if (target === undefined) {
-      return;
-    }
-    target.classList.add("hovered");
-    if (immediately) {
-      this.#showHover(target);
-    } else {
-      this.#hoverTimer = setTimeout(() => this.#showHover(target), hoverDelay);
-    }
-  }
-
-  /** What a hover over `target` says, or nothing. */
-  hoverFor(target: HTMLElement): HTMLElement | undefined {
-    const index = this.#index;
-    if (index === undefined) {
-      return undefined;
-    }
-    const document = this.ownerDocument;
-    const owner = target.closest(KEYED);
-    const ownerKey = owner === null ? undefined : keyOf(owner);
-    const ownerAt = ownerKey === undefined ? undefined : index.byKey.get(ownerKey);
-    if (target.dataset["property"] !== undefined) {
-      const card = target.closest(".card");
-      const cardKey = card === null ? undefined : keyOf(card);
-      const element = cardKey === undefined ? undefined : index.byKey.get(cardKey);
-      if (element === undefined) {
-        return undefined;
-      }
-      if (target.classList.contains("when")) {
-        return handlerHover(document, index, element, target.dataset["property"]);
-      }
-      // The node the attribute sets the property to, when the row is an attribute's; a phrase is
-      // the attribute's value itself.
-      const owned = ownerAt === undefined ? undefined : nodeOf(index, ownerAt);
-      const attribute =
-        owned?.role === "attribute" ? ownerAt : owned?.role === "literal" && owned.parent !== undefined ? owned.parent : undefined;
-      const valueAt = attribute === undefined ? undefined : (index.children[attribute] ?? []).find((child) => nodeOf(index, child).role !== "comment");
-      return propertyHover(
-        document,
-        index,
-        element,
-        target.dataset["property"] ?? target.textContent ?? "",
-        valueAt === undefined ? undefined : nodeOf(index, valueAt)
-      );
-    }
-    if (ownerAt === undefined) {
-      return undefined;
-    }
-    if (target.classList.contains("case")) {
-      return caseHover(document, index, nodeOf(index, ownerAt));
-    }
-    return declarationHover(document, index, nodeOf(index, ownerAt));
-  }
-
-  #showHover(target: HTMLElement): void {
-    if (this.#hovered !== target) {
-      return;
-    }
-    const content = this.hoverFor(target);
-    if (content === undefined) {
-      return;
-    }
-    this.#hover.replaceChildren(content);
-    this.#hover.hidden = false;
-    target.setAttribute("aria-describedby", this.#hover.id);
-    this.#position(this.#hover, target);
-  }
-
-  #position(panel: HTMLElement, anchor: HTMLElement | undefined): void {
-    if (anchor === undefined) {
-      panel.style.top = "0px";
-      panel.style.left = "0px";
-      return;
-    }
-    const frame = this.#frame.getBoundingClientRect();
-    const box = anchor.getClientRects()[0] ?? anchor.getBoundingClientRect();
-    panel.style.top = `${box.bottom - frame.top + 4}px`;
-    panel.style.left = `${Math.max(0, Math.min(box.left - frame.left, frame.width - panel.offsetWidth))}px`;
   }
 }
 

@@ -11,7 +11,7 @@ import {
   type NxValueNavigateDetail,
 } from "@nx-lang/value-view";
 import type { Diagnostic } from "../compile";
-import { useEditorThemes } from "../theme.ts";
+import { EDITOR_THEMES } from "../theme.ts";
 import { actionFrom, initialInput, type FieldInput } from "./fields.ts";
 import type { PreviewAction, PreviewField, PreviewSessionView, PreviewStep, PreviewValue } from "./protocol.ts";
 import type { Preview } from "./usePreview.ts";
@@ -269,7 +269,7 @@ function SessionOutput({
   onNavigate: (detail: NxValueNavigateDetail, built: boolean) => void;
 }) {
   const element = useRef<NxValueElement>(null);
-  const themes = useEditorThemes();
+  const themes = EDITOR_THEMES;
   const latest = useRef({ onPress, onNavigate, session });
   latest.current = { onPress, onNavigate, session };
 
@@ -350,7 +350,7 @@ function SessionState({ session, stale, describe }: { session: PreviewSessionVie
 }
 
 function PanelValue({ value, stale, describe }: { value: PreviewValue; stale: boolean; describe: NxValueDescribe }) {
-  const themes = useEditorThemes();
+  const themes = EDITOR_THEMES;
   return (
     <nx-value
       className="panel-value"

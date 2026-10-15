@@ -5,7 +5,7 @@ import editorWorker from "monaco-editor/editor/editor.worker.js?worker";
 import { NX_LANGUAGE_ID, registerNxLanguage } from "@nx-lang/monaco";
 import type { Diagnostic, DiagnosticSpan } from "../compile";
 import { createWorkerLanguageService } from "../language/worker.ts";
-import { ALL_EDITOR_THEMES, useEditorThemes, type Theme } from "../theme.ts";
+import { ALL_EDITOR_THEMES, EDITOR_THEMES, type Theme } from "../theme.ts";
 import { offsetOf, positionAt } from "./positions.ts";
 import { openSuggestionDetailsOnce } from "./suggestDetails.ts";
 
@@ -64,7 +64,7 @@ export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, them
   latestChange.current = onChange;
   const latestTheme = useRef(theme);
   latestTheme.current = theme;
-  const themes = useEditorThemes();
+  const themes = EDITOR_THEMES;
   const latestThemes = useRef(themes);
   latestThemes.current = themes;
   // The editor is created once the highlighter has loaded, by which time the text to show may have

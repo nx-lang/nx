@@ -28,12 +28,13 @@
     sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
   --sl-font-system-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
     monospace;
-  --pane-background: #0d1117; /* github-dark-default, the editor's theme */
-  --pane-foreground: #e6edf3;
-  /* The reading's selection and hover, from the theme's list colors. */
-  --nx-viewer-selection: #388bfd33;
-  --nx-viewer-selection-inactive: #6e768166;
-  --nx-viewer-hover: #6e76811a;
+  /* The panes take the background and text color of the editor's theme, Dark+. */
+  --pane-background: #1e1e1e;
+  --pane-foreground: #d4d4d4;
+  /* The reading's selection, out of focus, and hover: VS Code's list colors for Dark+. */
+  --nx-viewer-selection: #04395e;
+  --nx-viewer-selection-inactive: #37373d;
+  --nx-viewer-hover: #2a2d2e;
   --error: #f85149;
   --warning: #d29922;
 }
@@ -55,32 +56,14 @@
   --sl-color-bg-nav: var(--sl-color-gray-7);
   --sl-color-hairline: var(--sl-color-gray-6);
   --sl-color-hairline-shade: var(--sl-color-gray-6);
-  --pane-background: #ffffff; /* github-light-default */
-  --pane-foreground: #1f2328;
-  --nx-viewer-selection: #0969da1f;
-  --nx-viewer-selection-inactive: #afb8c133;
-  --nx-viewer-hover: #eaeef280;
-  --error: #cf222e;
-  --warning: #9a6700;
-}
-
-/* The panes take the background and text color of whichever theme family colors the source. */
-:root[data-theme-family="vscode"] {
-  --pane-background: #1e1e1e; /* dark-plus */
-  --pane-foreground: #d4d4d4;
-  /* VS Code's list colors for Dark+: its selection, out of focus, and hover. */
-  --nx-viewer-selection: #04395e;
-  --nx-viewer-selection-inactive: #37373d;
-  --nx-viewer-hover: #2a2d2e;
-}
-
-:root[data-theme="light"][data-theme-family="vscode"] {
-  --pane-background: #ffffff; /* light-plus */
+  /* Light+, with a lighter blue for a selection than its own white-on-blue, which code's colors need. */
+  --pane-background: #ffffff;
   --pane-foreground: #000000;
-  /* Light+'s list colors, with a lighter blue than its own white-on-blue, which code's colors need. */
   --nx-viewer-selection: #cce5ff;
   --nx-viewer-selection-inactive: #e4e6f1;
   --nx-viewer-hover: #e8e8e8;
+  --error: #cf222e;
+  --warning: #9a6700;
 }
 
 html,
@@ -320,119 +303,12 @@ nx-viewer {
   padding: 8px 16px;
 }
 
-/* The fonts the source reading is being tried in. Indentation stays in the monospace face that
-   goes with each, so it keeps its width. */
-/* The system's own faces: its interface font for prose, and for code the monospace font the
-   element and the editor already use, which is left as it is. */
-nx-viewer.reading-font-hybrid-system {
-  --nx-viewer-prose-font-family: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
-}
-
-/* The system's interface font throughout. Indentation keeps the monospace font's width. */
-nx-viewer.reading-font-proportional-system {
-  --nx-viewer-source-font-family: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
-}
-
-nx-viewer.reading-font-verdana {
-  --nx-viewer-source-font-family: Verdana, "DejaVu Sans", sans-serif;
-}
-
-/* Inter, with its slashed zero and the alternates that tell I, l and 1 apart. */
-nx-viewer.reading-font-inter {
-  --nx-viewer-source-font-family: "Inter Variable", system-ui, sans-serif;
-  --nx-viewer-source-font-features: "zero", "ss02";
-}
-
-nx-viewer.reading-font-atkinson {
-  --nx-viewer-source-font-family: "Atkinson Hyperlegible Next", system-ui, sans-serif;
-  --nx-viewer-indent-font-family: "Atkinson Hyperlegible Mono", ui-monospace, monospace;
-}
-
-nx-viewer.reading-font-atkinson-hybrid {
-  --nx-viewer-source-font-family: "Atkinson Hyperlegible Mono", ui-monospace, monospace;
-  --nx-viewer-prose-font-family: "Atkinson Hyperlegible Next", system-ui, sans-serif;
-  --nx-viewer-indent-font-family: "Atkinson Hyperlegible Mono", ui-monospace, monospace;
-}
-
-/* Recursive is one face whose MONO axis runs from proportional, 0, to monospace, 1. */
-nx-viewer.reading-font-recursive {
-  --nx-viewer-source-font-family: "Recursive Variable", system-ui, sans-serif;
-  --nx-viewer-source-font-variation: "MONO" 0, "CASL" 0;
-  --nx-viewer-indent-font-family: "Recursive Variable", ui-monospace, monospace;
-  --nx-viewer-indent-font-variation: "MONO" 1, "CASL" 0;
-}
-
-nx-viewer.reading-font-recursive-hybrid {
-  --nx-viewer-source-font-family: "Recursive Variable", ui-monospace, monospace;
-  --nx-viewer-source-font-variation: "MONO" 1, "CASL" 0;
-  --nx-viewer-prose-font-variation: "MONO" 0, "CASL" 0;
-  --nx-viewer-indent-font-family: "Recursive Variable", ui-monospace, monospace;
-  --nx-viewer-indent-font-variation: "MONO" 1, "CASL" 0;
-}
-
-/* Three more matched pairs: a proportional face, and the monospace face drawn to go with it. */
-nx-viewer.reading-font-geist {
-  --nx-viewer-source-font-family: "Geist", system-ui, sans-serif;
-  --nx-viewer-indent-font-family: "Geist Mono", ui-monospace, monospace;
-}
-
-nx-viewer.reading-font-geist-hybrid {
+/* The reading's faces: Geist for prose and Geist Mono for code and for indentation, so indentation
+   keeps its width. */
+nx-viewer {
   --nx-viewer-source-font-family: "Geist Mono", ui-monospace, monospace;
   --nx-viewer-prose-font-family: "Geist", system-ui, sans-serif;
   --nx-viewer-indent-font-family: "Geist Mono", ui-monospace, monospace;
-}
-
-nx-viewer.reading-font-source {
-  --nx-viewer-source-font-family: "Source Sans 3", system-ui, sans-serif;
-  --nx-viewer-indent-font-family: "Source Code Pro", ui-monospace, monospace;
-}
-
-nx-viewer.reading-font-source-hybrid {
-  --nx-viewer-source-font-family: "Source Code Pro", ui-monospace, monospace;
-  --nx-viewer-prose-font-family: "Source Sans 3", system-ui, sans-serif;
-  --nx-viewer-indent-font-family: "Source Code Pro", ui-monospace, monospace;
-}
-
-nx-viewer.reading-font-fira {
-  --nx-viewer-source-font-family: "Fira Sans", system-ui, sans-serif;
-  --nx-viewer-indent-font-family: "Fira Mono", ui-monospace, monospace;
-}
-
-nx-viewer.reading-font-fira-hybrid {
-  --nx-viewer-source-font-family: "Fira Mono", ui-monospace, monospace;
-  --nx-viewer-prose-font-family: "Fira Sans", system-ui, sans-serif;
-  --nx-viewer-indent-font-family: "Fira Mono", ui-monospace, monospace;
-}
-
-nx-viewer.reading-font-proportional {
-  --nx-viewer-source-font-family: "IBM Plex Sans", system-ui, sans-serif;
-  --nx-viewer-indent-font-family: "IBM Plex Mono", ui-monospace, monospace;
-}
-
-nx-viewer.reading-font-hybrid {
-  --nx-viewer-source-font-family: "IBM Plex Mono", ui-monospace, monospace;
-  --nx-viewer-prose-font-family: "IBM Plex Sans", system-ui, sans-serif;
-  --nx-viewer-indent-font-family: "IBM Plex Mono", ui-monospace, monospace;
-}
-
-nx-viewer.reading-font-duospace {
-  --nx-viewer-source-font-family: "iA Writer Quattro", ui-monospace, monospace;
-  --nx-viewer-indent-font-family: "iA Writer Quattro", ui-monospace, monospace;
-}
-
-.reading-font {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 0.4rem;
-}
-
-.reading-font select {
-  font: inherit;
-  color: inherit;
-  background: transparent;
-  border: 1px solid var(--sl-color-hairline);
-  border-radius: 4px;
-  padding: 0 0.25rem;
 }
 
 .reading-message {
