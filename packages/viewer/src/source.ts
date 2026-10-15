@@ -64,6 +64,7 @@ const KIND_ICONS: Partial<Record<SourceDeclarationKind, string>> = {
   record: "box",
   action: "zap",
   union: "tag",
+  function: "square-function",
 };
 
 export function renderSource(
@@ -790,6 +791,10 @@ export function renderSource(
       if (!onOneLine(start, end) && !(node.role === "element" && sheetable(item))) {
         line.classList.add("as-written");
         line.style.setProperty("--column", String(start - (text.lastIndexOf("\n", start - 1) + 1)));
+        // Room for the item's own indentation on its first line, which its later lines share.
+        const lead = document.createElement("span");
+        lead.className = "as-written-lead";
+        line.append(lead);
       }
       writeNodes(line, [item], start, end);
       parent.append(line);
