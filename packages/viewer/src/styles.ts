@@ -72,7 +72,9 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
    one changes no line's height. */
 .source {
   margin: 0;
-  padding: 4px 2px 12px;
+  /* Text stops 4px inside where a selected or hovered row's highlight ends, as it starts 4px inside
+     where the highlight begins. */
+  padding: 4px 12px 12px 2px;
   font-family: var(--nx-viewer-source-font-family, var(--mono));
   font-variation-settings: var(--nx-viewer-source-font-variation, normal);
   font-feature-settings: var(--nx-viewer-source-font-features, normal);
