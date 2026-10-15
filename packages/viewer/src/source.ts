@@ -292,6 +292,8 @@ export function renderSource(
       // like a sheet or a one-line element does.
       const marker = layout.sheets === true && node.role === "element" && startsItsLine(start) ? elementIcon(child) : undefined;
       if (marker !== undefined) {
+        // It is a unit of the reading too, selected and hovered as a whole like a one-line element.
+        element.classList.add("tag-line");
         element.append(marker);
       }
       // A comment is prose, which a host may set in another font than the code around it.

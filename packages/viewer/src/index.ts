@@ -54,10 +54,11 @@ const KEYED = "[data-key], [data-ref-key], [data-part-of]";
 
 /**
  * What a click selects in the source view's reading, and what the pointer and the arrow keys move
- * between: an element on lines of its own (through its header), a row of a sheet, or an element
- * on one line. A sheet's header stands for its sheet.
+ * between: an element on lines of its own (through its header), a row of a sheet, an element on
+ * one line, or an element written as its tags that starts a line. A sheet's header stands for its
+ * sheet.
  */
-const UNITS = ".sheet-head, .sheet-row, .line-element";
+const UNITS = ".sheet-head, .sheet-row, .line-element, .tag-line";
 
 /**
  * What `element` reads as, word by word: its text with pieces kept apart, an image by its label,
@@ -493,7 +494,7 @@ export class NxViewerElement extends ElementBase {
       layer.append(box);
     };
     const selected = this.#selection === undefined ? undefined : this.#rendered.get(this.#selection);
-    const unit = selected?.matches(".sheet, .sheet-row, .line-element") === true ? selected : undefined;
+    const unit = selected?.matches(".sheet, .sheet-row, .line-element, .tag-line") === true ? selected : undefined;
     if (unit !== undefined) {
       const head = unit.matches(".sheet") ? unit.querySelector<HTMLElement>(":scope > .sheet-head") : null;
       if (head !== null) {
