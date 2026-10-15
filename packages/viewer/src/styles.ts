@@ -116,7 +116,7 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
   overflow-wrap: anywhere;
   line-height: var(--nx-viewer-source-line-height, 18px);
 }
-.source .n.selected .uitext-block { background: var(--nx-viewer-selection, light-dark(#0969da1f, #388bfd33)); }
+.source .n.selected > .uitext-block { background: var(--nx-viewer-selection, light-dark(#0969da1f, #388bfd33)); }
 /* A string its viewer formats as an identifier: one quiet token, as products that show ids do,
    in muted gray on a faint tint, with no border and no added height. */
 .source .id-value, .value.formatted.id {
@@ -222,10 +222,8 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 }
 
 /* How a sheet shows what belongs to it, set by the host's grouping attribute.
-   outline: names a step bolder, a hairline above each sheet that follows another, a tint over the
-   sheet under the pointer, and a rule beside a sheet that is a property's value.
-   brackets: names a step bolder, a bracket down each sheet that turns right at its end, and a
-   tint over the sheet under the pointer.
+   outline: names a step bolder, a hairline above each sheet that follows another, and a rule beside a sheet that is a property's value.
+   brackets: names a step bolder, a bracket down each sheet that turns right at its end.
    guides: a faint line down each sheet from under its name, as an editor's indent guides. */
 :host([grouping="outline"]) .source .sheet-head { font-weight: 600; }
 :host([grouping="outline"]) .source .sheet-head .id-value { font-weight: 400; }
@@ -234,10 +232,6 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
 :host([grouping="outline"]) .source .sheet-item + .sheet-item > .sheet,
 :host([grouping="outline"]) .source .sheet ~ .sheet {
   border-top: 1px solid var(--nx-viewer-rule, light-dark(#0000001f, #ffffff1f));
-}
-:host([grouping="outline"]) .source .sheet:hover:not(:has(.sheet:hover)) {
-  background: var(--nx-viewer-hover, light-dark(#0000000a, #ffffff0a));
-  border-radius: 4px;
 }
 :host([grouping="outline"]) .source .sheet-below > .sheet {
   border-left: 2px solid var(--nx-viewer-rule, light-dark(#0000001f, #ffffff1f));
@@ -260,10 +254,6 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
   border-bottom-left-radius: 3px;
   pointer-events: none;
 }
-:host([grouping="brackets"]) .source .sheet:hover:not(:has(.sheet:hover)) {
-  background: var(--nx-viewer-hover, light-dark(#0000000a, #ffffff0a));
-  border-radius: 4px;
-}
 :host([grouping="guides"]) .source .sheet {
   background-image: linear-gradient(var(--nx-viewer-rule, light-dark(#00000024, #ffffff24)), var(--nx-viewer-rule, light-dark(#00000024, #ffffff24)));
   background-size: 1px calc(100% - var(--nx-viewer-source-line-height, 18px));
@@ -282,6 +272,29 @@ button:hover, button:focus-visible { border-color: var(--blue); color: var(--blu
   font-variation-settings: var(--nx-viewer-indent-font-variation, normal);
 }
 .source .n.selected { outline: none; background: var(--nx-viewer-selection, light-dark(#0969da1f, #388bfd33)); }
+/* A unit of the reading (an element on lines of its own, a sheet's row, an element on one line) is
+   drawn selected and hovered by the highlights behind it, as a list's rows are, not by its own box. */
+.source :is(.sheet, .sheet-row, .line-element).selected { background: none; }
+.source .sheet-head, .source .sheet-row, .source .line-element { cursor: default; }
+.body:has(> .highlights) { position: relative; isolation: isolate; }
+.highlights { position: absolute; inset: 0; pointer-events: none; z-index: -1; }
+.highlight { position: absolute; border-radius: 4px; }
+.highlight.selected { background: var(--nx-viewer-selection, light-dark(#0969da1f, #388bfd33)); }
+.highlight.selected-body {
+  background: color-mix(in srgb, var(--nx-viewer-selection, light-dark(#0969da1f, #388bfd33)) 45%, transparent);
+}
+/* Out of focus, a selection stays, quieter, as a list's does. */
+:host(:not(:focus-within)) .highlight.selected { background: var(--nx-viewer-selection-inactive, light-dark(#0000000f, #ffffff17)); }
+:host(:not(:focus-within)) .highlight.selected-body {
+  background: color-mix(in srgb, var(--nx-viewer-selection-inactive, light-dark(#0000000f, #ffffff17)) 45%, transparent);
+}
+.highlight.hovered { background: var(--nx-viewer-hover, light-dark(#0000000a, #ffffff0d)); }
+/* Over a selection, the row under the pointer lightens it a little. */
+.highlight.hovered.in-selection { background: var(--nx-viewer-hover-selected, light-dark(#0000000a, #ffffff12)); }
+/* A selected sheet's bracket brightens, as an editor's guide for the block it is in does. */
+:host([grouping="brackets"]) .source .sheet.selected::after {
+  border-color: var(--nx-viewer-selection-guide, light-dark(#0969da99, #4daafcb3));
+}
 .source .n.hovered { background: none; }
 
 .details { border: 1px solid var(--rule); border-radius: 6px; padding: 2px 10px; font-size: 13px; color: var(--ink-2); }

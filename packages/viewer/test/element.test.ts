@@ -786,6 +786,25 @@ describe("the keyboard", () => {
     target.dispatchEvent(new document.defaultView!.KeyboardEvent("keydown", { key: name, bubbles: true, composed: true }));
   }
 
+  it("selects the reading's elements and rows, and walks them as a tree", async () => {
+    const element = show(await fixture("groups"));
+    element.view = "source";
+    element.sheets = true;
+    const events: string[] = [];
+    element.addEventListener(NX_SELECT_EVENT, (event) => events.push((event as CustomEvent<NxSelectDetail>).detail.key));
+    const body = root(element).querySelector<HTMLElement>(".body")!;
+    const sheet = body.querySelector<HTMLElement>(".sheet")!;
+    const [first, second] = Array.from(body.querySelectorAll<HTMLElement>(".line-element"));
+    // A click on a word of a line chooses the line, and one on the header, its element.
+    first!.querySelector<HTMLElement>(".line-property")!.click();
+    sheet.querySelector<HTMLElement>(".sheet-head .line-name")!.click();
+    key(body, "ArrowRight");
+    key(body, "ArrowDown");
+    key(body, "ArrowLeft");
+    assert.deepEqual(events, [first!.dataset["key"], sheet.dataset["key"], first!.dataset["key"], second!.dataset["key"], sheet.dataset["key"]]);
+    assert.ok(body.querySelector(".highlights"), "the selection is drawn behind the text");
+  });
+
   it("walks the selection through every node with the arrow keys", async () => {
     const element = show(await fixture("user"));
     const events: string[] = [];

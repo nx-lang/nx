@@ -53,6 +53,13 @@ const ElementBase = (typeof HTMLElement === "undefined" ? class {} : HTMLElement
 const KEYED = "[data-key], [data-ref-key], [data-part-of]";
 
 /**
+ * What a click selects in the source view's reading, and what the pointer and the arrow keys move
+ * between: an element on lines of its own (through its header), a row of a sheet, or an element
+ * on one line. A sheet's header stands for its sheet.
+ */
+const UNITS = ".sheet-head, .sheet-row, .line-element";
+
+/**
  * What `element` reads as, word by word: its text with pieces kept apart, an image by its label,
  * and without the controls and tags that only decorate it.
  */
@@ -111,6 +118,10 @@ export class NxViewerElement extends ElementBase {
   /** Each key's original rendering. */
   #rendered = new Map<string, HTMLElement>();
   #hovered: HTMLElement | undefined;
+  /** The unit of the reading under the pointer, highlighted as a row. */
+  #hoveredUnit: HTMLElement | undefined;
+  /** The highlights of the selected and the hovered unit, drawn behind the text. */
+  readonly #highlights: HTMLDivElement;
   #hoverTimer: ReturnType<typeof setTimeout> | undefined;
   #shownSource: string | undefined;
   /** The control that opened the source panel from the keyboard or pointer, to return focus to. */
@@ -153,6 +164,10 @@ export class NxViewerElement extends ElementBase {
     this.#body.setAttribute("role", "region");
     this.#body.setAttribute("aria-label", "Reading view; the up and down arrows select the next node");
 
+    this.#highlights = document.createElement("div");
+    this.#highlights.className = "highlights";
+    this.#highlights.setAttribute("aria-hidden", "true");
+
     this.#hover = document.createElement("div");
     this.#hover.className = "hover";
     this.#hover.setAttribute("role", "tooltip");
@@ -191,7 +206,14 @@ export class NxViewerElement extends ElementBase {
     this.#frame.addEventListener("keydown", () => this.#body.classList.remove("by-pointer"));
     this.#frame.addEventListener("keydown", (event) => this.#onKeyDown(event));
     this.#body.addEventListener("pointerover", (event) => this.#onPointerOver(event));
-    this.#body.addEventListener("pointerleave", () => this.#setHovered(undefined));
+    this.#body.addEventListener("pointerleave", () => {
+      this.#setHovered(undefined);
+      this.#setHoveredUnit(undefined);
+    });
+    // The highlights follow the layout: a wider pane moves the right edge they run to.
+    if (typeof ResizeObserver !== "undefined") {
+      new ResizeObserver(() => this.#paintHighlights()).observe(this.#body);
+    }
     this.#body.addEventListener("focusin", (event) => this.#onFocusIn(event));
     this.#body.addEventListener("focusout", (event) => this.#onFocusOut(event));
 
@@ -402,6 +424,7 @@ export class NxViewerElement extends ElementBase {
       copy: false,
       images: this.#images,
     };
+    this.#hoveredUnit = undefined;
     this.#body.append(
       this.#view === "source" ? renderSource(this.ownerDocument, index, this.#colors, { sheets: this.#sheets, icons: this.#icons }) : renderDocument(context)
     );
@@ -412,6 +435,116 @@ export class NxViewerElement extends ElementBase {
     const selection = this.#selection;
     this.#selection = undefined;
     this.#select(selection !== undefined && index.byKey.has(selection) ? selection : undefined, false);
+    this.#body.append(this.#highlights);
+    this.#paintHighlights();
+    // Fonts that arrive later change where the rows fall.
+    void this.ownerDocument.fonts?.ready.then(() => this.#paintHighlights());
+  }
+
+  /** Whether the reading has units: the source view with its sheets. */
+  get #inUnits(): boolean {
+    return this.#view === "source" && this.#sheets;
+  }
+
+  /** The unit `target` is in, or nothing outside a unit or outside the reading's units. */
+  #unitOf(target: Element | null | undefined): HTMLElement | undefined {
+    if (!this.#inUnits) {
+      return undefined;
+    }
+    const found = target?.closest?.(UNITS) as HTMLElement | null | undefined;
+    if (found === null || found === undefined || !this.#body.contains(found)) {
+      return undefined;
+    }
+    return found.classList.contains("sheet-head") ? (found.parentElement as HTMLElement) : found;
+  }
+
+  #setHoveredUnit(unit: HTMLElement | undefined): void {
+    if (unit !== this.#hoveredUnit) {
+      this.#hoveredUnit = unit;
+      this.#paintHighlights();
+    }
+  }
+
+  /**
+   * Draws the selected unit and the one under the pointer as rows behind the text, from just before
+   * the unit's start to near the reading's right edge, as a list's rows are. A selected sheet's
+   * header is drawn stronger than the rest of it, and the row under the pointer, lighter over a
+   * selection.
+   */
+  #paintHighlights(): void {
+    const layer = this.#highlights;
+    layer.replaceChildren();
+    if (!this.#inUnits || !this.#body.contains(layer)) {
+      return;
+    }
+    const frame = this.#body.getBoundingClientRect();
+    if (frame.width === 0) {
+      return;
+    }
+    const draw = (from: HTMLElement, rows: DOMRect, className: string): void => {
+      const start = (from.matches(".sheet-row") ? from.querySelector<HTMLElement>(":scope > .sheet-name") : from) ?? from;
+      const left = start.getBoundingClientRect().left - frame.left - 4 + this.#body.scrollLeft;
+      const box = this.ownerDocument.createElement("div");
+      box.className = `highlight ${className}`;
+      box.style.left = `${left}px`;
+      box.style.top = `${rows.top - frame.top + this.#body.scrollTop}px`;
+      box.style.width = `${Math.max(0, frame.width - 8 - left)}px`;
+      box.style.height = `${rows.height}px`;
+      layer.append(box);
+    };
+    const selected = this.#selection === undefined ? undefined : this.#rendered.get(this.#selection);
+    const unit = selected?.matches(".sheet, .sheet-row, .line-element") === true ? selected : undefined;
+    if (unit !== undefined) {
+      const head = unit.matches(".sheet") ? unit.querySelector<HTMLElement>(":scope > .sheet-head") : null;
+      if (head !== null) {
+        draw(unit, unit.getBoundingClientRect(), "selected-body");
+        draw(unit, head.getBoundingClientRect(), "selected");
+      } else {
+        draw(unit, unit.getBoundingClientRect(), "selected");
+      }
+    }
+    const hovered = this.#hoveredUnit;
+    if (hovered !== undefined && this.#body.contains(hovered)) {
+      const head = hovered.matches(".sheet") ? hovered.querySelector<HTMLElement>(":scope > .sheet-head") : null;
+      const within = unit !== undefined && unit.contains(hovered);
+      draw(hovered, (head ?? hovered).getBoundingClientRect(), within ? "hovered in-selection" : "hovered");
+    }
+  }
+
+  /** Every unit the reader can see, in reading order. */
+  #units(): HTMLElement[] {
+    const units: HTMLElement[] = [];
+    for (const found of this.#body.querySelectorAll<HTMLElement>(UNITS)) {
+      const unit = this.#unitOf(found);
+      if (unit !== undefined && !units.includes(unit)) {
+        units.push(unit);
+      }
+    }
+    return units;
+  }
+
+  /** Selects the next or previous unit, or the one that holds the selected one, or the first it holds. */
+  #stepUnit(move: "next" | "previous" | "out" | "in"): void {
+    const units = this.#units();
+    if (units.length === 0) {
+      return;
+    }
+    const current = this.#selection === undefined ? undefined : this.#rendered.get(this.#selection);
+    const at = current === undefined ? -1 : units.indexOf(current);
+    let next: HTMLElement | undefined;
+    if (at < 0) {
+      next = move === "previous" ? units[units.length - 1] : units[0];
+    } else if (move === "next" || move === "previous") {
+      next = units[Math.max(0, Math.min(units.length - 1, at + (move === "next" ? 1 : -1)))];
+    } else if (move === "out") {
+      next = units.slice(0, at).reverse().find((unit) => unit.contains(current!));
+    } else {
+      next = units.slice(at + 1).find((unit) => current!.contains(unit));
+    }
+    if (next !== undefined) {
+      this.#select(keyOf(next), true);
+      next.scrollIntoView?.({ block: "nearest" });
+    }
   }
 
   #select(key: string | undefined, fire: boolean): void {
@@ -423,9 +556,11 @@ export class NxViewerElement extends ElementBase {
     const at = key === undefined ? undefined : index?.byKey.get(key);
     if (index === undefined || key === undefined || at === undefined) {
       this.#selection = undefined;
+      queueMicrotask(() => this.#paintHighlights());
       return;
     }
     this.#selection = key;
+    queueMicrotask(() => this.#paintHighlights());
     const original = this.#rendered.get(key);
     original?.classList.add("selected");
     original?.setAttribute("aria-current", "true");
@@ -474,6 +609,12 @@ export class NxViewerElement extends ElementBase {
     if (textSelection !== null && textSelection !== undefined && !textSelection.isCollapsed) {
       return;
     }
+    // In the reading's units, a click chooses the unit: the element, row or line, not a word in it.
+    const unit = this.#unitOf(target);
+    if (unit !== undefined) {
+      this.#select(keyOf(unit), true);
+      return;
+    }
     const clicked = target.closest?.(KEYED);
     // A click on a declaration's header or on one of its members chooses the declaration: a field
     // is read with its record, and the arrow keys still reach it on its own.
@@ -492,6 +633,12 @@ export class NxViewerElement extends ElementBase {
         event.preventDefault();
         this.#select(keyOf(keyed), true);
       }
+    } else if (this.#inUnits && inBody && ["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"].includes(event.key)) {
+      // The units read as a tree: up and down walk its rows, left goes to the unit that holds this
+      // one, and right into the first one it holds.
+      event.preventDefault();
+      const moves = { ArrowDown: "next", ArrowUp: "previous", ArrowLeft: "out", ArrowRight: "in" } as const;
+      this.#stepUnit(moves[event.key as keyof typeof moves]);
     } else if ((event.key === "ArrowDown" || event.key === "ArrowUp") && inBody) {
       event.preventDefault();
       this.#step(event.key === "ArrowDown" ? 1 : -1);
@@ -589,6 +736,7 @@ export class NxViewerElement extends ElementBase {
 
   #onPointerOver(event: PointerEvent): void {
     this.#setHovered(this.#hoverTarget(event.target as Element));
+    this.#setHoveredUnit(this.#unitOf(event.target as Element));
   }
 
   #onFocusIn(event: FocusEvent): void {

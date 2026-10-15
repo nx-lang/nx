@@ -30,6 +30,10 @@
     monospace;
   --pane-background: #0d1117; /* github-dark-default, the editor's theme */
   --pane-foreground: #e6edf3;
+  /* The reading's selection and hover, from the theme's list colors. */
+  --nx-viewer-selection: #388bfd33;
+  --nx-viewer-selection-inactive: #6e768166;
+  --nx-viewer-hover: #6e76811a;
   --error: #f85149;
   --warning: #d29922;
 }
@@ -53,6 +57,9 @@
   --sl-color-hairline-shade: var(--sl-color-gray-6);
   --pane-background: #ffffff; /* github-light-default */
   --pane-foreground: #1f2328;
+  --nx-viewer-selection: #0969da1f;
+  --nx-viewer-selection-inactive: #afb8c133;
+  --nx-viewer-hover: #eaeef280;
   --error: #cf222e;
   --warning: #9a6700;
 }
@@ -61,11 +68,19 @@
 :root[data-theme-family="vscode"] {
   --pane-background: #1e1e1e; /* dark-plus */
   --pane-foreground: #d4d4d4;
+  /* VS Code's list colors for Dark+: its selection, out of focus, and hover. */
+  --nx-viewer-selection: #04395e;
+  --nx-viewer-selection-inactive: #37373d;
+  --nx-viewer-hover: #2a2d2e;
 }
 
 :root[data-theme="light"][data-theme-family="vscode"] {
   --pane-background: #ffffff; /* light-plus */
   --pane-foreground: #000000;
+  /* Light+'s list colors, with a lighter blue than its own white-on-blue, which code's colors need. */
+  --nx-viewer-selection: #cce5ff;
+  --nx-viewer-selection-inactive: #e4e6f1;
+  --nx-viewer-hover: #e8e8e8;
 }
 
 html,
