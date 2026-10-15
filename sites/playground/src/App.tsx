@@ -160,7 +160,7 @@ export function App() {
     [],
   );
 
-  const [mode, setMode] = useState<SourceMode>("source");
+  const [mode, setMode] = useState<SourceMode>("visual");
   const [selection, setSelection] = useState<string | undefined>(undefined);
   // What the reader folded in Visual, kept while they switch to Source and back; until they fold
   // anything, Visual folds the source's supporting declarations itself.
@@ -315,7 +315,7 @@ export function App() {
               </span>
             )}
             <span className="mode-switch" role="group" aria-label="Show the source as">
-              {(["source", "visual"] as const).map((option) => (
+              {(["visual", "source"] as const).map((option) => (
                 <button
                   key={option}
                   type="button"

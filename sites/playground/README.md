@@ -7,14 +7,14 @@ its output, shown as NX text — the text `nxlang run` prints — by the `<nx-va
 name, property or case in the output shows the same hover its declaration shows in the source.
 Clicking one selects the declaration.
 
-The NX pane's Source and Visual switch shows the source itself visually, through the `<nx-viewer>`
-element of [`@nx-lang/viewer`](../../packages/viewer/README.md): an element over several lines as a
-group with a row to each property and no tags, an element on one line as its name and properties,
-and the rest as written, in the editor's colors, for a reader who does not write NX. The reading
-comes from the worker's `sourceTree` query, refreshed when typing pauses, as evaluation is. Visual
-starts with the source's supporting declarations folded to a line each, so the content comes first,
-and offers Collapse all and Expand all. Switching to Visual selects the node at the cursor, and
-switching back puts the cursor at the start of the selected node.
+The NX pane's Visual and Source switch, Visual by default, shows the source itself visually, through
+the `<nx-viewer>` element of [`@nx-lang/viewer`](../../packages/viewer/README.md): an element over
+several lines as a group with a row to each property and no tags, an element on one line as its name
+and properties, and the rest as written, in the editor's colors, for a reader who does not write NX.
+The reading comes from the worker's `sourceTree` query, refreshed when typing pauses, as evaluation
+is. Visual starts with the source's supporting declarations folded to a line each, so the content
+comes first, and offers Collapse all and Expand all. Switching to Visual selects the node at the
+cursor, and switching back puts the cursor at the start of the selected node.
 
 The output pane's Output and Preview switch runs a component instead. Preview starts a preview
 session of [`@nx-lang/previewer`](../../packages/previewer/README.md) in the worker, on the IR
