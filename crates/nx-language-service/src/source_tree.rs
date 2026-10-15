@@ -2026,10 +2026,11 @@ impl<'a> TreeBuilder<'a> {
             subtitle: resolved.subtitle,
             badge: resolved.badge,
             image: resolved.image,
-            id_position: resolved
-                .id
-                .as_ref()
-                .map(|_| resolved.id_position.unwrap_or_else(|| "beginning".to_string())),
+            id_position: resolved.id.as_ref().map(|_| {
+                resolved
+                    .id_position
+                    .unwrap_or_else(|| "beginning".to_string())
+            }),
             id: resolved.id,
             icon: resolved.icon,
             layout: Some(resolved.layout.unwrap_or_else(|| "card".to_string())),
