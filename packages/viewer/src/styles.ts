@@ -48,7 +48,8 @@ export const styles = `
   margin: 0;
   /* Text stops 4px inside where a selected or hovered row's highlight ends, as it starts 4px inside
      where the highlight begins. */
-  padding: 4px 12px 12px 2px;
+  /* The left padding is room for a declaration's fold chevron, which hangs left of its first line. */
+  padding: 4px 12px 12px 1.4em;
   font-family: var(--nx-viewer-source-font-family, var(--mono));
   font-variation-settings: var(--nx-viewer-source-font-variation, normal);
   font-feature-settings: var(--nx-viewer-source-font-features, normal);
@@ -241,6 +242,58 @@ export const styles = `
   font-variation-settings: var(--nx-viewer-indent-font-variation, normal);
 }
 .source .n.selected { outline: none; background: var(--nx-viewer-selection, light-dark(#0969da1f, #388bfd33)); }
+/* A group's or a declaration's fold chevron hangs left of where it starts, so folding moves nothing.
+   It shows while the pointer is over the reading, and always on what is folded, as an editor's
+   folding controls do. */
+.source .fold {
+  display: inline-block;
+  width: 1.2em;
+  margin-left: -1.2em;
+  text-align: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s;
+  color: var(--nx-viewer-fold-color, light-dark(#6e7781, #8b949e));
+  user-select: none;
+}
+.source .fold::before {
+  content: "";
+  display: inline-block;
+  width: 0.35em;
+  height: 0.35em;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: translateY(-0.15em) rotate(45deg);
+}
+.source .fold.folded::before { transform: rotate(-45deg); }
+.body:hover .source .fold, .source .fold.folded, .source .fold:focus-visible { opacity: 1; }
+.source .fold:hover { color: var(--nx-viewer-foreground, CanvasText); }
+/* What a folded unit hides, said quietly after it. */
+.source .fold-summary { color: var(--nx-viewer-fold-summary-color, light-dark(#8c959f, #858585)); font-weight: 400; }
+/* A folded group is its header on one line: what does not fit of its title is cut, not wrapped. */
+.source .sheet.folded > .sheet-head { display: flex; align-items: baseline; white-space: pre; padding-left: 0; text-indent: 0; }
+.source .sheet.folded > .sheet-head > * { flex: none; }
+.source .sheet.folded > .sheet-head { column-gap: 0; }
+.source .sheet.folded > .sheet-head > .element-icon { margin-right: 0.6ch; }
+.source .sheet.folded > .sheet-head > .id-value { margin-left: 1ch; }
+.source .sheet.folded > .sheet-head > .fold-title { margin-left: 2ch; }
+.source .fold-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  text-indent: 0;
+  font-family: var(--nx-viewer-prose-font-family, inherit);
+}
+.source .sheet.folded::after { display: none; }
+/* A run of supporting declarations: a quiet line that says what it holds, which opens it. */
+.source .fold-run-head { cursor: pointer; }
+.source .fold-run-head > .fold-summary { font-family: var(--nx-viewer-prose-font-family, inherit); }
+.source .fold-run-head:hover > .fold-summary { color: var(--nx-viewer-foreground, CanvasText); }
+/* A folded declaration is quieter than what is open, so the eye lands on the document's content. */
+.source .fold-declaration.folded { opacity: 0.75; }
 /* A unit of the reading (a group, a group's row, an element on one line, a block written as it is) is
    drawn selected and hovered by the highlights behind it, as a list's rows are, not by its own box. */
 .source :is(.sheet, .sheet-row, .line-element, .tag-line, .block-line, .sheet-held).selected { background: none; }

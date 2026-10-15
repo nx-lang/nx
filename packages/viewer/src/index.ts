@@ -10,7 +10,7 @@
  */
 import type { EditorRange, SourceRole, SourceTree } from "@nx-lang/language-protocol";
 
-import { renderSource, type NxViewerColor, type NxViewerIcons } from "./source.js";
+import { defaultFolded, readingRuns, renderSource, type NxViewerColor, type NxViewerIcons, type ReadingRun } from "./source.js";
 import { styles } from "./styles.js";
 import { indexTree, nodeOf, type TreeIndex } from "./tree.js";
 
@@ -23,6 +23,15 @@ export const NX_VIEWER_TAG = "nx-viewer";
 /** The event fired when a reader selects a node. */
 export const NX_SELECT_EVENT = "nx-select";
 
+/** The event fired when a reader folds or unfolds a group or a declaration. */
+export const NX_FOLD_EVENT = "nx-fold";
+
+/** What the `nx-fold` event carries. */
+export interface NxFoldDetail {
+  /** The keys of every unit folded now. */
+  readonly folded: readonly string[];
+}
+
 /** What the `nx-select` event carries. */
 export interface NxSelectDetail {
   /** The selected node's key. */
@@ -34,7 +43,7 @@ export interface NxSelectDetail {
 }
 
 /** The element's properties, which a host may set before the element is defined. */
-const PROPERTIES = ["tree", "text", "colors", "icons", "selection", "stale"] as const;
+const PROPERTIES = ["tree", "text", "colors", "icons", "folded", "selection", "stale"] as const;
 
 // A module imported where there is no DOM still loads; the element is only defined where
 // `HTMLElement` exists.
@@ -94,6 +103,12 @@ export class NxViewerElement extends ElementBase {
   #text = "";
   #colors: readonly NxViewerColor[] = [];
   #icons: NxViewerIcons | undefined;
+  /** What the host or the reader folded; nothing until either does, when the defaults apply. */
+  #chosenFolded: Set<string> | undefined;
+  /** What is folded now: the chosen keys, or the defaults for this tree. */
+  #folded = new Set<string>();
+  /** The runs of supporting declarations of the tree shown. */
+  #runs: ReadingRun[] = [];
   #index: TreeIndex | undefined;
   #selection: string | undefined;
   /** Each key's rendering. */
@@ -219,6 +234,36 @@ export class NxViewerElement extends ElementBase {
     this.#render();
   }
 
+  /**
+   * The keys of what is shown folded: a group as its header alone, a declaration as its first line,
+   * and a run of the declarations that support the document (its imports, types, visualizers, the
+   * components a host draws and its functions) as one line saying what it holds. Until the host or
+   * the reader folds anything, those runs and their declarations are folded and the rest is open,
+   * so the document's own content comes first. A host keeps the keys to show a document as the
+   * reader left it, and sets `undefined` to go back to the defaults.
+   */
+  get folded(): readonly string[] {
+    return [...this.#folded];
+  }
+
+  set folded(keys: readonly string[] | undefined) {
+    this.#chosenFolded = keys === undefined ? undefined : new Set(keys);
+    this.#render();
+  }
+
+  /** Folds everything that can fold. */
+  collapseAll(): void {
+    // What can fold inside a folded unit is not drawn, so it is found with everything unfolded.
+    this.#chosenFolded = new Set();
+    this.#render();
+    this.#setFolded(new Set(this.#foldKeys()));
+  }
+
+  /** Unfolds everything. */
+  expandAll(): void {
+    this.#setFolded(new Set());
+  }
+
   /** Whether the tree is out of date: the reading is muted and badged, and still works. */
   get stale(): boolean {
     return this.hasAttribute("stale");
@@ -259,7 +304,9 @@ export class NxViewerElement extends ElementBase {
     }
     const index = indexTree(tree, this.#text);
     this.#index = index;
-    this.#body.append(renderSource(this.ownerDocument, index, this.#colors, { icons: this.#icons }));
+    this.#runs = readingRuns(index);
+    this.#folded = this.#chosenFolded ?? new Set(defaultFolded(index));
+    this.#body.append(renderSource(this.ownerDocument, index, this.#colors, { icons: this.#icons, folded: this.#folded }));
     for (const element of this.#body.querySelectorAll<HTMLElement>("[data-key]")) {
       this.#rendered.set(element.dataset["key"]!, element);
     }
@@ -282,6 +329,64 @@ export class NxViewerElement extends ElementBase {
     // Room between a group's rows, or beside them, belongs to the group.
     const group = target?.closest?.(".sheet") as HTMLElement | null | undefined;
     return group !== null && group !== undefined && this.#body.contains(group) ? group : undefined;
+  }
+
+  /** The keys of every fold control drawn, in reading order. */
+  #foldKeys(within: Element = this.#body): string[] {
+    return [...within.querySelectorAll<HTMLElement>(".fold")].map((toggle) => toggle.dataset["foldKey"]!);
+  }
+
+  /** Folds what `folded` names and nothing else, redraws, and tells the host. */
+  #setFolded(folded: Set<string>): void {
+    this.#chosenFolded = folded;
+    this.#render();
+    const detail: NxFoldDetail = { folded: [...folded] };
+    this.dispatchEvent(new CustomEvent(NX_FOLD_EVENT, { detail, bubbles: true, composed: true }));
+  }
+
+  /**
+   * Folds or unfolds the unit with `key`. With `deep`, everything inside it goes the same way, as an
+   * Alt+click does in a design tool's layers.
+   */
+  #toggleFold(key: string, deep: boolean): void {
+    const folded = new Set(this.#folded);
+    const folding = !folded.has(key);
+    const unit = [...this.#body.querySelectorAll<HTMLElement>(".fold")]
+      .find((toggle) => toggle.dataset["foldKey"] === key)
+      ?.closest<HTMLElement>(".sheet, .fold-declaration, .fold-run");
+    if (folding) {
+      for (const inner of deep && unit !== null && unit !== undefined ? this.#foldKeys(unit) : [key]) {
+        folded.add(inner);
+      }
+    } else {
+      folded.delete(key);
+      if (deep) {
+        for (const other of [...folded]) {
+          if (this.#isInside(other, key)) {
+            folded.delete(other);
+          }
+        }
+      }
+    }
+    this.#setFolded(folded);
+  }
+
+  /** Whether the node with `key` lies inside the node with `outer`. */
+  #isInside(key: string, outer: string): boolean {
+    const index = this.#index;
+    const run = this.#runs.find((candidate) => candidate.key === outer);
+    if (run !== undefined) {
+      return run.nodes.some((top) => top === index?.byKey.get(key) || this.#isInside(key, index!.tree.nodes[top]!.key));
+    }
+    const target = index?.byKey.get(outer);
+    let at = index?.byKey.get(key);
+    while (index !== undefined && at !== undefined) {
+      at = index.tree.nodes[at]?.parent;
+      if (at === target) {
+        return true;
+      }
+    }
+    return false;
   }
 
   #setHoveredUnit(unit: HTMLElement | undefined): void {
@@ -364,6 +469,16 @@ export class NxViewerElement extends ElementBase {
    * holds it, or from where it stands when no unit holds it.
    */
   #stepUnit(move: "next" | "previous" | "out" | "in"): void {
+    // A group folds and unfolds before the arrows move past it, as a tree's nodes do.
+    const selected = this.#selection === undefined ? undefined : this.#rendered.get(this.#selection);
+    const toggle = selected?.matches(".sheet") === true ? selected.querySelector<HTMLElement>(":scope > .sheet-head > .fold") : null;
+    if (toggle !== null && toggle !== undefined) {
+      const key = toggle.dataset["foldKey"]!;
+      if ((move === "in" && this.#folded.has(key)) || (move === "out" && !this.#folded.has(key))) {
+        this.#toggleFold(key, false);
+        return;
+      }
+    }
     const units = this.#units();
     if (units.length === 0) {
       return;
@@ -404,6 +519,15 @@ export class NxViewerElement extends ElementBase {
       this.#selection = undefined;
       return;
     }
+    // A node folded away is unfolded to, so what is selected can be seen.
+    const hiding = [...this.#folded].filter((folded) => folded !== key && this.#isInside(key, folded));
+    if (hiding.length > 0) {
+      this.#selection = key;
+      const folded = new Set(this.#folded);
+      hiding.forEach((folded_) => folded.delete(folded_));
+      this.#setFolded(folded);
+      return;
+    }
     this.#selection = key;
     const original = this.#rendered.get(key);
     original?.classList.add("selected");
@@ -423,6 +547,14 @@ export class NxViewerElement extends ElementBase {
 
   #onClick(event: MouseEvent): void {
     const target = event.target as Element;
+    const toggle = (target.closest?.(".fold-run-head")?.querySelector(".fold") ?? target.closest?.(".fold")) as
+      | HTMLElement
+      | null
+      | undefined;
+    if (toggle !== null && toggle !== undefined && this.#body.contains(toggle)) {
+      this.#toggleFold(toggle.dataset["foldKey"]!, event.altKey);
+      return;
+    }
     // A drag that selected text is a text selection, not a choice of node.
     // Chromium reports a selection inside a shadow root only through the root itself.
     const root = this.shadowRoot as (ShadowRoot & { getSelection?(): Selection | null }) | null;

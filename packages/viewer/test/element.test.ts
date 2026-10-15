@@ -4,9 +4,9 @@ import assert from "node:assert/strict";
 import { after, describe, it } from "node:test";
 
 import { fixture, nxHost, type Fixture } from "./fixtures.js";
-import type { NxSelectDetail, NxViewerElement } from "../src/index.js";
+import type { NxFoldDetail, NxSelectDetail, NxViewerElement } from "../src/index.js";
 
-const { NX_SELECT_EVENT, NxViewerElement: VisualizerClass, nodeAtSpan } = await import("../src/index.js");
+const { NX_FOLD_EVENT, NX_SELECT_EVENT, NxViewerElement: ViewerClass, nodeAtSpan } = await import("../src/index.js");
 
 const created: NxViewerElement[] = [];
 
@@ -17,9 +17,13 @@ after(async () => {
   (await nxHost()).dispose();
 });
 
-function show({ tree, text }: Fixture): NxViewerElement {
+/** The element showing `fixture`, everything unfolded unless `defaults` asks for its own folding. */
+function show({ tree, text }: Fixture, defaults = false): NxViewerElement {
   const element = document.createElement("nx-viewer");
   document.body.append(element);
+  if (!defaults) {
+    element.folded = [];
+  }
   element.text = text;
   element.tree = tree;
   created.push(element);
@@ -81,9 +85,9 @@ describe("<nx-viewer>", () => {
     const element = document.createElement(tag) as NxViewerElement;
     document.body.append(element);
     Object.assign(element, { text, tree, stale: true });
-    customElements.define(tag, class extends VisualizerClass {});
+    customElements.define(tag, class extends ViewerClass {});
     created.push(element);
-    assert.ok(element instanceof VisualizerClass, "the element upgraded");
+    assert.ok(element instanceof ViewerClass, "the element upgraded");
     assert.equal(element.tree, tree);
     assert.ok(root(element).querySelector(".line-element"), "the tree set early is rendered");
     assert.equal(element.hasAttribute("stale"), true);
@@ -395,5 +399,54 @@ describe("the keyboard", () => {
     const announcer = root(element).querySelector('[role="status"]')!;
     assert.equal(announcer.getAttribute("aria-live"), "polite");
     assert.match(announcer.textContent ?? "", /^Selected Task/, "the selection is announced");
+  });
+});
+
+describe("folding", () => {
+  it("folds the document's supporting declarations to one line until the reader opens them", async () => {
+    const folding = await fixture("folding");
+    const element = show(folding, true);
+    const source = (): HTMLElement => root(element).querySelector<HTMLElement>(".source")!;
+    const run = source().querySelector<HTMLElement>(".fold-run")!;
+    assert.ok(run.classList.contains("folded"), "everything before the value is one folded run");
+    assert.equal(run.textContent!.trim(), "1 import · 2 types · 1 function · 1 visualizer");
+    assert.ok(source().textContent!.includes("let tasks"), "the value is open");
+    assert.ok(source().querySelector(".sheet:not(.folded)"), "and so is its group");
+    // Opening the run shows each declaration folded to its first line.
+    const folds: (readonly string[])[] = [];
+    element.addEventListener(NX_FOLD_EVENT, (event) => folds.push((event as CustomEvent<NxFoldDetail>).detail.folded));
+    run.querySelector<HTMLElement>(".fold-run-head")!.click();
+    assert.ok(!source().querySelector(".fold-run")!.classList.contains("folded"));
+    const declaration = source().querySelector<HTMLElement>(".fold-declaration.folded")!;
+    assert.equal(declaration.textContent, "type Task = { …");
+    assert.equal(folds.length, 1, "the host hears of it");
+    assert.ok(!folds[0]!.includes(run.querySelector<HTMLElement>(".fold")!.dataset["foldKey"]!));
+  });
+
+  it("folds a group to its header and title, and selecting inside it unfolds it", async () => {
+    const folding = await fixture("folding");
+    const element = show(folding);
+    const group = (): HTMLElement => root(element).querySelector<HTMLElement>(".sheet")!;
+    group().querySelector<HTMLElement>(":scope > .sheet-head > .fold")!.click();
+    assert.ok(group().classList.contains("folded"));
+    assert.equal(group().querySelector(".fold-title")!.textContent, "Ship the site", "its title's value says what it is");
+    assert.equal(group().querySelector(".sheet-row"), null, "its rows are not drawn");
+    const priority = folding.tree.nodes.find((node) => node.role === "attribute" && node.name === "priority")!;
+    element.selection = priority.key;
+    assert.ok(!group().classList.contains("folded"), "a selection inside a folded group opens it");
+    // From the keyboard, left folds the selected group and right opens it, as a tree's nodes do.
+    element.selection = group().dataset["key"];
+    const body = root(element).querySelector<HTMLElement>(".body")!;
+    const press = (key: string): void => {
+      body.dispatchEvent(new document.defaultView!.KeyboardEvent("keydown", { key, bubbles: true, composed: true }));
+    };
+    press("ArrowLeft");
+    assert.ok(group().classList.contains("folded"), "left folds it");
+    press("ArrowRight");
+    assert.ok(!group().classList.contains("folded"), "right opens it");
+    element.collapseAll();
+    assert.ok(element.folded.length >= 3, "everything that folds is folded");
+    element.expandAll();
+    assert.deepEqual(element.folded, []);
   });
 });

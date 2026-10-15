@@ -54,6 +54,7 @@ tree for any reader.
 - [x] 6.4 Keep the coverage test passing over the repository's `.nx` files and every fixture, with fixtures for groups, lines, content, ids, icons, colors, text types and comments inside attributes
 - [x] 6.5 Ask for visualizer declarations in the playground's Read view, color it with the editor's themes, set it in Geist and Geist Mono, draw Lucide icons, carry the editor's cursor into Read and the selection back, and add the playground scenarios to its tests
 - [x] 6.6 Add a "Larger examples" topic to the playground (a full survey, a settings screen, an orders dashboard), longer programs for judging the Read view
+- [x] 6.7 Fold the reading: groups and multi-line declarations fold, runs of supporting declarations fold to one summary line and start folded, with a hanging chevron, Alt+click, arrow keys, `folded`, `collapseAll`, `expandAll` and `nx-fold`, and Collapse all and Expand all in the playground
 
 ## 7. Editor, docs and examples
 

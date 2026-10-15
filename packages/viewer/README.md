@@ -92,6 +92,7 @@ declare module "react" {
 | `text`      | property               | The document's text, which the tree's byte ranges index                      |
 | `colors`    | property               | The text's colors, as ranges over `text`, from the host's highlighter        |
 | `icons`     | property               | Draws an icon by its Lucide name, for each element that starts a line of its own; no icons without it |
+| `folded`    | property               | The keys of what is folded; `undefined`, the default, folds the document's supporting declarations |
 | `stale`     | property and attribute | The reading is muted and badged "Out of date"; selection still works         |
 | `selection` | property               | The selected node's key; setting it scrolls the node into view               |
 
@@ -150,6 +151,22 @@ viewer.icons = (name) => {
   return node === undefined ? undefined : createElement(node);
 };
 ```
+
+## Folding
+
+A group folds to its header, followed by its title or a count of what it hides, and a declaration
+written over several lines folds to its first line. A run of declarations that support the document
+(imports, types, actions, the components a host draws, visualizer declarations, and functions other
+than `root` and element functions) folds to one line that says what it holds, such as `8 types · 13
+components · 2 visualizers`. Until the host or the reader folds anything, those runs and their
+declarations start folded, so a document opens on its own content. `if` and `for` blocks don't fold.
+
+A chevron hangs left of each unit that folds. It shows while the pointer is over the reading, and
+always on what is folded. A click folds or unfolds; an Alt+click does the same to everything inside.
+With a group selected, the left arrow folds it and the right arrow opens it. Selecting something
+folded away opens what hides it. `collapseAll()` and `expandAll()` fold and open everything, and each
+change fires `nx-fold`, whose `detail.folded` lists the keys folded. A host keeps them in `folded`
+to show the document as the reader left it.
 
 ## Selection
 

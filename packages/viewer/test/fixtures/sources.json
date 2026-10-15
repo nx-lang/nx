@@ -58,5 +58,9 @@
   "rows": {
     "source": "type Item = { name:string }\ntype Panel = { title:string note:string content items:Item+ }\n\nlet panel =\n  <Panel\n    title=\"x\"\n    note=\"z\"\n  >\n    <Item name=\"a\" />\n  </Panel>\n",
     "visualizers": []
+  },
+  "folding": {
+    "source": "import \"@nx/visualizer\"\n\ntype Task = {\n  title:string\n  priority:int = 2\n}\ntype Size = small | large\n\nlet label(task:Task): string = {\n  task.title\n}\n\nvisualizer Task = <ElementVisualizer title=title />\n\nlet tasks:Task+ = {\n  <Task\n    title=\"Ship the site\"\n    priority=1\n  />\n}\n",
+    "visualizers": []
   }
 }

@@ -1,17 +1,17 @@
 ## MODIFIED Requirements
 
 ### Requirement: One element shows a source tree in any host
-The repository SHALL publish `@nx-lang/visualizer`, which defines an `<nx-visualizer>` custom element that
+The repository SHALL publish `@nx-lang/viewer`, which defines an `<nx-viewer>` custom element that
 shows a `SourceTree`, as `@nx-lang/language-protocol` types it, together with the text of the
 document the tree describes, as a reading of that text. The element SHALL depend on no UI framework,
 SHALL keep its markup and styles in a shadow root, and SHALL follow the page's light or dark scheme.
-Its properties SHALL be `tree`, `text`, `colors`, `icons`, `selection` and `stale`, and a property set
+Its properties SHALL be `tree`, `text`, `colors`, `icons`, `folded`, `selection` and `stale`, and a property set
 before the element is defined SHALL take effect once it is. Where there is no DOM, importing the
 package SHALL do nothing, and the package SHALL export a function that defines the element in a
 registry the host chooses.
 
 #### Scenario: A plain page
-- **WHEN** a page with no framework imports the package, adds `<nx-visualizer>` and sets its `tree` and
+- **WHEN** a page with no framework imports the package, adds `<nx-viewer>` and sets its `tree` and
   `text`
 - **THEN** the element SHALL show the document's reading
 
@@ -88,8 +88,8 @@ element SHALL color the text by the ranges its host gives in `colors`, each a st
 UTF-16 code units with a light color, a dark color and a font style, so the reading takes the colors
 of the host's editor. The element SHALL mark comments and text shown to people as prose and each
 line's indentation as indentation, so a host can set prose in a proportional font through
-`--nx-visualizer-prose-font-family` while indentation keeps a fixed width through
-`--nx-visualizer-indent-font-family`, and code is set through `--nx-visualizer-source-font-family`.
+`--nx-viewer-prose-font-family` while indentation keeps a fixed width through
+`--nx-viewer-indent-font-family`, and code is set through `--nx-viewer-source-font-family`.
 
 #### Scenario: A type declaration
 - **WHEN** a document declares `type Task = { title:string priority:int = 2 }` over several lines
@@ -201,8 +201,8 @@ selection that is not itself a unit, such as a node the host selects inside a ro
 unit that holds it, or, outside every unit, to the nearest unit after or before it. The
 selected unit and the one under the pointer SHALL be drawn as rows behind the text, from just before
 the unit's start to near the reading's right edge, a selected group's first line stronger than the rest
-of it, in colors a host sets through `--nx-visualizer-selection`, `--nx-visualizer-selection-inactive` and
-`--nx-visualizer-hover`.
+of it, in colors a host sets through `--nx-viewer-selection`, `--nx-viewer-selection-inactive` and
+`--nx-viewer-hover`.
 
 #### Scenario: Selecting a line
 - **WHEN** a reader clicks a word of an element on one line
@@ -226,3 +226,41 @@ of it, in colors a host sets through `--nx-visualizer-selection`, `--nx-visualiz
 #### Scenario: From an origin to a node
 - **WHEN** a value's origin names a byte range
 - **THEN** `nodeAtSpan` SHALL give the node with exactly that range, an element where several share it
+
+### Requirement: The reading folds
+An element read as a group and a top-level declaration written over several lines SHALL each fold:
+a group to its header, followed by its title's value when its visualizer names a title and otherwise
+by how many properties and items it hides, cut to one line; a declaration to its first line. A run of
+top-level declarations that support the document (imports, types, actions, the components a host
+draws, visualizer declarations, and functions other than `root` and element functions), with the
+comments written over them, SHALL fold to one line saying what it holds, such as `6 types · 2
+visualizers`. A fold control SHALL hang to the left of each such unit, so folding moves nothing; it
+SHALL show while the pointer is over the reading and always on what is folded. Clicking it SHALL fold
+or unfold the unit, and an Alt+click SHALL fold or unfold everything inside it as well. With a group
+selected, the left arrow SHALL fold it and the right arrow unfold it before they move the selection.
+Until the host or the reader folds anything, each run and each declaration in it SHALL be folded and
+everything else open, so the document's content comes first; `folded` SHALL hold the keys of what is
+folded, setting it SHALL fold exactly those, and setting `undefined` SHALL go back to the defaults.
+`collapseAll` and `expandAll` SHALL fold and unfold everything. Each change the reader makes SHALL
+fire `nx-fold` with the keys folded. Selecting a node folded away SHALL unfold what hides it. `if` and
+`for` blocks SHALL NOT fold.
+
+#### Scenario: Supporting declarations come folded
+- **WHEN** a document imports a library, declares two types, a function and a visualizer, and then a
+  value, and the host sets no `folded`
+- **THEN** the reading SHALL show one line, `1 import · 2 types · 1 function · 1 visualizer`, before
+  the value, which SHALL be open
+
+#### Scenario: Opening a run
+- **WHEN** the reader clicks that line
+- **THEN** the run SHALL open, each declaration in it SHALL show its first line, and `nx-fold` SHALL fire
+
+#### Scenario: A folded group
+- **WHEN** the reader folds a group whose visualizer names `title` as its title and which sets
+  `title="Ship the site"`
+- **THEN** the group SHALL show its header and `Ship the site`, and none of its rows
+
+#### Scenario: Selecting into a fold
+- **WHEN** the host selects a property of a folded group
+- **THEN** the group SHALL unfold and the property SHALL be selected
+

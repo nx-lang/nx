@@ -47,6 +47,11 @@ export interface SourceLayout {
    * its kind of declaration. Without it, no element has an icon.
    */
   readonly icons?: NxViewerIcons | undefined;
+  /**
+   * The keys of the groups and declarations shown folded: an element over several lines as its
+   * header alone, and a declaration over several lines as its first line.
+   */
+  readonly folded?: ReadonlySet<string> | undefined;
 }
 
 /** Draws an icon by its Lucide name: an element the viewer copies, or nothing. */
@@ -60,6 +65,128 @@ const KIND_ICONS: Partial<Record<SourceDeclarationKind, string>> = {
   union: "tag",
   function: "square-function",
 };
+
+/** A run of top-level declarations that support the document, folded together to one line. */
+export interface ReadingRun {
+  /** The run's fold key: `run:` and the key of its first node. */
+  readonly key: string;
+  /** Its top-level nodes, comments included, in source order. */
+  readonly nodes: readonly number[];
+  /** What it holds, in words: "6 types · 2 visualizers". */
+  readonly summary: string;
+}
+
+/** What a supporting top-level node is called in a run's summary, or nothing for a primary one. */
+function supportingKind(index: TreeIndex, at: number): [string, string] | undefined {
+  const { tree } = index;
+  const node = tree.nodes[at]!;
+  if (node.role === "import") {
+    return ["import", "imports"];
+  }
+  if (node.role !== "declaration") {
+    return undefined;
+  }
+  const flags = node.flags ?? [];
+  if (flags.includes("visualizer")) {
+    return ["visualizer", "visualizers"];
+  }
+  const kind = node.declaration === undefined ? undefined : tree.declarations[node.declaration]?.kind;
+  switch (kind) {
+    case "record":
+    case "union":
+    case "alias":
+      return ["type", "types"];
+    case "action":
+      return ["action", "actions"];
+    case "component":
+      // A component the host draws is part of a design system; one with a body is the document's.
+      return flags.includes("external") ? ["component", "components"] : undefined;
+    case "function": {
+      // An element function draws, as a component does, and `root` is what the document returns.
+      const written = new TextDecoder().decode(index.bytes.subarray(node.range.startByte, node.range.startByte + 6));
+      return node.name === "root" || written.startsWith("let <") ? undefined : ["function", "functions"];
+    }
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * The runs of top-level declarations that support the document rather than make it up: imports,
+ * types, actions, the components a host draws, visualizer declarations and functions, apart from
+ * `root` and element functions. A comment goes with the declaration it is written over, unless a
+ * blank line sets it apart; values, components with bodies and what the document returns end a run.
+ */
+export function readingRuns(index: TreeIndex): ReadingRun[] {
+  const { tree, text } = index;
+  const offsets = utf16Offsets(text, index.bytes.length);
+  const startOf = (at: number): number => offsets[Math.min(tree.nodes[at]!.range.startByte, index.bytes.length)]!;
+  const endOf = (at: number): number => offsets[Math.min(tree.nodes[at]!.range.endByte, index.bytes.length)]!;
+  const top = tree.nodes
+    .flatMap((node, at) => (node.parent === undefined ? [at] : []))
+    .sort((a, b) => tree.nodes[a]!.range.startByte - tree.nodes[b]!.range.startByte);
+  const isNote = (at: number): boolean => ["comment", "docComment"].includes(tree.nodes[at]!.role);
+  // Each node's side: a declaration's own, and a comment's the next declaration's when nothing but a
+  // line break stands between them.
+  const supporting = new Map<number, [string, string] | undefined>();
+  for (let i = top.length - 1; i >= 0; i--) {
+    const at = top[i]!;
+    if (!isNote(at)) {
+      supporting.set(at, supportingKind(index, at));
+      continue;
+    }
+    const next = top[i + 1];
+    const between = next === undefined ? "\n\n" : text.slice(endOf(at), startOf(next));
+    supporting.set(at, next !== undefined && !/\n[ \t]*\n/.test(between) && supporting.get(next) !== undefined ? ["", ""] : undefined);
+  }
+  const runs: ReadingRun[] = [];
+  let current: number[] = [];
+  const close = (): void => {
+    const counts = new Map<string, [number, string, string]>();
+    for (const at of current) {
+      const kind = supporting.get(at)!;
+      if (kind[0] !== "") {
+        const counted = counts.get(kind[0]) ?? [0, kind[0], kind[1]];
+        counted[0] += 1;
+        counts.set(kind[0], counted);
+      }
+    }
+    // A run is worth folding when it holds more than one declaration.
+    const total = [...counts.values()].reduce((sum, [count]) => sum + count, 0);
+    if (total > 1) {
+      const summary = [...counts.values()].map(([count, one, many]) => `${count} ${count === 1 ? one : many}`).join(" · ");
+      runs.push({ key: `run:${tree.nodes[current[0]!]!.key}`, nodes: current, summary });
+    }
+    current = [];
+  };
+  for (const at of top) {
+    if (supporting.get(at) !== undefined) {
+      current.push(at);
+    } else {
+      close();
+    }
+  }
+  close();
+  return runs;
+}
+
+/**
+ * What the reading folds until the reader says otherwise: each run of supporting declarations, and
+ * each of those declarations, so opening a run shows them a line each.
+ */
+export function defaultFolded(index: TreeIndex): string[] {
+  const keys: string[] = [];
+  for (const run of readingRuns(index)) {
+    keys.push(run.key);
+    for (const at of run.nodes) {
+      const node = index.tree.nodes[at]!;
+      if (node.role === "declaration") {
+        keys.push(node.key);
+      }
+    }
+  }
+  return keys;
+}
 
 /**
  * Renders the document's text as the reading shows it, colored by `colors`, with its nodes marked:
@@ -275,6 +402,21 @@ export function renderSource(
       element.className = "n";
       element.dataset["role"] = node.role;
       element.dataset["key"] = node.key;
+      // A declaration over several lines folds to its first line.
+      if (node.parent === undefined && node.role === "declaration" && !onOneLine(start, end)) {
+        const folded = layout.folded?.has(node.key) === true;
+        element.classList.add("fold-declaration");
+        element.append(foldToggle(node.key, folded));
+        if (folded) {
+          element.classList.add("folded");
+          const lineEnd = text.indexOf("\n", start);
+          writeText(element, start, lineEnd);
+          element.append(foldSummary(" …"));
+          parent.append(element);
+          at = end;
+          continue;
+        }
+      }
       // An element written as it is, tag and all, starting a line of its own, starts with its icon
       // like a sheet or a one-line element does.
       const marker = node.role === "element" && startsItsLine(start) ? elementIcon(child) : undefined;
@@ -494,13 +636,40 @@ export function renderSource(
   };
 
   /** An element as a property sheet: its name and id, then a row to an attribute, then what it holds. */
+  /**
+   * The control that folds or unfolds the unit with `key`: a chevron that hangs to the left of
+   * where the unit starts, so it moves nothing.
+   */
+  const foldToggle = (key: string, folded: boolean): HTMLElement => {
+    const toggle = document.createElement("span");
+    toggle.className = folded ? "fold folded" : "fold";
+    toggle.dataset["foldKey"] = key;
+    toggle.setAttribute("role", "button");
+    toggle.setAttribute("aria-label", folded ? "Expand" : "Collapse");
+    toggle.setAttribute("aria-expanded", String(!folded));
+    return toggle;
+  };
+
+  /** A quiet note on a folded unit's line of what it hides. */
+  const foldSummary = (words: string): HTMLElement => {
+    const summary = document.createElement("span");
+    summary.className = "fold-summary";
+    summary.textContent = words;
+    return summary;
+  };
+
+  /** "1 property", "3 items": a count and its noun. */
+  const counted = (count: number, noun: string, nouns: string): string => `${count} ${count === 1 ? noun : nouns}`;
+
   const writeSheet = (at: number, start: number, end: number): HTMLElement => {
     const node = tree.nodes[at]!;
     const plan = idPlans.get(at);
-    const sheet = marked(at, "span", "sheet");
+    const folded = layout.folded?.has(node.key) === true;
+    const sheet = marked(at, "span", folded ? "sheet folded" : "sheet");
     sheet.style.setProperty("--indent", String(start - (text.lastIndexOf("\n", start - 1) + 1)));
     const head = document.createElement("span");
     head.className = "sheet-head";
+    head.append(foldToggle(node.key, folded));
     const marker = elementIcon(at);
     if (marker !== undefined) {
       head.append(marker);
@@ -513,6 +682,12 @@ export function renderSource(
       plan.written = true;
     }
     sheet.append(head);
+    // Folded, the group keeps its header and says what it hides: its title's value when its
+    // visualizer names one, and otherwise how many properties and items it holds.
+    let hiddenRows = 0;
+    let hiddenItems = 0;
+    let hiddenTitle: string | undefined;
+    const visualizer = node.declaration === undefined ? undefined : tree.declarations[node.declaration]?.visualizer;
     for (const child of childrenOf(at)) {
       const childNode = tree.nodes[child]!;
       if (child === plan?.attribute) {
@@ -524,6 +699,19 @@ export function renderSource(
         gap.className = "line-gap";
         gap.textContent = "  ";
         head.append(gap, namedPart(child));
+        continue;
+      }
+      if (folded) {
+        if (childNode.role === "attribute" && isContent(child)) {
+          hiddenItems += childrenOf(child).filter((item) => !isNote(item)).length;
+        } else if (childNode.role === "attribute") {
+          hiddenRows += 1;
+          const values = childrenOf(child);
+          const value = values.length === 1 ? tree.nodes[values[0]!]! : undefined;
+          if (childNode.name === visualizer?.title && value?.role === "literal" && (value.value ?? "").startsWith('"')) {
+            hiddenTitle = text.slice(startOf(value) + 1, endOf(value) - 1);
+          }
+        }
         continue;
       }
       if (childNode.role === "attribute" && !isContent(child)) {
@@ -563,6 +751,23 @@ export function renderSource(
       gap.className = "line-gap";
       gap.textContent = "  ";
       head.append(gap, idChip(plan));
+    }
+    if (folded) {
+      const parts = hiddenTitle !== undefined
+        ? [hiddenTitle]
+        : [
+            ...(hiddenRows > 0 ? [counted(hiddenRows, "property", "properties")] : []),
+            ...(hiddenItems > 0 ? [counted(hiddenItems, "item", "items")] : []),
+          ];
+      if (parts.length === 0) {
+        head.append(foldSummary(" …"));
+      } else {
+        // A title is words a person reads, set as text and cut to the line it has.
+        head.append("  ");
+        const summary = foldSummary(parts.join(" · "));
+        summary.classList.add(hiddenTitle !== undefined ? "fold-title" : "fold-count");
+        head.append(summary);
+      }
     }
     return sheet;
   };
@@ -823,8 +1028,41 @@ export function renderSource(
     }
   };
 
-  const top = tree.nodes.flatMap((node, at) => (node.parent === undefined ? [at] : []));
-  writeNodes(root, top, 0, text.length);
+  const top = tree.nodes
+    .flatMap((node, at) => (node.parent === undefined ? [at] : []))
+    .sort((a, b) => tree.nodes[a]!.range.startByte - tree.nodes[b]!.range.startByte);
+  // The document in segments: each run of supporting declarations, which may fold to one line, and
+  // what stands between them as written.
+  const runs = layout.folded === undefined ? [] : readingRuns(index);
+  let from = 0;
+  let next = 0;
+  for (const run of runs) {
+    const first = run.nodes[0]!;
+    const last = run.nodes[run.nodes.length - 1]!;
+    const runStart = startOf(tree.nodes[first]!);
+    const before = top.slice(next, top.indexOf(first));
+    writeNodes(root, before, from, runStart);
+    // The run takes the blank lines after it, so folded it keeps the room the source gives it.
+    const following = top[top.indexOf(last) + 1];
+    const runEnd = following === undefined ? text.length : startOf(tree.nodes[following]!);
+    const folded = layout.folded?.has(run.key) === true;
+    const block = document.createElement("span");
+    block.className = folded ? "fold-run folded" : "fold-run";
+    const head = document.createElement("span");
+    head.className = "fold-run-head";
+    head.append(foldToggle(run.key, folded), foldSummary(run.summary));
+    if (folded) {
+      block.append(head, text.slice(endOf(tree.nodes[last]!), runEnd).includes("\n\n") ? "\n\n" : "\n");
+    } else {
+      // Open, the run keeps a quiet line above its declarations to fold them again by.
+      block.append(head, "\n");
+      writeNodes(block, run.nodes, runStart, runEnd);
+    }
+    root.append(block);
+    from = runEnd;
+    next = top.indexOf(last) + 1;
+  }
+  writeNodes(root, top.slice(next), from, text.length);
   markIndentation(document, root);
   return root;
 }

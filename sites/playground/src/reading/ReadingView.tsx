@@ -1,6 +1,13 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type MutableRefObject } from "react";
 import "@nx-lang/viewer";
-import { NX_SELECT_EVENT, type NxSelectDetail, type NxViewerElement, type NxViewerIcons } from "@nx-lang/viewer";
+import {
+  NX_FOLD_EVENT,
+  NX_SELECT_EVENT,
+  type NxFoldDetail,
+  type NxSelectDetail,
+  type NxViewerElement,
+  type NxViewerIcons,
+} from "@nx-lang/viewer";
 import { colorize, loadHighlighter, type NxValueHighlighter } from "@nx-lang/value-view";
 import { EDITOR_THEMES } from "../theme.ts";
 import type { Reading } from "./reading.ts";
@@ -18,6 +25,17 @@ export interface ReadingViewProps {
   /** The selected node's key. */
   readonly selection: string | undefined;
   readonly onSelect: (key: string) => void;
+  /** The keys of the groups and declarations folded, kept by the host across Source and Visual. */
+  readonly folded: readonly string[] | undefined;
+  readonly onFold: (folded: readonly string[]) => void;
+  /** Filled in with what the pane's title bar can ask of the reading. */
+  readonly commands: MutableRefObject<ReadingCommands | null>;
+}
+
+/** What the NX pane's title bar can ask of the Visual view. */
+export interface ReadingCommands {
+  collapseAll(): void;
+  expandAll(): void;
 }
 
 /**
@@ -42,8 +60,19 @@ function loadIcons(): Promise<NxViewerIcons> {
 }
 
 /** The NX pane's Visual view: `<nx-viewer>` showing the source tree, or why it cannot. */
-export function ReadingView({ reading, selection, onSelect }: ReadingViewProps) {
+export function ReadingView({ reading, selection, onSelect, folded, onFold, commands }: ReadingViewProps) {
   const element = useRef<NxViewerElement>(null);
+  const latestFold = useRef(onFold);
+  latestFold.current = onFold;
+  useEffect(() => {
+    commands.current = {
+      collapseAll: () => element.current?.collapseAll(),
+      expandAll: () => element.current?.expandAll(),
+    };
+    return () => {
+      commands.current = null;
+    };
+  }, [commands]);
   // The highlighter the output pane colors with, loaded with the editor's themes, so the source
   // reading takes the colors the editor shows.
   const [highlighter, setHighlighter] = useState<NxValueHighlighter | null>(null);
@@ -90,6 +119,7 @@ export function ReadingView({ reading, selection, onSelect }: ReadingViewProps) 
     }
     target.tree = undefined;
     target.text = reading.text;
+    target.folded = folded;
     target.icons = icons;
     target.colors = highlighter !== null ? colorize(highlighter, reading.text, EDITOR_THEMES) : [];
     target.tree = reading.tree;
@@ -107,8 +137,13 @@ export function ReadingView({ reading, selection, onSelect }: ReadingViewProps) 
       return;
     }
     const listener = (event: Event) => latestSelect.current((event as CustomEvent<NxSelectDetail>).detail.key);
+    const foldListener = (event: Event) => latestFold.current((event as CustomEvent<NxFoldDetail>).detail.folded);
     target.addEventListener(NX_SELECT_EVENT, listener);
-    return () => target.removeEventListener(NX_SELECT_EVENT, listener);
+    target.addEventListener(NX_FOLD_EVENT, foldListener);
+    return () => {
+      target.removeEventListener(NX_SELECT_EVENT, listener);
+      target.removeEventListener(NX_FOLD_EVENT, foldListener);
+    };
   }, [reading.tree === null]);
 
   return (

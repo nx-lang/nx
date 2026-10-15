@@ -286,6 +286,30 @@ code {
   cursor: pointer;
 }
 
+/* Visual's fold commands: quiet text buttons before the view switch. */
+.fold-actions {
+  display: inline-flex;
+  gap: 0.25rem;
+  margin-right: 0.5rem;
+}
+
+.fold-actions button {
+  padding: 0.05rem 0.4rem;
+  border: 0;
+  border-radius: 0.25rem;
+  background: transparent;
+  color: var(--sl-color-gray-3);
+  font: inherit;
+  letter-spacing: 0;
+  text-transform: none;
+  cursor: pointer;
+}
+
+.fold-actions button:hover {
+  color: var(--sl-color-white);
+  background: var(--sl-color-gray-6);
+}
+
 .mode-switch button[aria-pressed="true"] {
   background: var(--sl-color-accent);
   color: #ffffff;

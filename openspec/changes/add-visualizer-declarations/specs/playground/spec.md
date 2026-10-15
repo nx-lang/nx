@@ -7,7 +7,9 @@ viewer's `<nx-viewer>` element, from the `sourceTree` query the playground's wor
 refreshed after the visitor pauses typing as evaluation is and marked stale while a newer tree is
 computed. Visual SHALL be colored by the editor's themes, Dark+ and Light+, set in Geist for prose
 and Geist Mono for code, and draw its icons from Lucide, loaded apart from the rest of the playground
-when Visual first needs them. Switching to Visual SHALL select the node at the editor's cursor, and
+when Visual first needs them. While Visual shows, the title SHALL also offer Collapse all and Expand
+all, and what the reader folds SHALL be kept while they switch between Source and Visual and
+forgotten when they choose an example. Switching to Visual SHALL select the node at the editor's cursor, and
 switching to Source SHALL put the cursor at the start of the selected node and reveal it. When the
 query fails, Visual SHALL say that the reading is unavailable, and Source SHALL keep working.
 

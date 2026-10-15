@@ -16,7 +16,7 @@ import { SiteHeader } from "./header/SiteHeader";
 import { OutputPane, type OutputView } from "./output/OutputPane";
 import { PreviewView } from "./preview/PreviewView";
 import { usePreview } from "./preview/usePreview.ts";
-import { ReadingView } from "./reading/ReadingView";
+import { ReadingView, type ReadingCommands } from "./reading/ReadingView";
 import { keyAtOffset, offsetOfKey } from "./reading/selection.ts";
 import { useSourceTree } from "./reading/useSourceTree.ts";
 import { SITE_ROOT } from "./paths.ts";
@@ -121,6 +121,7 @@ export function App() {
     // A new history entry, so Back returns to the source that was there, edits and all.
     void address.choose(chosen.id);
     setSource(chosen.source);
+    setFolded(undefined);
     setNotice(null);
   };
 
@@ -161,6 +162,10 @@ export function App() {
 
   const [mode, setMode] = useState<SourceMode>("source");
   const [selection, setSelection] = useState<string | undefined>(undefined);
+  // What the reader folded in Visual, kept while they switch to Source and back; until they fold
+  // anything, Visual folds the source's supporting declarations itself.
+  const [folded, setFolded] = useState<readonly string[] | undefined>(undefined);
+  const readingCommands = useRef<ReadingCommands | null>(null);
   const reading = useSourceTree(source, mode === "visual");
   // The editor's cursor, carried into Visual until a tree of the same text can say what it is on.
   const cursorToSelect = useRef<number | null>(null);
@@ -299,6 +304,16 @@ export function App() {
           <div className="pane-title">
             <span>NX</span>
             <span className="spacer" />
+            {mode === "visual" && (
+              <span className="fold-actions">
+                <button type="button" onClick={() => readingCommands.current?.collapseAll()}>
+                  Collapse all
+                </button>
+                <button type="button" onClick={() => readingCommands.current?.expandAll()}>
+                  Expand all
+                </button>
+              </span>
+            )}
             <span className="mode-switch" role="group" aria-label="Show the source as">
               {(["source", "visual"] as const).map((option) => (
                 <button
@@ -313,7 +328,14 @@ export function App() {
             </span>
           </div>
           {mode === "visual" && (
-            <ReadingView reading={reading} selection={selection} onSelect={setSelection} />
+            <ReadingView
+              reading={reading}
+              selection={selection}
+              onSelect={setSelection}
+              folded={folded}
+              onFold={setFolded}
+              commands={readingCommands}
+            />
           )}
           {/* The editor stays mounted while hidden, keeping its undo history and scroll position. */}
           <div className="editor" hidden={mode === "visual"}>
