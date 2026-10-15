@@ -392,7 +392,7 @@ website's viewer-declarations and `@nx/viewer` pages.
 - Probes of `<nx-viewer>` under jsdom on trees from the rebuilt wasm SDK, to confirm RF12 to RF16
   and RF18.
 
-### 🟡 Fixed - RF11 `openspec validate add-viewer-declarations --strict` fails on the new "Code reads as written" requirement
+### ✅ Verified - RF11 `openspec validate add-viewer-declarations --strict` fails on the new "Code reads as written" requirement
 - **Severity:** Medium (confidence: high)
 - **Evidence:** The validator reports `viewer/spec.md: ADDED "Code reads as written, in the editor's
   colors" must contain SHALL or MUST`. It reads the requirement's first line, and that line
@@ -404,8 +404,10 @@ website's viewer-declarations and `@nx/viewer` pages.
   Then rerun the strict validation.
 - **Fix:** Opened the requirement with "The element SHALL read text as the document writes it …", so SHALL
   is on its first line. `openspec validate add-viewer-declarations --strict` passes.
+- **Verification:** `openspec validate add-viewer-declarations --strict` now reports the change valid. The
+  requirement opens with "The element SHALL read text as the document writes it …".
 
-### 🟡 Fixed - RF12 A union case element never gets an icon, though the spec, README and docs promise `tag`
+### ✅ Verified - RF12 A union case element never gets an icon, though the spec, README and docs promise `tag`
 - **Severity:** Medium (confidence: high)
 - **Evidence:** `elementIcon` (`packages/viewer/src/source.ts:317-327`) finds the kind through
   `node.declaration`. The source tree gives a union case element no declaration: the element
@@ -423,8 +425,12 @@ website's viewer-declarations and `@nx/viewer` pages.
   viewer's `KIND_ICONS.union` (`tag`) applies. Added the Rust test `a_case_element_refers_to_its_union`
   (alone and as a property's value), a `Status.closed` element to the `icons` fixture with its `tag` icon
   asserted, and a line to the source-tree delta spec.
+- **Verification:** `a_case_element_refers_to_its_union` passes. Rerunning the earlier probe, `<Status.shipped
+  carrier="x" />` alone in a function body now starts with `tag`, and the `icons` test asserts `Status.closed`
+  → `tag`. Union entries carry no `properties`, so giving case elements their union does not change the
+  uitext, format or slot-type lookups.
 
-### 🟡 Fixed - RF13 The arrow keys jump to the top of the document when the selection is not a unit
+### ✅ Verified - RF13 The arrow keys jump to the top of the document when the selection is not a unit
 - **Severity:** Medium (confidence: high)
 - **Evidence:** `#stepUnit` (`packages/viewer/src/index.ts:366-371`) looks the selected element up in
   the list of units, and when the selection is not itself a unit (`at < 0`) it selects the first unit,
@@ -442,8 +448,12 @@ website's viewer-declarations and `@nx/viewer` pages.
   every unit, Down and Up select the nearest unit after or before it. Added the keyboard test "moves from
   the unit that holds a selection the host makes inside it" (fixture `rows`), a spec sentence and a
   scenario, and a README line.
+- **Verification:** Rerunning the earlier jsdom probe on the same document, Left from the host-selected `"z"`
+  now selects its row `c.value.note`, not `a.value`. Down moves from that row; it is the last unit there, so
+  it stays on it. The new keyboard test (`rows`) covers Left, Down and Up from inside a row, and Down and Up
+  from a type's field outside every unit.
 
-### 🟡 Fixed - RF14 A comment inside an attribute of a group drops a node, losing text or a key
+### ✅ Verified - RF14 A comment inside an attribute of a group drops a node, losing text or a key
 - **Severity:** Low (confidence: high)
 - **Evidence:** `sheetable` (`source.ts:386-388`) skips comments when it counts an attribute's values,
   but the renderers do not put them back:
@@ -465,8 +475,12 @@ website's viewer-declarations and `@nx/viewer` pages.
   fixture (a row, a header attribute and an id, each with a comment) with a test that every comment's text
   and every key is rendered once. The coverage test's fixture case now renders every fixture in
   `sources.json`, so it fails on the old code.
+- **Verification:** Rerunning the earlier probes, `name= /* why */ "a"` on a row and `<Item name= /* c */ "a"`
+  on a header now read as written, with every comment's text and every key present (no missing nodes). An id
+  attribute that holds a comment stays in place. The coverage test now renders every fixture,
+  `attributeComments` included.
 
-### 🟡 Fixed - RF15 The reading drops an element's text type, so `<Note:markdown>` reads as `Note`
+### ✅ Verified - RF15 The reading drops an element's text type, so `<Note:markdown>` reads as `Note`
 - **Severity:** Low (confidence: high)
 - **Evidence:** `writeSheet` (`source.ts:501-502`) and `lineParts` (`source.ts:654`) write only
   `node.name.length` characters after the `<`. A probe of `<Note:markdown>` over several lines rendered
@@ -478,8 +492,10 @@ website's viewer-declarations and `@nx/viewer` pages.
 - **Fix:** A shared `nameEnd` (moved out of `elementIdPlans`) writes the name through its text type in
   `writeSheet` and `lineParts`. Added the `textTypes` fixture and a test: the line reads `<Note:markdown
   Hello *there*/>` and the group's header `Note:markdown`.
+- **Verification:** Probe and the `textTypes` test: the group's header reads `Note:markdown`, and the line
+  reads `<Note:markdown Hello *there*/>`.
 
-### 🟡 Fixed - RF16 In a group, `idPosition=end` is ignored and the id always follows the name
+### ✅ Verified - RF16 In a group, `idPosition=end` is ignored and the id always follows the name
 - **Severity:** Low (confidence: high)
 - **Evidence:** `writeSheet` puts the id chip right after the name whatever `plan.atEnd` says
   (`source.ts:503-506`). With `viewer Choice = <ElementViewer title=label id=value idPosition=end />`, a
@@ -492,8 +508,10 @@ website's viewer-declarations and `@nx/viewer` pages.
 - **Fix:** `writeSheet` puts an `atEnd` id after the header's attributes, with the usual two-space gap.
   Added the `groupIdAtEnd` fixture and a test (`Choice label=Yes yes`, the chip last in the header), and
   the group requirement and README now say where the id goes.
+- **Verification:** The probe of a `Choice` with `idPosition=end` written over several lines now reads the
+  header `Choice label=Yes yes`, with the chip last. The `groupIdAtEnd` test, the spec and the README agree.
 
-### 🟡 Fixed - RF17 Long one-line elements and row values outside a written-as-is item do not wrap
+### ✅ Verified - RF17 Long one-line elements and row values outside a written-as-is item do not wrap
 - **Severity:** Low (confidence: medium; reasoned from the CSS, not checked in a real browser)
 - **Evidence:** `.source` is `white-space: pre` (`styles.ts:57`). Only these get `pre-wrap`: an element
   inside a `.sheet-item.as-written` (`styles.ts:177-188`), a group's header (`styles.ts:190`), and
@@ -510,8 +528,16 @@ website's viewer-declarations and `@nx/viewer` pages.
   read as written outside a group, keeps its source lines: wrapping those would double their indentation.
   The spec and README now name the units that wrap. No browser was available here, so this is not checked
   at 375px.
+- **Verification:** Checked in the preinstalled Chromium (Playwright, `chromium-1194`) with the reading 375px
+  wide. A long plain-string row value wrapped to 4 lines and stayed inside the pane (right edge 347 of 359).
+  Two long one-line elements alone on their lines (one in a group's held list, one in a function body) wrapped
+  to 5 and 4 lines, inside the pane (339), their later lines a step in. The playground's `.reading` is
+  `overflow: auto`, so the page itself does not scroll sideways. Two things still run past the edge, as the
+  narrowed spec allows: a one-line element that shares its line (`let pick = <Choice …/>`), and code read as
+  written. Cosmetic: at that width, `overflow-wrap: break-word` can split a long id chip across two lines
+  (`one-very-long-` / `identifier`).
 
-### 🟡 Fixed - RF18 An `icon` that Lucide does not have removes the element's icon instead of falling back to its kind's
+### ✅ Verified - RF18 An `icon` that Lucide does not have removes the element's icon instead of falling back to its kind's
 - **Severity:** Low (confidence: high)
 - **Evidence:** `elementIcon` (`source.ts:323-327`) picks the viewer's `icon` when it is set and returns
   nothing when the host cannot draw it. In a probe, `viewer A = <ElementViewer icon="no-such-icon" />`
@@ -523,8 +549,10 @@ website's viewer-declarations and `@nx/viewer` pages.
 - **Fix:** `elementIcon` tries the viewer's icon, then the kind's when the host draws nothing for that
   name. The `icons` test now has a `Tip` whose viewer names `no-such-icon` and reads `box`. Spec sentence
   and scenario added, and the README says so.
+- **Verification:** The probe with `icon="no-such-icon"` now starts the element with `box`, and the `icons`
+  test covers `Tip`. The spec sentence and scenario match.
 
-### 🟡 Fixed - RF19 tasks.md still marks the removed cards-view work as done
+### ✅ Verified - RF19 tasks.md still marks the removed cards-view work as done
 - **Severity:** Low (confidence: high)
 - **Evidence:** `tasks.md:46-49` are checked, but what they describe was removed in cf8edda:
   - 6.1: kind names; title, subtitle, badge and image parts; labels; boolean phrases; the details strip.
@@ -542,8 +570,12 @@ website's viewer-declarations and `@nx/viewer` pages.
 - **Fix:** Rewrote section 6 of tasks.md for the Read view: a note on the replaced cards work, then the
   Read view's tasks (reading, viewer values, selection and keys, coverage and fixtures, the playground's
   Read view, the larger examples), all checked. 8.1 holds again now that strict validation passes.
+- **Verification:** tasks.md section 6 now describes the Read view: the reading, viewer values, selection and
+  keys, coverage and fixtures, the playground's Read view, and the larger examples. 8.1 holds now that strict
+  validation passes. My original evidence was partly wrong: the six cards-era fixtures were still used by the
+  coverage test's viewer case. That case now covers every fixture.
 
-### 🟡 Fixed - RF20 Leftovers of the removed cards view and menus remain in code, tests and package metadata
+### ✅ Verified - RF20 Leftovers of the removed cards view and menus remain in code, tests and package metadata
 - **Severity:** Low (confidence: high)
 - **Evidence:**
   - `packages/viewer/package.json` `description` still says "cards, sentences and values instead of
@@ -570,8 +602,12 @@ website's viewer-declarations and `@nx/viewer` pages.
   `SourceMode` comment and `MODE_LABELS`, and `App.tsx` tests `mode === "read"`. The six cards fixtures
   were still used, by the coverage test's viewer case, but only for cards-era attributes. They are
   deleted, and that case now covers every fixture.
+- **Verification:** The `package.json` description and the `source.ts` header are rewritten. None of
+  `MODE_LABELS`, `mode !== "edit"`, `ALL_EDITOR_THEMES`, `EditorThemes`, `latestThemes` or the `const themes
+  =` aliases remain in `sites/playground/src`, and there is one `SourceMode` comment. The playground typecheck
+  and tests pass.
 
-### 🟡 Fixed - RF21 The new viewer fields have no Rust tests, and the playground test still checks the old scenario
+### ✅ Verified - RF21 The new viewer fields have no Rust tests, and the playground test still checks the old scenario
 - **Severity:** Low (confidence: high)
 - **Evidence:**
   - `source_tree_tests.rs` has no assertion on `id`, `idPosition` or `icon`. Untested are
@@ -588,8 +624,11 @@ website's viewer-declarations and `@nx/viewer` pages.
   id, `end` kept, dropped without an id) and `an_icon_is_inherited_through_extends` (a base's icon
   inherited, a kind's own winning). `session.test.mjs` now uses the spec's `title=label id=value` scenario
   and checks that the title and id attributes hold `"Apples"` and `"a"`.
+- **Verification:** `an_id_reads_where_its_position_puts_it` and `an_icon_is_inherited_through_extends` pass
+  (nx-language-service now has 225 tests, up from 222). `session.test.mjs` asserts the spec's `title=label
+  id=value` scenario.
 
-### 🟡 Fixed - RF22 The build does not clean `dist`, so deleted viewer modules and tests survive a rebuild
+### ✅ Verified - RF22 The build does not clean `dist`, so deleted viewer modules and tests survive a rebuild
 - **Severity:** Low (confidence: medium)
 - **Evidence:** `packages/viewer` builds with plain `tsc -p tsconfig.json`. A checkout that built before
   cf8edda keeps these files in `dist`:
@@ -603,3 +642,5 @@ website's viewer-declarations and `@nx/viewer` pages.
 - **Fix:** `packages/viewer` now has `clean` (`scripts/clean.mjs`, as `bindings/wasm` and `bindings/node`
   do), and `build` runs it first. `test` runs `build`, and `prepack` already did, so a rebuild never keeps
   deleted modules or tests.
+- **Verification:** I put a stale `dist/test/stale.test.js` and `dist/src/render.js` into `dist` and ran `pnpm
+  run build`; both were gone afterwards. `test` and `prepack` build through it.
