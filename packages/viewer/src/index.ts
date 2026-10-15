@@ -107,6 +107,8 @@ export class NxViewerElement extends ElementBase {
   #chosenFolded: Set<string> | undefined;
   /** What is folded now: the chosen keys, or the defaults for this tree. */
   #folded = new Set<string>();
+  /** The fold just toggled and how it was, so its chevron can turn from there. */
+  #turning: { key: string; wasFolded: boolean } | undefined;
   /** The runs of supporting declarations of the tree shown. */
   #runs: ReadingRun[] = [];
   #index: TreeIndex | undefined;
@@ -247,6 +249,15 @@ export class NxViewerElement extends ElementBase {
   }
 
   set folded(keys: readonly string[] | undefined) {
+    // A host handing back what the reader just folded changes nothing, and redraws nothing.
+    const same =
+      keys !== undefined &&
+      this.#chosenFolded !== undefined &&
+      keys.length === this.#chosenFolded.size &&
+      keys.every((key) => this.#chosenFolded!.has(key));
+    if (same) {
+      return;
+    }
     this.#chosenFolded = keys === undefined ? undefined : new Set(keys);
     this.#render();
   }
@@ -306,7 +317,7 @@ export class NxViewerElement extends ElementBase {
     this.#index = index;
     this.#runs = readingRuns(index);
     this.#folded = this.#chosenFolded ?? new Set(defaultFolded(index));
-    this.#body.append(renderSource(this.ownerDocument, index, this.#colors, { icons: this.#icons, folded: this.#folded }));
+    this.#body.append(renderSource(this.ownerDocument, index, this.#colors, { icons: this.#icons, folded: this.#folded, turning: this.#turning }));
     for (const element of this.#body.querySelectorAll<HTMLElement>("[data-key]")) {
       this.#rendered.set(element.dataset["key"]!, element);
     }
@@ -316,6 +327,7 @@ export class NxViewerElement extends ElementBase {
     this.#select(selection !== undefined && index.byKey.has(selection) ? selection : undefined, false);
     this.#body.append(this.#highlights);
     this.#paintHighlights();
+    this.#turnChevron();
     // Fonts that arrive later change where the rows fall.
     void this.ownerDocument.fonts?.ready.then(() => this.#paintHighlights());
   }
@@ -329,6 +341,20 @@ export class NxViewerElement extends ElementBase {
     // Room between a group's rows, or beside them, belongs to the group.
     const group = target?.closest?.(".sheet") as HTMLElement | null | undefined;
     return group !== null && group !== undefined && this.#body.contains(group) ? group : undefined;
+  }
+
+  /**
+   * Turns the chevron of the fold just toggled, which the reading draws where it was, to where it is,
+   * on the next frame.
+   */
+  #turnChevron(): void {
+    this.#turning = undefined;
+    const toggles = [...this.#body.querySelectorAll<HTMLElement>(".fold.was-folded, .fold.was-open")];
+    if (toggles.length === 0 || typeof requestAnimationFrame === "undefined") {
+      toggles.forEach((toggle) => toggle.classList.remove("was-folded", "was-open"));
+      return;
+    }
+    requestAnimationFrame(() => requestAnimationFrame(() => toggles.forEach((toggle) => toggle.classList.remove("was-folded", "was-open"))));
   }
 
   /** The keys of every fold control drawn, in reading order. */
@@ -351,6 +377,7 @@ export class NxViewerElement extends ElementBase {
   #toggleFold(key: string, deep: boolean): void {
     const folded = new Set(this.#folded);
     const folding = !folded.has(key);
+    this.#turning = { key, wasFolded: !folding };
     const unit = [...this.#body.querySelectorAll<HTMLElement>(".fold")]
       .find((toggle) => toggle.dataset["foldKey"] === key)
       ?.closest<HTMLElement>(".sheet, .fold-declaration, .fold-run");

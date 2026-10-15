@@ -255,7 +255,7 @@ export const styles = `
   transition: opacity 0.1s;
   /* Quieter than the icons: a small, thin chevron in a dim gray, as a design tool's layers list
      draws it, that brightens under the pointer. */
-  color: var(--nx-viewer-fold-color, light-dark(#8c959f, #6e6e6e));
+  color: var(--nx-viewer-fold-color, light-dark(#8c959f, #7a7a7a));
   user-select: none;
 }
 .source .fold::before {
@@ -266,8 +266,13 @@ export const styles = `
   border-right: 1px solid currentColor;
   border-bottom: 1px solid currentColor;
   transform: translateY(-0.18em) rotate(45deg);
+  transition: transform 0.15s ease;
 }
 .source .fold.folded::before { transform: translateY(-0.05em) rotate(-45deg); }
+/* The chevron of what was just folded or opened starts where it was, and turns to where it is. */
+.source .fold.was-folded::before, .source .fold.folded.was-folded::before { transform: translateY(-0.05em) rotate(-45deg); }
+.source .fold.was-open::before, .source .fold.folded.was-open::before { transform: translateY(-0.18em) rotate(45deg); }
+@media (prefers-reduced-motion: reduce) { .source .fold::before { transition: none; } }
 .body:hover .source .fold, .source .fold.folded, .source .fold:focus-visible { opacity: 1; }
 .source .fold:hover { color: var(--nx-viewer-foreground, CanvasText); }
 /* What a folded unit hides, said quietly after it. */

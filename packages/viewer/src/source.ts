@@ -52,6 +52,8 @@ export interface SourceLayout {
    * header alone, and a declaration over several lines as its first line.
    */
   readonly folded?: ReadonlySet<string> | undefined;
+  /** The fold just toggled and whether it was folded, so its chevron is drawn where it was. */
+  readonly turning?: { readonly key: string; readonly wasFolded: boolean } | undefined;
 }
 
 /** Draws an icon by its Lucide name: an element the viewer copies, or nothing. */
@@ -643,6 +645,9 @@ export function renderSource(
   const foldToggle = (key: string, folded: boolean): HTMLElement => {
     const toggle = document.createElement("span");
     toggle.className = folded ? "fold folded" : "fold";
+    if (layout.turning?.key === key) {
+      toggle.classList.add(layout.turning.wasFolded ? "was-folded" : "was-open");
+    }
     toggle.dataset["foldKey"] = key;
     toggle.setAttribute("role", "button");
     toggle.setAttribute("aria-label", folded ? "Expand" : "Collapse");
