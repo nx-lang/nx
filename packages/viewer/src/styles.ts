@@ -253,19 +253,21 @@ export const styles = `
   cursor: pointer;
   opacity: 0;
   transition: opacity 0.1s;
-  color: var(--nx-viewer-fold-color, light-dark(#6e7781, #8b949e));
+  /* Quieter than the icons: a small, thin chevron in a dim gray, as a design tool's layers list
+     draws it, that brightens under the pointer. */
+  color: var(--nx-viewer-fold-color, light-dark(#8c959f, #6e6e6e));
   user-select: none;
 }
 .source .fold::before {
   content: "";
   display: inline-block;
-  width: 0.35em;
-  height: 0.35em;
-  border-right: 1.5px solid currentColor;
-  border-bottom: 1.5px solid currentColor;
-  transform: translateY(-0.15em) rotate(45deg);
+  width: 0.28em;
+  height: 0.28em;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: translateY(-0.18em) rotate(45deg);
 }
-.source .fold.folded::before { transform: rotate(-45deg); }
+.source .fold.folded::before { transform: translateY(-0.05em) rotate(-45deg); }
 .body:hover .source .fold, .source .fold.folded, .source .fold:focus-visible { opacity: 1; }
 .source .fold:hover { color: var(--nx-viewer-foreground, CanvasText); }
 /* What a folded unit hides, said quietly after it. */
