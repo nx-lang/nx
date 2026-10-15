@@ -378,6 +378,11 @@ export class NxViewerElement extends ElementBase {
     const folded = new Set(this.#folded);
     const folding = !folded.has(key);
     this.#turning = { key, wasFolded: !folding };
+    // The unit stays where it is on the screen: what folds or opens is below it, and the reading
+    // is scrolled back by however far its line moved.
+    const toggleOf = (): HTMLElement | undefined =>
+      [...this.#body.querySelectorAll<HTMLElement>(".fold")].find((toggle) => toggle.dataset["foldKey"] === key);
+    const before = toggleOf()?.getBoundingClientRect().top;
     const unit = [...this.#body.querySelectorAll<HTMLElement>(".fold")]
       .find((toggle) => toggle.dataset["foldKey"] === key)
       ?.closest<HTMLElement>(".sheet, .fold-declaration, .fold-run");
@@ -396,6 +401,21 @@ export class NxViewerElement extends ElementBase {
       }
     }
     this.#setFolded(folded);
+    const after = toggleOf()?.getBoundingClientRect().top;
+    if (before !== undefined && after !== undefined && after !== before) {
+      this.#scroller()?.scrollBy({ top: after - before, behavior: "instant" as ScrollBehavior });
+    }
+  }
+
+  /** What scrolls the reading: the nearest ancestor of the element that scrolls, or the page. */
+  #scroller(): Element | undefined {
+    for (let at: Element | null = this.parentElement; at !== null; at = at.parentElement) {
+      const overflow = getComputedStyle(at).overflowY;
+      if ((overflow === "auto" || overflow === "scroll") && at.scrollHeight > at.clientHeight) {
+        return at;
+      }
+    }
+    return this.ownerDocument.scrollingElement ?? undefined;
   }
 
   /** Whether the node with `key` lies inside the node with `outer`. */
