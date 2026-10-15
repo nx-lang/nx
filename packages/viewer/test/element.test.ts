@@ -344,6 +344,17 @@ describe("the source view", () => {
     assert.ok(items[1]!.classList.contains("after-blank"), "a blank line between items is kept as room");
   });
 
+  it("reads an element on one line that holds content without its tags", async () => {
+    const content = await fixture("content");
+    const element = show(content);
+    element.view = "source";
+    element.sheets = true;
+    const source = root(element).querySelector<HTMLElement>(".source")!;
+    const line = source.querySelector<HTMLElement>(".line-element")!;
+    assert.equal(line.textContent, "Label  tone=quiet  Hello {who}", "its properties, then what it holds as written");
+    assert.ok(!source.textContent!.includes("</Label>"), "no closing tag");
+  });
+
   it("moves an element's id to where its viewer puts it, as its value alone", async () => {
     const ids = await fixture("elementIds");
     const element = show(ids);

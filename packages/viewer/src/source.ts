@@ -570,8 +570,8 @@ export function renderSource(
 
   /**
    * Whether an element written on one line reads as one: its name, then its properties, each a name,
-   * an `=` and a value, with no quotes, between its `<` and `/>`. It must set only
-   * properties, with nothing it holds and no comment in its tag.
+   * an `=` and a value, with no quotes, then what it holds as written, with no tags of its own. It
+   * must have no comment in its tag.
    */
   const oneLineable = (at: number): boolean => {
     const node = tree.nodes[at]!;
@@ -580,9 +580,12 @@ export function renderSource(
     }
     return childrenOf(at).every((child) => {
       const candidate = tree.nodes[child]!;
+      if (candidate.role === "attribute" && isContent(child)) {
+        // What it holds reads after its properties, as written, with no tags around it.
+        return childrenOf(child).every((value) => !isNote(value));
+      }
       return (
         candidate.role === "attribute" &&
-        !isContent(child) &&
         childrenOf(child).filter((value) => !isNote(value)).length === 1 &&
         childrenOf(child).every((value) => !isNote(value))
       );
@@ -634,7 +637,7 @@ export function renderSource(
   /** The properties of a one-line element shown by name: all but its id and its title. */
   const namedOf = (at: number): number[] => {
     const title = titleOf(at);
-    return childrenOf(at).filter((child) => child !== idPlans.get(at)?.attribute && child !== title);
+    return childrenOf(at).filter((child) => child !== idPlans.get(at)?.attribute && child !== title && !isContent(child));
   };
 
   /**
@@ -677,6 +680,13 @@ export function renderSource(
     }
     for (const child of namedOf(at)) {
       parts.push({ key: `property:${tree.nodes[child]!.name ?? ""}`, element: namedPart(child) });
+    }
+    for (const child of childrenOf(at).filter((candidate) => isContent(candidate))) {
+      // What the element holds, as written between its tags: text, and expressions in braces.
+      const held = marked(child, "span", "line-content");
+      const content = tree.nodes[child]!;
+      writeNodes(held, childrenOf(child), startOf(content), endOf(content));
+      parts.push({ key: "content", element: held });
     }
     if (plan !== undefined && plan.atEnd) {
       parts.push({ key: "id-end", element: idChip(plan) });

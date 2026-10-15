@@ -122,5 +122,9 @@
   "groups": {
     "source": "type Item = { name:string }\ntype Row = { gap:string content items:Item+ }\n\nlet row =\n  <Row gap=\"wide\">\n    <Item name=\"a\" />\n\n    <Item name=\"b\" />\n  </Row>\n",
     "viewers": []
+  },
+  "content": {
+    "source": "type Label = { tone:string content text:string }\n\nlet who = \"Ada\"\n\nlet labels = {\n  <Label tone=\"quiet\">Hello {who}</Label>\n}\n",
+    "viewers": []
   }
 }
