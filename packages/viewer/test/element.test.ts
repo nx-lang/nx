@@ -183,6 +183,9 @@ describe("the reading", () => {
     const asked: string[] = [];
     element.icons = (name) => {
       asked.push(name);
+      if (name === "no-such-icon") {
+        return undefined;
+      }
       const drawn = element.ownerDocument.createElementNS("http://www.w3.org/2000/svg", "svg");
       drawn.dataset["icon"] = name;
       return drawn;
@@ -190,13 +193,13 @@ describe("the reading", () => {
     const marks = Array.from(source().querySelectorAll<HTMLElement>(".element-icon"));
     assert.deepEqual(
       marks.map((mark) => [mark.getAttribute("aria-label"), mark.querySelector("svg")!.dataset["icon"]]),
-      [["Choice", "circle-dot"], ["Note", "box"], ["Choice", "circle-dot"]],
-      "the viewer's icon, then a record's; an element sharing its line has none"
+      [["Choice", "circle-dot"], ["Note", "box"], ["Tip", "box"], ["Status.closed", "tag"], ["Choice", "circle-dot"]],
+      "the viewer's icon, a record's, a record's for an icon the host cannot draw, and a union case's; an element sharing its line has none"
     );
-    assert.ok(asked.includes("circle-dot"));
+    assert.ok(asked.includes("circle-dot") && asked.includes("no-such-icon"));
     assert.equal(marks[0]!.textContent, "", "an icon adds no text");
     const names = Array.from(source().querySelectorAll<HTMLElement>(".line-element"), (line) => line.querySelector(".line-kind")?.textContent);
-    assert.deepEqual(names, ["ElementViewer", "Choice", "Note", "Note", undefined], "a place typed Choice+ leaves its Choice unnamed; its icon names it");
+    assert.deepEqual(names, ["ElementViewer", "ElementViewer", "Choice", "Note", "Tip", "Status.closed", "Note", undefined], "a place typed Choice+ leaves its Choice unnamed; its icon names it");
   });
 
   it("reads an element written over several lines as a group, without its tags", async () => {
@@ -249,6 +252,34 @@ describe("the reading", () => {
     assert.equal(source.querySelectorAll(".sheet").length, 1, "the Choice written on one line stays a line");
     const keys = Array.from(source.querySelectorAll<HTMLElement>("[data-key]"), (node) => node.dataset["key"]!);
     assert.deepEqual([...keys].sort(), ids.tree.nodes.map((node) => node.key).sort(), "every node is still there once");
+  });
+
+  it("puts an id last in a group's header when its viewer puts it at the end", async () => {
+    const ids = await fixture("groupIdAtEnd");
+    const element = show(ids);
+    const head = root(element).querySelector<HTMLElement>(".sheet-head")!;
+    assert.equal(read(head), "Choice label=Yes yes", "after the attributes on the header");
+    assert.ok(head.lastElementChild!.classList.contains("id-part"), "the id closes the header");
+  });
+
+  it("keeps an element's text type with its name", async () => {
+    const texts = await fixture("textTypes");
+    const element = show(texts);
+    const source = root(element).querySelector<HTMLElement>(".source")!;
+    assert.equal(read(source.querySelector(".line-element")!), "<Note:markdown Hello *there*/>");
+    assert.equal(read(source.querySelector(".sheet-head")!), "Note:markdown");
+  });
+
+  it("reads an element with a comment inside an attribute as written, losing no text and no node", async () => {
+    const comments = await fixture("attributeComments");
+    const element = show(comments);
+    const source = root(element).querySelector<HTMLElement>(".source")!;
+    for (const comment of ["/* why */", "/* c */", "/* key */"]) {
+      assert.ok(source.textContent!.includes(comment), `${comment} is kept`);
+    }
+    assert.equal(source.querySelectorAll(".sheet, .id-part").length, 0, "no group, and the id stays in place");
+    const keys = Array.from(source.querySelectorAll<HTMLElement>("[data-key]"), (node) => node.dataset["key"]!);
+    assert.deepEqual([...keys].sort(), comments.tree.nodes.map((node) => node.key).sort(), "every node is there once");
   });
 
   it("keeps offsets right after a character outside the basic plane", async () => {
@@ -330,6 +361,28 @@ describe("the keyboard", () => {
     key(body, "ArrowLeft");
     assert.deepEqual(events, [first!.dataset["key"], sheet.dataset["key"], first!.dataset["key"], second!.dataset["key"], sheet.dataset["key"]]);
     assert.ok(body.querySelector(".highlights"), "the selection is drawn behind the text");
+  });
+
+  it("moves from the unit that holds a selection the host makes inside it", async () => {
+    const rows = await fixture("rows");
+    const element = show(rows);
+    const events: string[] = [];
+    element.addEventListener(NX_SELECT_EVENT, (event) => events.push((event as CustomEvent<NxSelectDetail>).detail.key));
+    const body = root(element).querySelector<HTMLElement>(".body")!;
+    const z = keyWhere(rows, (node) => node.role === "literal" && node.value === '"z"');
+    const attribute = (name: string): string => keyWhere(rows, (node) => node.role === "attribute" && node.name === name);
+    const item = keyWhere(rows, (node) => node.role === "element" && node.name === "Item");
+    const panel = keyWhere(rows, (node) => node.role === "element" && node.name === "Panel");
+    for (const move of ["ArrowLeft", "ArrowDown", "ArrowUp"]) {
+      element.selection = z;
+      key(body, move);
+    }
+    assert.deepEqual(events, [attribute("note"), item, attribute("title")], "the row holding it, then the units around that row");
+    // Outside every unit, as a type's field, down selects the first unit after it, and up finds none.
+    element.selection = keyWhere(rows, (node) => node.role === "field" && node.name === "name");
+    key(body, "ArrowUp");
+    key(body, "ArrowDown");
+    assert.deepEqual(events.slice(3), [panel]);
   });
 
   it("takes focus and announces what the arrow keys select", async () => {

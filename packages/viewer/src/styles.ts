@@ -115,7 +115,7 @@ export const styles = `
 .source .sheet-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; padding-left: 2ch; }
 .source .sheet-held, .source .sheet-note { padding-left: 2ch; }
 .source .sheet-name { opacity: 0.75; }
-.source .sheet-value { min-width: 0; }
+.source .sheet-value { min-width: 0; white-space: pre-wrap; overflow-wrap: break-word; }
 /* Inside a sheet, UI text wraps where its line does: the sheet already sets it in from the margin. */
 .source .sheet .uitext-block { display: inline; max-width: none; }
 .source .sheet-list, .source .sheet-held { display: block; }
@@ -164,7 +164,7 @@ export const styles = `
 .source .sheet-head .line-property { font-weight: 400; }
 /* An item written as it is over several lines starts where its group puts it, and its later lines
    keep their indentation from the source, measured from the item's own start. */
-.source .sheet-item.as-written * { text-indent: 0; }
+.source .sheet-item.as-written *, .source .line-element.alone * { text-indent: 0; }
 /* After the reset above, so an item written as it is inside another keeps its own indents. A line
    too long for the pane wraps a little in from where the item starts, not at the far left. */
 .source .sheet-item.as-written {
@@ -172,8 +172,10 @@ export const styles = `
   text-indent: calc((var(--column, 0) + 4) * 1ch) hanging each-line;
 }
 .source .sheet-item.as-written > .as-written-lead { display: inline-block; width: calc(var(--column, 0) * 1ch); }
-/* An element on a line of its own inside such an item wraps within itself, its later lines a step in
-   from where it starts, as the item's other lines wrap from the item's start. */
+/* An element on a line of its own wraps within itself, its later lines a step in from where it starts,
+   wherever it sits; and so does one written as its tags inside such an item, as the item's other lines
+   wrap from the item's start. */
+.source .line-element.alone,
 .source .sheet-item.as-written :is(.line-element, .tag-line) {
   display: inline-block;
   vertical-align: top;

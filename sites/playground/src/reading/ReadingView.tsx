@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import "@nx-lang/viewer";
 import { NX_SELECT_EVENT, type NxSelectDetail, type NxViewerElement, type NxViewerIcons } from "@nx-lang/viewer";
 import { colorize, loadHighlighter, type NxValueHighlighter } from "@nx-lang/value-view";
-import { EDITOR_THEMES, type EditorThemes } from "../theme.ts";
+import { EDITOR_THEMES } from "../theme.ts";
 import type { Reading } from "./reading.ts";
 // The reading's faces: Geist for prose and Geist Mono for code. Latin only, in the weights and
 // styles the theme asks for.
@@ -46,15 +46,13 @@ export function ReadingView({ reading, selection, onSelect }: ReadingViewProps) 
   const element = useRef<NxViewerElement>(null);
   // The highlighter the output pane colors with, loaded with the editor's themes, so the source
   // reading takes the colors the editor shows.
-  const themes = EDITOR_THEMES;
-  // A highlighter is loaded for one pair of themes, so it is kept with the pair it colors with.
-  const [highlighter, setHighlighter] = useState<{ value: NxValueHighlighter; themes: EditorThemes } | null>(null);
+  const [highlighter, setHighlighter] = useState<NxValueHighlighter | null>(null);
   useEffect(() => {
     let current = true;
-    loadHighlighter(themes).then(
+    loadHighlighter(EDITOR_THEMES).then(
       (loaded) => {
         if (current) {
-          setHighlighter({ value: loaded, themes });
+          setHighlighter(loaded);
         }
       },
       // Without a highlighter the text still reads, uncolored.
@@ -63,7 +61,7 @@ export function ReadingView({ reading, selection, onSelect }: ReadingViewProps) 
     return () => {
       current = false;
     };
-  }, [themes]);
+  }, []);
   const [icons, setIcons] = useState<NxViewerIcons | undefined>(undefined);
   useEffect(() => {
     let current = true;
@@ -93,7 +91,7 @@ export function ReadingView({ reading, selection, onSelect }: ReadingViewProps) 
     target.tree = undefined;
     target.text = reading.text;
     target.icons = icons;
-    target.colors = highlighter !== null ? colorize(highlighter.value, reading.text, highlighter.themes) : [];
+    target.colors = highlighter !== null ? colorize(highlighter, reading.text, EDITOR_THEMES) : [];
     target.tree = reading.tree;
   }, [reading.tree, reading.text, highlighter, icons]);
 

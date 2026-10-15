@@ -1,9 +1,9 @@
 /**
- * The source reading: the document's own text, character for character, with each node of the
- * source tree wrapped in a span that carries its key. Nothing is rewritten or moved, so it reads as
- * the editor shows it, and selection and the hand-off to an editor work as they do in the card
- * reading. Colors come from the host, as ranges over the text, so a host colors the reading with
- * the highlighter and themes it colors its editor with.
+ * The source reading: the document's text with each node of the source tree wrapped in a span that
+ * carries its key. Code reads as written; an element over several lines reads as a group and one on
+ * a line as its name and properties, without tags or quotes, with its id moved to where its viewer
+ * puts it and its booleans read as marks. Colors come from the host, as ranges over the text, so a
+ * host colors the reading with the highlighter and themes it colors its editor with.
  */
 import type { SourceDeclarationKind, SourceNode, SourceValueFormat } from "@nx-lang/language-protocol";
 
@@ -320,8 +320,9 @@ export function renderSource(
     }
     const node = tree.nodes[at]!;
     const declaration = node.declaration === undefined ? undefined : tree.declarations[node.declaration];
-    const name = declaration?.viewer?.icon ?? (declaration === undefined ? undefined : KIND_ICONS[declaration.kind]);
-    const drawn = name === undefined ? undefined : layout.icons(name);
+    const draw = (name: string | undefined): Element | undefined => (name === undefined ? undefined : layout.icons?.(name));
+    // An icon the host cannot draw, as a name Lucide does not have, gives way to the kind's.
+    const drawn = draw(declaration?.viewer?.icon) ?? draw(declaration === undefined ? undefined : KIND_ICONS[declaration.kind]);
     if (drawn === undefined) {
       return undefined;
     }
@@ -377,14 +378,19 @@ export function renderSource(
       if (childNode.role !== "attribute") {
         return false;
       }
-      if (isContent(child) || onHeader(at, child)) {
+      if (isContent(child)) {
         continue;
       }
-      if (!startsItsLine(startOf(childNode))) {
+      // A comment inside an attribute has no place in a row or on the header, which show only the
+      // attribute's name and value: the element reads as written.
+      const values = childrenOf(child);
+      if (values.some(isNote)) {
         return false;
       }
-      const values = childrenOf(child).filter((value) => !isNote(value));
-      if (values.length !== 1) {
+      if (onHeader(at, child)) {
+        continue;
+      }
+      if (!startsItsLine(startOf(childNode)) || values.length !== 1) {
         return false;
       }
       const value = tree.nodes[values[0]!]!;
@@ -498,10 +504,11 @@ export function renderSource(
     if (marker !== undefined) {
       head.append(marker);
     }
-    const nameStart = start + 1;
-    writeText(head, nameStart, nameStart + (node.name ?? "").length);
-    if (plan !== undefined) {
+    writeText(head, start + 1, nameEnd(text, node, start));
+    if (plan !== undefined && !plan.atEnd) {
       head.append(" ", idChip(plan));
+    }
+    if (plan !== undefined) {
       plan.written = true;
     }
     sheet.append(head);
@@ -547,6 +554,13 @@ export function renderSource(
         writeNodes(line, [child], startOf(childNode), endOf(childNode));
         sheet.append(line);
       }
+    }
+    if (plan !== undefined && plan.atEnd) {
+      // Last in its tag: after the attributes on the header, as a line puts it after its properties.
+      const gap = document.createElement("span");
+      gap.className = "line-gap";
+      gap.textContent = "  ";
+      head.append(gap, idChip(plan));
     }
     return sheet;
   };
@@ -651,7 +665,7 @@ export function renderSource(
     if (named) {
       const kind = document.createElement("span");
       kind.className = "line-kind";
-      writeText(kind, start + 1, start + 1 + (node.name ?? "").length);
+      writeText(kind, start + 1, nameEnd(text, node, start));
       parts.push({ key: "kind", element: kind });
     }
     if (plan !== undefined && !plan.atEnd) {
@@ -744,6 +758,7 @@ export function renderSource(
       line.append(marker);
     }
     if (alone) {
+      line.classList.add("alone");
       line.style.setProperty("--line-column", String(start - (text.lastIndexOf("\n", start - 1) + 1)));
     }
     if (!alone) {
@@ -856,7 +871,8 @@ function elementIdPlans(
     if (attribute === undefined) {
       return;
     }
-    const values = (index.children[attribute] ?? []).filter((child) => tree.nodes[child]!.role !== "comment");
+    // An attribute that holds a comment as well stays where it is, so the comment keeps its place.
+    const values = index.children[attribute] ?? [];
     const literal = values.length === 1 ? values[0]! : undefined;
     const literalNode = literal === undefined ? undefined : tree.nodes[literal]!;
     if (literal === undefined || literalNode?.role !== "literal" || !(literalNode.value ?? "").startsWith('"')) {
@@ -878,18 +894,9 @@ function elementIdPlans(
         removeFrom -= 1;
       }
     }
-    const elementStart = startOf(node);
-    let nameEnd = elementStart + 1 + (node.name ?? "").length;
-    if (text[nameEnd] === ":") {
-      // A text type after the name, `<Note:markdown`, belongs with the name.
-      nameEnd += 1;
-      while (nameEnd < text.length && /[A-Za-z0-9_.-]/.test(text[nameEnd]!)) {
-        nameEnd += 1;
-      }
-    }
     const others = attributes.filter((child) => child !== attribute);
     const atEnd = viewer.idPosition === "end" && others.length > 0;
-    const insertAt = atEnd ? Math.max(...others.map((child) => endOf(tree.nodes[child]!))) : nameEnd;
+    const insertAt = atEnd ? Math.max(...others.map((child) => endOf(tree.nodes[child]!))) : nameEnd(text, node, startOf(node));
     plans.set(at, {
       attribute,
       literal,
@@ -902,6 +909,21 @@ function elementIdPlans(
     });
   });
   return plans;
+}
+
+/**
+ * Where an element's name ends in `text`, for the element starting at `start`: after its `<` and its
+ * name, and after a text type that follows the name, as `:markdown` in `<Note:markdown`.
+ */
+function nameEnd(text: string, node: SourceNode, start: number): number {
+  let end = start + 1 + (node.name ?? "").length;
+  if (text[end] === ":") {
+    end += 1;
+    while (end < text.length && /[A-Za-z0-9_.-]/.test(text[end]!)) {
+      end += 1;
+    }
+  }
+  return end;
 }
 
 /** The name the type of text shown to people goes by. An alias for now; it may become built in. */

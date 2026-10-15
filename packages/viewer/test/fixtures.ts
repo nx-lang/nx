@@ -37,6 +37,9 @@ const entries = JSON.parse(
   readFileSync(new URL("../../test/fixtures/sources.json", import.meta.url), "utf8")
 ) as Record<string, Entry>;
 
+/** The name of every fixture. */
+export const fixtureNames: readonly string[] = Object.keys(entries);
+
 let host: NxHost | undefined;
 
 /** The wasm host every fixture is computed with, created once. */

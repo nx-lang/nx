@@ -13,42 +13,6 @@
   "emoji": {
     "source": "type Label = { text:string title:string }\n\nlet wave = <Label text=\"😀 hello\" title=\"after\" />\n"
   },
-  "survey": {
-    "source": "import \"./questions.nx\"\n\nlet roleQuestion = <SingleChoice id=\"role\" label=\"Which describes your work best?\" layout=list allowsOther={true}>\n  <Choice value=\"eng\" label=\"Engineer\" description=\"Builds things\" imageUrl=\"https://example.com/a.png\" color=\"#3366ff\" />\n  <Choice value=\"design\" label=\"Designer\" imageUrl=\"javascript:alert(1)\" />\n  <Choice value=\"pm\" label=\"Product manager\" />\n  <Choice value=\"other\" label=\"Something else\" />\n</SingleChoice>\n",
-    "with": {
-      "questions.nx": "import \"@nx/viewer\"\n\n/// The address of a picture.\nexport type ImageUrl = string\nexport type ChoiceLayout = list | grid | chips\nexport type Choice = { value:string label:string description?:string imageUrl?:ImageUrl color?:string }\n\nexport abstract component <Question id:string label:string help?:string required:boolean = true />\nexport component <SingleChoice extends Question layout:ChoiceLayout = list allowsOther:boolean = false\n  content choices:Choice+ /> = { <div /> }\n\nviewer ImageUrl = <ValueViewer format=image />\nviewer ChoiceLayout =\n  <UnionViewer>\n    <CaseViewer of=list label=\"a list\" />\n    <CaseViewer of=chips label=\"chips\" example=\"A B C\" />\n  </UnionViewer>\nviewer Choice =\n  <ElementViewer layout=row title=label subtitle=description badge=value>\n    <PropertyViewer of=color format=color />\n  </ElementViewer>\nviewer Question =\n  <ElementViewer title=label subtitle=help>\n    <PropertyViewer of=required whenTrue=\"Required\" whenFalse=\"Optional\" />\n    <PropertyViewer of=id label=\"Key\" place=details />\n  </ElementViewer>\n"
-    },
-    "viewers": []
-  },
-  "surveyRenamed": {
-    "source": "import \"./questions.nx\"\n\nlet roleQuestion = <SingleChoice id=\"role\" label=\"Which describes your work best?\" layout=list allowsOther={true}>\n  <Choice value=\"eng\" label=\"Engineer\" description=\"Builds things\" imageUrl=\"https://example.com/a.png\" color=\"#3366ff\" />\n  <Choice value=\"design\" label=\"Designer\" imageUrl=\"javascript:alert(1)\" />\n  <Choice value=\"pm\" label=\"Product manager\" />\n  <Choice value=\"other\" label=\"Something else\" />\n</SingleChoice>\n",
-    "with": {
-      "questions.nx": "import \"@nx/viewer\"\n\n/// The address of a picture.\nexport type ImageUrl = string\nexport type ChoiceLayout = list | grid | chips\nexport type Choice = { value:string label:string description?:string imageUrl?:ImageUrl color?:string }\n\nexport abstract component <Question id:string label:string help?:string required:boolean = true />\nexport component <SingleChoice extends Question layout:ChoiceLayout = list allowsOther:boolean = false\n  content choices:Choice+ /> = { <div /> }\n\nviewer ImageUrl = <ValueViewer format=image />\nviewer ChoiceLayout =\n  <UnionViewer>\n    <CaseViewer of=list label=\"a list\" />\n    <CaseViewer of=chips label=\"chips\" example=\"A B C\" />\n  </UnionViewer>\nviewer Choice =\n  <ElementViewer layout=row title=label subtitle=description badge=value>\n    <PropertyViewer of=color format=color />\n  </ElementViewer>\nviewer Question =\n  <ElementViewer title=label subtitle=help>\n    <PropertyViewer of=required whenTrue=\"Required\" whenFalse=\"Optional\" />\n    <PropertyViewer of=id label=\"Key\" place=details />\n  </ElementViewer>\n",
-      "host.nx": "import \"@nx/viewer\"\nimport \"./questions.nx\"\n\nviewer SingleChoice = <ElementViewer name=\"Pick one\" />\n"
-    },
-    "viewers": [
-      "host.nx"
-    ]
-  },
-  "viewerDeclaration": {
-    "source": "import \"@nx/viewer\"\n\ntype Choice = { label:string }\n\nviewer Choice = <ElementViewer title=label />\n",
-    "viewers": []
-  },
-  "inlineTag": {
-    "source": "import \"@nx/viewer\"\n\ntype Tag = { name:string note?:string code?:string color:string = \"gray\" }\ntype Post = { title:string tag:Tag }\n\nviewer Tag = <ElementViewer layout=inline title=name subtitle=note badge=code />\n\nlet post = <Post title=\"Launch\" tag=<Tag name=\"news\" note=\"Company news\" code=\"N\" /> />\n",
-    "viewers": []
-  },
-  "formats": {
-    "source": "import \"@nx/viewer\"\n\ntype Contact = { site:string email:string phone:string bio:string note:string other:string }\n\nviewer Contact =\n  <ElementViewer>\n    <PropertyViewer of=site format=url />\n    <PropertyViewer of=email format=email />\n    <PropertyViewer of=phone format=phone />\n    <PropertyViewer of=bio format=markdown />\n    <PropertyViewer of=note format=text />\n    <PropertyViewer of=other format=url />\n  </ElementViewer>\n\nlet name = \"Ada\"\nlet ada = <Contact site=\"https://example.com\" email=\"ada@example.com\" phone=\"+1 (555) 010-0199\" bio=\"Writes *notes*.\" note=\"plain\" other={name} />\n",
-    "viewers": []
-  },
-  "surveyOptional": {
-    "source": "import \"./questions.nx\"\n\nlet roleQuestion = <SingleChoice id=\"role\" label=\"Which describes your work best?\" layout=list required={false}>\n  <Choice value=\"eng\" label=\"Engineer\" description=\"Builds things\" imageUrl=\"https://example.com/a.png\" color=\"#3366ff\" />\n  <Choice value=\"design\" label=\"Designer\" imageUrl=\"javascript:alert(1)\" />\n  <Choice value=\"pm\" label=\"Product manager\" />\n  <Choice value=\"other\" label=\"Something else\" />\n</SingleChoice>\n",
-    "with": {
-      "questions.nx": "import \"@nx/viewer\"\n\n/// The address of a picture.\nexport type ImageUrl = string\nexport type ChoiceLayout = list | grid | chips\nexport type Choice = { value:string label:string description?:string imageUrl?:ImageUrl color?:string }\n\nexport abstract component <Question id:string label:string help?:string required:boolean = true />\nexport component <SingleChoice extends Question layout:ChoiceLayout = list allowsOther:boolean = false\n  content choices:Choice+ /> = { <div /> }\n\nviewer ImageUrl = <ValueViewer format=image />\nviewer ChoiceLayout =\n  <UnionViewer>\n    <CaseViewer of=list label=\"a list\" />\n    <CaseViewer of=chips label=\"chips\" example=\"A B C\" />\n  </UnionViewer>\nviewer Choice =\n  <ElementViewer layout=row title=label subtitle=description badge=value>\n    <PropertyViewer of=color format=color />\n  </ElementViewer>\nviewer Question =\n  <ElementViewer title=label subtitle=help>\n    <PropertyViewer of=required whenTrue=\"Required\" whenFalse=\"Optional\" />\n    <PropertyViewer of=id label=\"Key\" place=details />\n  </ElementViewer>\n"
-    },
-    "viewers": []
-  },
   "tasks": {
     "source": "type Task = {\n  title:string\n  priority:int = 2\n  notes?:string\n}\n\nlet root(): Task+ = {\n  <Task title=\"Ship the site\" priority=1 />\n  <Task title=\"Plan the next release, and then write down every step of it for the whole team\" notes=\"After the site ships\" />\n}\n"
   },
@@ -68,7 +32,7 @@
     "viewers": []
   },
   "icons": {
-    "source": "import \"@nx/viewer\"\n\ntype Choice = { value:string label:string }\ntype Note = { text:string }\n\nviewer Choice = <ElementViewer title=label icon=\"circle-dot\" />\n\nlet items = {\n  <Choice value=\"a\" label=\"First\" />\n  <Note text=\"Plain\" />\n}\n\nlet held = <Note text=\"Inline\" />\n\nlet picks:Choice+ = {\n  <Choice value=\"b\" label=\"Second\" />\n}\n",
+    "source": "import \"@nx/viewer\"\n\ntype Choice = { value:string label:string }\ntype Note = { text:string }\ntype Tip = { text:string }\ntype Status =\n  | open\n  | closed { reason:string }\n\nviewer Choice = <ElementViewer title=label icon=\"circle-dot\" />\nviewer Tip = <ElementViewer icon=\"no-such-icon\" />\n\nlet items = {\n  <Choice value=\"a\" label=\"First\" />\n  <Note text=\"Plain\" />\n  <Tip text=\"Unknown icon\" />\n  <Status.closed reason=\"done\" />\n}\n\nlet held = <Note text=\"Inline\" />\n\nlet picks:Choice+ = {\n  <Choice value=\"b\" label=\"Second\" />\n}\n",
     "viewers": []
   },
   "groups": {
@@ -77,6 +41,22 @@
   },
   "content": {
     "source": "type Label = { tone:string content text:string }\n\nlet who = \"Ada\"\n\nlet labels = {\n  <Label tone=\"quiet\">Hello {who}</Label>\n}\n",
+    "viewers": []
+  },
+  "attributeComments": {
+    "source": "import \"@nx/viewer\"\n\ntype Item = { name:string note:string }\ntype Step = { id:string title:string }\n\nviewer Step = <ElementViewer id=id />\n\nlet rowed =\n  <Item\n    name= /* why */ \"a\"\n    note=\"n\"\n  />\n\nlet headed =\n  <Item name= /* c */ \"a\"\n    note=\"n\"\n  />\n\nlet keyed =\n  <Step id= /* key */ \"s\"\n    title=\"t\"\n  />\n",
+    "viewers": []
+  },
+  "textTypes": {
+    "source": "type Note = { content text:string }\n\nlet short = <Note:markdown>Hello *there*</Note>\n\nlet long =\n  <Note:markdown>\n    Hello *there*\n  </Note>\n",
+    "viewers": []
+  },
+  "groupIdAtEnd": {
+    "source": "import \"@nx/viewer\"\n\ntype Choice = { value:string label:string note:string }\n\nviewer Choice = <ElementViewer title=label id=value idPosition=end />\n\nlet choice =\n  <Choice value=\"yes\" label=\"Yes\"\n    note=\"Agrees\"\n  />\n",
+    "viewers": []
+  },
+  "rows": {
+    "source": "type Item = { name:string }\ntype Panel = { title:string note:string content items:Item+ }\n\nlet panel =\n  <Panel\n    title=\"x\"\n    note=\"z\"\n  >\n    <Item name=\"a\" />\n  </Panel>\n",
     "viewers": []
   }
 }

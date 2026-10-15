@@ -98,7 +98,8 @@ declare module "react" {
 ## How it reads
 
 - **An element over several lines** reads as a group: a header with its icon, its name in bold, its
-  id, and the attributes written on its first line as `name=value`; then a row for each attribute
+  id, and the attributes written on its first line as `name=value` (with `idPosition=end`, the id
+  follows those attributes); then a row for each attribute
   written on a line of its own, names in one quiet column and values in another; then what it holds,
   indented. There are no angle brackets and no closing tag. A bracket runs down the group from under
   its name and turns right at its end. A value of several lines reads under its name, and so does
@@ -116,7 +117,9 @@ declare module "react" {
   font. A string a viewer names as an element's `id`, or formats as `id`, reads as one quiet token; a
   string formatted as `color` reads with a swatch.
 - **Everything else** (declarations, function bodies, comments) reads as written, in `colors`.
-- **Long lines** wrap a step in from where their unit starts.
+- **Long lines** wrap a step in from where their unit starts: a group's header, a row's value, an
+  element on one line alone on its line, and an item a group holds as written. Code read as written
+  elsewhere keeps its lines.
 
 ## Viewer declarations
 
@@ -135,8 +138,8 @@ Lucide icon the element starts with; a kind inherits it), and a value's `format`
 ## Icons
 
 The element draws no icons of its own. Give it a function that draws one by its Lucide name, and every
-element that starts a line of its own starts with an icon: the one its viewer's `icon` names, or one
-for its kind (`component`, `box` for a record, `zap` for an action, `tag` for a union case,
+element that starts a line of its own starts with an icon: the one its viewer's `icon` names, or, when
+there is none or the function draws nothing for that name, one for its kind (`component`, `box` for a record, `zap` for an action, `tag` for a union case,
 `square-function` for a function). The playground loads Lucide apart from the rest of its code:
 
 ```ts
@@ -160,7 +163,8 @@ the tree does not hold clears it.
 The selected unit and the one under the pointer are drawn as full-width rows behind the text, a
 selected group's first line stronger than the rest of it. From the keyboard, the reading takes focus,
 the up and down arrows walk the units, the left arrow selects the group holding the selected unit, and
-the right arrow the first unit it holds. The selected node carries `aria-current`, and a polite live
+the right arrow the first unit it holds. A selection that is not a unit, such as a node the host
+selects inside a row, moves from the unit that holds it. The selected node carries `aria-current`, and a polite live
 region says what was selected.
 
 `nodeAtSpan(tree, startByte, endByte)` finds the node whose range is exactly that span, preferring an

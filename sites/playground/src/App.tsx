@@ -63,11 +63,8 @@ async function openLocation(): Promise<Opened> {
   }
 }
 
-/** Whether the source pane shows the editor or the reading view. */
 /** How the source pane shows the source: the editor, or the reading. */
 type SourceMode = "edit" | "read";
-
-const MODE_LABELS: Record<SourceMode, string> = { edit: "Edit", read: "Read" };
 
 /** The site: the header, the toolbar, and the source and output panes. */
 export function App() {
@@ -164,7 +161,7 @@ export function App() {
 
   const [mode, setMode] = useState<SourceMode>("edit");
   const [selection, setSelection] = useState<string | undefined>(undefined);
-  const reading = useSourceTree(source, mode !== "edit");
+  const reading = useSourceTree(source, mode === "read");
   // The editor's cursor, carried into Read until a tree of the same text can say what it is on.
   const cursorToSelect = useRef<number | null>(null);
   // The selected node's start, carried into Edit until the editor is shown again.
@@ -196,7 +193,7 @@ export function App() {
     if (next === mode) {
       return;
     }
-    if (next !== "edit") {
+    if (next === "read") {
       cursorToSelect.current = editor.current?.cursor() ?? null;
       selectedOnEntry.current = undefined;
     } else {
@@ -311,16 +308,16 @@ export function App() {
                   aria-pressed={mode === option}
                   onClick={() => switchTo(option)}
                 >
-                  {MODE_LABELS[option]}
+                  {option === "edit" ? "Edit" : "Read"}
                 </button>
               ))}
             </span>
           </div>
-          {mode !== "edit" && (
+          {mode === "read" && (
             <ReadingView reading={reading} selection={selection} onSelect={setSelection} />
           )}
           {/* The editor stays mounted while hidden, keeping its undo history and scroll position. */}
-          <div className="editor" hidden={mode !== "edit"}>
+          <div className="editor" hidden={mode === "read"}>
             {source !== null && (
               <NxEditor
                 ref={editor}

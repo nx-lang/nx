@@ -12,7 +12,7 @@ import { after, describe, it } from "node:test";
 
 import type { SourceTree } from "@nx-lang/language-protocol";
 
-import { fixture, nxHost, repository, type Fixture } from "./fixtures.js";
+import { fixture, fixtureNames, nxHost, repository, type Fixture } from "./fixtures.js";
 
 const { renderSource } = await import("../src/source.js");
 const { indexTree } = await import("../src/tree.js");
@@ -75,10 +75,10 @@ describe("coverage", () => {
     assert.deepEqual(failures, [], `nodes not rendered exactly once:\n${failures.join("\n")}`);
   });
 
-  it("renders every node once where viewers move attributes", async () => {
-    const names = ["survey", "surveyOptional", "surveyRenamed", "viewerDeclaration", "inlineTag", "formats"];
-    const trees = await Promise.all(names.map(async (name) => ({ path: name, fixture: await fixture(name) })));
-    assert.ok(trees.every(({ fixture }) => fixture.tree.declarations.some((entry) => entry.viewer !== undefined)));
+  it("renders every node of every fixture exactly once, shapes the repository lacks included", async () => {
+    // Among them, ids a viewer moves and comments inside a group's attributes.
+    const trees = await Promise.all(fixtureNames.map(async (name) => ({ path: name, fixture: await fixture(name) })));
+    assert.ok(trees.some(({ path }) => path === "attributeComments"));
     const failures = failuresOf(trees);
     assert.deepEqual(failures, [], `nodes not rendered exactly once:\n${failures.join("\n")}`);
   });

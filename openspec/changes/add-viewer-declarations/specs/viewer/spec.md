@@ -81,8 +81,9 @@ character outside the basic multilingual plane is cut where it begins.
 - **THEN** the reading of the element SHALL show `after` as the value of `title`
 
 ### Requirement: Code reads as written, in the editor's colors
-Text that is not part of an element read as a group or a line, such as a declaration, a function's
-body or a comment, SHALL read as the document writes it, keeping its line breaks and indentation. The
+The element SHALL read text as the document writes it, keeping its line breaks and indentation,
+wherever the text is not part of an element read as a group or a line, such as a declaration, a
+function's body or a comment. The
 element SHALL color the text by the ranges its host gives in `colors`, each a start and end offset in
 UTF-16 code units with a light color, a dark color and a font style, so the reading takes the colors
 of the host's editor. The element SHALL mark comments and text shown to people as prose and each
@@ -100,7 +101,8 @@ line's indentation as indentation, so a host can set prose in a proportional fon
 
 ### Requirement: An element over several lines reads as a group
 An element the document writes over several lines SHALL read as a group: a header holding its icon,
-its name, its id, and the attributes written on the line its tag starts on as `name=value`; a row for
+its name, its id, and the attributes written on the line its tag starts on as `name=value`, the id
+after those attributes when its viewer puts it at the end; a row for
 each attribute written on a line of its own, with the attribute's name in one column and its value in
 another; and what the element holds under them, indented. The group SHALL show no angle brackets and
 no closing tag. A bracket SHALL run down the group from under its name and turn right at its end. A
@@ -110,7 +112,8 @@ read an item to a line: an element in its own form, and anything else, such as a
 block, as written, its later lines keeping their indentation relative to its own start. A blank line
 the document leaves between two held items SHALL become a little room, and so SHALL the space between
 two siblings where either is a group. A line too long for the pane SHALL wrap a step in from where its
-unit starts.
+unit starts in a group's header, a row's value, an element on one line alone on its line, and an item a
+group holds as written; code read as written elsewhere SHALL keep its lines.
 
 #### Scenario: Attributes a line each
 - **WHEN** a document holds `<Step` with `id="welcome"` and `title="Welcome"` each on a line of its
@@ -170,13 +173,20 @@ before it when it names a color.
 The element SHALL take, through its `icons` property, a function that draws an icon by its Lucide name.
 With it, every element that starts a line of its own SHALL start with an icon: the one its viewer's
 `icon` names, or else one for its kind of declaration, `component` for a component, `box` for a record,
-`zap` for an action, `tag` for a union case and `square-function` for a function. The icon SHALL carry
+`zap` for an action, `tag` for a union case and `square-function` for a function. When the function
+draws nothing for the viewer's icon, the element SHALL start with its kind's icon. The icon SHALL carry
 the element's name as its label and add no text. Without the function, no element SHALL have an icon.
 
 #### Scenario: A viewer's icon and a kind's
 - **WHEN** the host draws icons, the viewer of `Choice` sets `icon="circle-dot"`, and a list holds a
   `Choice` and a record `Note` with no viewer, each on a line of its own
 - **THEN** the `Choice` SHALL start with the icon `circle-dot` and the `Note` with `box`
+
+#### Scenario: An icon the host cannot draw, and a union case
+- **WHEN** the host draws nothing for `no-such-icon`, the viewer of a record `Tip` sets
+  `icon="no-such-icon"`, and a list holds a `Tip` and `<Status.closed reason="done" />`, each on a line
+  of its own
+- **THEN** the `Tip` SHALL start with `box` and the case with `tag`
 
 ### Requirement: A selection is a unit of the reading
 A click SHALL select the unit it falls in: an element over several lines, by its header or the room
@@ -186,7 +196,9 @@ smallest node under it, and a drag that selects text SHALL select nothing. Selec
 `nx-select` with the node's key, role and range, and tell a screen reader what was selected. The host
 SHALL be able to select a node by key through `selection` without the event; a key the tree does not
 hold SHALL clear the selection. The up and down arrow keys SHALL select the previous and next unit, the
-left arrow the unit that holds the selected one, and the right arrow the first one it holds. The
+left arrow the unit that holds the selected one, and the right arrow the first one it holds. A
+selection that is not itself a unit, such as a node the host selects inside a row, SHALL move from the
+unit that holds it, or, outside every unit, to the nearest unit after or before it. The
 selected unit and the one under the pointer SHALL be drawn as rows behind the text, from just before
 the unit's start to near the reading's right edge, a selected group's first line stronger than the rest
 of it, in colors a host sets through `--nx-viewer-selection`, `--nx-viewer-selection-inactive` and
@@ -204,6 +216,12 @@ of it, in colors a host sets through `--nx-viewer-selection`, `--nx-viewer-selec
 - **WHEN** a group is selected and the reader presses the right arrow, the down arrow and the left
   arrow
 - **THEN** the selection SHALL move to the group's first item, to its second, and back to the group
+
+#### Scenario: Arrows from inside a row
+- **WHEN** the host selects the string `"z"` in a group's row `note` and the reader presses the left
+  arrow
+- **THEN** the selection SHALL move to the row `note`, and from `"z"` the down arrow SHALL select the
+  unit after that row
 
 #### Scenario: From an origin to a node
 - **WHEN** a value's origin names a byte range

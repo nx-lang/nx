@@ -269,7 +269,6 @@ function SessionOutput({
   onNavigate: (detail: NxValueNavigateDetail, built: boolean) => void;
 }) {
   const element = useRef<NxValueElement>(null);
-  const themes = EDITOR_THEMES;
   const latest = useRef({ onPress, onNavigate, session });
   latest.current = { onPress, onNavigate, session };
 
@@ -320,7 +319,7 @@ function SessionOutput({
       stale={stale}
       describe={describe}
       actions={actions}
-      themes={themes}
+      themes={EDITOR_THEMES}
     />
   );
 }
@@ -350,7 +349,6 @@ function SessionState({ session, stale, describe }: { session: PreviewSessionVie
 }
 
 function PanelValue({ value, stale, describe }: { value: PreviewValue; stale: boolean; describe: NxValueDescribe }) {
-  const themes = EDITOR_THEMES;
   return (
     <nx-value
       className="panel-value"
@@ -358,7 +356,7 @@ function PanelValue({ value, stale, describe }: { value: PreviewValue; stale: bo
       truncated={value.truncated}
       stale={stale}
       describe={describe}
-      themes={themes}
+      themes={EDITOR_THEMES}
     />
   );
 }

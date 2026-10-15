@@ -35,7 +35,6 @@ export interface OutputPaneProps {
  */
 export function OutputPane({ evaluation, view, onViewChange, preview, describe, onNavigate }: OutputPaneProps) {
   const element = useRef<NxValueElement>(null);
-  const themes = EDITOR_THEMES;
   const latestNavigate = useRef(onNavigate);
   latestNavigate.current = onNavigate;
 
@@ -103,7 +102,7 @@ export function OutputPane({ evaluation, view, onViewChange, preview, describe, 
             truncated={value.truncated}
             stale={stale}
             describe={describe}
-            themes={themes}
+            themes={EDITOR_THEMES}
           />
         )}
       </div>

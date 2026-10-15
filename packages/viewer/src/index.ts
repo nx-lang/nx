@@ -358,23 +358,33 @@ export class NxViewerElement extends ElementBase {
     return units;
   }
 
-  /** Selects the next or previous unit, or the one that holds the selected one, or the first it holds. */
+  /**
+   * Selects the next or previous unit, or the one that holds the selected one, or the first it holds.
+   * A selection that is not a unit, as a node the host selects inside a row, moves from the unit that
+   * holds it, or from where it stands when no unit holds it.
+   */
   #stepUnit(move: "next" | "previous" | "out" | "in"): void {
     const units = this.#units();
     if (units.length === 0) {
       return;
     }
     const current = this.#selection === undefined ? undefined : this.#rendered.get(this.#selection);
-    const at = current === undefined ? -1 : units.indexOf(current);
+    const holder = current === undefined || units.includes(current) ? current : this.#unitOf(current);
+    const at = holder === undefined ? -1 : units.indexOf(holder);
     let next: HTMLElement | undefined;
-    if (at < 0) {
+    if (current === undefined) {
       next = move === "previous" ? units[units.length - 1] : units[0];
-    } else if (move === "next" || move === "previous") {
-      next = units[Math.max(0, Math.min(units.length - 1, at + (move === "next" ? 1 : -1)))];
+    } else if (move === "in") {
+      next = units.find((unit) => unit !== current && current.contains(unit));
     } else if (move === "out") {
-      next = units.slice(0, at).reverse().find((unit) => unit.contains(current!));
+      next = holder !== current ? holder : units.slice(0, at).reverse().find((unit) => unit.contains(current));
+    } else if (at >= 0) {
+      next = units[Math.max(0, Math.min(units.length - 1, at + (move === "next" ? 1 : -1)))];
+    } else if (move === "next") {
+      // Outside every unit, as a type's field: the first unit after it.
+      next = units.find((unit) => (current.compareDocumentPosition(unit) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0);
     } else {
-      next = units.slice(at + 1).find((unit) => current!.contains(unit));
+      next = [...units].reverse().find((unit) => (current.compareDocumentPosition(unit) & Node.DOCUMENT_POSITION_PRECEDING) !== 0);
     }
     if (next !== undefined) {
       this.#select(keyOf(next), true);

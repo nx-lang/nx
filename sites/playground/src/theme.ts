@@ -11,21 +11,15 @@ import type { BundledTheme } from "shiki";
 
 export type Theme = "light" | "dark";
 
-/** A light and a dark Shiki theme that go together. */
-export interface EditorThemes {
-  readonly dark: BundledTheme;
-  readonly light: BundledTheme;
-}
-
 /**
  * The Shiki themes the source, the reading and the output are colored with: VS Code's long-standing
  * default pair, Dark+ and Light+, whose colors tell an attribute's name from its value and leave
  * punctuation quiet.
  */
-export const EDITOR_THEMES: EditorThemes = { dark: "dark-plus", light: "light-plus" };
-
-/** Both themes, for an editor to load up front. */
-export const ALL_EDITOR_THEMES: readonly BundledTheme[] = [EDITOR_THEMES.dark, EDITOR_THEMES.light];
+export const EDITOR_THEMES: { readonly dark: BundledTheme; readonly light: BundledTheme } = {
+  dark: "dark-plus",
+  light: "light-plus",
+};
 
 const STORAGE_KEY = "starlight-theme";
 

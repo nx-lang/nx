@@ -124,7 +124,7 @@ test("reads viewer declarations in the visitor's source, and reports a misspelle
   const source = [
     'import "@nx/viewer"',
     "type Choice = { value:string label:string }",
-    'viewer Choice = <ElementViewer name="Option" title=label />',
+    "viewer Choice = <ElementViewer title=label id=value />",
     'let pick = <Choice value="a" label="Apples" />',
     "",
   ].join("\n");
@@ -135,8 +135,16 @@ test("reads viewer declarations in the visitor's source, and reports a misspelle
     request: { documents: [{ uri, source, version: 1 }], uri, viewers: {} },
   });
   const choice = tree.declarations.find((entry) => entry.name === "Choice");
-  assert.equal(choice.viewer.name, "Option");
   assert.equal(choice.viewer.title, "label");
+  assert.equal(choice.viewer.id, "value");
+  assert.equal(choice.viewer.idPosition, "beginning");
+  // The reading of `pick` takes its title from `label` and its id from `value`: `Apples` and `a`.
+  const valueOf = (name) => {
+    const attribute = tree.nodes.findIndex((node) => node.role === "attribute" && node.name === name);
+    return tree.nodes.find((node) => node.parent === attribute && node.role === "literal")?.value;
+  };
+  assert.equal(valueOf(choice.viewer.title), '"Apples"');
+  assert.equal(valueOf(choice.viewer.id), '"a"');
 
   const misspelled = source.replace("title=label", "title=lable");
   const report = await session.answer({
