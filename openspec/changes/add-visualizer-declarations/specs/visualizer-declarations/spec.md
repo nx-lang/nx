@@ -11,7 +11,7 @@ evaluated by any runtime or the interpreter, and SHALL NOT change the module's e
 declaration schema.
 
 #### Scenario: A visualizer beside its type
-- **WHEN** a module imports `@nx/visualizer` and contains `type Choice = { value:string label:string }` followed by `visualizer Choice = <ElementVisualizer title=label badge=value />`
+- **WHEN** a module imports `@nx/visualizer` and contains `type Choice = { value:string label:string }` followed by `visualizer Choice = <ElementVisualizer title=label id=value />`
 - **THEN** analysis SHALL accept the module with no diagnostics
 
 #### Scenario: `visualizer` stays an ordinary name elsewhere
@@ -30,24 +30,23 @@ declaration schema.
 The target of a visualizer declaration SHALL resolve, through the module's ordinary name resolution, to
 a declaration the module can see, and the declaration's value SHALL have the visualizer record of the
 target's kind as its type: `ElementVisualizer` for a record, an action (an inline emitted action
-included) or a component, concrete, abstract or external; `UnionVisualizer` for a union whose cases are
-all constant cases; and `ValueVisualizer` for an alias of a primitive type. Any other target SHALL be a
-diagnostic naming the target and saying it cannot have a visualizer: a function, a value, a union with
-a payload case, an alias of a non-primitive type, a generic record, component or union, and a
-derived declaration (`T.Update`, `T.Property`, `T.State` and its companions, `T.Props` and its
+included) or a component, concrete, abstract or external; and `ValueVisualizer` for an alias of a
+primitive type. Any other target SHALL be a diagnostic naming the target and saying it cannot have a
+visualizer: a union, a function, a value, an alias of a non-primitive type, a generic record or
+component, and a derived declaration (`T.Update`, `T.Property`, `T.State` and its companions, `T.Props` and its
 companions). A target that does not resolve SHALL be reported as an unknown name.
 
 #### Scenario: Each kind takes its record
-- **WHEN** a module imports `@nx/visualizer` and declares `type Choice = { label:string }`, `type ChoiceLayout = list | grid | chips`, `type ImageUrl = string` and `component <Card title:string /> = { <Panel /> }`, with `visualizer Choice = <ElementVisualizer title=label />`, `visualizer ChoiceLayout = <UnionVisualizer />`, `visualizer ImageUrl = <ValueVisualizer format=image />` and `visualizer Card = <ElementVisualizer title=title />`
-- **THEN** analysis SHALL accept all four visualizer declarations
+- **WHEN** a module imports `@nx/visualizer` and declares `type Choice = { label:string }`, `type Color = string` and `component <Card title:string /> = { <Panel /> }`, with `visualizer Choice = <ElementVisualizer title=label />`, `visualizer Color = <ValueVisualizer format=color />` and `visualizer Card = <ElementVisualizer title=title />`
+- **THEN** analysis SHALL accept all three visualizer declarations
 
 #### Scenario: The wrong record for the kind
-- **WHEN** a module declares `type ChoiceLayout = list | grid` and `visualizer ChoiceLayout = <ElementVisualizer />`
-- **THEN** analysis SHALL reject the value because `ElementVisualizer` is not `UnionVisualizer`
+- **WHEN** a module declares `type Color = string` and `visualizer Color = <ElementVisualizer />`
+- **THEN** analysis SHALL reject the value because `ElementVisualizer` is not `ValueVisualizer`
 
 #### Scenario: A target that cannot have a visualizer
-- **WHEN** a module declares `let answer = 42` and `visualizer answer = <ValueVisualizer format=text />`, and `type Range = { T:type start:T end:T }` and `visualizer Range = <ElementVisualizer />`
-- **THEN** analysis SHALL reject both declarations, each with a diagnostic naming its target and saying it cannot have a visualizer
+- **WHEN** a module declares `let answer = 42` and `visualizer answer = <ValueVisualizer format=id />`, `type Range = { T:type start:T end:T }` and `visualizer Range = <ElementVisualizer />`, and `type Size = small | large` and `visualizer Size = <ElementVisualizer />`
+- **THEN** analysis SHALL reject all three declarations, each with a diagnostic naming its target and saying it cannot have a visualizer
 
 #### Scenario: A derived declaration is not a target
 - **WHEN** a module declares `type User = { name:string }` and `visualizer User.Update = <ElementVisualizer />`
@@ -60,7 +59,7 @@ companions). A target that does not resolve SHALL be reported as an unknown name
 ### Requirement: A visualizer declaration binds its visualizer records' `Target`
 The system SHALL bind `Target` for every construction of an `@nx/visualizer` record in a visualizer
 declaration's value that does not bind it, as if written `Target=X`. `X` SHALL be the target itself
-when the target is a record, an action, a union or an alias, and the target's derived props record
+when the target is a record, an action or an alias, and the target's derived props record
 `T.Props` when the target is a component, so that a component's visualizer names its props
 through `T.Props.Property`. A construction that binds `Target` explicitly SHALL bind it to `X`, and any other
 binding SHALL be a diagnostic. This binding SHALL apply only inside a visualizer declaration's value;
@@ -68,12 +67,12 @@ everywhere else the ordinary rule that a generic record's construction binds eve
 SHALL hold.
 
 #### Scenario: Children take the target too
-- **WHEN** a module declares `type Choice = { value:string label:string }` and `visualizer Choice = <ElementVisualizer title=label><PropertyVisualizer of=value label="Stored as" /></ElementVisualizer>`
-- **THEN** analysis SHALL accept the visualizer, checking `of=value` against `Choice.Property`
+- **WHEN** a module declares `type Choice = { value:string label:string }` and `visualizer Choice = <ElementVisualizer title=label><PropertyVisualizer property=value format=id /></ElementVisualizer>`
+- **THEN** analysis SHALL accept the visualizer, checking `property=value` against `Choice.Property`
 
 #### Scenario: A component's visualizer names its props
-- **WHEN** a module declares `component <Question label:string help?:string /> = { <Panel /> }` and `visualizer Question = <ElementVisualizer title=label subtitle=help />`
-- **THEN** analysis SHALL accept the visualizer, checking `title` and `subtitle` against `Question.Props.Property`
+- **WHEN** a module declares `component <Question label:string help?:string /> = { <Panel /> }` and `visualizer Question = <ElementVisualizer title=label id=help />`
+- **THEN** analysis SHALL accept the visualizer, checking `title` and `id` against `Question.Props.Property`
 
 #### Scenario: A misspelled property is a type error
 - **WHEN** a module declares `type Choice = { label:string }` and `visualizer Choice = <ElementVisualizer title=lable />`
@@ -95,11 +94,11 @@ in a visualizer declaration's value SHALL be a diagnostic saying a visualizer's 
 out. The system SHALL therefore be able to read every visualizer declaration without evaluating it.
 
 #### Scenario: A computed label is rejected
-- **WHEN** a module declares `type Choice = { label:string }` and `let prefix = "Pick"` and `visualizer Choice = <ElementVisualizer name={prefix} />`
+- **WHEN** a module declares `type Choice = { label:string }` and `let prefix = "Pick"` and `visualizer Choice = <ElementVisualizer icon={prefix} />`
 - **THEN** analysis SHALL reject `{prefix}` with a diagnostic saying a visualizer's values must be written out
 
 #### Scenario: Literals and bare names are accepted
-- **WHEN** a module declares `component <Question label:string required:boolean = true /> = { <Panel /> }` and `visualizer Question = <ElementVisualizer name="Question" title=label><PropertyVisualizer of=required whenTrue="Required" whenFalse="Optional" /></ElementVisualizer>`
+- **WHEN** a module declares `component <Question label:string required:boolean = true /> = { <Panel /> }` and `visualizer Question = <ElementVisualizer icon="circle-help" title=label idPosition=end><PropertyVisualizer property=label format=id /></ElementVisualizer>`
 - **THEN** analysis SHALL accept the visualizer
 
 ### Requirement: Visualizer declarations are gathered from the program and from host modules
@@ -117,12 +116,12 @@ and its diagnostics SHALL be reported for that module.
 - **THEN** the document's resolved visualizer for `Choice` SHALL have the title `label`
 
 #### Scenario: A host module rewords a library
-- **WHEN** the program's library declares `visualizer SingleChoice = <ElementVisualizer name="Single choice" />`, and the host names a visualizer module containing `visualizer SingleChoice = <ElementVisualizer name="Pick one" />`
-- **THEN** the resolved visualizer for `SingleChoice` SHALL have the name `Pick one`
+- **WHEN** the program's library declares `visualizer SingleChoice = <ElementVisualizer icon="list" />`, and the host names a visualizer module containing `visualizer SingleChoice = <ElementVisualizer icon="list-todo" />`
+- **THEN** the resolved visualizer for `SingleChoice` SHALL have the icon `list-todo`
 
 #### Scenario: An unloaded module's visualizer declarations do not apply
-- **WHEN** a workspace holds a module with `visualizer Choice = <ElementVisualizer name="Option" />` that the document's program does not import and the host does not name
-- **THEN** the document's resolved visualizer for `Choice` SHALL NOT have the name `Option`
+- **WHEN** a workspace holds a module with `visualizer Choice = <ElementVisualizer icon="option" />` that the document's program does not import and the host does not name
+- **THEN** the document's resolved visualizer for `Choice` SHALL NOT have the icon `option`
 
 ### Requirement: Visualizer declarations merge along inheritance and across sources
 The resolved visualizer of a declaration SHALL be built by applying visualizer declarations in order, each
@@ -131,31 +130,26 @@ base to the declaration itself, first the visualizer declaration in the module t
 declaration, then visualizer declarations in other modules of the program, then the host's visualizer modules
 in the order the host names them. Overriding SHALL work attribute by attribute: an attribute a later
 visualizer declaration sets SHALL replace the earlier value, and one it leaves unset SHALL keep it.
-`PropertyVisualizer` children SHALL merge by their `of` property and `CaseVisualizer` children by their `of`
-case, attribute by attribute. The resolved order of `PropertyVisualizer`s SHALL be the later
-declaration's, in its order, followed by the earlier declaration's that the later one does not name,
-in their order. A base's `name` SHALL NOT be inherited, since it names the
-base itself; every other attribute SHALL be.
+`PropertyVisualizer` children SHALL merge by their `property`, attribute by attribute. The resolved
+order of `PropertyVisualizer`s SHALL be the later declaration's, in its order, followed by the
+earlier declaration's that the later one does not name, in their order. Every attribute SHALL be
+inherited.
 
 #### Scenario: A derived kind inherits its base's visualizer
-- **WHEN** an abstract component `Question` with props `label` and `help` has `visualizer Question = <ElementVisualizer name="Question" title=label subtitle=help />`, and `SingleChoice extends Question` has `visualizer SingleChoice = <ElementVisualizer name="Single choice" />`
-- **THEN** the resolved visualizer for `SingleChoice` SHALL have the name `Single choice`, the title `label` and the subtitle `help`
+- **WHEN** an abstract component `Question` with props `id` and `label` has `visualizer Question = <ElementVisualizer title=label id=id icon="list-checks" />`, and `SingleChoice extends Question` has `visualizer SingleChoice = <ElementVisualizer icon="list" />`
+- **THEN** the resolved visualizer for `SingleChoice` SHALL have the title `label`, the id `id` and the icon `list`
 
-#### Scenario: The base's name is not inherited
-- **WHEN** `Question` has `visualizer Question = <ElementVisualizer name="Question" title=label />` and `MultiChoice extends Question` has no visualizer
-- **THEN** the resolved visualizer for `MultiChoice` SHALL have the title `label` and no name
+#### Scenario: A kind with no visualizer inherits its base's
+- **WHEN** `Question` has `visualizer Question = <ElementVisualizer title=label icon="list-checks" />` and `MultiChoice extends Question` has no visualizer
+- **THEN** the resolved visualizer for `MultiChoice` SHALL have the title `label` and the icon `list-checks`
 
 #### Scenario: Property visualizers merge by property
-- **WHEN** a library's visualizer for `Question` has `<PropertyVisualizer of=required whenTrue="Required" whenFalse="Optional" />`, and a host visualizer module declares `visualizer Question = <ElementVisualizer><PropertyVisualizer of=required whenTrue="Must answer" /></ElementVisualizer>`
-- **THEN** the resolved property visualizer for `required` SHALL have `whenTrue` `Must answer` and `whenFalse` `Optional`
+- **WHEN** a library's visualizer for `Question` has `<PropertyVisualizer property=help format=id />`, and a host visualizer module declares `visualizer Question = <ElementVisualizer><PropertyVisualizer property=label format=id /></ElementVisualizer>`
+- **THEN** the resolved property visualizers SHALL give both `help` and `label` the format `id`
 
 #### Scenario: Order puts the later visualizer's properties first
-- **WHEN** `Question`'s visualizer lists property visualizers for `required` then `id`, and `SingleChoice`'s visualizer lists `layout` then `allowsOther`
-- **THEN** the resolved property visualizers for `SingleChoice` SHALL be in the order `layout`, `allowsOther`, `required`, `id`
-
-#### Scenario: Case visualizers merge by case
-- **WHEN** a library declares a visualizer for `ChoiceLayout` with case visualizers labelling `list` "a list" and `chips` "chips", and a host relabels `chips` "tags"
-- **THEN** the resolved case labels SHALL be `list` "a list" and `chips` "tags"
+- **WHEN** `Question`'s visualizer lists property visualizers for `help`, and `SingleChoice`'s visualizer lists `allowsOther`
+- **THEN** the resolved property visualizers for `SingleChoice` SHALL be in the order `allowsOther`, `help`, then the rest in declaration order
 
 ### Requirement: Duplicate visualizer declarations at one level are an error
 Two visualizer declarations for the same target in one module SHALL be a `duplicate-visualizer` error at
@@ -173,22 +167,21 @@ SHALL apply later.
 - **THEN** analysis SHALL report `duplicate-visualizer` at the second visualizer declaration, naming the first
 
 #### Scenario: Two program modules declare a visualizer for the same target
-- **WHEN** a library declares `Choice`, and two other modules of the program each declare `visualizer Choice = <ElementVisualizer name=… />`
+- **WHEN** a library declares `Choice`, and two other modules of the program each declare `visualizer Choice = <ElementVisualizer icon=… />`
 - **THEN** analysis of a document that imports both modules SHALL report `duplicate-visualizer` naming both visualizer declarations
-- **AND** the resolved visualizer for `Choice` SHALL take neither name
+- **AND** the resolved visualizer for `Choice` SHALL take neither icon
 
 ### Requirement: A property's format comes from its visualizer or its type
 The resolved format of a property SHALL be the `format` of its resolved `PropertyVisualizer` when that
 sets one; otherwise, when the property's declared type names an alias with a `ValueVisualizer`, that
 visualizer's `format`; otherwise none. The alias SHALL be read from the property's declared type as
-written, through occurrence suffixes (`ImageUrl?`, `ImageUrl+`), even though aliases are transparent
-to type checking. A property whose type is a union with a `UnionVisualizer` or a record with an
-`ElementVisualizer` SHALL be read through that declaration's resolved visualizer.
+written, through occurrence suffixes (`Color?`, `Color+`), even though aliases are transparent to
+type checking.
 
 #### Scenario: An alias formats every property that uses it
-- **WHEN** a module declares `type ImageUrl = string` with `visualizer ImageUrl = <ValueVisualizer format=image />`, and `type Choice = { label:string imageUrl?:ImageUrl }`
-- **THEN** the resolved format of `Choice.imageUrl` SHALL be `image`
+- **WHEN** a module declares `type Color = string` with `visualizer Color = <ValueVisualizer format=color />`, and `type Choice = { label:string tint?:Color }`
+- **THEN** the resolved format of `Choice.tint` SHALL be `color`
 
 #### Scenario: A property visualizer overrides its type's format
-- **WHEN** `ImageUrl` has the format `image` and `Choice`'s visualizer has `<PropertyVisualizer of=imageUrl format=url />`
-- **THEN** the resolved format of `Choice.imageUrl` SHALL be `url`
+- **WHEN** `Color` has the format `color` and `Choice`'s visualizer has `<PropertyVisualizer property=tint format=id />`
+- **THEN** the resolved format of `Choice.tint` SHALL be `id`

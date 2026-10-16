@@ -338,14 +338,13 @@ pub fn read_visualizer_value(module: &LoweredModule, value: ExprId) -> Option<Vi
     let (tag, attributes, content) = element_parts(module, value)?;
     let record = match tag.as_str() {
         "ElementVisualizer" => VisualizerRecord::Element,
-        "UnionVisualizer" => VisualizerRecord::Union,
         "ValueVisualizer" => VisualizerRecord::Value,
         _ => return None,
     };
     let children = content
         .into_iter()
         .filter_map(|child| element_parts(module, child))
-        .filter(|(tag, _, _)| matches!(tag.as_str(), "PropertyVisualizer" | "CaseVisualizer"))
+        .filter(|(tag, _, _)| tag == "PropertyVisualizer")
         .map(|(_, attributes, _)| VisualizerChild { attributes })
         .collect();
     Some(VisualizerValue {

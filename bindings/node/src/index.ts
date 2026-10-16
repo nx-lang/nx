@@ -67,7 +67,6 @@ export type {
   Hover,
   RelatedLocation,
   SourceCase,
-  SourceCaseVisualizer,
   SourceDeclaration,
   SourceDeclarationKind,
   SourceFlag,

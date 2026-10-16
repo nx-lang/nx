@@ -21,7 +21,7 @@ rule Bret chose on 2026-10-10.
   to present one declaration. It sits beside the declaration or in any module that can see it, with
   the same syntax in both places. `visualizer` is a keyword only as the first token of a module member.
 - A new standard library, `@nx/visualizer`, holds the visualizer vocabulary: `ElementVisualizer`,
-  `PropertyVisualizer`, `UnionVisualizer`, `CaseVisualizer` and `ValueVisualizer`, with their small unions. A visualizer
+  `PropertyVisualizer` and `ValueVisualizer`, with the small unions `IdPosition` and `ValueFormat`. A visualizer
   declaration is ordinary NX markup, type-checked like any value, so a misspelled property or case is
   a type error.
 - Inside a visualizer declaration, property names are bare and checked: `title=label` resolves `label`
@@ -42,9 +42,9 @@ rule Bret chose on 2026-10-10.
   entries it already lists, and a client may name extra host visualizer modules.
 - The viewer's reading uses visualizer declarations: an element's title reads alone on its line, its id
   as one quiet token where `idPosition` puts it, its icon before its name, and values formatted as
-  `id` or `color` as a token or with a swatch. The other parts a visualizer declaration sets (a kind's
-  name, subtitle, badge, image, property labels, boolean phrases, places, layouts and case labels) are
-  carried by the source tree for any reader, and the reading uses them as it grows. The reading itself
+  `id` or `color` as a token or with a swatch. The library holds only what the reading uses; a kind's
+  name, subtitles, badges, pictures, labels, boolean phrases, places, layouts, union visualizers and
+  the other formats can return as the reading takes them up. The reading itself
   replaces the viewer's cards: an element over several lines reads as a group with a row to each
   property, an element on one line as its name and properties, and the rest as written.
 - The playground's Visual view, which replaces its Read view, asks for visualizer declarations.

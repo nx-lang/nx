@@ -13,7 +13,7 @@ describe('NX visualizer declarations', function () {
   });
 
   it('scopes a visualizer declaration, its target and its value', function () {
-    const result = tokenizeLines(grammar, ['visualizer SingleChoice = <ElementVisualizer name="Single choice" />']);
+    const result = tokenizeLines(grammar, ['visualizer SingleChoice = <ElementVisualizer icon="list-checks" />']);
 
     expectScopes(scopesAtLine(result, 0, 'visualizer'), 'visualizer').toInclude('keyword.declaration.visualizer.nx');
     expectScopes(scopesAtLine(result, 0, 'SingleChoice'), 'SingleChoice')
@@ -21,24 +21,24 @@ describe('NX visualizer declarations', function () {
       .toNotInclude('entity.name.tag.nx');
     expectScopes(scopesAtLine(result, 0, '='), '=').toInclude('keyword.operator.assignment.nx');
     expectScopes(scopesAtLine(result, 0, 'ElementVisualizer'), 'ElementVisualizer').toInclude('entity.name.tag.nx');
-    expectScopes(scopesAtLine(result, 0, 'name'), 'name').toInclude('entity.other.attribute-name.nx');
+    expectScopes(scopesAtLine(result, 0, 'icon'), 'icon').toInclude('entity.other.attribute-name.nx');
   });
 
   it('scopes a value written on the following lines as markup', function () {
     const result = tokenizeLines(grammar, [
       'export type ChoiceLayout = list | grid | chips',
-      'visualizer ChoiceLayout =',
-      '  <UnionVisualizer>',
-      '    <CaseVisualizer of=chips label="chips" />',
-      '  </UnionVisualizer>',
+      'visualizer Choice =',
+      '  <ElementVisualizer>',
+      '    <PropertyVisualizer property=label format=id />',
+      '  </ElementVisualizer>',
       'type Next = { label:string }'
     ]);
 
     // The union ends at the visualizer declaration rather than reading it as a case.
     expectScopes(scopesAtLine(result, 1, 'visualizer'), 'visualizer').toInclude('keyword.declaration.visualizer.nx');
-    expectScopes(scopesAtLine(result, 1, 'ChoiceLayout'), 'ChoiceLayout').toInclude('entity.name.type.nx');
-    expectScopes(scopesAtLine(result, 2, 'UnionVisualizer'), 'UnionVisualizer').toInclude('entity.name.tag.nx');
-    expectScopes(scopesAtLine(result, 3, 'CaseVisualizer'), 'CaseVisualizer').toInclude('entity.name.tag.nx');
+    expectScopes(scopesAtLine(result, 1, 'Choice'), 'Choice').toInclude('entity.name.type.nx');
+    expectScopes(scopesAtLine(result, 2, 'ElementVisualizer'), 'ElementVisualizer').toInclude('entity.name.tag.nx');
+    expectScopes(scopesAtLine(result, 3, 'PropertyVisualizer'), 'PropertyVisualizer').toInclude('entity.name.tag.nx');
     expectScopes(scopesAtLine(result, 5, 'type'), 'type').toInclude('keyword.declaration.type.nx');
   });
 

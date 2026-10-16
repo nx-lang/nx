@@ -262,39 +262,21 @@ pub struct SourceDeclaration {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceVisualizer {
-    /// The kind's name as readers see it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
     /// The property whose value is the element's title.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
-    /// The property whose value reads under the title.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub subtitle: Option<String>,
-    /// The property whose value shows as a badge.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub badge: Option<String>,
-    /// The property whose value is the URL of the element's picture.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub image: Option<String>,
     /// The property whose value identifies the element.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
-    /// `beginning` or `end`: where the element's id reads, when it has one.
+    /// `start` or `end`: where the element's id reads, when it has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id_position: Option<String>,
     /// The name of the Lucide icon that marks the element.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
-    /// `card`, `row` or `inline`, for a record, an action or a component.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub layout: Option<String>,
-    /// Every property, in the order to show them.
+    /// Every property, those the visualizer names first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub properties: Vec<SourcePropertyVisualizer>,
-    /// Every case of a union, in declaration order.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub cases: Vec<SourceCaseVisualizer>,
     /// How an alias's string values are shown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format: Option<String>,
@@ -306,35 +288,10 @@ pub struct SourceVisualizer {
 pub struct SourcePropertyVisualizer {
     /// The property's name.
     pub name: String,
-    /// The label to show in place of the name.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
-    /// What a boolean property reads as when it is true.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub when_true: Option<String>,
-    /// What a boolean property reads as when it is false.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub when_false: Option<String>,
     /// How the property's string value is shown: from its property visualizer, or else from the
     /// visualizer of the alias its type names.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format: Option<String>,
-    /// `body` or `details`.
-    pub place: String,
-}
-
-/// How one case of a union reads.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SourceCaseVisualizer {
-    /// The case's name.
-    pub name: String,
-    /// The label to show in place of the name.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
-    /// A short example of what the case looks like.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub example: Option<String>,
 }
 
 /// The kinds of declaration the table describes.
@@ -1930,9 +1887,8 @@ impl<'a> TreeBuilder<'a> {
                 | SourceDeclarationKind::Action
                 | SourceDeclarationKind::Component => {
                     let types = property_types(&workspace, &origin, &chain);
-                    // A property typed by a union or an alias with a visualizer brings that
-                    // declaration into the table, so a reader can read the property's cases or
-                    // format.
+                    // A property typed by an alias with a visualizer brings that alias into the
+                    // table, so a reader can read the property's format.
                     for (_, _, typed) in &types {
                         if let Some(typed) = typed {
                             let chain = base_chain(&workspace, typed);
@@ -1943,26 +1899,7 @@ impl<'a> TreeBuilder<'a> {
                     }
                     self.element_visualizer(index, resolved, &types, visualizers)
                 }
-                SourceDeclarationKind::Union => resolved.map(|resolved| SourceVisualizer {
-                    cases: self.table[index]
-                        .cases
-                        .iter()
-                        .map(|case| {
-                            let merged =
-                                resolved.cases.iter().find(|merged| merged.of == case.name);
-                            SourceCaseVisualizer {
-                                name: case.name.clone(),
-                                label: merged
-                                    .and_then(|merged| merged.get("label"))
-                                    .map(str::to_string),
-                                example: merged
-                                    .and_then(|merged| merged.get("example"))
-                                    .map(str::to_string),
-                            }
-                        })
-                        .collect(),
-                    ..SourceVisualizer::default()
-                }),
+                SourceDeclarationKind::Union => None,
                 SourceDeclarationKind::Alias => resolved.map(|resolved| SourceVisualizer {
                     format: resolved.format,
                     ..SourceVisualizer::default()
@@ -1974,8 +1911,8 @@ impl<'a> TreeBuilder<'a> {
         }
     }
 
-    /// The visualizer of a record, an action or a component: its heading parts, its layout and
-    /// every property once, those its property visualizers name first in their resolved order and
+    /// The visualizer of a record, an action or a component: its title, id and icon, and every
+    /// property once, those its property visualizers name first in their resolved order and
     /// the rest in declaration order. A declaration with no visualizer of its own still has one
     /// when a property takes a format from its type.
     fn element_visualizer(
@@ -2002,17 +1939,13 @@ impl<'a> TreeBuilder<'a> {
         let mut properties = resolved
             .properties
             .iter()
-            .filter(|merged| names.contains(&merged.of))
+            .filter(|merged| names.contains(&merged.property))
             .map(|merged| SourcePropertyVisualizer {
-                name: merged.of.clone(),
-                label: merged.get("label").map(str::to_string),
-                when_true: merged.get("whenTrue").map(str::to_string),
-                when_false: merged.get("whenFalse").map(str::to_string),
+                name: merged.property.clone(),
                 format: merged
                     .get("format")
                     .map(str::to_string)
-                    .or_else(|| type_format(&merged.of)),
-                place: merged.get("place").unwrap_or("body").to_string(),
+                    .or_else(|| type_format(&merged.property)),
             })
             .collect::<Vec<_>>();
         for name in names {
@@ -2020,25 +1953,17 @@ impl<'a> TreeBuilder<'a> {
                 properties.push(SourcePropertyVisualizer {
                     format: type_format(&name),
                     name,
-                    place: "body".to_string(),
-                    ..SourcePropertyVisualizer::default()
                 });
             }
         }
         Some(SourceVisualizer {
-            name: resolved.name,
             title: resolved.title,
-            subtitle: resolved.subtitle,
-            badge: resolved.badge,
-            image: resolved.image,
-            id_position: resolved.id.as_ref().map(|_| {
-                resolved
-                    .id_position
-                    .unwrap_or_else(|| "beginning".to_string())
-            }),
+            id_position: resolved
+                .id
+                .as_ref()
+                .map(|_| resolved.id_position.unwrap_or_else(|| "start".to_string())),
             id: resolved.id,
             icon: resolved.icon,
-            layout: Some(resolved.layout.unwrap_or_else(|| "card".to_string())),
             properties,
             ..SourceVisualizer::default()
         })

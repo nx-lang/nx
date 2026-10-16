@@ -115,7 +115,7 @@ An **unstable** library may change incompatibly in any NX release, including a p
 ## Visualizer declarations
 A module can also hold **visualizer declarations**, written `visualizer Target = Value`. Each one tells a
 viewer, such as the reading view of a source file, how to present one declaration: which property
-is an element's title, what a boolean reads as, how a union's cases are labelled. The value is built
+is an element's title, which one identifies it, and what icon marks it. The value is built
 from the records of [`@nx/visualizer`](/reference/libraries/visualizer):
 
 ```nx
@@ -123,7 +123,7 @@ import "@nx/visualizer"
 
 type Choice = { value:string label:string description?:string }
 
-visualizer Choice = <ElementVisualizer title=label subtitle=description badge=value />
+visualizer Choice = <ElementVisualizer title=label id=value idPosition=end />
 ```
 
 - `visualizer` is a keyword only as the first token of a module member. A prop, field, binding or

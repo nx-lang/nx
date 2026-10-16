@@ -45,12 +45,11 @@ Which record the value takes depends on what the target is:
 | Target | Record |
 | --- | --- |
 | A record, an action, an inline emitted action, or a component, concrete, abstract or external | `ElementVisualizer` |
-| A union whose cases all carry no payload | `UnionVisualizer` |
 | An alias of a primitive type | `ValueVisualizer` |
 
-Anything else cannot have a visualizer: a function, a value, a union with a payload case, an alias of
-anything but a primitive type, a generic record, component or union, and a derived declaration such
-as `User.Update`, `User.Property` or `Card.Props`.
+Anything else cannot have a visualizer: a union, a function, a value, an alias of anything but a
+primitive type, a generic record or component, and a derived declaration such as `User.Update`,
+`User.Property` or `Card.Props`.
 
 ```nx invalid
 import "@nx/visualizer"
@@ -68,41 +67,32 @@ questions:
 ```nx
 import "@nx/visualizer"
 
-/// The address of a picture.
-export type ImageUrl = string
+/// A color, as CSS writes one.
+export type Color = string
 export type ChoiceLayout = list | grid | chips
-export type Choice = { value:string label:string description?:string imageUrl?:ImageUrl }
+export type Choice = { value:string label:string tint?:Color }
 
 export abstract component <Question id:string label:string help?:string required:boolean = true />
 export component <SingleChoice extends Question layout:ChoiceLayout = list allowsOther:boolean = false
   content choices:Choice+ /> = { <div /> }
 
-visualizer ImageUrl = <ValueVisualizer format=image />
-visualizer ChoiceLayout =
-  <UnionVisualizer>
-    <CaseVisualizer of=list label="a list" />
-    <CaseVisualizer of=chips label="chips" example="A B C" />
-  </UnionVisualizer>
-visualizer Choice = <ElementVisualizer layout=row title=label subtitle=description badge=value />
-visualizer Question =
-  <ElementVisualizer title=label subtitle=help>
-    <PropertyVisualizer of=required whenTrue="Required" whenFalse="Optional" />
-    <PropertyVisualizer of=id label="Key" place=details />
-  </ElementVisualizer>
+visualizer Color = <ValueVisualizer format=color />
+visualizer Choice = <ElementVisualizer title=label id=value idPosition=end icon="circle-dot" />
+visualizer Question = <ElementVisualizer title=label id=id icon="circle-help" />
 
 let roleQuestion =
   <SingleChoice id="role" label="Which describes your work best?" layout=chips>
-    <Choice value="eng" label="Engineering" description="Building and running software" />
-    <Choice value="design" label="Design" imageUrl="https://example.com/design.png" />
+    <Choice value="eng" label="Engineering" tint="#3b82f6" />
+    <Choice value="design" label="Design" />
   </SingleChoice>
 ```
 
 The compiler resolves these into one visualizer for each declaration. `SingleChoice` has no visualizer
-declaration of its own, so the visualizer for `Question` applies to it: its title is `label`, its
-subtitle `help`, `required` reads as "Required" or "Optional", and `id` is labelled "Key" and placed
-in details. Each choice's title is its `label`, its subtitle its `description` and its badge its
-`value`, and every `ImageUrl` is a picture. A viewer presents as much of this as it has room for;
-[what a reading shows](#what-a-reading-shows) says what the playground's Visual view uses today.
+declaration of its own, so the visualizer for `Question` applies to it: its title is `label`, its id
+`id`, and its icon `circle-help`. Each choice's title is its `label`, its id its `value`, read at the
+end of its line, and every `Color` reads with a swatch. In the playground's Visual view,
+`roleQuestion` reads as a group headed `SingleChoice role`, and each choice as one line, such as
+`Engineering  tint=■ #3b82f6  eng`.
 
 The playground's *Visualizer declarations* example is a smaller library of the same kind. Open it in
 the [playground](/play) and switch to Visual to see the reading follow its visualizer declarations.
@@ -112,7 +102,7 @@ the [playground](/play) and switch to Visual to see the reading follow its visua
 Every `@nx/visualizer` record takes the declaration it describes as its type parameter `Target`, and
 names that declaration's properties with fields typed `Target.Property`. Inside a visualizer
 declaration, `Target` is bound for every `@nx/visualizer` construction that leaves it unset, children
-included, so `title=label` and `<PropertyVisualizer of=required … />` need no `Target=`. A property
+included, so `title=label` and `<PropertyVisualizer property=required … />` need no `Target=`. A property
 name is checked against the target, so a misspelling is a type error, and a rename in a library
 breaks its visualizer declarations loudly:
 
@@ -150,23 +140,18 @@ import "@nx/visualizer"
 type Choice = { label:string }
 let prefix = "Pick"
 
-visualizer Choice = <ElementVisualizer name={prefix} />   // error: a visualizer's values must be written out
+visualizer Choice = <ElementVisualizer icon={prefix} />   // error: a visualizer's values must be written out
 ```
 
 ## What a reading shows
 
-The source tree a viewer reads carries each declaration's resolved visualizer: its kind's `name`, the
-properties bound to `title`, `subtitle`, `badge`, `image` and `id`, where the id reads, its icon and
-layout, and for each property its `label`, its boolean phrases (`whenTrue` and `whenFalse`), its
-`place` and its format; for a union, each case's `label` and `example`. Properties are listed in the
-order of the `PropertyVisualizer`s, then the rest in declaration order. A visualizer declaration changes how
-source reads, never what it means, and it hides nothing: a property placed in details is still there
-for a viewer to show.
-
-The playground's Visual view uses:
+The source tree a viewer reads carries each declaration's resolved visualizer: the properties bound
+to `title` and `id`, where the id reads, its icon, and each property's format. A visualizer
+declaration changes how source reads, never what it means. The playground's Visual view uses it this
+way:
 
 - **Title.** The value of the property bound to `title` reads alone on an element's line, without its
-  name: `Engineering` rather than `label=Engineering`.
+  name: `Engineering` rather than `label=Engineering`. A folded element shows it after its header.
 - **Id.** The value of the property bound to `id` reads as one quiet token: after the element's name,
   or with `idPosition=end`, last on its line, so a list's labels come first.
 - **Icon.** `icon` names a [Lucide](https://lucide.dev/icons) icon that an element starts with when
@@ -178,9 +163,9 @@ The playground's Visual view uses:
 
 A property's format comes from its `PropertyVisualizer` when that sets one, and otherwise from the
 `ValueVisualizer` of the alias its type names, read as written, through `?`, `+` and `*`. In the survey
-library every property typed `ImageUrl` shows as a picture, and
-`<PropertyVisualizer of=imageUrl format=url />` would make it a link instead. A viewer should load an
-`image` or link a `url` only when it is an `http:` or `https:` URL.
+library every property typed `Color` reads with a swatch, and
+`<PropertyVisualizer property=value format=id />` would read a choice's `value` as an id wherever it
+is written.
 
 ## Visualizer declarations in another module
 
@@ -193,11 +178,8 @@ not own:
 import "@nx/visualizer"
 import "../survey"
 
-visualizer SingleChoice = <ElementVisualizer name="Pick one" />
-visualizer ChoiceLayout =
-  <UnionVisualizer>
-    <CaseVisualizer of=chips label="tags" />
-  </UnionVisualizer>
+visualizer SingleChoice = <ElementVisualizer icon="list-checks" />
+visualizer Choice = <ElementVisualizer idPosition=start />
 ```
 
 The visualizer declarations that apply to a program are those in all of its modules: the entry module,
@@ -230,32 +212,14 @@ overriding only what it sets. The order is:
    names them.
 
 Overriding works attribute by attribute: an attribute a later visualizer declaration sets replaces the
-earlier value, and one it leaves unset keeps it. `PropertyVisualizer`s merge by their `of` property and
-`CaseVisualizer`s by their `of` case, attribute by attribute too. If the survey library declares
-`<PropertyVisualizer of=required whenTrue="Required" whenFalse="Optional" />` for `Question`, and a host
-module declares
+earlier value, and one it leaves unset keeps it. Every attribute is inherited. `PropertyVisualizer`s
+merge by their `property`, attribute by attribute too. With the survey library above and the module
+before this section, a `SingleChoice` takes its title and id from `Question` and its own icon,
+`list-checks`, and a `Choice` keeps its title, id and icon from the library while its id moves to the
+start of its line.
 
-```nx fragment
-import "@nx/visualizer"
-import "../survey"
-
-visualizer Question =
-  <ElementVisualizer>
-    <PropertyVisualizer of=required whenTrue="Must answer" />
-  </ElementVisualizer>
-```
-
-then `required` reads "Must answer" when true and still "Optional" when false. The other module
-above relabels only `chips`, so `list` keeps "a list".
-
-Property order follows the later visualizer declaration: its `PropertyVisualizer`s in its order, then the
-earlier ones it does not name, in theirs. If `Question`'s visualizer lists `required` then `id`, and a
-visualizer for `SingleChoice` lists `layout` then `allowsOther`, a `SingleChoice`'s properties are listed `layout`,
-`allowsOther`, `required`, `id`, then the rest in declaration order.
-
-A base's `name` is not inherited, because it names the base itself. If `Question`'s visualizer set
-`name="Question"`, a `SingleChoice` would still be named "Single choice" unless its own visualizer
-declaration named it. Every other attribute is inherited.
+Property order follows the later visualizer declaration: its `PropertyVisualizer`s in its order, then
+the earlier ones it does not name, in theirs, then the rest of the properties in declaration order.
 
 ## Duplicate visualizer declarations
 
@@ -268,7 +232,7 @@ import "@nx/visualizer"
 type Choice = { label:string }
 
 visualizer Choice = <ElementVisualizer title=label />
-visualizer Choice = <ElementVisualizer name="Option" />   // error: duplicate-visualizer
+visualizer Choice = <ElementVisualizer icon="list" />   // error: duplicate-visualizer
 ```
 
 Two modules of the program that do not declare `Choice` may not both declare a visualizer for it

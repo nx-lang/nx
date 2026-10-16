@@ -2680,7 +2680,7 @@ export type AssistantConfig = { agent?:Agent }
             "{visualizer}"
         );
         assert!(
-            visualizer.contains("of: Extract<keyof Target, string>;"),
+            visualizer.contains("property: Extract<keyof Target, string>;"),
             "{visualizer}"
         );
         assert!(!visualizer.contains("#property-of"), "{visualizer}");

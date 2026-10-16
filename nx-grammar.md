@@ -362,7 +362,7 @@ import "@nx/visualizer"
 type Choice = { value:string label:string }
 type Settings = { visualizer:string }
 
-visualizer Choice = <ElementVisualizer title=label badge=value />
+visualizer Choice = <ElementVisualizer title=label id=value />
 ```
 
 See [Visualizer Declarations](https://nxlang.org/reference/concepts/visualizer-declarations/) for how the

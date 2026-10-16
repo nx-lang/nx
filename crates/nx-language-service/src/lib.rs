@@ -8,9 +8,9 @@ mod source_tree_tests;
 mod visualizers;
 
 pub use source_tree::{
-    SourceCase, SourceCaseVisualizer, SourceDeclaration, SourceDeclarationKind, SourceFlag,
-    SourceNode, SourceProperty, SourcePropertyVisualizer, SourceRole, SourceTree,
-    SourceTreeOptions, SourceTreeVisualizers, SourceVisualizer,
+    SourceCase, SourceDeclaration, SourceDeclarationKind, SourceFlag, SourceNode, SourceProperty,
+    SourcePropertyVisualizer, SourceRole, SourceTree, SourceTreeOptions, SourceTreeVisualizers,
+    SourceVisualizer,
 };
 
 use nx_api::{

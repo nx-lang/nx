@@ -35,7 +35,7 @@
 ## 5. Resolution and the source tree
 
 - [x] 5.1 Gather visualizer declarations for a document's program (entry module, its imports, the standard libraries) and for host visualizer modules named in the request
-- [x] 5.2 Resolve visualizer declarations along inheritance and across sources, merging attributes, `PropertyVisualizer`s and `CaseVisualizer`s by `of`, ordering properties, not inheriting `name`, and resolving formats through aliases as written
+- [x] 5.2 Resolve visualizer declarations along inheritance and across sources, merging attributes and `PropertyVisualizer`s by `property`, ordering properties, and resolving formats through aliases as written
 - [x] 5.3 Report cross-module `duplicate-visualizer` on each document whose program loads both visualizer declarations
 - [x] 5.4 Add the `visualizers` option and the `visualizer` values to `crates/nx-language-service/src/source_tree.rs`, list unions and aliases with visualizers that type listed properties, mark visualizer declarations, and report missing host modules
 - [x] 5.5 Add the option and types to `@nx-lang/language-protocol`, carry them through the wasm snapshot and `@nx-lang/language-core`, and extend the Rust/TypeScript parity test with a document with visualizer declarations
@@ -55,6 +55,7 @@ tree for any reader.
 - [x] 6.5 Ask for visualizer declarations in the playground's Read view, color it with the editor's themes, set it in Geist and Geist Mono, draw Lucide icons, carry the editor's cursor into Read and the selection back, and add the playground scenarios to its tests
 - [x] 6.6 Add a "Larger examples" topic to the playground (a full survey, a settings screen, an orders dashboard), longer programs for judging the Read view
 - [x] 6.7 Fold the reading: groups and multi-line declarations fold, runs of supporting declarations fold to one summary line and start folded, with a hanging chevron, Alt+click, arrow keys, `folded`, `collapseAll`, `expandAll` and `nx-fold`, and Collapse all and Expand all in the playground
+- [x] 6.8 Cut `@nx/visualizer` to what the reading uses: `ElementVisualizer` with `title`, `id`, `idPosition: IdPosition = start` (`start | end`), `icon` and `properties`; `PropertyVisualizer` with `property` and `format`; `ValueVisualizer`; `ValueFormat = id | color`. Unions take no visualizer for now. Update the resolution, the source tree protocol, the examples, the docs and the tests
 
 ## 7. Editor, docs and examples
 

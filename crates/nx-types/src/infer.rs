@@ -8267,15 +8267,14 @@ pub(crate) fn widened_type(ty: &Type, target: nx_hir::ast::PrimitiveType) -> Typ
 /// record outside the library fits anywhere.
 fn visualizer_record_fits(expected: nx_hir::VisualizerRecord, record: &str) -> bool {
     match record {
-        "ElementVisualizer" | "UnionVisualizer" | "ValueVisualizer" => record == expected.name(),
+        "ElementVisualizer" | "ValueVisualizer" => record == expected.name(),
         "PropertyVisualizer" => expected == nx_hir::VisualizerRecord::Element,
-        "CaseVisualizer" => expected == nx_hir::VisualizerRecord::Union,
         _ => true,
     }
 }
 
 /// The indefinite article for a visualizer record's name: "an ElementVisualizer", "a
-/// UnionVisualizer".
+/// ValueVisualizer".
 fn article(name: &str) -> &'static str {
     match name.chars().next() {
         Some('A' | 'E' | 'I' | 'O') => "an",

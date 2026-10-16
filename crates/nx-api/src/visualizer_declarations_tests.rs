@@ -11,14 +11,10 @@ use nx_value::NxValue;
 
 const VISUALIZER_ROOT: &str = "@nx/visualizer";
 
-const VISUALIZER_TYPES: [&str; 9] = [
-    "CaseVisualizer",
-    "ElementLayout",
+const VISUALIZER_TYPES: [&str; 5] = [
     "ElementVisualizer",
     "IdPosition",
-    "Placement",
     "PropertyVisualizer",
-    "UnionVisualizer",
     "ValueFormat",
     "ValueVisualizer",
 ];
@@ -70,7 +66,7 @@ fn assert_error(body: &str, code: Option<&str>, fragments: &[&str]) {
 // --- The library ------------------------------------------------------------------------------
 
 #[test]
-fn the_visualizer_library_exports_exactly_its_nine_types() {
+fn the_visualizer_library_exports_exactly_its_five_types() {
     let library = standard_library(VISUALIZER_ROOT).expect("the visualizer library");
     assert!(library.diagnostics.is_empty(), "{:#?}", library.diagnostics);
     let mut exported = library
@@ -127,7 +123,7 @@ fn every_visualizer_type_field_and_case_is_documented() {
 fn an_element_visualizer_with_property_visualizers() {
     assert_clean(
         "type Choice = { value:string label:string description?:string }\n\
-         visualizer Choice = <ElementVisualizer layout=row title=label subtitle=description badge=value><PropertyVisualizer of=value place=details /></ElementVisualizer>",
+         visualizer Choice = <ElementVisualizer title=label id=value idPosition=end icon=\"circle-dot\"><PropertyVisualizer property=description format=id /></ElementVisualizer>",
     );
 }
 
@@ -135,35 +131,17 @@ fn an_element_visualizer_with_property_visualizers() {
 fn a_property_visualizer_names_a_property_of_its_target() {
     assert_error(
         "type Choice = { label:string }\n\
-         visualizer Choice = <ElementVisualizer><PropertyVisualizer of=value /></ElementVisualizer>",
+         visualizer Choice = <ElementVisualizer><PropertyVisualizer property=value /></ElementVisualizer>",
         None,
         &["value"],
     );
 }
 
 #[test]
-fn case_labels() {
+fn a_color_alias() {
     assert_clean(
-        "type ChoiceLayout = list | grid | chips\n\
-         visualizer ChoiceLayout = <UnionVisualizer><CaseVisualizer of=list label=\"a list\" /><CaseVisualizer of=chips label=\"chips\" example=\"◉ A  ○ B\" /></UnionVisualizer>",
-    );
-}
-
-#[test]
-fn a_case_that_is_not_in_the_union() {
-    assert_error(
-        "type ChoiceLayout = list | grid | chips\n\
-         visualizer ChoiceLayout = <UnionVisualizer><CaseVisualizer of=table /></UnionVisualizer>",
-        None,
-        &["table"],
-    );
-}
-
-#[test]
-fn an_image_url_alias() {
-    assert_clean(
-        "type ImageUrl = string\n\
-         visualizer ImageUrl = <ValueVisualizer format=image />",
+        "type Color = string\n\
+         visualizer Color = <ValueVisualizer format=color />",
     );
 }
 
@@ -174,7 +152,7 @@ fn an_image_url_alias() {
 fn a_visualizer_beside_its_type() {
     assert_clean(
         "type Choice = { value:string label:string }\n\
-         visualizer Choice = <ElementVisualizer title=label badge=value />",
+         visualizer Choice = <ElementVisualizer title=label id=value />",
     );
 }
 
@@ -208,18 +186,16 @@ fn a_visualizer_declaration_takes_no_visibility() {
 fn each_kind_takes_its_record() {
     assert_clean(
         "type Choice = { label:string }\n\
-         type ChoiceLayout = list | grid | chips\n\
          type ImageUrl = string\n\
          component <Card title:string /> = { <Panel /> }\n\
          abstract component <Question label:string />\n\
          external component <SearchBox placeholder?:string />\n\
          action Saved = { id:string }\n\
          visualizer Choice = <ElementVisualizer title=label />\n\
-         visualizer ChoiceLayout = <UnionVisualizer />\n\
-         visualizer ImageUrl = <ValueVisualizer format=image />\n\
+         visualizer ImageUrl = <ValueVisualizer format=id />\n\
          visualizer Card = <ElementVisualizer title=title />\n\
          visualizer Question = <ElementVisualizer title=label />\n\
-         visualizer SearchBox = <ElementVisualizer subtitle=placeholder />\n\
+         visualizer SearchBox = <ElementVisualizer title=placeholder />\n\
          visualizer Saved = <ElementVisualizer title=id />",
     );
 }
@@ -227,10 +203,10 @@ fn each_kind_takes_its_record() {
 #[test]
 fn the_wrong_record_for_the_kind() {
     assert_error(
-        "type ChoiceLayout = list | grid\n\
-         visualizer ChoiceLayout = <ElementVisualizer />",
+        "type ImageUrl = string\n\
+         visualizer ImageUrl = <ElementVisualizer />",
         Some("visualizer-record-mismatch"),
-        &["UnionVisualizer", "ElementVisualizer"],
+        &["ValueVisualizer", "ElementVisualizer"],
     );
     assert_error(
         "type Choice = { label:string }\n\
@@ -260,15 +236,14 @@ fn a_visualizer_without_the_library_imported_says_to_import_it() {
 
 #[test]
 fn the_wrong_visualizer_record_is_one_error() {
-    // A union's visualizer written as an element visualizer, property visualizers and all: one
+    // An alias's visualizer written as an element visualizer, property visualizers and all: one
     // mismatch, not an error for each property the element visualizer could name.
     for value in [
         "<ElementVisualizer title=small />",
-        "<ElementVisualizer><PropertyVisualizer of=small /></ElementVisualizer>",
+        "<ElementVisualizer><PropertyVisualizer property=small /></ElementVisualizer>",
     ] {
-        let source = format!(
-            "import \"@nx/visualizer\"\ntype Size = small | large\nvisualizer Size = {value}"
-        );
+        let source =
+            format!("import \"@nx/visualizer\"\ntype Size = string\nvisualizer Size = {value}");
         let diagnostics = diagnostics(&[("main.nx", source.as_str())]);
         let errors = diagnostics
             .iter()
@@ -287,7 +262,7 @@ fn the_wrong_visualizer_record_is_one_error() {
 fn a_target_that_cannot_have_a_visualizer() {
     assert_error(
         "let answer = 42\n\
-         visualizer answer = <ValueVisualizer format=text />",
+         visualizer answer = <ValueVisualizer format=id />",
         Some("visualizer-target-not-allowed"),
         &["'answer' cannot have a visualizer"],
     );
@@ -304,15 +279,15 @@ fn a_target_that_cannot_have_a_visualizer() {
         &["'greet' cannot have a visualizer"],
     );
     assert_error(
-        "type Shape = | circle { radius:int } | square\n\
-         visualizer Shape = <UnionVisualizer />",
+        "type Size = small | large\n\
+         visualizer Size = <ElementVisualizer />",
         Some("visualizer-target-not-allowed"),
-        &["'Shape' cannot have a visualizer"],
+        &["'Size' cannot have a visualizer", "union"],
     );
     assert_error(
         "type Choice = { label:string }\n\
          type Choices = Choice+\n\
-         visualizer Choices = <ValueVisualizer format=text />",
+         visualizer Choices = <ValueVisualizer format=id />",
         Some("visualizer-target-not-allowed"),
         &["'Choices' cannot have a visualizer"],
     );
@@ -361,7 +336,7 @@ fn an_emitted_action_is_a_target() {
 fn children_take_the_target_too() {
     assert_clean(
         "type Choice = { value:string label:string }\n\
-         visualizer Choice = <ElementVisualizer title=label><PropertyVisualizer of=value label=\"Stored as\" /></ElementVisualizer>",
+         visualizer Choice = <ElementVisualizer title=label><PropertyVisualizer property=value format=id /></ElementVisualizer>",
     );
 }
 
@@ -369,7 +344,7 @@ fn children_take_the_target_too() {
 fn a_components_visualizer_names_its_props() {
     assert_clean(
         "component <Question label:string help?:string /> = { <Panel /> }\n\
-         visualizer Question = <ElementVisualizer title=label subtitle=help />",
+         visualizer Question = <ElementVisualizer title=label id=help />",
     );
     // A component's state is not among its props.
     assert_error(
@@ -414,10 +389,10 @@ fn outside_a_visualizer_declaration_the_rule_is_unchanged() {
 #[test]
 fn a_computed_label_is_rejected() {
     for value in [
-        "<ElementVisualizer name={prefix} />",
+        "<ElementVisualizer icon={prefix} />",
         "<ElementVisualizer>Pick {prefix}</ElementVisualizer>",
-        "<ElementVisualizer>{if true { <PropertyVisualizer of=label /> }}</ElementVisualizer>",
-        "<ElementVisualizer>{for x in { 1 2 } { <PropertyVisualizer of=label /> }}</ElementVisualizer>",
+        "<ElementVisualizer>{if true { <PropertyVisualizer property=label /> }}</ElementVisualizer>",
+        "<ElementVisualizer>{for x in { 1 2 } { <PropertyVisualizer property=label /> }}</ElementVisualizer>",
         "{ <ElementVisualizer /> }",
     ] {
         assert_error(
@@ -434,7 +409,7 @@ fn a_computed_label_is_rejected() {
     assert_error(
         "type Choice = { label:string }\n\
          let prefix = \"Pick\"\n\
-         visualizer Choice = <ElementVisualizer name=prefix />",
+         visualizer Choice = <ElementVisualizer idPosition=prefix />",
         None,
         &["prefix"],
     );
@@ -444,7 +419,7 @@ fn a_computed_label_is_rejected() {
 fn literals_and_bare_names_are_accepted() {
     assert_clean(
         "component <Question label:string required:boolean = true /> = { <Panel /> }\n\
-         visualizer Question = <ElementVisualizer name=\"Question\" title=label><PropertyVisualizer of=required whenTrue=\"Required\" whenFalse=\"Optional\" /></ElementVisualizer>",
+         visualizer Question = <ElementVisualizer icon=\"list-checks\" title=label idPosition=end><PropertyVisualizer property=label format=id /></ElementVisualizer>",
     );
 }
 
@@ -453,7 +428,7 @@ fn twice_in_one_module() {
     let diagnostics = visualizer_diagnostics(
         "type Choice = { label:string }\n\
          visualizer Choice = <ElementVisualizer title=label />\n\
-         visualizer Choice = <ElementVisualizer name=\"Option\" />",
+         visualizer Choice = <ElementVisualizer icon=\"option\" />",
     );
     let duplicates = diagnostics
         .iter()
@@ -497,7 +472,7 @@ fn ui_registry() -> LibraryRegistry {
                 "import \"@nx/visualizer\"
 export abstract component <Question label:string help?:string />
 export component <Card extends Question title:string /> = { <Panel /> }
-visualizer Question = <ElementVisualizer title=label subtitle=help />
+visualizer Question = <ElementVisualizer title=label icon=\"circle-help\" />
 ",
             )],
         ))
@@ -549,7 +524,7 @@ fn a_visualizer_of_an_imported_component_and_a_library_with_visualizers() {
     let artifact = library_artifact(&format!(
         "import \"@nx/visualizer\"
 import {{ Card }} from \"./{UI_ROOT}\"
-visualizer Card = <ElementVisualizer name=\"Card\" title=title badge=label />
+visualizer Card = <ElementVisualizer icon=\"card\" title=title id=label />
 let root(): Card.Props = {{ <Card.Props label=\"Q\" title=\"Hi\" /> }}"
     ));
     assert!(
@@ -563,9 +538,9 @@ let root(): Card.Props = {{ <Card.Props label=\"Q\" title=\"Hi\" /> }}"
 
 const CHOICE_LIBRARY: (&str, &str) = ("lib.nx", "export type Choice = { label:string }");
 
-fn rewording(name: &str) -> String {
+fn rewording(icon: &str) -> String {
     format!(
-        "import \"@nx/visualizer\"\nimport {{ Choice }} from \"./lib.nx\"\nvisualizer Choice = <ElementVisualizer name=\"{name}\" />\nexport let marker = 1"
+        "import \"@nx/visualizer\"\nimport {{ Choice }} from \"./lib.nx\"\nvisualizer Choice = <ElementVisualizer icon=\"{icon}\" />\nexport let marker = 1"
     )
 }
 

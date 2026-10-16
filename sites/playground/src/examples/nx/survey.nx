@@ -131,53 +131,17 @@ type ChatLinkConfig = {
   preview?:LinkPreview
 }
 
-visualizer ImageUrl = <ValueVisualizer format=image />
 visualizer Color = <ValueVisualizer format=color />
-visualizer SelectLayout =
-  <UnionVisualizer>
-    <CaseVisualizer of=vertical label="one per line" />
-    <CaseVisualizer of=horizontal label="side by side" />
-    <CaseVisualizer of=columns_2 label="two columns" />
-    <CaseVisualizer of=columns_3 label="three columns" />
-  </UnionVisualizer>
-visualizer Choice =
-  <ElementVisualizer layout=row title=label subtitle=description badge=value id=value idPosition=end icon="circle-dot">
-    <PropertyVisualizer of=exclusive whenTrue="Clears the other choices" />
-  </ElementVisualizer>
-visualizer StatementStep =
-  <ElementVisualizer name="Statement" title=headline subtitle=eyebrow id=id icon="message-square-text">
-    <PropertyVisualizer of=body format=markdown />
-    <PropertyVisualizer of=cta label="Button" />
-    <PropertyVisualizer of=id label="Key" place=details />
-  </ElementVisualizer>
-visualizer Question =
-  <ElementVisualizer title=label subtitle=description id=id icon="circle-question-mark">
-    <PropertyVisualizer of=required whenTrue="Required" whenFalse="Optional" />
-    <PropertyVisualizer of=requiredMessage label="If left empty" />
-    <PropertyVisualizer of=id label="Key" place=details />
-    <PropertyVisualizer of=mediaPosition place=details />
-  </ElementVisualizer>
-visualizer SelectQuestion =
-  <ElementVisualizer name="Select" title=label subtitle=description id=id icon="list-checks">
-    <PropertyVisualizer of=required whenTrue="Required" whenFalse="Optional" />
-    <PropertyVisualizer of=multiple whenTrue="Pick any number" whenFalse="Pick one" />
-    <PropertyVisualizer of=other whenTrue="Allows another answer" whenFalse="Listed choices only" />
-    <PropertyVisualizer of=requiredMessage label="If left empty" />
-    <PropertyVisualizer of=id label="Key" place=details />
-    <PropertyVisualizer of=otherLabel place=details />
-    <PropertyVisualizer of=mediaPosition place=details />
-    <PropertyVisualizer of=layout place=details />
-    <PropertyVisualizer of=carryForwardMode place=details />
-  </ElementVisualizer>
-visualizer QuestionFlow =
-  <ElementVisualizer name="Survey" title=title subtitle=description id=id icon="clipboard-list">
-    <PropertyVisualizer of=id label="Key" place=details />
-  </ElementVisualizer>
+visualizer Choice = <ElementVisualizer title=label id=value idPosition=end icon="circle-dot" />
+visualizer StatementStep = <ElementVisualizer title=headline id=id icon="message-square-text" />
+visualizer Question = <ElementVisualizer title=label id=id icon="circle-question-mark" />
+visualizer SelectQuestion = <ElementVisualizer icon="list-checks" />
 visualizer ShortTextQuestion = <ElementVisualizer icon="text-cursor-input" />
 visualizer EmailQuestion = <ElementVisualizer icon="mail" />
-visualizer CompletionScreen = <ElementVisualizer title=headline subtitle=eyebrow icon="flag" />
-visualizer LinkPreview = <ElementVisualizer title=title subtitle=description image=imageUrl icon="link" />
-visualizer ChatIdentity = <ElementVisualizer title=name subtitle=tagline image=avatarUrl icon="bot" />
+visualizer QuestionFlow = <ElementVisualizer title=title id=id icon="clipboard-list" />
+visualizer CompletionScreen = <ElementVisualizer title=headline icon="flag" />
+visualizer LinkPreview = <ElementVisualizer title=title icon="link" />
+visualizer ChatIdentity = <ElementVisualizer title=name icon="bot" />
 visualizer ChatLinkConfig = <ElementVisualizer icon="message-circle" />
 visualizer ImmersiveAppearance = <ElementVisualizer icon="palette" />
 

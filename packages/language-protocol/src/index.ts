@@ -420,68 +420,36 @@ export interface SourceDeclaration {
 }
 
 /**
- * A declaration's resolved visualizer. A record, an action or a component has its heading parts,
- * its layout and every property once, in the order to show them; a union every case once; an alias
- * of a primitive type its format.
+ * A declaration's resolved visualizer. A record, an action or a component has its title, id and
+ * icon, and every property once, those its visualizer names first; an alias of a primitive type its
+ * format.
  */
 export interface SourceVisualizer {
-  /** The kind's name as readers see it. */
-  name?: string;
   /** The property whose value is the element's title. */
   title?: string;
-  /** The property whose value reads under the title. */
-  subtitle?: string;
-  /** The property whose value shows as a badge. */
-  badge?: string;
-  /** The property whose value is the URL of the element's picture. */
-  image?: string;
   /** The property whose value identifies the element. */
   id?: string;
-  /** Where the element's id reads: right after its name, or last in its tag. */
-  idPosition?: "beginning" | "end";
+  /** Where the element's id reads: right after its name, or last on its line. */
+  idPosition?: "start" | "end";
   /** The name of the Lucide icon that marks the element where it starts. */
   icon?: string;
-  /** How a record's, action's or component's element is laid out. */
-  layout?: SourceVisualizerLayout;
-  /** Every property, in the order to show them. */
+  /** Every property, those the visualizer names first. */
   properties?: SourcePropertyVisualizer[];
-  /** Every case of a union, in declaration order. */
-  cases?: SourceCaseVisualizer[];
   /** How an alias's string values are shown. */
   format?: SourceValueFormat;
 }
 
-/** How an element is laid out. */
-export type SourceVisualizerLayout = "card" | "row" | "inline";
-
 /** How a string value is shown. A format changes how the value looks, never what it is. */
-export type SourceValueFormat = "text" | "markdown" | "url" | "image" | "color" | "email" | "phone" | "id";
+export type SourceValueFormat = "id" | "color";
 
 /** How one property of a declaration reads. */
 export interface SourcePropertyVisualizer {
   name: string;
-  /** The label to show in place of the name. */
-  label?: string;
-  /** What a boolean property reads as when it is true. */
-  whenTrue?: string;
-  /** What a boolean property reads as when it is false. */
-  whenFalse?: string;
   /**
    * How the property's string value is shown: from its property visualizer, or else from the
    * visualizer of the alias its type names.
    */
   format?: SourceValueFormat;
-  /** Where the property is shown: among the element's rows, or in its details strip. */
-  place: "body" | "details";
-}
-
-/** How one case of a union reads. */
-export interface SourceCaseVisualizer {
-  name: string;
-  /** The label to show in place of the name. */
-  label?: string;
-  /** A short example of what the case looks like. */
-  example?: string;
 }
 
 /**

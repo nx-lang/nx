@@ -4,8 +4,7 @@
 //! <para>Visualizer declarations apply in order, each later one overriding only what it sets: along
 //! inheritance from the furthest base to the declaration itself, and at each step the visualizer in
 //! the declaring module, then those in the program's other modules, then the host's visualizer
-//! modules in the order the host names them. `PropertyVisualizer`s and `CaseVisualizer`s merge by
-//! `of`. A base's `name` is not inherited, since it names the base.</para>
+//! modules in the order the host names them. `PropertyVisualizer`s merge by `property`.</para>
 
 use crate::{DeclarationOrigin, WorkspaceDeclarations};
 use nx_api::{
@@ -121,11 +120,10 @@ impl ProgramVisualizers {
     ) -> Option<ResolvedVisualizer> {
         let mut resolved: Option<ResolvedVisualizer> = None;
         for step in chain.iter().rev().chain(std::iter::once(origin)) {
-            let own = step == origin;
             for visualizer in self.of(step) {
                 let current = resolved
                     .get_or_insert_with(|| ResolvedVisualizer::new(visualizer.value.record));
-                current.apply(&visualizer.value, own);
+                current.apply(&visualizer.value);
             }
         }
         resolved
@@ -143,27 +141,19 @@ fn origin_of(visualizer: &ProgramVisualizer) -> DeclarationOrigin {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ResolvedVisualizer {
     pub record: Option<VisualizerRecord>,
-    pub name: Option<String>,
     pub title: Option<String>,
-    pub subtitle: Option<String>,
-    pub badge: Option<String>,
-    pub image: Option<String>,
     pub id: Option<String>,
     pub id_position: Option<String>,
     pub icon: Option<String>,
-    pub layout: Option<String>,
     pub format: Option<String>,
     /// The property visualizers, in their resolved order.
     pub properties: Vec<ResolvedChild>,
-    /// The case visualizers, in the order they were first written.
-    pub cases: Vec<ResolvedChild>,
 }
 
-/// One merged `PropertyVisualizer` or `CaseVisualizer`: what it describes and the attributes it
-/// sets.
+/// One merged `PropertyVisualizer`: the property it describes and the attributes it sets.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ResolvedChild {
-    pub of: String,
+    pub property: String,
     pub attributes: Vec<(String, String)>,
 }
 
@@ -191,29 +181,19 @@ impl ResolvedVisualizer {
         }
     }
 
-    /// Applies one visualizer declaration's value over what earlier ones resolved; `own` says
-    /// whether it is a visualizer of the declaration itself rather than of a base.
-    fn apply(&mut self, value: &VisualizerValue, own: bool) {
+    /// Applies one visualizer declaration's value over what earlier ones resolved.
+    fn apply(&mut self, value: &VisualizerValue) {
         let text = |name: &str| {
             value
                 .attribute(name)
                 .map(VisualizerAttribute::text)
                 .filter(|text| is_known_value(name, text))
         };
-        if own {
-            if let Some(name) = text("name") {
-                self.name = Some(name);
-            }
-        }
         for (slot, name) in [
             (&mut self.title, "title"),
-            (&mut self.subtitle, "subtitle"),
-            (&mut self.badge, "badge"),
-            (&mut self.image, "image"),
             (&mut self.id, "id"),
             (&mut self.id_position, "idPosition"),
             (&mut self.icon, "icon"),
-            (&mut self.layout, "layout"),
             (&mut self.format, "format"),
         ] {
             if let Some(value) = text(name) {
@@ -227,21 +207,24 @@ impl ResolvedVisualizer {
                 // merge too.
                 let mut earlier = std::mem::take(&mut self.properties);
                 for child in &value.children {
-                    let Some(of) = child_of(child) else {
+                    let Some(property) = property_of(child) else {
                         continue;
                     };
                     if let Some(merged) = self
                         .properties
                         .iter_mut()
-                        .find(|existing| existing.of == of)
+                        .find(|existing| existing.property == property)
                     {
                         merge_child(merged, child);
                         continue;
                     }
-                    let mut merged = match earlier.iter().position(|existing| existing.of == of) {
+                    let mut merged = match earlier
+                        .iter()
+                        .position(|existing| existing.property == property)
+                    {
                         Some(index) => earlier.remove(index),
                         None => ResolvedChild {
-                            of,
+                            property,
                             attributes: Vec::new(),
                         },
                     };
@@ -250,37 +233,19 @@ impl ResolvedVisualizer {
                 }
                 self.properties.extend(earlier);
             }
-            VisualizerRecord::Union => {
-                for child in &value.children {
-                    let Some(of) = child_of(child) else {
-                        continue;
-                    };
-                    match self.cases.iter_mut().find(|existing| existing.of == of) {
-                        Some(existing) => merge_child(existing, child),
-                        None => {
-                            let mut merged = ResolvedChild {
-                                of,
-                                attributes: Vec::new(),
-                            };
-                            merge_child(&mut merged, child);
-                            self.cases.push(merged);
-                        }
-                    }
-                }
-            }
             VisualizerRecord::Value => {}
         }
     }
 }
 
-fn child_of(child: &VisualizerChild) -> Option<String> {
-    child.attribute("of").map(VisualizerAttribute::text)
+fn property_of(child: &VisualizerChild) -> Option<String> {
+    child.attribute("property").map(VisualizerAttribute::text)
 }
 
 fn merge_child(merged: &mut ResolvedChild, child: &VisualizerChild) {
     for (name, value) in &child.attributes {
         let text = value.text();
-        if name != "of" && is_known_value(name, &text) {
+        if name != "property" && is_known_value(name, &text) {
             merged.set(name, text);
         }
     }
@@ -291,13 +256,8 @@ fn merge_child(merged: &mut ResolvedChild, child: &VisualizerChild) {
 /// a value outside the protocol's unions from reaching a reader all the same.
 fn is_known_value(name: &str, text: &str) -> bool {
     match name {
-        "layout" => matches!(text, "card" | "row" | "inline"),
-        "place" => matches!(text, "body" | "details"),
-        "idPosition" => matches!(text, "beginning" | "end"),
-        "format" => matches!(
-            text,
-            "text" | "markdown" | "url" | "image" | "color" | "email" | "phone" | "id"
-        ),
+        "idPosition" => matches!(text, "start" | "end"),
+        "format" => matches!(text, "id" | "color"),
         _ => true,
     }
 }

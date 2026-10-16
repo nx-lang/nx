@@ -137,7 +137,7 @@ test("reads visualizer declarations in the visitor's source, and reports a missp
   const choice = tree.declarations.find((entry) => entry.name === "Choice");
   assert.equal(choice.visualizer.title, "label");
   assert.equal(choice.visualizer.id, "value");
-  assert.equal(choice.visualizer.idPosition, "beginning");
+  assert.equal(choice.visualizer.idPosition, "start");
   // The reading of `pick` takes its title from `label` and its id from `value`: `Apples` and `a`.
   const valueOf = (name) => {
     const attribute = tree.nodes.findIndex((node) => node.role === "attribute" && node.name === name);

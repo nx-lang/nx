@@ -366,7 +366,7 @@ test("a source tree asked with visualizers carries resolved visualizers and the 
   const source = [
     'import "@nx/visualizer"',
     "type Question = { label:string required:boolean = false }",
-    'visualizer Question = <ElementVisualizer title=label><PropertyVisualizer of=required whenTrue="Required" /></ElementVisualizer>',
+    'visualizer Question = <ElementVisualizer title=label><PropertyVisualizer property=required format=id /></ElementVisualizer>',
     '<Question label="Name" />',
     "",
   ].join("\n");
@@ -382,8 +382,8 @@ test("a source tree asked with visualizers carries resolved visualizers and the 
   const visualizer = tree.declarations.find((declaration) => declaration.name === "Question")!.visualizer!;
   assert.equal(visualizer.title, "label");
   assert.deepEqual(
-    visualizer.properties!.map((property) => [property.name, property.whenTrue]),
-    [["required", "Required"], ["label", undefined]],
+    visualizer.properties!.map((property) => [property.name, property.format]),
+    [["required", "id"], ["label", undefined]],
   );
   assert.deepEqual(tree.missingVisualizerModules, ["tenant/missing.nx"]);
 

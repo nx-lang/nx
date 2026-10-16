@@ -20,7 +20,7 @@
     "source": "// A note for whoever reads the source.\ntype uitext = string\ntype WebUIText = uitext\ntype Choice = { value:string label:uitext hint?:WebUIText note:uitext = \"Fine\" }\nexternal component <Text tone:string = \"plain\" content text:uitext />\nlet greet(name:string): uitext = { \"Hello, \" + name }\nlet root() = {\n  <Choice value=\"a\" label=\"First choice\" hint=\"Pick me\" />\n  <Text>Shown to people</Text>\n  <Choice value=\"b\" label={\"Second \" + \"choice\"} />\n}\n"
   },
   "identifiers": {
-    "source": "import \"@nx/visualizer\"\n\ntype Step = { id:string title:string next?:string }\n\nvisualizer Step =\n  <ElementVisualizer title=title>\n    <PropertyVisualizer of=id format=id />\n  </ElementVisualizer>\n\nlet first = <Step id=\"welcome\" title=\"Welcome\" next=\"details\" />\n",
+    "source": "import \"@nx/visualizer\"\n\ntype Step = { id:string title:string next?:string }\n\nvisualizer Step =\n  <ElementVisualizer title=title>\n    <PropertyVisualizer property=id format=id />\n  </ElementVisualizer>\n\nlet first = <Step id=\"welcome\" title=\"Welcome\" next=\"details\" />\n",
     "visualizers": []
   },
   "elementIds": {

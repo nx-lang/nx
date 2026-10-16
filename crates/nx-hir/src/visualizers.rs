@@ -23,8 +23,6 @@ pub const VISUALIZER_TARGET_PARAMETER: &str = "Target";
 pub enum VisualizerRecord {
     /// `ElementVisualizer`, for a record, an action or a component.
     Element,
-    /// `UnionVisualizer`, for a union whose cases are all constant cases.
-    Union,
     /// `ValueVisualizer`, for an alias of a primitive type.
     Value,
 }
@@ -34,7 +32,6 @@ impl VisualizerRecord {
     pub fn name(self) -> &'static str {
         match self {
             VisualizerRecord::Element => "ElementVisualizer",
-            VisualizerRecord::Union => "UnionVisualizer",
             VisualizerRecord::Value => "ValueVisualizer",
         }
     }
@@ -71,10 +68,9 @@ pub enum VisualizerTargetError {
 /// decides which visualizer record it takes.
 ///
 /// <para>A record, an action (an inline emitted action included) or a component takes an
-/// `ElementVisualizer`; a union whose cases are all constant cases a `UnionVisualizer`; an alias of
-/// a primitive type a `ValueVisualizer`. A generic declaration, a derived one, a function, a value,
-/// a union with a payload case and an alias of any other type cannot have a visualizer in this
-/// release.</para>
+/// `ElementVisualizer`, and an alias of a primitive type a `ValueVisualizer`. A generic declaration,
+/// a derived one, a union, a function, a value and an alias of any other type cannot have a
+/// visualizer in this release.</para>
 pub fn resolve_visualizer_target(
     module: &PreparedModule,
     target: &Name,
@@ -167,24 +163,7 @@ fn classify(
                 ..element("component", &component.name)
             })
         }
-        Item::Union(union_def) => {
-            if union_def.property_target().is_some() {
-                return not_allowed("it is a derived property union");
-            }
-            if !union_def.is_constant_union() {
-                return not_allowed(
-                    "it is a union with a payload case, and only a union of constant cases can have a visualizer",
-                );
-            }
-            Ok(VisualizerTarget {
-                origin,
-                declared_name: union_def.name.clone(),
-                kind_label: "union",
-                record: VisualizerRecord::Union,
-                target_type: target.clone(),
-                is_component: false,
-            })
-        }
+        Item::Union(_) => not_allowed("it is a union, and unions cannot have visualizers yet"),
         Item::TypeAlias(alias) => match &alias.ty {
             ast::TypeRef::Name(name) if is_primitive_type_name(name.as_str()) => Ok(VisualizerTarget {
                 origin,

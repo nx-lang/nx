@@ -13,91 +13,36 @@
 export type ElementVisualizer = {
   // The declaration this visualizer describes. Bound by the `visualizer` declaration.
   Target: type
-  /// The kind's name as readers see it, in place of the declaration's name split into words. A
-  /// kind that extends another does not inherit it.
-  name?: string
-  /// The property whose value is the element's title.
+  /// The property whose value is the element's title: it reads alone on the element's line, and
+  /// says what a folded element holds.
   title?: Target.Property
-  /// The property whose value reads under the title.
-  subtitle?: Target.Property
-  /// The property whose value shows as a badge beside the heading.
-  badge?: Target.Property
-  /// The property whose value is the URL of the element's picture.
-  image?: Target.Property
   /// The property whose value identifies the element: a key that names it and is kept. It reads as
   /// one quiet token, its value alone, where `idPosition` puts it.
   id?: Target.Property
   /// Where the element's id reads.
-  idPosition: IdPosition = beginning
+  idPosition: IdPosition = start
   /// The name of the icon that marks the element where it starts, from the Lucide set
   /// (https://lucide.dev/icons), such as `"list-checks"`. A kind that extends another inherits it.
   icon?: string
-  /// How the element is laid out.
-  layout: ElementLayout = card
-  /// How individual properties read, in the order they should be listed. Properties not named
-  /// here follow in declaration order.
+  /// How individual properties read.
   content properties?: <PropertyVisualizer Target=Target/>+
 }
 
 /// Where an element's id reads.
 export type IdPosition =
   /// Right after the element's name.
-  | beginning
-  /// Last in the element's tag, after its other properties.
+  | start
+  /// Last on the element's line, after its other properties.
   | end
-
-/// How an element is laid out.
-export type ElementLayout =
-  /// A card with a heading and a row per property.
-  | card
-  /// One line holding the heading, title, subtitle, badge and picture, with the rest folded.
-  | row
-  /// Within the line that holds it, as its heading and title, with the rest folded.
-  | inline
 
 /// How one property of an element reads.
 export type PropertyVisualizer = {
   // The declaration whose property this describes. Bound by the `visualizer` declaration.
   Target: type
   /// The property this describes.
-  of: Target.Property
-  /// The property's label, in place of its name.
-  label?: string
-  /// What a boolean property reads as when it is true, in place of its row.
-  whenTrue?: string
-  /// What a boolean property reads as when it is false, in place of its row.
-  whenFalse?: string
+  property: Target.Property
   /// How the property's string value is shown.
   format?: ValueFormat
-  /// Where the property is shown.
-  place: Placement = body
-}
-
-/// Where a property is shown on its element.
-export type Placement =
-  /// Among the element's rows.
-  | body
-  /// In a strip at the foot of the element, folded until a reader opens it.
-  | details
-
-/// How a viewer presents the cases of a union.
-export type UnionVisualizer = {
-  // The union this visualizer describes. Bound by the `visualizer` declaration.
-  Target: type
-  /// How individual cases read.
-  content cases?: <CaseVisualizer Target=Target/>+
-}
-
-/// How one case of a union reads.
-export type CaseVisualizer = {
-  // The union whose case this describes. Bound by the `visualizer` declaration.
-  Target: type
-  /// The case this describes.
-  of: Target
-  /// The case's label, in place of its name.
-  label?: string
-  /// A short example of what the case looks like, shown with its name.
-  example?: string
 }
 
 /// How a viewer presents values of a scalar type.
@@ -110,19 +55,7 @@ export type ValueVisualizer = {
 
 /// How a string value is shown. A format changes how the value looks, never what it is.
 export type ValueFormat =
-  /// As plain text.
-  | text
-  /// As Markdown prose.
-  | markdown
-  /// As a link.
-  | url
-  /// As a small picture, when the URL is `https:` or `http:` and the viewer loads images.
-  | image
-  /// As a swatch beside the text.
-  | color
-  /// As a link that writes an email.
-  | email
-  /// As a link that dials.
-  | phone
   /// As an identifier: a key that names one thing and is kept, such as an id stored in a database.
   | id
+  /// With a small square of the color it names.
+  | color

@@ -124,9 +124,10 @@ unions and aliases that type a listed property, so a reader never needs a second
 
 Resolution order is the proposal's: along inheritance, base first; and at each step, the declaring
 module, then the other modules of the program, then the host's visualizer modules in the order named.
-Later visualizer declarations override attribute by attribute. `PropertyVisualizer`s and `CaseVisualizer`s merge
-by `of`, and the later visualizer declaration's property order comes first. One deviation: a base's `name`
-is not inherited. A base called "Question" should not make every derived kind read "Question". Without
+Later visualizer declarations override attribute by attribute. `PropertyVisualizer`s merge by
+`property`, and the later visualizer declaration's property order comes first. Every attribute is
+inherited. (While `ElementVisualizer` had a `name`, one deviation applied: a base's `name` was not
+inherited.) A base called "Question" should not make every derived kind read "Question". Without
 its own name, a derived kind reads its declaration name split into words, which is the default
 default.
 
@@ -156,17 +157,20 @@ its name and properties, and the rest as written, in the editor's colors. The re
 - **Formats:** `id` reads a string as a quiet token, and `color` puts a swatch before a string that
   names a color. A format changes how a string shows, never what it is.
 
-The other parts a visualizer declaration sets (`name`, `subtitle`, `badge`, `image`, labels, boolean
-phrases, places, layouts and case labels) stay in the source tree for any reader; the reading takes
-them up as it grows.
+On 2026-10-16 Bret cut the library down to what the reading uses: `ElementVisualizer` keeps
+`title`, `id`, `idPosition` (now `start | end`) and `icon`; `PropertyVisualizer` keeps `format`, its
+`of` renamed `property`; `ValueFormat` keeps `id` and `color`. `name`, `subtitle`, `badge`, `image`,
+`layout`, labels, boolean phrases, places, `UnionVisualizer`, `CaseVisualizer` and the other formats
+were removed, to return when the reading needs them, so a union cannot have a visualizer for now.
 
 ### What is left out of version one
 
 - **Generic targets** (a generic record, component or union) are rejected. Binding `Target` to a
   generic declaration would need its type arguments, and visualizer declarations don't depend on them;
   this can be allowed later by binding `Target` with its parameters unbound.
-- **Unions with payload cases** are rejected as `UnionVisualizer` targets, because `CaseVisualizer`'s
-  `of:Target` names a value, and a payload case can't be named without a payload.
+- **Unions** are rejected as targets, since `UnionVisualizer` was removed. When it returns, a union
+  with payload cases should still be rejected, because a case visualizer names a case by value, and a
+  payload case can't be named without a payload.
 - **`ElementVisualizer.key`**, which the proposal included for the change view, waits for that view.
 - **`date`, `time` and `currency` formats** are dropped from `ValueFormat`. The viewer shows source,
   and formatting a written date or amount needs a locale; they can return with locale support.

@@ -1243,7 +1243,7 @@ function uiTextNodes(index: TreeIndex): Set<number> {
 
 /**
  * The string literals an attribute holds directly, with the format its property's visualizer gives
- * them: from `<PropertyVisualizer of=id format=id />`, or from the visualizer of the alias its type
+ * them: from `<PropertyVisualizer property=id format=id />`, or from the visualizer of the alias its type
  * names.
  */
 function formattedNodes(index: TreeIndex): Map<number, SourceValueFormat> {

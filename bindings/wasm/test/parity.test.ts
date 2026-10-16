@@ -235,18 +235,15 @@ describe("language answer parity with the Node SDK", () => {
   it("answers the source tree with resolved visualizers identically", () => {
     const source = `import "@nx/visualizer"
 
-type Question = { label:string required:boolean = false }
-type Answer = yes | no
+type Question = { key:string label:string required:boolean = false }
+type Color = string
 
 visualizer Question =
-  <ElementVisualizer name="Question" title=label layout=row>
-    <PropertyVisualizer of=required label="Required" whenTrue="Must be answered" />
+  <ElementVisualizer title=label id=key idPosition=end icon="circle-help">
+    <PropertyVisualizer property=label format=id />
   </ElementVisualizer>
 
-visualizer Answer =
-  <UnionVisualizer>
-    <CaseVisualizer of=yes label="Yes" />
-  </UnionVisualizer>
+visualizer Color = <ValueVisualizer format=color />
 `;
     const corpus = [{ uri, source, identity: "demo/input.nx", version: 7 }];
     const fromNode = new NodeLanguageSnapshot(corpus);

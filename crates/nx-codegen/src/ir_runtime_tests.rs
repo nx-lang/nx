@@ -3998,12 +3998,12 @@ fn a_components_props_record_is_an_ordinary_record() {
 fn visualizer_declarations_leave_the_image_unchanged() {
     let declarations = "import \"@nx/visualizer\"
 type Choice = { value:string label:string }
-type ChoiceLayout = list | grid
+type Color = string
 component <Card title:string /> = { <Panel /> }
 let root(): Choice = { <Choice value=\"a\" label=\"A\" /> }
 ";
-    let visualizers = "visualizer Choice = <ElementVisualizer title=label><PropertyVisualizer of=value place=details /></ElementVisualizer>
-visualizer ChoiceLayout = <UnionVisualizer><CaseVisualizer of=grid label=\"a grid\" /></UnionVisualizer>
+    let visualizers = "visualizer Choice = <ElementVisualizer title=label><PropertyVisualizer property=value format=id /></ElementVisualizer>
+visualizer Color = <ValueVisualizer format=color />
 visualizer Card = <ElementVisualizer title=title />
 ";
     let image = |source: &str| {
