@@ -293,10 +293,13 @@ among them, can build playground links without the playground's code.
 
 ### Requirement: Examples get a visitor started
 The playground SHALL offer between 10 and 20 short examples, grouped by topic, that together cover
-the language's main features. They SHALL be offered from a single drop-down in the toolbar and SHALL
+the language's main features, and MAY offer, under the topic "Larger examples", a few longer programs
+of the kind a real app holds, such as a survey, a settings screen or an orders dashboard, for judging
+how the Visual view reads a whole program. The larger examples SHALL NOT count toward the 10 to 20 and
+need not fit without scrolling. They SHALL be offered from a single drop-down in the toolbar and SHALL
 NOT be featured anywhere else on the page, because their purpose is to show what NX to write rather
-than to be browsed. Each SHALL be small enough to read without scrolling on a laptop, and each SHALL
-link to the documentation page for its topic.
+than to be browsed. Each short example SHALL be small enough to read without scrolling on a laptop,
+and each SHALL link to the documentation page for its topic.
 
 #### Scenario: Topics
 - **WHEN** a visitor opens the examples drop-down
@@ -322,6 +325,11 @@ link to the documentation page for its topic.
 #### Scenario: From an example to its docs
 - **WHEN** an example is loaded
 - **THEN** the toolbar SHALL show a small link to the documentation page for its topic
+
+#### Scenario: Larger examples
+- **WHEN** a visitor opens the examples drop-down
+- **THEN** the larger examples SHALL be grouped under "Larger examples", and the playground's tests
+  SHALL count only the other examples toward the 10 to 20
 
 ### Requirement: Every example is checked against its expected output
 Every example SHALL have its expected output committed beside it. The playground's tests SHALL
@@ -427,25 +435,31 @@ that the details SHALL be the visitor's to open and close, and SHALL stay as the
 - **THEN** the details SHALL stay closed
 
 ### Requirement: The source pane reads as well as edits
-The playground's source pane SHALL offer an Edit and Read switch in its title, Edit by default. Read
-SHALL show the visitor's source in the viewer's `<nx-viewer>` element, from the `sourceTree` query the
-playground's worker answers, refreshed after the visitor pauses typing as evaluation is and marked
-stale while a newer tree is computed. Switching to Read SHALL select the node at the editor's cursor,
-and switching to Edit SHALL put the cursor at the start of the selected node and reveal it. When the
-query fails, Read SHALL say that the reading is unavailable, and Edit SHALL keep working.
+The playground's source pane, titled "NX", SHALL offer a Visual and Source switch in its title,
+Visual first and by default. Source SHALL show the editor, and Visual SHALL show the visitor's
+source in the viewer's `<nx-viewer>` element, from the `sourceTree` query the playground's worker
+answers, refreshed after the visitor pauses typing as evaluation is and marked stale while a newer
+tree is computed. Visual SHALL be colored by the editor's themes, Dark+ and Light+, set in Geist for
+prose and Geist Mono for code, and draw its icons from Lucide, loaded apart from the rest of the
+playground when Visual first needs them. While Visual shows, the title SHALL also offer Collapse all
+and Expand all, and what the reader folds SHALL be kept while they switch between Source and Visual
+and forgotten when they choose an example. Switching to Visual SHALL select the node at the editor's
+cursor, and switching to Source SHALL put the cursor at the start of the selected node and reveal
+it. When the query fails, Visual SHALL say that the reading is unavailable, and Source SHALL keep
+working.
 
 #### Scenario: Reading an example
-- **WHEN** a visitor opens the default example and switches to Read
-- **THEN** the source pane SHALL show the example's reading view, and the output pane SHALL be
+- **WHEN** a visitor opens the default example
+- **THEN** the source pane SHALL show the example's reading in Visual, and the output pane SHALL be
   unchanged
 
 #### Scenario: The selection crosses over
-- **WHEN** a visitor selects a card in Read and switches to Edit
-- **THEN** the editor's cursor SHALL be at the start of that card's element in the source
+- **WHEN** a visitor selects an element in Visual and switches to Source
+- **THEN** the editor's cursor SHALL be at the start of that element in the source
 
 #### Scenario: Read on a phone
-- **WHEN** a visitor switches to Read at a viewport 375 pixels wide
-- **THEN** the reading view SHALL fit the pane's width without the page scrolling horizontally
+- **WHEN** a visitor opens the playground at a viewport 375 pixels wide
+- **THEN** the reading SHALL fit the pane's width without the page scrolling horizontally
 
 ### Requirement: The output pane previews a component
 The playground's output pane SHALL offer an Output and Preview switch in its title, Output by
@@ -600,4 +614,19 @@ with a `Counter` element, so that switching to Preview runs it with no further s
 - **WHEN** a visitor opens "A counter to click" and switches to Preview
 - **THEN** the pane SHALL show the counter with buttons for adding and resetting, and pressing them
   SHALL change the count
+
+### Requirement: The Visual view uses the program's visualizers
+The playground's Visual view SHALL ask for the source tree with `visualizers`, naming no host visualizer declaration
+modules, so that visualizer declarations in the visitor's source and in the standard libraries it imports shape the
+reading. Visualizer diagnostics SHALL be reported against the visitor's source like any other diagnostic.
+
+#### Scenario: A visualizer declaration in the visitor's source
+- **WHEN** a visitor's source declares `type Choice = { value:string label:string }`, a visualizer declaration
+  `visualizer Choice = <ElementVisualizer title=label id=value />`, and a value
+  `let pick = <Choice value="a" label="Apples" />`, and the visitor switches to Visual
+- **THEN** the reading of `pick` SHALL show `Apples` as its title and `a` as its id, without quotes
+
+#### Scenario: A misspelled visualizer declaration
+- **WHEN** the visitor writes `visualizer Choice = <ElementVisualizer title=lable />`
+- **THEN** the source pane SHALL show a diagnostic on `lable`
 

@@ -48,11 +48,13 @@ range SHALL contain the ranges of its children, and the ranges of two siblings S
 Each node SHALL have exactly one of these roles, covering the source shown:
 
 - `import`: an import statement.
-- `declaration`: a `let`, `type`, `action`, `component` or function declaration, with its name.
+- `declaration`: a `let`, `type`, `action`, `component`, `visualizer` or function declaration, with its
+  name; a `visualizer` declaration's name is its target as written.
 - `parameter`, `stateField`, `field`, `unionCase`, `emit`: one member of a declaration, with its
   name, its declared type and, when it has one, its default as a child.
 - `typeReference`: a type written in the source, with the type spelled in NX.
-- `element`: an element construction, with the declaration of its kind when it resolves.
+- `element`: an element construction, with the declaration of its kind when it resolves; a union
+  case's element, as `<Status.shipped … />`, refers to its union.
 - `attribute`: a `name=value` attribute, or the run of element content bound to a content
   property, with the property's name.
 - `text`: a run of element text, with its text type when it has one (`markdown` in
@@ -103,6 +105,12 @@ one.
 - **WHEN** a document holds a declaration followed by a line the parser cannot read
 - **THEN** the tree SHALL hold the declaration's nodes and an `unparsed` node covering the unread
   region
+
+#### Scenario: A visualizer declaration
+- **WHEN** a document holds `visualizer Choice = <ElementVisualizer title=label />`
+- **THEN** the tree SHALL hold a `declaration` node named `Choice` and marked as a visualizer declaration
+- **AND** an `element` node referring to `ElementVisualizer` and an `attribute` node named `title` whose
+  value is a `case` node named `label` referring to `Choice.Property`
 
 ### Requirement: Every token belongs to exactly one node
 Every token of a document SHALL lie in the range of at least one node, and SHALL belong to the
@@ -177,4 +185,51 @@ as unstable until a later change commits to its shape.
 - **WHEN** the wasm SDK's language-service tests compute the source tree of each document in their
   corpus through the TypeScript service and through the Rust service
 - **THEN** the two answers SHALL be equal after JSON round-trip
+
+### Requirement: The answer carries resolved visualizer declarations when asked
+A `sourceTree` request SHALL accept an optional `visualizers` option, holding an optional list of host
+visualizer module identities. When the option is absent the answer SHALL carry no visualizers and SHALL be
+unchanged from an answer without this feature. When it is present, the answer SHALL resolve the
+program's visualizer declarations and the named host visualizer modules, as the visualizer-declarations capability defines, and
+SHALL attach to each declaration entry with a resolved visualizer a `visualizer` value:
+
+- for a record, an action or a component: its `title`, `id` and `icon` when set, its `idPosition`
+  when it has an `id`, and a `properties` list holding every property of the entry once, in the
+  resolved order (the properties the visualizer lists, then the rest in declaration order), each with
+  its name and its resolved `format` when set;
+- for an alias: its `format`.
+
+An entry for a record, action or component that has no visualizer but has a property with a resolved
+format SHALL carry a `visualizer` value with the formats. When visualizers are asked for, the
+declaration table SHALL also list each alias with a visualizer that types a property of a listed
+declaration, so a reader can read the property's format without another query. A host visualizer
+declaration module the workspace snapshot does not hold SHALL be reported in the answer as missing
+and SHALL NOT fail the query. The `visualizer` values SHALL round-trip through JSON without loss.
+
+#### Scenario: A question with visualizers
+- **WHEN** a client asks with `visualizers` for the source tree of a document that constructs
+  `<SingleChoice … />`, and the survey library declares a visualizer for `Question` with `title=label`
+  and `id=id` and for `SingleChoice` with `icon="list"` and a property visualizer for `allowsOther`
+- **THEN** the entry for `SingleChoice` SHALL carry a `visualizer` value with the title `label`, the id
+  `id`, the id position `start` and the icon `list`
+- **AND** its `properties` SHALL start with `allowsOther` and list every other property of
+  `SingleChoice` once
+
+#### Scenario: The alias a property uses comes along
+- **WHEN** a client asks with `visualizers` and `Choice`'s `tint` property is typed by `Color`, whose
+  visualizer has the format `color`, and no node of the document names `Color`
+- **THEN** the declaration table SHALL hold `Color` with a `visualizer` value with the format `color`
+
+#### Scenario: Without the option nothing changes
+- **WHEN** a client asks for the source tree of the same document without `visualizers`
+- **THEN** no declaration entry SHALL carry a `visualizer` value
+
+#### Scenario: A host module overrides a kind
+- **WHEN** a client asks with `visualizers` naming a host module that declares a visualizer for
+  `SingleChoice` with `icon="list-todo"`
+- **THEN** the entry for `SingleChoice` SHALL carry the icon `list-todo`
+
+#### Scenario: A missing host module
+- **WHEN** a client asks with `visualizers` naming a module identity the snapshot does not hold
+- **THEN** the answer SHALL list that identity as missing and SHALL carry the program's own visualizers
 

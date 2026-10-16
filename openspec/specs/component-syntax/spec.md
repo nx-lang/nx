@@ -284,12 +284,12 @@ declaration.
   component declares
 
 ### Requirement: `Update` is a reserved emitted action name
-A component SHALL NOT declare an inline emitted action named `Update`, `Property` or `State`,
-because `<Component>.State` is its derived state record, and `<Component>.Update` and
-`<Component>.Property` are kept free since they read as a derived update record and property union,
-which a component does not have. Lowering SHALL
-reject such a declaration with a diagnostic that explains the reservation. Referencing a shared
-action named `Update`, `Property` or `State` in `emits` SHALL be rejected for the same reason. A
+A component SHALL NOT declare an inline emitted action named `Update`, `Property`, `State` or
+`Props`, because `<Component>.State` is its derived state record and `<Component>.Props` its derived
+props record, and `<Component>.Update` and `<Component>.Property` are kept free since they read as a
+derived update record and property union, which a component does not have. Lowering SHALL reject
+such a declaration with a diagnostic that explains the reservation. Referencing a shared action
+named `Update`, `Property`, `State` or `Props` in `emits` SHALL be rejected for the same reason. A
 component SHALL NOT declare a state field or prop named `State` either, since inside its body the
 bare name `State` denotes the state record.
 
@@ -320,6 +320,14 @@ bare name `State` denotes the state record.
 #### Scenario: Shared action named Property cannot be emitted
 - **WHEN** a file contains `action Property = { name:string } component <Form emits { Property } /> = { <Panel /> }`
 - **THEN** lowering SHALL reject the emit reference because the qualified name `Form.Property` would collide with the derived property union
+
+#### Scenario: Inline emit named Props is rejected
+- **WHEN** a file contains `component <Form emits { Props { value:string } } /> = { <Panel /> }`
+- **THEN** lowering SHALL reject the emit because `Form.Props` is reserved for the component's props record
+
+#### Scenario: Shared action named Props cannot be emitted
+- **WHEN** a file contains `action Props = { value:string } component <Form emits { Props } /> = { <Panel /> }`
+- **THEN** lowering SHALL reject the emit reference because the qualified name `Form.Props` would collide with the derived props record
 
 ### Requirement: Component signatures accept type parameter definitions
 The parser SHALL accept, inside a component signature, a property definition whose type is the
