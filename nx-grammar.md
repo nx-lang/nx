@@ -346,7 +346,7 @@ VisualizerDefinition ::=
 
 A visualizer declaration tells a viewer, such as a reading view of the source, how to present one
 declaration: `visualizer Choice = <ElementVisualizer title=label />`. The `QualifiedName` is its target, a
-record, action, inline emitted action (`Form.Submitted`), component, constant union, or alias of a
+record, action, inline emitted action (`Form.Submitted`), component, or alias of a
 primitive type that the module can see. The value is built from the records of the `@nx/visualizer`
 standard library, which the module imports.
 

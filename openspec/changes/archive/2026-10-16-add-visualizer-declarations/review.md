@@ -748,3 +748,169 @@ grammar or snippet still uses them; the leftovers are prose only (RF25).
   "union" from the page description. Replace "wording"/"rewords" with "presentation" or "overrides".
 - **Fix:** Reworded the `SourceVisualizer`, `source_tree_with_options` and `attach_visualizers` doc comments (aliases only, title/id/icon/formats); design.md's resolution paragraph, dropped the `name` rationale and its Open Question; tasks 3.3, 4.1, 5.4, 7.5 and the section 6 note; the website page description ("record, action, component or alias") and "wording" to "presentation"; the spec scenario is now "A host module overrides a library". The proposal's motivation keeps "wording" as the original intent.
 - **Verification:** Every place listed in the evidence is reworded, and the text is accurate for the five-type library. A rescan of the change artifacts, the language-service, nx-api and nx-hir sources, the website reference pages and the viewer README finds no remaining mention of union visualizers, cases, heading parts, layouts, labels, phrases or `name`. The remaining hits are the proposal's motivation, kept on purpose as the original intent, and the `rewording` test helper in `visualizer_declarations_tests.rs:541`. That helper now builds icon overrides; its name is a harmless nit. `openspec validate add-visualizer-declarations --strict` passes, and the website code-block check passes (214 blocks, 0 failures).
+
+## New Findings Discovered During 2026-10-15 22:41 Review
+
+**Scope:** the commits since RF22 was verified: 47ace9b (Source and Visual), 49d5f25 (rename to
+visualizer declarations), 9239071, 7f1192e, 67fe892, 5988ad4 and 282737a (folding, chevrons, scroll
+anchoring), 2c3920d (Visual first) and 20d8efe (the cut of `@nx/visualizer` to five types). Read
+against every delta spec, `packages/viewer` (`index.ts`, `source.ts`), `sites/playground`
+(`App.tsx`, `reading/ReadingView.tsx`, examples, README), `crates/nx-hir/src/visualizers.rs`,
+`crates/nx-api/src/program_visualizers.rs`, `crates/nx-language-service` (`visualizers.rs`,
+`source_tree.rs`, tests), `packages/language-protocol`, `nx-grammar.md` and the website pages.  
+**Checks run:** `cargo test --workspace` (pass); `packages/viewer` `pnpm test` (32 pass);
+`sites/playground` `pnpm test` (pass, 23 examples match); website `check-code-blocks.mjs` (214
+blocks, 0 failures); `openspec validate add-visualizer-declarations --strict` (valid); jsdom probes
+of `<nx-viewer>` against the built package; Playwright probes of the playground at `/play/`.
+
+### 🟡 Fixed - RF26 A fold that hides the selection is undone at once, so a reader cannot fold a group holding the selected row, and Collapse all leaves the selection's containers open
+- **Severity:** Medium (confidence: high, reproduced)
+- **Evidence:** `#toggleFold`, `collapseAll` and the `folded` setter all end in `#render`
+  (`packages/viewer/src/index.ts:307-333`), which re-selects the current selection with
+  `#select(selection, false)`. `#select` (`:569-577`) treats any folded unit that holds the selection
+  as "a node folded away" and unfolds it through `#setFolded`, firing `nx-fold` again. So:
+  - jsdom, `folding` fixture: click the row `title` of the `Task` group, then the group's chevron.
+    The group stays open and `folded` is `[]`.
+  - `element.selection = <priority attribute>; element.collapseAll()` leaves `folded` as
+    `[run…, "Task", "label"]`: neither `tasks` nor its group is folded.
+  - Playground, "A full survey": click a row of `QuestionFlow`, then Collapse all. 11 of 12 groups
+    fold; `let screener` and the `QuestionFlow` group stay open.
+  - A host setting `folded` to keys that hide its own `selection` gets something other than "exactly
+    those", against the viewer spec ("setting it SHALL fold exactly those").
+
+  The rule the spec gives, "Selecting a node folded away SHALL unfold what hides it", is about the
+  moment of selecting. It should not fight a fold the reader or host asks for later. The existing test
+  (`test/element.test.ts:426-451`) selects the group itself before `collapseAll()`, and only checks
+  `folded.length >= 3`, so it does not catch this.
+- **Recommendation:** Only unfold what hides a node when that node is newly selected, through
+  `selection` or a click/arrow, and not when `#render` re-applies an existing selection. When a fold
+  hides the selected node, move the selection to the folded unit (as a tree view does) or clear it.
+  Add tests: fold a group whose row is selected; `collapseAll()` with a row selected; set `folded` to
+  keys that hide the selection.
+- **Fix:** `#render` no longer reveals the selection: it re-selects it where it is still drawn, and otherwise selects the folded unit still drawn that holds it, with no event; `#select` takes a `reveal` flag. So a click, `collapseAll` and a host's `folded` all keep their folds. The viewer spec states it, with the scenario "Folding over the selection", and the test "keeps a fold that hides the selection, and selects what holds it" covers all three paths.
+
+### 🟡 Fixed - RF27 An exported element function is counted as a supporting function and folded away; an abstract component ends a run
+- **Severity:** Low (confidence: high, reproduced)
+- **Evidence:** `supportingKind` (`packages/viewer/src/source.ts:106-110`) tells an element function
+  by decoding the node's first 6 bytes and testing `startsWith("let <")`. A declaration with a
+  visibility modifier starts with `export` or `private`, so `export let <Badge label:string /> = …`
+  is counted as "1 function". Probe: `type A`, `type B`, `export let <Badge …/>`, `let v` gives the
+  run `2 types · 1 function`. Without `export`, the same source gives `2 types`. The spec says
+  element functions are not supporting declarations, so they show up in the content. The `external`
+  test on components (`:103-105`) also makes a non-external `abstract component` (no body, nothing to
+  draw) a primary declaration. It splits runs: `type A`, `abstract component <Q/>`, `type B` fold to
+  nothing. The website's survey example writes `export abstract component <Question …/>` in this
+  form.
+- **Recommendation:** Tell an element function from the tree, with a flag or the function's
+  declaration entry, not from its leading bytes. Decide whether an abstract component supports the
+  document, as an external one does, and make the spec's "the components a host draws" say so. Add a
+  case for each to the viewer's folding tests.
+- **Fix:** `supportingKind` treats a component flagged `external` or `abstract` as supporting, and recognizes an element function by `^(?:(?:export|private)\s+)*let\s*<`, so modifiers no longer matter. The new `supporting` fixture and test check `1 type · 2 components` with `export let <Badge>` and `let <Card>` left open; the spec, README and doc comments say "components with no body of their own, external or abstract".
+
+### 🟡 Fixed - RF28 Back and Forward keep the folds of the document left behind, so the new one opens with nothing folded
+- **Severity:** Low (confidence: high, reproduced)
+- **Evidence:** `chooseExample` resets `folded` (`sites/playground/src/App.tsx:124`), but the
+  popstate path (`:86-101`) only calls `setSource`. Playwright: open "A full survey", open its run, so
+  `folded` holds the survey's keys, then press Back. The Hello example opens with
+  `1 type · 1 function` unfolded and `type Greeting` showing, because its keys are not in the
+  survey's set, and the defaults no longer apply once `folded` is a set. A shared link opened over a
+  folded document does the same. The playground spec says what the reader folds is kept across Source
+  and Visual and forgotten when they choose an example. It does not say a different document keeps
+  them.
+- **Recommendation:** Reset `folded` to `undefined` whenever the source is replaced from outside the
+  editor (popstate and the first open), or key the kept folds by source.
+- **Fix:** `App.tsx` resets `folded` to `undefined` whenever the address opens a document, on first load and on Back and Forward, as choosing an example does.
+
+### 🟡 Fixed - RF29 Alt+click folds only the nested units that are drawn, so a group open inside an already-folded one stays open
+- **Severity:** Low (confidence: medium, from reading the code)
+- **Evidence:** A deep fold collects `this.#foldKeys(unit)` from the DOM
+  (`packages/viewer/src/index.ts:389-392`). Units inside a folded child are not rendered, so they are
+  not collected. Take a group with a folded child that holds an open grandchild: Alt+click on the
+  outer group folds it and the child, and the grandchild comes back open when they are opened. The
+  spec says an Alt+click SHALL fold "everything inside it as well". `collapseAll` avoids this by
+  rendering everything unfolded first, and the deep fold could do the same. There is no test of
+  Alt+click (`grep altKey packages/viewer/test` finds nothing).
+- **Recommendation:** Collect the inner fold keys from the tree, or from an unfolded render as
+  `collapseAll` does, not from the DOM. Add a test for a deep fold and a deep unfold.
+- **Fix:** A deep fold first draws the unit open, with only the folds outside it kept, then collects every fold key inside it from that drawing, so groups nested in an already-folded unit fold too. The test "folds and opens everything inside a unit on an Alt+click" checks both directions.
+
+### 🟡 Fixed - RF30 "The reading keeps every node" no longer holds once anything is folded, and the spec does not say so
+- **Severity:** Low (confidence: high)
+- **Evidence:** The viewer spec says the element "SHALL render every node of the tree once". With
+  folding, which is on by default, a folded run, declaration or group's rows are not rendered at all.
+  A folded declaration's first line is written as plain text (`source.ts:411-418`), so even the
+  nodes on that line lose their keys. The coverage test calls `renderSource(document, index, [])`
+  with no `folded` (`test/coverage.test.ts:24`), which turns runs and folding off, so it checks only
+  the unfolded reading. The README says the same unqualified "The reading keeps every node".
+- **Recommendation:** Scope the requirement and README to the unfolded reading, for example "with
+  nothing folded, every node SHALL render once", and add a sentence that folded content is not
+  rendered and is reached by selecting it. Alternatively, keep the keyed nodes of a folded
+  declaration's first line.
+- **Fix:** The requirement now reads "With nothing folded, the element SHALL render every node of the tree once…" and adds that folded content is not rendered and is reached by selecting it; the coverage scenario says "with nothing folded". The README says the same.
+
+### 🟡 Fixed - RF31 Stale references to the removed library parts remain in code comments and docs
+- **Severity:** Low (confidence: high)
+- **Evidence:**
+  - `nx-grammar.md:349` still lists "constant union" as a target a visualizer declaration can have.
+  - The website page's front matter (`sites/website/src/content/docs/reference/concepts/visualizer-declarations.md:3`)
+    says a visualizer declaration presents "a record, component, union or alias".
+  - `crates/nx-api/src/program_visualizers.rs:275-280` documents children as "`CaseVisualizer`s
+    of a `UnionVisualizer`" and "a `PropertyVisualizer` or a `CaseVisualizer`".
+  - `crates/nx-language-service/src/source_tree.rs:365` and `:1868` say the table lists "each union
+    and alias with a visualizer", but only aliases are listed now.
+  - `packages/viewer/src/index.ts:96-97` lists the element's properties as "`tree`, `text`, `colors`,
+    `icons` and `selection`" and leaves out `folded`. The README's JSX declaration
+    (`packages/viewer/README.md`, `Pick<NxViewerElement, "tree" | "text" | "colors" | "icons" |
+    "stale" | "selection">`) leaves it out too.
+  - `sites/playground/shots/final.png` (168 KB), added in 47ace9b, is a screenshot that nothing
+    references.
+- **Recommendation:** Update the grammar note, the page description and the four comments; add
+  `folded` to the doc comment and the JSX `Pick`; delete `shots/final.png`, or ignore `shots/`.
+- **Fix:** Dropped "constant union" from `nx-grammar.md`; the page description now says "a record, action, component or alias"; the `program_visualizers.rs` and `source_tree.rs` comments no longer mention case or union visualizers; `folded` is in the `NxViewerElement` doc comment and the README's JSX `Pick`; `sites/playground/shots/final.png` is deleted.
+
+### 🟡 Fixed - RF32 design.md and tasks.md still describe the parts the cut removed
+- **Severity:** Low (confidence: high)
+- **Evidence:**
+  - design.md, Goals: "A lossless reading: a visualizer declaration can move a property into the
+    folded details strip". There is no details strip or `place` now.
+  - design.md, "Resolution happens in the compiler": `properties` carry "resolved label, phrases,
+    format and placement", "For a union it lists every case", and "The table also lists unions and
+    aliases".
+  - design.md, the inheritance paragraph still argues for not inheriting `name` ("A base called
+    'Question' should not make every derived kind read 'Question'…"), and the first Open Question
+    asks about it. `name` is gone.
+  - tasks.md 3.3 rejects "payload unions" (all unions are rejected now); 4.1 says "the eight types"
+    (there are five); the section 6 preface says the card-era parts "stay in the source tree for any
+    reader" (20d8efe removed them from it); 6.5 and 6.6 say "Read view"; 7.5 describes the example as
+    "a small record and union with visualizers" (it has no union visualizer).
+- **Recommendation:** Rewrite those design passages to the five-type library, drop the `name` open
+  question, and correct tasks 3.3, 4.1, the section 6 preface, 6.5, 6.6 and 7.5.
+- **Fix:** Most of this landed in the parallel round's RF25 (5205726, 396aadf), which this rebase keeps. On top of it: design.md drops the details-strip goal, and tasks.md 6.5, 6.6 and the section 6 preface name the reading the Visual view. The viewer spec's changes for RF26, RF27 and RF30 are applied both to the archived delta and to `openspec/specs/viewer/spec.md`.
+
+### 🔴 Open - RF33 The new folding and Visual-first requirements have no tests at the playground level, and several viewer folding rules have none
+- **Severity:** Low (confidence: high)
+- **Evidence:** No playground test checks the following: that Visual is first and the default (spec
+  "Reading an example"); that Collapse all and Expand all appear only in Visual; that folds are kept
+  across Source and Visual and forgotten when an example is chosen. The only playground test of this
+  area is `src/worker/session.test.mjs`, a worker query. In the viewer, nothing tests:
+  - Alt+click (RF29);
+  - that `if` and `for` blocks do not fold;
+  - that setting `folded` to `undefined` goes back to the defaults;
+  - that the chevron is drawn on folded units and on hover;
+  - the scroll anchoring added in 282737a.
+
+  RF26 also shows that the existing fold test misses the selection interplay.
+- **Recommendation:** Add viewer tests for each rule listed. For the playground, add a test of the
+  fold state's lifecycle and the default mode, either as a small React test or a Playwright check like
+  the ones above.
+- **Status:** Partly addressed. Viewer tests now cover Alt+click, `if` and `for` not folding, `folded = undefined` going back to the defaults, the chevron on folded units, the selection interplay (RF26) and the supporting-run rules (RF27). Left open: the playground has no React or DOM test setup, so the Visual-first default, the Collapse/Expand buttons and the fold lifecycle are still checked only in the browser; hover-only chevrons and scroll anchoring need layout, which jsdom does not do. Recommend a Playwright check for the playground once it has a browser test harness.
+
+## Summary (2026-10-15 22:41 review)
+- The rename is complete in code, protocol, tests and docs. The only `viewer`/`…Viewer` names left are
+  the tool's, and the historical sentence in design.md. The cut to five types is consistent between
+  the library, the type checker, resolution, the source tree, the protocol and the website reference.
+  The tests pass and the spec validates.
+- One Medium behavior bug (RF26): a fold that hides the selection is reopened at once, which breaks
+  folding a selected group's container and Collapse all whenever something is selected. The rest are
+  Low: folding classification (RF27), fold state across navigation (RF28), deep fold (RF29), a spec
+  statement folding broke (RF30), stale comments and docs (RF31, RF32), and missing tests (RF33).

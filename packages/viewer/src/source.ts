@@ -101,12 +101,15 @@ function supportingKind(index: TreeIndex, at: number): [string, string] | undefi
     case "action":
       return ["action", "actions"];
     case "component":
-      // A component the host draws is part of a design system; one with a body is the document's.
-      return flags.includes("external") ? ["component", "components"] : undefined;
+      // A component with no body of its own, one the host draws or an abstract base, is part of a
+      // design system; one with a body is the document's.
+      return flags.includes("external") || flags.includes("abstract") ? ["component", "components"] : undefined;
     case "function": {
-      // An element function draws, as a component does, and `root` is what the document returns.
-      const written = new TextDecoder().decode(index.bytes.subarray(node.range.startByte, node.range.startByte + 6));
-      return node.name === "root" || written.startsWith("let <") ? undefined : ["function", "functions"];
+      // An element function (`let <Name …>`, whatever modifiers come before it) is used as a
+      // component is, and `root` is what the document returns.
+      const written = new TextDecoder().decode(index.bytes.subarray(node.range.startByte, node.range.startByte + 48));
+      const element = /^(?:(?:export|private)\s+)*let\s*</.test(written);
+      return node.name === "root" || element ? undefined : ["function", "functions"];
     }
     default:
       return undefined;
@@ -115,8 +118,8 @@ function supportingKind(index: TreeIndex, at: number): [string, string] | undefi
 
 /**
  * The runs of top-level declarations that support the document rather than make it up: imports,
- * types, actions, the components a host draws, visualizer declarations and functions, apart from
- * `root` and element functions. A comment goes with the declaration it is written over, unless a
+ * types, actions, components with no body of their own, visualizer declarations and functions,
+ * apart from `root` and element functions. A comment goes with the declaration it is written over, unless a
  * blank line sets it apart; values, components with bodies and what the document returns end a run.
  */
 export function readingRuns(index: TreeIndex): ReadingRun[] {

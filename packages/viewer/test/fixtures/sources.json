@@ -11,7 +11,7 @@
     "source": "/// A person the survey is about.\ntype User = {\n  id:string\n  /// What to call them.\n  name:string?\n}\n"
   },
   "emoji": {
-    "source": "type Label = { text:string title:string }\n\nlet wave = <Label text=\"😀 hello\" title=\"after\" />\n"
+    "source": "type Label = { text:string title:string }\n\nlet wave = <Label text=\"\ud83d\ude00 hello\" title=\"after\" />\n"
   },
   "tasks": {
     "source": "type Task = {\n  title:string\n  priority:int = 2\n  notes?:string\n}\n\nlet root(): Task+ = {\n  <Task title=\"Ship the site\" priority=1 />\n  <Task title=\"Plan the next release, and then write down every step of it for the whole team\" notes=\"After the site ships\" />\n}\n"
@@ -62,5 +62,11 @@
   "folding": {
     "source": "import \"@nx/visualizer\"\n\ntype Task = {\n  title:string\n  priority:int = 2\n}\ntype Size = small | large\n\nlet label(task:Task): string = {\n  task.title\n}\n\nvisualizer Task = <ElementVisualizer title=title />\n\nlet tasks:Task+ = {\n  <Task\n    title=\"Ship the site\"\n    priority=1\n  />\n}\n",
     "visualizers": []
+  },
+  "supporting": {
+    "source": "type Task = { title:string }\nabstract component <Base label:string />\nexternal component <Button extends Base />\nexport let <Badge label:string />: string = {\n  label\n}\nlet <Card title:string /> = {\n  <Button label=title />\n}\nlet tasks:Task+ = {\n  <Task title=\"Ship\" />\n}\n"
+  },
+  "nesting": {
+    "source": "type Item = { name:string }\ntype Panel = { title:string content items:Item+ }\n\nlet root(wide:bool) =\n  <Panel title=\"outer\">\n    <Panel title=\"inner\">\n      <Item name=\"a\" />\n    </Panel>\n    if wide {\n      <Item name=\"b\" />\n    }\n  </Panel>\n"
   }
 }

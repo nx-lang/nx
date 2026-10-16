@@ -33,12 +33,14 @@ registry the host chooses.
 - **THEN** the element SHALL mute its reading and mark it out of date, and selection SHALL still work
 
 ### Requirement: The reading keeps every node
-The element SHALL render every node of the tree once, and the rendering of each node SHALL carry the
-node's key. Offsets into the text SHALL be taken from each range's UTF-8 byte offsets, so text after a
+With nothing folded, the element SHALL render every node of the tree once, and the rendering of each
+node SHALL carry the node's key. What is folded SHALL NOT be rendered; selecting a node folded away
+reaches it. Offsets into the text SHALL be taken from each range's UTF-8 byte offsets, so text after a
 character outside the basic multilingual plane is cut where it begins.
 
 #### Scenario: Coverage over the repository
-- **WHEN** the viewer's coverage test renders the source tree of every `.nx` file in the repository
+- **WHEN** the viewer's coverage test renders the source tree of every `.nx` file in the repository,
+  with nothing folded
 - **THEN** the key of every node SHALL appear in the rendering exactly once
 
 #### Scenario: Text after an emoji
@@ -196,8 +198,9 @@ of it, in colors a host sets through `--nx-viewer-selection`, `--nx-viewer-selec
 An element read as a group and a top-level declaration written over several lines SHALL each fold:
 a group to its header, followed by its title's value when its visualizer names a title and otherwise
 by how many properties and items it hides, cut to one line; a declaration to its first line. A run of
-top-level declarations that support the document (imports, types, actions, the components a host
-draws, visualizer declarations, and functions other than `root` and element functions), with the
+top-level declarations that support the document (imports, types, actions, components with no body
+of their own, external or abstract, visualizer declarations, and functions other than `root` and
+element functions, whatever modifiers they are written with), with the
 comments written over them, SHALL fold to one line saying what it holds, such as `6 types · 2
 visualizers`. A fold control SHALL hang to the left of each such unit, so folding moves nothing; it
 SHALL show while the pointer is over the reading and always on what is folded. Clicking it SHALL fold
@@ -207,7 +210,9 @@ Until the host or the reader folds anything, each run and each declaration in it
 everything else open, so the document's content comes first; `folded` SHALL hold the keys of what is
 folded, setting it SHALL fold exactly those, and setting `undefined` SHALL go back to the defaults.
 `collapseAll` and `expandAll` SHALL fold and unfold everything. Each change the reader makes SHALL
-fire `nx-fold` with the keys folded. Selecting a node folded away SHALL unfold what hides it. `if` and
+fire `nx-fold` with the keys folded. Selecting a node folded away SHALL unfold what hides it; folding a unit
+that holds the selection, by the reader, `collapseAll` or the host, SHALL keep it folded and select
+the outermost folded unit still drawn that holds the selection. `if` and
 `for` blocks SHALL NOT fold.
 
 #### Scenario: Supporting declarations come folded
@@ -228,4 +233,8 @@ fire `nx-fold` with the keys folded. Selecting a node folded away SHALL unfold w
 #### Scenario: Selecting into a fold
 - **WHEN** the host selects a property of a folded group
 - **THEN** the group SHALL unfold and the property SHALL be selected
+
+#### Scenario: Folding over the selection
+- **WHEN** a row of a group is selected and the reader folds the group
+- **THEN** the group SHALL stay folded and SHALL be selected
 

@@ -45,15 +45,15 @@
 
 The viewer first read `visualizer` values on cards (kind names, subtitle, badge and image parts, labels,
 boolean phrases, the details strip, the `row` and `inline` layouts, case labels, the other formats and
-"Viewer for …"). The Read view replaced the cards within this change, and 6.8 removed those parts from the
+"Viewer for …"). The reading (now the Visual view) replaced the cards within this change, and 6.8 removed those parts from the
 library and the source tree.
 
 - [x] 6.1 Replace the cards in `packages/viewer` with a reading of the document's text: code as written in the colors the host gives, an element over several lines as a group with a row to each attribute, an element on one line as its name and properties, every node rendered once with its key
 - [x] 6.2 Read `visualizer` values in the reading: the title alone on an element's line, the id as one quiet token where `idPosition` puts it, the icon the visualizer names or the kind's on an element that starts its line, and the `id` and `color` formats
 - [x] 6.3 Select units of the reading by click and by the arrow keys, draw the selection and the hovered unit as rows, and announce what is selected
 - [x] 6.4 Keep the coverage test passing over the repository's `.nx` files and every fixture, with fixtures for groups, lines, content, ids, icons, colors, text types and comments inside attributes
-- [x] 6.5 Ask for visualizer declarations in the playground's Read view, color it with the editor's themes, set it in Geist and Geist Mono, draw Lucide icons, carry the editor's cursor into Read and the selection back, and add the playground scenarios to its tests
-- [x] 6.6 Add a "Larger examples" topic to the playground (a full survey, a settings screen, an orders dashboard), longer programs for judging the Read view
+- [x] 6.5 Ask for visualizer declarations in the playground's reading (now the Visual view), color it with the editor's themes, set it in Geist and Geist Mono, draw Lucide icons, carry the editor's cursor into the reading and the selection back, and add the playground scenarios to its tests
+- [x] 6.6 Add a "Larger examples" topic to the playground (a full survey, a settings screen, an orders dashboard), longer programs for judging the Visual view
 - [x] 6.7 Fold the reading: groups and multi-line declarations fold, runs of supporting declarations fold to one summary line and start folded, with a hanging chevron, Alt+click, arrow keys, `folded`, `collapseAll`, `expandAll` and `nx-fold`, and Collapse all and Expand all in the playground
 - [x] 6.8 Cut `@nx/visualizer` to what the reading uses: `ElementVisualizer` with `title`, `id`, `idPosition: IdPosition = start` (`start | end`), `icon` and `properties`; `PropertyVisualizer` with `property` and `format`; `ValueVisualizer`; `ValueFormat = id | color`. Unions take no visualizer for now. Update the resolution, the source tree protocol, the examples, the docs and the tests
 

@@ -10,8 +10,9 @@ Code webview alike.
 
 What it shows is the source tree the NX language service answers for a document: `sourceTree(uri)`
 on a language snapshot of [`@nx-lang/sdk-wasm`](../../bindings/wasm/README.md), or the same query
-through any `NxLanguageService`. The reading keeps every node: each node of the tree is rendered once
-and carries its key, so a host can move between the reading and its editor.
+through any `NxLanguageService`. With nothing folded, the reading keeps every node: each node of the
+tree is rendered once and carries its key, so a host can move between the reading and its editor.
+What is folded is not rendered, and selecting a node folded away opens what hides it.
 
 ## A plain page
 
@@ -78,7 +79,7 @@ declare module "react" {
   namespace JSX {
     interface IntrinsicElements {
       "nx-viewer": React.DetailedHTMLProps<React.HTMLAttributes<NxViewerElement>, NxViewerElement> &
-        Partial<Pick<NxViewerElement, "tree" | "text" | "colors" | "icons" | "stale" | "selection">>;
+        Partial<Pick<NxViewerElement, "tree" | "text" | "colors" | "icons" | "folded" | "stale" | "selection">>;
     }
   }
 }
@@ -156,15 +157,15 @@ viewer.icons = (name) => {
 
 A group folds to its header, followed by its title or a count of what it hides, and a declaration
 written over several lines folds to its first line. A run of declarations that support the document
-(imports, types, actions, the components a host draws, visualizer declarations, and functions other
-than `root` and element functions) folds to one line that says what it holds, such as `8 types · 13
+(imports, types, actions, components with no body of their own, external or abstract, visualizer
+declarations, and functions other than `root` and element functions) folds to one line that says what it holds, such as `8 types · 13
 components · 2 visualizers`. Until the host or the reader folds anything, those runs and their
 declarations start folded, so a document opens on its own content. `if` and `for` blocks don't fold.
 
 A chevron hangs left of each unit that folds. It shows while the pointer is over the reading, and
 always on what is folded. A click folds or unfolds; an Alt+click does the same to everything inside.
 With a group selected, the left arrow folds it and the right arrow opens it. Selecting something
-folded away opens what hides it. `collapseAll()` and `expandAll()` fold and open everything, and each
+folded away opens what hides it, and folding what holds the selection keeps it folded and selects it. `collapseAll()` and `expandAll()` fold and open everything, and each
 change fires `nx-fold`, whose `detail.folded` lists the keys folded. A host keeps them in `folded`
 to show the document as the reader left it.
 

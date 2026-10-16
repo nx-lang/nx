@@ -449,4 +449,68 @@ describe("folding", () => {
     element.expandAll();
     assert.deepEqual(element.folded, []);
   });
+
+  it("counts components with no body and leaves element functions open", async () => {
+    const element = show(await fixture("supporting"), true);
+    const source = root(element).querySelector<HTMLElement>(".source")!;
+    assert.equal(source.querySelector(".fold-run")!.textContent!.trim(), "1 type · 2 components");
+    const toggles = [...source.querySelectorAll<HTMLElement>(".fold")].map((toggle) => toggle.dataset["foldKey"]);
+    assert.deepEqual(toggles, ["run:Task", "Badge", "Card", "tasks"], "an exported element function is the document's own");
+  });
+
+  it("folds groups and declarations but not if or for blocks, and draws a folded unit's chevron", async () => {
+    const element = show(await fixture("nesting"));
+    const toggles = (): HTMLElement[] => [...root(element).querySelectorAll<HTMLElement>(".fold")];
+    assert.deepEqual(
+      toggles().map((toggle) => toggle.dataset["foldKey"]),
+      ["run:Item", "root", "root.body", "root.body.items[0]"]
+    );
+    element.folded = ["root.body.items[0]"];
+    const folded = toggles().filter((toggle) => toggle.classList.contains("folded"));
+    assert.deepEqual(
+      folded.map((toggle) => toggle.dataset["foldKey"]),
+      ["root.body.items[0]"],
+      "what is folded shows its chevron"
+    );
+    element.folded = undefined;
+    assert.ok(element.folded.includes("run:Item"), "undefined goes back to the defaults");
+    assert.ok(!element.folded.includes("root.body"));
+  });
+
+  it("folds and opens everything inside a unit on an Alt+click", async () => {
+    const element = show(await fixture("nesting"));
+    const altClick = (key: string): void => {
+      const toggle = [...root(element).querySelectorAll<HTMLElement>(".fold")].find(
+        (candidate) => candidate.dataset["foldKey"] === key
+      )!;
+      toggle.dispatchEvent(new document.defaultView!.MouseEvent("click", { altKey: true, bubbles: true, composed: true }));
+    };
+    altClick("root.body");
+    assert.deepEqual([...element.folded].sort(), ["root.body", "root.body.items[0]"]);
+    altClick("root.body");
+    assert.deepEqual(element.folded, [], "everything inside opens too");
+  });
+
+  it("keeps a fold that hides the selection, and selects what holds it", async () => {
+    const element = show(await fixture("nesting"));
+    const item = "root.body.items[0].items[0]";
+    const groupToggle = (): HTMLElement =>
+      [...root(element).querySelectorAll<HTMLElement>(".fold")].find(
+        (candidate) => candidate.dataset["foldKey"] === "root.body"
+      )!;
+    element.selection = item;
+    groupToggle().click();
+    assert.deepEqual(element.folded, ["root.body"], "a click folds the group over its selected row");
+    assert.equal(element.selection, "root.body");
+    element.expandAll();
+    element.selection = item;
+    element.collapseAll();
+    assert.ok(element.folded.includes("root.body.items[0]"), "collapsing everything keeps it folded");
+    assert.equal(element.selection, "root", "the outermost fold left drawn holds the selection");
+    element.expandAll();
+    element.selection = item;
+    element.folded = ["root.body.items[0]"];
+    assert.deepEqual(element.folded, ["root.body.items[0]"], "a host's folds stay as set");
+    assert.equal(element.selection, "root.body.items[0]");
+  });
 });

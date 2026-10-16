@@ -89,7 +89,9 @@ export function App() {
     const open = () => {
       void openLocation().then((opened) => {
         if (current) {
+          // Another document opens on its own folding, as choosing an example does.
           setSource(opened.source);
+          setFolded(undefined);
           setNotice(opened.notice);
         }
       });

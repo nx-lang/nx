@@ -26,8 +26,6 @@ pick one.
 - Visualizer declarations checked against their targets, so a misspelled property or case is a type error
   and a rename in a library breaks its visualizer declarations loudly.
 - Resolution done once, in the compiler, so every reader of the source tree sees the same result.
-- A lossless reading: a visualizer declaration can move a property into the folded details strip, never
-  hide it.
 - Visualizer declarations a host supplies without the program importing them.
 
 **Non-Goals:**
