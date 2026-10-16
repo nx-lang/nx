@@ -894,7 +894,7 @@ of `<nx-viewer>` against the built package; Playwright probes of the playground 
 - **Fix:** Most of this landed in the parallel round's RF25 (5205726, 396aadf), which this rebase keeps. On top of it: design.md drops the details-strip goal, and tasks.md 6.5, 6.6 and the section 6 preface name the reading the Visual view. The viewer spec's changes for RF26, RF27 and RF30 are applied both to the archived delta and to `openspec/specs/viewer/spec.md`.
 - **Verification:** design.md has no details-strip goal, no union or label/phrase/placement prose and no `name` open question; tasks.md 3.3, 4.1, 6.5, 6.6, 7.5 and the section 6 preface match the five-type library and the Visual view.
 
-### 🔴 Open - RF33 The new folding and Visual-first requirements have no tests at the playground level, and several viewer folding rules have none
+### ✅ Resolved - RF33 The new folding and Visual-first requirements have no tests at the playground level, and several viewer folding rules have none
 - **Severity:** Low (confidence: high)
 - **Evidence:** No playground test checks the following: that Visual is first and the default (spec
   "Reading an example"); that Collapse all and Expand all appear only in Visual; that folds are kept
@@ -912,6 +912,7 @@ of `<nx-viewer>` against the built package; Playwright probes of the playground 
   the ones above.
 - **Status:** Partly addressed. Viewer tests now cover Alt+click, `if` and `for` not folding, `folded = undefined` going back to the defaults, the chevron on folded units, the selection interplay (RF26) and the supporting-run rules (RF27). Left open: the playground has no React or DOM test setup, so the Visual-first default, the Collapse/Expand buttons and the fold lifecycle are still checked only in the browser; hover-only chevrons and scroll anchoring need layout, which jsdom does not do. Recommend a Playwright check for the playground once it has a browser test harness.
 - **Verification:** The viewer half is done. There are new tests for Alt+click, `if` and `for` not folding, `folded = undefined` going back to the defaults, the chevron on folded units, the selection interplay and the supporting-run rules. They pass. It stays Open for the playground-level checks, as the status says.
+- **Resolution:** Deferred by Bret on 2026-10-16. The playground-level and layout-dependent checks are recorded in `specs/future.md`, under "The Visual View: What `add-visualizer-declarations` Left For Later".
 
 ## Summary (2026-10-15 22:41 review)
 - The rename is complete in code, protocol, tests and docs. The only `viewer`/`…Viewer` names left are

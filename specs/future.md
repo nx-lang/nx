@@ -953,6 +953,34 @@ guard against, only cost: it needs a step budget, and an LSP hover is markdown, 
 rather than the `<nx-value>` element. It touches `nx-language-service` and every editor host, which
 is why it was left for a change of its own.
 
+## The Visual View: What `add-visualizer-declarations` Left For Later
+
+The playground's NX pane opens on Visual, the `<nx-viewer>` reading of the source
+(`packages/viewer`, spec `openspec/specs/viewer`), with Source second. The viewer's own folding
+rules are tested under jsdom (`packages/viewer/test/element.test.ts`), but the playground around it
+is not.
+
+### Playground tests for Visual and its folds
+
+The playground's tests are `node --test` over its modules, with no React or DOM setup, so nothing
+automated checks the following:
+
+- Visual is the first mode and the one a document opens on.
+- Collapse all and Expand all show only in Visual.
+- Folds are kept while the reader switches to Source and back.
+- Folds are forgotten when an example is chosen or Back or Forward opens another document.
+- A fold that hides or clears the selection updates the playground's `selection`, so Source puts the
+  cursor where Visual shows it.
+
+The viewer has behavior that jsdom cannot check either, because it needs layout:
+
+- Chevrons show only while the pointer is over the reading.
+- Scroll anchoring keeps a unit in place when it folds or opens.
+
+A Playwright check against the dev server, like the browser probes used while building the view,
+would cover both lists (review finding RF33 in
+`openspec/changes/archive/2026-10-16-add-visualizer-declarations/review.md`).
+
 ## The DrawnUI Fiddle: What `add-nx-to-drawnui-fiddle` Left For Later
 
 NX is a language of the DrawnUI fiddle engine (`DrawnUi.FiddleEngine`, the engine behind
