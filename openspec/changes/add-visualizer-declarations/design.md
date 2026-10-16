@@ -63,9 +63,9 @@ file is unchecked.
 ### `Target` is a type parameter that the declaration binds
 
 Each visualizer record has a leading `Target:type` parameter, and fields such as `title?:Target.Property`
-and `of:Target.Property` use it. A visualizer declaration binds `Target` for every `@nx/visualizer`
+and `property:Target.Property` use it. A visualizer declaration binds `Target` for every `@nx/visualizer`
 construction in its value that leaves it unset, so authors write `<ElementVisualizer title=label />` and
-`<PropertyVisualizer of=required … />` without `Target=`. Outside a visualizer declaration the ordinary rule
+`<PropertyVisualizer property=required … />` without `Target=`. Outside a visualizer declaration the ordinary rule
 holds: a generic record binds every type parameter explicitly.
 
 That needs one language addition: a generic record's field may be typed `P.Property` for its own type

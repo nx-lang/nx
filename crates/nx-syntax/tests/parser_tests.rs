@@ -265,8 +265,8 @@ fn test_parse_content_remains_identifier_outside_modifier_position() {
 fn test_parse_visualizer_definition() {
     let source = r#"
         type Choice = { value:string label:string }
-        visualizer Choice = <ElementVisualizer title=label><PropertyVisualizer of=value /></ElementVisualizer>
-        visualizer ui.Question = <ElementVisualizer name="Question" />
+        visualizer Choice = <ElementVisualizer title=label><PropertyVisualizer property=value /></ElementVisualizer>
+        visualizer ui.Question = <ElementVisualizer icon="circle-help" />
     "#;
     let result = parse_str(source, "visualizer.nx");
 

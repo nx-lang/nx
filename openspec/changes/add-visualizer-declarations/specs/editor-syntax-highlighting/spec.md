@@ -7,7 +7,7 @@ scope the value as any other right-hand side. `visualizer` in any other position
 the same position gives any other name.
 
 #### Scenario: A visualizer declaration
-- **WHEN** a file contains `visualizer SingleChoice = <ElementVisualizer name="Single choice" />`
+- **WHEN** a file contains `visualizer SingleChoice = <ElementVisualizer icon="circle-dot" />`
 - **THEN** `visualizer` SHALL be scoped `keyword.declaration.visualizer.nx`
 - **AND** `SingleChoice` SHALL be scoped `entity.name.type.nx`
 - **AND** `ElementVisualizer` SHALL be scoped as an element tag, as in any other value

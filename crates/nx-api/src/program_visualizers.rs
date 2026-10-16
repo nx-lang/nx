@@ -272,12 +272,11 @@ pub struct VisualizerValue {
     pub record: VisualizerRecord,
     /// The attributes, in source order.
     pub attributes: Vec<(String, VisualizerAttribute)>,
-    /// The `PropertyVisualizer`s of an `ElementVisualizer`, or the `CaseVisualizer`s of a
-    /// `UnionVisualizer`, in source order.
+    /// The `PropertyVisualizer`s of an `ElementVisualizer`, in source order.
     pub children: Vec<VisualizerChild>,
 }
 
-/// One child visualizer record: a `PropertyVisualizer` or a `CaseVisualizer`.
+/// One child visualizer record: a `PropertyVisualizer`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VisualizerChild {
     /// The attributes, in source order.
