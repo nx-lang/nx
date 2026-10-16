@@ -163,6 +163,9 @@ fn classify(
                 ..element("component", &component.name)
             })
         }
+        Item::Union(union_def) if union_def.property_target().is_some() => {
+            not_allowed("it is a derived property union")
+        }
         Item::Union(_) => not_allowed("it is a union, and unions cannot have visualizers yet"),
         Item::TypeAlias(alias) => match &alias.ty {
             ast::TypeRef::Name(name) if is_primitive_type_name(name.as_str()) => Ok(VisualizerTarget {

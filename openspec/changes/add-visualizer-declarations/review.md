@@ -644,3 +644,104 @@ website's visualizer-declarations and `@nx/visualizer` pages.
   deleted modules or tests.
 - **Verification:** I put a stale `dist/test/stale.test.js` and `dist/src/render.js` into `dist` and ran `pnpm
   run build`; both were gone afterwards. `test` and `prepack` build through it.
+
+## New Findings Discovered During 2026-10-16 01:56 Review
+
+**Scope of this pass:** the cut of `@nx/visualizer` from nine types to five in 20d8efe and 5205726
+(`git diff 2c3920d..HEAD`), weighted over the rest of the change.  
+**Reviewed artifacts:** proposal.md, design.md, tasks.md, specs/visualizer-library,
+specs/visualizer-declarations, specs/source-tree, specs/editor-syntax-highlighting, specs/viewer,
+specs/playground, specs/cli-code-generation.  
+**Reviewed code:** `crates/nx-api/src/std/visualizer/visualizer.nx`, `crates/nx-api/src/program_visualizers.rs`,
+`crates/nx-api/src/visualizer_declarations_tests.rs`, `crates/nx-hir/src/visualizers.rs`,
+`crates/nx-types/src/infer.rs` (visualizer parts), `crates/nx-language-service/src/{source_tree,visualizers,lib}.rs`
+and `source_tree_tests.rs`, `crates/nx-cli/src/main.rs`, `crates/nx-codegen/src/ir_runtime_tests.rs`,
+`crates/nx-syntax/tests/parser_tests.rs`, `packages/language-protocol`, `packages/viewer` (`source.ts`, README,
+fixtures), `packages/language-http` test, `bindings/node/src/index.ts`, `bindings/wasm/test/parity.test.ts`,
+the playground examples and `session.test.mjs`, the website's visualizer-declarations, `@nx/visualizer` and
+modules pages, `nx-grammar.md`, and the VS Code grammar test. I searched the whole repository (outside
+`openspec/changes/archive`) for `UnionVisualizer`, `CaseVisualizer`, `ElementLayout`, `Placement`,
+`whenTrue`/`whenFalse`, `SourceCaseVisualizer`, `SourceVisualizerLayout`, `beginning`, `of=`, `name=`,
+`subtitle=`, `badge=`, `image=`, `layout=`, `place=` and the removed formats. No code, binding, test, example,
+grammar or snippet still uses them; the leftovers are prose only (RF25).  
+**Checks run:**
+- `pnpm -r build`: all packages build (the checked-out `language-protocol` dist was stale until then).
+- `cargo test -p nx-api -p nx-language-service -p nx-hir -p nx-types -p nx-syntax -p nx-cli` and the
+  codegen visualizer test: all pass. `cargo fmt --all --check` and `cargo clippy --all-targets` on the
+  changed crates: clean.
+- Package tests: `packages/viewer` 32/32, `language-protocol` 4/4, `language-http` 21/21, playground 121/121
+  plus `check-examples` (23/23), `src/vscode` 287 passing. `bindings/wasm`: 124/125, and the one failure is the
+  known `recursion-stack` test.
+- `sites/website` `check-code-blocks`: 214 blocks, 0 failures, after the wasm SDK was rebuilt.
+- `openspec validate add-visualizer-declarations --strict`: valid.
+- `nxlang typegen @nx/visualizer` for TypeScript and C#: both generate (C# warns that the `idPosition`
+  default is omitted, as it did before for `beginning`, `card` and `body`).
+- CLI probes: the old spellings (`of=`, `name=`, `layout=`, `idPosition=beginning`, `format=image`) each get a
+  clear diagnostic, and a union target with an `ElementVisualizer` holding a `PropertyVisualizer`, or with a
+  `ValueVisualizer`, gets exactly one diagnostic. Every Lucide icon name in the examples and docs exists in
+  the installed `lucide`.
+
+### 🟡 Fixed - RF23 No test covers a `PropertyVisualizer`'s format overriding its alias's format any more
+- **Severity:** Low (confidence: high)
+- **Evidence:** The spec scenario "A property visualizer overrides its type's format"
+  (`specs/visualizer-declarations/spec.md`, last scenario) has no test. Before the cut,
+  `a_host_module_rewords_a_kind_and_merges_property_visualizers` covered this path. `ImageUrl` had
+  `<ValueVisualizer format=image />`, and the host's `<PropertyVisualizer of=imageUrl format=url />` had to win.
+  The cut removed `visualizer ImageUrl` from `SURVEY` (`crates/nx-language-service/src/source_tree_tests.rs:1408-1424`).
+  So the rewritten test (`a_host_module_overrides_and_merges_property_visualizers`, `:1636-1656`) only gives a
+  format to a property that had none. Only `tint` has an alias format (`color`), and nothing overrides it. In
+  the other tests, every `format=` on a `PropertyVisualizer` names a property whose type has no visualizer. The
+  `merged.get("format").or_else(|| type_format(...))` precedence in `element_visualizer`
+  (`source_tree.rs:1942-1949`) is therefore unguarded. A swapped order would still pass every test. The
+  behavior is correct today. A probe through the Node SDK with `tint?:Color`, `visualizer Color =
+  <ValueVisualizer format=color />` and `<PropertyVisualizer property=tint format=id />` resolves `tint` to
+  `id`. The cut also dropped the guard assertion that RF7's fix added: the old test checked that no node names
+  the alias. `an_alias_formats_every_property_that_uses_it` (`:1594-1601`) states that in a comment but no longer
+  asserts it.
+- **Recommendation:** In the host test, override `tint`, e.g. `<PropertyVisualizer property=tint format=id />`,
+  and assert `format_of(choice, "tint") == Some("id")`. Restore the
+  `!tree.nodes.iter().any(|node| … name == "Color")` guard in `an_alias_formats_every_property_that_uses_it`.
+- **Fix:** The host in `a_host_module_overrides_and_merges_property_visualizers` now also sets `<PropertyVisualizer property=tint format=id />` and the test asserts `tint` resolves to `id` over its alias's `color`; swapping the precedence in `element_visualizer` makes it fail (checked). `an_alias_formats_every_property_that_uses_it` again asserts that no node names `Color`.
+
+### 🟡 Fixed - RF24 A `T.Property` target is now told "it is a union, and unions cannot have visualizers yet"
+- **Severity:** Low (confidence: high)
+- **Evidence:** `classify` (`crates/nx-hir/src/visualizers.rs:166`) folds every union into one arm. Before
+  the cut, a derived property union had its own reason, "it is a derived property union". Now
+  `visualizer User.Property = <ElementVisualizer />` reports
+  `'User.Property' cannot have a visualizer: it is a union, and unions cannot have visualizers yet`
+  (reproduced with `nxlang run`). The spec (`specs/visualizer-declarations/spec.md`, "A visualizer declaration's
+  target decides its visualizer record") and the website list `T.Property` among the derived declarations,
+  which are rejected for good. The word "yet" tells the author it will work once unions do.
+  `a_derived_declaration_is_not_a_target` (`crates/nx-api/src/visualizer_declarations_tests.rs:297-316`)
+  checks only the code and the "cannot have a visualizer" prefix, so it did not notice.
+- **Recommendation:** Restore the check before the union arm:
+  `Item::Union(union_def) if union_def.property_target().is_some() => not_allowed("it is a derived property union")`.
+  Extend the test to assert the reason for `User.Property`.
+- **Fix:** `classify` again reports "it is a derived property union" before the general union arm. `a_derived_declaration_is_not_a_target` now asserts each target's full reason, including `User.Property` and `Card.Props.Property`.
+
+### 🟡 Fixed - RF25 Prose about the removed features remains in doc comments, the design, tasks and the website
+- **Severity:** Low (confidence: high)
+- **Evidence:** The library and the code are clean, but these statements now describe things that no
+  longer exist, or are false:
+  - `crates/nx-language-service/src/source_tree.rs:259-261`: `SourceVisualizer` "holds the heading parts, the
+    layout … for a union, every case once".
+  - `source_tree.rs:365-366` (`source_tree_with_options`) and `:1868-1869` (`attach_visualizers`): the table
+    "lists each union and alias with a visualizer". Only aliases are listed now.
+  - `design.md:121-123`: the `properties` list carries the "resolved label, phrases, format and placement", and
+    "For a union it lists every case". `design.md:129-132` still argues for not inheriting `name` ("A base
+    called 'Question' …, which is the default default"), now about a field that is gone. `design.md:200-201`
+    keeps the Open Question "Is a base's `name` not being inherited the right call?", which is moot.
+  - `tasks.md:46-49`: the removed card parts "stay in the source tree for any reader". After 6.8 that is false.
+    `tasks.md` 3.3 says "payload unions" (now every union), 4.1 says "the eight types" (now five), 5.4 says
+    "list unions and aliases with visualizers", and 7.5 says the example has "a small record and union with
+    visualizers". `visualizer-declarations.nx` has no union visualizer.
+  - `sites/website/src/content/docs/reference/concepts/visualizer-declarations.md:3`: the page description
+    says a visualizer declaration presents "a record, component, union or alias". Lines 173 and 189 offer
+    visualizer modules for a team's "own wording", but nothing in the library words anything now. The same
+    goes for the spec scenario "A host module rewords a library" (`specs/visualizer-declarations/spec.md:118`),
+    which now changes an icon.
+- **Recommendation:** Reword these to the five-type library: element visualizers carry title, id, id position,
+  icon and per-property formats, and aliases carry a format. The table lists aliases only. Drop the `name`
+  rationale and its Open Question. Fix tasks 3.3, 4.1, 5.4 and 7.5 and the note at `tasks.md:46-49`. Remove
+  "union" from the page description. Replace "wording"/"rewords" with "presentation" or "overrides".
+- **Fix:** Reworded the `SourceVisualizer`, `source_tree_with_options` and `attach_visualizers` doc comments (aliases only, title/id/icon/formats); design.md's resolution paragraph, dropped the `name` rationale and its Open Question; tasks 3.3, 4.1, 5.4, 7.5 and the section 6 note; the website page description ("record, action, component or alias") and "wording" to "presentation"; the spec scenario is now "A host module overrides a library". The proposal's motivation keeps "wording" as the original intent.

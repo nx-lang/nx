@@ -115,7 +115,7 @@ and its diagnostics SHALL be reported for that module.
 - **WHEN** a library module declares `export type Choice = { label:string }` with `visualizer Choice = <ElementVisualizer title=label />`, and a document imports `Choice` from it
 - **THEN** the document's resolved visualizer for `Choice` SHALL have the title `label`
 
-#### Scenario: A host module rewords a library
+#### Scenario: A host module overrides a library
 - **WHEN** the program's library declares `visualizer SingleChoice = <ElementVisualizer icon="list" />`, and the host names a visualizer module containing `visualizer SingleChoice = <ElementVisualizer icon="list-todo" />`
 - **THEN** the resolved visualizer for `SingleChoice` SHALL have the icon `list-todo`
 

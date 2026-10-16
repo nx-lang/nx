@@ -1597,6 +1597,9 @@ fn an_alias_formats_every_property_that_uses_it() {
     assert_eq!(format_of(choice, "tint"), Some("color"));
     assert_eq!(format_of(choice, "imageUrl"), None);
     // The alias comes along, though no node of the form names it.
+    assert!(!tree.nodes.iter().any(|node| node
+        .declaration
+        .is_some_and(|at| tree.declarations[at as usize].name == "Color")));
     assert_eq!(visualizer(&tree, "Color").format.as_deref(), Some("color"));
 }
 
@@ -1638,7 +1641,10 @@ fn a_host_module_overrides_and_merges_property_visualizers() {
 import "./survey.nx"
 visualizer SingleChoice = <ElementVisualizer icon="list-todo" />
 visualizer Question = <ElementVisualizer><PropertyVisualizer property=label format=id /></ElementVisualizer>
-visualizer Choice = <ElementVisualizer><PropertyVisualizer property=imageUrl format=id /></ElementVisualizer>
+visualizer Choice = <ElementVisualizer>
+  <PropertyVisualizer property=imageUrl format=id />
+  <PropertyVisualizer property=tint format=id />
+</ElementVisualizer>
 "#;
     let snapshot = survey_snapshot(&[("nx://tenant/host.nx", host)]);
     let tree = with_visualizers(&snapshot, &["tenant/host.nx"]);
@@ -1648,10 +1654,10 @@ visualizer Choice = <ElementVisualizer><PropertyVisualizer property=imageUrl for
     // The host adds a property visualizer; the library's stays.
     assert_eq!(format_of(single, "label"), Some("id"));
     assert_eq!(format_of(single, "help"), Some("id"));
-    assert_eq!(
-        format_of(visualizer(&tree, "Choice"), "imageUrl"),
-        Some("id")
-    );
+    let choice = visualizer(&tree, "Choice");
+    assert_eq!(format_of(choice, "imageUrl"), Some("id"));
+    // A property visualizer's format wins over the `color` its alias gives.
+    assert_eq!(format_of(choice, "tint"), Some("id"));
 }
 
 #[test]

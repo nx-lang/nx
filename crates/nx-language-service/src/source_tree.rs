@@ -256,9 +256,9 @@ pub struct SourceDeclaration {
 
 /// A declaration's resolved visualizer.
 ///
-/// <para>For a record, an action or a component it holds the heading parts, the layout and every
-/// property once, in the order to show them; for a union, every case once; for an alias of a
-/// primitive type, the format.</para>
+/// <para>For a record, an action or a component it holds the title, the id and where it reads, the
+/// icon and every property once, with its format; for an alias of a primitive type, the
+/// format.</para>
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceVisualizer {
@@ -362,8 +362,8 @@ impl WorkspaceSnapshot {
     /// Returns the source tree of the requested document, with what `options` asks for besides.
     ///
     /// <para>With `visualizers`, each declaration entry with a resolved visualizer carries it, and
-    /// the table also lists each union and alias with a visualizer that types a listed property, so
-    /// a reader needs no second query. Without it the answer is the plain source tree.</para>
+    /// the table also lists each alias with a visualizer that types a listed property, so a reader
+    /// needs no second query. Without it the answer is the plain source tree.</para>
     pub fn source_tree_with_options(
         &self,
         uri: &DocumentUri,
@@ -1865,8 +1865,8 @@ impl<'a> TreeBuilder<'a> {
     // Visualizers
     // -----------------------------------------------------------------------------------------
 
-    /// Attaches each listed declaration's resolved visualizer, and lists each union and alias with
-    /// a visualizer that types a property of a listed declaration.
+    /// Attaches each listed declaration's resolved visualizer, and lists each alias with a
+    /// visualizer that types a property of a listed declaration.
     fn attach_visualizers(&mut self, visualizers: &ProgramVisualizers) {
         let workspace = Arc::clone(&self.scope.workspace);
         let mut index = 0;

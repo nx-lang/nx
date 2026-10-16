@@ -295,13 +295,13 @@ fn a_target_that_cannot_have_a_visualizer() {
 
 #[test]
 fn a_derived_declaration_is_not_a_target() {
-    for target in [
-        "User.Update",
-        "User.Property",
-        "Card.Props",
-        "Card.Props.Update",
-        "Card.Props.Property",
-        "Card.State",
+    for (target, reason) in [
+        ("User.Update", "it is a derived update record"),
+        ("User.Property", "it is a derived property union"),
+        ("Card.Props", "it is a derived props record"),
+        ("Card.Props.Update", "it is a derived update record"),
+        ("Card.Props.Property", "it is a derived property union"),
+        ("Card.State", "it is a derived state record"),
     ] {
         assert_error(
             &format!(
@@ -310,7 +310,7 @@ fn a_derived_declaration_is_not_a_target() {
                  visualizer {target} = <ElementVisualizer />"
             ),
             Some("visualizer-target-not-allowed"),
-            &[&format!("'{target}' cannot have a visualizer")],
+            &[&format!("'{target}' cannot have a visualizer: {reason}")],
         );
     }
 }

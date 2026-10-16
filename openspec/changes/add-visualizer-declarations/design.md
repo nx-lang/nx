@@ -118,18 +118,15 @@ as on every other record.
 The language service resolves visualizer declarations when a `sourceTree` request carries the `visualizers`
 option. It attaches a `visualizer` value to each declaration entry that has a visualizer, so the viewer reads
 finished data and does no type lookups. For a record, action or component, the value's `properties`
-list holds every property once, in its resolved order, with its resolved label, phrases, format and
-placement. For a union it lists every case; for an alias it gives the format. The table also lists
-unions and aliases that type a listed property, so a reader never needs a second query.
+list holds every property once, in its resolved order, with its resolved format. For an alias the value
+gives the format. The table also lists aliases that type a listed property, so a reader never needs a
+second query.
 
 Resolution order is the proposal's: along inheritance, base first; and at each step, the declaring
 module, then the other modules of the program, then the host's visualizer modules in the order named.
 Later visualizer declarations override attribute by attribute. `PropertyVisualizer`s merge by
 `property`, and the later visualizer declaration's property order comes first. Every attribute is
-inherited. (While `ElementVisualizer` had a `name`, one deviation applied: a base's `name` was not
-inherited.) A base called "Question" should not make every derived kind read "Question". Without
-its own name, a derived kind reads its declaration name split into words, which is the default
-default.
+inherited.
 
 "The program" is the entry module and everything it imports, standard libraries included. A host
 supplies further visualizer modules by identity in the request. They are analyzed like any module, so a
@@ -197,7 +194,5 @@ named `Props`. The `@nx/visualizer` library is new and `unstable`.
 
 ## Open Questions
 
-- **Is a base's `name` not being inherited the right call?** The proposal's example sets `name` on
-  every kind, so it does not settle this.
 - **Should visualizer diagnostics from cross-module duplicates be warnings instead of errors?** An error
   matches the proposal. A warning would let a program build while two libraries disagree.

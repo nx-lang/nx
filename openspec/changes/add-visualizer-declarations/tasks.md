@@ -19,7 +19,7 @@
 
 - [x] 3.1 Add `visualizer_definition` to `crates/nx-syntax/grammar.js` as a module member, with `visualizer` a keyword only in that position; regenerate the parser and update `ast.rs`, `syntax_kind.rs` and the grammar tests
 - [x] 3.2 Lower visualizer declarations in HIR as a separate list on the module, keeping the target path and value; keep them out of the module's items, exports, IR and declaration schema
-- [x] 3.3 Resolve the target and report targets that cannot have a visualizer (functions, values, payload unions, non-primitive aliases, generic and derived declarations)
+- [x] 3.3 Resolve the target and report targets that cannot have a visualizer (functions, values, unions, non-primitive aliases, generic and derived declarations)
 - [x] 3.4 Type-check the value against the visualizer record for the target's kind, binding `Target` for `@nx/visualizer` constructions that leave it unset (the target, or `T.Props` for a component) and rejecting a different explicit `Target`
 - [x] 3.5 Report non-constant visualizer declaration values (braces, references, conditionals, loops, interpolation, calls)
 - [x] 3.6 Report `duplicate-visualizer` for two visualizer declarations of one target in one module
@@ -28,7 +28,7 @@
 
 ## 4. The `@nx/visualizer` library
 
-- [x] 4.1 Write `crates/nx-api/src/std/visualizer/visualizer.nx` with the eight types, a doc comment on every type, field and case, and the `unstable` header
+- [x] 4.1 Write `crates/nx-api/src/std/visualizer/visualizer.nx` with its types (five since 6.8), a doc comment on every type, field and case, and the `unstable` header
 - [x] 4.2 Register the library beside `@nx/agent` so it is importable, can be an implicit import, and generates with `typegen @nx/visualizer`
 - [x] 4.3 Add the library tests from `visualizer-library` (exact exports, no diagnostics, every scenario)
 
@@ -37,7 +37,7 @@
 - [x] 5.1 Gather visualizer declarations for a document's program (entry module, its imports, the standard libraries) and for host visualizer modules named in the request
 - [x] 5.2 Resolve visualizer declarations along inheritance and across sources, merging attributes and `PropertyVisualizer`s by `property`, ordering properties, and resolving formats through aliases as written
 - [x] 5.3 Report cross-module `duplicate-visualizer` on each document whose program loads both visualizer declarations
-- [x] 5.4 Add the `visualizers` option and the `visualizer` values to `crates/nx-language-service/src/source_tree.rs`, list unions and aliases with visualizers that type listed properties, mark visualizer declarations, and report missing host modules
+- [x] 5.4 Add the `visualizers` option and the `visualizer` values to `crates/nx-language-service/src/source_tree.rs`, list aliases with visualizers that type listed properties, mark visualizer declarations, and report missing host modules
 - [x] 5.5 Add the option and types to `@nx-lang/language-protocol`, carry them through the wasm snapshot and `@nx-lang/language-core`, and extend the Rust/TypeScript parity test with a document with visualizer declarations
 - [x] 5.6 Add tests for every scenario in the `source-tree` delta
 
@@ -45,8 +45,8 @@
 
 The viewer first read `visualizer` values on cards (kind names, subtitle, badge and image parts, labels,
 boolean phrases, the details strip, the `row` and `inline` layouts, case labels, the other formats and
-"Viewer for …"). The Read view replaced the cards within this change; those parts stay in the source
-tree for any reader.
+"Viewer for …"). The Read view replaced the cards within this change, and 6.8 removed those parts from the
+library and the source tree.
 
 - [x] 6.1 Replace the cards in `packages/viewer` with a reading of the document's text: code as written in the colors the host gives, an element over several lines as a group with a row to each attribute, an element on one line as its name and properties, every node rendered once with its key
 - [x] 6.2 Read `visualizer` values in the reading: the title alone on an element's line, the id as one quiet token where `idPosition` puts it, the icon the visualizer names or the kind's on an element that starts its line, and the `id` and `color` formats
@@ -63,7 +63,7 @@ tree for any reader.
 - [x] 7.2 Add `visualizer` to `nx-grammar.md` and the website syntax reference, and write a website page on visualizer declarations with the survey example
 - [x] 7.3 Add the `@nx/visualizer` reference page beside the agent library's
 - [x] 7.4 Document `T.Props` beside `T.State` on the website's component pages
-- [x] 7.5 Add a playground example, `visualizer-declarations.nx`, with a small record and union with visualizers, and its expected output
+- [x] 7.5 Add a playground example, `visualizer-declarations.nx`, with a small record and alias with visualizers, and its expected output
 
 ## 8. Verification
 

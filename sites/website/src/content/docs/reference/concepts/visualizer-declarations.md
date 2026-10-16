@@ -1,6 +1,6 @@
 ---
 title: 'Visualizer Declarations'
-description: 'How a visualizer declaration tells a viewer, such as the NX reading view, how to present a record, component, union or alias.'
+description: 'How a visualizer declaration tells a viewer, such as the NX reading view, how to present a record, action, component or alias.'
 ---
 
 A **visualizer declaration** tells a viewer how to present one declaration. A viewer is a tool that
@@ -170,7 +170,7 @@ is written.
 ## Visualizer declarations in another module
 
 A visualizer declaration does not have to sit beside the declaration it describes. The same syntax works
-in any module that can see the target, so a team can write its own wording for a library it does
+in any module that can see the target, so a team can set its own presentation for a library it does
 not own:
 
 ```nx fragment
@@ -186,7 +186,7 @@ The visualizer declarations that apply to a program are those in all of its modu
 every module it imports, directly or through others, and the standard libraries. A visualizer
 declaration in a module the program does not load does not apply.
 
-A host can also supply visualizer modules the program never imports, such as its own wording for
+A host can also supply visualizer modules the program never imports, such as its own presentation for
 libraries its users write against. It names them by module identity in the `visualizers` option of a
 `sourceTree` request, and they are analyzed like any module, so a host visualizer declaration against a
 renamed property fails to type-check:
