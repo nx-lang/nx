@@ -925,7 +925,7 @@ of `<nx-viewer>` against the built package; Playwright probes of the playground 
 
 ## New Findings Discovered During 2026-10-15 23:05 Verification
 
-### 🔴 Open - RF34 Folding a run over the selection clears it silently, rather than selecting the run as the spec says, and the host is not told
+### 🟡 Fixed - RF34 Folding a run over the selection clears it silently, rather than selecting the run as the spec says, and the host is not told
 - **Severity:** Low (confidence: high, reproduced)
 - **Evidence:** The RF26 fix moves a hidden selection to a folded unit only when that unit is in
   `#rendered` (`packages/viewer/src/index.ts:332-338`). A run's fold key (`run:…`) is not a node and
@@ -943,4 +943,4 @@ of `<nx-viewer>` against the built package; Playwright probes of the playground 
   unit), or say in the spec that a fold with no node clears the selection, and fire `nx-select`, or a
   documented clear, so the host can follow. Add the run case to "keeps a fold that hides the
   selection".
-
+- **Fix:** I took the spec route, since a run has no node key to select. A fold that a run hides the selection in clears it, and `NxFoldDetail` now carries `selection`, the selection after the fold (the holder, or `undefined`), so every fold tells the host where the selection is. The playground's `ReadingView` passes it to `onFold`, and `App.tsx` sets its `selection` from it. Both viewer specs (the archived delta and `openspec/specs/viewer/spec.md`) say so, with the scenario "Folding a run over the selection", and so does the README. The test "clears a selection a folded run hides, and tells the host" covers a run click and the `collapseAll` holder case.

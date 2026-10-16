@@ -165,8 +165,9 @@ declarations start folded, so a document opens on its own content. `if` and `for
 A chevron hangs left of each unit that folds. It shows while the pointer is over the reading, and
 always on what is folded. A click folds or unfolds; an Alt+click does the same to everything inside.
 With a group selected, the left arrow folds it and the right arrow opens it. Selecting something
-folded away opens what hides it, and folding what holds the selection keeps it folded and selects it. `collapseAll()` and `expandAll()` fold and open everything, and each
-change fires `nx-fold`, whose `detail.folded` lists the keys folded. A host keeps them in `folded`
+folded away opens what hides it, and folding what holds the selection keeps it folded and selects it (a run, which is not a node,
+clears the selection instead). `collapseAll()` and `expandAll()` fold and open everything, and each
+change fires `nx-fold`, whose `detail.folded` lists the keys folded and `detail.selection` the selection after the fold. A host keeps them in `folded`
 to show the document as the reader left it.
 
 ## Selection

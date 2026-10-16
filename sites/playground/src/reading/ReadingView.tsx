@@ -27,7 +27,8 @@ export interface ReadingViewProps {
   readonly onSelect: (key: string) => void;
   /** The keys of the groups and declarations folded, kept by the host across Source and Visual. */
   readonly folded: readonly string[] | undefined;
-  readonly onFold: (folded: readonly string[]) => void;
+  /** Also hands back the selection, which a fold that hides it moves or clears. */
+  readonly onFold: (folded: readonly string[], selection: string | undefined) => void;
   /** Filled in with what the pane's title bar can ask of the reading. */
   readonly commands: MutableRefObject<ReadingCommands | null>;
 }
@@ -137,7 +138,10 @@ export function ReadingView({ reading, selection, onSelect, folded, onFold, comm
       return;
     }
     const listener = (event: Event) => latestSelect.current((event as CustomEvent<NxSelectDetail>).detail.key);
-    const foldListener = (event: Event) => latestFold.current((event as CustomEvent<NxFoldDetail>).detail.folded);
+    const foldListener = (event: Event) => {
+      const { folded, selection } = (event as CustomEvent<NxFoldDetail>).detail;
+      latestFold.current(folded, selection);
+    };
     target.addEventListener(NX_SELECT_EVENT, listener);
     target.addEventListener(NX_FOLD_EVENT, foldListener);
     return () => {

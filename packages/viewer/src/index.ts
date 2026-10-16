@@ -30,6 +30,11 @@ export const NX_FOLD_EVENT = "nx-fold";
 export interface NxFoldDetail {
   /** The keys of every unit folded now. */
   readonly folded: readonly string[];
+  /**
+   * The selection after the fold: the folded unit that holds it when a fold hid it, or nothing
+   * when the unit that hid it is a run, which is not a node.
+   */
+  readonly selection: string | undefined;
 }
 
 /** What the `nx-select` event carries. */
@@ -379,7 +384,7 @@ export class NxViewerElement extends ElementBase {
   #setFolded(folded: Set<string>): void {
     this.#chosenFolded = folded;
     this.#render();
-    const detail: NxFoldDetail = { folded: [...folded] };
+    const detail: NxFoldDetail = { folded: [...folded], selection: this.#selection };
     this.dispatchEvent(new CustomEvent(NX_FOLD_EVENT, { detail, bubbles: true, composed: true }));
   }
 

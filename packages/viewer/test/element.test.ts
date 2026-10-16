@@ -513,4 +513,19 @@ describe("folding", () => {
     assert.deepEqual(element.folded, ["root.body.items[0]"], "a host's folds stay as set");
     assert.equal(element.selection, "root.body.items[0]");
   });
+
+  it("clears a selection a folded run hides, and tells the host", async () => {
+    const element = show(await fixture("nesting"));
+    const folds: NxFoldDetail[] = [];
+    element.addEventListener(NX_FOLD_EVENT, (event) => folds.push((event as CustomEvent<NxFoldDetail>).detail));
+    element.selection = "Panel";
+    root(element).querySelector<HTMLElement>(".fold-run-head")!.click();
+    assert.ok(element.folded.includes("run:Item"), "the run stays folded");
+    assert.equal(element.selection, undefined);
+    assert.equal(folds.at(-1)!.selection, undefined, "the host hears the selection is gone");
+    element.expandAll();
+    element.selection = "root.body.items[0].items[0]";
+    element.collapseAll();
+    assert.equal(folds.at(-1)!.selection, "root", "a fold that moves the selection says where");
+  });
 });

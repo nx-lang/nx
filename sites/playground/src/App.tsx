@@ -335,7 +335,10 @@ export function App() {
               selection={selection}
               onSelect={setSelection}
               folded={folded}
-              onFold={setFolded}
+              onFold={(keys, kept) => {
+                setFolded(keys);
+                setSelection(kept);
+              }}
               commands={readingCommands}
             />
           )}

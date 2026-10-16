@@ -212,7 +212,8 @@ folded, setting it SHALL fold exactly those, and setting `undefined` SHALL go ba
 `collapseAll` and `expandAll` SHALL fold and unfold everything. Each change the reader makes SHALL
 fire `nx-fold` with the keys folded. Selecting a node folded away SHALL unfold what hides it; folding a unit
 that holds the selection, by the reader, `collapseAll` or the host, SHALL keep it folded and select
-the outermost folded unit still drawn that holds the selection. `if` and
+the outermost folded unit still drawn that holds the selection, or clear the selection when that
+unit is a run, which is not a node. `nx-fold` SHALL carry the selection that results. `if` and
 `for` blocks SHALL NOT fold.
 
 #### Scenario: Supporting declarations come folded
@@ -237,4 +238,8 @@ the outermost folded unit still drawn that holds the selection. `if` and
 #### Scenario: Folding over the selection
 - **WHEN** a row of a group is selected and the reader folds the group
 - **THEN** the group SHALL stay folded and SHALL be selected
+
+#### Scenario: Folding a run over the selection
+- **WHEN** a declaration in a run is selected and the reader folds the run
+- **THEN** the run SHALL stay folded, nothing SHALL be selected, and `nx-fold` SHALL carry no selection
 
