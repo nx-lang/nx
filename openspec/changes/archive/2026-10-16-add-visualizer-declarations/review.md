@@ -763,7 +763,7 @@ against every delta spec, `packages/viewer` (`index.ts`, `source.ts`), `sites/pl
 blocks, 0 failures); `openspec validate add-visualizer-declarations --strict` (valid); jsdom probes
 of `<nx-viewer>` against the built package; Playwright probes of the playground at `/play/`.
 
-### 🟡 Fixed - RF26 A fold that hides the selection is undone at once, so a reader cannot fold a group holding the selected row, and Collapse all leaves the selection's containers open
+### ✅ Verified - RF26 A fold that hides the selection is undone at once, so a reader cannot fold a group holding the selected row, and Collapse all leaves the selection's containers open
 - **Severity:** Medium (confidence: high, reproduced)
 - **Evidence:** `#toggleFold`, `collapseAll` and the `folded` setter all end in `#render`
   (`packages/viewer/src/index.ts:307-333`), which re-selects the current selection with
@@ -788,8 +788,9 @@ of `<nx-viewer>` against the built package; Playwright probes of the playground 
   Add tests: fold a group whose row is selected; `collapseAll()` with a row selected; set `folded` to
   keys that hide the selection.
 - **Fix:** `#render` no longer reveals the selection: it re-selects it where it is still drawn, and otherwise selects the folded unit still drawn that holds it, with no event; `#select` takes a `reveal` flag. So a click, `collapseAll` and a host's `folded` all keep their folds. The viewer spec states it, with the scenario "Folding over the selection", and the test "keeps a fold that hides the selection, and selects what holds it" covers all three paths.
+- **Verification:** `#render` now re-selects with `reveal=false`, and moves a hidden selection to the outermost drawn fold that holds it (`index.ts:324-340`); `#select` reveals only when asked. A jsdom probe on the `folding` fixture: clicking a row and then its group's chevron leaves `folded = ["tasks.value"]` with the group selected (`nx-select` and then `nx-fold`); `collapseAll()` with a row selected keeps every fold. The new test covers a click, `collapseAll` and the host's `folded`, and all 36 viewer tests pass. A fold by a run, which has no node to select, is RF34.
 
-### 🟡 Fixed - RF27 An exported element function is counted as a supporting function and folded away; an abstract component ends a run
+### ✅ Verified - RF27 An exported element function is counted as a supporting function and folded away; an abstract component ends a run
 - **Severity:** Low (confidence: high, reproduced)
 - **Evidence:** `supportingKind` (`packages/viewer/src/source.ts:106-110`) tells an element function
   by decoding the node's first 6 bytes and testing `startsWith("let <")`. A declaration with a
@@ -806,8 +807,9 @@ of `<nx-viewer>` against the built package; Playwright probes of the playground 
   document, as an external one does, and make the spec's "the components a host draws" say so. Add a
   case for each to the viewer's folding tests.
 - **Fix:** `supportingKind` treats a component flagged `external` or `abstract` as supporting, and recognizes an element function by `^(?:(?:export|private)\s+)*let\s*<`, so modifiers no longer matter. The new `supporting` fixture and test check `1 type · 2 components` with `export let <Badge>` and `let <Card>` left open; the spec, README and doc comments say "components with no body of their own, external or abstract".
+- **Verification:** `supportingKind` (`source.ts:103-113`) counts `external` or `abstract` components and matches `^(?:(?:export|private)\s+)*let\s*<` over 48 bytes, which covers both visibility modifiers the grammar has. The `supporting` fixture test checks `1 type · 2 components`, with `export let <Badge>` and `let <Card>` left open, and it passes.
 
-### 🟡 Fixed - RF28 Back and Forward keep the folds of the document left behind, so the new one opens with nothing folded
+### ✅ Verified - RF28 Back and Forward keep the folds of the document left behind, so the new one opens with nothing folded
 - **Severity:** Low (confidence: high, reproduced)
 - **Evidence:** `chooseExample` resets `folded` (`sites/playground/src/App.tsx:124`), but the
   popstate path (`:86-101`) only calls `setSource`. Playwright: open "A full survey", open its run, so
@@ -820,8 +822,9 @@ of `<nx-viewer>` against the built package; Playwright probes of the playground 
 - **Recommendation:** Reset `folded` to `undefined` whenever the source is replaced from outside the
   editor (popstate and the first open), or key the kept folds by source.
 - **Fix:** `App.tsx` resets `folded` to `undefined` whenever the address opens a document, on first load and on Back and Forward, as choosing an example does.
+- **Verification:** `App.tsx` now calls `setFolded(undefined)` when the address opens a document. I re-ran the Playwright probe: opening the survey, opening its run and pressing Back now shows Hello with its own defaults (`run:Greeting` folded).
 
-### 🟡 Fixed - RF29 Alt+click folds only the nested units that are drawn, so a group open inside an already-folded one stays open
+### ✅ Verified - RF29 Alt+click folds only the nested units that are drawn, so a group open inside an already-folded one stays open
 - **Severity:** Low (confidence: medium, from reading the code)
 - **Evidence:** A deep fold collects `this.#foldKeys(unit)` from the DOM
   (`packages/viewer/src/index.ts:389-392`). Units inside a folded child are not rendered, so they are
@@ -833,8 +836,9 @@ of `<nx-viewer>` against the built package; Playwright probes of the playground 
 - **Recommendation:** Collect the inner fold keys from the tree, or from an unfolded render as
   `collapseAll` does, not from the DOM. Add a test for a deep fold and a deep unfold.
 - **Fix:** A deep fold first draws the unit open, with only the folds outside it kept, then collects every fold key inside it from that drawing, so groups nested in an already-folded unit fold too. The test "folds and opens everything inside a unit on an Alt+click" checks both directions.
+- **Verification:** A deep fold now renders the unit fully open, with only the folds outside it kept, and collects every fold key inside it. The new Alt+click test on the `nesting` fixture checks that folding gives `root.body` and `root.body.items[0]`, and that unfolding gives `[]`. It passes.
 
-### 🟡 Fixed - RF30 "The reading keeps every node" no longer holds once anything is folded, and the spec does not say so
+### ✅ Verified - RF30 "The reading keeps every node" no longer holds once anything is folded, and the spec does not say so
 - **Severity:** Low (confidence: high)
 - **Evidence:** The viewer spec says the element "SHALL render every node of the tree once". With
   folding, which is on by default, a folded run, declaration or group's rows are not rendered at all.
@@ -847,8 +851,9 @@ of `<nx-viewer>` against the built package; Playwright probes of the playground 
   rendered and is reached by selecting it. Alternatively, keep the keyed nodes of a folded
   declaration's first line.
 - **Fix:** The requirement now reads "With nothing folded, the element SHALL render every node of the tree once…" and adds that folded content is not rendered and is reached by selecting it; the coverage scenario says "with nothing folded". The README says the same.
+- **Verification:** The requirement and the coverage scenario say "with nothing folded" and add that folded content is not rendered, in both `openspec/specs/viewer/spec.md` and the archived delta; the README says the same.
 
-### 🟡 Fixed - RF31 Stale references to the removed library parts remain in code comments and docs
+### ✅ Verified - RF31 Stale references to the removed library parts remain in code comments and docs
 - **Severity:** Low (confidence: high)
 - **Evidence:**
   - `nx-grammar.md:349` still lists "constant union" as a target a visualizer declaration can have.
@@ -867,8 +872,9 @@ of `<nx-viewer>` against the built package; Playwright probes of the playground 
 - **Recommendation:** Update the grammar note, the page description and the four comments; add
   `folded` to the doc comment and the JSX `Pick`; delete `shots/final.png`, or ignore `shots/`.
 - **Fix:** Dropped "constant union" from `nx-grammar.md`; the page description now says "a record, action, component or alias"; the `program_visualizers.rs` and `source_tree.rs` comments no longer mention case or union visualizers; `folded` is in the `NxViewerElement` doc comment and the README's JSX `Pick`; `sites/playground/shots/final.png` is deleted.
+- **Verification:** `nx-grammar.md:348` no longer lists unions; the page description says "record, action, component or alias"; `program_visualizers.rs` and `source_tree.rs` no longer mention case or union visualizers; `folded` is in the doc comment and in the JSX `Pick`; `sites/playground/shots/` is gone.
 
-### 🟡 Fixed - RF32 design.md and tasks.md still describe the parts the cut removed
+### ✅ Verified - RF32 design.md and tasks.md still describe the parts the cut removed
 - **Severity:** Low (confidence: high)
 - **Evidence:**
   - design.md, Goals: "A lossless reading: a visualizer declaration can move a property into the
@@ -886,6 +892,7 @@ of `<nx-viewer>` against the built package; Playwright probes of the playground 
 - **Recommendation:** Rewrite those design passages to the five-type library, drop the `name` open
   question, and correct tasks 3.3, 4.1, the section 6 preface, 6.5, 6.6 and 7.5.
 - **Fix:** Most of this landed in the parallel round's RF25 (5205726, 396aadf), which this rebase keeps. On top of it: design.md drops the details-strip goal, and tasks.md 6.5, 6.6 and the section 6 preface name the reading the Visual view. The viewer spec's changes for RF26, RF27 and RF30 are applied both to the archived delta and to `openspec/specs/viewer/spec.md`.
+- **Verification:** design.md has no details-strip goal, no union or label/phrase/placement prose and no `name` open question; tasks.md 3.3, 4.1, 6.5, 6.6, 7.5 and the section 6 preface match the five-type library and the Visual view.
 
 ### 🔴 Open - RF33 The new folding and Visual-first requirements have no tests at the playground level, and several viewer folding rules have none
 - **Severity:** Low (confidence: high)
@@ -904,6 +911,7 @@ of `<nx-viewer>` against the built package; Playwright probes of the playground 
   fold state's lifecycle and the default mode, either as a small React test or a Playwright check like
   the ones above.
 - **Status:** Partly addressed. Viewer tests now cover Alt+click, `if` and `for` not folding, `folded = undefined` going back to the defaults, the chevron on folded units, the selection interplay (RF26) and the supporting-run rules (RF27). Left open: the playground has no React or DOM test setup, so the Visual-first default, the Collapse/Expand buttons and the fold lifecycle are still checked only in the browser; hover-only chevrons and scroll anchoring need layout, which jsdom does not do. Recommend a Playwright check for the playground once it has a browser test harness.
+- **Verification:** The viewer half is done. There are new tests for Alt+click, `if` and `for` not folding, `folded = undefined` going back to the defaults, the chevron on folded units, the selection interplay and the supporting-run rules. They pass. It stays Open for the playground-level checks, as the status says.
 
 ## Summary (2026-10-15 22:41 review)
 - The rename is complete in code, protocol, tests and docs. The only `viewer`/`…Viewer` names left are
@@ -914,3 +922,25 @@ of `<nx-viewer>` against the built package; Playwright probes of the playground 
   folding a selected group's container and Collapse all whenever something is selected. The rest are
   Low: folding classification (RF27), fold state across navigation (RF28), deep fold (RF29), a spec
   statement folding broke (RF30), stale comments and docs (RF31, RF32), and missing tests (RF33).
+
+## New Findings Discovered During 2026-10-15 23:05 Verification
+
+### 🔴 Open - RF34 Folding a run over the selection clears it silently, rather than selecting the run as the spec says, and the host is not told
+- **Severity:** Low (confidence: high, reproduced)
+- **Evidence:** The RF26 fix moves a hidden selection to a folded unit only when that unit is in
+  `#rendered` (`packages/viewer/src/index.ts:332-338`). A run's fold key (`run:…`) is not a node and
+  has no `data-key`, so it is never in `#rendered`. jsdom probe, `folding` fixture, with
+  `selection = "Task.priority"`:
+  - clicking the run's chevron gives `folded = ["run:…"]` and `selection = undefined`;
+  - `collapseAll()` gives the same.
+
+  In both cases only `nx-fold` fires, with no `nx-select`. The spec ("folding a unit that holds the
+  selection … SHALL … select the outermost folded unit still drawn that holds the selection") calls
+  for the run to be selected, or at least for the change to be reported. The playground's
+  `selection` state keeps the hidden key. Switching to Source then compares it with
+  `selectedOnEntry` and can put the cursor on a node the reader no longer sees selected.
+- **Recommendation:** Either make a folded run selectable (a key the host can hold, with its head as a
+  unit), or say in the spec that a fold with no node clears the selection, and fire `nx-select`, or a
+  documented clear, so the host can follow. Add the run case to "keeps a fold that hides the
+  selection".
+
