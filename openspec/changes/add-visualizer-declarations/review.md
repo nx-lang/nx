@@ -681,7 +681,7 @@ grammar or snippet still uses them; the leftovers are prose only (RF25).
   `ValueVisualizer`, gets exactly one diagnostic. Every Lucide icon name in the examples and docs exists in
   the installed `lucide`.
 
-### 🟡 Fixed - RF23 No test covers a `PropertyVisualizer`'s format overriding its alias's format any more
+### ✅ Verified - RF23 No test covers a `PropertyVisualizer`'s format overriding its alias's format any more
 - **Severity:** Low (confidence: high)
 - **Evidence:** The spec scenario "A property visualizer overrides its type's format"
   (`specs/visualizer-declarations/spec.md`, last scenario) has no test. Before the cut,
@@ -702,8 +702,9 @@ grammar or snippet still uses them; the leftovers are prose only (RF25).
   and assert `format_of(choice, "tint") == Some("id")`. Restore the
   `!tree.nodes.iter().any(|node| … name == "Color")` guard in `an_alias_formats_every_property_that_uses_it`.
 - **Fix:** The host in `a_host_module_overrides_and_merges_property_visualizers` now also sets `<PropertyVisualizer property=tint format=id />` and the test asserts `tint` resolves to `id` over its alias's `color`; swapping the precedence in `element_visualizer` makes it fail (checked). `an_alias_formats_every_property_that_uses_it` again asserts that no node names `Color`.
+- **Verification:** Both assertions are in place, and `cargo test -p nx-language-service` passes (224). I checked it independently on a scratch copy of the workspace: with `type_format` tried before the property visualizer's `format` in `element_visualizer`, only `a_host_module_overrides_and_merges_property_visualizers` fails, and the fixture-dependent tests that fail in the copy fail with or without the change. The restored guard asserts that no node of the form refers to `Color`, and it passes, so the "alias comes along" assertion is not vacuous.
 
-### 🟡 Fixed - RF24 A `T.Property` target is now told "it is a union, and unions cannot have visualizers yet"
+### ✅ Verified - RF24 A `T.Property` target is now told "it is a union, and unions cannot have visualizers yet"
 - **Severity:** Low (confidence: high)
 - **Evidence:** `classify` (`crates/nx-hir/src/visualizers.rs:166`) folds every union into one arm. Before
   the cut, a derived property union had its own reason, "it is a derived property union". Now
@@ -718,8 +719,9 @@ grammar or snippet still uses them; the leftovers are prose only (RF25).
   `Item::Union(union_def) if union_def.property_target().is_some() => not_allowed("it is a derived property union")`.
   Extend the test to assert the reason for `User.Property`.
 - **Fix:** `classify` again reports "it is a derived property union" before the general union arm. `a_derived_declaration_is_not_a_target` now asserts each target's full reason, including `User.Property` and `Card.Props.Property`.
+- **Verification:** `classify` (`crates/nx-hir/src/visualizers.rs:166-168`) checks `property_target()` before the general union arm. `a_derived_declaration_is_not_a_target` now asserts the full `'<target>' cannot have a visualizer: <reason>` text for all six derived targets. On the scratch copy, removing the new arm makes exactly that test fail. nx-api's 437 lib tests pass, and fmt and clippy are clean.
 
-### 🟡 Fixed - RF25 Prose about the removed features remains in doc comments, the design, tasks and the website
+### ✅ Verified - RF25 Prose about the removed features remains in doc comments, the design, tasks and the website
 - **Severity:** Low (confidence: high)
 - **Evidence:** The library and the code are clean, but these statements now describe things that no
   longer exist, or are false:
@@ -745,3 +747,4 @@ grammar or snippet still uses them; the leftovers are prose only (RF25).
   rationale and its Open Question. Fix tasks 3.3, 4.1, 5.4 and 7.5 and the note at `tasks.md:46-49`. Remove
   "union" from the page description. Replace "wording"/"rewords" with "presentation" or "overrides".
 - **Fix:** Reworded the `SourceVisualizer`, `source_tree_with_options` and `attach_visualizers` doc comments (aliases only, title/id/icon/formats); design.md's resolution paragraph, dropped the `name` rationale and its Open Question; tasks 3.3, 4.1, 5.4, 7.5 and the section 6 note; the website page description ("record, action, component or alias") and "wording" to "presentation"; the spec scenario is now "A host module overrides a library". The proposal's motivation keeps "wording" as the original intent.
+- **Verification:** Every place listed in the evidence is reworded, and the text is accurate for the five-type library. A rescan of the change artifacts, the language-service, nx-api and nx-hir sources, the website reference pages and the viewer README finds no remaining mention of union visualizers, cases, heading parts, layouts, labels, phrases or `name`. The remaining hits are the proposal's motivation, kept on purpose as the original intent, and the `rewording` test helper in `visualizer_declarations_tests.rs:541`. That helper now builds icon overrides; its name is a harmless nit. `openspec validate add-visualizer-declarations --strict` passes, and the website code-block check passes (214 blocks, 0 failures).

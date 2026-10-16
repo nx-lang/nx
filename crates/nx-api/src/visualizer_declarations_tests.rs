@@ -538,7 +538,7 @@ let root(): Card.Props = {{ <Card.Props label=\"Q\" title=\"Hi\" /> }}"
 
 const CHOICE_LIBRARY: (&str, &str) = ("lib.nx", "export type Choice = { label:string }");
 
-fn rewording(icon: &str) -> String {
+fn icon_override(icon: &str) -> String {
     format!(
         "import \"@nx/visualizer\"\nimport {{ Choice }} from \"./lib.nx\"\nvisualizer Choice = <ElementVisualizer icon=\"{icon}\" />\nexport let marker = 1"
     )
@@ -560,8 +560,8 @@ fn duplicates_in(diagnostics: &[NxDiagnostic], file: &str) -> Vec<NxDiagnostic> 
 
 #[test]
 fn two_program_modules_declare_a_visualizer_for_the_same_target() {
-    let a = rewording("A");
-    let b = rewording("B");
+    let a = icon_override("A");
+    let b = icon_override("B");
     let diagnostics = diagnostics(&[
         (
             "main.nx",
@@ -585,8 +585,8 @@ fn two_program_modules_declare_a_visualizer_for_the_same_target() {
 
 #[test]
 fn a_document_holding_one_of_two_duplicates_is_told_at_its_own() {
-    let a = rewording("A");
-    let main = format!("import \"./a.nx\"\n{}", rewording("Main"));
+    let a = icon_override("A");
+    let main = format!("import \"./a.nx\"\n{}", icon_override("Main"));
     let diagnostics = diagnostics(&[("main.nx", &main), ("a.nx", &a), CHOICE_LIBRARY]);
     let main_duplicates = duplicates_in(&diagnostics, "main.nx");
     assert_eq!(main_duplicates.len(), 1, "{diagnostics:#?}");
@@ -602,7 +602,7 @@ fn a_document_holding_one_of_two_duplicates_is_told_at_its_own() {
 
 #[test]
 fn the_declaring_modules_visualizer_never_conflicts() {
-    let a = rewording("A");
+    let a = icon_override("A");
     let diagnostics = diagnostics(&[
         ("main.nx", "import \"./a.nx\"\nlet root() = { 1 }"),
         ("a.nx", &a),
@@ -621,8 +621,8 @@ fn the_declaring_modules_visualizer_never_conflicts() {
 
 #[test]
 fn an_unloaded_modules_visualizer_does_not_count() {
-    let a = rewording("A");
-    let c = rewording("C");
+    let a = icon_override("A");
+    let c = icon_override("C");
     let diagnostics = diagnostics(&[
         ("main.nx", "import \"./a.nx\"\nlet root() = { 1 }"),
         ("a.nx", &a),
