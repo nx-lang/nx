@@ -4,8 +4,9 @@
  * Every example must compile with no diagnostics, and what its `root` prints must equal the
  * `.out.nx` committed beside it. Evaluation goes through `evaluateSource` and the wasm module the
  * site ships, so what is checked is what a visitor sees. Every example must also name a docs page
- * the website builds, and the set must stay between 10 and 20 examples: enough to start from,
- * few enough to stay out of the way.
+ * the website builds, and the short examples must stay between 10 and 20: enough to start from,
+ * few enough to stay out of the way. The larger examples, programs of a realistic size listed last
+ * under their own topic, are not counted.
  *
  * Usage: pnpm run check-examples [--update]
  *
@@ -24,12 +25,14 @@ const update = process.argv.includes("--update");
 
 const MIN_EXAMPLES = 10;
 const MAX_EXAMPLES = 20;
+const LARGER_TOPIC = "Larger examples";
 
 const examples = JSON.parse(readFileSync(join(appRoot, "src/examples/examples.json"), "utf8"));
 const failures = [];
 
-if (examples.length < MIN_EXAMPLES || examples.length > MAX_EXAMPLES) {
-  failures.push(`the set has ${examples.length} examples; keep it between ${MIN_EXAMPLES} and ${MAX_EXAMPLES}`);
+const short = examples.filter((example) => example.topic !== LARGER_TOPIC).length;
+if (short < MIN_EXAMPLES || short > MAX_EXAMPLES) {
+  failures.push(`the set has ${short} short examples; keep it between ${MIN_EXAMPLES} and ${MAX_EXAMPLES}`);
 }
 
 const ids = new Set();

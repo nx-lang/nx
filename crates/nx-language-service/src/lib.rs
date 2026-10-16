@@ -5,10 +5,12 @@ mod positions;
 mod source_tree;
 #[cfg(test)]
 mod source_tree_tests;
+mod visualizers;
 
 pub use source_tree::{
     SourceCase, SourceDeclaration, SourceDeclarationKind, SourceFlag, SourceNode, SourceProperty,
-    SourceRole, SourceTree,
+    SourcePropertyVisualizer, SourceRole, SourceTree, SourceTreeOptions, SourceTreeVisualizers,
+    SourceVisualizer,
 };
 
 use nx_api::{
@@ -314,6 +316,16 @@ impl WorkspaceSnapshot {
         self.by_uri.get(uri).map(|index| &self.documents[*index])
     }
 
+    /// Whether the snapshot holds a document with this NX identity.
+    fn has_identity(&self, identity: &str) -> bool {
+        self.by_identity.contains_key(identity)
+    }
+
+    /// The libraries every query in this snapshot can see.
+    fn build_context(&self) -> &ProgramBuildContext {
+        &self.build_context
+    }
+
     /// Computes editor diagnostics for every submitted document.
     pub fn diagnostics(&self) -> Result<Vec<DocumentDiagnostics>, SnapshotError> {
         Ok(self.diagnostic_report()?.documents)
@@ -616,8 +628,8 @@ impl WorkspaceSnapshot {
         };
         let signature = hover::item_signature(item, declaration.kind, inferred.as_deref());
         // A prelude declaration is a built-in: the same label `Element` carries, over the real
-        // declaration, because an author meeting `Range` needs both — that it is the language's, and
-        // what it holds.
+        // declaration, because an author meeting `Range` needs both — that it is the language's,
+        // and what it holds.
         let mut content = if declaration.origin.0 == nx_hir::PRELUDE_MODULE_IDENTITY {
             hover::fenced(format!(
                 "{}\n{signature}",

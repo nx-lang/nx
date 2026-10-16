@@ -1,0 +1,32 @@
+<Dashboard
+  orders={<Order
+    customer=<Customer city="London" email="ada@example.com" name="Ada Lovelace" returning=true />
+    id="1042"
+    items={<LineItem product="Block plane" quantity=1 unitPrice=89.0 /> <LineItem product="Honing guide" quantity=1 unitPrice=24.5 /> <LineItem product="Sandpaper, 220 grit" quantity=3 unitPrice=6.0 />}
+    note="Leave with the neighbour at number 12."
+    placed="12 Oct"
+    shipping=7.5
+    status=<OrderStatus.shipped carrier="Royal Mail" tracking="RM 4410 2291 7GB" />
+  /> <Order
+    customer=<Customer city="Arlington" email="grace@example.com" name="Grace Hopper" returning=false />
+    id="1043"
+    items={<LineItem product="Marking gauge" quantity=1 unitPrice=32.0 />}
+    placed="12 Oct"
+    shipping=0.0
+    status=paid
+  /> <Order
+    customer=<Customer city="Boston" email="barbara@example.com" name="Barbara Liskov" returning=true />
+    id="1044"
+    items={<LineItem product="Bench chisel set" quantity=1 unitPrice=120.0 /> <LineItem product="Mallet" quantity=1 unitPrice=28.0 />}
+    placed="13 Oct"
+    shipping=9.0
+    status=<OrderStatus.cancelled reason="Paid twice by mistake" />
+  /> <Order
+    customer=<Customer city="London" email="ada@example.com" name="Ada Lovelace" returning=true />
+    id="1045"
+    items={<LineItem product="Dovetail saw" quantity=2 unitPrice=64.0 />}
+    placed="13 Oct"
+    shipping=7.5
+    status=pending
+  />}
+/>

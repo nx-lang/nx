@@ -1,0 +1,61 @@
+// The NX visualizer library: the records a `visualizer` declaration is written with, which tell a
+// viewer how to present a declaration. Import it with `import "@nx/visualizer"`.
+//
+// UNSTABLE. These declarations may change incompatibly in any NX release, including a patch
+// release. See https://nxlang.org/reference/libraries/visualizer.
+//
+// Each record takes the declaration it describes as its type parameter `Target`. Inside a
+// `visualizer` declaration, `Target` is bound for you: write `visualizer Choice =
+// <ElementVisualizer title=label />`, not `<ElementVisualizer Target=Choice ... />`. For a
+// component, `Target` is its props record, so property names are its props.
+
+/// How a viewer presents an element of a record, action or component.
+export type ElementVisualizer = {
+  // The declaration this visualizer describes. Bound by the `visualizer` declaration.
+  Target: type
+  /// The property whose value is the element's title: it reads alone on the element's line, and
+  /// says what a folded element holds.
+  title?: Target.Property
+  /// The property whose value identifies the element: a key that names it and is kept. It reads as
+  /// one quiet token, its value alone, where `idPosition` puts it.
+  id?: Target.Property
+  /// Where the element's id reads.
+  idPosition: IdPosition = start
+  /// The name of the icon that marks the element where it starts, from the Lucide set
+  /// (https://lucide.dev/icons), such as `"list-checks"`. A kind that extends another inherits it.
+  icon?: string
+  /// How individual properties read.
+  content properties?: <PropertyVisualizer Target=Target/>+
+}
+
+/// Where an element's id reads.
+export type IdPosition =
+  /// Right after the element's name.
+  | start
+  /// Last on the element's line, after its other properties.
+  | end
+
+/// How one property of an element reads.
+export type PropertyVisualizer = {
+  // The declaration whose property this describes. Bound by the `visualizer` declaration.
+  Target: type
+  /// The property this describes.
+  property: Target.Property
+  /// How the property's string value is shown.
+  format?: ValueFormat
+}
+
+/// How a viewer presents values of a scalar type.
+export type ValueVisualizer = {
+  // The type this visualizer describes. Bound by the `visualizer` declaration.
+  Target: type
+  /// How a string value of the type is shown.
+  format: ValueFormat
+}
+
+/// How a string value is shown. A format changes how the value looks, never what it is.
+export type ValueFormat =
+  /// As an identifier: a key that names one thing and is kept, such as an id stored in a database.
+  | id
+  /// With a small square of the color it names.
+  | color

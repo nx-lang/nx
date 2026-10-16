@@ -39,16 +39,16 @@ export interface SnapshotLanguageServiceOptions {
   /**
    * Analyzes a document set. Called once per distinct set, and its result is cached and disposed.
    *
-   * <para>The identities of `context.implicitImports` are passed as `implicitImports`, so the factory
-   * hands them to whichever SDK's snapshot it builds.</para>
+   * <para>The identities of `context.implicitImports` are passed as `implicitImports`, so the
+   * factory hands them to whichever SDK's snapshot it builds.</para>
    */
   createSnapshot: (
     documents: readonly LanguageDocument[],
     options: { implicitImports: readonly string[] }
   ) => SnapshotLike;
   /**
-   * The host's own declarations, served with every query: documents that join every query's set, and
-   * the identities every queried document imports implicitly.
+   * The host's own declarations, served with every query: documents that join every query's set,
+   * and the identities every queried document imports implicitly.
    *
    * <para>Nothing is prepended and no position is rewritten, so every position in a query and every
    * range in an answer is in the queried document's own coordinates.</para>
@@ -127,7 +127,12 @@ export function createSnapshotLanguageService(
       return answer("documentSymbols", toAnswerRequest(request, undefined), signal);
     },
     sourceTree(request: SourceTreeRequest, signal?: AbortSignal): Promise<SourceTree> {
-      return answer("sourceTree", toAnswerRequest(request, undefined), signal);
+      const answerRequest = toAnswerRequest(request, undefined);
+      return answer(
+        "sourceTree",
+        request.visualizers === undefined ? answerRequest : { ...answerRequest, visualizers: request.visualizers },
+        signal
+      );
     },
     dispose(): void {
       cache.clear();

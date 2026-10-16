@@ -45,6 +45,10 @@
               {
                 "type": "SYMBOL",
                 "name": "component_definition"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "visualizer_definition"
               }
             ]
           }
@@ -733,6 +737,51 @@
               "type": "BLANK"
             }
           ]
+        },
+        {
+          "type": "STRING",
+          "value": "="
+        },
+        {
+          "type": "FIELD",
+          "name": "value",
+          "content": {
+            "type": "SYMBOL",
+            "name": "rhs_expression"
+          }
+        }
+      ]
+    },
+    "visualizer_definition": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "FIELD",
+              "name": "visibility",
+              "content": {
+                "type": "SYMBOL",
+                "name": "visibility_modifier"
+              }
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "STRING",
+          "value": "visualizer"
+        },
+        {
+          "type": "FIELD",
+          "name": "target",
+          "content": {
+            "type": "SYMBOL",
+            "name": "qualified_name"
+          }
         },
         {
           "type": "STRING",

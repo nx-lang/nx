@@ -1,0 +1,82 @@
+<ChatLinkConfig
+  appearance=<ImmersiveAppearance
+    background=<SolidChatBackground color="#f4e9e7" />
+    brand=<BrandStyle brandColor="#b6695d" font="Inter" onBrandColor="#ffffff" />
+    identity=<ChatIdentity name="Woodworking Research" responseLabel="Research screener" status=none tagline="Hobbyist woodworking study" />
+    questionFlow=<QuestionFlowStyle answerColor="#843f10" questionColor="#2b211e" />
+  />
+  preview=<LinkPreview description="A 3-5 minute screener for hobbyist woodworkers about your projects, your tools, and how you manage them." title="Woodworking research: are you a fit?" />
+  questionFlow=<QuestionFlow
+    completion=<FlowCompletion.end
+      screen=<CompletionScreen body="We’ll review your answers and reach out by email if your experience is a fit for the research." eyebrow="Thank you" headline="Your response has been recorded" />
+    />
+    description="A 3-5 minute screener for hobbyist woodworkers about their projects, tools, and how they manage them between projects."
+    id="woodworking-bullseye-customer-screener"
+    presentation=stepped
+    showProgressBar=true
+    showQuestionNumbers=true
+    steps={<StatementStep body="We’re looking for hobbyist woodworkers to take part in research about their projects, tools, and how people manage them between projects.\n\nThis short survey will help us determine whether your experience is a fit for the research. It should take 3-5 min to complete.\n\nIf selected, we’ll also ask you to complete a brief 5-min phone screen before scheduling the interview. And participants who complete the 60-min research interview will receive a $50 gift card.\n\nThis is research only; there’s no sales pitch or purchase required." cta="Start" eyebrow="Woodworking research" headline="Bullseye Customer screener" id="screener-intro" /> <SelectQuestion
+      carryForwardMode=all
+      choices={<Choice exclusive=false label="It’s primarily a hobby" pinned=false value="primarily-a-hobby" /> <Choice exclusive=false label="It’s a hobby but I occasionally sell my work" pinned=false value="hobby-occasionally-sell" /> <Choice exclusive=false label="It’s part of my profession/business" pinned=false value="profession-or-business" /> <Choice exclusive=false label="I’m learning but haven’t completed my own projects yet" pinned=false value="learning-no-projects-yet" />}
+      id="woodworking-description"
+      label="Which best describes your woodworking?"
+      layout=vertical
+      mediaPosition=top
+      multiple=false
+      other=true
+      otherLabel="Other"
+      required=true
+      requiredMessage="Choose the option that best describes your woodworking."
+    /> <SelectQuestion
+      carryForwardMode=all
+      choices={<Choice exclusive=false label="None" pinned=false value="none" /> <Choice exclusive=false label="1" pinned=false value="1" /> <Choice exclusive=false label="2-4" pinned=false value="2-4" /> <Choice exclusive=false label="5+" pinned=false value="5-plus" />}
+      id="projects-completed-past-year"
+      label="Approx how many woodworking projects have you completed in the past 12 mos?"
+      layout=horizontal
+      mediaPosition=top
+      multiple=false
+      other=false
+      required=true
+      requiredMessage="Choose one option."
+    /> <SelectQuestion
+      carryForwardMode=all
+      choices={<Choice exclusive=false label="Yes, several" pinned=false value="yes-several" /> <Choice exclusive=false label="Yes, one" pinned=false value="yes-one" /> <Choice exclusive=false label="No" pinned=false value="no" /> <Choice exclusive=false label="I’m not sure" pinned=false value="not-sure" />}
+      id="acquired-tools-for-projects"
+      label="Thinking about those projects, did you buy or acquire any tools specifically because you needed them?"
+      layout=vertical
+      mediaPosition=top
+      multiple=false
+      other=true
+      otherLabel="Other"
+      required=true
+      requiredMessage="Choose one option."
+    /> <SelectQuestion
+      carryForwardMode=all
+      choices={<Choice exclusive=false label="I use most of my tools regularly" pinned=false value="use-most-regularly" /> <Choice exclusive=false label="Some of my tools have gone unused for 3+ mos" pinned=false value="unused-3-plus-months" /> <Choice exclusive=false label="Some of my tools have gone unused for 6+ mos" pinned=false value="unused-6-plus-months" /> <Choice exclusive=false label="I’ve lent tools to friends or family" pinned=false value="lent-to-friends-family" /> <Choice exclusive=false label="I’ve sold or tried to sell tools I wasn’t using" pinned=false value="sold-or-tried-to-sell" /> <Choice exclusive=false label="I’ve rented or tried to rent tools out" pinned=false value="rented-or-tried-to-rent-out" /> <Choice exclusive=false label="I’m keeping tools I don’t currently use because I expect to need them again" pinned=false value="keeping-unused-for-later" /> <Choice exclusive=false label="I don’t currently own many woodworking tools" pinned=false value="dont-own-many-tools" />}
+      description="Select all that apply."
+      id="owned-tool-usage"
+      label="Thinking about woodworking tools you currently own, which of these have been true in the last year?"
+      layout=vertical
+      mediaPosition=top
+      multiple=true
+      other=true
+      otherLabel="Other"
+      required=true
+      requiredMessage="Choose at least one option."
+    /> <SelectQuestion
+      carryForwardMode=all
+      choices={<Choice exclusive=false label="Bought it new" pinned=false value="bought-new" /> <Choice exclusive=false label="Bought it used" pinned=false value="bought-used" /> <Choice exclusive=false label="Borrowed it from someone" pinned=false value="borrowed" /> <Choice exclusive=false label="Rented it" pinned=false value="rented" /> <Choice exclusive=false label="Used one at a makerspace, shared shop, or community workshop" pinned=false value="used-shared-shop" /> <Choice exclusive=false label="Used a different tool or did a workaround instead" pinned=false value="workaround" /> <Choice exclusive=false label="Delayed or skipped the project" pinned=false value="delayed-or-skipped" /> <Choice exclusive=true label="I didn’t need any tools I didn’t already own" pinned=false value="did-not-need-any" />}
+      description="Select all that apply."
+      id="needed-tool-not-owned"
+      label="In the last year, when you needed a woodworking tool you didn’t already own, what did you do?"
+      layout=vertical
+      mediaPosition=top
+      multiple=true
+      other=true
+      otherLabel="Other"
+      required=true
+      requiredMessage="Choose at least one option."
+    /> <ShortTextQuestion id="unused-tool-and-price" inputType=text label="Think of one woodworking tool you own that you haven’t used recently. What is it and approximately how much did you pay for it?" maxLength=300 mediaPosition=top minLength=1 placeholder="For example, a benchtop planer, about $400" required=true requiredMessage="Tell us the tool and roughly what you paid." /> <EmailQuestion id="contact-email" label="Your email" mapsToContactEmail=true mediaPosition=top placeholder="you@example.com" required=true requiredMessage="Enter a valid email address." /> <ShortTextQuestion id="contact-name" inputType=text label="First and last name" maxLength=100 mediaPosition=top minLength=1 placeholder="Your name" required=true requiredMessage="Enter your first and last name." /> <ShortTextQuestion id="social-media-profile" inputType=text label="Social media profile where you post some of your work" maxLength=200 mediaPosition=top minLength=1 placeholder="A link or @handle" required=true requiredMessage="Share a profile link or handle." />}
+    title="Bullseye Customer screener"
+  />
+/>

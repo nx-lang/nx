@@ -1,7 +1,7 @@
 {
   "name": "@nx-lang/viewer",
   "version": "0.1.0",
-  "description": "An <nx-viewer> custom element that shows an NX document's source tree as a reading view: cards, sentences and values instead of syntax, with every piece one click from its source. No framework.",
+  "description": "An <nx-viewer> custom element that shows an NX document's source as a reading view: elements read as groups and lines without tags or quotes, code reads as written in the editor's colors, and every piece is one click from its source. No framework.",
   "license": "MIT",
   "homepage": "https://nxlang.org",
   "repository": {
@@ -29,8 +29,9 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "test": "tsc -p tsconfig.json && node --test \"dist/test/**/*.test.js\"",
+    "clean": "node scripts/clean.mjs",
+    "build": "pnpm run clean && tsc -p tsconfig.json",
+    "test": "pnpm run build && node --test \"dist/test/**/*.test.js\"",
     "prepack": "pnpm run build",
     "verify:package": "node ../../scripts/verify-package.mjs"
   },

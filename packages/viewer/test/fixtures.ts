@@ -7,7 +7,13 @@
 import { readFileSync } from "node:fs";
 
 import type { SourceTree } from "@nx-lang/language-protocol";
-import { createNxHost, loadNxModule, type NxHost, type NxLanguageDocumentInput } from "@nx-lang/sdk-wasm";
+import {
+  createNxHost,
+  loadNxModule,
+  type NxHost,
+  type NxLanguageDocumentInput,
+  type SourceTreeOptions
+} from "@nx-lang/sdk-wasm";
 
 /** The repository's root, from `dist/test`. */
 export const repository = new URL("../../../../", import.meta.url);
@@ -21,11 +27,18 @@ export interface Fixture {
 interface Entry {
   readonly files?: readonly string[];
   readonly source?: string;
+  /** Further documents analyzed with the first, by identity. */
+  readonly with?: Readonly<Record<string, string>>;
+  /** The host visualizer modules to resolve visualizers with; visualizers are resolved when this is set. */
+  readonly visualizers?: readonly string[];
 }
 
 const entries = JSON.parse(
   readFileSync(new URL("../../test/fixtures/sources.json", import.meta.url), "utf8")
 ) as Record<string, Entry>;
+
+/** The name of every fixture. */
+export const fixtureNames: readonly string[] = Object.keys(entries);
 
 let host: NxHost | undefined;
 
@@ -35,12 +48,15 @@ export async function nxHost(): Promise<NxHost> {
   return host;
 }
 
-/** The tree of the first of `documents`, analyzed together. */
-export async function treeOf(documents: readonly NxLanguageDocumentInput[]): Promise<Fixture> {
+/** The tree of the first of `documents`, analyzed together, asked for with `options`. */
+export async function treeOf(
+  documents: readonly NxLanguageDocumentInput[],
+  options?: SourceTreeOptions
+): Promise<Fixture> {
   const snapshot = (await nxHost()).createLanguageSnapshot(documents);
   try {
     const first = documents[0]!;
-    return { text: first.source, tree: snapshot.sourceTree(first.uri) };
+    return { text: first.source, tree: snapshot.sourceTree(first.uri, options) };
   } finally {
     snapshot.dispose();
   }
@@ -63,14 +79,24 @@ async function compute(name: string): Promise<Fixture> {
   if (entry === undefined) {
     throw new Error(`No fixture '${name}' in test/fixtures/sources.json.`);
   }
+  const options = entry.visualizers === undefined ? undefined : { visualizers: { modules: [...entry.visualizers] } };
+  const others = Object.entries(entry.with ?? {}).map(([identity, source]) => ({
+    uri: `nx:///${identity}`,
+    identity,
+    source
+  }));
   if (entry.source !== undefined) {
-    return treeOf([{ uri: `nx:///${name}.nx`, identity: `${name}.nx`, source: entry.source }]);
+    return treeOf([{ uri: `nx:///${name}.nx`, identity: `${name}.nx`, source: entry.source }, ...others], options);
   }
   return treeOf(
-    (entry.files ?? []).map((path) => ({
-      uri: `nx:///${path}`,
-      identity: path,
-      source: readFileSync(new URL(path, repository), "utf8")
-    }))
+    [
+      ...(entry.files ?? []).map((path) => ({
+        uri: `nx:///${path}`,
+        identity: path,
+        source: readFileSync(new URL(path, repository), "utf8")
+      })),
+      ...others
+    ],
+    options
   );
 }

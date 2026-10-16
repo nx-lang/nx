@@ -1,0 +1,312 @@
+import "@nx/visualizer"
+
+// A whole survey, written as data: a research screener for hobbyist woodworkers. A host reads this
+// value, shows one step at a time and collects the answers. The types come first, then the
+// visualizer declarations that say how a step reads, then the survey itself.
+
+type QuestionMediaPosition = left | right | top | bottom | background
+type QuestionFlowPresentation = stepped | threaded
+type SelectLayout = vertical | horizontal | columns_2 | columns_3
+type CarryForwardMode = selected | unselected | all
+type ShortTextInputType = text | number | email | url | tel
+type ChatAssistantStatus = ai | human | hybrid | none
+
+/// Text a person reads: a question, a label, a button. It is what a translator translates.
+type uitext = string
+
+/// The address of a picture.
+type ImageUrl = string
+/// A color, as CSS writes one.
+type Color = string
+
+type Choice = {
+  value:string
+  label:uitext
+  description?:uitext
+  pinned:boolean = false
+  exclusive:boolean = false
+}
+
+type CompletionScreen = {
+  eyebrow?:uitext
+  headline:uitext
+  body?:uitext
+}
+
+/// What happens after the last step.
+type FlowCompletion =
+  | continue { screen?:CompletionScreen }
+  | end { screen?:CompletionScreen }
+  | redirect { url:string }
+
+abstract external component <FlowStep id:string />
+
+/// A screen that says something and asks nothing.
+external component <StatementStep extends FlowStep
+  eyebrow?:uitext
+  headline:uitext
+  body?:uitext
+  cta?:uitext
+/>
+
+abstract external component <Question extends FlowStep
+  label:uitext
+  description?:uitext
+  required:boolean = false
+  requiredMessage?:uitext
+  mediaPosition:QuestionMediaPosition = top
+/>
+
+external component <SelectQuestion extends Question
+  choices:Choice+
+  multiple:boolean = false
+  other:boolean = false
+  otherLabel?:uitext
+  layout:SelectLayout = vertical
+  carryForwardMode:CarryForwardMode = all
+/>
+
+external component <ShortTextQuestion extends Question
+  placeholder?:uitext
+  minLength:int = 0
+  maxLength?:int
+  inputType:ShortTextInputType = text
+/>
+
+external component <EmailQuestion extends Question
+  placeholder?:uitext
+  mapsToContactEmail:boolean = false
+/>
+
+external component <QuestionFlow
+  id:string
+  title?:uitext
+  description?:uitext
+  presentation:QuestionFlowPresentation
+  showQuestionNumbers:boolean = true
+  showProgressBar:boolean = true
+  completion?:FlowCompletion
+  content steps:FlowStep+
+/>
+
+type BrandStyle = {
+  brandColor?:Color
+  onBrandColor?:Color
+  font?:string
+}
+
+type QuestionFlowStyle = {
+  questionColor?:Color
+  answerColor?:Color
+}
+
+type ChatIdentity = {
+  name?:uitext
+  tagline?:uitext
+  avatarUrl?:ImageUrl
+  responseLabel?:uitext
+  status?:ChatAssistantStatus
+}
+
+abstract type ChatBackground = { }
+type SolidChatBackground extends ChatBackground = { color:Color }
+
+type ImmersiveAppearance = {
+  identity?:ChatIdentity
+  brand?:BrandStyle
+  questionFlow?:QuestionFlowStyle
+  background?:ChatBackground
+}
+
+/// What the link shows where its URL is posted, before anyone opens it.
+type LinkPreview = {
+  title?:uitext
+  description?:uitext
+  imageUrl?:ImageUrl
+}
+
+type ChatLinkConfig = {
+  appearance?:ImmersiveAppearance
+  questionFlow:QuestionFlow
+  preview?:LinkPreview
+}
+
+visualizer Color = <ValueVisualizer format=color />
+visualizer Choice = <ElementVisualizer title=label id=value idPosition=end icon="circle-dot" />
+visualizer StatementStep = <ElementVisualizer title=headline id=id icon="message-square-text" />
+visualizer Question = <ElementVisualizer title=label id=id icon="circle-question-mark" />
+visualizer SelectQuestion = <ElementVisualizer icon="list-checks" />
+visualizer ShortTextQuestion = <ElementVisualizer icon="text-cursor-input" />
+visualizer EmailQuestion = <ElementVisualizer icon="mail" />
+visualizer QuestionFlow = <ElementVisualizer title=title id=id icon="clipboard-list" />
+visualizer CompletionScreen = <ElementVisualizer title=headline icon="flag" />
+visualizer LinkPreview = <ElementVisualizer title=title icon="link" />
+visualizer ChatIdentity = <ElementVisualizer title=name icon="bot" />
+visualizer ChatLinkConfig = <ElementVisualizer icon="message-circle" />
+visualizer ImmersiveAppearance = <ElementVisualizer icon="palette" />
+
+let screener =
+  <QuestionFlow
+    id="woodworking-bullseye-customer-screener"
+    title="Bullseye Customer screener"
+    description="A 3-5 minute screener for hobbyist woodworkers about their projects, tools, and how they manage them between projects."
+    presentation=stepped
+    completion=<FlowCompletion.end
+      screen=<CompletionScreen
+        eyebrow="Thank you"
+        headline="Your response has been recorded"
+        body="We’ll review your answers and reach out by email if your experience is a fit for the research."
+      />
+    />
+  >
+    <StatementStep
+      id="screener-intro"
+      eyebrow="Woodworking research"
+      headline="Bullseye Customer screener"
+      body="We’re looking for hobbyist woodworkers to take part in research about their projects, tools, and how people manage them between projects.
+
+This short survey will help us determine whether your experience is a fit for the research. It should take 3-5 min to complete.
+
+If selected, we’ll also ask you to complete a brief 5-min phone screen before scheduling the interview. And participants who complete the 60-min research interview will receive a $50 gift card.
+
+This is research only; there’s no sales pitch or purchase required."
+      cta="Start"
+    />
+    <SelectQuestion
+      id="woodworking-description"
+      label="Which best describes your woodworking?"
+      required={true}
+      requiredMessage="Choose the option that best describes your woodworking."
+      choices={
+        <Choice value="primarily-a-hobby" label="It’s primarily a hobby" />
+        <Choice value="hobby-occasionally-sell" label="It’s a hobby but I occasionally sell my work" />
+        <Choice value="profession-or-business" label="It’s part of my profession/business" />
+        <Choice value="learning-no-projects-yet" label="I’m learning but haven’t completed my own projects yet" />
+      }
+      other={true}
+      otherLabel="Other"
+    />
+    <SelectQuestion
+      id="projects-completed-past-year"
+      label="Approx how many woodworking projects have you completed in the past 12 mos?"
+      required={true}
+      requiredMessage="Choose one option."
+      choices={
+        <Choice value="none" label="None" />
+        <Choice value="1" label="1" />
+        <Choice value="2-4" label="2-4" />
+        <Choice value="5-plus" label="5+" />
+      }
+      layout=horizontal
+    />
+    <SelectQuestion
+      id="acquired-tools-for-projects"
+      label="Thinking about those projects, did you buy or acquire any tools specifically because you needed them?"
+      required={true}
+      requiredMessage="Choose one option."
+      choices={
+        <Choice value="yes-several" label="Yes, several" />
+        <Choice value="yes-one" label="Yes, one" />
+        <Choice value="no" label="No" />
+        <Choice value="not-sure" label="I’m not sure" />
+      }
+      other={true}
+      otherLabel="Other"
+    />
+    <SelectQuestion
+      id="owned-tool-usage"
+      label="Thinking about woodworking tools you currently own, which of these have been true in the last year?"
+      description="Select all that apply."
+      required={true}
+      requiredMessage="Choose at least one option."
+      choices={
+        <Choice value="use-most-regularly" label="I use most of my tools regularly" />
+        <Choice value="unused-3-plus-months" label="Some of my tools have gone unused for 3+ mos" />
+        <Choice value="unused-6-plus-months" label="Some of my tools have gone unused for 6+ mos" />
+        <Choice value="lent-to-friends-family" label="I’ve lent tools to friends or family" />
+        <Choice value="sold-or-tried-to-sell" label="I’ve sold or tried to sell tools I wasn’t using" />
+        <Choice value="rented-or-tried-to-rent-out" label="I’ve rented or tried to rent tools out" />
+        <Choice value="keeping-unused-for-later" label="I’m keeping tools I don’t currently use because I expect to need them again" />
+        <Choice value="dont-own-many-tools" label="I don’t currently own many woodworking tools" />
+      }
+      multiple={true}
+      other={true}
+      otherLabel="Other"
+    />
+    <SelectQuestion
+      id="needed-tool-not-owned"
+      label="In the last year, when you needed a woodworking tool you didn’t already own, what did you do?"
+      description="Select all that apply."
+      required={true}
+      requiredMessage="Choose at least one option."
+      choices={
+        <Choice value="bought-new" label="Bought it new" />
+        <Choice value="bought-used" label="Bought it used" />
+        <Choice value="borrowed" label="Borrowed it from someone" />
+        <Choice value="rented" label="Rented it" />
+        <Choice value="used-shared-shop" label="Used one at a makerspace, shared shop, or community workshop" />
+        <Choice value="workaround" label="Used a different tool or did a workaround instead" />
+        <Choice value="delayed-or-skipped" label="Delayed or skipped the project" />
+        <Choice value="did-not-need-any" label="I didn’t need any tools I didn’t already own" exclusive={true} />
+      }
+      multiple={true}
+      other={true}
+      otherLabel="Other"
+    />
+    <ShortTextQuestion
+      id="unused-tool-and-price"
+      label="Think of one woodworking tool you own that you haven’t used recently. What is it and approximately how much did you pay for it?"
+      required={true}
+      requiredMessage="Tell us the tool and roughly what you paid."
+      placeholder="For example, a benchtop planer, about $400"
+      minLength=1
+      maxLength=300
+    />
+    <EmailQuestion
+      id="contact-email"
+      label="Your email"
+      required={true}
+      requiredMessage="Enter a valid email address."
+      placeholder="you@example.com"
+      mapsToContactEmail={true}
+    />
+    <ShortTextQuestion
+      id="contact-name"
+      label="First and last name"
+      required={true}
+      requiredMessage="Enter your first and last name."
+      placeholder="Your name"
+      minLength=1
+      maxLength=100
+    />
+    <ShortTextQuestion
+      id="social-media-profile"
+      label="Social media profile where you post some of your work"
+      required={true}
+      requiredMessage="Share a profile link or handle."
+      placeholder="A link or @handle"
+      minLength=1
+      maxLength=200
+    />
+  </QuestionFlow>
+
+let root(): ChatLinkConfig = {
+  <ChatLinkConfig
+    appearance=<ImmersiveAppearance
+      brand=<BrandStyle brandColor="#b6695d" onBrandColor="#ffffff" font="Inter" />
+      questionFlow=<QuestionFlowStyle questionColor="#2b211e" answerColor="#843f10" />
+      identity=<ChatIdentity
+        name="Woodworking Research"
+        tagline="Hobbyist woodworking study"
+        responseLabel="Research screener"
+        status=none
+      />
+      background=<SolidChatBackground color="#f4e9e7" />
+    />
+    questionFlow={screener}
+    preview=<LinkPreview
+      title="Woodworking research: are you a fit?"
+      description="A 3-5 minute screener for hobbyist woodworkers about your projects, your tools, and how you manage them."
+    />
+  />
+}

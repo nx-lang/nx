@@ -10,6 +10,8 @@ files contribute declarations recursively. For the full grammar, see
 ## File Layout
 - Imports appear at the top of the file and pull in declarations from library directories.
 - Local declarations use `let`, `type`, `action`, or `component`.
+- A `visualizer` declaration says how a viewer presents one of those declarations. See
+  [Visualizer declarations](#visualizer-declarations).
 - A module may export a root element directly or expose named bindings.
 
 ```nx fragment
@@ -105,9 +107,35 @@ let assistant = <Agent name="support">Be brief.</Agent>
 | Library | Stability | What it holds |
 | --- | --- | --- |
 | [`@nx/agent`](/reference/libraries/agent) | unstable | Types for declaring an AI agent, its documents and its tools |
+| [`@nx/visualizer`](/reference/libraries/visualizer) | unstable | Records for `visualizer` declarations, which say how a viewer presents a declaration |
 
 An **unstable** library may change incompatibly in any NX release, including a patch release. A
 **stable** one changes incompatibly only in a release whose version marks a breaking change.
+
+## Visualizer declarations
+A module can also hold **visualizer declarations**, written `visualizer Target = Value`. Each one tells a
+viewer, such as the reading view of a source file, how to present one declaration: which property
+is an element's title, which one identifies it, and what icon marks it. The value is built
+from the records of [`@nx/visualizer`](/reference/libraries/visualizer):
+
+```nx
+import "@nx/visualizer"
+
+type Choice = { value:string label:string description?:string }
+
+visualizer Choice = <ElementVisualizer title=label id=value idPosition=end />
+```
+
+- `visualizer` is a keyword only as the first token of a module member. A prop, field, binding or
+  function named `visualizer` keeps working.
+- A visualizer declaration declares no name and takes no visibility modifier. It applies wherever its
+  module is loaded, without being exported or imported.
+- It can sit beside the declaration it describes or in any module that can see it, with the same
+  syntax in both places.
+- It runs nothing: it does not reach NX IR, generated code or a declaration schema.
+
+See [Visualizer Declarations](/reference/concepts/visualizer-declarations) for what a visualizer declaration can
+say and how visualizer declarations from several modules combine.
 
 ## Root Elements
 - A root element at the end of the file behaves like `main`. Tooling can render it immediately or expose it as the module default.

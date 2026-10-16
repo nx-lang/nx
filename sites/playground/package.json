@@ -13,6 +13,8 @@
     "check-examples": "node --no-warnings --experimental-transform-types scripts/check-examples.mjs"
   },
   "dependencies": {
+    "@fontsource/geist": "^5.3.0",
+    "@fontsource/geist-mono": "^5.3.0",
     "@nx-lang/ir-runtime": "workspace:*",
     "@nx-lang/language": "file:../../src/vscode",
     "@nx-lang/language-core": "workspace:*",
@@ -23,6 +25,7 @@
     "@nx-lang/value-view": "workspace:*",
     "@nx-lang/viewer": "workspace:*",
     "@shikijs/monaco": "^4.4.3",
+    "lucide": "^1.57.0",
     "monaco-editor": "^0.56.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

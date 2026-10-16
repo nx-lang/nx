@@ -1,0 +1,23 @@
+import "@nx/visualizer"
+
+// Visualizer declarations say how a reader sees a type, not what it is.
+// Switch to Visual to see the reading follow them.
+
+type Size = small | medium | large
+type Swatch = string
+
+type Drink = {
+  code:string
+  name:string
+  size:Size = medium
+  iced:boolean = false
+  color?:Swatch
+}
+
+visualizer Swatch = <ValueVisualizer format=color />
+visualizer Drink = <ElementVisualizer title=name id=code idPosition=end icon="coffee" />
+
+let root(): Drink+ = {
+  <Drink code="LAT" name="Latte" />
+  <Drink code="CBR" name="Cold brew" size=large iced={true} color="#5a3a22" />
+}

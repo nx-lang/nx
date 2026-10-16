@@ -28,8 +28,13 @@
     sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
   --sl-font-system-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
     monospace;
-  --pane-background: #0d1117; /* github-dark-default, the editor's theme */
-  --pane-foreground: #e6edf3;
+  /* The panes take the background and text color of the editor's theme, Dark+. */
+  --pane-background: #1e1e1e;
+  --pane-foreground: #d4d4d4;
+  /* The reading's selection, out of focus, and hover: VS Code's list colors for Dark+. */
+  --nx-viewer-selection: #04395e;
+  --nx-viewer-selection-inactive: #37373d;
+  --nx-viewer-hover: #2a2d2e;
   --error: #f85149;
   --warning: #d29922;
 }
@@ -51,8 +56,12 @@
   --sl-color-bg-nav: var(--sl-color-gray-7);
   --sl-color-hairline: var(--sl-color-gray-6);
   --sl-color-hairline-shade: var(--sl-color-gray-6);
-  --pane-background: #ffffff; /* github-light-default */
-  --pane-foreground: #1f2328;
+  /* Light+, with a lighter blue for a selection than its own white-on-blue, which code's colors need. */
+  --pane-background: #ffffff;
+  --pane-foreground: #000000;
+  --nx-viewer-selection: #cce5ff;
+  --nx-viewer-selection-inactive: #e4e6f1;
+  --nx-viewer-hover: #e8e8e8;
   --error: #cf222e;
   --warning: #9a6700;
 }
@@ -277,6 +286,30 @@ code {
   cursor: pointer;
 }
 
+/* Visual's fold commands: quiet text buttons before the view switch. */
+.fold-actions {
+  display: inline-flex;
+  gap: 0.25rem;
+  margin-right: 0.5rem;
+}
+
+.fold-actions button {
+  padding: 0.05rem 0.4rem;
+  border: 0;
+  border-radius: 0.25rem;
+  background: transparent;
+  color: var(--sl-color-gray-3);
+  font: inherit;
+  letter-spacing: 0;
+  text-transform: none;
+  cursor: pointer;
+}
+
+.fold-actions button:hover {
+  color: var(--sl-color-white);
+  background: var(--sl-color-gray-6);
+}
+
 .mode-switch button[aria-pressed="true"] {
   background: var(--sl-color-accent);
   color: #ffffff;
@@ -292,6 +325,14 @@ code {
 nx-viewer {
   --nx-viewer-foreground: var(--pane-foreground);
   padding: 8px 16px;
+}
+
+/* The reading's faces: Geist for prose and Geist Mono for code and for indentation, so indentation
+   keeps its width. */
+nx-viewer {
+  --nx-viewer-source-font-family: "Geist Mono", ui-monospace, monospace;
+  --nx-viewer-prose-font-family: "Geist", system-ui, sans-serif;
+  --nx-viewer-indent-font-family: "Geist Mono", ui-monospace, monospace;
 }
 
 .reading-message {

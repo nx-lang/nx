@@ -135,12 +135,12 @@ fn root_record(artifact: &ProgramArtifact) -> (String, Vec<(String, NxValue)>) {
 // --- The mechanism ---------------------------------------------------------------------------
 
 #[test]
-fn the_table_holds_the_agent_library() {
+fn the_table_holds_the_agent_and_visualizer_libraries() {
     let roots = standard_libraries()
         .iter()
         .map(|library| library.root)
         .collect::<Vec<_>>();
-    assert_eq!(roots, [AGENT_ROOT]);
+    assert_eq!(roots, [AGENT_ROOT, "@nx/visualizer"]);
 
     let agent = standard_library_entry(AGENT_ROOT).expect("the agent library");
     assert_eq!(agent.stability, StandardLibraryStability::Unstable);
@@ -149,6 +149,14 @@ fn the_table_holds_the_agent_library() {
     assert_eq!(
         standard_library_for_module(AGENT_MODULE).map(|library| library.root),
         Some(AGENT_ROOT)
+    );
+    let visualizer = standard_library_entry("@nx/visualizer").expect("the visualizer library");
+    assert_eq!(visualizer.stability, StandardLibraryStability::Unstable);
+    assert_eq!(visualizer.typescript_package, "@nx-lang/viewer");
+    assert_eq!(visualizer.csharp_namespace, "NxLang.Visualizer");
+    assert_eq!(
+        standard_library_for_module(nx_hir::VISUALIZER_LIBRARY_MODULE).map(|library| library.root),
+        Some("@nx/visualizer")
     );
     assert!(standard_library_for_module(nx_hir::PRELUDE_MODULE_IDENTITY).is_none());
     assert!(standard_library_entry("@nx/nope").is_none());

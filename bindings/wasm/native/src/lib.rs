@@ -24,7 +24,7 @@ use nx_api::{
 use nx_codegen::{emit_nx_ir, write_nx_ir_bundle, NxIrEmitOptions};
 use nx_ir::explain_nx_ir_image;
 use nx_language_service::{
-    DocumentInput, DocumentUri, SnapshotError, TextPosition, WorkspaceSnapshot,
+    DocumentInput, DocumentUri, SnapshotError, SourceTreeOptions, TextPosition, WorkspaceSnapshot,
 };
 use serde::{Deserialize, Serialize};
 
@@ -143,6 +143,13 @@ struct PositionRequest {
 #[serde(rename_all = "camelCase")]
 struct UriRequest {
     uri: String,
+}
+
+#[derive(Deserialize)]
+struct SourceTreeRequest {
+    uri: String,
+    #[serde(flatten)]
+    options: SourceTreeOptions,
 }
 
 /// The ABI version this module implements.
@@ -790,9 +797,9 @@ fn snapshot_source_tree(
     snapshot: &WorkspaceSnapshot,
     argument: Result<&str, OperationError>,
 ) -> Operation {
-    let request: UriRequest = parse_request(argument?)?;
+    let request: SourceTreeRequest = parse_request(argument?)?;
     let tree = snapshot
-        .source_tree(&DocumentUri::new(request.uri))
+        .source_tree_with_options(&DocumentUri::new(request.uri), &request.options)
         .map_err(snapshot_error)?;
     result_json(&tree)
 }

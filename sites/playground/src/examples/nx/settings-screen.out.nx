@@ -1,0 +1,10 @@
+<WorkspaceSettings
+  workspace=<Workspace
+    members={<Member email="ada@example.com" lastSeen="Today" name="Ada Lovelace" role=owner twoFactor=true /> <Member email="grace@example.com" lastSeen="Yesterday" name="Grace Hopper" role=admin twoFactor=true /> <Member email="barbara@example.com" lastSeen="3 days ago" name="Barbara Liskov" role=member twoFactor=false /> <Member email="margaret@example.com" name="Margaret Hamilton" role=member twoFactor=true /> <Member email="katherine@example.com" lastSeen="Last month" name="Katherine Johnson" role=guest twoFactor=false />}
+    name="Hive5 Tools"
+    plan=team
+    seats=5
+    seatsUsed=5
+    slug="hive5-tools"
+  />
+/>

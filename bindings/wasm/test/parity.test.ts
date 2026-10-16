@@ -232,6 +232,34 @@ describe("language answer parity with the Node SDK", () => {
     }
   });
 
+  it("answers the source tree with resolved visualizers identically", () => {
+    const source = `import "@nx/visualizer"
+
+type Question = { key:string label:string required:boolean = false }
+type Color = string
+
+visualizer Question =
+  <ElementVisualizer title=label id=key idPosition=end icon="circle-help">
+    <PropertyVisualizer property=label format=id />
+  </ElementVisualizer>
+
+visualizer Color = <ValueVisualizer format=color />
+`;
+    const corpus = [{ uri, source, identity: "demo/input.nx", version: 7 }];
+    const fromNode = new NodeLanguageSnapshot(corpus);
+    const fromWasm = host.createLanguageSnapshot(corpus);
+    try {
+      const options = { visualizers: { modules: ["demo/missing.nx"] } };
+      const tree = JSON.parse(JSON.stringify(fromWasm.sourceTree(uri, options)));
+      expect(tree).toEqual(fromNode.sourceTree(uri, options));
+      expect(JSON.stringify(tree)).toContain('"visualizer":{');
+      expect(tree.missingVisualizerModules).toEqual(["demo/missing.nx"]);
+    } finally {
+      fromWasm.dispose();
+      fromNode.dispose();
+    }
+  });
+
   it("answers hover and completions identically at every line start", () => {
     const lineCount = sources.component.split("\n").length;
 

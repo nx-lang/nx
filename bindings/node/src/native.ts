@@ -79,7 +79,7 @@ export interface NativeNxLanguageSnapshot {
   completions(uri: string, line: number, character: number): string;
   diagnostics(): string;
   documentSymbols(uri: string): string;
-  sourceTree(uri: string): string;
+  sourceTree(uri: string, optionsJson?: string | null): string;
   dispose(): void;
 }
 

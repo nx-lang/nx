@@ -1199,6 +1199,10 @@
         {
           "type": "value_definition",
           "named": true
+        },
+        {
+          "type": "visualizer_definition",
+          "named": true
         }
       ]
     }
@@ -2489,6 +2493,42 @@
     "fields": {}
   },
   {
+    "type": "visualizer_definition",
+    "named": true,
+    "fields": {
+      "target": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "qualified_name",
+            "named": true
+          }
+        ]
+      },
+      "value": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "rhs_expression",
+            "named": true
+          }
+        ]
+      },
+      "visibility": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "visibility_modifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "wildcard_import",
     "named": true,
     "fields": {
@@ -2820,6 +2860,10 @@
   },
   {
     "type": "type",
+    "named": false
+  },
+  {
+    "type": "visualizer",
     "named": false
   },
   {

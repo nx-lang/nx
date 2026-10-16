@@ -18,7 +18,8 @@ language bindings. That is also a reasonable limit for other implementations.
 ```ebnf
 ModuleDefinition ::=
     {ImportStatement}
-    { ActionDefinition | TypeDefinition | ValueDefinition | FunctionDefinition | ComponentDefinition }
+    { ActionDefinition | TypeDefinition | ValueDefinition | FunctionDefinition | ComponentDefinition
+      | VisualizerDefinition }
     [Element]
 
 ImportStatement ::=
@@ -44,9 +45,9 @@ LibraryPath ::=
     StringLiteral
 ```
 
-A module can include any number of imports, followed by top-level declarations and an optional
-trailing root `Element` for rendered markup. Imports target libraries rather than individual source
-files. A local library is a directory containing `.nx` files, and every `.nx` file under that
+A module can include any number of imports, followed by top-level declarations and visualizer
+declarations, and an optional trailing root `Element` for rendered markup. Imports target libraries
+rather than individual source files. A local library is a directory containing `.nx` files, and every `.nx` file under that
 directory contributes declarations to the imported library recursively.
 
 A library path whose first segment is `@nx` names a standard library, NX source the compiler
@@ -301,15 +302,18 @@ they can also declare emitted action payloads in `emits` and persistent local st
 identifier, and each emit/state field uses the same `PropertyDefinition` shape as other record-like
 members. Inline emitted actions may optionally include an `extends` clause but remain concrete.
 
-`State`, `<Name>.Update`, `<Name>.Property`, and `<Name>.State` are derived names, not grammar
-productions. Every record, action, and inline emitted action has an update record `<Name>.Update`
-and a property union `<Name>.Property`. A component is not a record and has neither; a component
-with `state` has a state record `<Name>.State`, with its own `<Name>.State.Update` and
-`<Name>.State.Property`. Inside a component body a bare `State` type reference, element tag, or
-member-access base names that component's state record. All are ordinary names to the parser;
-analysis gives them their meaning. Because `<Component>.State` is taken, and `<Component>.Update`
-and `<Component>.Property` read as derived names, an `EmitDefinition` or emit reference may not use
-the name `Update`, `Property`, or `State`, and a prop or state field may not be named `State`. The intrinsic
+`State`, `<Name>.Update`, `<Name>.Property`, `<Name>.State`, and `<Name>.Props` are derived names,
+not grammar productions. Every record, action, and inline emitted action has an update record
+`<Name>.Update` and a property union `<Name>.Property`. A component is not a record and has neither.
+Every component has a props record `<Name>.Props`, with its own `<Name>.Props.Update` and
+`<Name>.Props.Property`, and a component with `state` has a state record `<Name>.State`, with its
+own `<Name>.State.Update` and `<Name>.State.Property`. Inside a component body a bare `State` type
+reference, element tag, or member-access base names that component's state record; there is no bare
+`Props`. All are ordinary names to the parser; analysis gives them their meaning. Because
+`<Component>.State` and `<Component>.Props` are taken, and `<Component>.Update` and
+`<Component>.Property` read as derived names, an `EmitDefinition` or emit reference may not use the
+name `Update`, `Property`, `State`, or `Props`, and a prop or state field may not be named `State`.
+The intrinsic
 function names `apply`, `merge`, `diff`, and `changed` are likewise ordinary identifiers to the
 parser that analysis reserves.
 
@@ -328,6 +332,41 @@ component <SearchBox emits { ValueChanged extends InputAction { value: string } 
 Within a single record, function signature, component signature, emitted action payload, or state
 block, at most one `PropertyDefinition` may be prefixed by `content`. That content-marked property
 receives element body content during markup-style invocation.
+
+<a id="visualizer-declarations"></a>
+## Visualizer Declarations
+
+```ebnf
+(* "visualizer" is a keyword only as the first token of a module member; elsewhere it is an
+   identifier. A VisibilityModifier parses before it so that lowering can report that a visualizer
+   declaration takes none. *)
+VisualizerDefinition ::=
+    [VisibilityModifier] "visualizer" QualifiedName "=" RhsExpression
+```
+
+A visualizer declaration tells a viewer, such as a reading view of the source, how to present one
+declaration: `visualizer Choice = <ElementVisualizer title=label />`. The `QualifiedName` is its target, a
+record, action, inline emitted action (`Form.Submitted`), component, or alias of a
+primitive type that the module can see. The value is built from the records of the `@nx/visualizer`
+standard library, which the module imports.
+
+A visualizer declaration declares no name, takes no visibility modifier, and cannot be referred to. Its
+value is checked like any other, but only written-out values are accepted: visualizer records, string
+and boolean literals, and bare property or case names. Nothing in it is evaluated, and it does not
+reach NX IR, generated code, or a declaration schema. Because `visualizer` is a keyword only in this
+position, a prop, field, parameter, binding, or function named `visualizer` keeps working:
+
+```nx
+import "@nx/visualizer"
+
+type Choice = { value:string label:string }
+type Settings = { visualizer:string }
+
+visualizer Choice = <ElementVisualizer title=label id=value />
+```
+
+See [Visualizer Declarations](https://nxlang.org/reference/concepts/visualizer-declarations/) for how the
+target is bound and how visualizer declarations from several modules combine.
 
 <a id="expressions"></a>
 ## Expressions

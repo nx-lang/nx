@@ -623,3 +623,72 @@ fn a_generic_record_cannot_take_part_in_inheritance() {
         "Record 'Tagged' declares type parameters and cannot extend a base",
     );
 }
+
+// ---------------------------------------------------------------------------------------------
+// A field can be typed by a type parameter's property union
+// ---------------------------------------------------------------------------------------------
+
+const COLUMN: &str = "type Column = { T:type of:T.Property title?:string }\n\
+                      type Contact = { name:string email:string }\n";
+
+#[test]
+fn a_field_names_a_property_of_its_argument() {
+    assert_clean(&format!("{COLUMN}let c = <Column T=Contact of=email />"));
+    assert_clean(&format!(
+        "{COLUMN}let k: Contact.Property = {{(<Column T=Contact of=name />).of}}"
+    ));
+}
+
+#[test]
+fn a_name_that_is_not_a_property_is_rejected() {
+    assert_reports(
+        &format!("{COLUMN}let c = <Column T=Contact of=phone />"),
+        "phone",
+    );
+}
+
+#[test]
+fn an_argument_with_no_property_union_is_rejected() {
+    assert_reports(
+        &format!("{COLUMN}type Size = small | large\nlet c = <Column T=Size of=small />"),
+        "Type argument 'Size' for 'T' on 'Column' has no property union, which field 'of' needs",
+    );
+    assert_reports(
+        &format!("{COLUMN}let c = <Column T=int of=small />"),
+        "which field 'of' needs",
+    );
+}
+
+#[test]
+fn the_parameter_passes_through_to_a_nested_record() {
+    assert_clean(
+        "type Column = { T:type of:T.Property }\n\
+         type Table = { T:type content columns:<Column T=T/>+ }\n\
+         type Contact = { name:string }\n\
+         let t = <Table T=Contact><Column T=Contact of=name /></Table>",
+    );
+}
+
+#[test]
+fn inside_the_record_the_property_union_is_rigid() {
+    assert_reports(
+        "type Column = { T:type of:T.Property = name }\ntype Contact = { name:string }",
+        "name",
+    );
+}
+
+#[test]
+fn only_a_records_own_type_parameter_has_a_property_union() {
+    assert_reports(
+        "component <List TItem:type key:TItem.Property /> = { <Panel /> }",
+        "'TItem' is a type parameter",
+    );
+    assert_reports(
+        "type Column = { T:type patch:T.Update }",
+        "'T' is a type parameter",
+    );
+    assert_reports(
+        "type Column = { T:type state:T.State }",
+        "'T' is a type parameter",
+    );
+}

@@ -4,6 +4,7 @@ import type {
   DocumentSymbol,
   Hover,
   SourceTree,
+  SourceTreeVisualizersOption,
   TextPosition
 } from "@nx-lang/language-protocol";
 
@@ -51,6 +52,12 @@ import type {
   NxWorkspaceBuildOptions,
   NxWorkspaceValidateOptions
 } from "./types.js";
+
+/** What a source-tree query asks for besides the tree. */
+export interface SourceTreeOptions {
+  /** Resolve visualizer declarations and attach each declaration's resolved visualizer. */
+  visualizers?: SourceTreeVisualizersOption;
+}
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -340,8 +347,10 @@ export interface NxLanguageSnapshot {
    * Every piece of the document at `uri` as a typed node, with the declarations the nodes refer to.
    *
    * Unstable: the answer's shape may change in any release until a later one commits to it.
+   *
+   * With `options.visualizers`, each declaration entry with a resolved visualizer carries it.
    */
-  sourceTree(uri: string): SourceTree;
+  sourceTree(uri: string, options?: SourceTreeOptions): SourceTree;
 
   /**
    * Releases the snapshot inside the module. Calling `dispose` more than once is allowed.
@@ -931,12 +940,12 @@ class WasmLanguageSnapshot implements NxLanguageSnapshot {
     );
   }
 
-  sourceTree(uri: string): SourceTree {
+  sourceTree(uri: string, options?: SourceTreeOptions): SourceTree {
     const handle = this.#live();
     return this.#host.callWithArgument<SourceTree>(
       "nx_wasm_snapshot_source_tree",
       (exports, pointer, length) => exports.nx_wasm_snapshot_source_tree(handle, pointer, length),
-      { uri }
+      options?.visualizers === undefined ? { uri } : { uri, visualizers: options.visualizers }
     );
   }
 

@@ -7,18 +7,19 @@
  * playground does not flip the page's colors.</para>
  */
 import { useEffect, useState } from "react";
+import type { BundledTheme } from "shiki";
 
 export type Theme = "light" | "dark";
 
 /**
- * The Shiki theme the source and the output are colored with in each site theme: GitHub's current
- * ones. Their comments are readable (6.2:1 against the dark background, where `github-dark`'s are
- * 3.1:1), and a doc comment is there to be read.
+ * The Shiki themes the source, the reading and the output are colored with: VS Code's long-standing
+ * default pair, Dark+ and Light+, whose colors tell an attribute's name from its value and leave
+ * punctuation quiet.
  */
-export const EDITOR_THEMES = { dark: "github-dark-default", light: "github-light-default" } as const satisfies Record<
-  Theme,
-  string
->;
+export const EDITOR_THEMES: { readonly dark: BundledTheme; readonly light: BundledTheme } = {
+  dark: "dark-plus",
+  light: "light-plus",
+};
 
 const STORAGE_KEY = "starlight-theme";
 

@@ -5,7 +5,8 @@ use nx_hir::{
     ast::{Expr, Literal, OrderedFloat, TypeRef},
     Component, ImportKind, InterfaceItemKind, Item, LocalDefinitionId, LoweredModule,
     ModuleNamespace, PreparedItemKind, PreparedModule, PreparedNamespace, RecordDef, RecordField,
-    RecordKind, SelectiveImport, TypeAlias, UnionCaseDef, UnionCaseField, UnionDef, Visibility,
+    RecordKind, ResolvedPreparedItem, SelectiveImport, TypeAlias, UnionCaseDef, UnionCaseField,
+    UnionDef, Visibility,
 };
 use nx_types::ModuleArtifact;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -214,8 +215,25 @@ pub fn update_companion_type_params<'a>(
     }
 }
 
+const PROPERTY_SUFFIX: &str = ".Property";
+
+/// What a field typed `P.Property`, for its record's own type parameter `P`, is renamed to: a name
+/// no source can write, which each emitter spells as the argument's property names. TypeScript
+/// writes `Extract<keyof P, string>` and C# `string`.
+const PARAMETER_PROPERTY_UNION_PREFIX: &str = "#property-of:";
+
+fn parameter_property_union_name(param: &str) -> String {
+    format!("{PARAMETER_PROPERTY_UNION_PREFIX}{param}")
+}
+
+/// The type parameter `P` when `name` stands for a field typed `P.Property`.
+pub fn parameter_of_property_union(name: &str) -> Option<&str> {
+    name.strip_prefix(PARAMETER_PROPERTY_UNION_PREFIX)
+}
+
 /// `fields` with every reference to one of `type_params` replaced by `object`, which each emitter
-/// already maps to its host's top type; `fields` itself when there is nothing to erase.
+/// already maps to its host's top type, and every `P.Property` of one by `string`; `fields` itself
+/// when there is nothing to erase.
 pub fn erase_field_type_parameters<'a>(
     fields: &'a [ExportedRecordField],
     type_params: &[String],
@@ -230,9 +248,17 @@ pub fn erase_field_type_parameters<'a>(
     Cow::Owned(
         fields
             .iter()
-            .map(|field| ExportedRecordField {
-                ty: nx_hir::erase_type_parameters(&field.ty, &params),
-                ..field.clone()
+            .map(|field| {
+                let mut ty = nx_hir::erase_type_parameters(&field.ty, &params);
+                rewrite_type_ref_names(&mut ty, &mut |name| {
+                    parameter_of_property_union(name)
+                        .filter(|param| type_params.iter().any(|candidate| candidate == param))
+                        .map(|_| "string".to_string())
+                });
+                ExportedRecordField {
+                    ty,
+                    ..field.clone()
+                }
             })
             .collect(),
     )
@@ -485,10 +511,12 @@ impl ExportedTypeGraph {
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("types.nx"));
         let module_path = module_output_stem(&file_name)?;
+        let declarations = collect_exported_declarations(module);
+        reject_props_record_references(&declarations, module.prepared_module.as_deref())?;
         let mut modules = vec![ExportedModule {
             module_path: module_path.clone(),
             imported_types: imported_build.imported_types.clone(),
-            declarations: collect_exported_declarations(module),
+            declarations,
         }];
         let mut warnings = Vec::new();
         imported_type_collector.resolve_inherited_field_types(&mut modules, &mut warnings);
@@ -527,6 +555,7 @@ impl ExportedTypeGraph {
 
             reject_fields_admitting_zero(artifact, Path::new(&artifact.file_name))?;
             let declarations = collect_exported_declarations(artifact);
+            reject_props_record_references(&declarations, artifact.prepared_module.as_deref())?;
             if declarations.is_empty() {
                 continue;
             }
@@ -840,8 +869,16 @@ impl ExportedTypeGraph {
                 .iter()
                 .map(|imported_type| imported_type.visible_name.as_str())
                 .collect::<FxHashSet<_>>();
-            let mut rename = |ty: &mut TypeRef| {
+            // `params` are the type parameters of the declaration the type is written in: a field
+            // typed `P.Property` for one of them names the argument's property union, which only
+            // the emitters can spell.
+            let mut rename = |ty: &mut TypeRef, params: &[String]| {
                 rewrite_type_ref_names(ty, &mut |name| {
+                    if let Some(param) = name.strip_suffix(PROPERTY_SUFFIX) {
+                        if params.iter().any(|candidate| candidate == param) {
+                            return Some(parameter_property_union_name(param));
+                        }
+                    }
                     if !nx_hir::is_update_record_name(name)
                         && !nx_hir::is_property_union_name(name)
                         && !nx_hir::is_state_record_name(name)
@@ -868,27 +905,27 @@ impl ExportedTypeGraph {
 
             for declaration in declarations {
                 match &mut declaration.item {
-                    ExportedType::Alias(alias) => rename(&mut alias.target),
+                    ExportedType::Alias(alias) => rename(&mut alias.target, &[]),
                     ExportedType::Union(union_def) => {
                         for case in &mut union_def.cases {
                             for field in &mut case.fields {
-                                rename(&mut field.ty);
+                                rename(&mut field.ty, &[]);
                             }
                         }
                     }
                     ExportedType::Record(record) => {
                         for field in &mut record.fields {
-                            rename(&mut field.ty);
+                            rename(&mut field.ty, &record.type_params);
                         }
                     }
                     ExportedType::ComponentState(state) => {
                         for field in &mut state.fields {
-                            rename(&mut field.ty);
+                            rename(&mut field.ty, &[]);
                         }
                     }
                     ExportedType::Update(update) => {
                         for field in &mut update.fields {
-                            rename(&mut field.ty);
+                            rename(&mut field.ty, &update.type_params);
                         }
                     }
                 }
@@ -1142,7 +1179,7 @@ fn collect_exported_declarations(artifact: &ModuleArtifact) -> Vec<ExportedTypeD
     let prepared = artifact.prepared_module.as_deref();
 
     for item in module.items() {
-        if item.visibility() != Visibility::Export {
+        if item.visibility() != Visibility::Export || is_props_record_item(item) {
             continue;
         }
 
@@ -1197,6 +1234,109 @@ fn collect_exported_declarations(artifact: &ModuleArtifact) -> Vec<ExportedTypeD
     }
 
     declarations
+}
+
+/// Whether `item` is a component's derived props record, or the update record or property union
+/// derived from one. Typegen emits no type for these in this release.
+fn is_props_record_item(item: &Item) -> bool {
+    match item {
+        Item::Record(record) => {
+            record.props_component().is_some()
+                || record
+                    .update_target()
+                    .is_some_and(|target| nx_hir::is_props_record_name(target.as_str()))
+        }
+        Item::Union(union_def) => union_def
+            .property_target()
+            .is_some_and(|target| nx_hir::is_props_record_name(target.as_str())),
+        _ => false,
+    }
+}
+
+/// The props record a type name reaches, when it names `X.Props`, `X.Props.Update` or
+/// `X.Props.Property` and `X.Props` is a component's props record.
+///
+/// <para>The name is resolved in `prepared`, so a type merely named `Props` in a namespace, such as
+/// `shared.Props`, is not mistaken for one. A name that does not resolve is judged by its
+/// spelling.</para>
+fn props_record_reference<'a>(name: &'a str, prepared: Option<&PreparedModule>) -> Option<&'a str> {
+    let record = name
+        .strip_suffix(".Update")
+        .or_else(|| name.strip_suffix(".Property"))
+        .filter(|record| nx_hir::is_props_record_name(record))
+        .unwrap_or(name);
+    if !nx_hir::is_props_record_name(record) {
+        return None;
+    }
+    let resolved = prepared.and_then(|prepared| {
+        let binding =
+            prepared.resolve_binding(PreparedNamespace::Type, &nx_hir::Name::new(record))?;
+        prepared.resolve_prepared_item(binding)
+    });
+    let is_props = match resolved {
+        Some(ResolvedPreparedItem::Raw {
+            item: Item::Record(record),
+            ..
+        }) => record.props_component().is_some(),
+        Some(ResolvedPreparedItem::Imported { item, .. }) => matches!(
+            item.item,
+            InterfaceItemKind::Record {
+                kind: RecordKind::Props { .. },
+                ..
+            }
+        ),
+        Some(ResolvedPreparedItem::Raw { .. }) => false,
+        None => true,
+    };
+    is_props.then_some(record)
+}
+
+/// Fails when an exported declaration's generated type would refer to a component's props record.
+///
+/// <para>Typegen generates no type for `T.Props` or its companions yet, so a reference to one
+/// could only be emitted as a name that does not exist. Failing names what to change instead of
+/// generating code that does not compile.</para>
+fn reject_props_record_references(
+    declarations: &[ExportedTypeDecl],
+    prepared: Option<&PreparedModule>,
+) -> Result<(), String> {
+    for declaration in declarations {
+        let mut types: Vec<TypeRef> = Vec::new();
+        match &declaration.item {
+            ExportedType::Alias(alias) => types.push(alias.target.clone()),
+            ExportedType::Union(union_def) => {
+                for case in &union_def.cases {
+                    types.extend(case.fields.iter().map(|field| field.ty.clone()));
+                }
+            }
+            ExportedType::Record(record) => {
+                types.extend(record.fields.iter().map(|field| field.ty.clone()));
+            }
+            ExportedType::ComponentState(state) => {
+                types.extend(state.fields.iter().map(|field| field.ty.clone()));
+            }
+            ExportedType::Update(update) => {
+                types.extend(update.fields.iter().map(|field| field.ty.clone()));
+            }
+        }
+        let mut found = None;
+        for ty in &mut types {
+            rewrite_type_ref_names(ty, &mut |name| {
+                if found.is_none() {
+                    found = props_record_reference(name, prepared).map(str::to_string);
+                }
+                None
+            });
+        }
+        if let Some(record) = found {
+            return Err(format!(
+                "Exported declaration '{}' refers to the props record '{}', and typegen does not generate props records yet",
+                declaration.name(),
+                record
+            ));
+        }
+    }
+    Ok(())
 }
 
 impl ImportedTypeCollector {

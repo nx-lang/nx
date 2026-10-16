@@ -1,10 +1,10 @@
 /**
- * What the renderers ask of a source tree: each node's children, the slot it fills in its parent,
- * its declaration entry, and the exact text of its range.
+ * What the reading asks of a source tree: each node's children, the slot it fills in its parent,
+ * and each key's node.
  */
-import type { SourceDeclaration, SourceNode, SourceTree } from "@nx-lang/language-protocol";
+import type { SourceNode, SourceTree } from "@nx-lang/language-protocol";
 
-/** A source tree with the lookups the renderers need, built once per tree. */
+/** A source tree with the lookups the reading needs, built once per tree. */
 export interface TreeIndex {
   readonly tree: SourceTree;
   readonly text: string;
@@ -18,8 +18,6 @@ export interface TreeIndex {
   readonly slots: readonly string[];
   /** Each key's node. */
   readonly byKey: ReadonlyMap<string, number>;
-  /** The node `nodeAtSpan` gives for each exact byte span, keyed `start:end`. */
-  readonly bySpan: ReadonlyMap<string, number>;
   /** The document's text as UTF-8, which ranges' byte offsets count in. */
   readonly bytes: Uint8Array;
 }
@@ -32,19 +30,14 @@ export function indexTree(tree: SourceTree, text: string): TreeIndex {
   const nodes = tree.nodes;
   const children: number[][] = nodes.map(() => []);
   const byKey = new Map<string, number>();
-  const bySpan = new Map<string, number>();
   nodes.forEach((node, index) => {
     if (node.parent !== undefined) {
       children[node.parent]?.push(index);
     }
     byKey.set(node.key, index);
-    const span = `${node.range.startByte}:${node.range.endByte}`;
-    if (prefers(tree, index, bySpan.get(span))) {
-      bySpan.set(span, index);
-    }
   });
   const slots = nodes.map((node) => slotOf(node, node.parent === undefined ? undefined : nodes[node.parent]));
-  return { tree, text, children, slots, byKey, bySpan, bytes: new TextEncoder().encode(text) };
+  return { tree, text, children, slots, byKey, bytes: new TextEncoder().encode(text) };
 }
 
 function slotOf(node: SourceNode, parent: SourceNode | undefined): string {
@@ -71,22 +64,6 @@ export function nodeOf(index: TreeIndex, at: number): SourceNode {
   return node;
 }
 
-/** The declaration entry a node refers to, if any. */
-export function declarationOf(index: TreeIndex, node: SourceNode): SourceDeclaration | undefined {
-  return node.declaration === undefined ? undefined : index.tree.declarations[node.declaration];
-}
-
-/** The children of `at` that fill `slot`. */
-export function childrenIn(index: TreeIndex, at: number, slot: string): number[] {
-  return (index.children[at] ?? []).filter((child) => index.slots[child] === slot);
-}
-
-/** The exact text of the node at `at`, sliced by its range's UTF-8 byte offsets. */
-export function sourceTextOf(index: TreeIndex, at: number): string {
-  const range = nodeOf(index, at).range;
-  return new TextDecoder().decode(index.bytes.subarray(range.startByte, range.endByte));
-}
-
 /**
  * The index of the node whose range has exactly the byte offsets `start` and `end`, preferring an
  * `element` node where several have them, as a record's value origin names its element. Nothing
@@ -100,11 +77,6 @@ export function nodeAtSpan(tree: SourceTree, start: number, end: number): number
     }
   });
   return found;
-}
-
-/** `nodeAtSpan` through an index, without scanning the tree. */
-export function indexedNodeAtSpan(index: TreeIndex, start: number, end: number): number | undefined {
-  return index.bySpan.get(`${start}:${end}`);
 }
 
 /** Whether the node at `candidate` wins over `found` for the same span: the first, or an element. */

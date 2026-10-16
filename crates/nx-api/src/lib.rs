@@ -35,6 +35,7 @@ mod component;
 mod diagnostics;
 mod eval;
 mod nx_text;
+mod program_visualizers;
 mod schema;
 mod source_graph;
 mod value;
@@ -46,6 +47,8 @@ mod library_source_tests;
 mod schema_tests;
 #[cfg(test)]
 mod standard_library_tests;
+#[cfg(test)]
+mod visualizer_declarations_tests;
 
 pub use artifacts::{
     analyze_workspace_modules, build_library_artifact_from_directory,
@@ -73,6 +76,11 @@ pub use eval::{
 };
 pub use nx_interpreter::ResourceLimits;
 pub use nx_text::{format_nx_text, NxValueNode, NxValueRole, NxValueText};
+pub use program_visualizers::{
+    duplicate_program_visualizers, duplicate_visualizer_diagnostics, program_modules,
+    program_visualizers, read_visualizer_value, ProgramModule, ProgramVisualizer,
+    VisualizerAttribute, VisualizerChild, VisualizerValue,
+};
 pub use schema::{
     program_artifact_boundary_subtype_modules, program_artifact_function_schema,
     program_artifact_function_schema_json, program_artifact_type_schema,

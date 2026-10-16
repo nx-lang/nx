@@ -316,10 +316,11 @@ impl LibraryRegistry {
 
     /// Loads several in-memory libraries, in dependency order whatever order they are given in.
     ///
-    /// <para>Each library is loaded as [`load_library_from_sources`](Self::load_library_from_sources)
-    /// loads one, after every library of the batch it imports. A dependency outside the batch must
-    /// already be loaded, and a cycle among the batch's libraries fails the load before any of them
-    /// is analyzed. The artifacts are returned in the order the libraries were given.</para>
+    /// <para>Each library is loaded as
+    /// [`load_library_from_sources`](Self::load_library_from_sources) loads one, after every
+    /// library of the batch it imports. A dependency outside the batch must already be loaded, and
+    /// a cycle among the batch's libraries fails the load before any of them is analyzed. The
+    /// artifacts are returned in the order the libraries were given.</para>
     pub fn load_libraries_from_sources(
         &self,
         libraries: &[NxLibrarySource],
@@ -683,6 +684,20 @@ impl ProgramBuildContext {
         self.registry.get_loaded_library(root)
     }
 
+    /// The library an import's resolved target identity names: a standard library, or a library
+    /// this context can see whose logical root it is.
+    pub(crate) fn library_for_import_target(&self, identity: &str) -> Option<Arc<LibraryArtifact>> {
+        match self.visible_library_by_logical_identity(identity) {
+            LogicalLibraryResolution::Found(_, library) => Some(library),
+            _ => None,
+        }
+    }
+
+    /// The loaded library at `root`, as a library's dependency names it.
+    pub(crate) fn library_for_root(&self, root: &Path) -> Option<Arc<LibraryArtifact>> {
+        self.registry.get_loaded_library(root)
+    }
+
     /// Every loaded library this context makes visible, ordered by root path.
     ///
     /// This is the set an import in this context can select from; a tool that describes what a
@@ -697,9 +712,10 @@ impl ProgramBuildContext {
     }
 
     /// Whether a visible library's root is spelled exactly `identity`, as an in-memory library's
-    /// logical root is. Unlike [`visible_library_by_logical_identity`](Self::visible_library_by_logical_identity)
-    /// this ignores suffix matches, so a directory library whose path merely ends in `identity` is
-    /// not a claim on the name.
+    /// logical root is. Unlike
+    /// [`visible_library_by_logical_identity`](Self::visible_library_by_logical_identity) this
+    /// ignores suffix matches, so a directory library whose path merely ends in `identity` is not a
+    /// claim on the name.
     fn has_visible_library_root(&self, identity: &str) -> bool {
         self.visible_roots.iter().any(|root| {
             logical_identity_for_path(root).as_deref() == Some(identity)
@@ -1228,16 +1244,28 @@ impl StandardLibrary {
 }
 
 /// The standard libraries the compiler carries.
-static STANDARD_LIBRARIES: [StandardLibrary; 1] = [StandardLibrary::new(
-    "@nx/agent",
-    StandardLibraryStability::Unstable,
-    &[StandardLibraryModule {
-        identity: "agent.nx",
-        source: include_str!("std/agent/agent.nx"),
-    }],
-    "@nx-lang/agent",
-    "NxLang.Agent",
-)];
+static STANDARD_LIBRARIES: [StandardLibrary; 2] = [
+    StandardLibrary::new(
+        "@nx/agent",
+        StandardLibraryStability::Unstable,
+        &[StandardLibraryModule {
+            identity: "agent.nx",
+            source: include_str!("std/agent/agent.nx"),
+        }],
+        "@nx-lang/agent",
+        "NxLang.Agent",
+    ),
+    StandardLibrary::new(
+        "@nx/visualizer",
+        StandardLibraryStability::Unstable,
+        &[StandardLibraryModule {
+            identity: "visualizer.nx",
+            source: include_str!("std/visualizer/visualizer.nx"),
+        }],
+        "@nx-lang/viewer",
+        "NxLang.Visualizer",
+    ),
+];
 
 /// Every standard library, in root order.
 pub fn standard_libraries() -> &'static [StandardLibrary] {
@@ -1332,7 +1360,7 @@ fn is_reserved_identity(identity: &str) -> bool {
 
 /// The identity a workspace import names: a standard library's root as written, or the path
 /// resolved against the importing module.
-fn workspace_import_target_identity(
+pub(crate) fn workspace_import_target_identity(
     importer_identity: &str,
     library_path: &str,
 ) -> Result<String, crate::workspace::WorkspaceIdentityError> {
@@ -1626,7 +1654,8 @@ fn prepare_in_memory_library(
 /// batch it imports, and otherwise in the order given.
 ///
 /// <para>The same root given twice with the same sources is loaded once; given with different
-/// sources it is a conflict. A cycle among the batch's libraries is refused naming its chain.</para>
+/// sources it is a conflict. A cycle among the batch's libraries is refused naming its
+/// chain.</para>
 fn in_memory_load_order(
     libraries: &[PreparedInMemoryLibrary],
 ) -> Result<Vec<usize>, Box<Diagnostic>> {
@@ -2026,12 +2055,78 @@ fn analyze_logical_module_graph(
         build_context,
         &libraries,
     ));
+    add_duplicate_visualizer_diagnostics(&mut modules, &libraries, build_context);
 
     LogicalProgramAnalysis {
         modules,
         libraries,
         source_map,
         program_diagnostics,
+    }
+}
+
+/// Reports, on each workspace module, the visualizer declarations two other modules of its program
+/// declare for one target, which neither then applies.
+///
+/// <para>Each workspace module is the entry of the program a host would build from it, so each is
+/// told about the duplicates its own program loads. Nothing is walked when no module the analysis
+/// holds declares a visualizer.</para>
+fn add_duplicate_visualizer_diagnostics(
+    modules: &mut [ModuleArtifact],
+    libraries: &[Arc<LibraryArtifact>],
+    build_context: &ProgramBuildContext,
+) {
+    let library_modules = libraries
+        .iter()
+        .flat_map(|library| library.modules.iter())
+        .collect::<Vec<_>>();
+    let has_visualizers = |module: &ModuleArtifact| {
+        module
+            .lowered_module
+            .as_deref()
+            .is_some_and(|lowered| !lowered.visualizers().is_empty())
+    };
+    if !modules.iter().any(has_visualizers)
+        && !library_modules.iter().any(|module| has_visualizers(module))
+    {
+        return;
+    }
+
+    let by_identity = modules
+        .iter()
+        .chain(library_modules.iter().copied())
+        .map(|module| (module.file_name.as_str(), module))
+        .collect::<FxHashMap<_, _>>();
+    let workspace = modules
+        .iter()
+        .map(|module| (module.file_name.as_str(), module))
+        .collect::<FxHashMap<_, _>>();
+    let found = modules
+        .iter()
+        .enumerate()
+        .filter_map(|(index, module)| {
+            let program = crate::program_visualizers::program_modules(
+                &module.file_name,
+                |identity| {
+                    workspace
+                        .get(identity)
+                        .map(|module| module.imports.as_slice())
+                },
+                build_context,
+            );
+            let visualizers =
+                crate::program_visualizers::program_visualizers(&program, |identity| {
+                    by_identity.get(identity).copied()
+                });
+            let diagnostics = crate::program_visualizers::duplicate_visualizer_diagnostics(
+                &module.file_name,
+                &visualizers,
+            );
+            (!diagnostics.is_empty()).then_some((index, diagnostics))
+        })
+        .collect::<Vec<_>>();
+    for (index, diagnostics) in found {
+        modules[index].diagnostics.extend(diagnostics);
     }
 }
 
@@ -2274,10 +2369,10 @@ fn prepare_logical_source_file(
 ///
 /// An implicit import is the host's claim about what the workspace and its build context contain; a
 /// claim they do not bear out is a fault in the build request, not in any module's text, so it is
-/// reported with no file or span and fails the build. An identity is looked up among the workspace's
-/// modules and the context's visible library roots exactly as a written import of it would be, and
-/// one that is both a workspace module and exactly a visible library's root is refused rather than
-/// silently resolved to the workspace module.
+/// reported with no file or span and fails the build. An identity is looked up among the
+/// workspace's modules and the context's visible library roots exactly as a written import of it
+/// would be, and one that is both a workspace module and exactly a visible library's root is
+/// refused rather than silently resolved to the workspace module.
 fn unknown_implicit_import_diagnostics(
     graph: &LogicalModuleGraph,
     build_context: &ProgramBuildContext,
@@ -2583,25 +2678,14 @@ fn apply_graph_imports(
                                 item_indices,
                                 &mut imported_visible_names,
                             );
-                            // A declaration's derived `<Name>.Update`, `<Name>.Property`, and
-                            // `<Name>.State` declarations travel with it: they are reachable
-                            // through the name the author imported, not exported names of their
-                            // own.
-                            for suffix in DERIVED_DECLARATION_SUFFIXES {
-                                let derived = format!("{}.{}", entry.name.as_str(), suffix);
-                                let Some(derived_indices) = library.exported_items.get(&derived)
-                                else {
-                                    continue;
-                                };
-                                add_imported_interface_bindings(
-                                    module,
-                                    &format!("{}.{}", visible_name, suffix),
-                                    entry.span,
-                                    &library,
-                                    derived_indices,
-                                    &mut imported_visible_names,
-                                );
-                            }
+                            add_derived_interface_bindings(
+                                module,
+                                entry,
+                                &visible_name,
+                                &library,
+                                item_indices,
+                                &mut imported_visible_names,
+                            );
                         }
                     }
                 }
@@ -2645,15 +2729,38 @@ fn add_library_wildcard_bindings(
 ) {
     let mut export_names = library.exported_items.keys().cloned().collect::<Vec<_>>();
     export_names.sort();
+    let visible = |name: &str| {
+        alias
+            .map(|prefix| format!("{}.{}", prefix.as_str(), name))
+            .unwrap_or_else(|| name.to_string())
+    };
+    // The declarations themselves first, then those derived from them, each only beside its base.
+    let (derived, declared): (Vec<_>, Vec<_>) = export_names.into_iter().partition(|name| {
+        derived_base(name, |base| library.exported_items.contains_key(base)).is_some()
+    });
 
-    for export_name in export_names {
-        let visible_name = alias
-            .map(|prefix| format!("{}.{}", prefix.as_str(), export_name))
-            .unwrap_or_else(|| export_name.clone());
+    for export_name in declared.into_iter().chain(derived) {
+        let visible_name = visible(&export_name);
 
         let Some(item_indices) = library.exported_items.get(&export_name) else {
             continue;
         };
+        if let Some(base) = derived_base(&export_name, |base| {
+            library.exported_items.contains_key(base)
+        }) {
+            let base_bound_here = library.exported_items[base].iter().any(|index| {
+                let item = &library.interface_items[*index];
+                binds_to(
+                    module,
+                    &visible(base),
+                    &item.module_identity,
+                    item.definition_id,
+                )
+            });
+            if !base_bound_here {
+                continue;
+            }
+        }
         add_imported_interface_bindings(
             module,
             &visible_name,
@@ -2670,9 +2777,10 @@ fn add_library_wildcard_bindings(
 /// <para>Only a module with an error can have lost one. It has when an error lies outside every
 /// declaration that lowered — an unclosed `export type Contact = {` at the end of the file, a
 /// removed `enum` form — or when a declaration begins at the start of a line where no lowered
-/// declaration begins: an unclosed declaration before it ran on over it and swallowed it. An
-/// error inside a declaration that lowered and swallowed nothing — a validation error such as
-/// `tags:string[]`, or a syntax error in a field type or a body — leaves every name in place.</para>
+/// declaration begins: an unclosed declaration before it ran on over it and swallowed it. An error
+/// inside a declaration that lowered and swallowed nothing — a validation error such as
+/// `tags:string[]`, or a syntax error in a field type or a body — leaves every name in
+/// place.</para>
 fn lost_a_declaration(source_file: &GraphSourceFile, module: &LoweredModule) -> bool {
     let error_spans: Vec<TextSpan> = source_file
         .diagnostics
@@ -2756,15 +2864,44 @@ fn add_workspace_import_bindings(
 
     match &import.kind {
         ImportKind::Wildcard { alias } => {
-            for (item_index, item) in target_module.items().iter().enumerate() {
-                if item.visibility() != Visibility::Export {
-                    continue;
+            let visible = |name: &str| {
+                alias
+                    .as_ref()
+                    .map(|prefix| format!("{}.{}", prefix.as_str(), name))
+                    .unwrap_or_else(|| name.to_string())
+            };
+            let exports = target_module
+                .items()
+                .iter()
+                .enumerate()
+                .filter(|(_, item)| item.visibility() == Visibility::Export)
+                .map(|(index, item)| (item.name().as_str().to_string(), index))
+                .collect::<FxHashMap<_, _>>();
+            // The declarations themselves first, then those derived from them, each only beside
+            // its base.
+            let (derived, declared): (Vec<_>, Vec<_>) = target_module
+                .items()
+                .iter()
+                .enumerate()
+                .filter(|(_, item)| item.visibility() == Visibility::Export)
+                .partition(|(_, item)| {
+                    derived_base(item.name().as_str(), |base| exports.contains_key(base)).is_some()
+                });
+            for (item_index, item) in declared.into_iter().chain(derived) {
+                if let Some(base) =
+                    derived_base(item.name().as_str(), |base| exports.contains_key(base))
+                {
+                    if !binds_to(
+                        module,
+                        &visible(base),
+                        &target_source_file.identity,
+                        local_definition_id(exports[base]),
+                    ) {
+                        continue;
+                    }
                 }
 
-                let visible_name = alias
-                    .as_ref()
-                    .map(|prefix| format!("{}.{}", prefix.as_str(), item.name().as_str()))
-                    .unwrap_or_else(|| item.name().as_str().to_string());
+                let visible_name = visible(item.name().as_str());
                 add_workspace_item_bindings(
                     module,
                     &target_source_file.identity,
@@ -2805,7 +2942,16 @@ fn add_workspace_import_bindings(
                     entry.span,
                     imported_visible_names,
                 );
-                // As for a library import: the derived declarations come along with their target.
+                // As for a library import: the derived declarations come along with their target,
+                // when the import bound the name to it.
+                if !binds_to(
+                    module,
+                    &visible_name,
+                    &target_source_file.identity,
+                    local_definition_id(item_index),
+                ) {
+                    continue;
+                }
                 for suffix in DERIVED_DECLARATION_SUFFIXES {
                     let derived = format!("{}.{}", entry.name.as_str(), suffix);
                     let Some((derived_index, derived_item)) =
@@ -2831,15 +2977,53 @@ fn add_workspace_import_bindings(
     }
 }
 
+/// Whether `visible_name` is bound, in any namespace, to the declaration `definition_id` of the
+/// module `module_identity`.
+fn binds_to(
+    module: &PreparedModule,
+    visible_name: &str,
+    module_identity: &str,
+    definition_id: LocalDefinitionId,
+) -> bool {
+    let name = Name::new(visible_name);
+    [
+        PreparedNamespace::Type,
+        PreparedNamespace::Element,
+        PreparedNamespace::Value,
+    ]
+    .into_iter()
+    .filter_map(|namespace| module.resolve_binding(namespace, &name))
+    .any(|binding| {
+        binding.module_identity("") == module_identity && binding.definition_id() == definition_id
+    })
+}
+
+/// The declaration `name` is derived from, when it is `<Base>.<suffix>` for one of
+/// `DERIVED_DECLARATION_SUFFIXES` and `is_export` says `<Base>` is exported beside it. The longest
+/// suffix is tried first, so `Card.State.Update` derives from `Card`, not from `Card.State`.
+fn derived_base(name: &str, is_export: impl Fn(&str) -> bool) -> Option<&str> {
+    let mut suffixes = DERIVED_DECLARATION_SUFFIXES;
+    suffixes.sort_by_key(|suffix| std::cmp::Reverse(suffix.len()));
+    suffixes.into_iter().find_map(|suffix| {
+        name.strip_suffix(suffix)
+            .and_then(|base| base.strip_suffix('.'))
+            .filter(|base| is_export(base))
+    })
+}
+
 /// The suffixes of the declarations derived from a record, action, or component, which an import
 /// of the target brings into scope with it: a record's or action's update record and property
-/// union, and a component's state record with that record's own two, when it declares state.
-const DERIVED_DECLARATION_SUFFIXES: [&str; 5] = [
+/// union; a component's state record with that record's own two, when it declares state; and a
+/// component's props record with its own two.
+const DERIVED_DECLARATION_SUFFIXES: [&str; 8] = [
     nx_hir::UPDATE_RECORD_SUFFIX,
     nx_hir::PROPERTY_UNION_SUFFIX,
     nx_hir::STATE_RECORD_SUFFIX,
     "State.Update",
     "State.Property",
+    nx_hir::PROPS_RECORD_SUFFIX,
+    "Props.Update",
+    "Props.Property",
 ];
 
 fn add_workspace_item_bindings(
@@ -2890,7 +3074,8 @@ fn add_workspace_item_bindings(
     }
 }
 
-/// Builds a file-preserving program artifact from source text against a caller-supplied build context.
+/// Builds a file-preserving program artifact from source text against a caller-supplied build
+/// context.
 pub fn build_program_artifact_from_source(
     source: &str,
     file_name: &str,
@@ -3213,6 +3398,14 @@ fn apply_build_context_imports(
                         item_indices,
                         &mut imported_visible_names,
                     );
+                    add_derived_interface_bindings(
+                        module,
+                        entry,
+                        &visible_name,
+                        &library,
+                        item_indices,
+                        &mut imported_visible_names,
+                    );
                 }
             }
         }
@@ -3242,6 +3435,49 @@ fn add_ambiguous_interface_diagnostic(
         ),
         span,
     });
+}
+
+/// Binds a selectively imported library declaration's derived `<Name>.Update`, `<Name>.Property`,
+/// `<Name>.State` and `<Name>.Props` declarations under the name the author imported it as. They
+/// travel with their target rather than being exported names of their own.
+///
+/// <para>They come along only when the import bound the name itself to the declaration at
+/// `item_indices`: a name already taken by a local declaration or another import keeps its own
+/// derived declarations, so `Card` and `Card.State` never name two different components.</para>
+fn add_derived_interface_bindings(
+    module: &mut PreparedModule,
+    entry: &SelectiveImport,
+    visible_name: &str,
+    library: &LibraryArtifact,
+    item_indices: &[usize],
+    imported_visible_names: &mut FxHashMap<(PreparedNamespace, String), String>,
+) {
+    let bound_here = item_indices.iter().any(|index| {
+        let item = &library.interface_items[*index];
+        binds_to(
+            module,
+            visible_name,
+            &item.module_identity,
+            item.definition_id,
+        )
+    });
+    if !bound_here {
+        return;
+    }
+    for suffix in DERIVED_DECLARATION_SUFFIXES {
+        let derived = format!("{}.{}", entry.name.as_str(), suffix);
+        let Some(derived_indices) = library.exported_items.get(&derived) else {
+            continue;
+        };
+        add_imported_interface_bindings(
+            module,
+            &format!("{}.{}", visible_name, suffix),
+            entry.span,
+            library,
+            derived_indices,
+            imported_visible_names,
+        );
+    }
 }
 
 fn add_imported_interface_bindings(
@@ -4119,8 +4355,8 @@ fn is_logical_library_path(path: &Path) -> bool {
     !path.is_absolute()
 }
 
-/// Resolves `library_path` against the logical module `base_file` with the workspace identity rules:
-/// `.` and `..` are normalized, and a path that climbs above the logical root is refused.
+/// Resolves `library_path` against the logical module `base_file` with the workspace identity
+/// rules: `.` and `..` are normalized, and a path that climbs above the logical root is refused.
 fn normalize_logical_library_path(
     base_file: &Path,
     library_path: &str,
@@ -5318,6 +5554,209 @@ let root() = { helper() }"#;
             .diagnostics
             .iter()
             .any(|diagnostic| { diagnostic.message().contains("does not export 'helper'") }));
+    }
+
+    /// A library that selectively imports a component from another library reaches the
+    /// component's derived declarations through the imported name, as a program does.
+    #[test]
+    fn a_library_reaches_a_selectively_imported_components_derived_declarations() {
+        let temp = TempDir::new().expect("temp dir");
+        let ui_dir = temp.path().join("ui");
+        let forms_dir = temp.path().join("forms");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+        fs::create_dir_all(&forms_dir).expect("forms dir");
+
+        fs::write(
+            ui_dir.join("card.nx"),
+            r#"export external component <Card title:string /> = {
+  state { open:boolean }
+}"#,
+        )
+        .expect("card file");
+        fs::write(
+            forms_dir.join("saved.nx"),
+            r#"import { Card as Ui.Card } from "../ui"
+export type Saved = {
+  state:Ui.Card.State
+  patch:Ui.Card.State.Update
+  field:Ui.Card.State.Property
+  props:Ui.Card.Props
+  prop:Ui.Card.Props.Property
+}"#,
+        )
+        .expect("saved file");
+
+        let registry = LibraryRegistry::new();
+        let result = registry.load_library_from_directory(&forms_dir);
+        assert!(result.is_ok(), "{:?}", result.err());
+    }
+
+    /// Writes a `plain` library whose `Card` declares no state and a `ui` library whose `Card`
+    /// does, under `root`.
+    fn write_two_cards(root: &Path) {
+        for (dir, source) in [
+            (
+                "plain",
+                "export component <Card label:string /> = { <div>{label}</div> }",
+            ),
+            (
+                "ui",
+                "export component <Card title:string /> = {\n  state { open:boolean = false }\n  <div>{title}</div>\n}",
+            ),
+        ] {
+            let path = root.join(dir);
+            fs::create_dir_all(&path).expect("library dir");
+            fs::write(path.join("card.nx"), source).expect("card file");
+        }
+    }
+
+    fn says_card_declares_no_state(messages: impl IntoIterator<Item = String>) -> bool {
+        messages
+            .into_iter()
+            .any(|message| message.contains("component 'Card' declares no state"))
+    }
+
+    /// When a name is already taken, a later import of the same name brings none of its derived
+    /// declarations, so `Card.State` never names the state of a different `Card`.
+    #[test]
+    fn a_library_does_not_take_derived_declarations_from_an_import_that_lost_the_name() {
+        let temp = TempDir::new().expect("temp dir");
+        write_two_cards(temp.path());
+        let forms_dir = temp.path().join("forms");
+        fs::create_dir_all(&forms_dir).expect("forms dir");
+        fs::write(
+            forms_dir.join("saved.nx"),
+            "import { Card } from \"../plain\"\nimport { Card } from \"../ui\"\nexport type Saved = { s:Card.State }",
+        )
+        .expect("saved file");
+
+        let diagnostics = LibraryRegistry::new()
+            .load_library_from_directory(&forms_dir)
+            .expect_err("Card.State names no state record here");
+        assert!(
+            says_card_declares_no_state(diagnostics.iter().map(|d| d.message.clone())),
+            "{diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn a_local_component_keeps_its_own_derived_declarations_beside_an_import() {
+        let temp = TempDir::new().expect("temp dir");
+        write_two_cards(temp.path());
+        let forms_dir = temp.path().join("forms");
+        fs::create_dir_all(&forms_dir).expect("forms dir");
+        fs::write(
+            forms_dir.join("saved.nx"),
+            "import { Card } from \"../ui\"\nexport component <Card label:string /> = { <div>{label}</div> }\nexport type Saved = { s:Card.State }",
+        )
+        .expect("saved file");
+
+        let diagnostics = LibraryRegistry::new()
+            .load_library_from_directory(&forms_dir)
+            .expect_err("Card.State names no state record here");
+        assert!(
+            says_card_declares_no_state(diagnostics.iter().map(|d| d.message.clone())),
+            "{diagnostics:?}"
+        );
+    }
+
+    /// A wildcard import brings a derived declaration only beside its base, as a selective one
+    /// does.
+    #[test]
+    fn a_library_wildcard_import_does_not_bring_derived_declarations_of_a_name_it_lost() {
+        for saved in [
+            "import \"../plain\"\nimport \"../ui\"\nexport type Saved = { s:Card.State }",
+            "import \"../ui\"\nexport component <Card label:string /> = { <div>{label}</div> }\nexport type Saved = { s:Card.State }",
+        ] {
+            let temp = TempDir::new().expect("temp dir");
+            write_two_cards(temp.path());
+            let forms_dir = temp.path().join("forms");
+            fs::create_dir_all(&forms_dir).expect("forms dir");
+            fs::write(forms_dir.join("saved.nx"), saved).expect("saved file");
+
+            let diagnostics = LibraryRegistry::new()
+                .load_library_from_directory(&forms_dir)
+                .expect_err("Card.State names no state record here");
+            assert!(
+                says_card_declares_no_state(diagnostics.iter().map(|d| d.message.clone())),
+                "{saved}: {diagnostics:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_workspace_wildcard_import_does_not_bring_derived_declarations_of_a_name_it_lost() {
+        let workspace = workspace(vec![
+            workspace_module(
+                "ui.nx",
+                "export component <Card title:string /> = {\n  state { open:boolean = false }\n  <div>{title}</div>\n}",
+            ),
+            workspace_module(
+                "main.nx",
+                "import \"./ui.nx\"\ncomponent <Card label:int /> = { <span>{label}</span> }\nlet x():Card.State = { <Card.State open=true /> }\nlet root() = { 1 }",
+            ),
+        ]);
+        let Err(diagnostics) =
+            build_workspace_program_artifact(&workspace, "main.nx", &ProgramBuildContext::empty())
+        else {
+            panic!("Expected Card.State to name no state record");
+        };
+        assert!(
+            says_card_declares_no_state(diagnostics.iter().map(|d| d.message.clone())),
+            "{diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn a_wildcard_import_still_brings_derived_declarations_beside_their_base() {
+        let workspace = workspace(vec![
+            workspace_module(
+                "ui.nx",
+                "export component <Card title:string /> = {\n  state { open:boolean = false }\n  <div>{title}</div>\n}",
+            ),
+            workspace_module("user.nx", "export type User = { name:string }"),
+            workspace_module(
+                "main.nx",
+                "import \"./ui.nx\"\nimport \"./user.nx\" as Ui\nlet a():Card.State.Update = { <Card.State.Update open=true /> }\nlet b():Ui.User.Update = { <Ui.User.Update name=\"x\" /> }\nlet c():Card.State = { <Card.State open=true /> }\nlet root() = { 1 }",
+            ),
+        ]);
+        let result =
+            build_workspace_program_artifact(&workspace, "main.nx", &ProgramBuildContext::empty());
+        assert!(result.is_ok(), "{:?}", result.err());
+    }
+
+    #[test]
+    fn a_program_does_not_take_derived_declarations_from_an_import_that_lost_the_name() {
+        let temp = TempDir::new().expect("temp dir");
+        write_two_cards(temp.path());
+        let registry = LibraryRegistry::new();
+        for dir in ["plain", "ui"] {
+            registry
+                .load_library_from_directory(temp.path().join(dir))
+                .expect("library loads");
+        }
+        let app_dir = temp.path().join("app");
+        fs::create_dir_all(&app_dir).expect("app dir");
+        let main_path = app_dir.join("main.nx");
+        let source = "import { Card } from \"../plain\"\nimport { Card } from \"../ui\"\nlet s:Card.State = <Card.State open=true />\nlet root() = { <Card label=\"x\" /> }";
+        fs::write(&main_path, source).expect("main file");
+
+        let artifact = build_program_artifact_from_source(
+            source,
+            &main_path.display().to_string(),
+            &registry.build_context(),
+        )
+        .expect("Expected program artifact");
+        assert!(
+            says_card_declares_no_state(
+                artifact
+                    .diagnostics
+                    .iter()
+                    .map(|diagnostic| diagnostic.message().to_string())
+            ),
+            "{:?}",
+            artifact.diagnostics
+        );
     }
 
     /// A union-typed property of a component imported from a built library.

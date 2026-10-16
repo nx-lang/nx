@@ -120,6 +120,47 @@ test("answers hover on the visitor's own declarations, with no catalog behind th
   assert.deepEqual(report.documents[0].diagnostics, []);
 });
 
+test("reads visualizer declarations in the visitor's source, and reports a misspelled one", async () => {
+  const source = [
+    'import "@nx/visualizer"',
+    "type Choice = { value:string label:string }",
+    "visualizer Choice = <ElementVisualizer title=label id=value />",
+    'let pick = <Choice value="a" label="Apples" />',
+    "",
+  ].join("\n");
+  const tree = await session.answer({
+    kind: "language",
+    id: ++id,
+    query: "sourceTree",
+    request: { documents: [{ uri, source, version: 1 }], uri, visualizers: {} },
+  });
+  const choice = tree.declarations.find((entry) => entry.name === "Choice");
+  assert.equal(choice.visualizer.title, "label");
+  assert.equal(choice.visualizer.id, "value");
+  assert.equal(choice.visualizer.idPosition, "start");
+  // The reading of `pick` takes its title from `label` and its id from `value`: `Apples` and `a`.
+  const valueOf = (name) => {
+    const attribute = tree.nodes.findIndex((node) => node.role === "attribute" && node.name === name);
+    return tree.nodes.find((node) => node.parent === attribute && node.role === "literal")?.value;
+  };
+  assert.equal(valueOf(choice.visualizer.title), '"Apples"');
+  assert.equal(valueOf(choice.visualizer.id), '"a"');
+
+  const misspelled = source.replace("title=label", "title=lable");
+  const report = await session.answer({
+    kind: "language",
+    id: ++id,
+    query: "diagnostics",
+    request: { documents: [{ uri, source: misspelled, version: 2 }], uri },
+  });
+  const diagnostics = report.documents[0].diagnostics;
+  assert.equal(diagnostics.length, 1, JSON.stringify(diagnostics));
+  // On the attribute that sets it, as for any misspelled case, naming the property it meant.
+  const { start, end } = diagnostics[0].range;
+  assert.equal(misspelled.split("\n")[start.line].slice(start.character, end.character), "title=lable");
+  assert.match(diagnostics[0].message, /'lable'.*did you mean `label`/);
+});
+
 test("a crashed host is reported once and replaced, and the next request is answered", async () => {
   // One host that crashes on its first build, then the real thing. That is what a trap looks like
   // from the session's side; the trap itself is proved against a real one in the wasm SDK's tests.

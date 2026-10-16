@@ -86,7 +86,23 @@ export type DocumentSymbolsRequest = LanguageQuery;
  *
  * Unstable: the answer's shape may change until a later release commits to it.
  */
-export type SourceTreeRequest = LanguageQuery;
+export interface SourceTreeRequest extends LanguageQuery {
+  /**
+   * Resolve the visualizer declarations that apply to the document's program, and attach each
+   * declaration's resolved visualizer to its entry in the answer's declaration table. Absent, the
+   * answer carries no visualizers.
+   */
+  visualizers?: SourceTreeVisualizersOption;
+}
+
+/** Which visualizer declarations a source-tree request resolves. */
+export interface SourceTreeVisualizersOption {
+  /**
+   * Further visualizer modules the host supplies, by module identity, applied after the program's
+   * own visualizer declarations in the order named.
+   */
+  modules?: string[];
+}
 
 /** The queries this protocol defines. */
 export const LANGUAGE_QUERIES = [
@@ -311,7 +327,8 @@ export type SourceFlag =
   | "abstract"
   | "external"
   | "export"
-  | "private";
+  | "private"
+  | "visualizer";
 
 /**
  * One piece of the source. Every token of the document belongs to exactly one node, the smallest
@@ -395,6 +412,44 @@ export interface SourceDeclaration {
   type?: string;
   /** The range of a value declaration's value, when the queried document declares it. */
   valueRange?: EditorRange;
+  /**
+   * How a viewer presents the declaration, resolved from every visualizer declaration that applies
+   * to it; present only when the request asked for `visualizers`.
+   */
+  visualizer?: SourceVisualizer;
+}
+
+/**
+ * A declaration's resolved visualizer. A record, an action or a component has its title, id and
+ * icon, and every property once, those its visualizer names first; an alias of a primitive type its
+ * format.
+ */
+export interface SourceVisualizer {
+  /** The property whose value is the element's title. */
+  title?: string;
+  /** The property whose value identifies the element. */
+  id?: string;
+  /** Where the element's id reads: right after its name, or last on its line. */
+  idPosition?: "start" | "end";
+  /** The name of the Lucide icon that marks the element where it starts. */
+  icon?: string;
+  /** Every property, those the visualizer names first. */
+  properties?: SourcePropertyVisualizer[];
+  /** How an alias's string values are shown. */
+  format?: SourceValueFormat;
+}
+
+/** How a string value is shown. A format changes how the value looks, never what it is. */
+export type SourceValueFormat = "id" | "color";
+
+/** How one property of a declaration reads. */
+export interface SourcePropertyVisualizer {
+  name: string;
+  /**
+   * How the property's string value is shown: from its property visualizer, or else from the
+   * visualizer of the alias its type names.
+   */
+  format?: SourceValueFormat;
 }
 
 /**
@@ -409,6 +464,8 @@ export interface SourceTree {
   version: number | null;
   nodes: SourceNode[];
   declarations: SourceDeclaration[];
+  /** The host visualizer modules the request named that the analyzed documents do not include. */
+  missingVisualizerModules?: string[];
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -517,7 +574,8 @@ export class LanguageServiceTimeoutError extends Error {
  * Returns whether `error` is the rejection a cancelled signal produces.
  *
  * `fetch` rejects with a `DOMException` named `AbortError`; an in-process implementation may throw
- * `signal.reason`, which is the same when the caller used `AbortController.abort()` without a reason.
+ * `signal.reason`, which is the same when the caller used `AbortController.abort()` without a
+ * reason.
  */
 export function isAbortError(error: unknown): boolean {
   return (

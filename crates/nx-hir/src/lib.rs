@@ -31,6 +31,7 @@ pub mod prepared;
 pub mod records;
 pub mod scope;
 pub mod unions;
+pub mod visualizers;
 
 use la_arena::{Arena, Idx};
 use nx_diagnostics::{Diagnostic, Label, Severity, TextSize, TextSpan};
@@ -82,12 +83,16 @@ pub use unions::{
     complete_property_unions, resolve_union_definition, validate_union_definitions,
     InvalidUnionBaseReason, UnionValidationError,
 };
+pub use visualizers::{
+    resolve_visualizer_target, VisualizerRecord, VisualizerTarget, VisualizerTargetError,
+    VISUALIZER_LIBRARY_MODULE, VISUALIZER_LIBRARY_ROOT, VISUALIZER_TARGET_PARAMETER,
+};
 
 /// The reserved module identity of the NX prelude.
 ///
-/// <para>The prelude is a module the compiler carries and every other module sees without an import.
-/// Its identity is reserved: a workspace may not supply a module under it, and the checker names it
-/// to tell the prelude's `Range` from a module's own declaration of that name.</para>
+/// <para>The prelude is a module the compiler carries and every other module sees without an
+/// import. Its identity is reserved: a workspace may not supply a module under it, and the checker
+/// names it to tell the prelude's `Range` from a module's own declaration of that name.</para>
 ///
 /// <para>It has to be a legal file name on every platform, because the prelude's image is written
 /// like any module's, with `/` replaced by `__`.</para>
@@ -100,7 +105,8 @@ pub const PRELUDE_MODULE_IDENTITY: &str = "@nx/prelude.nx";
 /// fingerprint cannot answer that: it hashes the source text, so a reworded comment would reject
 /// every image already in the wild. This is the semantic answer instead — bump it when a prelude
 /// declaration's shape changes, and leave it alone for an edit that changes no declaration. Linking
-/// then reports a mismatch as `nx-ir-link-version`, the same way it does for any other library.</para>
+/// then reports a mismatch as `nx-ir-link-version`, the same way it does for any other
+/// library.</para>
 ///
 /// <para>`prelude_declaration_shape_is_pinned_to_the_prelude_version` fails when the shape changes
 /// without a bump, so this cannot silently fall behind.</para>
@@ -832,8 +838,9 @@ pub enum RecordKind {
     /// Derived `<Target>.Update` patch record, synthesized for every record, action, inline
     /// emitted action, and component state record.
     ///
-    /// <para>An update record has the target's effective fields, every one optional and none carrying a default. An absent field means "unchanged"; a present
-    /// empty value clears the field, which only a field the target declares optional admits.</para>
+    /// <para>An update record has the target's effective fields, every one optional and none
+    /// carrying a default. An absent field means "unchanged"; a present empty value clears the
+    /// field, which only a field the target declares optional admits.</para>
     Update {
         /// Name of the record, action, or component state record this update record patches.
         target: Name,
@@ -847,13 +854,26 @@ pub enum RecordKind {
         /// Name of the component whose state this record describes.
         component: Name,
     },
+    /// Derived `<Component>.Props` record, synthesized for every component.
+    ///
+    /// <para>A props record has the component's props, inherited props first, with their types,
+    /// optional marks and content modifiers and without defaults. A component with a base gets
+    /// the inherited props through the record's base, the base component's props record; that
+    /// link is internal, and a props record cannot be named in an `extends` clause. In every other
+    /// respect it is a plain record: it has its own update record and property union.</para>
+    Props {
+        /// Name of the component whose props this record describes.
+        component: Name,
+    },
 }
 
 impl RecordKind {
     /// Returns the `(Label, singular, plural)` wording diagnostics use for this kind.
     pub fn labels(&self) -> (&'static str, &'static str, &'static str) {
         match self {
-            RecordKind::Plain | RecordKind::State { .. } => ("Record", "record", "records"),
+            RecordKind::Plain | RecordKind::State { .. } | RecordKind::Props { .. } => {
+                ("Record", "record", "records")
+            }
             RecordKind::Action => ("Action", "action", "actions"),
             RecordKind::Update { .. } => ("Update record", "update record", "update records"),
         }
@@ -885,6 +905,20 @@ pub fn state_record_name(component: &str) -> Name {
 /// Returns true when `name` is spelled like a derived state record, `<Component>.State`.
 pub fn is_state_record_name(name: &str) -> bool {
     name.strip_suffix(STATE_RECORD_SUFFIX)
+        .is_some_and(|prefix| prefix.ends_with('.'))
+}
+
+/// Suffix of the derived props record name: `<Component>.Props`.
+pub const PROPS_RECORD_SUFFIX: &str = "Props";
+
+/// Returns the name of the derived props record for `component`.
+pub fn props_record_name(component: &str) -> Name {
+    Name::new(&format!("{}.{}", component, PROPS_RECORD_SUFFIX))
+}
+
+/// Returns true when `name` is spelled like a derived props record, `<Component>.Props`.
+pub fn is_props_record_name(name: &str) -> bool {
+    name.strip_suffix(PROPS_RECORD_SUFFIX)
         .is_some_and(|prefix| prefix.ends_with('.'))
 }
 
@@ -939,12 +973,21 @@ impl RecordDef {
         }
     }
 
+    /// Returns the component whose props this record describes, when it is a derived
+    /// `<Component>.Props` record.
+    pub fn props_component(&self) -> Option<&Name> {
+        match &self.kind {
+            RecordKind::Props { component } => Some(component),
+            _ => None,
+        }
+    }
+
     /// Returns true when this record is derived rather than declared: an update record or a
-    /// component's state record.
+    /// component's state or props record.
     pub fn is_derived(&self) -> bool {
         matches!(
             self.kind,
-            RecordKind::Update { .. } | RecordKind::State { .. }
+            RecordKind::Update { .. } | RecordKind::State { .. } | RecordKind::Props { .. }
         )
     }
 
@@ -1297,6 +1340,28 @@ pub struct LoweredModule {
     /// Where the annotation of a declaration that is not a property was written — a function's
     /// return type, a value's `: Type` — keyed by the declaration's span.
     annotation_spans: FxHashMap<TextSpan, TextSpan>,
+    /// The module's `visualizer` declarations, in source order.
+    ///
+    /// <para>They are kept apart from [`items`](Self::items): a visualizer declaration has no name
+    /// of its own, nothing refers to it, and it never reaches the module's exports, declaration
+    /// schema or NX IR. The type checker checks each value, and tools gather them.</para>
+    visualizers: Vec<VisualizerDecl>,
+}
+
+/// A `visualizer Target = Value` declaration: how a viewer presents the declaration `Target`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VisualizerDecl {
+    /// The target as written, possibly qualified (`ui.Choice`, `Form.Submitted`).
+    pub target: Name,
+    /// Where the target was written.
+    pub target_span: TextSpan,
+    /// The value, a construction of an `@nx/visualizer` record.
+    pub value: ExprId,
+    /// The arena indices of the value's expressions, which were allocated together. Code that
+    /// scans every expression of a module for what the program uses skips these.
+    pub exprs: std::ops::Range<usize>,
+    /// The whole declaration.
+    pub span: TextSpan,
 }
 
 impl LoweredModule {
@@ -1312,7 +1377,27 @@ impl LoweredModule {
             elements: Arena::new(),
             type_name_spans: Vec::new(),
             annotation_spans: FxHashMap::default(),
+            visualizers: Vec::new(),
         }
+    }
+
+    /// The module's `visualizer` declarations, in source order.
+    pub fn visualizers(&self) -> &[VisualizerDecl] {
+        &self.visualizers
+    }
+
+    /// Whether the expression is part of a visualizer declaration's value, which no runtime
+    /// evaluates.
+    pub fn is_visualizer_expr(&self, id: ExprId) -> bool {
+        let index = id.into_raw().into_u32() as usize;
+        self.visualizers
+            .iter()
+            .any(|visualizer| visualizer.exprs.contains(&index))
+    }
+
+    /// Adds a `visualizer` declaration.
+    pub fn add_visualizer(&mut self, visualizer: VisualizerDecl) {
+        self.visualizers.push(visualizer);
     }
 
     /// Records every type name written in a type position, with where it was written.

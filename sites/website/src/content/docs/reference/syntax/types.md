@@ -9,10 +9,11 @@ This page describes type declarations and usage. For formal grammar, see [nx-gra
 A name written where a type goes must name a type visible in that module: a primitive, a record,
 union, alias, component or action declared in or imported into the module, `Element`, `Range` from
 the prelude, a type parameter in scope, a record's or action's derived `Name.Property` or
-`Name.Update`, or, for a component with state, `Name.State`, `Name.State.Update` and
-`Name.State.Property`. Inside a component
-body a bare `State` names that component's state record. Any other name
-is an error, `unresolved-type`, reported where it was written and suggesting the closest visible name:
+`Name.Update`, for a component its props record `Name.Props`, `Name.Props.Update` and
+`Name.Props.Property`, or, for a component with state, `Name.State`, `Name.State.Update` and
+`Name.State.Property`. Inside a component body a bare `State` names that component's state record.
+Any other name is an error, `unresolved-type`, reported where it was written and suggesting the
+closest visible name:
 
 ```nx invalid
 type Contact = { name:string }
@@ -460,7 +461,7 @@ let stage = { DealStage.pending_review }
   form, and it generates a C# `enum` and a TypeScript string-literal union. Give a case a payload
   when that state needs to carry data.
 - Every record and action has a derived constant union of its field names, `T.Property` (a
-  component has none; its state fields are `T.State.Property`), so
+  component has none; its props are `T.Props.Property` and its state fields `T.State.Property`), so
   `User.Property.email` names the `email` field of `User` as a value. See
   [Property references](/reference/syntax/functions#property-references).
 
@@ -672,6 +673,37 @@ produces `<Range.Update T=int/>`, and `merge` requires two updates of one instan
 derived property union is parameter-independent: `Range.Property` takes no arguments and has the
 cases `start`, `end` and `endInclusive`.
 
+### Naming a parameter's properties
+A field can be typed `P.Property` for one of the record's own type parameters `P`, with any
+occurrence suffix. Inside the record it is rigid, like `P`. When the record is applied with `P=A`,
+the field's type becomes `A.Property`, the
+[property union](/reference/syntax/functions#property-references) of `A`, so a bare name in an
+unbraced attribute resolves to one of `A`'s fields:
+
+```nx
+type Column = { T:type of:T.Property title?:string }
+type Contact = { name:string email:string }
+
+let byEmail = <Column T=Contact of=email />
+```
+
+A name that is not a field of the argument is rejected, and so is an argument that has no property
+union: a union, an alias, a primitive type or a component. An argument that is itself a type
+parameter passes its own `.Property` on, so in
+`type Table = { T:type content columns:<Column T=T/>+ }` each column names a field of the table's
+`T`.
+
+```nx invalid
+type Column = { T:type of:T.Property }
+type Contact = { name:string email:string }
+
+let byPhone = <Column T=Contact of=phone />   // error: `phone` is not a case of `Contact.Property`
+```
+
+Only a record's own type parameters have `.Property`. A component's type parameter has none, and no
+type parameter has `.Update` or `.State`. This is what lets the records of
+[`@nx/visualizer`](/reference/libraries/visualizer) name the properties of the declaration they describe.
+
 ### Not part of inheritance
 A record that declares type parameters cannot be `abstract` and cannot have an `extends` clause.
 
@@ -685,7 +717,8 @@ its own deserialization site. The update companion follows the record: `Bounds_u
 languages, so a patch of a `Bounds<long>` is typed as one and applies to it. The wire is unaffected —
 a patch is still `Bounds.Update` with its field names and no type argument. Only a *component's*
 state companions (`<Name>_state` and `<Name>_state_update`) erase its parameters, because
-the instantiation was fixed at an NX use site the host never sees.
+the instantiation was fixed at an NX use site the host never sees. A field typed `P.Property` is
+`Extract<keyof P, string>` in TypeScript and `string` in C#.
 
 ## Ranges
 `Range` is a **built-in type**: a generic record NX declares for every program, so it needs no import

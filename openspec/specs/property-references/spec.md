@@ -8,19 +8,20 @@ bare-name positions, how the bare `Property` name resolves inside a component, a
 ### Requirement: Every record-shaped declaration has a derived property union
 The system SHALL make a derived constant union named `T.Property` available, without any
 declaration by the author, for every record-shaped declaration `T` in scope: a `type` record, an
-`action` record, an inline emitted action, and a component's derived `T.State` record.
+`action` record, an inline emitted action, and a component's derived `T.State` and `T.Props`
+records.
 `T.Property` SHALL have exactly one case per effective field of `T` (including inherited fields),
 named by that field, in declaration order with inherited fields first; whether a field is optional,
 defaulted or required SHALL NOT affect whether it has a case. A component is not a record-shaped
 declaration, so it SHALL NOT have a `T.Property`, stateful or not, external or not; the property
-union of a component's state is `T.State.Property`. `T.Property` SHALL have no base and no payload case,
+union of a component's state is `T.State.Property` and of its props `T.Props.Property`. `T.Property` SHALL have no base and no payload case,
 so that every case is a constant case. `T.Property` SHALL be visible and importable wherever `T`
 is, SHALL NOT be usable as the base of an `extends` clause, and SHALL NOT itself have a derived
-`Property`, `Update` or `State`; nor SHALL `T.Update` have a derived `Property`. A type reference or
+`Property`, `Update`, `State` or `Props`; nor SHALL `T.Update` have a derived `Property`. A type reference or
 member access spelled `X.Property` that does not resolve to a derived property union SHALL be a
 diagnostic naming `X`, since the `.Property` suffix always names a derived union. When `X` is a
-component, the diagnostic SHALL say that a component has no property union and, when the component
-has state, SHALL suggest `X.State.Property`.
+component, the diagnostic SHALL say that a component has no property union and SHALL suggest
+`X.State.Property` when the component has state and `X.Props.Property` when it has none.
 
 #### Scenario: Property union of a plain record lists its fields
 - **WHEN** a file contains `type User = { name:string email?:string } let key: User.Property = {User.Property.email}`
@@ -61,6 +62,7 @@ has state, SHALL suggest `X.State.Property`.
 #### Scenario: A component without state has no property union
 - **WHEN** a file contains `component <Form title:string /> = { <Panel /> } let key = {Form.Property.title}`
 - **THEN** type checking SHALL reject `Form.Property` with a diagnostic saying the component has no property union
+- **AND** the diagnostic SHALL suggest `Form.Props.Property`
 
 #### Scenario: Property union cannot be extended
 - **WHEN** a file contains `type User = { name:string } type Extra extends User.Property = | more`

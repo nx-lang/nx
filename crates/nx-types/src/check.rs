@@ -235,6 +235,9 @@ pub fn analyze_prepared_module(
             nx_hir::Item::Union(_) => {}
         }
     }
+    for visualizer in prepared_module.raw_module().visualizers() {
+        ctx.infer_visualizer(visualizer);
+    }
 
     // Apply contextual name resolutions before the module is snapshotted, so every consumer after
     // type checking sees the qualified member access rather than the bare source spelling.

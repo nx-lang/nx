@@ -8,19 +8,19 @@ the bare `Update` tag resolves inside a component, and how it is encoded on the 
 ### Requirement: Every record-shaped declaration has a derived update record
 The system SHALL make a derived record named `T.Update` available, without any declaration by the
 author, for every record-shaped declaration `T` in scope: a `type` record, an `action` record, an
-inline emitted action, and a component's derived `T.State` record. `T.Update` SHALL have exactly
+inline emitted action, and a component's derived `T.State` and `T.Props` records. `T.Update` SHALL have exactly
 the effective fields of `T` (including inherited fields), each with the same declared type as in
 `T`, and every field SHALL be optional in the sense that it may be absent from the value. A field's
 optional mark in `T` SHALL be remembered by `T.Update` as the field being *clearable*: only a field
 that is optional in `T` may be present in the update with the empty value. A component is not a
 record-shaped declaration, so it SHALL NOT have a `T.Update`, stateful or not, external or not; the
-update record of a component's state is `T.State.Update`. An update record SHALL NOT be an action
+update record of a component's state is `T.State.Update` and of its props `T.Props.Update`. An update record SHALL NOT be an action
 record, SHALL NOT be a plain record, SHALL NOT be abstract, and SHALL NOT be usable as the base of an
 `extends` clause. An element or record-literal tag spelled `X.Update` that does not resolve to a
 derived update record SHALL be a diagnostic naming `X`, rather than being treated as an unknown host
 element, since the `.Update` suffix always names a derived record. When `X` is a component, the
-diagnostic SHALL say that a component has no update record and, when the component has state,
-SHALL suggest `X.State.Update`.
+diagnostic SHALL say that a component has no update record and SHALL suggest `X.State.Update` when
+the component has state and `X.Props.Update` when it has none.
 
 #### Scenario: Update record of a plain record has the same fields
 - **WHEN** a file contains `type User = { name:string email?:string } let patch = <User.Update name="Ada" />`
@@ -55,6 +55,7 @@ SHALL suggest `X.State.Update`.
 #### Scenario: A component without state has no update record
 - **WHEN** a file contains `component <Form title:string /> = { <Panel /> }` and `let patch = <Form.Update title="Sign in" />`
 - **THEN** type checking SHALL reject `Form.Update` with a diagnostic saying the component has no update record
+- **AND** the diagnostic SHALL suggest `Form.Props.Update`
 
 ### Requirement: Update records have a canonical wire encoding that preserves absence
 The canonical value encoding of an update record SHALL carry its `$type` discriminator as

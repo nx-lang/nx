@@ -93,7 +93,8 @@ enum Commands {
         #[arg(long)]
         csharp_namespace: Option<String>,
 
-        /// Package prefix for TypeScript dependency-library imports (only used for --language typescript)
+        /// Package prefix for TypeScript dependency-library imports (only used for --language
+        /// typescript)
         #[arg(long = "typescript-package-prefix")]
         typescript_package_prefix: Option<String>,
     },
@@ -2650,6 +2651,209 @@ export type AssistantConfig = { agent?:Agent }
         let output = run_cli(&["typegen", "--help"]);
         assert!(output.status.success());
         assert!(String::from_utf8_lossy(&output.stdout).contains("@nx/agent"));
+    }
+
+    #[test]
+    fn test_cli_typegen_visualizer_library_spells_target_property_names() {
+        let dir = TempDir::new().unwrap();
+        let ts_path = dir.path().join("generated-ts");
+        let cs_path = dir.path().join("generated-cs");
+
+        let output = run_cli(&[
+            "typegen",
+            "@nx/visualizer",
+            "--language",
+            "typescript",
+            "--output",
+            ts_path.to_str().unwrap(),
+        ]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{stderr}");
+        assert!(!stderr.contains("Warning:"), "{stderr}");
+        let visualizer = fs::read_to_string(ts_path.join("visualizer.ts")).unwrap();
+        assert!(
+            visualizer.contains("export interface ElementVisualizer<Target> "),
+            "{visualizer}"
+        );
+        assert!(
+            visualizer.contains("title?: Extract<keyof Target, string>;"),
+            "{visualizer}"
+        );
+        assert!(
+            visualizer.contains("property: Extract<keyof Target, string>;"),
+            "{visualizer}"
+        );
+        assert!(!visualizer.contains("#property-of"), "{visualizer}");
+
+        let output = run_cli(&[
+            "typegen",
+            "@nx/visualizer",
+            "--language",
+            "csharp",
+            "--output",
+            cs_path.to_str().unwrap(),
+        ]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{stderr}");
+        let visualizer = fs::read_to_string(cs_path.join("visualizer.g.cs")).unwrap();
+        assert!(
+            visualizer.contains("namespace NxLang.Visualizer"),
+            "{visualizer}"
+        );
+        assert!(visualizer.contains("public string? Title"), "{visualizer}");
+        assert!(!visualizer.contains("#property-of"), "{visualizer}");
+    }
+
+    #[test]
+    fn test_cli_typegen_record_type_parameter_property_union() {
+        let (dir, library_path) = create_temp_library(&[(
+            "sort.nx",
+            "export type SortBy = { T:type key:T.Property descending:boolean = false }",
+        )]);
+        for (language, file, expected) in [
+            ("typescript", "sort.ts", "key: Extract<keyof T, string>;"),
+            ("csharp", "sort.g.cs", "public string Key"),
+        ] {
+            let output_path = dir.path().join(format!("generated-{language}"));
+            let output = run_cli(&[
+                "typegen",
+                library_path.to_str().unwrap(),
+                "--language",
+                language,
+                "--output",
+                output_path.to_str().unwrap(),
+            ]);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(output.status.success(), "{stderr}");
+            assert!(!stderr.contains("T.Property"), "{stderr}");
+            let generated = fs::read_to_string(output_path.join(file)).unwrap();
+            assert!(generated.contains(expected), "{generated}");
+        }
+    }
+
+    #[test]
+    fn test_cli_typegen_visualizer_declarations_change_nothing() {
+        // The import stays: what is compared is the visualizer declaration alone.
+        let choice = "import \"@nx/visualizer\"\nexport type Choice = { label:string }\n";
+        let (plain_dir, plain_path) = create_temp_library(&[("choice.nx", choice)]);
+        let with_visualizer =
+            format!("{choice}visualizer Choice = <ElementVisualizer title=label />\n");
+        let (visualizer_dir, visualizer_path) =
+            create_temp_library(&[("choice.nx", with_visualizer.as_str())]);
+        for language in ["typescript", "csharp"] {
+            let generate = |dir: &TempDir, library: &Path| {
+                let output_path = dir.path().join(format!("generated-{language}"));
+                let output = run_cli(&[
+                    "typegen",
+                    library.to_str().unwrap(),
+                    "--language",
+                    language,
+                    "--output",
+                    output_path.to_str().unwrap(),
+                ]);
+                assert!(
+                    output.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                let mut files = fs::read_dir(&output_path)
+                    .unwrap()
+                    .map(|entry| {
+                        let path = entry.unwrap().path();
+                        let text = fs::read_to_string(&path).unwrap();
+                        (path.file_name().unwrap().to_owned(), text)
+                    })
+                    .collect::<Vec<_>>();
+                files.sort();
+                files
+            };
+            assert_eq!(
+                generate(&plain_dir, &plain_path),
+                generate(&visualizer_dir, &visualizer_path),
+                "{language}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_cli_typegen_rejects_a_props_record_in_an_exported_signature() {
+        let (dir, library_path) = create_temp_library(&[(
+            "card.nx",
+            "export component <Card title:string /> = { <Panel /> }\nexport type Saved = { props:Card.Props }",
+        )]);
+        let output_path = dir.path().join("generated-ts");
+        let output = run_cli(&[
+            "typegen",
+            library_path.to_str().unwrap(),
+            "--language",
+            "typescript",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success(), "{stderr}");
+        assert!(
+            stderr.contains("'Saved'") && stderr.contains("'Card.Props'"),
+            "{stderr}"
+        );
+    }
+
+    #[test]
+    fn test_cli_typegen_accepts_a_namespaced_type_named_props() {
+        let (dir, library_path) = create_temp_library(&[(
+            "saved.nx",
+            "import \"../shared\" as shared\nexport type Saved = { p:shared.Props }",
+        )]);
+        let shared_path = dir.path().join("shared");
+        fs::create_dir_all(&shared_path).unwrap();
+        fs::write(
+            shared_path.join("shared.nx"),
+            "export type Props = { a:string }",
+        )
+        .unwrap();
+        let output_path = dir.path().join("generated-ts");
+        let output = run_cli(&[
+            "typegen",
+            library_path.to_str().unwrap(),
+            "--language",
+            "typescript",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{stderr}");
+    }
+
+    #[test]
+    fn test_cli_typegen_resolves_a_selectively_imported_components_state() {
+        let (dir, library_path) = create_temp_library(&[(
+            "saved.nx",
+            "import { Card } from \"../ui\"\nexport type Saved = { s:Card.State }",
+        )]);
+        let ui_path = dir.path().join("ui");
+        fs::create_dir_all(&ui_path).unwrap();
+        fs::write(
+            ui_path.join("card.nx"),
+            "export external component <Card /> = {\n  state { open:boolean }\n}",
+        )
+        .unwrap();
+        let output_path = dir.path().join("generated-ts");
+        let output = run_cli(&[
+            "typegen",
+            library_path.to_str().unwrap(),
+            "--language",
+            "typescript",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{stderr}");
+        let saved = fs::read_to_string(output_path.join("saved.ts")).unwrap();
+        assert!(
+            saved.contains("import type { Card_state as Card_State } from \"ui\";"),
+            "{saved}"
+        );
+        assert!(saved.contains("s: Card_State;"), "{saved}");
     }
 
     #[test]

@@ -10,7 +10,7 @@ use nx_api::{
 use nx_codegen::{emit_nx_ir, NxIrEmitOptions};
 use nx_ir::explain_nx_ir_image;
 use nx_language_service::{
-    DocumentInput, DocumentUri, SnapshotError, TextPosition, WorkspaceSnapshot,
+    DocumentInput, DocumentUri, SnapshotError, SourceTreeOptions, TextPosition, WorkspaceSnapshot,
 };
 use nx_value::NxValue;
 use serde::Serialize;
@@ -364,10 +364,18 @@ impl NativeNxLanguageSnapshot {
     /// Every piece of one document as a typed node, with the declarations the nodes refer to, as
     /// JSON. Unstable.
     #[napi]
-    pub fn source_tree(&self, uri: String) -> Result<String> {
+    pub fn source_tree(&self, uri: String, options_json: Option<String>) -> Result<String> {
         let snapshot = self.snapshot()?;
+        let options: SourceTreeOptions = match options_json {
+            Some(json) => serde_json::from_str(&json).map_err(|error| {
+                Error::from_reason(format!(
+                    "{EVALUATION_ERROR_PREFIX}Invalid source tree options: {error}"
+                ))
+            })?,
+            None => SourceTreeOptions::default(),
+        };
         let tree = snapshot
-            .source_tree(&DocumentUri::new(uri))
+            .source_tree_with_options(&DocumentUri::new(uri), &options)
             .map_err(snapshot_error)?;
         result_json(&tree)
     }

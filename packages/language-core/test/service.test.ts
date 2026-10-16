@@ -35,7 +35,7 @@ function range(line: number, startCharacter: number, endCharacter: number, start
  */
 function fakeSnapshot(
   documents: readonly LanguageDocument[],
-  record: { analyses: number; sources: string[]; implicitImports: string[][] },
+  record: Record_,
   options: { implicitImports: readonly string[] },
 ): SnapshotLike {
   record.analyses += 1;
@@ -101,30 +101,38 @@ function fakeSnapshot(
         selectionRange: range(panelLine, 1, 6, queried.indexOf("<Panel mode=light") + 1),
       },
     ],
-    sourceTree: (): SourceTree => ({
-      uri: FORM,
-      identity: "tenant/form.nx",
-      version: 1,
-      nodes: [
-        {
-          role: "element",
-          range: range(panelLine, 0, 30, queried.indexOf("<Panel mode=light")),
-          key: "root",
-          name: "Panel",
-          type: "Panel",
-          declaration: 0,
-        },
-      ],
-      declarations: [{ module: "tenant/catalog.nx", name: "Panel", kind: "function" }],
-    }),
+    sourceTree: (_uri, treeOptions): SourceTree => {
+      record.treeOptions.push(treeOptions);
+      return {
+        uri: FORM,
+        identity: "tenant/form.nx",
+        version: 1,
+        nodes: [
+          {
+            role: "element",
+            range: range(panelLine, 0, 30, queried.indexOf("<Panel mode=light")),
+            key: "root",
+            name: "Panel",
+            type: "Panel",
+            declaration: 0,
+          },
+        ],
+        declarations: [{ module: "tenant/catalog.nx", name: "Panel", kind: "function" }],
+      };
+    },
     dispose: () => {},
   };
 }
 
-type Record_ = { analyses: number; sources: string[]; implicitImports: string[][] };
+type Record_ = {
+  analyses: number;
+  sources: string[];
+  implicitImports: string[][];
+  treeOptions: ({ visualizers?: { modules?: string[] } } | undefined)[];
+};
 
 function newRecord(): Record_ {
-  return { analyses: 0, sources: [], implicitImports: [] };
+  return { analyses: 0, sources: [], implicitImports: [], treeOptions: [] };
 }
 
 function serviceOver(record: Record_) {
@@ -217,8 +225,8 @@ test("a client cannot supply a document with a context document's URI", async ()
 });
 
 // The context document is declared the way both READMEs declare one — a URI and a source, with no
-// identity — so its identity is the derived `tenant/catalog.nx`. A client naming that identity under
-// a URI of its own would replace the host's declarations, which is the refusal this asserts.
+// identity — so its identity is the derived `tenant/catalog.nx`. A client naming that identity
+// under a URI of its own would replace the host's declarations, which is the refusal this asserts.
 test("a client cannot supply a document with a context document's derived identity", async () => {
   const service = serviceOver(newRecord());
 
@@ -279,6 +287,20 @@ test("a source tree through host context is the document's own, at this request'
   // A declaration the host's context declares is described under the context's identity.
   assert.equal(tree.declarations[0]!.module, "tenant/catalog.nx");
   assert.deepEqual(record.implicitImports, [["tenant/catalog.nx"]]);
+});
+
+test("a source tree asked with visualizers passes them to the snapshot, and one asked without passes none", async () => {
+  const record = newRecord();
+  const service = serviceOver(record);
+
+  await service.sourceTree({ documents: [{ uri: FORM, source: SOURCE }], uri: FORM });
+  await service.sourceTree({
+    documents: [{ uri: FORM, source: SOURCE }],
+    uri: FORM,
+    visualizers: { modules: ["tenant/visualizers.nx"] },
+  });
+
+  assert.deepEqual(record.treeOptions, [undefined, { visualizers: { modules: ["tenant/visualizers.nx"] } }]);
 });
 
 test("repeated queries over unchanged text analyze once, and each answer carries its own version", async () => {

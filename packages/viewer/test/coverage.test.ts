@@ -1,6 +1,6 @@
 /**
- * The reading is lossless: the source tree of every `.nx` file in the repository, rendered with
- * its details strips open, carries the key of every node exactly once.
+ * The reading is lossless: the source tree of every `.nx` file in the repository, rendered, carries
+ * the key of every node exactly once.
  */
 import { document } from "./dom.js";
 
@@ -12,19 +12,16 @@ import { after, describe, it } from "node:test";
 
 import type { SourceTree } from "@nx-lang/language-protocol";
 
-import { nxHost, repository, treeOf, type Fixture } from "./fixtures.js";
+import { fixture, fixtureNames, nxHost, repository, type Fixture } from "./fixtures.js";
 
-const { renderDocument, renderers } = await import("../src/render.js");
+const { renderSource } = await import("../src/source.js");
 const { indexTree } = await import("../src/tree.js");
 
 after(async () => (await nxHost()).dispose());
 
 /** The keys of `tree` that do not appear exactly once in its rendering, with how often they do. */
 function uncovered({ tree, text }: Fixture): string[] {
-  const rendered = renderDocument({ document, index: indexTree(tree, text), ghosts: true, copy: false });
-  for (const details of rendered.querySelectorAll("details")) {
-    details.open = true;
-  }
+  const rendered = renderSource(document, indexTree(tree, text), []);
   const counts = new Map<string, number>();
   for (const element of rendered.querySelectorAll<HTMLElement>("[data-key]")) {
     const key = element.dataset["key"]!;
@@ -50,7 +47,8 @@ async function repositoryTrees(): Promise<{ path: string; fixture: Fixture }[]> 
   try {
     return documents.map((document) => ({
       path: document.identity,
-      fixture: { text: document.source, tree: snapshot.sourceTree(document.uri) as SourceTree }
+      // With visualizers, so every node a visualizer moves, as an element's id, is checked too.
+      fixture: { text: document.source, tree: snapshot.sourceTree(document.uri, { visualizers: {} }) as SourceTree }
     }));
   } finally {
     snapshot.dispose();
@@ -77,21 +75,12 @@ describe("coverage", () => {
     assert.deepEqual(failures, [], `nodes not rendered exactly once:\n${failures.join("\n")}`);
   });
 
-  it("fails naming a file and a key when a role's renderer is removed", async () => {
-    const fixture = await treeOf([
-      { uri: "nx:///commented.nx", identity: "commented.nx", source: "// A note.\nlet answer = 42\n" }
-    ]);
-    const renderer = renderers.comment;
-    delete renderers.comment;
-    try {
-      assert.deepEqual(failuresOf([{ path: "commented.nx", fixture }]), [
-        "commented.nx: answer:comment[0] (comment, rendered 0 times)"
-      ]);
-    } finally {
-      if (renderer !== undefined) {
-        renderers.comment = renderer;
-      }
-    }
+  it("renders every node of every fixture exactly once, shapes the repository lacks included", async () => {
+    // Among them, ids a visualizer moves and comments inside a group's attributes.
+    const trees = await Promise.all(fixtureNames.map(async (name) => ({ path: name, fixture: await fixture(name) })));
+    assert.ok(trees.some(({ path }) => path === "attributeComments"));
+    const failures = failuresOf(trees);
+    assert.deepEqual(failures, [], `nodes not rendered exactly once:\n${failures.join("\n")}`);
   });
 
   it("reports how long the question-flow program takes to render", async () => {
@@ -99,7 +88,7 @@ describe("coverage", () => {
     const { fixture } = (await repositoryTrees()).find((entry) => entry.path === path)!;
     const index = indexTree(fixture.tree, fixture.text);
     const started = performance.now();
-    renderDocument({ document, index, ghosts: true, copy: false });
+    renderSource(document, index, []);
     const elapsed = performance.now() - started;
     console.log(`Rendered ${path} (${fixture.tree.nodes.length} nodes) in ${elapsed.toFixed(1)} ms`);
   });

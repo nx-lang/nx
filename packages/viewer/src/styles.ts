@@ -11,18 +11,9 @@ export const styles = `
   line-height: 1.5;
   color: var(--nx-viewer-foreground, CanvasText);
   background: var(--nx-viewer-background, transparent);
-  --ink-2: light-dark(#4a4c57, #b8b9c2);
-  --ink-3: light-dark(#7c7e8a, #8c8e99);
-  --rule: light-dark(#dedcd3, #33353f);
-  --sheet: light-dark(#ffffff, #1e2027);
-  --code-bg: light-dark(#f6f6f2, #1a1c22);
-  --blue: var(--nx-viewer-accent, light-dark(#1f4fe0, #7d9bff));
   --blue-soft: light-dark(#e5ecff, #1f2a4d);
   --gold: light-dark(#8a5a00, #ffb020);
   --gold-soft: light-dark(#fff1d1, #3a2d12);
-  --green: light-dark(#1d7a4a, #5ccb8f);
-  --green-soft: light-dark(#e2f4ea, #173528);
-  --red: light-dark(#b42318, #ff8a7a);
   --mono: var(--nx-viewer-mono-font-family, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
 }
 :host([hidden]) { display: none; }
@@ -47,128 +38,291 @@ export const styles = `
   background: var(--gold-soft);
   color: var(--gold);
 }
-button {
-  font: inherit;
-  font-size: 12px;
-  color: inherit;
-  background: var(--sheet);
-  border: 1px solid var(--rule);
-  border-radius: 4px;
-  padding: 0 6px;
-  cursor: pointer;
-}
-button:hover, button:focus-visible { border-color: var(--blue); color: var(--blue); }
-.document { display: flex; flex-direction: column; gap: 12px; padding: 4px 2px 12px; }
-:host([stale]) .document { opacity: 0.55; }
-.n { border-radius: 4px; }
 .announcer { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .body:focus-visible { outline: 2px solid var(--blue-soft); outline-offset: 4px; border-radius: 4px; }
-.n.selected { outline: 2px solid var(--blue); outline-offset: 2px; }
-.n.hovered { background: var(--blue-soft); }
+.body.by-pointer:focus-visible { outline: none; }
 
-.details { border: 1px solid var(--rule); border-radius: 6px; padding: 2px 10px; font-size: 13px; color: var(--ink-2); }
-.details summary { cursor: pointer; }
-.details-body { display: flex; flex-direction: column; gap: 4px; padding: 4px 0 6px; }
-
-.declaration { display: flex; flex-direction: column; gap: 6px; }
-.declaration-header { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
-.declaration-kind { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3); }
-.declaration-name { font-weight: 600; font-family: var(--mono); font-size: 13px; }
-.declaration-header .source-toggle, .card-header .source-toggle { margin-left: auto; opacity: 0.7; }
-.declaration-body { display: flex; flex-direction: column; gap: 4px; padding-left: 12px; border-left: 2px solid var(--rule); }
-.declaration-body > .type { align-self: flex-start; }
-.group-label { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
-.member { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
-.member-name { font-family: var(--mono); font-size: 13px; font-weight: 500; }
-.member-default-label { font-size: 12px; color: var(--ink-3); }
-.nested { flex-basis: 100%; padding-left: 14px; display: flex; flex-direction: column; gap: 2px; }
-code, .type { font-family: var(--mono); font-size: 12.5px; }
-.type { color: var(--ink-2); background: var(--code-bg); border: 1px solid var(--rule); border-radius: 4px; padding: 0 4px; }
-.tag { font-size: 11px; color: var(--ink-3); border: 1px solid var(--rule); border-radius: 4px; padding: 0 5px; }
-
-.card { background: var(--sheet); border: 1px solid var(--rule); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.card:focus-visible { outline: 2px solid var(--blue); }
-.card-header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.kind { font-size: 12px; font-weight: 600; color: var(--blue); background: var(--blue-soft); border-radius: 999px; padding: 1px 10px; }
-.kind.unresolved { color: var(--red); background: transparent; border: 1px dashed var(--red); font-family: var(--mono); }
-.unresolved-marker { font-size: 11px; color: var(--red); }
-.card-name { font-family: var(--mono); font-size: 12px; color: var(--ink-3); }
-.rows { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; align-items: baseline; }
-.rows > :not(.row) { grid-column: 1 / -1; }
-.row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: baseline; }
-.row > .label, .row > .when { color: var(--ink-3); font-size: 13px; }
-.row > .label, .row > .when { cursor: help; }
-.row.content-row > .label, .row.handler > .when { align-self: start; }
-.row-value { min-width: 0; overflow-wrap: anywhere; }
-.row.ghost > .label, .ghost-value { color: var(--ink-3); font-style: italic; }
-.ghost-value { font-family: var(--mono); font-size: 12.5px; margin-right: 6px; }
-.item-list { display: flex; flex-direction: column; gap: 6px; }
-.content { display: flex; flex-direction: column; gap: 6px; }
-
-.value.string { color: var(--green); }
-.value.number { font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 12.5px; }
-.value.boolean { font-weight: 700; }
-.value.boolean.true { color: var(--green); }
-.value.boolean.false { color: var(--red); }
-.value.empty { color: var(--ink-3); font-style: italic; }
-.pill { display: inline-block; font-family: var(--mono); font-size: 12px; border: 1px solid var(--rule); border-radius: 999px; padding: 0 8px; }
-.pill.case { color: var(--blue); border-color: var(--blue); }
-.pill.current { color: var(--blue); border-color: var(--blue); background: var(--blue-soft); font-weight: 600; }
-.qualifier { color: var(--ink-3); }
-.sequence { display: inline; }
-.sequence > .reference { display: inline-block; vertical-align: top; }
-.sequence.blocks { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
-
-.reference .ref { font-family: var(--mono); font-size: 12.5px; color: var(--blue); border-bottom: 1px dashed var(--blue); cursor: pointer; }
-.expand { margin-left: 4px; padding: 0 4px; font-size: 11px; line-height: 1.3; }
-.expansion { display: block; margin: 6px 0 2px; padding-left: 10px; border-left: 2px solid var(--blue-soft); }
-.member-access, .call, .binding { font-family: var(--mono); font-size: 12.5px; }
-.member-access .member-name { font-weight: 400; }
-.dot { color: var(--ink-3); }
-.op { color: var(--ink-2); }
-.slot { color: var(--gold); background: var(--gold-soft); border-radius: 4px; padding: 0 4px; font-family: var(--mono); font-size: 12.5px; }
-.sentence .words { color: inherit; }
-
-.condition, .match, .loop { display: flex; flex-direction: column; gap: 4px; }
-.when-label { color: var(--gold); font-size: 13px; font-weight: 500; }
-.when-label .verb, .otherwise, .verb { color: var(--gold); }
-.otherwise { font-size: 13px; font-weight: 500; }
-.branch { display: flex; flex-direction: column; gap: 6px; padding-left: 12px; border-left: 2px solid var(--gold-soft); }
-.arm { display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr); gap: 4px 12px; align-items: baseline; padding: 2px 0; border-top: 1px solid var(--rule); }
-.arm-when { color: var(--ink-2); font-size: 13px; }
-.update { display: flex; flex-direction: column; gap: 2px; }
-.set-line .slot-name { font-family: var(--mono); font-size: 12.5px; color: var(--gold); }
-.arrow { color: var(--ink-3); }
-
-.comment { color: var(--ink-3); font-size: 13px; font-style: italic; white-space: pre-wrap; }
-.notes { display: flex; flex-direction: column; }
-.doc { color: var(--ink-2); font-size: 13.5px; }
-.doc p, .text-body p { margin: 0; }
-.text-body { display: flex; flex-direction: column; gap: 6px; }
-.text-body h3, .text-body h4, .text-body h5, .text-body h6 { margin: 0; font-size: 15px; }
-.text-body ul, .text-body ol { margin: 0; padding-left: 1.3em; }
-.text-body pre.raw { margin: 0; font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap; }
-.card > .content > .text-body { border-left: 3px solid var(--gold); padding-left: 10px; }
-.unparsed { border: 1px dashed var(--red); border-radius: 6px; padding: 4px 8px; }
-.unparsed-marker { font-size: 11px; color: var(--red); }
-.unparsed pre { margin: 0; font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap; }
-.import { font-size: 13px; }
-
-.hover, .source-panel {
-  position: absolute;
-  z-index: 3;
-  max-width: min(420px, 100%);
-  background: var(--sheet);
-  border: 1px solid var(--rule);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(22, 23, 28, 0.14);
-  padding: 8px 10px;
-  font-size: 13px;
+/* The reading: the document's text as an editor shows it, with elements read as groups and lines.
+   A node is an inline span, so marking one changes no line's height. */
+.source {
+  margin: 0;
+  /* Text stops 4px inside where a selected or hovered row's highlight ends, as it starts 4px inside
+     where the highlight begins. */
+  /* The left padding is room for a declaration's fold chevron, which hangs left of its first line. */
+  padding: 4px 12px 12px 1.4em;
+  font-family: var(--nx-viewer-source-font-family, var(--mono));
+  font-variation-settings: var(--nx-viewer-source-font-variation, normal);
+  font-feature-settings: var(--nx-viewer-source-font-features, normal);
+  font-size: var(--nx-viewer-source-font-size, 13px);
+  line-height: var(--nx-viewer-source-line-height, 18px);
+  white-space: pre;
+  tab-size: 2;
 }
-.hover > div + div { margin-top: 6px; }
-.hover-cases { display: flex; flex-wrap: wrap; gap: 4px; }
-.hover-note { color: var(--ink-3); font-size: 12px; }
-.source-panel { max-width: 100%; }
-.source-bar { display: flex; justify-content: space-between; gap: 8px; align-items: center; font-size: 12px; color: var(--ink-3); margin-bottom: 4px; }
-.source-panel pre { margin: 0; font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 50vh; overflow: auto; }
+:host([stale]) .source { opacity: 0.55; }
+.source .t { color: light-dark(var(--l, inherit), var(--d, inherit)); }
+.source .n { border-radius: 2px; }
+/* Text shown to people, as a \`uitext\` property holds: its words in the prose font and a plain,
+   clear color of their own, since they are content and every hue in a theme means code; its quotes
+   quiet. The words sit in a box no wider than the room left on their line, so a long string wraps
+   and a string of several lines continues under its first. */
+.source .uitext-body {
+  font-family: var(--nx-viewer-prose-font-family, inherit);
+  font-variation-settings: var(--nx-viewer-prose-font-variation, inherit);
+  color: var(--nx-viewer-uitext-color, light-dark(#222222, #e4e4e4));
+}
+/* The quotes are in the words' font, so they sit against the words and not a character away. */
+.source .uitext-quote {
+  font-family: var(--nx-viewer-prose-font-family, inherit);
+  font-variation-settings: var(--nx-viewer-prose-font-variation, inherit);
+  color: var(--nx-viewer-uitext-quote-color, light-dark(#8e8e8e, #808080));
+}
+.source .uitext-block {
+  display: inline-flex;
+  vertical-align: baseline;
+  max-width: max(20ch, calc(100% - var(--column, 0) * 1ch));
+}
+.source .uitext-block > .uitext-body {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: var(--nx-viewer-source-line-height, 18px);
+}
+.source .n.selected > .uitext-block { background: var(--nx-viewer-selection, light-dark(#0969da1f, #388bfd33)); }
+/* A string its visualizer formats as an identifier: one quiet token, as products that show ids do,
+   in muted gray on a faint tint, with no border and no added height. */
+.source .id-value {
+  font-family: var(--nx-viewer-source-font-family, var(--mono));
+  color: var(--nx-viewer-id-color, light-dark(#8c959f, #858585));
+  background: var(--nx-viewer-id-background, light-dark(#0000000a, #ffffff0f));
+  border-radius: 6px;
+  padding: 0 6px;
+}
+/* A chip last in its tag closes it with a small gap, less than a space, before the \`/>\`. */
+.source .id-end { margin-right: 3px; }
+.source .id-quote { color: var(--nx-viewer-id-quote-color, light-dark(#afb8c1, #6e6e6e)); }
+/* An element as a property sheet: its name, then a row to an attribute, its names in one quiet
+   column and its values in another, and what it holds under them. It sits where the element began
+   on its line and is no wider than the room left there. */
+.source .sheet {
+  display: inline-grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 2ch;
+  vertical-align: top;
+  max-width: calc(100% - var(--indent, 0) * 1ch);
+}
+/* A sheet inside another is already set in by it, so only its container bounds it. */
+.source .sheet .sheet { max-width: 100%; }
+.source .sheet-head, .source .sheet-held, .source .sheet-note { grid-column: 1 / -1; }
+.source .sheet-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; padding-left: 2ch; }
+.source .sheet-held, .source .sheet-note { padding-left: 2ch; }
+.source .sheet-name { opacity: 0.75; }
+.source .sheet-value { min-width: 0; white-space: pre-wrap; overflow-wrap: break-word; }
+/* Inside a sheet, UI text wraps where its line does: the sheet already sets it in from the margin. */
+.source .sheet .uitext-block { display: inline; max-width: none; }
+.source .sheet-list, .source .sheet-held { display: block; }
+.source .sheet-item { display: block; }
+/* An element on one line: its name, then its properties, a name in the same quiet tone as a
+   sheet's and its value after it. */
+.source .line-name { opacity: 0.75; }
+/* A one-line element's \`<\` and \`/>\`, quiet like its \`=\`. The \`>\` is drawn in close under the slash,
+   nearly touching it, so the two read as one mark. */
+.source .line-open, .source .line-close { color: var(--nx-viewer-tag-color, light-dark(#6e6e6e, #9a9a9a)); }
+.source .line-close-slash { margin-right: -0.18em; }
+/* Half a space before the \`/>\`: a whole one reads as a gap, since the slash leans away from what it
+   follows. An id last in the tag keeps its own smaller gap. */
+.source .line-close { margin-left: 0.3em; }
+.source .id-end + .line-close { margin-left: 0; }
+/* The color a string names, as a small square before it. */
+.source .swatch {
+  display: inline-block;
+  width: 0.75em;
+  height: 0.75em;
+  margin: 0 0.25em 0 0.1em;
+  border-radius: 2px;
+  border: 0;
+  box-shadow: inset 0 0 0 1px light-dark(rgb(0 0 0 / 0.2), rgb(255 255 255 / 0.25));
+  vertical-align: -0.05em;
+}
+.source .line-equals { color: var(--nx-viewer-equals-color, light-dark(#6e6e6e, #9a9a9a)); }
+/* A boolean reads as a mark, a check for true and a cross for false, never as a box to click. */
+.source .sheet-boolean { color: var(--nx-viewer-boolean-color, light-dark(#0451a5, #569cd6)); font-weight: 600; }
+.source .sheet-boolean.false { color: var(--nx-viewer-boolean-false-color, light-dark(#8e8e8e, #808080)); }
+/* A list or a nested sheet sits under its name, a step in, across both columns. */
+.source .sheet-below { grid-column: 1 / -1; display: block; padding-left: 2ch; }
+/* The icon an element on lines of its own starts with, as a design tool's layers list marks each
+   layer: an outline the size of a letter, as quiet as the brackets, before the element's name. */
+.source .element-icon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-right: 0.6ch;
+  vertical-align: -0.15em;
+  color: var(--nx-viewer-icon-color, light-dark(#6e7781, #8b949e));
+  user-select: none;
+}
+.source .element-icon > svg { display: block; width: 100%; height: 100%; stroke-width: 1.75; }
+/* A group's header bolds its name only, not the attributes written after it. */
+.source .sheet-head .line-property { font-weight: 400; }
+/* An item written as it is over several lines starts where its group puts it, and its later lines
+   keep their indentation from the source, measured from the item's own start. */
+.source .sheet-item.as-written *, .source .line-element.alone * { text-indent: 0; }
+/* After the reset above, so an item written as it is inside another keeps its own indents. A line
+   too long for the pane wraps a little in from where the item starts, not at the far left. */
+.source .sheet-item.as-written {
+  margin-left: calc(var(--column, 0) * -1ch);
+  text-indent: calc((var(--column, 0) + 4) * 1ch) hanging each-line;
+}
+.source .sheet-item.as-written > .as-written-lead { display: inline-block; width: calc(var(--column, 0) * 1ch); }
+/* An element on a line of its own wraps within itself, its later lines a step in from where it starts,
+   wherever it sits; and so does one written as its tags inside such an item, as the item's other lines
+   wrap from the item's start. */
+.source .line-element.alone,
+.source .sheet-item.as-written :is(.line-element, .tag-line) {
+  display: inline-block;
+  vertical-align: top;
+  /* The reading's width less the element's column: a percentage here would be of a box that is
+     itself sized by its content. */
+  max-width: calc(100cqw - (var(--line-column, 0) + 1) * 1ch);
+  padding-left: 4ch;
+  text-indent: -4ch;
+  /* At its own spaces, so a wrapped line starts with a word, not inside a string. */
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+/* A sheet's header wraps the same way, its later lines a step in from its icon. */
+.source .sheet > .sheet-head { padding-left: 4ch; text-indent: -4ch; white-space: pre-wrap; overflow-wrap: break-word; }
+.source .sheet > .sheet-head * { text-indent: 0; }
+/* A little room between siblings where either is a sheet, so each group stands apart from the next:
+   between the elements of a list or of what an element holds, between sheets that follow one
+   another, and around a row whose value is a sheet under its name. Not between one-line elements,
+   which read as one list, nor between a sheet's own rows. */
+.source .sheet-item:has(> .sheet) + .sheet-item,
+.source .sheet-item + .sheet-item:has(> .sheet),
+.source .sheet ~ .sheet,
+.source .sheet-row:has(> .sheet-below > .sheet) + :is(.sheet-row, .sheet-held),
+.source .sheet-row + .sheet-row:has(> .sheet-below > .sheet),
+.source .sheet-item.after-blank {
+  margin-top: var(--nx-viewer-group-gap, 0.25lh);
+}
+/* In a narrow pane every value moves under its name, so text never runs down a thin column. */
+.source { container-type: inline-size; }
+@container (width < 64ch) {
+  .source .sheet-row > .sheet-value { grid-column: 1 / -1; padding-left: 2ch; }
+}
+
+/* A group's name is a step bolder than its rows, and a bracket runs down the group from under its
+   name, turning right at its end, as a tree's connectors and an editor's bracket guides do, so each
+   group visibly closes. */
+.source .sheet-head { font-weight: 600; }
+.source .sheet-head .id-value { font-weight: 400; }
+.source .sheet { position: relative; }
+.source .sheet::after {
+  content: "";
+  position: absolute;
+  left: 0.5ch;
+  top: var(--nx-viewer-source-line-height, 18px);
+  bottom: 2px;
+  width: 7px;
+  border-left: 1px solid var(--nx-viewer-rule, light-dark(#0000002e, #ffffff2e));
+  border-bottom: 1px solid var(--nx-viewer-rule, light-dark(#0000002e, #ffffff2e));
+  border-bottom-left-radius: 3px;
+  pointer-events: none;
+}
+/* A group that starts with an icon drops its bracket from under the icon's middle. */
+.source .sheet:has(> .sheet-head > .element-icon)::after { left: calc(0.5em - 0.5px); }
+/* A span in another font takes no line height of its own, so every line keeps the height the
+   text's own font gives it, whichever fonts meet on it. */
+.source .prose, .source .indent { line-height: 0; }
+.source .prose {
+  font-family: var(--nx-viewer-prose-font-family, inherit);
+  font-variation-settings: var(--nx-viewer-prose-font-variation, inherit);
+}
+.source .indent {
+  font-family: var(--nx-viewer-indent-font-family, var(--mono));
+  font-variation-settings: var(--nx-viewer-indent-font-variation, normal);
+}
+.source .n.selected { outline: none; background: var(--nx-viewer-selection, light-dark(#0969da1f, #388bfd33)); }
+/* A group's or a declaration's fold chevron hangs left of where it starts, so folding moves nothing.
+   It shows while the pointer is over the reading, and always on what is folded, as an editor's
+   folding controls do. */
+.source .fold {
+  display: inline-block;
+  width: 1.2em;
+  margin-left: -1.2em;
+  text-align: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s;
+  /* Quieter than the icons: a small, thin chevron in a dim gray, as a design tool's layers list
+     draws it, that brightens under the pointer. */
+  color: var(--nx-viewer-fold-color, light-dark(#8c959f, #7a7a7a));
+  user-select: none;
+}
+.source .fold::before {
+  content: "";
+  display: inline-block;
+  width: 0.28em;
+  height: 0.28em;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: translateY(-0.18em) rotate(45deg);
+  transition: transform 0.15s ease;
+}
+.source .fold.folded::before { transform: translateY(-0.05em) rotate(-45deg); }
+/* The chevron of what was just folded or opened starts where it was, and turns to where it is. */
+.source .fold.was-folded::before, .source .fold.folded.was-folded::before { transform: translateY(-0.05em) rotate(-45deg); }
+.source .fold.was-open::before, .source .fold.folded.was-open::before { transform: translateY(-0.18em) rotate(45deg); }
+@media (prefers-reduced-motion: reduce) { .source .fold::before { transition: none; } }
+.body:hover .source .fold, .source .fold.folded, .source .fold:focus-visible { opacity: 1; }
+.source .fold:hover { color: var(--nx-viewer-foreground, CanvasText); }
+/* What a folded unit hides, said quietly after it. */
+.source .fold-summary { color: var(--nx-viewer-fold-summary-color, light-dark(#8c959f, #858585)); font-weight: 400; }
+/* A folded group is its header on one line: what does not fit of its title is cut, not wrapped. */
+.source .sheet.folded > .sheet-head { display: flex; align-items: baseline; white-space: pre; padding-left: 0; text-indent: 0; }
+.source .sheet.folded > .sheet-head > * { flex: none; }
+.source .sheet.folded > .sheet-head { column-gap: 0; }
+.source .sheet.folded > .sheet-head > .element-icon { margin-right: 0.6ch; }
+.source .sheet.folded > .sheet-head > .id-value { margin-left: 1ch; }
+/* What a folded group hides stands a little apart from its header, as a property does on a line. */
+.source .sheet.folded > .sheet-head > .fold-summary { margin-left: 2ch; }
+.source .fold-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  text-indent: 0;
+  font-family: var(--nx-viewer-prose-font-family, inherit);
+}
+.source .sheet.folded::after { display: none; }
+/* A run of supporting declarations: a quiet line that says what it holds, which opens it. */
+.source .fold-run-head { cursor: pointer; }
+.source .fold-run-head > .fold-summary { font-family: var(--nx-viewer-prose-font-family, inherit); }
+.source .fold-run-head:hover > .fold-summary { color: var(--nx-viewer-foreground, CanvasText); }
+/* A folded declaration is quieter than what is open, so the eye lands on the document's content. */
+.source .fold-declaration.folded { opacity: 0.75; }
+/* A unit of the reading (a group, a group's row, an element on one line, a block written as it is) is
+   drawn selected and hovered by the highlights behind it, as a list's rows are, not by its own box. */
+.source :is(.sheet, .sheet-row, .line-element, .tag-line, .block-line, .sheet-held).selected { background: none; }
+.source :is(.sheet, .block-line, .line-element, .tag-line) { cursor: default; }
+.body:has(> .highlights) { position: relative; isolation: isolate; }
+.highlights { position: absolute; inset: 0; pointer-events: none; z-index: -1; }
+.highlight { position: absolute; border-radius: 4px; }
+.highlight.selected { background: var(--nx-viewer-selection, light-dark(#0969da1f, #388bfd33)); }
+.highlight.selected-body {
+  background: color-mix(in srgb, var(--nx-viewer-selection, light-dark(#0969da1f, #388bfd33)) 45%, transparent);
+}
+/* Out of focus, a selection stays, quieter, as a list's does. */
+:host(:not(:focus-within)) .highlight.selected { background: var(--nx-viewer-selection-inactive, light-dark(#0000000f, #ffffff17)); }
+:host(:not(:focus-within)) .highlight.selected-body {
+  background: color-mix(in srgb, var(--nx-viewer-selection-inactive, light-dark(#0000000f, #ffffff17)) 45%, transparent);
+}
+.highlight.hovered { background: var(--nx-viewer-hover, light-dark(#0000000a, #ffffff0d)); }
+/* Over a selection, the row under the pointer lightens it a little. */
+.highlight.hovered.in-selection { background: var(--nx-viewer-hover-selected, light-dark(#0000000a, #ffffff12)); }
+/* A selected sheet's bracket brightens, as an editor's guide for the block it is in does. */
+.source .sheet.selected::after {
+  border-color: var(--nx-viewer-selection-guide, light-dark(#0969da99, #4daafcb3));
+}
 `;

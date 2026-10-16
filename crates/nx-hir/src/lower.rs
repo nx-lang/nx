@@ -8,12 +8,13 @@ use crate::ast::{
     Stmt, TypeRef, UnOp,
 };
 use crate::{
-    property_union_name, state_record_name, update_record_name, Component, ComponentEmit,
-    ComponentEmitKind, Doc, Element, ExprId, Function, FunctionForm, Import, ImportKind, Item,
-    LoweredModule, LoweringDiagnostic, Name, Param, Property, PropertyConditionArm, PropertyEntry,
-    PropertyMatchArm, RecordDef, RecordField, RecordKind, SelectiveImport, SourceId, TypeAlias,
-    TypeParameter, UnionCaseDef, UnionCaseField, UnionDef, ValueDef, Visibility, WhitespaceRun,
-    PROPERTY_UNION_SUFFIX, STATE_RECORD_SUFFIX, UPDATE_RECORD_SUFFIX,
+    property_union_name, props_record_name, state_record_name, update_record_name, Component,
+    ComponentEmit, ComponentEmitKind, Doc, Element, ExprId, Function, FunctionForm, Import,
+    ImportKind, Item, LoweredModule, LoweringDiagnostic, Name, Param, Property,
+    PropertyConditionArm, PropertyEntry, PropertyMatchArm, RecordDef, RecordField, RecordKind,
+    SelectiveImport, SourceId, TypeAlias, TypeParameter, UnionCaseDef, UnionCaseField, UnionDef,
+    ValueDef, Visibility, VisualizerDecl, WhitespaceRun, PROPERTY_UNION_SUFFIX,
+    PROPS_RECORD_SUFFIX, STATE_RECORD_SUFFIX, UPDATE_RECORD_SUFFIX,
 };
 use nx_diagnostics::{TextSize, TextSpan};
 use nx_syntax::{property_definition_is_type_parameter, SyntaxKind, SyntaxNode};
@@ -167,12 +168,20 @@ pub struct LoweringContext {
     update_records: FxHashMap<Name, RecordDef>,
     /// Derived state records keyed by the name of their component.
     state_records: FxHashMap<Name, RecordDef>,
+    /// Derived props records keyed by the name of their component.
+    props_records: FxHashMap<Name, RecordDef>,
     /// Update records to add once every declared item has been added, in declaration order.
     pending_update_items: Vec<RecordDef>,
     /// Derived property unions keyed by the name of the declaration whose fields they name.
     property_unions: FxHashMap<Name, UnionDef>,
     /// Property unions to add after the update records, in declaration order.
     pending_property_items: Vec<UnionDef>,
+    /// Props records, each followed by its update record and property union, to add after every
+    /// other derived item, in declaration order.
+    ///
+    /// <para>They come last because they were added to the language last: placing them after
+    /// everything else leaves the index of every item that existed before them unchanged.</para>
+    pending_props_items: Vec<Item>,
     /// The component whose declaration is being lowered, if any.
     ///
     /// <para>Inside a component a bare `State` names that component's state record, and a handler
@@ -199,9 +208,11 @@ impl LoweringContext {
             predeclared_records: FxHashMap::default(),
             update_records: FxHashMap::default(),
             state_records: FxHashMap::default(),
+            props_records: FxHashMap::default(),
             pending_update_items: Vec::new(),
             property_unions: FxHashMap::default(),
             pending_property_items: Vec::new(),
+            pending_props_items: Vec::new(),
             current_component: None,
             type_name_spans: RefCell::new(Vec::new()),
             rejected_type_parameters: RefCell::new(Vec::new()),
@@ -793,7 +804,8 @@ impl LoweringContext {
     /// The type parameters `node` declares, without diagnostics.
     ///
     /// <para>The mirror of [`Self::lower_field_signatures`]: predeclaration runs before the
-    /// declaration itself is lowered, and a duplicate should be reported once, by the lowering.</para>
+    /// declaration itself is lowered, and a duplicate should be reported once, by the
+    /// lowering.</para>
     fn type_parameter_signatures(&self, node: SyntaxNode) -> Vec<TypeParameter> {
         let mut params: Vec<TypeParameter> = Vec::new();
         for prop in node
@@ -910,6 +922,65 @@ impl LoweringContext {
         self.state_records.insert(component.clone(), record);
         // State is never generic: abstract components cannot declare it.
         self.predeclare_update_record(&state_name, visibility, &[], fields, span);
+    }
+
+    /// Synthesizes and registers the derived `<Component>.Props` record of a component, and the
+    /// update record and property union derived from it.
+    ///
+    /// <para>The props record has the props the component declares, with their types, optional
+    /// marks and content modifiers, and the component's type parameters. Defaults are dropped for
+    /// the reason the state record drops them. A component with a base reaches the inherited
+    /// props through the record's base, the base's props record, so they come first once the
+    /// record's effective shape is resolved, wherever the base is declared.</para>
+    fn predeclare_props_record(
+        &mut self,
+        component: &Name,
+        visibility: Visibility,
+        base: Option<&Name>,
+        type_params: &[TypeParameter],
+        props: &[RecordField],
+        span: TextSpan,
+    ) {
+        let fields: Vec<RecordField> = props
+            .iter()
+            .map(|field| RecordField {
+                default: None,
+                ..field.clone()
+            })
+            .collect();
+        let record = RecordDef {
+            name: props_record_name(component.as_str()),
+            visibility,
+            kind: RecordKind::Props {
+                component: component.clone(),
+            },
+            is_abstract: false,
+            base: base.map(|base| props_record_name(base.as_str())),
+            type_params: type_params.to_vec(),
+            properties: fields.clone(),
+            doc: None,
+            span,
+        };
+        self.predeclared_records
+            .insert(record.name.clone(), record.clone());
+        let props_name = record.name.clone();
+        self.props_records.insert(component.clone(), record);
+        self.predeclare_update_record(&props_name, visibility, type_params, &fields, span);
+    }
+
+    /// Queues the props record of `component`, with its update record and property union.
+    fn add_props_items(&mut self, component: &Name) {
+        let Some(record) = self.props_records.get(component).cloned() else {
+            return;
+        };
+        let props_name = record.name.clone();
+        self.pending_props_items.push(Item::Record(record));
+        if let Some(update) = self.update_records.get(&props_name).cloned() {
+            self.pending_props_items.push(Item::Record(update));
+        }
+        if let Some(union) = self.property_unions.get(&props_name).cloned() {
+            self.pending_props_items.push(Item::Union(union));
+        }
     }
 
     /// Predeclares the update record of every top-level `type` record and `action`.
@@ -1150,7 +1221,15 @@ impl LoweringContext {
             }
         }
         // A component is not a record, so it has no update record or property union of its own;
-        // its state record has both.
+        // its state and props records have both.
+        self.predeclare_props_record(
+            &name,
+            visibility,
+            base.as_ref(),
+            &type_params,
+            &props,
+            node.span(),
+        );
 
         let mut emits = Vec::new();
         let mut inline_records = Vec::new();
@@ -1188,6 +1267,17 @@ impl LoweringContext {
                             self.add_diagnostic(
                                 format!(
                                     "Component '{}' cannot declare an emitted action named 'State': '{}.State' is reserved for the component's derived state record",
+                                    name.as_str(),
+                                    name.as_str()
+                                ),
+                                emit_node.span(),
+                            );
+                            continue;
+                        }
+                        if emit_name.as_str() == PROPS_RECORD_SUFFIX {
+                            self.add_diagnostic(
+                                format!(
+                                    "Component '{}' cannot declare an emitted action named 'Props': '{}.Props' is reserved for the component's derived props record",
                                     name.as_str(),
                                     name.as_str()
                                 ),
@@ -1262,6 +1352,18 @@ impl LoweringContext {
                             self.add_diagnostic(
                                 format!(
                                     "Component '{}' cannot emit '{}': the name '{}.State' would collide with the component's derived state record",
+                                    name.as_str(),
+                                    action_name.as_str(),
+                                    name.as_str()
+                                ),
+                                emit_node.span(),
+                            );
+                            continue;
+                        }
+                        if local_name.as_str() == PROPS_RECORD_SUFFIX {
+                            self.add_diagnostic(
+                                format!(
+                                    "Component '{}' cannot emit '{}': the name '{}.Props' would collide with the component's derived props record",
                                     name.as_str(),
                                     action_name.as_str(),
                                     name.as_str()
@@ -1941,8 +2043,8 @@ impl LoweringContext {
                     }
                 }
 
-                // Build nested if-else from the arms (in reverse order)
-                // if { a => x, b => y, else => z } becomes: if a { x } else { if b { y } else { z } }
+                // Build nested if-else from the arms (in reverse order) if { a => x, b => y, else
+                // => z } becomes: if a { x } else { if b { y } else { z } }
                 let mut result = else_expr;
                 for (condition, body) in arms.into_iter().rev() {
                     result = Some(self.alloc_expr(Expr::If {
@@ -2207,6 +2309,91 @@ impl LoweringContext {
             doc: self.doc_for(node),
             span: node.span(),
         }
+    }
+
+    /// Lowers a `visualizer Target = Value` declaration.
+    ///
+    /// <para>A visibility modifier is reported here: a visualizer declaration applies wherever its
+    /// module is loaded, so there is nothing for `export` or `private` to change.</para>
+    fn lower_visualizer_definition(&mut self, node: SyntaxNode) -> Option<VisualizerDecl> {
+        if let Some(visibility) = node.child_by_field("visibility") {
+            self.add_diagnostic(
+                format!(
+                    "A visualizer declaration takes no visibility modifier; remove '{}': a visualizer applies wherever its module is loaded",
+                    visibility.text()
+                ),
+                visibility.span(),
+            );
+        }
+        let target = node.child_by_field("target")?;
+        if let Some(value_node) = node.child_by_field("value") {
+            self.check_visualizer_value_is_written_out(value_node);
+        }
+        let first_expr = self.module.exprs().len();
+        let value = node
+            .child_by_field("value")
+            .map(|value_node| self.lower_expr(value_node))
+            .unwrap_or_else(|| self.error_expr(node.span()));
+        Some(VisualizerDecl {
+            target: Name::new(target.text()),
+            target_span: target.span(),
+            value,
+            exprs: first_expr..self.module.exprs().len(),
+            span: node.span(),
+        })
+    }
+
+    /// Reports every part of a visualizer declaration's value that is not written out.
+    ///
+    /// <para>A visualizer's value is built only from element constructions, string and boolean
+    /// literals, and bare names, which name properties or cases. Anything computed — a braced
+    /// expression, a conditional, a loop, a number, text or an embed in an element's body — is
+    /// reported, so every visualizer declaration can be read without evaluating it. The rule is
+    /// checked on the syntax, because a braced literal and a bare one lower alike.</para>
+    fn check_visualizer_value_is_written_out(&mut self, node: SyntaxNode) {
+        match node.kind() {
+            SyntaxKind::RHS_EXPRESSION | SyntaxKind::PROPERTY_LIST | SyntaxKind::MIXED_CONTENT => {
+                for child in node.children() {
+                    self.check_visualizer_value_is_written_out(child);
+                }
+            }
+            SyntaxKind::ELEMENT => {
+                for child in node.children() {
+                    if child.kind() != SyntaxKind::ELEMENT_NAME {
+                        self.check_visualizer_value_is_written_out(child);
+                    }
+                }
+            }
+            SyntaxKind::PROPERTY_VALUE => {
+                if let Some(value) = node.child_by_field("value") {
+                    self.check_visualizer_value_is_written_out(value);
+                }
+            }
+            SyntaxKind::LITERAL => {
+                let written_out = node.children().all(|child| {
+                    matches!(
+                        child.kind(),
+                        SyntaxKind::STRING_LITERAL | SyntaxKind::BOOL_LITERAL
+                    )
+                });
+                if !written_out {
+                    self.report_visualizer_value_not_written_out(node);
+                }
+            }
+            SyntaxKind::CONTEXTUAL_NAME => {}
+            kind if kind.is_comment() => {}
+            _ => self.report_visualizer_value_not_written_out(node),
+        }
+    }
+
+    fn report_visualizer_value_not_written_out(&mut self, node: SyntaxNode) {
+        self.add_diagnostic(
+            format!(
+                "A visualizer's values must be written out: use a visualizer record, a string or boolean literal, or a bare property or case name, not '{}'",
+                node.text().trim()
+            ),
+            node.span(),
+        );
     }
 
     /// Lowers a record definition node.
@@ -2895,6 +3082,7 @@ impl LoweringContext {
                         self.pending_update_items.push(state);
                         self.add_derived_items(&state_name);
                     }
+                    self.add_props_items(&component_name);
                 }
                 SyntaxKind::TYPE_DEFINITION => {
                     let alias = self.lower_type_alias(child);
@@ -2915,6 +3103,11 @@ impl LoweringContext {
                 SyntaxKind::UNION_DEFINITION => {
                     let union_def = self.lower_union_definition(child);
                     self.module.add_item(Item::Union(union_def));
+                }
+                SyntaxKind::VISUALIZER_DEFINITION => {
+                    if let Some(visualizer) = self.lower_visualizer_definition(child) {
+                        self.module.add_visualizer(visualizer);
+                    }
                 }
                 SyntaxKind::ELEMENT => {
                     // Top-level element becomes an implicit 'root' function
@@ -2955,6 +3148,9 @@ impl LoweringContext {
         }
         for union in std::mem::take(&mut self.pending_property_items) {
             self.module.add_item(Item::Union(union));
+        }
+        for item in std::mem::take(&mut self.pending_props_items) {
+            self.module.add_item(item);
         }
     }
 }
@@ -6369,7 +6565,7 @@ type Mode = light | dark"#;
     }
 
     #[test]
-    fn derived_items_follow_every_authored_item_with_update_records_first() {
+    fn derived_items_follow_every_authored_item_with_update_records_first_and_props_records_last() {
         let module = lower_source(
             r#"
             type User = { name:string }
@@ -6394,6 +6590,9 @@ type Mode = light | dark"#;
                 "Counter.State.Update",
                 "User.Property",
                 "Counter.State.Property",
+                "Counter.Props",
+                "Counter.Props.Update",
+                "Counter.Props.Property",
             ]
         );
     }

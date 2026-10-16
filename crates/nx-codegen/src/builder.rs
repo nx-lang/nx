@@ -113,12 +113,12 @@ type UpdateRecordKey = (u32, LocalDefinitionId);
 ///
 /// <para>Every record and action has an update record and a property union, every component with
 /// state a state record with its own two, and most programs never use any of them. Emitting only
-/// the referenced ones keeps a program that never writes a patch or names a field the same program it was before they existed. A reference
-/// is a construction — a record literal or an element tag — a type annotation naming one, or a
-/// member access reaching a property union's case; a reference from another module counts, since
-/// the declaring module is where the declaration is emitted. A state record is also referenced by
-/// its update record and its property union, whose target it is, and it references its update
-/// record in turn.</para>
+/// the referenced ones keeps a program that never writes a patch or names a field the same program
+/// it was before they existed. A reference is a construction — a record literal or an element tag —
+/// a type annotation naming one, or a member access reaching a property union's case; a reference
+/// from another module counts, since the declaring module is where the declaration is emitted. A
+/// state record is also referenced by its update record and its property union, whose target it is,
+/// and it references its update record in turn.</para>
 fn referenced_derived_declarations(artifact: &ProgramArtifact) -> FxHashSet<UpdateRecordKey> {
     let mut referenced = FxHashSet::default();
     for module in artifact.resolved_program.modules() {
@@ -129,6 +129,10 @@ fn referenced_derived_declarations(artifact: &ProgramArtifact) -> FxHashSet<Upda
         };
         let mut names = Vec::new();
         for (expr_id, expr) in lowered_module.exprs() {
+            // A visualizer declaration is never emitted, so nothing its value names is used.
+            if lowered_module.is_visualizer_expr(expr_id) {
+                continue;
+            }
             match expr {
                 ast::Expr::RecordLiteral { record, .. } => names.push(record.clone()),
                 ast::Expr::Element { element, .. } => {
@@ -216,6 +220,31 @@ fn referenced_derived_declarations(artifact: &ProgramArtifact) -> FxHashSet<Upda
         })
         .collect::<Vec<_>>();
     referenced.extend(state_updates);
+    // A props record extends its component's base's props record, which a runtime must know to
+    // read the inherited fields, so a referenced derived record brings its derived bases along.
+    let mut pending = referenced.iter().copied().collect::<Vec<_>>();
+    while let Some((module_id, definition_id)) = pending.pop() {
+        let module_id = RuntimeModuleId::new(module_id);
+        let Some(Item::Record(record)) = artifact
+            .resolved_program
+            .module(module_id)
+            .and_then(|module| module.lowered_module.item_by_definition(definition_id))
+        else {
+            continue;
+        };
+        let Some(base) = record.base.as_ref() else {
+            continue;
+        };
+        let Some(reference) = resolve_visible_reference(artifact, module_id, base.as_str()) else {
+            continue;
+        };
+        let key = (reference.module_id.as_u32(), reference.definition_id);
+        if is_derived_declaration(artifact, reference.module_id, reference.definition_id)
+            && referenced.insert(key)
+        {
+            pending.push(key);
+        }
+    }
     referenced
 }
 
@@ -1049,8 +1078,8 @@ fn update_field_order(
 /// The fields a record carries, its base's included.
 ///
 /// <para>An inherited field is a field of the record: the interpreter materializes it, and a value
-/// constructed from this declaration carries it. Emitting only the declared ones is what left the IR
-/// runtime rejecting `name` on a `User` that extends a base declaring it.</para>
+/// constructed from this declaration carries it. Emitting only the declared ones is what left the
+/// IR runtime rejecting `name` on a `User` that extends a base declaring it.</para>
 fn effective_record_shape_of(
     artifact: &ProgramArtifact,
     resolved_module: &ResolvedModule,
@@ -2941,8 +2970,8 @@ fn build_type_ref(
 ///
 /// <para>A type alias is transparent in NX — `type Ints = int[]` *is* a list — and the runtime that
 /// reads this IR decides how to normalize a value from the shape of its type. An alias emitted as a
-/// nominal reference hides that shape, so `xs:Ints` given one value stayed one value where `xs:int[]`
-/// became a list of one. Resolving here keeps the two spellings the same program.</para>
+/// nominal reference hides that shape, so `xs:Ints` given one value stayed one value where
+/// `xs:int[]` became a list of one. Resolving here keeps the two spellings the same program.</para>
 ///
 /// <para>`aliases` carries the aliases already being resolved on this path, so a cyclic alias stops
 /// at the repeat rather than recursing forever. The cycle itself is a diagnostic analysis already

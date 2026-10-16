@@ -16,7 +16,7 @@ import { SiteHeader } from "./header/SiteHeader";
 import { OutputPane, type OutputView } from "./output/OutputPane";
 import { PreviewView } from "./preview/PreviewView";
 import { usePreview } from "./preview/usePreview.ts";
-import { ReadingView } from "./reading/ReadingView";
+import { ReadingView, type ReadingCommands } from "./reading/ReadingView";
 import { keyAtOffset, offsetOfKey } from "./reading/selection.ts";
 import { useSourceTree } from "./reading/useSourceTree.ts";
 import { SITE_ROOT } from "./paths.ts";
@@ -63,8 +63,8 @@ async function openLocation(): Promise<Opened> {
   }
 }
 
-/** Whether the source pane shows the editor or the reading view. */
-type SourceMode = "edit" | "read";
+/** How the NX pane shows the source: as text in the editor, or visually, as the reading. */
+type SourceMode = "source" | "visual";
 
 /** The site: the header, the toolbar, and the source and output panes. */
 export function App() {
@@ -89,7 +89,9 @@ export function App() {
     const open = () => {
       void openLocation().then((opened) => {
         if (current) {
+          // Another document opens on its own folding, as choosing an example does.
           setSource(opened.source);
+          setFolded(undefined);
           setNotice(opened.notice);
         }
       });
@@ -121,6 +123,7 @@ export function App() {
     // A new history entry, so Back returns to the source that was there, edits and all.
     void address.choose(chosen.id);
     setSource(chosen.source);
+    setFolded(undefined);
     setNotice(null);
   };
 
@@ -159,20 +162,24 @@ export function App() {
     [],
   );
 
-  const [mode, setMode] = useState<SourceMode>("edit");
+  const [mode, setMode] = useState<SourceMode>("visual");
   const [selection, setSelection] = useState<string | undefined>(undefined);
-  const reading = useSourceTree(source, mode === "read");
-  // The editor's cursor, carried into Read until a tree of the same text can say what it is on.
+  // What the reader folded in Visual, kept while they switch to Source and back; until they fold
+  // anything, Visual folds the source's supporting declarations itself.
+  const [folded, setFolded] = useState<readonly string[] | undefined>(undefined);
+  const readingCommands = useRef<ReadingCommands | null>(null);
+  const reading = useSourceTree(source, mode === "visual");
+  // The editor's cursor, carried into Visual until a tree of the same text can say what it is on.
   const cursorToSelect = useRef<number | null>(null);
-  // The selected node's start, carried into Edit until the editor is shown again.
+  // The selected node's start, carried into Source until the editor is shown again.
   const cursorToPlace = useRef<number | null>(null);
-  // The node the cursor selected on entering Read: leaving with it still selected leaves the cursor be.
+  // The node the cursor selected on entering Visual: leaving with it still selected leaves the cursor be.
   const selectedOnEntry = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     const offset = cursorToSelect.current;
     const { tree, text } = reading;
-    if (mode !== "read" || offset === null || tree === null || text === null || text !== source) {
+    if (mode === "source" || offset === null || tree === null || text === null || text !== source) {
       return;
     }
     cursorToSelect.current = null;
@@ -183,7 +190,7 @@ export function App() {
 
   useEffect(() => {
     const offset = cursorToPlace.current;
-    if (mode === "edit" && offset !== null) {
+    if (mode === "source" && offset !== null) {
       cursorToPlace.current = null;
       editor.current?.placeCursor(offset);
     }
@@ -193,7 +200,7 @@ export function App() {
     if (next === mode) {
       return;
     }
-    if (next === "read") {
+    if (next === "visual") {
       cursorToSelect.current = editor.current?.cursor() ?? null;
       selectedOnEntry.current = undefined;
     } else {
@@ -295,27 +302,48 @@ export function App() {
         </div>
       )}
       <main className="panes">
-        <section className="pane pane-source" aria-label="Source">
+        <section className="pane pane-source" aria-label="NX">
           <div className="pane-title">
-            <span>Source</span>
-            <span className="pane-note">NX</span>
+            <span>NX</span>
             <span className="spacer" />
+            {mode === "visual" && (
+              <span className="fold-actions">
+                <button type="button" onClick={() => readingCommands.current?.collapseAll()}>
+                  Collapse all
+                </button>
+                <button type="button" onClick={() => readingCommands.current?.expandAll()}>
+                  Expand all
+                </button>
+              </span>
+            )}
             <span className="mode-switch" role="group" aria-label="Show the source as">
-              {(["edit", "read"] as const).map((option) => (
+              {(["visual", "source"] as const).map((option) => (
                 <button
                   key={option}
                   type="button"
                   aria-pressed={mode === option}
                   onClick={() => switchTo(option)}
                 >
-                  {option === "edit" ? "Edit" : "Read"}
+                  {option === "source" ? "Source" : "Visual"}
                 </button>
               ))}
             </span>
           </div>
-          {mode === "read" && <ReadingView reading={reading} selection={selection} onSelect={setSelection} />}
+          {mode === "visual" && (
+            <ReadingView
+              reading={reading}
+              selection={selection}
+              onSelect={setSelection}
+              folded={folded}
+              onFold={(keys, kept) => {
+                setFolded(keys);
+                setSelection(kept);
+              }}
+              commands={readingCommands}
+            />
+          )}
           {/* The editor stays mounted while hidden, keeping its undo history and scroll position. */}
-          <div className="editor" hidden={mode === "read"}>
+          <div className="editor" hidden={mode === "visual"}>
             {source !== null && (
               <NxEditor
                 ref={editor}
