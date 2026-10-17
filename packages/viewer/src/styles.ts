@@ -287,6 +287,7 @@ export const styles = `
 .source .sheet.folded > .sheet-head > .id-value { margin-left: 1ch; }
 /* What a folded group hides stands a little apart from its header, as a property does on a line. */
 .source .sheet.folded > .sheet-head > .fold-summary { margin-left: 2ch; }
+.source .sheet.folded > .sheet-head > .fold-title,
 .source .fold-title {
   flex: 0 1 auto;
   min-width: 0;

@@ -164,8 +164,11 @@ viewer.icons = (name) => {
 
 ## Folding
 
-A group folds to its header, followed by its title or a count of what it hides, and a declaration
-written over several lines folds to its first line. A run of declarations that support the document
+A group folds to its header, followed by its title or a count of what it hides, such as
+`7 properties · 1 child`, and a declaration written over several lines folds to its first line. The
+children are counted as the group shows them open: each element, and each expression that gives
+elements, such as `{Children}`, once; inside an `if`, a match or a `for`, what every branch or its
+body writes. Text and comments are not children. A run of declarations that support the document
 (imports, types, actions, components with no body of their own, external or abstract, visualizer
 declarations, and functions other than `root` and element functions) folds to one line that says what it holds, such as `8 types · 13
 components · 2 visualizers`. Until the host or the reader folds anything, those runs and their

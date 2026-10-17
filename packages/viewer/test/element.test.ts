@@ -38,13 +38,23 @@ function narrow(t: TestContext, columns: number): void {
   const prototype = document.defaultView!.HTMLElement.prototype;
   const { getClientRects } = prototype;
   Object.defineProperty(prototype, "clientWidth", { configurable: true, get: () => columns * 8 });
+  // What runs past its line, as a folded group's header does rather than wrap.
+  Object.defineProperty(prototype, "scrollWidth", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return (this.textContent ?? "").replace(/\s+/g, " ").length * 8;
+    }
+  });
   prototype.getClientRects = function (this: HTMLElement) {
-    const height = (this.textContent ?? "").replace(/\s+/g, " ").length > columns ? 36 : 18;
+    // A folded group's header stays on one line however long, as its style keeps it.
+    const long = (this.textContent ?? "").replace(/\s+/g, " ").length > columns && !this.matches(".folded > .sheet-head");
+    const height = long ? 36 : 18;
     return [{ top: 0, bottom: height, left: 0, right: 100, width: 100, height, x: 0, y: 0, toJSON: () => ({}) }] as unknown as DOMRectList;
   };
   t.after(() => {
     prototype.getClientRects = getClientRects;
     delete (prototype as { clientWidth?: number }).clientWidth;
+    delete (prototype as { scrollWidth?: number }).scrollWidth;
   });
 }
 
@@ -363,6 +373,48 @@ describe("the reading", () => {
     ]);
     assert.equal(read(sheets[0]!.querySelector(".sheet-held .line-element")!), "Item name=a note=n", "short enough for a line");
     assert.equal(read(sheets[1]!.querySelector(".sheet-head")!), "Shape kind=square", "one property needs no row");
+  });
+
+  it("folds a group whose properties do not fit to its name and what it hides, not its properties", async (t) => {
+    const wrapped = await fixture("wrappedAttributes");
+    narrow(t, 30);
+    const element = show(wrapped);
+    const shape = root(element).querySelector<HTMLElement>(".source .sheet")!.dataset["key"]!;
+    element.folded = [shape];
+    const sheet = root(element).querySelector<HTMLElement>(`[data-key="${shape}"]`)!;
+    assert.ok(sheet.classList.contains("folded"));
+    assert.equal(read(sheet.querySelector(".sheet-head")!), "Shape 4 properties · 1 child", "a header cut, not wrapped, still measured");
+  });
+
+  it("keeps a folded group's properties on its header when they fit there", async (t) => {
+    const wrapped = await fixture("wrappedAttributes");
+    narrow(t, 60);
+    const element = show(wrapped);
+    const shape = root(element).querySelector<HTMLElement>(".source .sheet")!.dataset["key"]!;
+    element.folded = [shape];
+    const head = root(element).querySelector<HTMLElement>(`[data-key="${shape}"] > .sheet-head`)!;
+    assert.equal(read(head), "Shape kind=circle width=52 color=#6652AD stroke=1 1 child");
+  });
+
+  it("moves a folded group's one property to a row when its header does not fit", async (t) => {
+    const wrapped = await fixture("wrappedAttributes");
+    narrow(t, 10);
+    const element = show(wrapped);
+    const shape = wrapped.tree.nodes.filter((node) => node.role === "element" && node.name === "Shape")[1]!.key;
+    element.folded = [shape];
+    const head = root(element).querySelector<HTMLElement>(`[data-key="${shape}"] > .sheet-head`)!;
+    assert.equal(read(head), "Shape 1 property · 1 child", "cut, not wrapped, it would run off the pane");
+  });
+
+  it("counts a folded group's children as it shows them open, every branch of an if and a for's body", async () => {
+    const counts = await fixture("childCounts");
+    const element = show(counts);
+    const panels = counts.tree.nodes.filter((node) => node.role === "element" && node.name === "Panel").map((node) => node.key);
+    element.folded = panels;
+    const head = (key: string): string => read(root(element).querySelector(`[data-key="${key}"] > .sheet-head`)!);
+    // The Item, the if's three, the for's one and the match's two: not the note.
+    assert.equal(head(panels[0]!), "Panel 7 children");
+    assert.equal(head(panels[1]!), "Panel 2 children", "an expression giving elements is one");
   });
 
   it("keeps an element written as its tags over several lines in its item's lines", async () => {

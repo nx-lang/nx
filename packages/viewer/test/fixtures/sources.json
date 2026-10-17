@@ -81,5 +81,9 @@
   },
   "wrappedAttributes": {
     "source": "type Item = { name:string note:string }\ntype Shape = { kind:string width:int color:string stroke:int content items:Item* }\n\nlet shape =\n  <Shape kind=\"circle\" width=52\n    color=\"#6652AD\" stroke=1>\n    <Item name=\"a\" note=\"n\" />\n  </Shape>\n\nlet commented =\n  <Shape kind=\"square\">\n    <Item name= /* why */ \"a\"\n      note=\"n\" />\n  </Shape>\n"
+  },
+  "childCounts": {
+    "source": "type Item = { name:string }\ntype Panel = { content items:Item+ }\n\nlet kids(): Item+ = { <Item name=\"k\" /> }\n\nlet root(wide:bool, names:string+, n:int) =\n  <Panel>\n    <Item name=\"x\" />\n    // A note is not a child.\n    if wide {\n      <Item name=\"b\" />\n      <Item name=\"c\" />\n    } else {\n      <Item name=\"d\" />\n    }\n    for title in names {\n      <Item name={title} />\n    }\n    if n is {\n      0 => <Item name=\"zero\" />\n      else => <Item name=\"many\" />\n    }\n  </Panel>\n\nlet given =\n  <Panel>\n    <Item name=\"y\" />\n    {kids()}\n  </Panel>\n",
+    "visualizers": []
   }
 }

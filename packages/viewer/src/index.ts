@@ -467,7 +467,10 @@ export class NxViewerElement extends ElementBase {
     }
   }
 
-  /** The keys of the elements measured whose line, or whose group's header, takes more than one line. */
+  /**
+   * The keys of the elements measured whose line, or whose group's header, takes more than one line,
+   * or, for a folded group, whose header runs past its line, since it is cut rather than wrapped.
+   */
   #wrapped(): string[] {
     const source = this.#body.querySelector<HTMLElement>(".source");
     if (source === null) {
@@ -478,6 +481,12 @@ export class NxViewerElement extends ElementBase {
     for (const element of this.#body.querySelectorAll<HTMLElement>(".fit-check")) {
       const target = element.classList.contains("sheet") ? element.querySelector<HTMLElement>(":scope > .sheet-head") : element;
       if (target === null) {
+        continue;
+      }
+      if (element.classList.contains("folded")) {
+        if (target.scrollWidth > target.clientWidth + 1) {
+          keys.push(element.dataset["key"]!);
+        }
         continue;
       }
       // An inline line has a box to each line it falls on; a block has one, as tall as its lines.

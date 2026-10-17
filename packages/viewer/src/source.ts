@@ -74,6 +74,9 @@ const KIND_ICONS: Partial<Record<SourceDeclarationKind, string>> = {
   function: "square-function",
 };
 
+/** The slots of an `if`, a match or a `for` that hold its test, subject, pattern or list. */
+const BLOCK_HEADS = new Set(["test", "subject", "pattern", "in"]);
+
 /** A run of top-level declarations that support the document, folded together to one line. */
 export interface ReadingRun {
   /** The run's fold key: `run:` and the key of its first node. */
@@ -526,10 +529,12 @@ export function renderSource(
     );
   /**
    * Marks an element whose line, or whose group's header, holds more than one property, for the
-   * element to measure whether it fits on one line.
+   * element to measure whether it fits on one line. A folded group's header is cut rather than
+   * wrapped, so one property is enough there: a row takes it off the line.
    */
   const markFit = (element: HTMLElement, at: number): void => {
-    if (!isValue(at) && !isWrapped(at) && shownOf(at).length > 1) {
+    const least = layout.folded?.has(tree.nodes[at]!.key) === true ? 1 : 2;
+    if (!isValue(at) && !isWrapped(at) && shownOf(at).length >= least) {
       element.classList.add("fit-check");
     }
   };
@@ -745,7 +750,32 @@ export function renderSource(
     return summary;
   };
 
-  /** "1 property", "3 items": a count and its noun. */
+  /**
+   * How many children a group's body writes, as the group shows them open: each element, and each
+   * expression that gives elements, as `{Children}`, once; inside an `if`, a match or a `for`, what
+   * every branch or its body writes, since all of them show. Text and comments are not children.
+   */
+  const childCount = (items: readonly number[]): number => {
+    if (items.some((item) => tree.nodes[item]!.role === "text")) {
+      return 0;
+    }
+    let count = 0;
+    for (const item of items) {
+      const role = tree.nodes[item]!.role;
+      if (role === "condition" || role === "loop" || role === "match" || role === "matchArm") {
+        // A block's test, subject, pattern, list or variables are not what it writes. A loop's
+        // variables take their own names as their slots, so they are known by their role.
+        count += childCount(
+          childrenOf(item).filter((part) => tree.nodes[part]!.role !== "binding" && !BLOCK_HEADS.has(index.slots[part]!))
+        );
+      } else if (!isNote(item) && role !== "unparsed") {
+        count += 1;
+      }
+    }
+    return count;
+  };
+
+  /** "1 property", "3 children": a count and its noun. */
   const counted = (count: number, noun: string, nouns: string): string => `${count} ${count === 1 ? noun : nouns}`;
 
   const writeSheet = (at: number, start: number, end: number): HTMLElement => {
@@ -771,9 +801,9 @@ export function renderSource(
     }
     sheet.append(head);
     // Folded, the group keeps its header and says what it hides: its title's value when its
-    // visualizer names one, and otherwise how many properties and items it holds.
+    // visualizer names one, and otherwise how many properties and children it holds.
     let hiddenRows = 0;
-    let hiddenItems = 0;
+    let hiddenChildren = 0;
     let hiddenTitle: string | undefined;
     const visualizer = node.declaration === undefined ? undefined : tree.declarations[node.declaration]?.visualizer;
     for (const child of childrenOf(at)) {
@@ -791,7 +821,7 @@ export function renderSource(
       }
       if (folded) {
         if (childNode.role === "attribute" && isContent(child)) {
-          hiddenItems += childrenOf(child).filter((item) => !isNote(item)).length;
+          hiddenChildren += childCount(childrenOf(child));
         } else if (childNode.role === "attribute") {
           hiddenRows += 1;
           const values = childrenOf(child);
@@ -845,7 +875,7 @@ export function renderSource(
         ? [hiddenTitle]
         : [
             ...(hiddenRows > 0 ? [counted(hiddenRows, "property", "properties")] : []),
-            ...(hiddenItems > 0 ? [counted(hiddenItems, "item", "items")] : []),
+            ...(hiddenChildren > 0 ? [counted(hiddenChildren, "child", "children")] : []),
           ];
       if (parts.length === 0) {
         head.append(foldSummary(" …"));

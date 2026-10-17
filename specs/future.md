@@ -981,6 +981,25 @@ A Playwright check against the dev server, like the browser probes used while bu
 would cover both lists (review finding RF33 in
 `openspec/changes/archive/2026-10-16-add-visualizer-declarations/review.md`).
 
+### One Shiki highlighter for the editor and the reading
+
+A host that shows both the editor and the reading builds two Shiki highlighters for NX. The
+editor's is built inside `registerNxLanguage` (`packages/monaco/src/index.ts`,
+`prepareHighlighter`) and kept there; the reading's `colors` come from `colorize` over the one
+`@nx-lang/value-view`'s `loadHighlighter` builds (`packages/value-view/src/highlight.ts`). The
+playground's reading pane (`sites/playground/src/reading/ReadingView.tsx`) and the DrawnUI fiddle's
+Visual view (`nx/src/visual.ts` there) both do this. Each highlighter instantiates its own copy of
+Shiki's Oniguruma regex engine and compiles the NX grammar, so the first time the reading shows it
+pays that again, in memory and in a short delay; nothing is downloaded twice, since a bundle holds
+Shiki once. The two also take their themes separately, so a host could give them different ones by
+mistake, though both hosts pass the same.
+
+Sharing one would take a new `@nx-lang/monaco` export that hands out the highlighter
+`registerNxLanguage` builds, or a way to pass it one, which hosts then give to `colorize`. It saves
+the second engine and grammar and keeps the themes in one place; readers see no difference, since
+the two already color alike. Left out of `add-visual-view-to-drawnui-fiddle` (design decision 3,
+review finding RF7) because it adds to `@nx-lang/monaco`'s API for a one-time cost.
+
 ## The DrawnUI Fiddle: What `add-nx-to-drawnui-fiddle` Left For Later
 
 NX is a language of the DrawnUI fiddle engine (`DrawnUi.FiddleEngine`, the engine behind
