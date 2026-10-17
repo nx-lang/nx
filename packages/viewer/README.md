@@ -93,6 +93,7 @@ declare module "react" {
 | `text`      | property               | The document's text, which the tree's byte ranges index                      |
 | `colors`    | property               | The text's colors, as ranges over `text`, from the host's highlighter        |
 | `icons`     | property               | Draws an icon by its Lucide name, for each element that starts a line of its own; no icons without it |
+| `markdown`  | property               | Renders a doc comment's Markdown for the hover cards, as a `Node`; a built-in renderer without it |
 | `folded`    | property               | The keys of what is folded; `undefined`, the default, folds the document's supporting declarations |
 | `stale`     | property and attribute | The reading is muted and badged "Out of date"; selection still works         |
 | `selection` | property               | The selected node's key; setting it scrolls the node into view               |
@@ -114,8 +115,8 @@ every step of a dragged divider) or its fonts load, keeping what is at the top w
   tag. A bracket runs down the group from under its name and turns right at its end. A value of
   several lines reads under its name, and so does every value in a pane narrower than about 64
   characters.
-- **A property's element value** (`Padding=<Thickness …/>`) reads inline, as a line, unless it holds
-  elements.
+- **A property's element value** (`Padding=<Thickness …/>`) reads on its row, as a line, when it fits
+  there, and otherwise, or when it holds elements, as a group under the property's name.
 - **A line that shares its line**, with a property's name or a `let`, keeps a quiet `<` and `/>` to
   show where it starts and ends. Alone on its line, in a place typed exactly as its kind (a `Choice`
   in `choices: Choice+`), it leaves out its name, which its icon carries.
@@ -242,6 +243,41 @@ if (atTop !== undefined && start !== undefined) {
 }
 ```
 
+## Hover cards
+
+Resting the pointer on a name or a value for half a second opens a card that says what it is, in the
+editor's hover's style, from the source tree alone, so a host wires nothing. It is shorter than the
+editor's where the reading shows the rest: a component reads as its name and base, not its tag with
+every property, and a property reads unqualified, with its default:
+
+| Under the pointer                                  | The card                                                 |
+| -------------------------------------------------- | -------------------------------------------------------- |
+| An element's name or icon                          | `component Shape extends Node` and the declaration's doc |
+| A property's name, on a row or a line              | `(property) Type: ShapeType = Rectangle` and its doc     |
+| An id or a title, shown without its property's name | That property's card                                    |
+| A union case, bare or qualified                    | `(case) ShapeType.Circle` and the case's doc             |
+| A reference, a member or a call                    | `size: int`, or the function's `let twice(n:int): int`, and the doc of what it names |
+
+A literal, a comment, punctuation and a unit's room open nothing. The card stays while the pointer
+moves onto it, so its text can be selected and its links followed, and closes once the pointer has
+left both, when anything scrolls, on Escape, or when the text or the tree changes. It never moves the
+selection, the folds or the scroll. With the reading focused, `i` shows the card of the selected unit
+(an element's declaration, a row's property), and the live region reads it, or says "No information";
+that card stays while the pointer moves, until Escape or the selection moves.
+
+A doc's Markdown is rendered by a small built-in renderer that makes text and elements only:
+paragraphs, inline and fenced code, emphasis, lists, and links, a link only to an `http:` or `https:`
+address and opening in a new tab. Anything else, raw HTML included, reads as its text. A host that
+renders Markdown its own way sets `markdown`, and answers for what it returns:
+
+```ts
+viewer.markdown = (doc) => {
+  const holder = document.createElement("div");
+  holder.innerHTML = sanitize(marked.parse(doc));
+  return holder;
+};
+```
+
 ## Styling
 
 The element follows the page's `color-scheme` through `light-dark()`. These custom properties
@@ -260,6 +296,9 @@ restyle it:
 | `--nx-viewer-selection-inactive`      | a gray tint, when the reading is not focused |
 | `--nx-viewer-hover`                   | a faint tint                              |
 | `--nx-viewer-group-gap`               | `0.25lh`, the room between groups         |
+| `--nx-viewer-card-background`         | white, or a dark gray                     |
+| `--nx-viewer-card-border`             | a light or dark gray                      |
+| `--nx-viewer-link-color`              | a light or dark blue, for a card's links  |
 
 ## Development
 

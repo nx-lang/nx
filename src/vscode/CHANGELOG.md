@@ -53,6 +53,10 @@ All notable changes to this project will be documented in this file.
   `keyAtTop()`, `topOf()` and `scrollToKey()` carry the scroll position; and `nodeAtSpan` finds the
   node a value origin names. `stale` mutes the reading while a newer tree
   is computed.
+- Resting the pointer on a name or a value opens a hover card, in the editor's hover's style, from the
+  source tree alone: an element's declaration, a property's type, default and doc, a union case, or
+  a reference's type. With the reading focused, `i` shows the selected unit's card. A doc's Markdown
+  is rendered as text and elements only, links only to the web, or by the host's `markdown`.
 - The playground's NX pane opens in this view, Visual, beside Source.
 
 ### `@nx-lang/previewer` (new, unstable)

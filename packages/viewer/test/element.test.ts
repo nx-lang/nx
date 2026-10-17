@@ -45,9 +45,15 @@ function narrow(t: TestContext, columns: number): void {
       return (this.textContent ?? "").replace(/\s+/g, " ").length * 8;
     }
   });
+  const tooLong = (element: Element): boolean => (element.textContent ?? "").replace(/\s+/g, " ").length > columns;
   prototype.getClientRects = function (this: HTMLElement) {
-    // A folded group's header stays on one line however long, as its style keeps it.
-    const long = (this.textContent ?? "").replace(/\s+/g, " ").length > columns && !this.matches(".folded > .sheet-head");
+    // A folded group's header stays on one line however long, as its style keeps it. An element on
+    // a line or a header too long for the pane is squeezed and wraps, wherever it would read once
+    // that one has its rows.
+    const squeezed = this.parentElement?.closest(".line-element, .sheet-head");
+    const long =
+      (tooLong(this) || (squeezed !== null && squeezed !== undefined && tooLong(squeezed))) &&
+      !this.matches(".folded > .sheet-head");
     const height = long ? 36 : 18;
     return [{ top: 0, bottom: height, left: 0, right: 100, width: 100, height, x: 0, y: 0, toJSON: () => ({}) }] as unknown as DOMRectList;
   };
@@ -373,6 +379,66 @@ describe("the reading", () => {
     ]);
     assert.equal(read(sheets[0]!.querySelector(".sheet-held .line-element")!), "Item name=a note=n", "short enough for a line");
     assert.equal(read(sheets[1]!.querySelector(".sheet-head")!), "Shape kind=square", "one property needs no row");
+  });
+
+  it("reads a property's element value too long for its row as a group under its name, and a short one on its row", async (t) => {
+    const values = await fixture("valueGroups");
+    const wide = show(values);
+    assert.equal(root(wide).querySelectorAll(".source .sheet").length, 0, "where everything fits, all lines");
+    narrow(t, 30);
+    const element = show(values);
+    const card = root(element).querySelector<HTMLElement>(".source .sheet")!;
+    assert.equal(read(card.querySelector(":scope > .sheet-head")!), "Card");
+    const row = (name: string): HTMLElement =>
+      [...card.querySelectorAll<HTMLElement>(":scope > .sheet-row")].find((candidate) => read(candidate.querySelector(".sheet-name")!) === name)!;
+    assert.equal(read(row("padding").querySelector(".sheet-value")!), "<Thickness left=1 top=2/>", "short enough for its row");
+    const style = row("style").querySelector<HTMLElement>(":scope > .sheet-below > .sheet")!;
+    assert.ok(style, "too long for its row: a group under the property's name");
+    assert.equal(read(style.querySelector(":scope > .sheet-head")!), "Style");
+    assert.deepEqual(
+      [...style.querySelectorAll<HTMLElement>(":scope > .sheet-row")].map((candidate) => [
+        read(candidate.querySelector(".sheet-name")!),
+        read(candidate.querySelector(".sheet-value")!),
+      ]),
+      [["color", "red"], ["font", "Inter"], ["size", "12"]]
+    );
+  });
+
+  it("measures a value on a group's header once the group has its rows, and keeps a one-property line", async (t) => {
+    const holders = await fixture("valueHolders");
+    narrow(t, 40);
+    const element = show(holders);
+    const source = root(element).querySelector<HTMLElement>(".source")!;
+    const holder = rendered(element, keyWhere(holders, (node) => node.role === "element" && node.name === "Holder"));
+    assert.ok(holder.classList.contains("line-element"), "one property: a line, however long");
+    assert.equal(holder.querySelector(".sheet"), null, "and its value a line in it");
+    const panel = source.querySelector<HTMLElement>(".sheet")!;
+    assert.equal(read(panel.querySelector(":scope > .sheet-head")!), "Panel", "its header does not fit");
+    const style = [...panel.querySelectorAll<HTMLElement>(":scope > .sheet-row")].find((row) => read(row.querySelector(".sheet-name")!) === "style")!;
+    assert.equal(
+      read(style.querySelector(".sheet-value")!),
+      "<Style color=red font=Inter size=12/>",
+      "squeezed onto the header it wrapped, but it fits on its row"
+    );
+    // Two levels down: the Wrap too long for its row is a group, and its Style fits on its own row.
+    const outer = rendered(element, keyWhere(holders, (node) => node.role === "element" && node.name === "Outer"));
+    const wrap = outer.querySelector<HTMLElement>(":scope > .sheet-row > .sheet-below > .sheet")!;
+    assert.equal(read(wrap.querySelector(":scope > .sheet-head")!), "Wrap");
+    const inner = [...wrap.querySelectorAll<HTMLElement>(":scope > .sheet-row")].find((row) => read(row.querySelector(".sheet-name")!) === "style")!;
+    assert.equal(read(inner.querySelector(".sheet-value")!), "<Style color=red font=Inter size=12/>");
+    // A group showing one property, an element, on a header too long: a row, where the value fits.
+    const frame = rendered(element, keyWhere(holders, (node) => node.role === "element" && node.name === "Frame"));
+    assert.equal(read(frame.querySelector(":scope > .sheet-head")!), "Frame");
+    assert.equal(read(frame.querySelector(":scope > .sheet-row > .sheet-value")!), "<Style color=red font=Inter size=12/>");
+  });
+
+  it("measures the headers of groups nested in groups all in one pass", async (t) => {
+    const deep = await fixture("deepGroups");
+    narrow(t, 30);
+    const element = show(deep);
+    const heads = [...root(element).querySelectorAll<HTMLElement>(".source .sheet > .sheet-head")].map(read);
+    assert.equal(heads.length, 8);
+    assert.deepEqual(heads, Array(8).fill("Box"), "each header too long, so each has rows");
   });
 
   it("folds a group whose properties do not fit to its name and what it hides, not its properties", async (t) => {

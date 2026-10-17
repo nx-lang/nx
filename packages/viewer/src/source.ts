@@ -8,6 +8,7 @@
  */
 import type { SourceDeclarationKind, SourceNode, SourceValueFormat } from "@nx-lang/language-protocol";
 
+import { isElementFunction, VALUE_ROLES } from "./card.js";
 import type { TreeIndex } from "./tree.js";
 
 /** One colored range of the text, in UTF-16 offsets. Ranges are in text order and do not overlap. */
@@ -116,9 +117,7 @@ function supportingKind(index: TreeIndex, at: number): [string, string] | undefi
     case "function": {
       // An element function (`let <Name …>`, whatever modifiers come before it) is used as a
       // component is, and `root` is what the document returns.
-      const written = new TextDecoder().decode(index.bytes.subarray(node.range.startByte, node.range.startByte + 48));
-      const element = /^(?:(?:export|private)\s+)*let\s*</.test(written);
-      return node.name === "root" || element ? undefined : ["function", "functions"];
+      return node.name === "root" || isElementFunction(index, at) ? undefined : ["function", "functions"];
     }
     default:
       return undefined;
@@ -333,8 +332,13 @@ export function renderSource(
   // range does not sit inside what is left to write is left unmarked rather than written twice.
   const idPlans = elementIdPlans(index, startOf, endOf);
 
+  // What the pointer rests on to see the card of the node at `at`, as a name or a value.
+  const hoverable = (element: HTMLElement, at: number): void => {
+    element.dataset["hover"] = tree.nodes[at]!.key;
+  };
+
   // An element's id, moved to where its visualizer puts it: its value alone, as one quiet token
-  // that keeps the attribute's key and its value's.
+  // that keeps the attribute's key and its value's. Its card is its property's.
   const idChip = (plan: ElementIdPlan): HTMLElement => {
     const attribute = tree.nodes[plan.attribute]!;
     const literal = tree.nodes[plan.literal]!;
@@ -342,7 +346,7 @@ export function renderSource(
     chip.className = plan.atEnd ? "n id-value id-part id-end" : "n id-value id-part";
     chip.dataset["role"] = attribute.role;
     chip.dataset["key"] = attribute.key;
-    chip.title = attribute.name ?? "";
+    hoverable(chip, plan.attribute);
     const value = document.createElement("span");
     value.className = "n";
     value.dataset["role"] = literal.role;
@@ -416,6 +420,12 @@ export function renderSource(
       element.className = "n";
       element.dataset["role"] = node.role;
       element.dataset["key"] = node.key;
+      // A value shows its card: a case, a reference, a member or a call. A qualified case's union is
+      // the case's.
+      const parentRole = node.parent === undefined ? undefined : tree.nodes[node.parent]!.role;
+      if (VALUE_ROLES.has(node.role) && parentRole !== "case") {
+        hoverable(element, child);
+      }
       // A declaration over several lines folds to its first line.
       if (node.parent === undefined && node.role === "declaration" && !onOneLine(start, end)) {
         const folded = layout.folded?.has(node.key) === true;
@@ -473,8 +483,9 @@ export function renderSource(
   // ---- Property sheets ----------------------------------------------------------------------
 
   /**
-   * The icon an element on lines of its own starts with, labelled with its kind's name for a reader
-   * who cannot see it and for the pointer. Nothing when the host draws no icons.
+   * The icon an element on lines of its own starts with, labelled with its name for a reader who
+   * cannot see it, and showing the element's card to the pointer. Nothing when the host draws no
+   * icons.
    */
   const elementIcon = (at: number): HTMLElement | undefined => {
     if (layout.icons === undefined) {
@@ -492,7 +503,7 @@ export function renderSource(
     icon.className = "element-icon";
     icon.setAttribute("role", "img");
     icon.setAttribute("aria-label", node.name ?? "");
-    icon.title = node.name ?? "";
+    hoverable(icon, at);
     icon.append(drawn.cloneNode(true));
     return icon;
   };
@@ -513,15 +524,21 @@ export function renderSource(
   // pane, and as a group, a row to each property, when they do not, however the source breaks its
   // lines. An element that holds items is a group either way, with its properties on its header
   // when they fit there. A property's element value reads on its row or its line, as a line, or as
-  // a group under the property's name when it holds items.
+  // a group under the property's name when it holds items or does not fit on its row.
 
-  /** Whether an element is a property's value, not an item. */
-  const isValue = (at: number): boolean => {
+  /** The element whose property's value the element at `at` is, or nothing for an item. */
+  const holderOf = (at: number): number | undefined => {
     const parent = tree.nodes[at]!.parent;
-    return parent !== undefined && tree.nodes[parent]!.role === "attribute" && !isContent(parent);
+    return parent !== undefined && tree.nodes[parent]!.role === "attribute" && !isContent(parent)
+      ? tree.nodes[parent]!.parent
+      : undefined;
   };
-  /** Whether an element's properties take a row each: they were measured not to fit on one line. */
-  const isWrapped = (at: number): boolean => !isValue(at) && layout.wrapped?.has(tree.nodes[at]!.key) === true;
+  /**
+   * Whether an element's properties take a row each: they were measured not to fit on one line. A
+   * property's element value is measured too, so one too long for its row reads as a group under
+   * the property's name, and a short one, as `<Thickness …/>`, stays on its row.
+   */
+  const isWrapped = (at: number): boolean => layout.wrapped?.has(tree.nodes[at]!.key) === true;
   /** The properties an element shows by name or as its title: all but its id and what it holds. */
   const shownOf = (at: number): number[] =>
     childrenOf(at).filter(
@@ -529,12 +546,21 @@ export function renderSource(
     );
   /**
    * Marks an element whose line, or whose group's header, holds more than one property, for the
-   * element to measure whether it fits on one line. A folded group's header is cut rather than
-   * wrapped, so one property is enough there: a row takes it off the line.
+   * element to measure whether it fits on one line. One property is enough on a group's header when
+   * the header is cut rather than wrapped, folded, or when that property is an element, which a row
+   * lets fit on its own line.
    */
   const markFit = (element: HTMLElement, at: number): void => {
-    const least = layout.folded?.has(tree.nodes[at]!.key) === true ? 1 : 2;
-    if (!isValue(at) && !isWrapped(at) && shownOf(at).length >= least) {
+    const elementValue = (attribute: number): boolean => childrenOf(attribute).some((value) => tree.nodes[value]!.role === "element");
+    const group = element.classList.contains("sheet");
+    const least = group && (layout.folded?.has(tree.nodes[at]!.key) === true || shownOf(at).some(elementValue)) ? 1 : 2;
+    // A property's element value is measured where a group shows it, on its header or its row. On a
+    // line, its holder's line wraps as a whole, and a holder showing one property stays a line.
+    const holder = holderOf(at);
+    if (holder !== undefined && shapeOf(holder) !== "group") {
+      return;
+    }
+    if (!isWrapped(at) && shownOf(at).length >= least) {
       element.classList.add("fit-check");
     }
   };
@@ -792,7 +818,11 @@ export function renderSource(
     if (marker !== undefined) {
       head.append(marker);
     }
-    writeText(head, start + 1, nameEnd(text, node, start));
+    const kind = document.createElement("span");
+    kind.className = "sheet-kind";
+    hoverable(kind, at);
+    writeText(kind, start + 1, nameEnd(text, node, start));
+    head.append(kind);
     if (plan !== undefined && !plan.atEnd) {
       head.append(" ", idChip(plan));
     }
@@ -805,6 +835,7 @@ export function renderSource(
     let hiddenRows = 0;
     let hiddenChildren = 0;
     let hiddenTitle: string | undefined;
+    let hiddenTitleAt: number | undefined;
     const visualizer = node.declaration === undefined ? undefined : tree.declarations[node.declaration]?.visualizer;
     for (const child of childrenOf(at)) {
       const childNode = tree.nodes[child]!;
@@ -828,6 +859,7 @@ export function renderSource(
           const value = values.length === 1 ? tree.nodes[values[0]!]! : undefined;
           if (childNode.name === visualizer?.title && value?.role === "literal" && (value.value ?? "").startsWith('"')) {
             hiddenTitle = text.slice(startOf(value) + 1, endOf(value) - 1);
+            hiddenTitleAt = child;
           }
         }
         continue;
@@ -836,6 +868,7 @@ export function renderSource(
         const row = marked(child, "span", "sheet-row");
         const name = document.createElement("span");
         name.className = "sheet-name";
+        hoverable(name, child);
         const nameAt = startOf(childNode);
         writeText(name, nameAt, nameAt + (childNode.name ?? "").length);
         const cell = document.createElement("span");
@@ -884,6 +917,9 @@ export function renderSource(
         head.append("  ");
         const summary = foldSummary(parts.join(" · "));
         summary.classList.add(hiddenTitle !== undefined ? "fold-title" : "fold-count");
+        if (hiddenTitleAt !== undefined) {
+          hoverable(summary, hiddenTitleAt);
+        }
         head.append(summary);
       }
     }
@@ -949,10 +985,12 @@ export function renderSource(
     const part = marked(attribute, "span", "line-property");
     const name = document.createElement("span");
     name.className = "line-name";
+    hoverable(name, attribute);
     const nameAt = startOf(tree.nodes[attribute]!);
     writeText(name, nameAt, nameAt + (tree.nodes[attribute]!.name ?? "").length);
     const equals = document.createElement("span");
     equals.className = "line-equals";
+    hoverable(equals, attribute);
     equals.textContent = "=";
     part.append(name, equals);
     writeLineValue(part, attribute);
@@ -967,6 +1005,7 @@ export function renderSource(
     if (named) {
       const kind = document.createElement("span");
       kind.className = "line-kind";
+      hoverable(kind, at);
       writeText(kind, start + 1, nameEnd(text, node, start));
       parts.push({ key: "kind", element: kind });
     }
@@ -975,7 +1014,9 @@ export function renderSource(
     }
     const title = titleOf(at);
     if (title !== undefined) {
+      // Shown without its name, the title shows its property's card.
       const part = marked(title, "span", "line-property");
+      hoverable(part, title);
       writeLineValue(part, title);
       parts.push({ key: "title", element: part });
     }

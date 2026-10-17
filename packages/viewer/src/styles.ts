@@ -328,4 +328,54 @@ export const styles = `
 .source .sheet.selected::after {
   border-color: var(--nx-viewer-selection-guide, light-dark(#0969da99, #4daafcb3));
 }
+
+/* The hover card: what a name or a value is, as code in the reading's code face, then its doc in
+   its prose face, as an editor's hover shows them. It is placed against the frame, under or over
+   what it describes. */
+.card {
+  position: absolute;
+  z-index: 4;
+  max-width: min(36rem, 100%);
+  max-height: 20em;
+  overflow: auto;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--nx-viewer-card-border, light-dark(#d0d7de, #454545));
+  background: var(--nx-viewer-card-background, light-dark(#ffffff, #202020));
+  color: var(--nx-viewer-foreground, CanvasText);
+  box-shadow: 0 4px 14px light-dark(rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.5));
+  font-family: var(--nx-viewer-prose-font-family, inherit);
+  font-variation-settings: var(--nx-viewer-prose-font-variation, normal);
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+.card[hidden] { display: none; }
+.card-signature {
+  font-family: var(--nx-viewer-source-font-family, var(--mono));
+  font-variation-settings: var(--nx-viewer-source-font-variation, normal);
+  font-feature-settings: var(--nx-viewer-source-font-features, normal);
+  font-size: var(--nx-viewer-source-font-size, 13px);
+  white-space: pre-wrap;
+}
+.card-doc {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--nx-viewer-rule, light-dark(#0000001f, #ffffff1f));
+}
+.card-doc > :first-child { margin-top: 0; }
+.card-doc > :last-child { margin-bottom: 0; }
+.card-doc :is(p, ul, ol, pre) { margin: 0 0 0.5em; }
+.card-doc :is(ul, ol) { padding-left: 1.4em; }
+.card-doc code {
+  font-family: var(--nx-viewer-source-font-family, var(--mono));
+  font-size: 0.92em;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: light-dark(#0000000d, #ffffff14);
+}
+.card-doc pre { padding: 4px 6px; border-radius: 4px; background: light-dark(#0000000a, #ffffff0f); overflow-x: auto; }
+.card-doc pre code { padding: 0; background: none; white-space: pre; }
+.card-doc a { color: var(--nx-viewer-link-color, light-dark(#0969da, #4daafc)); }
 `;

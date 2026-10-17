@@ -10,6 +10,8 @@
  */
 import type { EditorRange, SourceRole, SourceTree } from "@nx-lang/language-protocol";
 
+import { cardOf } from "./card.js";
+import { renderMarkdown } from "./markdown.js";
 import { defaultFolded, readingRuns, renderSource, type NxViewerColor, type NxViewerIcons, type ReadingRun } from "./source.js";
 import { styles } from "./styles.js";
 import { indexTree, nodeOf, type TreeIndex } from "./tree.js";
@@ -48,8 +50,20 @@ export interface NxSelectDetail {
   readonly range: EditorRange;
 }
 
+/** Renders a doc comment's Markdown as the host wants it read. */
+export type NxViewerMarkdown = (markdown: string) => Node;
+
 /** The element's properties, which a host may set before the element is defined. */
-const PROPERTIES = ["tree", "text", "colors", "icons", "folded", "selection", "stale"] as const;
+const PROPERTIES = ["tree", "text", "colors", "icons", "markdown", "folded", "selection", "stale"] as const;
+
+/** How long the pointer rests on a name or a value before its card opens, in milliseconds. */
+const CARD_DELAY = 500;
+
+/** How long a card stays once the pointer leaves it and what it describes, to reach it. */
+const CARD_GRACE = 300;
+
+/** The room between a card and what it describes, in pixels. */
+const CARD_GAP = 4;
 
 // A module imported where there is no DOM still loads; the element is only defined where
 // `HTMLElement` exists.
@@ -100,7 +114,7 @@ function keyOf(element: Element): string | undefined {
  * The `<nx-viewer>` element.
  *
  * <para>The attribute `stale` mirrors the property of the same name. Everything else is a property:
- * `tree`, `text`, `colors`, `icons`, `folded` and `selection`.</para>
+ * `tree`, `text`, `colors`, `icons`, `markdown`, `folded` and `selection`.</para>
  */
 export class NxViewerElement extends ElementBase {
   static observedAttributes = ["stale"];
@@ -109,6 +123,7 @@ export class NxViewerElement extends ElementBase {
   #text = "";
   #colors: readonly NxViewerColor[] = [];
   #icons: NxViewerIcons | undefined;
+  #markdown: NxViewerMarkdown | undefined;
   /** What the host or the reader folded; nothing until either does, when the defaults apply. */
   #chosenFolded: Set<string> | undefined;
   /** What is folded now: the chosen keys, or the defaults for this tree. */
@@ -127,6 +142,19 @@ export class NxViewerElement extends ElementBase {
   #fitWidth = -1;
   /** The measure waiting for the pane's width to settle. */
   #remeasureTimer: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * The key of the name or value under the pointer, whose card opens once the pointer rests there.
+   * A node marked on several spans, as a line's name and its `=`, is one target.
+   */
+  #pointedKey: string | undefined;
+  /** The key of the node the open card describes. */
+  #cardKey: string | undefined;
+  /** What scrolls the reading while a card is open, which closes the card when it scrolls. */
+  #cardScroller: Element | undefined;
+  /** Whether the open card was asked for from the keyboard, which the pointer does not close. */
+  #cardByKeyboard = false;
+  #cardOpenTimer: ReturnType<typeof setTimeout> | undefined;
+  #cardCloseTimer: ReturnType<typeof setTimeout> | undefined;
 
   readonly #badge: HTMLSpanElement;
   readonly #body: HTMLDivElement;
@@ -134,6 +162,16 @@ export class NxViewerElement extends ElementBase {
   readonly #highlights: HTMLDivElement;
   /** Says what the arrow keys selected, for a screen reader, since focus stays on the body. */
   readonly #announcer: HTMLDivElement;
+  readonly #frame: HTMLDivElement;
+  /** The hover card: what a name or a value under the pointer is, and its doc. */
+  readonly #card: HTMLDivElement;
+  /** Closes the card when anything around the reading scrolls, or Escape is pressed anywhere. */
+  readonly #onDocumentScroll = (): void => this.#closeCard();
+  readonly #onDocumentKey = (event: KeyboardEvent): void => {
+    if (event.key === "Escape") {
+      this.#closeCard();
+    }
+  };
 
   constructor() {
     super();
@@ -145,6 +183,7 @@ export class NxViewerElement extends ElementBase {
 
     const frame = document.createElement("div");
     frame.className = "frame";
+    this.#frame = frame;
 
     const toolbar = document.createElement("div");
     toolbar.className = "toolbar";
@@ -173,16 +212,37 @@ export class NxViewerElement extends ElementBase {
     this.#announcer.setAttribute("role", "status");
     this.#announcer.setAttribute("aria-live", "polite");
 
-    frame.append(toolbar, this.#body, this.#announcer);
+    this.#card = document.createElement("div");
+    this.#card.className = "card";
+    this.#card.setAttribute("role", "tooltip");
+    this.#card.hidden = true;
+    // The pointer may cross onto the card, to select its text or follow its links.
+    this.#card.addEventListener("pointerenter", () => clearTimeout(this.#cardCloseTimer));
+    this.#card.addEventListener("pointerleave", () => {
+      if (!this.#cardByKeyboard) {
+        this.#closeCardSoon();
+      }
+    });
+
+    frame.append(toolbar, this.#body, this.#announcer, this.#card);
     shadow.append(style, frame);
 
     this.#body.addEventListener("click", (event) => this.#onClick(event));
     // A focus ring is for a reader on the keyboard; after a click, the selection says where they are.
-    this.#body.addEventListener("pointerdown", () => this.#body.classList.add("by-pointer"));
+    this.#body.addEventListener("pointerdown", () => {
+      this.#body.classList.add("by-pointer");
+      this.#closeCard();
+    });
     frame.addEventListener("keydown", () => this.#body.classList.remove("by-pointer"));
     frame.addEventListener("keydown", (event) => this.#onKeyDown(event));
-    this.#body.addEventListener("pointerover", (event) => this.#setHoveredUnit(this.#unitOf(event.target as Element)));
-    this.#body.addEventListener("pointerleave", () => this.#setHoveredUnit(undefined));
+    this.#body.addEventListener("pointerover", (event) => {
+      this.#setHoveredUnit(this.#unitOf(event.target as Element));
+      this.#point(this.#hoverTargetOf(event.target));
+    });
+    this.#body.addEventListener("pointerleave", () => {
+      this.#setHoveredUnit(undefined);
+      this.#point(undefined);
+    });
     // The highlights follow the layout: a wider pane moves the right edge they run to.
     if (typeof ResizeObserver !== "undefined") {
       new ResizeObserver(() => {
@@ -210,6 +270,17 @@ export class NxViewerElement extends ElementBase {
         (this as Record<string, unknown>)[name] = value;
       }
     }
+  }
+
+  connectedCallback(): void {
+    this.ownerDocument.addEventListener("scroll", this.#onDocumentScroll, true);
+    this.ownerDocument.addEventListener("keydown", this.#onDocumentKey);
+  }
+
+  disconnectedCallback(): void {
+    this.ownerDocument.removeEventListener("scroll", this.#onDocumentScroll, true);
+    this.ownerDocument.removeEventListener("keydown", this.#onDocumentKey);
+    this.#closeCard();
   }
 
   /** The source tree to show, as the language service's `sourceTree` query answers it. */
@@ -258,6 +329,20 @@ export class NxViewerElement extends ElementBase {
   set icons(icons: NxViewerIcons | undefined) {
     this.#icons = typeof icons === "function" ? icons : undefined;
     this.#render();
+  }
+
+  /**
+   * Renders a doc comment's Markdown for the hover cards, as the host's other views render it. The
+   * host answers for what it returns. Without it, a built-in renderer reads paragraphs, code,
+   * emphasis, lists and links to the web, and anything else, raw HTML included, as text.
+   */
+  get markdown(): NxViewerMarkdown | undefined {
+    return this.#markdown;
+  }
+
+  set markdown(markdown: NxViewerMarkdown | undefined) {
+    this.#markdown = typeof markdown === "function" ? markdown : undefined;
+    this.#closeCard();
   }
 
   /**
@@ -399,6 +484,9 @@ export class NxViewerElement extends ElementBase {
 
   #render(): void {
     const tree = this.#tree;
+    // What the card described may be gone, and so may what the pointer was over.
+    this.#closeCard();
+    this.#pointedKey = undefined;
     this.#rendered.clear();
     this.#hoveredUnit = undefined;
     this.#body.replaceChildren();
@@ -421,7 +509,10 @@ export class NxViewerElement extends ElementBase {
     // when shown draws it again.
     this.#fitWidth = this.#body.clientWidth;
     const wrapped = new Set<string>();
-    for (let pass = 0; pass < 4 && this.#fitWidth > 0; pass++) {
+    // A property's element value on a line or a header that does not fit is measured once that one
+    // has its rows, so each pass settles one level of values, and values nested deeper than this
+    // keep their innermost lines.
+    for (let pass = 0; pass < 6 && this.#fitWidth > 0; pass++) {
       const found = this.#wrapped();
       if (found.length === 0) {
         break;
@@ -469,7 +560,8 @@ export class NxViewerElement extends ElementBase {
 
   /**
    * The keys of the elements measured whose line, or whose group's header, takes more than one line,
-   * or, for a folded group, whose header runs past its line, since it is cut rather than wrapped.
+   * or, for a folded group, whose header runs past its line, since it is cut rather than wrapped;
+   * of those, the outermost only.
    */
   #wrapped(): string[] {
     const source = this.#body.querySelector<HTMLElement>(".source");
@@ -477,7 +569,8 @@ export class NxViewerElement extends ElementBase {
       return [];
     }
     const lineHeight = parseFloat(getComputedStyle(source).lineHeight) || 18;
-    const keys: string[] = [];
+    // Each element found, and what of it was measured: its line, or its group's header.
+    const found: { element: HTMLElement; target: HTMLElement }[] = [];
     for (const element of this.#body.querySelectorAll<HTMLElement>(".fit-check")) {
       const target = element.classList.contains("sheet") ? element.querySelector<HTMLElement>(":scope > .sheet-head") : element;
       if (target === null) {
@@ -485,7 +578,7 @@ export class NxViewerElement extends ElementBase {
       }
       if (element.classList.contains("folded")) {
         if (target.scrollWidth > target.clientWidth + 1) {
-          keys.push(element.dataset["key"]!);
+          found.push({ element, target });
         }
         continue;
       }
@@ -493,10 +586,15 @@ export class NxViewerElement extends ElementBase {
       const rects = [...target.getClientRects()];
       const lines = rects.length > 1 ? new Set(rects.map((rect) => Math.round(rect.top))).size : (rects[0]?.height ?? 0) / lineHeight;
       if (lines > 1.5) {
-        keys.push(element.dataset["key"]!);
+        found.push({ element, target });
       }
     }
-    return keys;
+    // An element on the line or the header of one that does not fit is not where it will be once
+    // that one has its rows, as a property's value moved to a row: it is measured again on the next
+    // pass. What a group holds under its header is where it will be, and counts now.
+    return found
+      .filter(({ element }) => !found.some((outer) => outer.element !== element && outer.target.contains(element)))
+      .map(({ element }) => element.dataset["key"]!);
   }
 
   /** The unit `target` is in, or the group it falls in between rows, or nothing. */
@@ -738,6 +836,10 @@ export class NxViewerElement extends ElementBase {
    * again, the folds stay as they are.
    */
   #select(key: string | undefined, fire: boolean, reveal = true): void {
+    // A card asked for from the keyboard is the selected unit's.
+    if (this.#cardByKeyboard) {
+      this.#closeCard();
+    }
     for (const element of this.#body.querySelectorAll(".selected")) {
       element.classList.remove("selected");
       element.removeAttribute("aria-current");
@@ -812,6 +914,160 @@ export class NxViewerElement extends ElementBase {
     if (move !== undefined) {
       event.preventDefault();
       this.#stepUnit(move);
+      return;
+    }
+    if (event.key === "Escape") {
+      this.#closeCard();
+      return;
+    }
+    // `i` shows the selected unit's card, and tells a screen reader what it says.
+    if (event.key === "i" && !event.ctrlKey && !event.metaKey && !event.altKey && this.#selection !== undefined) {
+      const drawn = this.#rendered.get(this.#selection);
+      const anchor = drawn?.matches(".sheet") === true ? (drawn.querySelector<HTMLElement>(":scope > .sheet-head") ?? drawn) : drawn;
+      if (anchor !== undefined) {
+        event.preventDefault();
+        const said = this.#openCard(this.#selection, anchor, true);
+        if (said === undefined) {
+          // A card for anything else would seem to answer for this.
+          this.#closeCard();
+        }
+        this.#announcer.textContent = said ?? "No information";
+      }
+    }
+  }
+
+  /** The name or value `target` is in, which the reading marks with the key of what it describes. */
+  #hoverTargetOf(target: EventTarget | null): HTMLElement | undefined {
+    const found = (target as Element | null)?.closest?.("[data-hover]") as HTMLElement | null | undefined;
+    return found !== null && found !== undefined && this.#body.contains(found) ? found : undefined;
+  }
+
+  /**
+   * Notes that the pointer is over `target`, or over nothing that has a card: the card opens once it
+   * has rested there, and an open card for anything else closes after a moment's grace.
+   */
+  #point(target: HTMLElement | undefined): void {
+    const key = target?.dataset["hover"];
+    if (key === this.#pointedKey) {
+      return;
+    }
+    this.#pointedKey = key;
+    clearTimeout(this.#cardOpenTimer);
+    if (key !== undefined && key === this.#cardKey) {
+      clearTimeout(this.#cardCloseTimer);
+      return;
+    }
+    if (!this.#card.hidden && !this.#cardByKeyboard) {
+      this.#closeCardSoon();
+    }
+    if (target !== undefined && key !== undefined) {
+      this.#cardOpenTimer = setTimeout(() => this.#openCard(key, target, false), CARD_DELAY);
+    }
+  }
+
+  /**
+   * Opens the card of the node with `key` against `anchor`, which draws it, and answers what the card
+   * says, as words. Nothing opens, and nothing is answered, when the tree says nothing about it.
+   */
+  #openCard(key: string, anchor: HTMLElement, byKeyboard: boolean): string | undefined {
+    const index = this.#index;
+    const at = index?.byKey.get(key);
+    const card = index === undefined || at === undefined ? undefined : cardOf(index, at);
+    if (card === undefined || !this.#body.contains(anchor)) {
+      return undefined;
+    }
+    clearTimeout(this.#cardCloseTimer);
+    const document = this.ownerDocument;
+    const signature = document.createElement("div");
+    signature.className = "card-signature";
+    signature.textContent = card.signature;
+    this.#card.replaceChildren(signature);
+    if (card.doc !== undefined) {
+      const doc = document.createElement("div");
+      doc.className = "card-doc";
+      doc.append(this.#renderDoc(card.doc));
+      this.#card.append(doc);
+    }
+    this.#cardKey = key;
+    this.#cardByKeyboard = byKeyboard;
+    this.#card.hidden = false;
+    this.#placeCard(anchor);
+    // A scroller inside a host's shadow root does not tell the document it scrolled.
+    const scroller = this.#scrollPort().element;
+    if (scroller !== this.#cardScroller) {
+      this.#cardScroller?.removeEventListener("scroll", this.#onDocumentScroll);
+      this.#cardScroller = scroller;
+      scroller.addEventListener("scroll", this.#onDocumentScroll);
+    }
+    const doc = (this.#card.querySelector(".card-doc")?.textContent ?? "").trim();
+    return `${card.signature}${doc === "" ? "" : `. ${doc}`}`.replace(/\s+/g, " ");
+  }
+
+  /** A doc's Markdown as the host renders it, or as the built-in renderer does. */
+  #renderDoc(markdown: string): Node {
+    if (this.#markdown !== undefined) {
+      try {
+        const rendered = this.#markdown(markdown) as Node | null | undefined;
+        if (rendered !== null && rendered !== undefined && typeof rendered.nodeType === "number") {
+          return rendered;
+        }
+      } catch {
+        // A host renderer that fails leaves the doc to the built-in one.
+      }
+    }
+    return renderMarkdown(this.ownerDocument, markdown);
+  }
+
+  /**
+   * Places the card below `anchor`, or above it where there is no room below, inside the element's
+   * box and what of it is in view.
+   */
+  #placeCard(anchor: HTMLElement): void {
+    const card = this.#card;
+    // Measured from the frame's corner, so its width is not cut by where it last stood.
+    card.style.left = "0px";
+    card.style.top = "0px";
+    const frame = this.#frame.getBoundingClientRect();
+    const box = this.getBoundingClientRect();
+    const port = this.#scrollPort();
+    const top = Math.max(box.top, port.top);
+    const bottom = Math.min(box.bottom, port.top + port.height);
+    const target = anchor.getBoundingClientRect();
+    const size = card.getBoundingClientRect();
+    let y = target.bottom + CARD_GAP;
+    if (y + size.height > bottom && target.top - CARD_GAP - size.height >= top) {
+      y = target.top - CARD_GAP - size.height;
+    }
+    y = Math.max(top, Math.min(y, bottom - size.height));
+    const x = Math.max(box.left, Math.min(target.left, box.right - size.width));
+    card.style.left = `${x - frame.left}px`;
+    card.style.top = `${y - frame.top}px`;
+  }
+
+  /**
+   * Hides the card after a moment, unless the pointer reaches it or what it describes first. A card
+   * waiting to open for what the pointer moved onto still opens.
+   */
+  #closeCardSoon(): void {
+    clearTimeout(this.#cardCloseTimer);
+    this.#cardCloseTimer = setTimeout(() => this.#hideCard(), CARD_GRACE);
+  }
+
+  /** Closes the card, and any card waiting to open: on Escape, a scroll, a click or a new reading. */
+  #closeCard(): void {
+    clearTimeout(this.#cardOpenTimer);
+    this.#hideCard();
+  }
+
+  #hideCard(): void {
+    clearTimeout(this.#cardCloseTimer);
+    this.#cardScroller?.removeEventListener("scroll", this.#onDocumentScroll);
+    this.#cardScroller = undefined;
+    this.#cardKey = undefined;
+    this.#cardByKeyboard = false;
+    if (this.#card !== undefined && !this.#card.hidden) {
+      this.#card.hidden = true;
+      this.#card.replaceChildren();
     }
   }
 }

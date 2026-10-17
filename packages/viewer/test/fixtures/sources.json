@@ -85,5 +85,18 @@
   "childCounts": {
     "source": "type Item = { name:string }\ntype Panel = { content items:Item+ }\n\nlet kids(): Item+ = { <Item name=\"k\" /> }\n\nlet root(wide:bool, names:string+, n:int) =\n  <Panel>\n    <Item name=\"x\" />\n    // A note is not a child.\n    if wide {\n      <Item name=\"b\" />\n      <Item name=\"c\" />\n    } else {\n      <Item name=\"d\" />\n    }\n    for title in names {\n      <Item name={title} />\n    }\n    if n is {\n      0 => <Item name=\"zero\" />\n      else => <Item name=\"many\" />\n    }\n  </Panel>\n\nlet given =\n  <Panel>\n    <Item name=\"y\" />\n    {kids()}\n  </Panel>\n",
     "visualizers": []
+  },
+  "hover": {
+    "source": "import \"@nx/visualizer\"\n\n/// A node in the tree.\nabstract component <Node\n  /// Whether it shows.\n  visible:bool = true\n/>\n\ntype ShapeType =\n  /// Square corners.\n  | Rectangle\n  /// Round.\n  | Circle\n\n/// A filled shape.\ncomponent <Shape extends Node\n  /// What the shape draws.\n  Type:ShapeType = Rectangle\n  /// Words under it.\n  label?:string\n/> = { <div /> }\n\n/// A task to do.\ntype Task = { id:string title:string done:bool = false }\n\n/// Something was sent.\naction Submitted = { at:int }\n\n/// Where it lives.\ntype Place = string\n\nvisualizer Task = <ElementVisualizer title=title id=id />\n\n/// Doubles.\nlet twice(n:int): int = { n * 2 }\n\n/// How big.\nlet size = 3\n\n/// A glowing shape.\nlet <Glow color:string /> = { <Shape Type=Circle /> }\n\nlet root(t:Task) = {\n  // A note.\n  <Shape Type=Circle label=\"hi\" visible=false />\n  <Shape Type={ShapeType.Rectangle} label={t.title} />\n  <Shape label={twice(size)} />\n  <Glow color=\"red\" />\n  <Task id=\"ship\" title=\"Ship it\" />\n}\n",
+    "visualizers": []
+  },
+  "valueGroups": {
+    "source": "type Thickness = { left:int top:int }\ntype Style = { color:string font:string size:int }\ntype Card = { padding:Thickness style:Style title:string }\n\nlet card =\n  <Card padding=<Thickness left=1 top=2 /> style=<Style color=\"red\" font=\"Inter\" size=12 /> title=\"Hello\" />\n"
+  },
+  "valueHolders": {
+    "source": "type Style = { color:string font:string size:int }\ntype Item = { name:string }\ntype Holder = { appearance:Style }\ntype Wrap = { label:string style:Style }\ntype Outer = { title:string wrap:Wrap }\ntype Frame = { style:Style content items:Item* }\ntype Panel = { style:Style title:string content items:Item* }\n\nlet holder = <Holder appearance=<Style color=\"red\" font=\"Inter\" size=12 /> />\n\nlet panel =\n  <Panel style=<Style color=\"red\" font=\"Inter\" size=12 /> title=\"Hi\">\n    <Item name=\"a\" />\n  </Panel>\n\nlet outer = <Outer title=\"Outer title\" wrap=<Wrap label=\"A label\" style=<Style color=\"red\" font=\"Inter\" size=12 /> /> />\n\nlet framed =\n  <Frame style=<Style color=\"red\" font=\"Inter\" size=12 />>\n    <Item name=\"b\" />\n  </Frame>\n"
+  },
+  "deepGroups": {
+    "source": "type Box = { a:string b:string content items:Box* }\n\nlet deep =\n  <Box a=\"aaaaaaaaaaaa\" b=\"bbbbbbbbbbbb\">\n    <Box a=\"aaaaaaaaaaaa\" b=\"bbbbbbbbbbbb\">\n      <Box a=\"aaaaaaaaaaaa\" b=\"bbbbbbbbbbbb\">\n        <Box a=\"aaaaaaaaaaaa\" b=\"bbbbbbbbbbbb\">\n          <Box a=\"aaaaaaaaaaaa\" b=\"bbbbbbbbbbbb\">\n            <Box a=\"aaaaaaaaaaaa\" b=\"bbbbbbbbbbbb\">\n              <Box a=\"aaaaaaaaaaaa\" b=\"bbbbbbbbbbbb\">\n                <Box a=\"aaaaaaaaaaaa\" b=\"bbbbbbbbbbbb\">\n                </Box>\n              </Box>\n            </Box>\n          </Box>\n        </Box>\n      </Box>\n    </Box>\n  </Box>\n"
   }
 }

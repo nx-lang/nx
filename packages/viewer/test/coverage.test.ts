@@ -20,8 +20,10 @@ const { indexTree } = await import("../src/tree.js");
 after(async () => (await nxHost()).dispose());
 
 /** The keys of `tree` that do not appear exactly once in its rendering, with how often they do. */
-function uncovered({ tree, text }: Fixture): string[] {
-  const rendered = renderSource(document, indexTree(tree, text), []);
+function uncovered({ tree, text }: Fixture, wrapAll = false): string[] {
+  // With every element wrapped, each reads as a group where it can, values under their names too.
+  const wrapped = wrapAll ? new Set(tree.nodes.filter((node) => node.role === "element").map((node) => node.key)) : undefined;
+  const rendered = renderSource(document, indexTree(tree, text), [], { wrapped });
   const counts = new Map<string, number>();
   for (const element of rendered.querySelectorAll<HTMLElement>("[data-key]")) {
     const key = element.dataset["key"]!;
@@ -59,9 +61,12 @@ async function repositoryTrees(): Promise<{ path: string; fixture: Fixture }[]> 
 function failuresOf(trees: readonly { path: string; fixture: Fixture }[]): string[] {
   const failures: string[] = [];
   for (const { path, fixture } of trees) {
-    const missing = uncovered(fixture);
-    if (missing.length > 0) {
-      failures.push(`${path}: ${missing.slice(0, 5).join(", ")}${missing.length > 5 ? ` and ${missing.length - 5} more` : ""}`);
+    for (const wrapAll of [false, true]) {
+      const missing = uncovered(fixture, wrapAll);
+      if (missing.length > 0) {
+        const how = wrapAll ? " (everything wrapped)" : "";
+        failures.push(`${path}${how}: ${missing.slice(0, 5).join(", ")}${missing.length > 5 ? ` and ${missing.length - 5} more` : ""}`);
+      }
     }
   }
   return failures;
