@@ -139,7 +139,11 @@ declaration, no runtime, no debug section. That artifact SHALL name the catalog 
 version it was compiled against. The `/p/` player SHALL prepare the bundled catalog, link the share's
 artifact against it, and draw with the NX runtime bundle and the DrawnUI engine alone, never
 fetching the compiler module. Every NX preset's share module SHALL be under 128 KB, half the
-backend's limit.
+backend's limit. A share whose NX IR image was written under an earlier schema that has a retired
+runtime SHALL be drawn by that runtime, and the fiddle SHALL keep a retired runtime for every schema
+an earlier release of the fiddle wrote shares in, schema 4 and schema 5 among them. The editor's note
+on such a share SHALL name the NX version that wrote it and the NX version the editor uses, the
+latter as the NX runtime bundle reports it.
 
 #### Scenario: A share round-trips in NX
 - **WHEN** a visitor shares an NX snippet and another visitor opens the share's editor link
@@ -179,11 +183,17 @@ backend's limit.
 
 #### Scenario: A share from another NX IR schema is reported
 - **WHEN** the player opens a share whose NX IR image was written under a schema version other than
-  the one the NX runtime bundle reads
+  the one the NX runtime bundle reads, and for which the fiddle keeps no retired runtime
 - **THEN** the player SHALL draw the engine's failure label naming both schema versions, and SHALL
   NOT attempt to link or draw the share
 - **AND** the share's editor link SHALL still open the stored source in NX, where compiling it
   reports whatever the current language rejects in the snippet's own line numbers
+
+#### Scenario: A share from NX 0.7 keeps drawing
+- **WHEN** the player opens a share compiled by the fiddle on NX 0.7.0, under schema 5, after the
+  fiddle moves to NX 0.8.0
+- **THEN** the player SHALL draw it with the retired schema-5 runtime, without the compiler
+- **AND** its editor link SHALL open the source with a note naming NX 0.7 and NX 0.8
 
 ### Requirement: The engine lets a language prepare its runtime
 The engine's React surface SHALL let a registered language declare a preparation step, and SHALL

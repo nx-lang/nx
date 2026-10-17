@@ -291,7 +291,9 @@ derived update record and property union, which a component does not have. Lower
 such a declaration with a diagnostic that explains the reservation. Referencing a shared action
 named `Update`, `Property`, `State` or `Props` in `emits` SHALL be rejected for the same reason. A
 component SHALL NOT declare a state field or prop named `State` either, since inside its body the
-bare name `State` denotes the state record.
+bare name `State` denotes the state record. A concrete external component with no body SHALL be
+exempt from the prop rule: it has no body and cannot be extended into one, so it MAY declare a prop
+named `State` for a host control's property of that name.
 
 #### Scenario: Inline emit named Update is rejected
 - **WHEN** a file contains `component <Form emits { Update { value:string } } /> = { <Panel /> }`
@@ -308,6 +310,12 @@ bare name `State` denotes the state record.
 #### Scenario: A prop or state field named State is rejected
 - **WHEN** a file contains `component <Form State:string /> = { <Panel /> }` or `component <Form /> = { state { State:string = "" } <Panel /> }`
 - **THEN** lowering SHALL reject the field because the bare name `State` denotes the component's state record inside its body
+
+#### Scenario: A bodyless external component keeps a prop named State
+- **WHEN** a file contains `external component <SpriteSet State?:float />`
+- **THEN** lowering SHALL accept the prop and report no diagnostic
+- **AND** `abstract external component <Base State?:float />` and
+  `external component <Search State?:float /> = { state { query:string } }` SHALL still be rejected
 
 #### Scenario: Shared action named Update cannot be emitted
 - **WHEN** a file contains `action Update = { value:string } component <Form emits { Update } /> = { <Panel /> }`

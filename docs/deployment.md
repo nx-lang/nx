@@ -71,6 +71,10 @@ Only stable `major.minor.patch` release tags are supported in this implementatio
 
 1. Merge the release change to `main`, including a section for the release version in
    `src/vscode/CHANGELOG.md`, which the Marketplace and Open VSX show as the extension's changelog.
+   Check that the Build workflow is green on the commit you will tag, the `🦀 Rust` job included:
+   it stops at its first failing step, so a formatting miss also skips the lint, the tests and the
+   packing after it. If the release adds an npm package that has never been published, set it up
+   first, as [Add A New npm Package](#add-a-new-npm-package) describes.
 2. Check what the release does to the speed of `@nx-lang/ir-runtime`. Every push to `main` compares
    it with the last release in the `⏱ Runtime performance` job of the Build workflow, and the job's
    summary names each call that is slower than it was in that release. To run the same comparison
@@ -107,6 +111,40 @@ a consumer installing a just-published package finds its `@nx-lang/*` dependenci
 already, and skips any version the registry has. The crates job does the same
 (`scripts/publish-crates.mjs`): `nx-ir` and `nx-value` before `nx-ir-runtime`, each skipped when
 crates.io already has the version with the attached file's checksum.
+
+## Add A New npm Package
+
+A workspace package that is not `private` is published by the next release, but npm only accepts a
+trusted publisher for a package that already exists, and the publish job authenticates through that
+trusted publisher alone. `publish-packages.mjs` stops at the first package it cannot publish, so a
+new name has to be set up by hand before the release is published. `@nx-lang/viewer` and
+`@nx-lang/previewer` were set up this way for 0.8.0.
+
+1. Publish a `0.0.0` placeholder from an account that owns the `@nx-lang` scope. npm asks for a
+   one-time password in the browser, so run this in a terminal of your own:
+   ```bash
+   name=viewer   # the package name after @nx-lang/
+   dir=$(mktemp -d) && cd "$dir"
+   printf '{"name":"@nx-lang/%s","version":"0.0.0","description":"Placeholder; the first release is coming.","license":"MIT","repository":{"type":"git","url":"https://github.com/nx-lang/nx.git","directory":"packages/%s"}}\n' "$name" "$name" > package.json
+   printf '# @nx-lang/%s\n\nPlaceholder. See https://nxlang.org.\n' "$name" > README.md
+   npm publish --access public
+   ```
+2. Wait until `npm view @nx-lang/<name> version` answers `0.0.0`. A new package takes a few
+   minutes to appear, and npm refuses a trusted publisher for it until it does.
+3. On npmjs.com, open the package's **Settings** page, and under **Trusted Publisher** choose
+   **GitHub Actions** with:
+   - organization or user `nx-lang`, repository `nx`;
+   - workflow filename `package-publish.yml`;
+   - environment name `production`.
+
+   The page shows the publisher as *Pending validation* until the first publish through it, which
+   is the release. `npm trust github @nx-lang/<name> --file package-publish.yml --repository
+   nx-lang/nx --environment production` does the same from the command line, but answers a bare
+   `400 Bad Request` when the npm login's token is one that bypasses two-factor authentication, and
+   for a package that has not appeared yet.
+
+The placeholder stays in the package's version list. The release publishes the real version as
+`latest` over it.
 
 ## Pull Request Artifact Testing
 

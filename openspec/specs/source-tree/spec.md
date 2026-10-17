@@ -197,12 +197,15 @@ SHALL attach to each declaration entry with a resolved visualizer a `visualizer`
   when it has an `id`, and a `properties` list holding every property of the entry once, in the
   resolved order (the properties the visualizer lists, then the rest in declaration order), each with
   its name and its resolved `format` when set;
+- for an element function (`let <Name … />`), which a visualizer cannot target: a `properties` list
+  holding each of its properties once, in declaration order, each with its name and the `format` its
+  type gives it when set;
 - for an alias: its `format`.
 
-An entry for a record, action or component that has no visualizer but has a property with a resolved
-format SHALL carry a `visualizer` value with the formats. When visualizers are asked for, the
-declaration table SHALL also list each alias with a visualizer that types a property of a listed
-declaration, so a reader can read the property's format without another query. A host visualizer
+An entry for a record, action, component or element function that has no visualizer but has a
+property with a resolved format SHALL carry a `visualizer` value with the formats. When visualizers
+are asked for, the declaration table SHALL also list each alias with a visualizer that types a
+property of a listed declaration, so a reader can read the property's format without another query. A host visualizer
 declaration module the workspace snapshot does not hold SHALL be reported in the answer as missing
 and SHALL NOT fail the query. The `visualizer` values SHALL round-trip through JSON without loss.
 
@@ -220,6 +223,13 @@ and SHALL NOT fail the query. The `visualizer` values SHALL round-trip through J
   visualizer has the format `color`, and no node of the document names `Color`
 - **THEN** the declaration table SHALL hold `Color` with a `visualizer` value with the format `color`
 
+#### Scenario: An element function's property takes its type's format
+- **WHEN** a client asks with `visualizers` for the source tree of a document that declares
+  `let <Glow tint:Color size:int /> = …` and constructs `<Glow tint="#EC4899" size=3 />`, and `Color`'s
+  visualizer has the format `color`
+- **THEN** the entry for `Glow` SHALL carry a `visualizer` value whose `tint` property has the format
+  `color` and whose `size` property has none
+
 #### Scenario: Without the option nothing changes
 - **WHEN** a client asks for the source tree of the same document without `visualizers`
 - **THEN** no declaration entry SHALL carry a `visualizer` value
@@ -232,4 +242,3 @@ and SHALL NOT fail the query. The `visualizer` values SHALL round-trip through J
 #### Scenario: A missing host module
 - **WHEN** a client asks with `visualizers` naming a module identity the snapshot does not hold
 - **THEN** the answer SHALL list that identity as missing and SHALL carry the program's own visualizers
-
