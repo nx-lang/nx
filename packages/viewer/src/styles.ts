@@ -132,7 +132,8 @@ export const styles = `
    follows. An id last in the tag keeps its own smaller gap. */
 .source .line-close { margin-left: 0.3em; }
 .source .id-end + .line-close { margin-left: 0; }
-/* The color a string names, as a small square before it. */
+/* The color a string names, as a small square before it, kept with it where a line wraps. */
+.source .colored, .source .line-property:has(> .colored) { white-space: nowrap; }
 .source .swatch {
   display: inline-block;
   width: 0.75em;
@@ -174,10 +175,11 @@ export const styles = `
 }
 .source .sheet-item.as-written > .as-written-lead { display: inline-block; width: calc(var(--column, 0) * 1ch); }
 /* An element on a line of its own wraps within itself, its later lines a step in from where it starts,
-   wherever it sits; and so does one written as its tags inside such an item, as the item's other lines
-   wrap from the item's start. */
+   wherever it sits; and so does one written as its tags on one line inside such an item, as the item's
+   other lines wrap from the item's start. One written as its tags over several lines stays inline, its
+   lines the item's own: a box of its own would set them in twice, by the box and by their indentation. */
 .source .line-element.alone,
-.source .sheet-item.as-written :is(.line-element, .tag-line) {
+.source .sheet-item.as-written :is(.line-element, .tag-line:not(.over-lines)) {
   display: inline-block;
   vertical-align: top;
   /* The reading's width less the element's column: a percentage here would be of a box that is

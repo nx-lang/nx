@@ -1,8 +1,9 @@
 /**
  * The source reading: the document's text with each node of the source tree wrapped in a span that
- * carries its key. Code reads as written; an element over several lines reads as a group and one on
- * a line as its name and properties, without tags or quotes, with its id moved to where its
- * visualizer puts it and its booleans read as marks. Colors come from the host, as ranges over the
+ * carries its key. Code reads as written; an element reads as its name and properties on one line
+ * when they fit there, and as a group, a row to each property, when they do not or when it holds
+ * items, without tags or quotes, with its id moved to where its visualizer puts it and its booleans
+ * read as marks. Colors come from the host, as ranges over the
  * text, so a host colors the reading with the highlighter and themes it colors its editor with.
  */
 import type { SourceDeclarationKind, SourceNode, SourceValueFormat } from "@nx-lang/language-protocol";
@@ -41,6 +42,11 @@ function utf16Offsets(text: string, byteLength: number): Uint32Array {
 
 /** What the reading draws with, beyond the text and its colors. */
 export interface SourceLayout {
+  /**
+   * The keys of the elements whose properties do not fit on one line in the pane, which give each
+   * property a row. The element measures which those are, from the reading drawn without them.
+   */
+  readonly wrapped?: ReadonlySet<string> | undefined;
   /**
    * Draws the icon of the given name, from the Lucide set, or nothing when it has none. With it, an
    * element on lines of its own starts with an icon: the one its visualizer names, or else one for
@@ -195,8 +201,8 @@ export function defaultFolded(index: TreeIndex): string[] {
 
 /**
  * Renders the document's text as the reading shows it, colored by `colors`, with its nodes marked:
- * an element over several lines as a group with no tags, an element on one line as its name and
- * properties, and everything else as written.
+ * an element as a line of its name and properties, or as a group with no tags when it holds items
+ * or is in `layout.wrapped`, and everything else as written.
  */
 export function renderSource(
   document: Document,
@@ -393,12 +399,12 @@ export function renderSource(
         continue;
       }
       writeGap(parent, at, start, plan);
-      if (node.role === "element" && sheetable(child)) {
+      if (node.role === "element" && shapeOf(child) === "group") {
         parent.append(writeSheet(child, start, end));
         at = end;
         continue;
       }
-      if (node.role === "element" && oneLineable(child)) {
+      if (node.role === "element" && shapeOf(child) === "line") {
         parent.append(writeLine(child, start, end));
         at = end;
         continue;
@@ -429,6 +435,11 @@ export function renderSource(
         // It is a unit of the reading too, selected and hovered as a whole like a one-line element.
         element.classList.add("tag-line");
         element.style.setProperty("--line-column", String(start - (text.lastIndexOf("\n", start - 1) + 1)));
+        // Over several lines, its later lines keep the indentation the source gives them, as the
+        // lines of the item it is in do.
+        if (!onOneLine(start, end)) {
+          element.classList.add("over-lines");
+        }
         element.append(marker);
       }
       // A comment is prose, which a host may set in another font than the code around it.
@@ -493,30 +504,98 @@ export function renderSource(
   const onOneLine = (from: number, to: number): boolean => !text.slice(from, to).includes("\n");
   const startsItsLine = (offset: number): boolean => text.slice(text.lastIndexOf("\n", offset - 1) + 1, offset).trim() === "";
 
-  /** Whether two offsets fall on the same line. */
-  const sameLine = (from: number, to: number): boolean => onOneLine(Math.min(from, to), Math.max(from, to));
+  // ---- How each element reads ------------------------------------------------------------
+  //
+  // An element reads as a line, its name and then its properties, when they fit on one line in the
+  // pane, and as a group, a row to each property, when they do not, however the source breaks its
+  // lines. An element that holds items is a group either way, with its properties on its header
+  // when they fit there. A property's element value reads on its row or its line, as a line, or as
+  // a group under the property's name when it holds items.
 
+  /** Whether an element is a property's value, not an item. */
+  const isValue = (at: number): boolean => {
+    const parent = tree.nodes[at]!.parent;
+    return parent !== undefined && tree.nodes[parent]!.role === "attribute" && !isContent(parent);
+  };
+  /** Whether an element's properties take a row each: they were measured not to fit on one line. */
+  const isWrapped = (at: number): boolean => !isValue(at) && layout.wrapped?.has(tree.nodes[at]!.key) === true;
+  /** The properties an element shows by name or as its title: all but its id and what it holds. */
+  const shownOf = (at: number): number[] =>
+    childrenOf(at).filter(
+      (child) => tree.nodes[child]!.role === "attribute" && !isContent(child) && child !== idPlans.get(at)?.attribute
+    );
   /**
-   * Whether an attribute reads on its element's header line, after the name, as a one-line element
-   * shows its properties: the author wrote it on the line the tag starts on, and all on that line.
+   * Marks an element whose line, or whose group's header, holds more than one property, for the
+   * element to measure whether it fits on one line.
    */
-  const onHeader = (element: number, attribute: number): boolean => {
-    const node = tree.nodes[attribute]!;
-    return sameLine(startOf(tree.nodes[element]!), startOf(node)) && onOneLine(startOf(node), endOf(node));
+  const markFit = (element: HTMLElement, at: number): void => {
+    if (!isValue(at) && !isWrapped(at) && shownOf(at).length > 1) {
+      element.classList.add("fit-check");
+    }
+  };
+
+  const shapes = new Map<number, "group" | "line" | "written">();
+  /** How an element reads: as a line, as a group, or as written. */
+  const shapeOf = (at: number): "group" | "line" | "written" => {
+    let shape = shapes.get(at);
+    if (shape === undefined) {
+      shape = lineable(at) ? "line" : sheetable(at) ? "group" : "written";
+      shapes.set(at, shape);
+    }
+    return shape;
   };
 
   /**
-   * Whether an element reads as a group: written over several lines, it shows a header (its icon,
-   * name, id and the attributes written on its first line), a row to each attribute written on a
-   * line of its own, and under them what it holds, with no angle brackets and no closing tag. Each
-   * row's value must be one a cell can show: a literal, an element, a list of elements or literals,
-   * or anything else on one line.
+   * Whether an attribute's value fits on a line after its name: one value, no comment, and an
+   * element that reads as a line or anything else written on one line.
    */
-  const sheetable = (at: number): boolean => {
-    const node = tree.nodes[at]!;
-    if (onOneLine(startOf(node), endOf(node))) {
+  const inlineValue = (attribute: number): boolean => {
+    const values = childrenOf(attribute);
+    if (values.length !== 1 || isNote(values[0]!)) {
       return false;
     }
+    const value = tree.nodes[values[0]!]!;
+    if (value.role === "element") {
+      return shapeOf(values[0]!) === "line";
+    }
+    return onOneLine(startOf(value), endOf(value));
+  };
+
+  /** Whether an attribute of a group reads on its header, after the name: its properties fit there. */
+  const inHeader = (element: number, attribute: number): boolean => !isWrapped(element) && inlineValue(attribute);
+
+  /**
+   * Whether an element reads as a line: each property's value fits on a line, it holds no element
+   * and no more than a line of text, and it has no comment in its tag. Measured not to fit, it
+   * still reads as one when it shows one property at most, which a row would not shorten.
+   */
+  const lineable = (at: number): boolean => {
+    for (const child of childrenOf(at)) {
+      const candidate = tree.nodes[child]!;
+      if (candidate.role !== "attribute") {
+        return false;
+      }
+      if (isContent(child)) {
+        // An element held reads under its holder, as an item of a group.
+        const held = childrenOf(child);
+        if (!onOneLine(startOf(candidate), endOf(candidate)) || held.some((item) => isNote(item) || tree.nodes[item]!.role === "element")) {
+          return false;
+        }
+      } else if (!inlineValue(child)) {
+        return false;
+      }
+    }
+    return !isWrapped(at) || shownOf(at).length <= 1;
+  };
+
+  /**
+   * Whether an element reads as a group: it shows a header (its icon, name, id and the properties
+   * that fit there), a row to each other property, and under them what it holds, with no angle
+   * brackets and no closing tag. Each row's value must be one a cell can show: a literal, an
+   * element, a list of elements or literals, or anything else on one line. A comment inside an
+   * attribute has no place in a row or on the header, so an element with one reads as written.
+   */
+  const sheetable = (at: number): boolean => {
     const plan = idPlans.get(at);
     for (const child of childrenOf(at)) {
       const childNode = tree.nodes[child]!;
@@ -529,16 +608,14 @@ export function renderSource(
       if (isContent(child)) {
         continue;
       }
-      // A comment inside an attribute has no place in a row or on the header, which show only the
-      // attribute's name and value: the element reads as written.
       const values = childrenOf(child);
       if (values.some(isNote)) {
         return false;
       }
-      if (onHeader(at, child)) {
+      if (inHeader(at, child)) {
         continue;
       }
-      if (!startsItsLine(startOf(childNode)) || values.length !== 1) {
+      if (values.length !== 1) {
         return false;
       }
       const value = tree.nodes[values[0]!]!;
@@ -598,6 +675,8 @@ export function renderSource(
         const words = marked(at, "span", "");
         const square = swatch(at, start, end);
         if (square !== undefined) {
+          // The square and the color it shows stay together where a line wraps.
+          words.classList.add("colored");
           words.append(square);
         }
         writeText(words, start + 1, end - 1);
@@ -637,7 +716,7 @@ export function renderSource(
     if (value.role === "sequence") {
       return true;
     }
-    return value.role === "element" && sheetable(values[0]!);
+    return value.role === "element" && shapeOf(values[0]!) === "group";
   };
 
   /** An element as a property sheet: its name and id, then a row to an attribute, then what it holds. */
@@ -674,6 +753,7 @@ export function renderSource(
     const plan = idPlans.get(at);
     const folded = layout.folded?.has(node.key) === true;
     const sheet = marked(at, "span", folded ? "sheet folded" : "sheet");
+    markFit(sheet, at);
     sheet.style.setProperty("--indent", String(start - (text.lastIndexOf("\n", start - 1) + 1)));
     const head = document.createElement("span");
     head.className = "sheet-head";
@@ -701,7 +781,7 @@ export function renderSource(
       if (child === plan?.attribute) {
         continue;
       }
-      if (childNode.role === "attribute" && !isContent(child) && onHeader(at, child)) {
+      if (childNode.role === "attribute" && !isContent(child) && inHeader(at, child)) {
         // On the header, after the name, as a one-line element shows it.
         const gap = document.createElement("span");
         gap.className = "line-gap";
@@ -782,30 +862,6 @@ export function renderSource(
 
   // ---- Elements on one line ------------------------------------------------------------------
 
-  /**
-   * Whether an element written on one line reads as one: its name, then its properties, each a
-   * name, an `=` and a value, with no quotes, then what it holds as written, with no tags of its
-   * own. It must have no comment in its tag.
-   */
-  const oneLineable = (at: number): boolean => {
-    const node = tree.nodes[at]!;
-    if (!onOneLine(startOf(node), endOf(node))) {
-      return false;
-    }
-    return childrenOf(at).every((child) => {
-      const candidate = tree.nodes[child]!;
-      if (candidate.role === "attribute" && isContent(child)) {
-        // What it holds reads after its properties, as written, with no tags around it.
-        return childrenOf(child).every((value) => !isNote(value));
-      }
-      return (
-        candidate.role === "attribute" &&
-        childrenOf(child).filter((value) => !isNote(value)).length === 1 &&
-        childrenOf(child).every((value) => !isNote(value))
-      );
-    });
-  };
-
   /** A property's value on an element's line: as a sheet shows it, or as written with its braces. */
   const writeLineValue = (parent: HTMLElement, attribute: number): void => {
     const at = childrenOf(attribute)[0]!;
@@ -815,7 +871,7 @@ export function renderSource(
       writeValue(parent, attribute);
       return;
     }
-    if (value.role === "element" && oneLineable(at)) {
+    if (value.role === "element" && shapeOf(at) === "line") {
       parent.append(writeLine(at, startOf(value), endOf(value)));
       return;
     }
@@ -968,6 +1024,7 @@ export function renderSource(
    */
   const writeLine = (at: number, start: number, end: number): HTMLElement => {
     const line = marked(at, "span", "line-element");
+    markFit(line, at);
     const alone = startsItsLine(start) && endsItsLine(end);
     const marker = alone ? elementIcon(at) : undefined;
     if (marker !== undefined) {
@@ -1018,7 +1075,7 @@ export function renderSource(
       }
       // An item written as it is over several lines keeps the indentation of its later lines as the
       // source has it, measured from where the item starts, wherever the group puts it.
-      if (!onOneLine(start, end) && !(node.role === "element" && sheetable(item))) {
+      if (!onOneLine(start, end) && !(node.role === "element" && shapeOf(item) !== "written")) {
         line.classList.add("as-written");
         line.style.setProperty("--column", String(start - (text.lastIndexOf("\n", start - 1) + 1)));
         // Room for the item's own indentation on its first line, which its later lines share.

@@ -68,5 +68,18 @@
   },
   "nesting": {
     "source": "type Item = { name:string }\ntype Panel = { title:string content items:Item+ }\n\nlet root(wide:bool) =\n  <Panel title=\"outer\">\n    <Panel title=\"inner\">\n      <Item name=\"a\" />\n    </Panel>\n    if wide {\n      <Item name=\"b\" />\n    }\n  </Panel>\n"
+  },
+  "importedAliases": {
+    "source": "import \"controls.nx\"\n\nlet root() = {\n  <Label\n    Text=\"Welcome back\"\n    TextColor=\"#2E7D32\"\n  />\n}\n",
+    "with": {
+      "controls.nx": "export type uitext = string\nexport type Color = string\nexport external component <Label Text?:uitext TextColor?:Color />\n",
+      "looks.nx": "import \"@nx/visualizer\"\nimport \"controls.nx\"\n\nvisualizer Color = <ValueVisualizer format=color />\n"
+    },
+    "visualizers": [
+      "looks.nx"
+    ]
+  },
+  "wrappedAttributes": {
+    "source": "type Item = { name:string note:string }\ntype Shape = { kind:string width:int color:string stroke:int content items:Item* }\n\nlet shape =\n  <Shape kind=\"circle\" width=52\n    color=\"#6652AD\" stroke=1>\n    <Item name=\"a\" note=\"n\" />\n  </Shape>\n\nlet commented =\n  <Shape kind=\"square\">\n    <Item name= /* why */ \"a\"\n      note=\"n\" />\n  </Shape>\n"
   }
 }

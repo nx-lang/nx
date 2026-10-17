@@ -1,7 +1,7 @@
 import { document } from "./dom.js";
 
 import assert from "node:assert/strict";
-import { after, describe, it } from "node:test";
+import { after, describe, it, type TestContext } from "node:test";
 
 import { fixture, nxHost, type Fixture } from "./fixtures.js";
 import type { NxFoldDetail, NxSelectDetail, NxViewerElement } from "../src/index.js";
@@ -28,6 +28,24 @@ function show({ tree, text }: Fixture, defaults = false): NxViewerElement {
   element.tree = tree;
   created.push(element);
   return element;
+}
+
+/**
+ * Lays the reading out as jsdom does not, for the test `t`: a line or a group's header of more than
+ * `columns` characters takes two lines, so its element gives each property a row.
+ */
+function narrow(t: TestContext, columns: number): void {
+  const prototype = document.defaultView!.HTMLElement.prototype;
+  const { getClientRects } = prototype;
+  Object.defineProperty(prototype, "clientWidth", { configurable: true, get: () => columns * 8 });
+  prototype.getClientRects = function (this: HTMLElement) {
+    const height = (this.textContent ?? "").replace(/\s+/g, " ").length > columns ? 36 : 18;
+    return [{ top: 0, bottom: height, left: 0, right: 100, width: 100, height, x: 0, y: 0, toJSON: () => ({}) }] as unknown as DOMRectList;
+  };
+  t.after(() => {
+    prototype.getClientRects = getClientRects;
+    delete (prototype as { clientWidth?: number }).clientWidth;
+  });
 }
 
 function root(element: NxViewerElement): ShadowRoot {
@@ -179,6 +197,21 @@ describe("the reading", () => {
     assert.equal(squares[0]!.getAttribute("aria-hidden"), "true");
   });
 
+  it("reads text shown to people and a color swatch through aliases another module declares", async () => {
+    // As a host's catalog does: the aliases in one module, the color format in a host visualizer
+    // module, and the document importing only the first.
+    const imported = await fixture("importedAliases");
+    const element = show(imported);
+    const source = root(element).querySelector<HTMLElement>(".source")!;
+    assert.deepEqual(
+      Array.from(source.querySelectorAll<HTMLElement>(".uitext-body"), (node) => node.textContent),
+      ["Welcome back"]
+    );
+    const squares = Array.from(source.querySelectorAll<HTMLElement>(".swatch"));
+    assert.equal(squares.length, 1);
+    assert.equal(squares[0]!.parentElement!.textContent, "#2E7D32");
+  });
+
   it("starts an element on a line of its own with the icon its visualizer names, or its kind's", async () => {
     const icons = await fixture("icons");
     const element = show(icons);
@@ -229,13 +262,63 @@ describe("the reading", () => {
     assert.ok(!source.textContent!.includes("</Label>"), "no closing tag");
   });
 
+  it("keeps an element with one property and the text it holds a line, however narrow the pane", async (t) => {
+    narrow(t, 10);
+    const element = show(await fixture("content"));
+    const source = root(element).querySelector<HTMLElement>(".source")!;
+    assert.equal(source.querySelector(".sheet"), null, "a row would not shorten it");
+    assert.equal(source.querySelector<HTMLElement>(".line-element")!.textContent, "Label  tone=quiet  Hello {who}");
+  });
+
+  it("measures the reading again once the pane's width settles, not on each step", async (t) => {
+    let width = 400;
+    const prototype = document.defaultView!.HTMLElement.prototype;
+    Object.defineProperty(prototype, "clientWidth", { configurable: true, get: () => width });
+    const resized: (() => void)[] = [];
+    const observer = Object.getOwnPropertyDescriptor(globalThis, "ResizeObserver");
+    Object.defineProperty(globalThis, "ResizeObserver", {
+      configurable: true,
+      writable: true,
+      value: class {
+        constructor(callback: () => void) {
+          resized.push(callback);
+        }
+        observe(): void {}
+        disconnect(): void {}
+      }
+    });
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    t.after(() => {
+      delete (prototype as { clientWidth?: number }).clientWidth;
+      if (observer === undefined) {
+        delete (globalThis as { ResizeObserver?: unknown }).ResizeObserver;
+      } else {
+        Object.defineProperty(globalThis, "ResizeObserver", observer);
+      }
+    });
+    const element = show(await fixture("groups"));
+    const resize = resized.at(-1)!;
+    const drawn = (): Element | null => root(element).querySelector(".source");
+    const first = drawn();
+    for (const step of [380, 360, 340]) {
+      width = step;
+      resize();
+    }
+    assert.equal(drawn(), first, "not drawn again while the width is changing");
+    t.mock.timers.tick(150);
+    const second = drawn();
+    assert.notEqual(second, first, "drawn again once it settles");
+    t.mock.timers.tick(1000);
+    assert.equal(drawn(), second, "and only once");
+  });
+
   it("moves an element's id to where its visualizer puts it, as its value alone", async () => {
     const ids = await fixture("elementIds");
     const element = show(ids);
     const source = root(element).querySelector<HTMLElement>(".source")!;
-    // At the beginning, after the group's name; at the end, after the line's title.
-    assert.equal(read(source.querySelector(".sheet-head")!), "Step welcome");
-    assert.equal(read(source.querySelector(".sheet + * .line-element, .sheet-item:last-child .line-element") ?? source.querySelectorAll(".line-element")[2]!), "Choice Yes yes");
+    // At the beginning, after the name; at the end, after the title.
+    const lines = Array.from(source.querySelectorAll<HTMLElement>('[data-key="steps"] .line-element'), (line) => read(line));
+    assert.deepEqual(lines, ["Step welcome Welcome", "Choice Yes yes"]);
     const chips = Array.from(source.querySelectorAll<HTMLElement>(".id-part"));
     assert.deepEqual(chips.map((chip) => chip.textContent), ["welcome", "yes"]);
     // Each chip keeps the keys of the attribute and its value, so selection still finds them.
@@ -243,26 +326,62 @@ describe("the reading", () => {
     assert.deepEqual([...keys].sort(), ids.tree.nodes.map((node) => node.key).sort(), "every node is still there once");
   });
 
-  it("reads an element written an attribute to a line as a group with a row to each", async () => {
+  it("reads an element whose properties fit on one line as a line, however the source breaks it", async () => {
     const ids = await fixture("elementIds");
     const element = show(ids);
     const source = root(element).querySelector<HTMLElement>(".source")!;
-    const sheet = source.querySelector<HTMLElement>(".sheet")!;
-    assert.ok(sheet, "the Step written over several lines is a sheet");
-    assert.equal(read(sheet.querySelector(".sheet-head")!), "Step welcome", "its name and id, with no angle bracket");
-    const rows = Array.from(sheet.querySelectorAll<HTMLElement>(".sheet-row"));
-    assert.deepEqual(rows.map((row) => [read(row.querySelector(".sheet-name")!), read(row.querySelector(".sheet-value")!)]), [["title", "Welcome"]]);
-    assert.ok(!sheet.textContent!.includes("/>") && !sheet.textContent!.includes('"'), "no closer, no quotes");
-    assert.equal(source.querySelectorAll(".sheet").length, 1, "the Choice written on one line stays a line");
+    assert.equal(source.querySelectorAll(".sheet").length, 0, "the Step written an attribute to a line is no group");
+    const step = source.querySelector<HTMLElement>('[data-key="steps"] .line-element')!;
+    assert.equal(read(step), "Step welcome Welcome", "its name, id and title, with no angle bracket");
+    assert.ok(!step.textContent!.includes("/>") && !step.textContent!.includes('"'), "no closer, no quotes");
     const keys = Array.from(source.querySelectorAll<HTMLElement>("[data-key]"), (node) => node.dataset["key"]!);
     assert.deepEqual([...keys].sort(), ids.tree.nodes.map((node) => node.key).sort(), "every node is still there once");
   });
 
-  it("puts an id last in a group's header when its visualizer puts it at the end", async () => {
+  it("puts a group's properties on its header when they fit there, however the source breaks them", async () => {
+    const wrapped = await fixture("wrappedAttributes");
+    const element = show(wrapped);
+    const sheet = root(element).querySelector<HTMLElement>(".source .sheet")!;
+    assert.equal(read(sheet.querySelector(".sheet-head")!), "Shape kind=circle width=52 color=#6652AD stroke=1");
+    assert.equal(sheet.querySelectorAll(".sheet-row").length, 0, "no rows");
+    assert.equal(read(sheet.querySelector(".sheet-held .line-element")!), "Item name=a note=n", "what it holds reads under it");
+    assert.ok(!sheet.textContent!.includes("</Shape>"), "no closing tag");
+  });
+
+  it("gives each property a row where an element's properties do not fit on one line", async (t) => {
+    const wrapped = await fixture("wrappedAttributes");
+    narrow(t, 30);
+    const element = show(wrapped);
+    const sheets = Array.from(root(element).querySelectorAll<HTMLElement>(".source .sheet"));
+    assert.equal(read(sheets[0]!.querySelector(".sheet-head")!), "Shape", "too long for its header: a row to each");
+    const rows = Array.from(sheets[0]!.querySelectorAll<HTMLElement>(":scope > .sheet-row"));
+    assert.deepEqual(rows.map((row) => [read(row.querySelector(".sheet-name")!), read(row.querySelector(".sheet-value")!)]), [
+      ["kind", "circle"],
+      ["width", "52"],
+      ["color", "#6652AD"],
+      ["stroke", "1"],
+    ]);
+    assert.equal(read(sheets[0]!.querySelector(".sheet-held .line-element")!), "Item name=a note=n", "short enough for a line");
+    assert.equal(read(sheets[1]!.querySelector(".sheet-head")!), "Shape kind=square", "one property needs no row");
+  });
+
+  it("keeps an element written as its tags over several lines in its item's lines", async () => {
+    const wrapped = await fixture("wrappedAttributes");
+    const element = show(wrapped);
+    // An element written as its tags is a unit of its own, as a tag line, where the host draws icons.
+    element.icons = () => element.ownerDocument.createElementNS("http://www.w3.org/2000/svg", "svg");
+    const written = root(element).querySelector<HTMLElement>(".sheet-item.as-written .tag-line")!;
+    assert.ok(written, "the Item with a comment in an attribute reads as written");
+    assert.ok(written.classList.contains("over-lines"), "it is marked as written over several lines, so it stays inline");
+    assert.ok(written.textContent!.includes('\n      note="n"'), "its later line keeps the source's indentation");
+  });
+
+  it("puts an id last in a group's header when its visualizer puts it at the end", async (t) => {
     const ids = await fixture("groupIdAtEnd");
+    narrow(t, 20);
     const element = show(ids);
-    const head = root(element).querySelector<HTMLElement>(".sheet-head")!;
-    assert.equal(read(head), "Choice label=Yes yes", "after the attributes on the header");
+    const head = root(element).querySelector<HTMLElement>('[data-key="choice"] .sheet-head')!;
+    assert.equal(read(head), "Choice yes", "after the name, as the properties have rows");
     assert.ok(head.lastElementChild!.classList.contains("id-part"), "the id closes the header");
   });
 
@@ -336,6 +455,55 @@ describe("selection", () => {
     assert.equal(rendered(element, "User.id").hasAttribute("aria-current"), false);
   });
 
+  it("tells a host what starts at the top of what scrolls it, and scrolls a node to where it asks", async () => {
+    const groups = await fixture("groups");
+    const port = document.createElement("div");
+    port.style.overflowY = "auto";
+    document.body.append(port);
+    const element = document.createElement("nx-viewer");
+    port.append(element);
+    created.push(element);
+    element.folded = [];
+    element.text = groups.text;
+    element.tree = groups.tree;
+    // jsdom lays nothing out: each node is drawn a line of 18px below the one before it, in the
+    // order the reading holds them, and the port shows 100px of them from where it is scrolled to.
+    let scrolled = 0;
+    const prototype = document.defaultView!.HTMLElement.prototype;
+    const { getBoundingClientRect, getClientRects } = prototype;
+    const lineOf = (target: HTMLElement): number =>
+      Array.from(root(element).querySelectorAll("[data-key]")).indexOf(target);
+    Object.defineProperty(port, "clientHeight", { value: 100 });
+    port.scrollBy = ((options: ScrollToOptions) => (scrolled += options.top ?? 0)) as typeof port.scrollBy;
+    prototype.getBoundingClientRect = function (this: HTMLElement) {
+      const line = this === port ? -1 : lineOf(this);
+      const top = this === port ? 0 : line * 18 - scrolled;
+      return { top, bottom: top + 18, left: 0, right: 100, width: 100, height: 18, x: 0, y: top, toJSON: () => ({}) } as DOMRect;
+    };
+    prototype.getClientRects = function (this: HTMLElement) {
+      return (lineOf(this) >= 0 ? [this.getBoundingClientRect()] : []) as unknown as DOMRectList;
+    };
+    try {
+      const keys = Array.from(root(element).querySelectorAll<HTMLElement>("[data-key]"), (node) => node.dataset["key"]!);
+      assert.deepEqual(element.keyAtTop(), { key: keys[0], top: 0 });
+      element.scrollToKey(keys[5]!, 36);
+      assert.equal(scrolled, 5 * 18 - 36);
+      assert.equal(element.topOf(keys[5]!), 36);
+      assert.deepEqual(element.keyAtTop(), { key: keys[3], top: 0 }, "the first node at or below the top");
+      // Folded, a group draws none of what it holds: a node in it is found where its group is.
+      const row = keyWhere(groups, (node) => node.role === "element" && node.name === "Row");
+      const item = keyWhere(groups, (node) => node.role === "element" && node.name === "Item");
+      element.folded = [row];
+      assert.equal(root(element).querySelector(`[data-key="${item}"]`), null, "the item is not drawn");
+      assert.equal(element.topOf(item), element.topOf(row));
+      assert.equal(element.topOf("Nothing.here"), undefined);
+    } finally {
+      prototype.getBoundingClientRect = getBoundingClientRect;
+      prototype.getClientRects = getClientRects;
+      port.remove();
+    }
+  });
+
   it("finds the node a value origin names", async () => {
     const flow = await fixture("questionFlow");
     const at = flow.tree.nodes.findIndex((node) => node.key === "roleQuestion.value");
@@ -367,8 +535,9 @@ describe("the keyboard", () => {
     assert.ok(body.querySelector(".highlights"), "the selection is drawn behind the text");
   });
 
-  it("moves from the unit that holds a selection the host makes inside it", async () => {
+  it("moves from the unit that holds a selection the host makes inside it", async (t) => {
     const rows = await fixture("rows");
+    narrow(t, 10);
     const element = show(rows);
     const events: string[] = [];
     element.addEventListener(NX_SELECT_EVENT, (event) => events.push((event as CustomEvent<NxSelectDetail>).detail.key));
@@ -403,8 +572,9 @@ describe("the keyboard", () => {
 });
 
 describe("folding", () => {
-  it("folds the document's supporting declarations to one line until the reader opens them", async () => {
+  it("folds the document's supporting declarations to one line until the reader opens them", async (t) => {
     const folding = await fixture("folding");
+    narrow(t, 10);
     const element = show(folding, true);
     const source = (): HTMLElement => root(element).querySelector<HTMLElement>(".source")!;
     const run = source().querySelector<HTMLElement>(".fold-run")!;
@@ -423,8 +593,9 @@ describe("folding", () => {
     assert.ok(!folds[0]!.includes(run.querySelector<HTMLElement>(".fold")!.dataset["foldKey"]!));
   });
 
-  it("folds a group to its header and title, and selecting inside it unfolds it", async () => {
+  it("folds a group to its header and title, and selecting inside it unfolds it", async (t) => {
     const folding = await fixture("folding");
+    narrow(t, 10);
     const element = show(folding);
     const group = (): HTMLElement => root(element).querySelector<HTMLElement>(".sheet")!;
     group().querySelector<HTMLElement>(":scope > .sheet-head > .fold")!.click();

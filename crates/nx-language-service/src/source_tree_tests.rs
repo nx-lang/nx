@@ -1604,6 +1604,27 @@ fn an_alias_formats_every_property_that_uses_it() {
 }
 
 #[test]
+fn an_alias_formats_a_property_of_an_element_function() {
+    // An element function's properties read as a component's: a string typed by an alias with a
+    // visualizer takes its format, as a component's does.
+    let form = r##"import "./survey.nx"
+let <Glow tint:Color size:int /> = <Choice value="a" label="A" tint={tint} />
+let root() = { <Glow tint="#EC4899" size=3 /> }
+"##;
+    let snapshot = WorkspaceSnapshot::from_documents(
+        Option::<PathBuf>::None,
+        vec![
+            DocumentInput::new(SURVEY_URI, SURVEY).with_version(1),
+            DocumentInput::new(URI, form).with_version(1),
+        ],
+    )
+    .expect("snapshot");
+    let tree = with_visualizers(&snapshot, &[]);
+    let glow = visualizer(&tree, "Glow");
+    assert_eq!(format_of(glow, "tint"), Some("color"));
+    assert_eq!(format_of(glow, "size"), None);
+}
+#[test]
 fn a_union_cannot_have_a_visualizer() {
     let source = r#"import "@nx/visualizer"
 type Size = small | large

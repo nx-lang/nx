@@ -2,7 +2,71 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 0.8.0
+
+### Component state and props
+- **Breaking.** A component with state has a derived state record, `T.State`, with its own
+  `T.State.Update` and `T.State.Property`. Inside a component body a bare `State` names it, so a
+  handler patches state with `<State.Update count={count + 1} />` where it wrote
+  `<Update count={count + 1} />`; the old spelling is an unknown element whose diagnostic gives the
+  new one. A component is not a record and no longer has a `T.Update` or `T.Property` of its own.
+- Every component has a derived props record, `T.Props`, with its update record and property
+  union, and a generic record's field can be typed by its type parameter's property union.
+- `State` and `Props`, like `Update` and `Property`, are reserved as emitted-action names, and a
+  prop or state field may not be named `State`, since a bare `State` in the body names the state
+  record. A concrete external component with no body has no body to shadow, so it may declare a
+  prop named `State` for a host control's property of that name.
+- A library module that imports a component selectively (`import { Card } from "../ui"`) can name
+  `Card.State`, `Card.Props` and their companions, as a program could.
+- **Breaking**, for a host that reads NX IR images: NX IR is schema 6. A component's layout
+  carries a reference to its state record, and both IR runtimes match state patches against it. An
+  image written by NX 0.7.0 or earlier (schema 5) is refused by this release's runtimes with a
+  diagnostic naming both schemas; keep the earlier runtime to play such images.
+- typegen emits `<Name>_state`, `<Name>_state_update` and `<Name>_state_property` for a component
+  with state, and no `<Name>_update` or `<Name>_property` for a component.
+
+### Visualizer declarations and `@nx/visualizer`
+- New. A `visualizer T = <ElementVisualizer ... />` declaration says how a reader shows `T`: which
+  property is its `title`, which is its `id` and whether that reads at the `start` or the `end` of
+  its line, and the Lucide `icon` that marks it. `<PropertyVisualizer property=... format=... />`
+  inside it formats one property's string values, and `visualizer Color = <ValueVisualizer
+  format=color />` formats every value of an alias of `string`. The formats are `id` (a quiet
+  identifier) and `color` (a swatch).
+- The declarations come from `import "@nx/visualizer"`, a standard library. They are type-checked,
+  inherited from a base component or record, and kept out of NX IR: compiling, evaluating and
+  sharing a program is unchanged by them.
+- A host can name visualizer modules of its own in a source-tree request,
+  `visualizers: { modules: [...] }`, applied after the program's own: a catalog's presentation can
+  live beside it without any program importing it.
+
+### `@nx-lang/viewer` (new)
+- `<nx-viewer>`, a custom element with no framework that reads an NX document from its source tree:
+  an element whose properties fit on one line in the pane reads as its name, title and properties,
+  one whose properties do not, or that holds elements, as a group under its name with a row per
+  property (measured again as the pane resizes, whatever the source's line breaks), and the rest as
+  written, in the editor's colors (`colors`, from `@nx-lang/value-view`'s `colorize`). Visualizers give elements
+  their titles, ids and icons (`icons`, a function the host gives Lucide or its own set), a color a
+  swatch, and a `uitext` value reads as text shown to people.
+- Groups and declarations fold (`folded`, `collapseAll()`, `expandAll()`, the `nx-fold` event), and
+  a click selects a node (`selection`, the `nx-select` event). `keyAtRange` and `rangeOfKey`
+  carry a selection between the reading and a host's editor, in the editor's UTF-16 offsets;
+  `keyAtTop()`, `topOf()` and `scrollToKey()` carry the scroll position; and `nodeAtSpan` finds the
+  node a value origin names. `stale` mutes the reading while a newer tree
+  is computed.
+- The playground's NX pane opens in this view, Visual, beside Source.
+
+### `@nx-lang/previewer` (new, unstable)
+- Runs one NX component as a headless preview session on `@nx-lang/ir-runtime`: the host draws the
+  current output, dispatches actions, steps back through the timeline and keeps several runs. It
+  has no UI and no framework. The playground's output pane uses it for Preview.
+
+### Value origins and values
+- Both IR runtimes report where the records of a value were constructed, when a call passes an
+  `origins` object: each record's path in the value and the source range of the element or range
+  expression that built it. A host can select the source of a value it shows.
+- The wasm SDK spells a runtime value as annotated NX text (`formatValue`), with every node
+  carrying its JSON pointer. `<nx-value>` takes an `actions` function and shows
+  each action as a button on its node's first line, firing `nx-value-action`.
 
 ### Source tree (unstable)
 - New language query, `sourceTree`: every piece of one document as a typed node, with the
@@ -10,9 +74,10 @@ All notable changes to this project will be documented in this file.
   `attribute`, `literal`, `case`, `operator`, `condition`, `comment`, `unparsed` and the rest), a
   range, its parent, a key that an edit elsewhere in the document does not move, and the type and
   declaration hover reports inside it; comments and regions that do not parse are nodes too, so
-  every token of the source belongs to one. The language service, the Node and wasm SDKs (wasm ABI
-  version 7), `@nx-lang/language-protocol`, `-core`, `-http` and `-client` answer it. It is
+  every token of the source belongs to one. The language service, the Node and wasm SDKs,
+  `@nx-lang/language-protocol`, `-core`, `-http` and `-client` answer it. It is
   unstable: its shape may change in any release until a later one commits to it.
+- `@nx-lang/sdk-wasm`'s module ABI version is now 8; the loader refuses a module of another version.
 
 ## 0.7.0
 

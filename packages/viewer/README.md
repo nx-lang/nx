@@ -1,10 +1,10 @@
 # @nx-lang/viewer
 
 An `<nx-viewer>` custom element that shows NX source as a reading: the document's own text, with each
-element read the way a design tool's layers read rather than as tags. An element written over several
-lines reads as a group under its name, with a row to each property and no angle brackets or closing
-tag; an element on one line reads as its name and properties; values lose their quotes; and the rest
-reads as written, in the colors of the host's editor. It has no framework dependency and keeps its
+element read the way a design tool's layers read rather than as tags. An element whose properties
+fit on one line reads as its name and properties; one whose properties do not, or that holds
+elements, reads as a group under its name, with no angle brackets or closing tag; values lose their
+quotes; and the rest reads as written, in the colors of the host's editor. It has no framework dependency and keeps its
 markup and styles in a shadow root, so it drops into a plain page, a React app, a docs site or a VS
 Code webview alike.
 
@@ -99,28 +99,37 @@ declare module "react" {
 
 ## How it reads
 
-- **An element over several lines** reads as a group: a header with its icon, its name in bold, its
-  id, and the attributes written on its first line as `name=value` (with `idPosition=end`, the id
-  follows those attributes); then a row for each attribute
-  written on a line of its own, names in one quiet column and values in another; then what it holds,
-  indented. There are no angle brackets and no closing tag. A bracket runs down the group from under
-  its name and turns right at its end. A value of several lines reads under its name, and so does
-  every value in a pane narrower than about 64 characters.
-- **An element on one line** reads as its icon and name, its title's value alone, each other attribute
-  as `name=value`, and what it holds as written. When it shares its line, with a property's name or a
-  `let`, it keeps a quiet `<` and `/>` to show where it starts and ends. Alone on its line, in a place
-  typed exactly as its kind (a `Choice` in `choices: Choice+`), it leaves out its name, which its
-  icon carries.
+How an element reads depends on the pane's width, not on where the source breaks its lines. The
+element measures what fits as it draws, and again once a change in the pane's width settles (not on
+every step of a dragged divider) or its fonts load, keeping what is at the top where it was.
+
+- **An element whose properties fit on one line** reads as a line: its icon and name, its title's
+  value alone, each other attribute as `name=value`, and any text it holds. So does one with a single
+  property, which wraps if it must.
+- **An element that holds elements, or whose properties do not fit on one line,** reads as a group:
+  a header with its icon, its name in bold and its id; its properties on the header as `name=value`
+  when they fit there (with `idPosition=end`, the id follows them), or else a row for each, names in
+  one quiet column and values in another; then what it holds, indented. A property whose value needs
+  lines of its own, such as a list, has a row either way. There are no angle brackets and no closing
+  tag. A bracket runs down the group from under its name and turns right at its end. A value of
+  several lines reads under its name, and so does every value in a pane narrower than about 64
+  characters.
+- **A property's element value** (`Padding=<Thickness …/>`) reads inline, as a line, unless it holds
+  elements.
+- **A line that shares its line**, with a property's name or a `let`, keeps a quiet `<` and `/>` to
+  show where it starts and ends. Alone on its line, in a place typed exactly as its kind (a `Choice`
+  in `choices: Choice+`), it leaves out its name, which its icon carries.
 - **What a group holds** reads an item to a line. An `if` or a `for` block reads as written, its
-  later lines indented from its own start. A blank line between two items, and the space between two
+  later lines indented from its own start, and so does an element a group cannot show, such as one
+  with a comment inside an attribute. A blank line between two items, and the space between two
   siblings where either is a group, becomes a little room.
 - **Values**: strings lose their quotes, and booleans read ✓ and ✗. A string typed `uitext` (an alias
   `type uitext = string`, or any alias that leads to it) reads as text shown to people, in the prose
   font. A string a visualizer names as an element's `id`, or formats as `id`, reads as one quiet token; a
   string formatted as `color` reads with a swatch.
 - **Everything else** (declarations, function bodies, comments) reads as written, in `colors`.
-- **Long lines** wrap a step in from where their unit starts: a group's header, a row's value, an
-  element on one line alone on its line, and an item a group holds as written. Code read as written
+- **Long lines** wrap a step in from where their unit starts: a row's value, a line with a single
+  property, and an item a group holds as written. Code read as written
   elsewhere keeps its lines.
 
 ## Visualizer declarations
@@ -189,6 +198,46 @@ region says what was selected.
 `nodeAtSpan(tree, startByte, endByte)` finds the node whose range is exactly that span, preferring an
 element. A value origin from the IR runtime carries such a span, so a host can select the source of
 a value it shows.
+
+Two helpers carry a selection between the reading and a host's editor, both in UTF-16 offsets into
+the text the tree was computed from, the way JavaScript strings and Monaco's `getOffsetAt` count:
+
+- `keyAtRange(tree, text, start, end?)` is the key of the smallest node holding the text from
+  `start` to `end`, less the whitespace at either end, so a selection of whole lines finds what they
+  hold; without `end`, the node at a cursor. It is `undefined` between nodes. Set it as `selection`
+  when the reading is shown.
+- `rangeOfKey(tree, text, key)` is where that node starts and ends. Select it in the editor when the
+  editor is shown again.
+
+Three methods of the element carry the place, so the view switched to shows the same part of the
+document. Each measures from the top of what scrolls the reading, its nearest scrolling ancestor or
+the page, which must be laid out (hide it with `visibility: hidden`, not `display: none`, to measure
+it while the editor shows):
+
+- `keyAtTop()` is the first node drawn at or below that top, as `{ key, top }`, `top` in pixels.
+- `topOf(key)` is how far below that top the node is drawn, or the nearest drawn node holding it,
+  as a folded group.
+- `scrollToKey(key, top)` scrolls the reading so that node is drawn `top` pixels below it.
+
+```ts
+import { keyAtRange, rangeOfKey } from "@nx-lang/viewer";
+
+// Into the reading: the editor's selection, and the line at the editor's top at the same height.
+const selection = editor.getSelection();
+viewer.selection = keyAtRange(tree, text, model.getOffsetAt(selection.getStartPosition()), model.getOffsetAt(selection.getEndPosition()));
+const line = editor.getVisibleRanges()[0].startLineNumber;
+const key = keyAtRange(tree, text, model.getOffsetAt({ lineNumber: line, column: model.getLineFirstNonWhitespaceColumn(line) }));
+if (key !== undefined) viewer.scrollToKey(key, editor.getTopForLineNumber(line) - editor.getScrollTop());
+
+// ...and back: the node's text, and the node at the reading's top at the same height.
+const range = viewer.selection === undefined ? undefined : rangeOfKey(tree, text, viewer.selection);
+if (range !== undefined) editor.setSelection(monaco.Selection.fromPositions(model.getPositionAt(range.start), model.getPositionAt(range.end)));
+const atTop = viewer.keyAtTop();
+const start = atTop === undefined ? undefined : rangeOfKey(tree, text, atTop.key)?.start;
+if (atTop !== undefined && start !== undefined) {
+  editor.setScrollTop(editor.getTopForLineNumber(model.getPositionAt(start).lineNumber) - atTop.top);
+}
+```
 
 ## Styling
 

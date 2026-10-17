@@ -1198,6 +1198,11 @@ impl LoweringContext {
 
         let type_params = self.lower_type_parameters(signature);
         let props = self.lower_record_fields_from_node(signature, false);
+        // A prop named `State` would be shadowed by the state record inside a body. A concrete
+        // external component without a body has no body and cannot be extended into one, so it
+        // keeps a host control's property of that name.
+        let state_shadows_props =
+            !(is_external && !is_abstract && node.child_by_field("body").is_none());
         for prop in &props {
             if type_params.iter().any(|param| param.name == prop.name) {
                 self.add_diagnostic(
@@ -1209,7 +1214,7 @@ impl LoweringContext {
                     prop.span,
                 );
             }
-            if prop.name.as_str() == STATE_RECORD_SUFFIX {
+            if state_shadows_props && prop.name.as_str() == STATE_RECORD_SUFFIX {
                 self.add_diagnostic(
                     format!(
                         "Component '{}' cannot declare a prop named 'State': inside its body the bare name 'State' denotes '{}.State'",
@@ -6457,6 +6462,22 @@ type Mode = light | dark"#;
                 messages
             );
         }
+    }
+
+    #[test]
+    fn a_bodyless_external_component_keeps_a_prop_named_state() {
+        let module = lower_source(
+            "external component <Sprites State?:float /> abstract external component <Base State?:float /> external component <Search State?:float /> = { state { query:string } }",
+            "state-external.nx",
+        );
+        let flagged = module
+            .diagnostics()
+            .iter()
+            .filter(|diagnostic| diagnostic.message.contains("cannot declare a prop named 'State'"))
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(flagged.len(), 2, "{:?}", flagged);
+        assert!(flagged.iter().all(|message| !message.contains("'Sprites'")), "{:?}", flagged);
     }
 
     fn find_union<'a>(module: &'a LoweredModule, name: &str) -> &'a UnionDef {

@@ -17,7 +17,7 @@ import { OutputPane, type OutputView } from "./output/OutputPane";
 import { PreviewView } from "./preview/PreviewView";
 import { usePreview } from "./preview/usePreview.ts";
 import { ReadingView, type ReadingCommands } from "./reading/ReadingView";
-import { keyAtOffset, offsetOfKey } from "./reading/selection.ts";
+import { keyAtRange, rangeOfKey } from "@nx-lang/viewer";
 import { useSourceTree } from "./reading/useSourceTree.ts";
 import { SITE_ROOT } from "./paths.ts";
 import { createAddressKeeper } from "./address.ts";
@@ -183,7 +183,7 @@ export function App() {
       return;
     }
     cursorToSelect.current = null;
-    const key = keyAtOffset(tree, text, offset);
+    const key = keyAtRange(tree, text, offset);
     selectedOnEntry.current = key;
     setSelection(key);
   }, [mode, reading.tree, reading.text, source]);
@@ -207,7 +207,7 @@ export function App() {
       const { tree, text } = reading;
       const moved = selection !== selectedOnEntry.current;
       if (moved && selection !== undefined && tree !== null && text !== null && text === source) {
-        cursorToPlace.current = offsetOfKey(tree, text, selection) ?? null;
+        cursorToPlace.current = rangeOfKey(tree, text, selection)?.start ?? null;
       }
     }
     setMode(next);

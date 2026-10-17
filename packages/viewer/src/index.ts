@@ -15,6 +15,7 @@ import { styles } from "./styles.js";
 import { indexTree, nodeOf, type TreeIndex } from "./tree.js";
 
 export { nodeAtSpan } from "./tree.js";
+export { keyAtRange, rangeOfKey } from "./selection.js";
 export type { NxViewerColor, NxViewerIcons } from "./source.js";
 
 /** The tag the element is defined under. */
@@ -122,6 +123,10 @@ export class NxViewerElement extends ElementBase {
   #rendered = new Map<string, HTMLElement>();
   /** The unit under the pointer, highlighted as a row. */
   #hoveredUnit: HTMLElement | undefined;
+  /** The body's width the reading was last measured at, for what fits on a line. */
+  #fitWidth = -1;
+  /** The measure waiting for the pane's width to settle. */
+  #remeasureTimer: ReturnType<typeof setTimeout> | undefined;
 
   readonly #badge: HTMLSpanElement;
   readonly #body: HTMLDivElement;
@@ -180,7 +185,21 @@ export class NxViewerElement extends ElementBase {
     this.#body.addEventListener("pointerleave", () => this.#setHoveredUnit(undefined));
     // The highlights follow the layout: a wider pane moves the right edge they run to.
     if (typeof ResizeObserver !== "undefined") {
-      new ResizeObserver(() => this.#paintHighlights()).observe(this.#body);
+      new ResizeObserver(() => {
+        this.#paintHighlights();
+        if (this.#body.clientWidth === this.#fitWidth) {
+          return;
+        }
+        // What fits on a line changes with the pane's width. A reading first given a width is
+        // measured at once; one already measured, once the width settles, so dragging a divider
+        // does not draw it again on every frame.
+        clearTimeout(this.#remeasureTimer);
+        if (this.#fitWidth <= 0) {
+          this.#remeasure();
+        } else {
+          this.#remeasureTimer = setTimeout(() => this.#body.clientWidth !== this.#fitWidth && this.#remeasure(), 120);
+        }
+      }).observe(this.#body);
     }
 
     // A property set before the element was defined hides the accessor; set it again through it.
@@ -303,6 +322,75 @@ export class NxViewerElement extends ElementBase {
     this.#select(key, false);
   }
 
+  /**
+   * The first node drawn at or below the top of what scrolls the reading, and how far below that
+   * top it is, in pixels: what a host keeps in view when it shows the document another way, as in
+   * an editor beside the reading. Nothing when no node starts in view.
+   */
+  keyAtTop(): { key: string; top: number } | undefined {
+    const port = this.#scrollPort();
+    for (const element of this.#body.querySelectorAll<HTMLElement>("[data-key]")) {
+      if (element.getClientRects().length === 0) {
+        continue;
+      }
+      const top = element.getBoundingClientRect().top - port.top;
+      if (top >= -0.5) {
+        return top < port.height ? { key: element.dataset["key"]!, top } : undefined;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * How far below the top of what scrolls the reading the node with `key` is drawn, in pixels,
+   * negative above it: the node itself, or the nearest node holding it that is drawn, as a folded
+   * group. Nothing when neither is drawn.
+   */
+  topOf(key: string): number | undefined {
+    const element = this.#drawnFor(key);
+    return element === undefined ? undefined : element.getBoundingClientRect().top - this.#scrollPort().top;
+  }
+
+  /**
+   * Scrolls the reading so the node with `key`, or the nearest node holding it that is drawn, is
+   * `top` pixels below the top of what scrolls it, as far as the reading can scroll.
+   */
+  scrollToKey(key: string, top = 0): void {
+    const now = this.topOf(key);
+    if (now !== undefined) {
+      this.#scrollPort().element.scrollBy({ top: now - top, behavior: "instant" as ScrollBehavior });
+    }
+  }
+
+  /** What draws the node with `key`: its own rendering, or the nearest drawn node holding it. */
+  #drawnFor(key: string): HTMLElement | undefined {
+    const index = this.#index;
+    let at = index?.byKey.get(key);
+    while (index !== undefined && at !== undefined) {
+      const drawn = this.#rendered.get(index.tree.nodes[at]!.key);
+      if (drawn !== undefined && drawn.getClientRects().length > 0) {
+        return drawn;
+      }
+      at = index.tree.nodes[at]!.parent;
+    }
+    return undefined;
+  }
+
+  /**
+   * What scrolls the reading, whether or not it has anything to scroll now, and the top and height
+   * of what it shows: the nearest ancestor that scrolls, or the page.
+   */
+  #scrollPort(): { element: Element; top: number; height: number } {
+    for (let at: Element | null = this.parentElement; at !== null; at = at.parentElement) {
+      const overflow = getComputedStyle(at).overflowY;
+      if (overflow === "auto" || overflow === "scroll") {
+        return { element: at, top: at.getBoundingClientRect().top + at.clientTop, height: at.clientHeight };
+      }
+    }
+    const page = this.ownerDocument.scrollingElement ?? this.ownerDocument.documentElement;
+    return { element: page, top: 0, height: this.ownerDocument.defaultView?.innerHeight ?? page.clientHeight };
+  }
+
   attributeChangedCallback(name: string): void {
     if (name === "stale") {
       this.#badge.hidden = !this.stale;
@@ -322,7 +410,25 @@ export class NxViewerElement extends ElementBase {
     this.#index = index;
     this.#runs = readingRuns(index);
     this.#folded = this.#chosenFolded ?? new Set(defaultFolded(index));
-    this.#body.append(renderSource(this.ownerDocument, index, this.#colors, { icons: this.#icons, folded: this.#folded, turning: this.#turning }));
+    const draw = (wrapped?: ReadonlySet<string>): void => {
+      this.#body.replaceChildren(
+        renderSource(this.ownerDocument, index, this.#colors, { wrapped, icons: this.#icons, folded: this.#folded, turning: this.#turning })
+      );
+    };
+    draw();
+    // Each element whose properties do not fit on one line gives each a row, drawn again until all
+    // left on lines fit. Hidden or unattached, nothing is measured, and the size the reading takes
+    // when shown draws it again.
+    this.#fitWidth = this.#body.clientWidth;
+    const wrapped = new Set<string>();
+    for (let pass = 0; pass < 4 && this.#fitWidth > 0; pass++) {
+      const found = this.#wrapped();
+      if (found.length === 0) {
+        break;
+      }
+      found.forEach((key) => wrapped.add(key));
+      draw(wrapped);
+    }
     for (const element of this.#body.querySelectorAll<HTMLElement>("[data-key]")) {
       this.#rendered.set(element.dataset["key"]!, element);
     }
@@ -346,8 +452,42 @@ export class NxViewerElement extends ElementBase {
     this.#body.append(this.#highlights);
     this.#paintHighlights();
     this.#turnChevron();
-    // Fonts that arrive later change where the rows fall.
-    void this.ownerDocument.fonts?.ready.then(() => this.#paintHighlights());
+    // Fonts that arrive later change where the rows fall, and what fits on a line.
+    const remeasure = this.ownerDocument.fonts !== undefined && this.ownerDocument.fonts.status !== "loaded";
+    void this.ownerDocument.fonts?.ready.then(() => (remeasure ? this.#remeasure() : this.#paintHighlights()));
+  }
+
+  /** Draws the reading again, measured anew, keeping the node at the top where it was. */
+  #remeasure(): void {
+    clearTimeout(this.#remeasureTimer);
+    const top = this.keyAtTop();
+    this.#render();
+    if (top !== undefined) {
+      this.scrollToKey(top.key, top.top);
+    }
+  }
+
+  /** The keys of the elements measured whose line, or whose group's header, takes more than one line. */
+  #wrapped(): string[] {
+    const source = this.#body.querySelector<HTMLElement>(".source");
+    if (source === null) {
+      return [];
+    }
+    const lineHeight = parseFloat(getComputedStyle(source).lineHeight) || 18;
+    const keys: string[] = [];
+    for (const element of this.#body.querySelectorAll<HTMLElement>(".fit-check")) {
+      const target = element.classList.contains("sheet") ? element.querySelector<HTMLElement>(":scope > .sheet-head") : element;
+      if (target === null) {
+        continue;
+      }
+      // An inline line has a box to each line it falls on; a block has one, as tall as its lines.
+      const rects = [...target.getClientRects()];
+      const lines = rects.length > 1 ? new Set(rects.map((rect) => Math.round(rect.top))).size : (rects[0]?.height ?? 0) / lineHeight;
+      if (lines > 1.5) {
+        keys.push(element.dataset["key"]!);
+      }
+    }
+    return keys;
   }
 
   /** The unit `target` is in, or the group it falls in between rows, or nothing. */
@@ -468,9 +608,9 @@ export class NxViewerElement extends ElementBase {
 
   /**
    * Draws the selected unit and the one under the pointer as rows behind the text, from just before
-   * the unit's start to near the reading's right edge, as a list's rows are. A selected group's
-   * first line is drawn stronger than the rest of it, and the row under the pointer, lighter over a
-   * selection.
+   * the unit's start to near the reading's right edge, as a list's rows are, or, for an element
+   * inside a line, to just past its end. A selected group's first line is drawn stronger than the
+   * rest of it, and the row under the pointer, lighter over a selection.
    */
   #paintHighlights(): void {
     const layer = this.#highlights;
@@ -487,12 +627,18 @@ export class NxViewerElement extends ElementBase {
       // A block's later lines start further left, at its source indentation; it starts where its
       // first line does.
       const first = from.matches(".block-line") ? from.getClientRects()[0] : undefined;
-      const left = (first ?? start.getBoundingClientRect()).left - frame.left - 4 + this.#body.scrollLeft;
+      // An element inside a line, as a property's value, ends where it does, unless it wraps, and is
+      // drawn tighter, so it stays clear of the text beside it.
+      const inline = from.matches(".line-element:not(.alone)") ? from.getClientRects() : undefined;
+      const tight = inline?.length === 1 ? inline[0] : undefined;
+      const pad = tight === undefined ? 4 : 1;
+      const left = (first ?? start.getBoundingClientRect()).left - frame.left - pad + this.#body.scrollLeft;
       const box = this.ownerDocument.createElement("div");
       box.className = `highlight ${className}`;
       box.style.left = `${left}px`;
       box.style.top = `${rows.top - frame.top + this.#body.scrollTop}px`;
-      box.style.width = `${Math.max(0, frame.width - 8 - left)}px`;
+      const right = tight === undefined ? frame.width - 8 : tight.right - frame.left + pad + this.#body.scrollLeft;
+      box.style.width = `${Math.max(0, right - left)}px`;
       box.style.height = `${rows.height}px`;
       layer.append(box);
     };

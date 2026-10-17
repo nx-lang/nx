@@ -22,7 +22,9 @@ use crate::{
     DocumentVersion, EditorRange, LineIndex, ModuleAnalysis, NxIdentity, SnapshotError,
     WorkspaceDeclarations, WorkspaceSnapshot,
 };
-use nx_hir::{ast::Expr, Doc, ExprId, Item, LocalDefinitionId, RecordField, RecordKind};
+use nx_hir::{
+    ast::Expr, Doc, ExprId, FunctionForm, Item, LocalDefinitionId, RecordField, RecordKind,
+};
 use nx_syntax::{parse_str, SyntaxKind, SyntaxNode};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
@@ -1882,39 +1884,49 @@ impl<'a> TreeBuilder<'a> {
             };
             let chain = base_chain(&workspace, &origin);
             let resolved = visualizers.resolve(&origin, &chain);
-            let visualizer = match self.table[index].kind {
+            let kind = self.table[index].kind;
+            // An element function is written as an element, so its properties read as a
+            // component's do.
+            let element = match kind {
                 SourceDeclarationKind::Record
                 | SourceDeclarationKind::Action
-                | SourceDeclarationKind::Component => {
-                    let types = property_types(&workspace, &origin, &chain);
-                    // A property typed by an alias with a visualizer brings that alias into the
-                    // table, so a reader can read the property's format.
-                    for (_, _, typed) in &types {
-                        if let Some(typed) = typed {
-                            let chain = base_chain(&workspace, typed);
-                            if visualizers.resolve(typed, &chain).is_some() {
-                                self.entry(typed);
-                            }
+                | SourceDeclarationKind::Component => true,
+                SourceDeclarationKind::Function => matches!(
+                    item_at(&workspace, &origin),
+                    Some(Item::Function(function)) if function.form == FunctionForm::Element
+                ),
+                _ => false,
+            };
+            let visualizer = if element {
+                let types = property_types(&workspace, &origin, &chain);
+                // A property typed by an alias with a visualizer brings that alias into the
+                // table, so a reader can read the property's format.
+                for (_, _, typed) in &types {
+                    if let Some(typed) = typed {
+                        let chain = base_chain(&workspace, typed);
+                        if visualizers.resolve(typed, &chain).is_some() {
+                            self.entry(typed);
                         }
                     }
-                    self.element_visualizer(index, resolved, &types, visualizers)
                 }
-                SourceDeclarationKind::Union => None,
-                SourceDeclarationKind::Alias => resolved.map(|resolved| SourceVisualizer {
+                self.element_visualizer(index, resolved, &types, visualizers)
+            } else if kind == SourceDeclarationKind::Alias {
+                resolved.map(|resolved| SourceVisualizer {
                     format: resolved.format,
                     ..SourceVisualizer::default()
-                }),
-                SourceDeclarationKind::Function | SourceDeclarationKind::Value => None,
+                })
+            } else {
+                None
             };
             self.table[index].visualizer = visualizer;
             index += 1;
         }
     }
 
-    /// The visualizer of a record, an action or a component: its title, id and icon, and every
-    /// property once, those its property visualizers name first in their resolved order and
-    /// the rest in declaration order. A declaration with no visualizer of its own still has one
-    /// when a property takes a format from its type.
+    /// The visualizer of a record, an action, a component or an element function: its title, id
+    /// and icon, and every property once, those its property visualizers name first in their
+    /// resolved order and the rest in declaration order. A declaration with no visualizer of its
+    /// own still has one when a property takes a format from its type.
     fn element_visualizer(
         &self,
         index: usize,
@@ -2032,6 +2044,11 @@ fn property_types(
                     .props
                     .iter()
                     .map(|field| (&field.name, &field.ty))
+                    .collect(),
+                Some(Item::Function(function)) => function
+                    .params
+                    .iter()
+                    .map(|param| (&param.name, &param.ty))
                     .collect(),
                 _ => Vec::new(),
             };
