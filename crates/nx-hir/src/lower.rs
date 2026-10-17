@@ -6473,11 +6473,19 @@ type Mode = light | dark"#;
         let flagged = module
             .diagnostics()
             .iter()
-            .filter(|diagnostic| diagnostic.message.contains("cannot declare a prop named 'State'"))
+            .filter(|diagnostic| {
+                diagnostic
+                    .message
+                    .contains("cannot declare a prop named 'State'")
+            })
             .map(|diagnostic| diagnostic.message.as_str())
             .collect::<Vec<_>>();
         assert_eq!(flagged.len(), 2, "{:?}", flagged);
-        assert!(flagged.iter().all(|message| !message.contains("'Sprites'")), "{:?}", flagged);
+        assert!(
+            flagged.iter().all(|message| !message.contains("'Sprites'")),
+            "{:?}",
+            flagged
+        );
     }
 
     fn find_union<'a>(module: &'a LoweredModule, name: &str) -> &'a UnionDef {
