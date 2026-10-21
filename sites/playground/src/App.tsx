@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { NxValueDescribe, NxValueNavigateDetail, NxValueNode } from "@nx-lang/value-view";
 import "./app.css";
 import { evaluateInBrowser, type Diagnostic } from "./compile";
-import { NxEditor, languageService, MODEL_URI, type NxEditorHandle } from "./editor/NxEditor";
+import { NxEditor, languageService, MODEL_URI, type EditorHistory, type NxEditorHandle } from "./editor/NxEditor";
 import { declaredName, offsetAtPosition, offsetOf, positionAt } from "./editor/positions.ts";
 import {
   DEFAULT_EXAMPLE,
@@ -37,6 +37,11 @@ interface Opened {
 }
 
 const isExample = (id: string) => exampleById(id) !== undefined;
+
+/** The undo and redo shortcuts as the visitor's platform spells them, for the buttons' tooltips. */
+const SHORTCUTS = /Mac|iPhone|iPad/.test(globalThis.navigator?.platform ?? "")
+  ? { undo: "⌘Z", redo: "⇧⌘Z" }
+  : { undo: "Ctrl+Z", redo: "Ctrl+Y" };
 
 /** Reads the current address into source, decoding a `#code=` fragment. */
 async function openLocation(): Promise<Opened> {
@@ -188,7 +193,9 @@ export function App() {
       ),
     [],
   );
-  /** Undo or redo from Visual: the editor's history, the same as in Source. */
+  // Whether the editor's history holds anything to undo and to redo, for the title bar's buttons.
+  const [history, setHistory] = useState<EditorHistory>({ canUndo: false, canRedo: false });
+  /** Undo or redo, from Visual or the title bar: the editor's history, the same as in Source. */
   const visualHistory = (step: "undo" | "redo") => {
     editor.current?.[step]();
     immediateTree.current = editor.current?.text() ?? null;
@@ -339,13 +346,47 @@ export function App() {
           <div className="pane-title">
             <span>NX</span>
             <span className="spacer" />
+            <span className="history-actions">
+              <button
+                type="button"
+                aria-label="Undo"
+                title={`Undo (${SHORTCUTS.undo})`}
+                disabled={!history.canUndo}
+                onClick={() => visualHistory("undo")}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M9 14 4 9l5-5" />
+                  <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                aria-label="Redo"
+                title={`Redo (${SHORTCUTS.redo})`}
+                disabled={!history.canRedo}
+                onClick={() => visualHistory("redo")}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="m15 14 5-5-5-5" />
+                  <path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13" />
+                </svg>
+              </button>
+            </span>
             {mode === "visual" && (
               <span className="fold-actions">
-                <button type="button" onClick={() => readingCommands.current?.collapseAll()}>
-                  Collapse all
+                <button type="button" aria-label="Collapse all" title="Collapse all" onClick={() => readingCommands.current?.collapseAll()}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="m7 20 5-5 5 5" />
+                    <path d="m7 4 5 5 5-5" />
+                  </svg>
+                  <span>Collapse all</span>
                 </button>
-                <button type="button" onClick={() => readingCommands.current?.expandAll()}>
-                  Expand all
+                <button type="button" aria-label="Expand all" title="Expand all" onClick={() => readingCommands.current?.expandAll()}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="m7 15 5 5 5-5" />
+                    <path d="m7 9 5-5 5 5" />
+                  </svg>
+                  <span>Expand all</span>
                 </button>
               </span>
             )}
@@ -393,6 +434,7 @@ export function App() {
                 diagnostics={marked}
                 diagnosticsSource={evaluation.diagnosticsSource}
                 theme={theme}
+                onHistory={setHistory}
               />
             )}
           </div>

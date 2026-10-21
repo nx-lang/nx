@@ -146,3 +146,37 @@ export function pickerColor(text: string, fallback: Element | undefined): string
   }
   return "#000000";
 }
+
+/**
+ * The offset in `element`'s text nearest the point `x`, `y`, as a caret placed there by a click
+ * would fall: on the line the point is on, before or after the character it is over. Measured from
+ * the characters' boxes, since the browsers' own lookups do not reach into a shadow root alike.
+ * The end of the text when nothing is laid out.
+ */
+export function offsetAtPoint(element: HTMLElement, x: number, y: number): number {
+  const text = element.textContent ?? "";
+  const node = element.firstChild;
+  if (node === null || node.nodeType !== 3 || text === "") {
+    return text.length;
+  }
+  const range = element.ownerDocument.createRange();
+  let best = text.length;
+  let bestLine = Infinity;
+  let bestX = Infinity;
+  for (let at = 0; at < text.length; at++) {
+    range.setStart(node, at);
+    range.setEnd(node, at + 1);
+    const box = range.getBoundingClientRect?.();
+    if (box === undefined || (box.width === 0 && box.height === 0)) {
+      continue;
+    }
+    const line = y < box.top ? box.top - y : y > box.bottom ? y - box.bottom : 0;
+    const across = x < box.left ? box.left - x : x > box.right ? x - box.right : 0;
+    if (line < bestLine || (line === bestLine && across < bestX)) {
+      bestLine = line;
+      bestX = across;
+      best = x < (box.left + box.right) / 2 ? at : at + 1;
+    }
+  }
+  return best;
+}

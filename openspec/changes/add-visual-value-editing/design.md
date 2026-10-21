@@ -105,13 +105,19 @@ For an item of a sequence or a `let`'s value, the literal's own kind picks the e
 and anything not in the table stay read-only. The viewer decides only what to offer: the service
 checks again.
 
-### 5. Select first, then edit
+### 5. A click on a value edits it
 
-A click selects, as today. A click on an editable value of the unit already selected, a double-click
-on an editable value, or Enter or F2 on a selected unit opens its value's editor; on a line holding
-several values, Enter opens the first and Tab moves to the next. Space on a selected boolean row and a
-click on the check of a selected unit toggle it. Requiring a selection first keeps a click meant to
-select from changing a value, and reads like a design tool: select, then change. Enter or leaving the
+A click on an editable value edits it, as a form's or a property grid's field does, and selects its
+unit: a field opens with the caret where the click fell, a boolean toggles, and a case or a color
+opens its popover. A click anywhere else in a unit, as on a property's name or an element's header,
+selects it, as today. Enter or F2 on a selected unit opens its first value with its text selected,
+to type over it, as in a spreadsheet; Tab moves to the next value. Space on a selected boolean row
+toggles it. (The first version asked for a selection first, so a click on an unselected value only
+selected it. In use, Bret found the extra click unexpected, and a field opened with all its text
+selected looked like a selection, not an editor, so a click now edits directly.) Under the pointer, a
+value shows a faint mark and a text cursor, or a hand for a toggle or a popover, and a case a chevron,
+as a dropdown does. An open field reads as an input: an editor's background, a focus ring and its own
+selection color, apart from the selected row's band. Enter or leaving the
 field commits, Escape cancels and keeps the selection, Tab commits and moves to the next editable
 value, Shift+Tab to the previous. A text field grows with its text and wraps within the reading's
 width; it never pushes the rows below unless the value already wrapped.
@@ -124,13 +130,17 @@ edits to its own text (in the playground, Monaco's `executeEdits`, which joins t
 sets the new text and tree. A refusal leaves the text alone; the viewer drops its shown value when the
 host sets a tree in which the value did not change. The host serializes edits: a second `nx-edit`
 waits for the first one's tree. With Visual focused, Ctrl or Cmd+Z and Ctrl+Y or Shift+Cmd+Z reach
-the host's undo; inside an open field they are the field's.
+the host's undo; inside an open field they are the field's. Since shortcuts are hard to discover and
+absent on a phone, the playground's NX title bar also shows Undo and Redo buttons in both views, as
+Docs, Sheets and Notion's mobile apps put them in their toolbars.
 
 ### 7. Reset and Clear
 
-With a row selected, Delete or Backspace removes its property when its declaration gives it a
-default or makes it optional. A small quiet button at the end of the selected row does the same, its
-label "Reset to default" or "Clear". Nothing shows at rest.
+With a row selected, Delete removes its property when its declaration gives it a default or makes it
+optional. Backspace does not: a reader who meant to change the text would press it. (The first version
+also showed a quiet "Reset to default" or "Clear" button on the selected row; Bret found it made a
+destructive change too easy for a rare action, so it was dropped. A row menu with Reset and Remove
+fits phase 2, where adding properties needs a menu anyway.)
 
 ### 8. `nx-open` for what Visual cannot edit
 

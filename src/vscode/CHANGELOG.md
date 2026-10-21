@@ -11,13 +11,14 @@ All notable changes to this project will be documented in this file.
   are the service's; an edit it cannot make is refused with a reason (`unknownNode`, `notEditable`,
   `invalidValue`), not an error. The language service, the Node and wasm SDKs,
   `@nx-lang/language-protocol`, `-core`, `-http` and `-client` answer it.
-- `<nx-viewer>`'s new `editable` property edits values in place: a field for strings, ids and
-  one-line text, a number field that steps with the arrows and with the property's name dragged
-  sideways, toggles for booleans, a popover of a union's cases with their docs, and a hex field and
-  color picker for a color. Delete resets a property with a default or clears an optional one. Each
+- `<nx-viewer>`'s new `editable` property edits values in place, on a click, with the caret where it
+  falls: a field for strings, ids and one-line text, a number field that steps with the arrows and
+  with the property's name dragged sideways, toggles for booleans, a popover of a union's cases with
+  their docs, and a hex field and color picker for a color. Delete resets a property with a default or clears an optional one. Each
   edit fires `nx-edit` with the node's key and a `sourceEdit` edit for the host to make in its
   source; a value the reading cannot edit, such as an expression, fires `nx-open`.
-- The playground's Visual edits this way, through the editor, so undo and redo work in both views.
+- The playground's Visual edits this way, through the editor, so undo and redo work in both views,
+  and the NX title bar has Undo and Redo buttons.
 - `@nx-lang/sdk-wasm`'s module ABI version is now 9; the loader refuses a module of another version.
 
 ## 0.8.0

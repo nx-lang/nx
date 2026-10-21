@@ -257,22 +257,23 @@ reads muted; a host that sets the same tree again, as after a refused edit, has 
 | -------------------------------------------------- | ------------------------------------------------------------- |
 | A string, `uitext` or an id                        | A field in the value's place, holding it without quotes or escapes |
 | An `int`, `float32` or `float64`, or an alias of one | A number field: the up and down arrows step by 1, Shift by 10; dragging the property's name sideways changes it, committed once on release |
-| A boolean                                          | Toggles: Space, or a click on the selected unit's mark         |
+| A boolean                                          | Toggles: a click on its mark, or Space                         |
 | A bare case of a union                             | A popover of the union's cases that hold no properties, each with its doc, filtered as the reader types |
 | A string formatted as `color`                      | A popover with a hex field and the browser's color picker      |
 | A run of text on one line                          | A one-line field                                              |
 
 Only whole values edit: an attribute's value, an item of a braced list, or the value of a `let`
-with no parameters. Select first, then change: a click on a value of the selected unit, a
-double-click on a value, or Enter or F2 opens its editor (Enter opens a line's first value). Enter
-or leaving the field commits, Escape cancels, and Tab and Shift+Tab commit and open the next or
-previous value. An entry an editor cannot take, such as `12px` in a number field, stays in the
-field, marked. Fields take the value's own place and popovers open over the reading, so nothing
-else moves.
+with no parameters. A click on a value edits it, as a form's field does: a field opens with the
+caret where the click fell, a boolean toggles, and a case or a color opens its popover. A click on
+anything else, as a property's name, selects. Enter or F2 opens the selected unit's first value
+with its text selected. Enter or leaving the field commits, Escape cancels, and Tab and Shift+Tab
+commit and open the next or previous value. An entry an editor cannot take, such as `12px` in a
+number field, stays in the field, marked. Fields take the value's own place and popovers open over
+the reading, so nothing else moves.
 
-On a selected row whose property has a default or is optional, Delete or Backspace, or the quiet
-"Reset to default" or "Clear" at the row's end, fires `nx-edit` with `{ kind: "remove" }` for the
-attribute, and the element it was on is selected. Enter or a double-click on a value the reading
+On a selected row whose property has a default or is optional, Delete fires `nx-edit` with
+`{ kind: "remove" }` for the attribute, and the element it was on is selected. Backspace does not,
+since a reader who meant to change the text would press it. Enter or a double-click on a value the reading
 cannot edit, such as an expression, fires `nx-open` with the node's `{ key, role, range }`, for the
 host to show it in its editor. With the reading focused and no editor open, Ctrl or Cmd with Z or Y
 are left to the host; inside a field, they are the field's.
@@ -356,10 +357,11 @@ restyle it:
 | `--nx-viewer-card-background`         | white, or a dark gray                     |
 | `--nx-viewer-card-border`             | a light or dark gray                      |
 | `--nx-viewer-link-color`              | a light or dark blue, for a card's links  |
-| `--nx-viewer-edit-hover`              | a faint tint, on an editable value of the selected unit |
-| `--nx-viewer-field-background`        | a faint blue tint, behind an open field    |
-| `--nx-viewer-field-underline`         | a light or dark blue, under an open field  |
-| `--nx-viewer-invalid`                 | a light or dark red, under an entry a field cannot take |
+| `--nx-viewer-edit-hover`              | a faint tint, on an editable value under the pointer |
+| `--nx-viewer-field-background`        | white, or a dark gray, inside an open field |
+| `--nx-viewer-field-border`            | a light or dark blue, the ring around an open field |
+| `--nx-viewer-field-selection`         | a light or dark blue, selected text in a field |
+| `--nx-viewer-invalid`                 | a light or dark red, the ring around an entry a field cannot take |
 
 ## Development
 

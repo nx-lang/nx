@@ -44,10 +44,17 @@ an editor fits it:
 
 The element SHALL find a value's type through its element's declaration and the aliases it names, in
 the tree's declaration table. An editor SHALL take the value's own place in the reading, and a popover
-SHALL open over the reading, so that opening an editor moves nothing else. A click on an editable value
-of the selected unit, a double-click on an editable value, or Enter or F2 with a unit selected SHALL
-open the editor of its value, or of its first value when it holds several; Space, or a click on a
-selected unit's check or cross, SHALL toggle a boolean. Enter or leaving the field SHALL commit, Escape
+SHALL open over the reading, so that opening an editor moves nothing else. A popover SHALL be placed
+by its value before anything in it is brought into view, and SHALL scroll only its own list, never the
+reading. A click on an editable value SHALL edit it and select its unit: a field SHALL open with a
+collapsed caret where the click fell, a click on a check or cross SHALL toggle the boolean, and a
+case or a color SHALL open its popover; a click anywhere else in a unit, as on a property's name,
+SHALL select the unit and open nothing. The second click of a double-click SHALL NOT toggle a boolean
+again. Enter or F2 with a unit selected SHALL open the editor of its value, or of its first value
+when it holds several, with the field's text selected; Space SHALL toggle a boolean. Under the
+pointer, an editable value SHALL show a faint mark and a text cursor, or a hand for one that toggles
+or opens a popover, and a case SHALL show a chevron after it. An open field SHALL read as an input,
+with a ring of its own apart from the selection's color. Enter or leaving the field SHALL commit, Escape
 SHALL cancel and keep the selection, and Tab and Shift+Tab SHALL commit and open the next and previous
 editable value. A text field SHALL grow with its text and wrap within the reading's width. A number
 SHALL be committed once when a drag ends, and an entry an editor cannot take, such as a number field
@@ -65,8 +72,18 @@ SHALL close any hover card.
 - **THEN** a popover SHALL list `small`, `medium` and `large`, `medium` marked, and choosing `large`
   SHALL fire `nx-edit` setting the case `large`
 
+#### Scenario: A click edits where it falls
+- **WHEN** the host has set `editable` and the reader clicks in the middle of the value `"Latte"`,
+  with nothing selected
+- **THEN** a field SHALL open on `Latte` with the caret between the characters the click fell
+  between and no text selected, and the row SHALL be selected
+
+#### Scenario: A click on a name selects
+- **WHEN** the reader clicks the name of the row `name`
+- **THEN** the row SHALL be selected and no editor SHALL open
+
 #### Scenario: Toggling
-- **WHEN** a row `iced` reading a cross is selected and the reader presses Space
+- **WHEN** a row `iced` reading a cross is selected and the reader presses Space, or clicks the cross
 - **THEN** the element SHALL fire `nx-edit` setting the boolean `true`
 
 #### Scenario: Cancelling
@@ -83,15 +100,20 @@ SHALL close any hover card.
 
 ### Requirement: A property with a default, or an optional one, can be left out
 The element SHALL let the reader leave out a property that has a default or is optional: when the
-host has set `editable` and such a property's row is selected, Delete or Backspace SHALL remove it, and a quiet button at the row's end, shown
-only on the selected row, SHALL do the same, labelled "Reset to default" for a property with a default
-and "Clear" for an optional one. A row whose property is required SHALL offer neither. After the
-removal the element SHALL select the element that held the row.
+host has set `editable` and such a property's row is selected, Delete SHALL remove it. Backspace SHALL
+NOT, since a reader who meant to change the text would press it, and the element SHALL offer no button
+for it. A row whose property is required SHALL NOT be removed. After the removal the element SHALL
+select the element that held the row.
 
 #### Scenario: Resetting
 - **WHEN** the row `size` of a `Drink` whose `size` defaults to `medium` is selected and the reader
   presses Delete
 - **THEN** the element SHALL fire `nx-edit` removing that attribute
+
+#### Scenario: Backspace
+- **WHEN** the row `color` of a `Drink`, whose `color` is optional, is selected and the reader presses
+  Backspace
+- **THEN** no `nx-edit` SHALL fire
 
 #### Scenario: A required property
 - **WHEN** the row `name` of a `Drink`, whose `name` is required, is selected and the reader presses

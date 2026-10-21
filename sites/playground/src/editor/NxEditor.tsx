@@ -67,14 +67,24 @@ export interface NxEditorProps {
   readonly diagnosticsSource: string | null;
   readonly theme: Theme;
   readonly ref?: Ref<NxEditorHandle>;
+  /** Told whether there is anything to undo and to redo, whenever the text changes. */
+  readonly onHistory?: (history: EditorHistory) => void;
+}
+
+/** What the editor's undo history holds. */
+export interface EditorHistory {
+  readonly canUndo: boolean;
+  readonly canRedo: boolean;
 }
 
 /** The source pane: Monaco, the shared NX integration, and markers for the visitor's own errors. */
-export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, theme, ref }: NxEditorProps) {
+export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, theme, ref, onHistory }: NxEditorProps) {
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const latestChange = useRef(onChange);
   latestChange.current = onChange;
+  const latestHistory = useRef(onHistory);
+  latestHistory.current = onHistory;
   const latestTheme = useRef(theme);
   latestTheme.current = theme;
   // The editor is created once the highlighter has loaded, by which time the text to show may have
@@ -181,10 +191,13 @@ export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, them
       // theme Monaco draws with. A theme passed to `create` reaches Monaco without the bridge
       // knowing, and a document set later is then colored from the other theme's palette.
       monaco.editor.setTheme(EDITOR_THEMES[latestTheme.current]);
+      const reportHistory = () => latestHistory.current?.({ canUndo: model.canUndo(), canRedo: model.canRedo() });
+      reportHistory();
       subscription = instance.onDidChangeModelContent(() => {
         if (!settingValue.current) {
           latestChange.current(instance.getValue());
         }
+        reportHistory();
       });
     });
     return () => {

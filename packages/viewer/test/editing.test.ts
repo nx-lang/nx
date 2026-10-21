@@ -96,6 +96,9 @@ function fakeSelection(t: TestContext): Selection {
     get rangeCount() {
       return ranges.length;
     },
+    get isCollapsed() {
+      return ranges.every((range) => range.collapsed);
+    },
     getRangeAt: (index: number) => ranges[index]!,
     removeAllRanges: () => {
       ranges = [];
@@ -236,20 +239,41 @@ describe("editing in place", () => {
     assert.equal(element.selection, "latte.value.label");
   });
 
-  it("opens a value of the selected unit on a click, and any value on a double-click", async (t) => {
+  it("opens a value on a click, with a caret and nothing selected, and selects on a click on its name", async (t) => {
     narrow(t, 40);
+    const selection = fakeSelection(t);
     const element = show(await fixture("editing"));
-    const value = rendered(element, "latte.value.name.value");
-    value.click();
-    assert.equal(element.selection, "latte.value.name", "the first click selects the row");
-    assert.equal(field(element), null);
-    value.click();
-    assert.ok(field(element), "a click on a value of the selected unit opens it");
-    press(field(element)!, "Escape");
+    const { edits } = events(element);
+    root(element).querySelector<HTMLElement>('.sheet-name[data-hover="latte.value.name"]')!.click();
+    assert.equal(element.selection, "latte.value.name", "a click on the name selects the row");
+    assert.equal(field(element), null, "and opens nothing");
     element.selection = undefined;
-    rendered(element, "latte.value.shots.value").dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true, composed: true }));
-    assert.equal(element.selection, "latte.value.shots", "a double-click selects the value's unit");
-    assert.equal(field(element)?.textContent, "2");
+    rendered(element, "latte.value.name.value").click();
+    const open = field(element);
+    assert.ok(open, "a click on a value opens its field");
+    assert.equal(element.selection, "latte.value.name", "and selects its row");
+    const range = selection.getRangeAt(0);
+    assert.ok(open.contains(range.startContainer), "the caret is in the field");
+    assert.equal(range.collapsed, true, "where the click fell, with nothing selected");
+    press(open, "Escape");
+    assert.deepEqual(edits, []);
+    // The second click of a double-click is the field's own, and opens nothing again.
+    rendered(element, "latte.value.shots.value").click();
+    const number = field(element)!;
+    number.dispatchEvent(new window.MouseEvent("click", { bubbles: true, composed: true, detail: 2 }));
+    number.dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true, composed: true }));
+    assert.equal(field(element), number);
+    assert.equal(number.textContent, "2");
+  });
+
+  it("selects a value's text on Enter, to type over it", async (t) => {
+    narrow(t, 40);
+    const selection = fakeSelection(t);
+    const element = show(await fixture("editing"));
+    element.selection = "latte.value.name";
+    press(body(element), "Enter");
+    const range = selection.getRangeAt(0);
+    assert.equal(range.toString(), "Latte");
   });
 
   it("moves to the next and previous value with Tab and Shift+Tab, committing", async (t) => {
@@ -412,7 +436,7 @@ describe("editing in place", () => {
     assert.deepEqual(edits.map((edit) => edit.edit), [{ kind: "setValue", value: { kind: "case", name: "small" } }]);
   });
 
-  it("toggles a boolean with Space, and with a click on a selected unit's mark", async (t) => {
+  it("toggles a boolean with Space, and with a click on its mark", async (t) => {
     narrow(t, 40);
     const element = show(await fixture("editing"));
     const { edits } = events(element);
@@ -423,6 +447,14 @@ describe("editing in place", () => {
     rendered(element, "latte.value.iced.value").click();
     assert.deepEqual(edits[1]?.edit, { kind: "setValue", value: { kind: "boolean", value: false } }, "a click toggles it back");
     assert.equal(field(element), null, "no field opens");
+    rendered(element, "latte.value.iced.value").dispatchEvent(
+      new window.MouseEvent("click", { bubbles: true, composed: true, detail: 2 })
+    );
+    assert.equal(edits.length, 2, "a double-click's second click does not toggle it again");
+    element.selection = undefined;
+    rendered(element, "latte.value.iced.value").click();
+    assert.equal(edits.length, 3, "a click toggles it with nothing selected first");
+    assert.equal(element.selection, "latte.value.iced", "and selects its row");
   });
 
   it("steps a number with the arrows and keeps an entry it cannot take in the field, marked", async (t) => {
@@ -536,18 +568,15 @@ describe("editing in place", () => {
     const element = show(await fixture("editing"));
     const { edits } = events(element);
     element.selection = "latte.value.size";
-    const action = root(element).querySelector<HTMLElement>(".row-action")!;
-    await Promise.resolve();
-    assert.equal(action.hidden, false, "the selected row offers its reset");
-    assert.equal(action.getAttribute("aria-label"), "Reset to default");
+    assert.equal(root(element).querySelector(".row-action"), null, "no button offers it");
     press(body(element), "Delete");
     assert.deepEqual(edits[0], { key: "latte.value.size", edit: { kind: "remove" } });
     assert.equal(element.selection, "latte.value", "the element is selected");
     element.selection = "latte.value.color";
-    await Promise.resolve();
-    assert.equal(action.getAttribute("aria-label"), "Clear", "an optional property clears");
-    action.click();
-    assert.deepEqual(edits[1], { key: "latte.value.color", edit: { kind: "remove" } });
+    press(body(element), "Backspace");
+    assert.equal(edits.length, 1, "Backspace, pressed to change the text, does not remove it");
+    press(body(element), "Delete");
+    assert.deepEqual(edits[1], { key: "latte.value.color", edit: { kind: "remove" } }, "an optional property clears");
   });
 
   it("leaves a required property in place", async (t) => {
@@ -555,10 +584,7 @@ describe("editing in place", () => {
     const element = show(await fixture("editing"));
     const { edits } = events(element);
     element.selection = "latte.value.name";
-    await Promise.resolve();
-    assert.equal(root(element).querySelector<HTMLElement>(".row-action")!.hidden, true, "no button");
     press(body(element), "Delete");
-    press(body(element), "Backspace");
     assert.deepEqual(edits, []);
   });
 

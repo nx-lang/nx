@@ -379,13 +379,28 @@ export const styles = `
 .card-doc pre code { padding: 0; background: none; white-space: pre; }
 .card-doc a { color: var(--nx-viewer-link-color, light-dark(#0969da, #4daafc)); }
 
-/* Editing, when the host allows it. A value of the selected unit that opens an editor shows a faint
-   mark under the pointer; nothing else changes at rest. */
-.body.editable .editable-value.in-unit { cursor: text; }
-.body.editable .editable-value.in-unit:is(.edit-boolean, .edit-case, .edit-color) { cursor: pointer; }
-.body.editable .editable-value.in-unit:hover:not(.editing) {
+/* Editing, when the host allows it. A value that a click edits shows a faint mark and a text cursor
+   under the pointer, or a hand for one that toggles or opens a popover, and a case a chevron, as a
+   dropdown does; nothing else changes at rest. */
+.body.editable .editable-value { cursor: text; }
+.body.editable .editable-value:is(.edit-boolean, .edit-case, .edit-color) { cursor: pointer; }
+.body.editable .editable-value:hover:not(.editing) {
   background: var(--nx-viewer-edit-hover, light-dark(#0000000f, #ffffff17));
   border-radius: 3px;
+}
+/* The chevron stands past the value's end, over the gap after it, so nothing moves. */
+.body.editable .edit-case { position: relative; }
+.body.editable .edit-case:is(:hover, .editing)::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: -13px;
+  width: 10px;
+  height: 10px;
+  transform: translateY(-50%);
+  background: var(--nx-viewer-fold-color, light-dark(#8c959f, #7a7a7a));
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / contain no-repeat;
+  pointer-events: none;
 }
 /* A boolean toggles on a second click, which would otherwise select the mark as a word. */
 .body.editable .edit-boolean { user-select: none; }
@@ -394,19 +409,27 @@ export const styles = `
 .body.scrubbing, .body.scrubbing * { cursor: ew-resize !important; user-select: none; }
 /* An edit made and not yet in the host's tree reads muted, as a stale reading does. */
 .source .pending { opacity: 0.55; }
-/* A field takes its value's own place in the reading, in its font: a tint and an underline say it
-   is open, and it grows and wraps with its text. */
+/* A field takes its value's own place in the reading, in its font, and grows and wraps with its
+   text. It reads as an input: an editor's background inside a focus ring drawn just outside the
+   text, so nothing moves, and its own selection color, apart from the selected row's. */
 .source .field {
   outline: none;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   border-radius: 2px;
-  background: var(--nx-viewer-field-background, light-dark(#0969da14, #388bfd26));
-  box-shadow: 0 1px 0 var(--nx-viewer-field-underline, light-dark(#0969da, #4daafc));
+  background: var(--nx-viewer-field-background, light-dark(#ffffff, #1e1e1e));
+  box-shadow: 0 0 0 2px var(--nx-viewer-field-background, light-dark(#ffffff, #1e1e1e)),
+    0 0 0 3px var(--nx-viewer-field-border, light-dark(#0090f1, #007fd4));
   caret-color: var(--nx-viewer-foreground, CanvasText);
   font-weight: 400;
 }
-.source .field.invalid { box-shadow: 0 1px 0 var(--nx-viewer-invalid, light-dark(#cf222e, #f85149)); }
+.source .field::selection {
+  background: var(--nx-viewer-field-selection, light-dark(#add6ff, #264f78));
+}
+.source .field.invalid {
+  box-shadow: 0 0 0 2px var(--nx-viewer-field-background, light-dark(#ffffff, #1e1e1e)),
+    0 0 0 3px var(--nx-viewer-invalid, light-dark(#cf222e, #f85149));
+}
 /* A popover opens over the reading, under its value, as the hover card does. */
 .popover {
   position: absolute;
@@ -463,21 +486,4 @@ export const styles = `
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* The selected row's way to leave its property out: a quiet word at the row's end. */
-.row-action {
-  position: absolute;
-  right: 12px;
-  z-index: 1;
-  padding: 0 6px;
-  border-radius: 4px;
-  font-family: var(--nx-viewer-prose-font-family, inherit);
-  font-size: 11px;
-  line-height: var(--nx-viewer-source-line-height, 18px);
-  color: var(--nx-viewer-fold-summary-color, light-dark(#6e7781, #9a9a9a));
-  background: var(--nx-viewer-background, Canvas);
-  cursor: pointer;
-  user-select: none;
-}
-.row-action[hidden] { display: none; }
-.row-action:hover { color: var(--nx-viewer-foreground, CanvasText); background: var(--nx-viewer-hover, light-dark(#0000000a, #ffffff0d)); }
 `;

@@ -16,10 +16,10 @@ is. Visual starts with the source's supporting declarations folded to a line eac
 comes first, and offers Collapse all and Expand all. Switching to Visual selects the node at the
 cursor, and switching back puts the cursor at the start of the selected node.
 
-Values edit in Visual too: select a unit, then click a value, double-click it, or press Enter. Each
-edit asks the worker's `sourceEdit` query for its text edits and applies them to the editor, as one
-step of its undo history, so Source shows them and Ctrl or Cmd+Z undoes them in either view; the
-reading's next tree is asked for at once. Double-clicking an expression, which Visual cannot edit,
+Values edit in Visual too: click a value, or select a unit and press Enter. Each edit asks the
+worker's `sourceEdit` query for its text edits and applies them to the editor, as one step of its
+undo history, so Source shows them and the title bar's Undo and Redo, or Ctrl or Cmd+Z, take them
+back and forth in either view; the reading's next tree is asked for at once. Double-clicking an expression, which Visual cannot edit,
 switches to Source with the cursor at its start.
 
 The output pane's Output and Preview switch runs a component instead. Preview starts a preview

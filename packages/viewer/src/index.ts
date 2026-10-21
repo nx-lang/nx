@@ -12,7 +12,7 @@ import type { EditorRange, SourceEdit, SourceRole, SourceTree } from "@nx-lang/l
 
 import { cardOf } from "./card.js";
 import { editOf, editTargets, isHexColor, isNumericLiteral, isWholeValue, removalOf, runProblem, type EditTarget } from "./edit.js";
-import { caseOptions, pickerColor, showValue, stepNumber, valueHost } from "./editors.js";
+import { caseOptions, offsetAtPoint, pickerColor, showValue, stepNumber, valueHost } from "./editors.js";
 import { renderMarkdown } from "./markdown.js";
 import { defaultFolded, readingRuns, renderSource, type NxViewerColor, type NxViewerIcons, type ReadingRun } from "./source.js";
 import { styles } from "./styles.js";
@@ -257,8 +257,6 @@ export class NxViewerElement extends ElementBase {
   readonly #card: HTMLDivElement;
   /** The popover a case or a color is chosen in. */
   readonly #popover: HTMLDivElement;
-  /** The quiet button at the end of a selected row whose property may be left out. */
-  readonly #rowAction: HTMLSpanElement;
   /** Closes the card when anything around the reading scrolls, or Escape is pressed anywhere. */
   readonly #onDocumentScroll = (): void => this.#closeCard();
   readonly #onDocumentKey = (event: KeyboardEvent): void => {
@@ -349,12 +347,6 @@ export class NxViewerElement extends ElementBase {
         this.#cancel(session, false);
       }
     });
-
-    this.#rowAction = document.createElement("span");
-    this.#rowAction.className = "row-action";
-    this.#rowAction.setAttribute("role", "button");
-    this.#rowAction.hidden = true;
-    this.#rowAction.addEventListener("pointerdown", (event) => event.preventDefault());
 
     frame.append(toolbar, this.#body, this.#announcer, this.#card, this.#popover);
     shadow.append(style, frame);
@@ -722,7 +714,7 @@ export class NxViewerElement extends ElementBase {
         }
       }
     }
-    this.#body.append(this.#highlights, this.#rowAction);
+    this.#body.append(this.#highlights);
     this.#paintHighlights();
     this.#turnChevron();
     const reopen = this.#reopen;
@@ -912,7 +904,6 @@ export class NxViewerElement extends ElementBase {
   #paintHighlights(): void {
     const layer = this.#highlights;
     layer.replaceChildren();
-    this.#placeRowAction();
     if (!this.#body.contains(layer)) {
       return;
     }
@@ -963,29 +954,6 @@ export class NxViewerElement extends ElementBase {
       const within = unit !== undefined && unit.contains(hovered);
       draw(hovered, firstLine(hovered) ?? hovered.getBoundingClientRect(), within ? "hovered in-selection" : "hovered");
     }
-  }
-
-  /**
-   * Shows the quiet button that leaves out the selected row's property, at the end of the row's first
-   * line, when the reader may edit and the property has a default or is optional.
-   */
-  #placeRowAction(): void {
-    const action = this.#rowAction;
-    const unit = this.#selectedUnit();
-    const at = unit === undefined || !unit.matches(".sheet-row") ? undefined : this.#index?.byKey.get(keyOf(unit) ?? "");
-    const removal = !this.#editable || at === undefined || this.#removed.has(keyOf(unit!)!) ? undefined : removalOf(this.#index!, at);
-    if (removal === undefined || this.#session?.span !== undefined && unit!.contains(this.#session.span)) {
-      action.hidden = true;
-      return;
-    }
-    const label = removal === "reset" ? "Reset to default" : "Clear";
-    action.textContent = label;
-    action.title = label;
-    action.setAttribute("aria-label", label);
-    action.hidden = false;
-    const frame = this.#body.getBoundingClientRect();
-    const first = unit!.querySelector<HTMLElement>(":scope > .sheet-name")?.getBoundingClientRect() ?? unit!.getBoundingClientRect();
-    action.style.top = `${first.top - frame.top + this.#body.scrollTop}px`;
   }
 
   /** Every unit, in reading order. */
@@ -1063,7 +1031,6 @@ export class NxViewerElement extends ElementBase {
     const at = key === undefined ? undefined : index?.byKey.get(key);
     if (index === undefined || key === undefined || at === undefined) {
       this.#selection = undefined;
-      this.#markUnitValues();
       return;
     }
     // A node folded away is unfolded to, so what is selected can be seen.
@@ -1079,7 +1046,6 @@ export class NxViewerElement extends ElementBase {
     const original = this.#rendered.get(key);
     original?.classList.add("selected");
     original?.setAttribute("aria-current", "true");
-    this.#markUnitValues();
     if (fire) {
       if (original !== undefined) {
         const words = spoken(original);
@@ -1148,20 +1114,6 @@ export class NxViewerElement extends ElementBase {
       }
     }
     return found;
-  }
-
-  /** Marks the values of the selected unit, which a click opens and the pointer marks over. */
-  #markUnitValues(): void {
-    for (const value of this.#body.querySelectorAll(".in-unit")) {
-      value.classList.remove("in-unit");
-    }
-    if (!this.#editable) {
-      return;
-    }
-    const unit = this.#selectedUnit();
-    const selected = this.#selection === undefined ? undefined : this.#rendered.get(this.#selection);
-    const values = unit !== undefined ? this.#unitValues(unit) : selected?.matches(".editable-value") === true ? [selected] : [];
-    values.forEach((value) => value.classList.add("in-unit"));
   }
 
   /** The text of the value `target` names as the tree writes it. */
@@ -1558,7 +1510,7 @@ export class NxViewerElement extends ElementBase {
       return;
     }
     const target = event.target as Element;
-    if (this.#session?.field?.contains(target) === true || target.closest?.(".row-action, .fold") != null) {
+    if (this.#session?.field?.contains(target) === true || target.closest?.(".fold") != null) {
       return;
     }
     const value = target.closest?.(".editable-value") as HTMLElement | null | undefined;
@@ -1636,7 +1588,6 @@ export class NxViewerElement extends ElementBase {
     this.#session = session;
     input.addEventListener("input", () => this.#filterCases(session));
     this.#filterCases(session, options.find((option) => option.dataset["name"] === current));
-    this.#placeCard(span, this.#popover);
     input.focus({ preventScroll: true });
     if (caret !== undefined) {
       input.setSelectionRange(caret.start, caret.end);
@@ -1651,6 +1602,8 @@ export class NxViewerElement extends ElementBase {
     }
     const shown = (session.options ?? []).filter((option) => !option.hidden);
     const keep = prefer ?? session.active;
+    // Placed before an option is brought into view, which then scrolls the list alone.
+    this.#placeCard(session.span, this.#popover);
     this.#setActive(session, keep !== undefined && shown.includes(keep) ? keep : shown[0]);
   }
 
@@ -1663,7 +1616,17 @@ export class NxViewerElement extends ElementBase {
       session.input?.removeAttribute("aria-activedescendant");
     } else {
       session.input?.setAttribute("aria-activedescendant", option.id);
-      option.scrollIntoView?.({ block: "nearest" });
+      // Only the list scrolls: `scrollIntoView` would scroll the reading too, and the page.
+      const list = option.parentElement;
+      if (list !== null) {
+        const shown = option.getBoundingClientRect();
+        const port = list.getBoundingClientRect();
+        if (shown.top < port.top) {
+          list.scrollTop -= port.top - shown.top;
+        } else if (shown.bottom > port.bottom) {
+          list.scrollTop += shown.bottom - port.bottom;
+        }
+      }
     }
   }
 
@@ -1861,10 +1824,6 @@ export class NxViewerElement extends ElementBase {
       this.#toggleFold(toggle.dataset["foldKey"]!, event.altKey);
       return;
     }
-    if (target.closest?.(".row-action") !== null && target.closest?.(".row-action") !== undefined) {
-      this.#removeSelected();
-      return;
-    }
     // The press that ended a drag of a number's name, or a click inside an open field, is not a
     // choice of node.
     if (this.#ignoreClick) {
@@ -1881,11 +1840,26 @@ export class NxViewerElement extends ElementBase {
     if (textSelection !== null && textSelection !== undefined && !textSelection.isCollapsed) {
       return;
     }
-    // A click on a value of the unit already selected opens its editor, or toggles a boolean:
-    // select, then change.
+    // A click on an editable value edits it, as a form's field does: a field opens with the caret
+    // where the click fell, a boolean toggles, and a case or a color opens its popover. Its unit is
+    // selected with it. A click anywhere else in a unit, as on a property's name, selects the unit.
     const value = this.#editable ? (target.closest?.(".editable-value") as HTMLElement | null | undefined) : undefined;
-    if (value !== null && value !== undefined && this.#body.contains(value) && keyOf(this.#unitOf(value) ?? value) === this.#selection) {
-      this.#openEditor(keyOf(value)!);
+    if (value !== null && value !== undefined && this.#body.contains(value)) {
+      const key = keyOf(value)!;
+      // The second click of a double-click would toggle a boolean back, or open an editor again.
+      if ((event.detail > 1 && this.#targets.get(key)?.kind === "boolean") || this.#session?.target.key === key) {
+        return;
+      }
+      const unit = keyOf(this.#unitOf(value) ?? value);
+      if (unit !== this.#selection) {
+        this.#select(unit, true, false);
+      }
+      this.#openEditor(key);
+      const field = this.#session?.target.key === key ? this.#session.field : undefined;
+      if (field !== undefined) {
+        const at = offsetAtPoint(field, event.clientX, event.clientY);
+        this.#placeCaret(field, { start: at, end: at });
+      }
       return;
     }
     // A click chooses the unit it falls in: the element, row or line, not a word in it. Outside
@@ -1914,8 +1888,8 @@ export class NxViewerElement extends ElementBase {
       this.#closeCard();
       return;
     }
-    // Enter or F2 opens the selected unit's first value, Space toggles its boolean, and Delete or
-    // Backspace leaves out its property. Ctrl or Cmd with Z or Y are the host's, for its undo.
+    // Enter or F2 opens the selected unit's first value, Space toggles its boolean, and Delete leaves
+    // out its property. Ctrl or Cmd with Z or Y are the host's, for its undo.
     if (this.#editable && !event.ctrlKey && !event.metaKey && !event.altKey) {
       if (event.key === "Enter" || event.key === "F2") {
         if (this.#openSelected(event.key === "Enter")) {
@@ -1932,7 +1906,8 @@ export class NxViewerElement extends ElementBase {
         }
         return;
       }
-      if (event.key === "Delete" || event.key === "Backspace") {
+      // Not Backspace, which a reader who meant to change the text would press.
+      if (event.key === "Delete") {
         if (this.#removeSelected()) {
           event.preventDefault();
         }
