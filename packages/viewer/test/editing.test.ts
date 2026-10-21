@@ -306,6 +306,22 @@ describe("editing in place", () => {
     assert.equal(range.startOffset, 4, "the caret is where the reader left it");
   });
 
+  it("puts the caret after the draft when where it was cannot be read", async (t) => {
+    narrow(t, 40);
+    const selection = fakeSelection(t);
+    const fixed = await fixture("editing");
+    const element = show(fixed);
+    element.selection = "latte.value.name";
+    press(body(element), "Enter");
+    field(element)!.textContent = "Half typed";
+    selection.removeAllRanges();
+    element.tree = fixed.tree;
+    const range = selection.getRangeAt(0);
+    assert.ok(field(element)!.contains(range.startContainer));
+    assert.equal(range.collapsed, true, "a reopened field never selects the draft");
+    assert.equal(range.startOffset, "Half typed".length);
+  });
+
   it("takes a sign only where the grammar takes one", async (t) => {
     narrow(t, 40);
     const fixed = await fixture("editingEdges");

@@ -728,7 +728,10 @@ export class NxViewerElement extends ElementBase {
     const reopen = this.#reopen;
     this.#reopen = undefined;
     if (reopen !== undefined && this.#targets.has(reopen.key) && this.#rendered.has(reopen.key)) {
-      this.#openEditor(reopen.key, reopen.draft, reopen.caret);
+      // Where the caret was cannot always be read; then it goes after what the reader typed, which a
+      // reopened editor never selects, so the next key does not replace it.
+      const end = reopen.draft?.length ?? 0;
+      this.#openEditor(reopen.key, reopen.draft, reopen.caret ?? { start: end, end });
     }
     // Fonts that arrive later change where the rows fall, and what fits on a line.
     const remeasure = this.ownerDocument.fonts !== undefined && this.ownerDocument.fonts.status !== "loaded";
@@ -1213,11 +1216,15 @@ export class NxViewerElement extends ElementBase {
     }
     const field = session.field;
     const selection = this.#domSelection();
-    if (field === undefined || selection === null || selection === undefined || selection.rangeCount === 0) {
+    if (field === undefined || selection === null || selection === undefined) {
       return undefined;
     }
-    const range = selection.getRangeAt(0);
-    if (!field.contains(range.startContainer) || !field.contains(range.endContainer)) {
+    // Where the browser keeps no selection apart for a shadow root, its composed ranges reach inside.
+    const composed = (
+      selection as Selection & { getComposedRanges?(options: { shadowRoots: ShadowRoot[] }): StaticRange[] }
+    ).getComposedRanges?.({ shadowRoots: this.shadowRoot === null ? [] : [this.shadowRoot] })[0];
+    const range = composed ?? (selection.rangeCount === 0 ? undefined : selection.getRangeAt(0));
+    if (range === undefined || !field.contains(range.startContainer) || !field.contains(range.endContainer)) {
       return undefined;
     }
     const offset = (node: Node, at: number): number => {

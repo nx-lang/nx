@@ -16,7 +16,7 @@ SDK's `sourceEdit` and `sourceTree` (scratch script, not committed).
 
 ## Findings
 
-### 🟡 Fixed - RF1 `setValue` spells a negative number (and a case) without regard to its place, so it can break the document or make the value uneditable
+### ✅ Verified - RF1 `setValue` spells a negative number (and a case) without regard to its place, so it can break the document or make the value uneditable
 - **Severity:** Medium (confidence: high, reproduced)
 - **Evidence:** `spell_value` (crates/nx-language-service/src/source_edit.rs:222) returns the same text
   wherever the target is, but only `rhs_expression` (an unbraced attribute value or a `let` value)
@@ -48,8 +48,9 @@ SDK's `sourceEdit` and `sourceTree` (scratch script, not committed).
   invalid, and the arrows and scrubbing stop at zero there (test "takes a sign only where the grammar
   takes one"). Spec: a sentence in "A value is set in the spelling its place takes" and the scenario
   "A negative item of a sequence".
+- **Verification:** Verified. `set_value` (source_edit.rs) now refuses a signed number, and a case, as `invalidValue` outside an unbraced attribute or `let` value. A qualified case is still handled first and keeps its qualifier. The new tests `a_negative_number_only_where_the_grammar_takes_one` and `a_bare_case_only_where_it_resolves` cover the three cases I reproduced (`{ 2 -4 5 }`, `{-3}`, `{large}`). The round-trip test now also writes `-42` and asserts there are no new parse errors. On the viewer side, `EditTarget.signed` (edit.ts) stops the arrows and scrubbing at zero and marks a negative entry invalid in a sequence or inside braces. The spec has the sentence and the scenario. `cargo test -p nx-language-service source_edit`: 28 pass.
 
-### 🟡 Fixed - RF2 The viewer decodes every string escape as its bare character, so changing part of a string with `\n` or `\t` rewrites those escapes as letters
+### ✅ Verified - RF2 The viewer decodes every string escape as its bare character, so changing part of a string with `\n` or `\t` rewrites those escapes as letters
 - **Severity:** Medium (confidence: high)
 - **Evidence:** `decodeString` (packages/viewer/src/edit.ts:46-49) replaces every `\X` with `X`, so
   `"a\nb"` opens as `anb`. If the reader changes anything in the field, `#finishField`
@@ -65,8 +66,9 @@ SDK's `sourceEdit` and `sourceTree` (scratch script, not committed).
   other escape, so such a string gets no text editor; Enter or a double-click opens it in Source
   (`nx-open`). Test "offers no text field for a string with an escape other than a quote or a
   backslash" (`title="a\nb"`).
+- **Verification:** Verified. `decodeString` decodes only `\"` and `\\`, and returns `undefined` for a string holding any other escape, so `targetOf` offers no editor and Enter or a double-click falls through to `nx-open`. This matches what `quote_string` writes back. It is covered by the viewer test with `title="a\nb"`.
 
-### 🟡 Fixed - RF3 A tree that arrives while a field is open reopens the field with all its text selected, so the reader's next keystroke replaces their draft
+### ✅ Verified - RF3 A tree that arrives while a field is open reopens the field with all its text selected, so the reader's next keystroke replaces their draft
 - **Severity:** Medium (confidence: high on the mechanism, medium on how often it happens)
 - **Evidence:** `#render` keeps only the open field's text (index.ts:637) and reopens it through
   `#openEditor` → `#openField`, which always ends with `#selectAll(field)` (index.ts:704, 1211). The
@@ -87,8 +89,9 @@ SDK's `sourceEdit` and `sourceTree` (scratch script, not committed).
   Test "keeps the caret of an editor open across a newer tree, and through a tree cleared first". The
   playground's other setters run while the tree is cleared, so the reading is rebuilt, and the field
   reopened, once per tree.
+- **Verification:** Verified, with a caveat on the fallback (see RF9). `#render` saves the open editor's key, draft and caret in `#reopen`, which survives a render with no tree. Fields and popover inputs reopened this way put the caret back, and only a fresh open selects all. The playground's effect now clears the tree first, so the field is rebuilt once per tree, not once per setter. The new viewer test checks for a collapsed caret at offset 4 after a cleared-then-set tree. Viewer suite: 110 pass.
 
-### 🟡 Fixed - RF4 In the playground, a refused or empty edit leaves Visual showing the reader's value, muted, indefinitely; the viewer's run check also disagrees with the service
+### ✅ Verified - RF4 In the playground, a refused or empty edit leaves Visual showing the reader's value, muted, indefinitely; the viewer's run check also disagrees with the service
 - **Severity:** Medium (confidence: high, reproduced)
 - **Evidence:** The viewer drops a value it is showing only when the host sets a tree
   (index.ts `set tree`). The viewer spec's "The host refuses" scenario assumes the host sets the tree
@@ -114,8 +117,9 @@ SDK's `sourceEdit` and `sourceTree` (scratch script, not committed).
   refuses `<` and `{`, a leading space, and `if`/`for`/`else` or the start of one as a word (`fo`,
   `e`), and allows `>` and `}`. Tests in edits.test.mjs (refusals and no-change edits call
   `onUnchanged`; a stale answer too) and the viewer's run test.
+- **Verification:** Verified. `createEditQueue` calls `onUnchanged` when the answer is refused or empty, when it arrives after the text changed, and when the request fails. The playground raises `revision`, which makes ReadingView set the tree again, so the muted value goes. `runProblem` now uses the `_mixed_text_run` token regex, anchored: it accepts `>` and `}`, and refuses `fo`, `e`, `el` and `els`, matching what I probed from the service. edits.test.mjs: 4 pass. One minor caveat, not reopened: setting the tree again also drops the muted values of later edits still in the queue until their own tree arrives, which is a brief flicker in a rare path.
 
-### 🟡 Fixed - RF5 A text run's trailing whitespace is part of the field, so replacing a run before a braced value or an element merges words
+### ✅ Verified - RF5 A text run's trailing whitespace is part of the field, so replacing a run before a braced value or an element merges words
 - **Severity:** Medium (confidence: high, reproduced)
 - **Evidence:** In `<L>Hello {1} world</L>`, the text node `text[0]` is `"Hello "`, trailing space
   included (range 11..17), while `text[2]` is `"world"` with no leading space. The run field opens with
@@ -132,8 +136,9 @@ SDK's `sourceEdit` and `sourceTree` (scratch script, not committed).
   trimmed at the end. Tests: Rust `a_run_keeps_the_space_before_what_follows` (`Hello {1} world` →
   `Hi {1} world`) and viewer "edits a run of text without the space that separates it from what
   follows". Spec scenario "A run before a braced value".
+- **Verification:** Verified. `set_text` keeps the run's trailing whitespace: it replaces only the trimmed words, after checking that the new text plus that whitespace reads back as one run. The no-change check compares against the same span. The viewer's run target is trimmed at the end. Covered by `a_run_keeps_the_space_before_what_follows` (`<L>Hi {1} world</L>`), the viewer test and the new spec scenario.
 
-### 🟡 Fixed - RF6 A re-render during a number scrub drops the drag and leaves the reading with `scrubbing` set
+### ✅ Verified - RF6 A re-render during a number scrub drops the drag and leaves the reading with `scrubbing` set
 - **Severity:** Medium (confidence: high on the mechanism)
 - **Evidence:** `#render` sets `this.#scrub = undefined` (index.ts:639) but does not remove the
   `scrubbing` class that `#onPointerMove` put on the persistent body (index.ts:1680). Only
@@ -149,8 +154,9 @@ SDK's `sourceEdit` and `sourceTree` (scratch script, not committed).
   is gone, the drag ends cleanly. A render with no tree keeps the drag for the next one. Tests
   "carries a drag on through a newer tree" and "ends a drag cleanly when the number is gone from the
   newer tree".
+- **Verification:** Verified. `#render` no longer drops the drag on a render without a tree. With a tree it removes `scrubbing` and either resumes the drag through `#resumeScrub` (new name element, pointer captured again, value shown) or ends it cleanly when the number is gone. Both paths have viewer tests.
 
-### 🟡 Fixed - RF7 `remove` leaves a trailing line comment behind, and the comment cases that task 1.4 says were verified have no tests
+### ✅ Verified - RF7 `remove` leaves a trailing line comment behind, and the comment cases that task 1.4 says were verified have no tests
 - **Severity:** Low (confidence: high, reproduced)
 - **Evidence:** In `remove` (source_edit.rs:350-386), only blanks count as separating space, so:
   - an attribute alone on its line with a trailing comment, `  a=1 // note`, becomes `  // note`, an
@@ -166,8 +172,9 @@ SDK's `sourceEdit` and `sourceTree` (scratch script, not committed).
   comment on the line above stays (it may be about more than the attribute); documented on `remove` and
   in the spec. Tests `removing_takes_a_trailing_comment_with_it` and
   `removing_keeps_a_comment_line_above`.
+- **Verification:** Verified. A `//` comment after the attribute on its line now goes with it: a line holding only the attribute and its comment is removed whole, and `<T a=1 // note` becomes `<T`. Keeping a comment line above the attribute is now documented and tested. The spec has the scenario.
 
-### 🟡 Fixed - RF8 The contract for applying several `TextEdit`s is inconsistent between the service, its tests and the host
+### ✅ Verified - RF8 The contract for applying several `TextEdit`s is inconsistent between the service, its tests and the host
 - **Severity:** Low (confidence: high; latent while every answer has at most one edit)
 - **Evidence:**
   - The Rust and protocol docs give each range "in the document as the request carried it"
@@ -186,6 +193,26 @@ SDK's `sourceEdit` and `sourceTree` (scratch script, not committed).
   docs, its README, the spec and `EditedDocument.apply`. `NxEditor.applyEdits` makes one
   `executeEdits` call with every edit; edits.test.mjs applies an answer's edits against the text as
   it was.
+- **Verification:** Verified. The Rust and protocol docs, the README and the spec now say LSP semantics: every range is in the document as sent, and no two overlap. `NxEditor.applyEdits` makes one `executeEdits` call with all the edits inside a single pair of undo stops, which Monaco applies against the original model. The edits.test.mjs helper and the Rust `apply` both apply against the original text.
+
+## New Findings Discovered During 2026-10-21 22:10 Verification
+
+### 🟡 Fixed - RF9 An editor reopened with no caret it can read still selects everything, as a fresh open does
+- **Severity:** Low (confidence: high on the code path; medium on which browsers reach it)
+- **Evidence:** `#openField`, `#openColor` and `#openCases` take `caret === undefined` to mean a fresh
+  open, and `#openField` then calls `#selectAll`. But `#caretOf` also returns `undefined` on a reopen
+  when the DOM selection cannot be read inside the field. That happens when the root has no
+  `ShadowRoot.getSelection` and `document.getSelection()` retargets the range to the shadow host, as
+  WebKit does, so `field.contains(range.startContainer)` is false. On those browsers RF3 is still
+  there: a tree arriving after Tab selects the reader's draft, and the next key replaces it.
+- **Recommendation:** Tell a reopen apart from a fresh open: pass a flag, or a draft without a caret.
+  When the caret is unknown on a reopen, collapse it at the end of the draft instead of selecting all.
+  Where available, consider `Selection.getComposedRanges({ shadowRoots: [root] })` to read the caret
+  in WebKit.
+- **Fix:** A reopen whose caret cannot be read collapses the caret at the end of the draft
+  (`#render` passes `{ start: end, end }`), so a reopened editor never selects the draft. `#caretOf`
+  reads `Selection.getComposedRanges({ shadowRoots: [root] })` first where the browser has it, then
+  the selection's own range. Test "puts the caret after the draft when where it was cannot be read".
 
 ## Questions
 - Should Enter and F2 toggle a boolean when it is the first editable value of the selected unit? They do
