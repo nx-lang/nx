@@ -26,10 +26,12 @@ an attribute, an item of a braced sequence, or the value of a `let` without para
 SHALL replace only the target's text, keeping braces written around it, and SHALL spell the value by
 its kind:
 
-- a string as a double-quoted string literal, with the escapes a string literal needs;
+- a string as a double-quoted string literal, its quotes and backslashes escaped and every other
+  character, a line break included, written as it is;
 - a number as the text the request gives, when that text is an NX numeric literal, signed or not;
 - a boolean as `true` or `false`;
-- a case as its bare name, when the name is an identifier.
+- a case as its bare name, when the name is an identifier other than `true` and `false`; a case
+  written qualified, as `{ Size.small }`, SHALL keep its qualifier.
 
 The service SHALL NOT check the value against the place's type; a value of the wrong type SHALL be
 written and then reported by the type checker as a hand edit would be.
@@ -55,14 +57,20 @@ written and then reported by the type checker as a hand edit would be.
   `4`
 - **THEN** the declaration SHALL read `let primes:int+ = { 2 4 5 7 }`
 
-### Requirement: A line of text content is set with the escapes text takes
+### Requirement: A line of text content is set as written
 For `setText`, the target SHALL be a `text` node written on one line, outside a typed or raw text
-body. The service SHALL replace the run with the new text, spelling `<`, `&`, `{` and `}` with the
-entities and escaped braces text content takes, so that the run reads as the new text once parsed.
+body. Element content has no escapes, so the service SHALL write the new text as it is, and SHALL
+refuse it as `invalidValue` unless the document then reads it back as one run of exactly that text,
+with no new parse error: text holding `<` or `{`, starting with a space, or starting with `if`, `for`
+or `else` as a word is refused.
 
-#### Scenario: Text with a brace
-- **WHEN** a client sets the text of the run in `<Label>Hello</Label>` to `Use {name} & go`
-- **THEN** the element SHALL read `<Label>Use \{name\} &amp; go</Label>`
+#### Scenario: Text with an ampersand
+- **WHEN** a client sets the text of the run in `<Label>Hello</Label>` to `Fish & chips > all`
+- **THEN** the element SHALL read `<Label>Fish & chips > all</Label>`
+
+#### Scenario: Text that would start a tag
+- **WHEN** a client sets the text of that run to `a < b`
+- **THEN** the answer SHALL hold no edits and the refusal `invalidValue`
 
 ### Requirement: A property is removed with its separating space
 For `remove`, the target SHALL be an attribute. The service SHALL remove the attribute and the

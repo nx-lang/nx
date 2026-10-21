@@ -65,8 +65,11 @@ it changed, and an unknown key is refused rather than guessed.
   braced sequence, or the value of a `let` without parameters. Its braces, when written, stay: `{true}`
   becomes `{false}`. A value inside an expression (an operand, an argument, a pattern) is not a whole
   value and is refused.
-- `setText` on a `text` node written on one line, outside a typed or raw body. The new text is one
-  line, not empty, and is spelled with the entities and escaped braces text content needs.
+- `setText` on a `text` node written on one line, outside a typed or raw body. Element content has
+  no escapes (entities are kept as written, and `\{` is only an escape in typed text), so the new
+  text is written as it is, and refused unless the document reads it back as one run of exactly that
+  text: `<` and `{` start a tag or a braced value, and a run cannot start with a space or with `if`,
+  `for` or `else` as a word.
 - `remove` on an attribute: the attribute goes, with the space that separates it from its neighbour,
   or its whole line when it has one. This is Reset for a property with a default and Clear for an
   optional one. The service does not check that the property may be left out; the viewer offers it
@@ -75,7 +78,7 @@ it changed, and an unknown key is refused rather than guessed.
 A value of the wrong kind for its place (a number where a string was) is spelled anyway, and
 type-checks badly like a hand edit would; refusing it would need the checker in the edit path for
 little gain. What cannot be spelled is refused: a number that is not a numeric literal, a case name
-that is not an identifier, text that is empty or holds a line break.
+that is not an identifier, text that is empty, holds a line break or would not read back as itself.
 
 ### 3. The answer is edits or a refusal, never an error
 

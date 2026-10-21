@@ -2,11 +2,15 @@
 
 mod hover;
 mod positions;
+mod source_edit;
+#[cfg(test)]
+mod source_edit_tests;
 mod source_tree;
 #[cfg(test)]
 mod source_tree_tests;
 mod visualizers;
 
+pub use source_edit::{SourceEdit, SourceEditAnswer, SourceEditRefusal, SourceEditValue, TextEdit};
 pub use source_tree::{
     SourceCase, SourceDeclaration, SourceDeclarationKind, SourceFlag, SourceNode, SourceProperty,
     SourcePropertyVisualizer, SourceRole, SourceTree, SourceTreeOptions, SourceTreeVisualizers,
