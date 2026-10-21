@@ -1,0 +1,37 @@
+## 1. The source edit in the language service
+
+- [ ] 1.1 Add `crates/nx-language-service/src/source_edit.rs`: request types (`setValue` with a string, number, boolean or case value; `setText`; `remove`), the answer (`edits`, optional `refused`), and key resolution through the source tree of the document as sent; refuse `unknownNode` for a missing key; verify with unit tests
+- [ ] 1.2 `setValue` for a literal or bare case that is a whole value (an attribute's value, an item of a braced sequence, a parameterless `let`'s value), replacing only the target's text and keeping braces: strings quoted and escaped, numbers kept as given when they lex as a numeric literal, booleans, bare case names; refuse `notEditable` for operands, arguments, patterns and defaults, and `invalidValue` for what cannot be spelled; verify with tests for each scenario in `source-edits`
+- [ ] 1.3 `setText` for a one-line `text` node outside typed and raw bodies, spelling `<`, `&`, `{` and `}` as entities and escaped braces; refuse runs over several lines, typed bodies, and empty or multi-line text; verify by re-parsing the result and comparing the run's text
+- [ ] 1.4 `remove` for an attribute, with its separating whitespace, or its whole line when it stands alone; verify on one-line and one-attribute-per-line elements, first, middle and last attributes, and with comments beside it
+- [ ] 1.5 A round-trip test over the repository's `.nx` files: for every editable literal, setting it to itself answers no edits, and setting it to another value of its kind yields a document that parses with the same keys
+
+## 2. Exposing it to TypeScript hosts
+
+- [ ] 2.1 `bindings/wasm`: a `nx_wasm_snapshot_source_edit` export and `sourceEdit` on the snapshot in `host.ts`; raise the ABI version; `bindings/node`: the same on the native snapshot and `index.ts`
+- [ ] 2.2 `packages/language-protocol`: `SourceEditRequest`, `SourceEdit`, `SourceEditValue`, `TextEdit`, `SourceEditAnswer`, `SourceEditRefusal`; `sourceEdit` in the query names, requests, answers and `NxLanguageService`; mark it unstable in the docs
+- [ ] 2.3 `language-core` (answer and service), `language-http` (request validation), `language-client` (method); verify with each package's tests, including a refusal round-tripping through HTTP as an answer, not an error
+- [ ] 2.4 Parity: the wasm SDK's language-service tests ask for source edits over their corpus through TypeScript and Rust and compare after JSON round-trip
+
+## 3. Editing in the viewer
+
+- [ ] 3.1 Add the `editable` property (honored when set before definition), the `nx-edit` and `nx-open` events and their detail types, exported from the package; verify that nothing changes when `editable` is not set, with the existing tests unchanged
+- [ ] 3.2 Decide what is editable and with which editor, from the tree: the value's place, its property's declared type through the element's declaration and alias chain, `uitext`, `format=id`, `format=color`, the union's constant cases; verify with unit tests over fixtures
+- [ ] 3.3 The text field (strings, `uitext`, ids, text runs) in the value's box, decoding escapes and entities for its content; commit, cancel, Tab and Shift+Tab; growth and wrapping within the reading; verify "Editing a string", "Cancelling" and "Nothing moves"
+- [ ] 3.4 The number field: arrow and Shift+arrow steps, scrubbing by dragging the property's name with one commit on release, invalid entries kept and marked; verify with tests using faked pointer events
+- [ ] 3.5 Boolean toggles (Space and a click on a selected unit's check), the case popover (constant cases, docs, current marked, type to filter, arrows and Enter), the color popover (hex field and the browser's color picker); verify "Toggling" and "Picking a case"
+- [ ] 3.6 Selection and opening: click on a value of the selected unit, double-click, Enter and F2, first value of a line; hover cards close when an editor opens; `nx-open` for values that cannot be edited; Ctrl/Cmd+Z and Y left to the host
+- [ ] 3.7 Reset and Clear: Delete and Backspace on a selected row whose property has a default or is optional, the quiet button on the selected row, selection moving to the element; verify "Resetting" and "A required property"
+- [ ] 3.8 The edited value shown muted until the next tree, then the tree as it is; the selection kept by key; verify "The host refuses"
+- [ ] 3.9 Styles: editors in the reading's faces and theme tokens, no borders or chrome at rest, a faint hover mark on editable values of the selected unit; light and dark
+
+## 4. The playground
+
+- [ ] 4.1 The worker answers `sourceEdit`; the editor handle applies text edits with `executeEdits` as one undo step
+- [ ] 4.2 `ReadingView` sets `editable`, handles `nx-edit` in order (queued while one is in flight), asks for the source tree at once after an edit, and forwards Ctrl/Cmd+Z and redo to the editor; `App` switches to Source at the node for `nx-open`
+- [ ] 4.3 Verify the playground scenarios with its tests, and by screenshots in the playground: editing a string, picking a case, toggling, resetting, undo from Visual, in light and dark and at 375 pixels wide
+
+## 5. Docs and checks
+
+- [ ] 5.1 Document editing, `editable`, `nx-edit` and `nx-open` in `packages/viewer/README.md`, and `sourceEdit` in the language packages' READMEs; add the changes to `src/vscode/CHANGELOG.md`'s next release and the package changelogs
+- [ ] 5.2 Run `cargo test`, `pnpm -r build` and `pnpm -r test`, and `openspec validate add-visual-value-editing --strict`, all passing
