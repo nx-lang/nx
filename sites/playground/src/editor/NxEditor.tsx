@@ -47,8 +47,9 @@ export interface NxEditorHandle {
   /** The editor's text, or null before the editor exists. */
   text(): string | null;
   /**
-   * Applies `edits`, each against the text the one before left, as one step of the editor's undo
-   * history, as an edit made in Visual is. The editor reports the new text as it does any edit.
+   * Applies `edits`, every range in the text as it is now and none overlapping, together as one step
+   * of the editor's undo history, as an edit made in Visual is. The editor reports the new text as
+   * it does any edit.
    */
   applyEdits(edits: readonly TextEdit[]): void;
   /** Undoes the last step of the editor's history, wherever it was made. */
@@ -127,11 +128,14 @@ export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, them
         return;
       }
       instance.pushUndoStop();
-      for (const edit of edits) {
-        const { start, end } = edit.range;
-        const range = new monaco.Range(start.line + 1, start.character + 1, end.line + 1, end.character + 1);
-        instance.executeEdits("nx-visual", [{ range, text: edit.newText, forceMoveMarkers: true }]);
-      }
+      instance.executeEdits(
+        "nx-visual",
+        edits.map(({ range: { start, end }, newText }) => ({
+          range: new monaco.Range(start.line + 1, start.character + 1, end.line + 1, end.character + 1),
+          text: newText,
+          forceMoveMarkers: true,
+        })),
+      );
       instance.pushUndoStop();
     },
     undo() {

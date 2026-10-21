@@ -102,5 +102,8 @@
   "editing": {
     "source": "import \"@nx/visualizer\"\n\ntype uitext = string\ntype Swatch = string\ntype Count = int\n\ntype Size =\n  /// The smallest cup.\n  | small\n  /// The usual.\n  | medium\n  | large\n  | custom { ounces:int }\n\ntype Drink = {\n  name:string\n  size:Size = medium\n  iced:bool = false\n  shots:Count = 1\n  color?:Swatch\n  label:uitext = \"Drink\"\n  tags:string* = {}\n}\n\ntype Counter = { count:int }\ntype Text = { content text:string }\n\nvisualizer Swatch = <ValueVisualizer format=color />\n\nlet total = 3\n\nlet latte =\n  <Drink\n    name=\"Latte\"\n    size=medium\n    iced=false\n    shots=2\n    color=\"#5a3a22\"\n    label=\"Hot \\\"latte\\\"\"\n    tags={ \"warm\" \"milky\" }\n  />\n\nlet counter = <Counter count={total + 1} />\n\nlet note = <Text>Hello there</Text>\n\nlet ratio = 1.5\n",
     "visualizers": []
+  },
+  "editingEdges": {
+    "source": "type Text = { content text:string }\ntype Box = { title:string note:string depth:int items:int* }\n\nlet box = <Box title=\"a\\nb\" note=\"say \\\"hi\\\" \\\\ ok\" depth={3} items={ 1 2 } />\n\nlet mixed = <Text>Hello {1} world</Text>\n\nlet total = 3\n"
   }
 }

@@ -34,4 +34,4 @@
 ## 5. Docs and checks
 
 - [x] 5.1 Document editing, `editable`, `nx-edit` and `nx-open` in `packages/viewer/README.md`, and `sourceEdit` in the language packages' READMEs; add the changes to `src/vscode/CHANGELOG.md`'s next release and the package changelogs
-- [ ] 5.2 Run `cargo test`, `pnpm -r build` and `pnpm -r test`, and `openspec validate add-visual-value-editing --strict`, all passing
+- [x] 5.2 Run `cargo test`, `pnpm -r build` and `pnpm -r test`, and `openspec validate add-visual-value-editing --strict`, all passing

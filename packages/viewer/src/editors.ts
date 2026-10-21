@@ -82,15 +82,16 @@ export function showValue(span: HTMLElement, target: EditTarget, written: string
 
 /**
  * `text`, a numeric literal, moved by `steps`: an integer stays one, and a real keeps as many
- * decimals as it has. Nothing when `text` is not a decimal number.
+ * decimals as it has; unless `signed`, it stops at zero. Nothing when `text` is not a decimal number.
  */
-export function stepNumber(text: string, steps: number): string | undefined {
+export function stepNumber(text: string, steps: number, signed = true): string | undefined {
   const trimmed = text.trim();
   if (!isNumericLiteral(trimmed) || /[xXeE]/.test(trimmed)) {
     return undefined;
   }
   const decimals = trimmed.includes(".") ? trimmed.length - trimmed.indexOf(".") - 1 : 0;
-  const next = Number(trimmed) + steps;
+  // Where a number cannot be negative, it stops at zero.
+  const next = signed ? Number(trimmed) + steps : Math.max(0, Number(trimmed) + steps);
   return decimals === 0 ? String(Math.round(next)) : next.toFixed(decimals);
 }
 

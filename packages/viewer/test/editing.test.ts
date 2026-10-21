@@ -86,6 +86,37 @@ function events(element: NxViewerElement): { edits: NxEditDetail[]; opens: NxOpe
   return { edits, opens };
 }
 
+/**
+ * A selection that holds ranges in a shadow root, as browsers' do and jsdom's does not, standing in
+ * for the document's for the test `t`.
+ */
+function fakeSelection(t: TestContext): Selection {
+  let ranges: Range[] = [];
+  const selection = {
+    get rangeCount() {
+      return ranges.length;
+    },
+    getRangeAt: (index: number) => ranges[index]!,
+    removeAllRanges: () => {
+      ranges = [];
+    },
+    addRange: (range: Range) => {
+      ranges = [range];
+    },
+    selectAllChildren: (node: Node) => {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      ranges = [range];
+    }
+  } as unknown as Selection;
+  const { getSelection } = document;
+  document.getSelection = () => selection;
+  t.after(() => {
+    document.getSelection = getSelection;
+  });
+  return selection;
+}
+
 /** A pointer event as jsdom lacks one: a mouse event with a pointer id. */
 function pointer(type: string, clientX: number, init: MouseEventInit = {}): MouseEvent {
   const event = new window.MouseEvent(type, { bubbles: true, composed: true, cancelable: true, clientX, button: 0, ...init });
@@ -248,6 +279,76 @@ describe("editing in place", () => {
     assert.equal(field(element)?.textContent, "Half typed");
   });
 
+  it("keeps the caret of an editor open across a newer tree, and through a tree cleared first", async (t) => {
+    narrow(t, 40);
+    const selection = fakeSelection(t);
+    const fixed = await fixture("editing");
+    const element = show(fixed);
+    element.selection = "latte.value.name";
+    press(body(element), "Enter");
+    const open = field(element)!;
+    open.textContent = "Half typed";
+    const caret = document.createRange();
+    caret.setStart(open.firstChild!, 4);
+    caret.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(caret);
+    // As a host does: the tree cleared, the text set, then the new tree.
+    element.tree = undefined;
+    element.text = fixed.text;
+    element.tree = fixed.tree;
+    const reopened = field(element)!;
+    assert.equal(reopened.textContent, "Half typed");
+    assert.equal(selection.rangeCount, 1);
+    const range = selection.getRangeAt(0);
+    assert.ok(reopened.contains(range.startContainer), "the caret is in the field");
+    assert.equal(range.collapsed, true, "nothing is selected, so the next key does not replace the draft");
+    assert.equal(range.startOffset, 4, "the caret is where the reader left it");
+  });
+
+  it("takes a sign only where the grammar takes one", async (t) => {
+    narrow(t, 40);
+    const fixed = await fixture("editingEdges");
+    const targets = editTargets(indexTree(fixed.tree, fixed.text));
+    assert.equal(targets.get("total.value")?.signed, true, "an unbraced let value");
+    assert.equal(targets.get("box.value.depth.value")?.signed, false, "a braced value");
+    assert.equal(targets.get("box.value.items.value[0]")?.signed, false, "an item of a sequence");
+    const element = show(fixed);
+    const { edits } = events(element);
+    rendered(element, "box.value.depth.value").dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true, composed: true }));
+    const open = field(element)!;
+    assert.equal(open.textContent, "3");
+    press(open, "ArrowDown", { shiftKey: true });
+    assert.equal(open.textContent, "0", "the arrows stop at zero");
+    open.textContent = "-1";
+    press(open, "Enter");
+    assert.deepEqual(edits, [], "a negative number is not committed");
+    assert.ok(open.classList.contains("invalid"));
+  });
+
+  it("offers no text field for a string with an escape other than a quote or a backslash", async () => {
+    const fixed = await fixture("editingEdges");
+    const targets = editTargets(indexTree(fixed.tree, fixed.text));
+    assert.equal(targets.get("box.value.title.value"), undefined, "\\n would be written back as n");
+    assert.equal(targets.get("box.value.note.value")?.value, 'say "hi" \\ ok');
+    const element = show(fixed);
+    const { opens } = events(element);
+    rendered(element, "box.value.title.value").dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true, composed: true }));
+    assert.equal(field(element), null);
+    assert.equal(opens.length, 1, "it opens in the source instead");
+  });
+
+  it("edits a run of text without the space that separates it from what follows", async () => {
+    const element = show(await fixture("editingEdges"));
+    const { edits } = events(element);
+    rendered(element, "mixed.value.text[0]").dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true, composed: true }));
+    const open = field(element)!;
+    assert.equal(open.textContent, "Hello");
+    open.textContent = "Hi";
+    press(open, "Enter");
+    assert.deepEqual(edits, [{ key: "mixed.value.text[0]", edit: { kind: "setText", text: "Hi" } }]);
+  });
+
   it("picks a case from a popover of the union's cases", async (t) => {
     narrow(t, 40);
     const element = show(await fixture("editing"));
@@ -346,6 +447,36 @@ describe("editing in place", () => {
     name.click();
     assert.deepEqual(edits, [{ key: "latte.value.shots.value", edit: { kind: "setValue", value: { kind: "number", text: "12" } } }]);
     assert.notEqual(element.selection, "latte.value.shots", "the drag's click does not select");
+  });
+
+  it("carries a drag on through a newer tree", async (t) => {
+    narrow(t, 40);
+    const fixed = await fixture("editing");
+    const element = show(fixed);
+    const { edits } = events(element);
+    const scrubName = (): HTMLElement => root(element).querySelector<HTMLElement>('.scrub[data-hover="latte.value.shots"]')!;
+    scrubName().dispatchEvent(pointer("pointerdown", 100));
+    scrubName().dispatchEvent(pointer("pointermove", 110));
+    assert.equal(rendered(element, "latte.value.shots.value").textContent, "7");
+    element.tree = fixed.tree;
+    assert.equal(rendered(element, "latte.value.shots.value").textContent, "7", "the number dragged to is still shown");
+    assert.ok(body(element).classList.contains("scrubbing"));
+    scrubName().dispatchEvent(pointer("pointermove", 120));
+    assert.equal(rendered(element, "latte.value.shots.value").textContent, "12", "the drag goes on");
+    scrubName().dispatchEvent(pointer("pointerup", 120));
+    assert.deepEqual(edits, [{ key: "latte.value.shots.value", edit: { kind: "setValue", value: { kind: "number", text: "12" } } }]);
+    assert.ok(!body(element).classList.contains("scrubbing"), "the reading reads as before");
+  });
+
+  it("ends a drag cleanly when the number is gone from the newer tree", async (t) => {
+    narrow(t, 40);
+    const fixed = await fixture("editing");
+    const element = show(fixed);
+    const name = root(element).querySelector<HTMLElement>('.scrub[data-hover="latte.value.shots"]')!;
+    name.dispatchEvent(pointer("pointerdown", 100));
+    name.dispatchEvent(pointer("pointermove", 110));
+    element.tree = (await fixture("editingEdges")).tree;
+    assert.ok(!body(element).classList.contains("scrubbing"), "the reading does not stay in a drag");
   });
 
   it("sets a color from a hex field", async (t) => {

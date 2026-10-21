@@ -10,7 +10,10 @@ export interface VisualEdit {
 export interface EditedDocument {
   /** The document's text, or null while there is none. */
   text(): string | null;
-  /** Applies `edits` one after another to the text, as one undoable step. */
+  /**
+   * Applies `edits` to the text as one undoable step. Every range is in the text as it is now, and
+   * none overlap.
+   */
   apply(edits: readonly TextEdit[]): void;
 }
 
@@ -18,24 +21,29 @@ export interface EditedDocument {
  * Applies Visual's edits to `document` in the order they are fired, each against the text the one
  * before left: the language service answers each edit for the text as it is when its turn comes,
  * and its text edits are applied unless the text changed while it was asked. A refused edit changes
- * nothing. `onApplied` is told the text after each edit that changed it.
+ * nothing. `onApplied` is told the text after each edit that changed it, and `onUnchanged` of each
+ * edit that changed nothing: refused, answered with no edits, answered for text since changed, or
+ * failed. Visual shows the reader's value until it is given a tree, so it is given the one it has.
  */
 export function createEditQueue(
   service: Pick<NxLanguageService, "sourceEdit">,
   uri: string,
   document: EditedDocument,
   onApplied: (text: string) => void,
+  onUnchanged: () => void = () => undefined,
 ): (edit: VisualEdit) => Promise<void> {
   let last: Promise<void> = Promise.resolve();
   return (edit) => {
     const next = last.then(async () => {
       const text = document.text();
       if (text === null) {
+        onUnchanged();
         return;
       }
       const answer = await service.sourceEdit({ documents: [{ uri, source: text }], uri, key: edit.key, edit: edit.edit });
       // An edit typed in Source meanwhile moved the text the answer counts in.
       if (answer.edits.length === 0 || document.text() !== text) {
+        onUnchanged();
         return;
       }
       document.apply(answer.edits);
@@ -45,7 +53,10 @@ export function createEditQueue(
       }
     });
     // A failed edit does not hold up the ones after it.
-    last = next.catch((error: unknown) => console.debug("nx visual edit", error));
+    last = next.catch((error: unknown) => {
+      console.debug("nx visual edit", error);
+      onUnchanged();
+    });
     return next;
   };
 }

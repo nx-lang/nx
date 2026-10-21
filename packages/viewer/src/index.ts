@@ -155,10 +155,24 @@ interface EditSession {
   closed: boolean;
 }
 
+/** An editor open when the reading was drawn again, to open again on the same value. */
+interface Reopen {
+  readonly key: string;
+  /** What the editor held. */
+  readonly draft: string | undefined;
+  /** Where the caret and selection were in it, in UTF-16 offsets. */
+  readonly caret: Caret | undefined;
+}
+
+interface Caret {
+  readonly start: number;
+  readonly end: number;
+}
+
 /** A number's name being dragged sideways to change it. */
 interface Scrub {
-  readonly target: EditTarget;
-  readonly name: HTMLElement;
+  target: EditTarget;
+  name: HTMLElement;
   readonly pointer: number;
   readonly x: number;
   /** The number when the drag began. */
@@ -222,6 +236,8 @@ export class NxViewerElement extends ElementBase {
   #targets = new Map<string, EditTarget>();
   /** The editor open, if any. */
   #session: EditSession | undefined;
+  /** The editor to open again once the reading is drawn with a tree. */
+  #reopen: Reopen | undefined;
   /** Each value edited since the host last set a tree, as the reader left it, shown until it does. */
   #pending = new Map<string, string>();
   /** The attributes removed since the host last set a tree, shown muted until it does. */
@@ -633,10 +649,12 @@ export class NxViewerElement extends ElementBase {
     // What the card described may be gone, and so may what the pointer was over. An editor open is
     // opened again on its value, as the reader left it, when the value is still there.
     this.#closeCard();
+    // A host that clears the tree before it sets the next one gets the editor back with that one.
     const session = this.#session;
-    const reopen = session === undefined || session.closed ? undefined : { key: session.target.key, draft: this.#draftOf(session) };
+    if (session !== undefined && !session.closed) {
+      this.#reopen = { key: session.target.key, draft: this.#draftOf(session), caret: this.#caretOf(session) };
+    }
     this.#dropSession();
-    this.#scrub = undefined;
     this.#pointedKey = undefined;
     this.#rendered.clear();
     this.#hoveredUnit = undefined;
@@ -647,6 +665,10 @@ export class NxViewerElement extends ElementBase {
     if (tree === undefined) {
       return;
     }
+    // A drag on a number's name goes on with the next tree, on the same number.
+    const scrub = this.#scrub;
+    this.#scrub = undefined;
+    this.#body.classList.remove("scrubbing");
     const index = indexTree(tree, this.#text);
     this.#index = index;
     this.#runs = readingRuns(index);
@@ -679,6 +701,9 @@ export class NxViewerElement extends ElementBase {
     if (this.#editable) {
       this.#targets = editTargets(index);
       this.#markEditable();
+      if (scrub !== undefined) {
+        this.#resumeScrub(scrub);
+      }
     }
     // Keep the selection across a new tree when the node is still there. A fold asked for since,
     // by the reader or the host, is kept: when it hides the selection, the selection moves to the
@@ -700,8 +725,10 @@ export class NxViewerElement extends ElementBase {
     this.#body.append(this.#highlights, this.#rowAction);
     this.#paintHighlights();
     this.#turnChevron();
+    const reopen = this.#reopen;
+    this.#reopen = undefined;
     if (reopen !== undefined && this.#targets.has(reopen.key) && this.#rendered.has(reopen.key)) {
-      this.#openEditor(reopen.key, reopen.draft);
+      this.#openEditor(reopen.key, reopen.draft, reopen.caret);
     }
     // Fonts that arrive later change where the rows fall, and what fits on a line.
     const remeasure = this.ownerDocument.fonts !== undefined && this.ownerDocument.fonts.status !== "loaded";
@@ -1149,10 +1176,10 @@ export class NxViewerElement extends ElementBase {
   }
 
   /**
-   * Opens the editor of the value with `key`, holding `draft` when it is given, as when a reading
-   * drawn again opens an editor the reader had open; a boolean toggles instead.
+   * Opens the editor of the value with `key`, holding `draft` with `caret` when they are given, as
+   * when a reading drawn again opens an editor the reader had open; a boolean toggles instead.
    */
-  #openEditor(key: string, draft?: string): void {
+  #openEditor(key: string, draft?: string, caret?: Caret): void {
     const target = this.#targets.get(key);
     const span = this.#rendered.get(key);
     if (target === undefined || span === undefined) {
@@ -1168,14 +1195,65 @@ export class NxViewerElement extends ElementBase {
         this.#commitValue(target, current === "true" ? "false" : "true");
         return;
       case "case":
-        this.#openCases(target, span, draft ?? "");
+        this.#openCases(target, span, draft ?? "", caret);
         return;
       case "color":
-        this.#openColor(target, span, draft ?? current);
+        this.#openColor(target, span, draft ?? current, caret);
         return;
       default:
-        this.#openField(target, span, draft ?? current);
+        this.#openField(target, span, draft ?? current, caret);
     }
+  }
+
+  /** Where the caret and selection are in the open editor, or nothing when it has no focus. */
+  #caretOf(session: EditSession): Caret | undefined {
+    const input = session.input;
+    if (input !== undefined) {
+      return input.selectionStart === null ? undefined : { start: input.selectionStart, end: input.selectionEnd ?? input.selectionStart };
+    }
+    const field = session.field;
+    const selection = this.#domSelection();
+    if (field === undefined || selection === null || selection === undefined || selection.rangeCount === 0) {
+      return undefined;
+    }
+    const range = selection.getRangeAt(0);
+    if (!field.contains(range.startContainer) || !field.contains(range.endContainer)) {
+      return undefined;
+    }
+    const offset = (node: Node, at: number): number => {
+      const before = this.ownerDocument.createRange();
+      before.selectNodeContents(field);
+      before.setEnd(node, at);
+      return before.toString().length;
+    };
+    return { start: offset(range.startContainer, range.startOffset), end: offset(range.endContainer, range.endOffset) };
+  }
+
+  /** Puts the caret and selection back in `field`, as `caret` says, within what it holds. */
+  #placeCaret(field: HTMLElement, caret: Caret): void {
+    const text = field.firstChild;
+    const length = text?.textContent?.length ?? 0;
+    const selection = this.#domSelection();
+    try {
+      const range = this.ownerDocument.createRange();
+      if (text === null) {
+        range.setStart(field, 0);
+        range.collapse(true);
+      } else {
+        range.setStart(text, Math.min(caret.start, length));
+        range.setEnd(text, Math.min(Math.max(caret.end, caret.start), length));
+      }
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    } catch {
+      // A selection the DOM cannot make leaves the caret where it is.
+    }
+  }
+
+  /** The selection of the reading's shadow root, where the browser keeps one apart, or the document's. */
+  #domSelection(): Selection | null | undefined {
+    const root = this.shadowRoot as (ShadowRoot & { getSelection?(): Selection | null }) | null;
+    return root?.getSelection?.() ?? this.ownerDocument.getSelection?.();
   }
 
   /** What an open editor holds now, to open it again with. */
@@ -1184,7 +1262,7 @@ export class NxViewerElement extends ElementBase {
   }
 
   /** A field in the value's own place, holding `text`, that grows with it and wraps in the reading. */
-  #openField(target: EditTarget, span: HTMLElement, text: string): void {
+  #openField(target: EditTarget, span: HTMLElement, text: string, caret?: Caret): void {
     const { host, lead, trail, keep } = valueHost(span, this.#writtenOf(target));
     const restore = [...host.childNodes];
     const field = this.ownerDocument.createElement("span");
@@ -1208,13 +1286,17 @@ export class NxViewerElement extends ElementBase {
     this.#validate(session);
     this.#paintHighlights();
     field.focus({ preventScroll: true });
-    this.#selectAll(field);
+    // A field opened afresh is selected whole, so typing replaces it; one opened again keeps the caret.
+    if (caret === undefined) {
+      this.#selectAll(field);
+    } else {
+      this.#placeCaret(field, caret);
+    }
   }
 
   /** Selects all `field` holds, so typing replaces it. */
   #selectAll(field: HTMLElement): void {
-    const root = this.shadowRoot as (ShadowRoot & { getSelection?(): Selection | null }) | null;
-    const selection = root?.getSelection?.() ?? this.ownerDocument.getSelection?.();
+    const selection = this.#domSelection();
     try {
       selection?.selectAllChildren(field);
     } catch {
@@ -1234,7 +1316,10 @@ export class NxViewerElement extends ElementBase {
   #problemOf(target: EditTarget, value: string): string | undefined {
     switch (target.kind) {
       case "number":
-        return isNumericLiteral(value.trim()) ? undefined : "Not a number";
+        if (!isNumericLiteral(value.trim())) {
+          return "Not a number";
+        }
+        return target.signed === false && value.trim().startsWith("-") ? "Cannot be negative here" : undefined;
       case "run":
         return runProblem(value);
       case "color":
@@ -1285,7 +1370,8 @@ export class NxViewerElement extends ElementBase {
           return;
         }
         event.preventDefault();
-        const stepped = stepNumber(field.textContent ?? "", (event.key === "ArrowUp" ? 1 : -1) * (event.shiftKey ? 10 : 1));
+        const steps = (event.key === "ArrowUp" ? 1 : -1) * (event.shiftKey ? 10 : 1);
+        const stepped = stepNumber(field.textContent ?? "", steps, session.target.signed !== false);
         if (stepped !== undefined) {
           field.textContent = stepped;
           this.#validate(session);
@@ -1510,7 +1596,7 @@ export class NxViewerElement extends ElementBase {
   // ---- Popovers ---------------------------------------------------------------------------
 
   /** The union's cases with no properties, to choose from, the current one marked, `filter` typed. */
-  #openCases(target: EditTarget, span: HTMLElement, filter: string): void {
+  #openCases(target: EditTarget, span: HTMLElement, filter: string, caret?: Caret): void {
     const document = this.ownerDocument;
     const input = document.createElement("input");
     input.className = "popover-filter";
@@ -1539,6 +1625,9 @@ export class NxViewerElement extends ElementBase {
     this.#filterCases(session, options.find((option) => option.dataset["name"] === current));
     this.#placeCard(span, this.#popover);
     input.focus({ preventScroll: true });
+    if (caret !== undefined) {
+      input.setSelectionRange(caret.start, caret.end);
+    }
   }
 
   /** Shows the cases whose names hold what the filter holds, and keeps one of them active. */
@@ -1566,7 +1655,7 @@ export class NxViewerElement extends ElementBase {
   }
 
   /** A hex field and the browser's color picker, for a string its visualizer formats as a color. */
-  #openColor(target: EditTarget, span: HTMLElement, text: string): void {
+  #openColor(target: EditTarget, span: HTMLElement, text: string, caret?: Caret): void {
     const document = this.ownerDocument;
     const input = document.createElement("input");
     input.className = "popover-hex";
@@ -1593,7 +1682,11 @@ export class NxViewerElement extends ElementBase {
     this.#validate(session);
     this.#placeCard(span, this.#popover);
     input.focus({ preventScroll: true });
-    input.select();
+    if (caret === undefined) {
+      input.select();
+    } else {
+      input.setSelectionRange(caret.start, caret.end);
+    }
   }
 
   #onPopoverKey(event: KeyboardEvent): void {
@@ -1680,11 +1773,40 @@ export class NxViewerElement extends ElementBase {
       this.#body.classList.add("scrubbing");
     }
     event.preventDefault();
-    const value = stepNumber(scrub.from, Math.trunc(moved / SCRUB_STEP) * (event.shiftKey ? 10 : 1)) ?? scrub.from;
+    const steps = Math.trunc(moved / SCRUB_STEP) * (event.shiftKey ? 10 : 1);
+    const value = stepNumber(scrub.from, steps, scrub.target.signed !== false) ?? scrub.from;
     scrub.value = value;
     const span = this.#rendered.get(scrub.target.key);
     if (span !== undefined) {
       showValue(span, scrub.target, this.#writtenOf(scrub.target), value);
+    }
+  }
+
+  /**
+   * Carries a drag on through a reading drawn again, on the same number's new name, showing the
+   * number it has reached; when the number is gone, or no longer a number, the drag ends.
+   */
+  #resumeScrub(scrub: Scrub): void {
+    const target = this.#targets.get(scrub.target.key);
+    const name = [...this.#body.querySelectorAll<HTMLElement>(".scrub")].find((candidate) => candidate.dataset["scrubKey"] === scrub.target.key);
+    if (target === undefined || target.kind !== "number" || name === undefined) {
+      return;
+    }
+    scrub.target = target;
+    scrub.name = name;
+    this.#scrub = scrub;
+    if (scrub.value === undefined) {
+      return;
+    }
+    this.#body.classList.add("scrubbing");
+    try {
+      name.setPointerCapture?.(scrub.pointer);
+    } catch {
+      // A pointer the DOM no longer knows ends with its next event.
+    }
+    const span = this.#rendered.get(target.key);
+    if (span !== undefined) {
+      showValue(span, target, this.#writtenOf(target), scrub.value);
     }
   }
 

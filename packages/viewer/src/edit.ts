@@ -29,6 +29,11 @@ export interface EditTarget {
   readonly value: string;
   /** The cases a case's popover lists: those of its union that hold no properties. */
   readonly cases?: readonly SourceCase[];
+  /**
+   * Whether a number may be negative here: only an unbraced attribute or `let` value takes a sign,
+   * since in a sequence or inside braces `-` reads as an operator.
+   */
+  readonly signed?: boolean;
 }
 
 /** How a property that may be left out goes: back to its default, or cleared. */
@@ -42,16 +47,31 @@ export function isNumericLiteral(text: string): boolean {
   return /^-?(?:0[xX][0-9a-fA-F]+|\d+(?:\.\d+)?|\d+\.\d+[eE][+-]?\d+)$/.test(text);
 }
 
-/** A string literal's content: its quotes taken off, and each `\` escape read as what it escapes. */
-export function decodeString(written: string): string {
+/**
+ * A string literal's content: its quotes taken off, and `\"` and `\\` read as a quote and a
+ * backslash. Nothing when it holds any other escape, as `\n`: the source edit writes back only those
+ * two, so editing it would lose the others.
+ */
+export function decodeString(written: string): string | undefined {
   const inner = written.length >= 2 && written.startsWith('"') && written.endsWith('"') ? written.slice(1, -1) : written;
-  return inner.replace(/\\([\s\S])/g, "$1");
+  if (inner.replace(/\\[\\"]/g, "").includes("\\")) {
+    return undefined;
+  }
+  return inner.replace(/\\([\\"])/g, "$1");
 }
+
+/**
+ * A run of text content, as the grammar reads one: it starts with neither a space nor `<` or `{`,
+ * holds neither `<` nor `{`, and does not start with `if`, `for` or `else`, or the start of one of
+ * them, as a word, which a block takes.
+ */
+const TEXT_RUN =
+  /^(?:[^\s<{ife][^<{]*|i[^f\s<{][^<{]*|if[^\s<{][^<{]*|f[^o\s<{][^<{]*|fo[^r\s<{][^<{]*|for[^\s<{][^<{]*|e[^l\s<{][^<{]*|el[^s\s<{][^<{]*|els[^e\s<{][^<{]*|else[^\s<{][^<{]*)$/;
 
 /**
  * Why a run of text cannot be written as typed, or nothing when it can: element content has no
  * escapes, so what would start a tag, a braced value or a block cannot be in a run, and a run
- * cannot start with a space or hold a line break.
+ * cannot start with a space or hold a line break. The language service checks again.
  */
 export function runProblem(text: string): string | undefined {
   if (text.trim() === "") {
@@ -63,11 +83,11 @@ export function runProblem(text: string): string | undefined {
   if (/^\s/.test(text)) {
     return "Text cannot start with a space";
   }
-  if (/[<>{}]/.test(text)) {
-    return "Text cannot hold <, >, { or }";
+  if (/[<{]/.test(text)) {
+    return "Text cannot hold < or {";
   }
-  if (/^(?:if|for|else)\b/.test(text)) {
-    return "Text cannot start with if, for or else";
+  if (!TEXT_RUN.test(text)) {
+    return "Text cannot start with if, for or else, or the start of one, as a word";
   }
   return undefined;
 }
@@ -142,7 +162,9 @@ function targetOf(
   const node = tree.nodes[at]!;
   const key = node.key;
   if (node.role === "text") {
-    return isPlainRun(index, at) ? { at, key, kind: "run", value: node.value ?? "" } : undefined;
+    // The space after a run separates it from what follows, a braced value or an element, and stays.
+    const value = (node.value ?? "").trimEnd();
+    return isPlainRun(index, at) && value !== "" ? { at, key, kind: "run", value } : undefined;
   }
   if ((node.role !== "literal" && node.role !== "case") || !isWholeValue(index, at)) {
     return undefined;
@@ -156,13 +178,16 @@ function targetOf(
   const written = node.value ?? "";
   if (written.startsWith('"') && written.endsWith('"') && written.length >= 2) {
     const format = formats.get(at) ?? declared.format;
-    return { at, key, kind: format === "color" ? "color" : "text", value: decodeString(written) };
+    const value = decodeString(written);
+    return value === undefined ? undefined : { at, key, kind: format === "color" ? "color" : "text", value };
   }
   if (written === "true" || written === "false") {
     return { at, key, kind: "boolean", value: written };
   }
   if (isNumericLiteral(written) && (declared.base === undefined || NUMBER_TYPES.has(declared.base))) {
-    return { at, key, kind: "number", value: written };
+    const owner = node.parent === undefined ? undefined : tree.nodes[node.parent];
+    const signed = (owner?.role === "attribute" || owner?.role === "declaration") && node.flags?.includes("braced") !== true;
+    return { at, key, kind: "number", value: written, signed };
   }
   // A literal of any other kind, or a number where something else is declared, reads as it is.
   return undefined;

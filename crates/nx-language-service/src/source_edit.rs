@@ -85,7 +85,8 @@ pub enum SourceEditRefusal {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceEditAnswer {
-    /// The edits that make the change, applied one after another to the document as sent.
+    /// The edits that make the change. Each range is in the document as sent, and no two
+    /// overlap, so a host applies them together, as an editor applies a batch of edits.
     pub edits: Vec<TextEdit>,
     /// Why the edit was not made, when it was not.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -215,6 +216,16 @@ fn set_value(source: &str, tree: &SourceTree, at: usize, value: &SourceEditValue
             return Ok(Some((start + dot + 1, end, text)));
         }
     }
+    // Only a value written unbraced after `=` takes a minus sign or a bare case name: in braces or
+    // in a list, `-3` is an operator and `large` a reference to a name.
+    let unbraced = matches!(
+        parent(tree, node).map(|owner| owner.role),
+        Some(SourceRole::Attribute | SourceRole::Declaration)
+    ) && !node.flags.contains(&SourceFlag::Braced);
+    let signed = matches!(value, SourceEditValue::Number { text } if text.starts_with('-'));
+    if !unbraced && (signed || matches!(value, SourceEditValue::Case { .. })) {
+        return Err(SourceEditRefusal::InvalidValue);
+    }
     Ok(Some((start, end, text)))
 }
 
@@ -308,13 +319,19 @@ fn set_text(source: &str, tree: &SourceTree, at: usize, text: &str) -> Replaceme
         return Err(SourceEditRefusal::InvalidValue);
     }
     let (start, end) = byte_span(node);
+    // The space a run ends with, as before a braced value or a tag, separates it from what follows
+    // and stays: the new text takes the place of the words.
+    let written = &source[start..end];
+    let words = written.trim_end();
+    let trail = &written[words.len()..];
     // Element content has no escapes: a run is the text as written, and what would start a tag,
     // a braced value or an `if`, `for` or `else` block cannot be in one. So the text is written as
     // it is, and kept only when the document then reads it back as one run of exactly that text.
-    if !reads_as_one_run(source, start, end, text) {
+    let run = format!("{text}{trail}");
+    if !reads_as_one_run(source, start, end, &run) {
         return Err(SourceEditRefusal::InvalidValue);
     }
-    Ok(Some((start, end, text.to_string())))
+    Ok(Some((start, start + words.len(), text.to_string())))
 }
 
 /// Whether replacing `start..end` of `source` with `text` leaves a run of text that is exactly
@@ -347,6 +364,8 @@ fn reads_as_one_run(source: &str, start: usize, end: usize, text: &str) -> bool 
     find(syntax.root(), wanted)
 }
 
+/// Removes an attribute with the space before it and a line comment after it, or its whole line when
+/// it stands alone there. A comment on the line above stays: it may be about more than the attribute.
 fn remove(source: &str, tree: &SourceTree, at: usize) -> Replacement {
     let node = &tree.nodes[at];
     if node.role != SourceRole::Attribute || node.flags.contains(&SourceFlag::Content) {
@@ -361,10 +380,17 @@ fn remove(source: &str, tree: &SourceTree, at: usize) -> Replacement {
     while before > 0 && is_blank(bytes[before - 1]) {
         before -= 1;
     }
-    // The space after it, up to the next token or the end of its line.
+    // The space after it, up to the next token or the end of its line. A line comment after it is
+    // about it, and goes with it.
     let mut after = end;
     while after < bytes.len() && is_blank(bytes[after]) {
         after += 1;
+    }
+    let commented = source[after..].starts_with("//");
+    if commented {
+        after = source[after..]
+            .find(['\r', '\n'])
+            .map_or(source.len(), |offset| after + offset);
     }
     let starts_line = before == 0 || bytes[before - 1] == b'\n';
     let ends_line = after == bytes.len() || bytes[after] == b'\n' || bytes[after] == b'\r';
@@ -382,5 +408,9 @@ fn remove(source: &str, tree: &SourceTree, at: usize) -> Replacement {
         // First on its line, with more after it: the space after it goes instead.
         return Ok(Some((start, after, String::new())));
     }
-    Ok(Some((before, end, String::new())))
+    Ok(Some((
+        before,
+        if commented { after } else { end },
+        String::new(),
+    )))
 }

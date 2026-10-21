@@ -5,9 +5,11 @@ The language service SHALL answer a `sourceEdit` query, which carries the docume
 document to edit, the key of a node in that document's source tree, and one edit: `setValue` with a
 typed value, `setText` with a line of text, or `remove`. It SHALL resolve the key against the
 document as the request carries it, by the keys its source tree gives. Its answer SHALL be the text
-edits that make the change, each a range in the protocol's form and its new text, in an order that can
-be applied one after another to the document as sent, touching nothing outside the target and the
-whitespace that separates it from its neighbours. An edit that would leave the text as it is SHALL
+edits that make the change, each a range in the protocol's form and its new text. Every range SHALL be
+in the document as sent, and no two SHALL overlap, so a client applies them together as one change.
+The edits SHALL touch nothing outside the target and the whitespace (and a trailing line comment, for
+`remove`) that separates it from its neighbours, and the edited document SHALL parse wherever the
+original did. An edit that would leave the text as it is SHALL
 answer no edits.
 
 #### Scenario: Applying the answer
@@ -33,6 +35,11 @@ its kind:
 - a case as its bare name, when the name is an identifier other than `true` and `false`; a case
   written qualified, as `{ Size.small }`, SHALL keep its qualifier.
 
+A signed number SHALL be written only where the grammar takes one, an unbraced attribute value or
+`let` value, and a case only at an unbraced place or as a qualified case; elsewhere, in a sequence
+item or inside braces, where `-` reads as an operator and a bare name as a reference, the service
+SHALL refuse the value as `invalidValue`.
+
 The service SHALL NOT check the value against the place's type; a value of the wrong type SHALL be
 written and then reported by the type checker as a hand edit would be.
 
@@ -57,16 +64,27 @@ written and then reported by the type checker as a hand edit would be.
   `4`
 - **THEN** the declaration SHALL read `let primes:int+ = { 2 4 5 7 }`
 
+#### Scenario: A negative item of a sequence
+- **WHEN** a client sets the number value of the second item of `let primes:int+ = { 2 3 5 7 }` to
+  `-4`
+- **THEN** the answer SHALL hold no edits and the refusal `invalidValue`
+
 ### Requirement: A line of text content is set as written
 For `setText`, the target SHALL be a `text` node written on one line, outside a typed or raw text
 body. Element content has no escapes, so the service SHALL write the new text as it is, and SHALL
 refuse it as `invalidValue` unless the document then reads it back as one run of exactly that text,
 with no new parse error: text holding `<` or `{`, starting with a space, or starting with `if`, `for`
-or `else` as a word is refused.
+or `else`, or the start of one of them, as a word (`for you`, `fo`, `e`) is refused. The run's
+trailing whitespace, which separates it from a braced value or element after it, SHALL be kept, and
+the new text SHALL replace only the words before it.
 
 #### Scenario: Text with an ampersand
 - **WHEN** a client sets the text of the run in `<Label>Hello</Label>` to `Fish & chips > all`
 - **THEN** the element SHALL read `<Label>Fish & chips > all</Label>`
+
+#### Scenario: A run before a braced value
+- **WHEN** a client sets the text of the first run in `<L>Hello {1} world</L>` to `Hi`
+- **THEN** the element SHALL read `<L>Hi {1} world</L>`
 
 #### Scenario: Text that would start a tag
 - **WHEN** a client sets the text of that run to `a < b`
@@ -74,8 +92,9 @@ or `else` as a word is refused.
 
 ### Requirement: A property is removed with its separating space
 For `remove`, the target SHALL be an attribute. The service SHALL remove the attribute and the
-whitespace that separates it from the attribute or tag before it; when the attribute stands alone on
-its line, the service SHALL remove that whole line. The service SHALL NOT check that the property may
+whitespace that separates it from the attribute or tag before it, and a `//` comment that follows it
+on its line; when the attribute stands alone on its line, the service SHALL remove that whole line. A
+comment on the line above SHALL stay. The service SHALL NOT check that the property may
 be left out.
 
 #### Scenario: On one line
@@ -86,6 +105,10 @@ be left out.
 - **WHEN** a client removes an attribute that stands alone on its line in an element written one
   attribute per line
 - **THEN** that line SHALL be gone and every other line SHALL be unchanged
+
+#### Scenario: With a comment after it
+- **WHEN** a client removes `a=1` from a line that reads `  a=1 // note`
+- **THEN** the whole line, comment included, SHALL be gone
 
 ### Requirement: What cannot be done is refused, not failed
 The service SHALL answer a request it cannot honor with no edits and a refusal that names why:

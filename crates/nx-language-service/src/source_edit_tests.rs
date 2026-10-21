@@ -43,7 +43,7 @@ fn edit(source: &str, key: &str, edit: SourceEdit) -> SourceEditAnswer {
         .expect("source edit")
 }
 
-/// Applies an answer's edits, one after another, to `source`.
+/// Applies an answer's edits to `source`: every range is in `source` as sent, and none overlap.
 fn apply(source: &str, answer: &SourceEditAnswer) -> String {
     let mut text = source.to_string();
     for edit in answer.edits.iter().rev() {
@@ -352,8 +352,66 @@ fn nx_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+#[test]
+fn a_negative_number_only_where_the_grammar_takes_one() {
+    // An unbraced attribute value or a `let` value may be signed.
+    let after = edited(DRINKS, "total.value", number("-4"));
+    assert!(after.contains("let total = -4"), "{after}");
+    // A sequence item may not, nor a braced value, where `-` reads as an operator.
+    let answer = edit(DRINKS, "primes.value[1]", number("-4"));
+    assert_eq!(answer.refused, Some(SourceEditRefusal::InvalidValue));
+    let source = "type T = { p:int }\nlet v = <T p={8} />\n";
+    let answer = edit(source, "v.value.p.value", number("-3"));
+    assert_eq!(answer.refused, Some(SourceEditRefusal::InvalidValue));
+    let after = edited(source, "v.value.p.value", number("3"));
+    assert!(after.contains("p={3}"), "{after}");
+}
+
+#[test]
+fn a_bare_case_only_where_it_resolves() {
+    // A braced literal set to a case would read as an undefined name.
+    let source = "type Size = small | large\nlet s:string = {\"a\"}\n";
+    let answer = edit(source, "s.value", case("large"));
+    assert_eq!(answer.refused, Some(SourceEditRefusal::InvalidValue));
+    let source = "type Size = small | large\nlet s:string+ = { \"a\" \"b\" }\n";
+    let answer = edit(source, "s.value[0]", case("large"));
+    assert_eq!(answer.refused, Some(SourceEditRefusal::InvalidValue));
+}
+
+#[test]
+fn a_run_keeps_the_space_before_what_follows() {
+    let source = "type L = { content text:string }\nlet l = <L>Hello {1} world</L>\n";
+    let after = edited(source, "l.value.text[0]", text("Hi"));
+    assert!(after.contains("<L>Hi {1} world</L>"), "{after}");
+}
+
+#[test]
+fn removing_takes_a_trailing_comment_with_it() {
+    let source = "type T = { a?:int b?:int }\nlet v = <T\n  a=1 // note\n  b=2\n/>\n";
+    let after = edited(source, "v.value.a", SourceEdit::Remove);
+    assert_eq!(after, "type T = { a?:int b?:int }\nlet v = <T\n  b=2\n/>\n");
+    let source = "type T = { a?:int b?:int }\nlet v = <T a=1 // note\n  b=2 />\n";
+    let after = edited(source, "v.value.a", SourceEdit::Remove);
+    assert_eq!(after, "type T = { a?:int b?:int }\nlet v = <T\n  b=2 />\n");
+}
+
+#[test]
+fn removing_keeps_a_comment_line_above() {
+    let source = "type T = { a?:int b?:int }\nlet v = <T\n  // about a\n  a=1\n  b=2\n/>\n";
+    let after = edited(source, "v.value.a", SourceEdit::Remove);
+    assert_eq!(
+        after,
+        "type T = { a?:int b?:int }\nlet v = <T\n  // about a\n  b=2\n/>\n"
+    );
+}
+
+/// The number of parse errors in `source`.
+fn parse_errors(source: &str) -> usize {
+    nx_syntax::parse_str(source, "edited.nx").errors.len()
+}
+
 /// Over every `.nx` file in the repository: each editable literal set to itself answers no edits,
-/// and set to another value of its kind yields a document with the same keys.
+/// and set to another value of its kind yields a document with the same keys and no new parse errors.
 #[test]
 fn round_trips_over_the_repository() {
     let mut files = Vec::new();
@@ -367,6 +425,7 @@ fn round_trips_over_the_repository() {
         let uri = DocumentUri::from(URI);
         let tree = snapshot.source_tree(&uri).expect("tree");
         let keys: Vec<&str> = tree.nodes.iter().map(|node| node.key.as_str()).collect();
+        let errors = parse_errors(&source);
         // A few values per file keep the test quick; every file still takes part.
         let mut per_file = 0;
         for (at, node) in tree.nodes.iter().enumerate() {
@@ -422,16 +481,33 @@ fn round_trips_over_the_repository() {
                 file.display(),
                 node.key
             );
-            let answer = snapshot.source_edit(&uri, &node.key, &other).expect("edit");
-            assert_eq!(answer.refused, None, "{} {}", file.display(), node.key);
-            let after = apply(&source, &answer);
-            let after_tree = snapshot_for(&after).source_tree(&uri).expect("tree");
-            let after_keys: Vec<&str> = after_tree
-                .nodes
-                .iter()
-                .map(|node| node.key.as_str())
-                .collect();
-            assert_eq!(after_keys, keys, "{} {}", file.display(), node.key);
+            // A negative number is written where the grammar takes one, and refused elsewhere.
+            let mut others = vec![other];
+            if matches!(node.role, SourceRole::Literal) && is_numeric_literal(&written) {
+                others.push(number("-42"));
+            }
+            for other in others {
+                let answer = snapshot.source_edit(&uri, &node.key, &other).expect("edit");
+                if answer.refused == Some(SourceEditRefusal::InvalidValue) && other == number("-42")
+                {
+                    continue;
+                }
+                assert_eq!(answer.refused, None, "{} {}", file.display(), node.key);
+                let after = apply(&source, &answer);
+                assert!(
+                    parse_errors(&after) <= errors,
+                    "{} {}: {after}",
+                    file.display(),
+                    node.key
+                );
+                let after_tree = snapshot_for(&after).source_tree(&uri).expect("tree");
+                let after_keys: Vec<&str> = after_tree
+                    .nodes
+                    .iter()
+                    .map(|node| node.key.as_str())
+                    .collect();
+                assert_eq!(after_keys, keys, "{} {}", file.display(), node.key);
+            }
             checked += 1;
             per_file += 1;
         }

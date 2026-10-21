@@ -215,7 +215,7 @@ export interface Hover {
 
 /** One replacement in a document's text. */
 export interface TextEdit {
-  /** The range replaced, in the document as the request carried it. */
+  /** The range replaced, in the document as the request carried it. The ranges of one answer never overlap. */
   range: EditorRange;
   /** What replaces it. */
   newText: string;
@@ -228,9 +228,9 @@ export interface TextEdit {
 export type SourceEditRefusal = "unknownNode" | "notEditable" | "invalidValue";
 
 /**
- * The answer to a source edit query: the text edits that make the change, to apply one after
- * another to the document as sent, or none and why. An edit that changes nothing answers no edits
- * and no refusal.
+ * The answer to a source edit query: the text edits that make the change, or none and why. Every
+ * range is in the document as sent and no two overlap, so a host applies them together, as one
+ * change. An edit that changes nothing answers no edits and no refusal.
  */
 export interface SourceEditAnswer {
   edits: TextEdit[];

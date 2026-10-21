@@ -171,6 +171,8 @@ export function App() {
   const readingCommands = useRef<ReadingCommands | null>(null);
   // The text an edit made in Visual left, whose tree is asked for at once rather than after a pause.
   const immediateTree = useRef<string | null>(null);
+  // Raised by an edit made in Visual that changed nothing, to give Visual its tree again.
+  const [visualRevision, setVisualRevision] = useState(0);
   const reading = useSourceTree(source, mode === "visual", undefined, immediateTree);
   // Visual's edits, made in the editor's text one after another, each one step of its undo history.
   const applyVisualEdit = useMemo(
@@ -182,6 +184,7 @@ export function App() {
         (text) => {
           immediateTree.current = text;
         },
+        () => setVisualRevision((revision) => revision + 1),
       ),
     [],
   );
@@ -374,6 +377,7 @@ export function App() {
               onOpen={openInSource}
               onUndo={() => visualHistory("undo")}
               onRedo={() => visualHistory("redo")}
+              revision={visualRevision}
             />
           )}
           {/* The editor stays mounted while hidden, keeping its undo history and scroll position. */}

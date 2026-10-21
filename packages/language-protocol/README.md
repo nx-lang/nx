@@ -214,8 +214,8 @@ const refused: SourceEditAnswer = { edits: [], refused: "notEditable" };
 The request names a node of the document's source tree by its `key` and one change: `setValue`
 with a typed value (`string`, `number` as typed, `boolean`, or `case` by name) for a literal or a
 bare union case that is a whole value, `setText` with one line of text for a run of text content,
-or `remove` for an attribute. The answer's `edits`, applied one after another to the document as
-sent, make the change; the service writes the spelling (quotes, escapes, kept braces, an
+or `remove` for an attribute. The answer's `edits` make the change: every range is in the document
+as sent and no two overlap, so a host applies them together; the service writes the spelling (quotes, escapes, kept braces, an
 attribute's whole line). A change it cannot make answers no edits and `refused`: `unknownNode`,
 `notEditable` or `invalidValue`. A change that would leave the text as it is answers no edits and no
 refusal.

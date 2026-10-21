@@ -23,7 +23,10 @@ const service = {
 const sourceTree = (source) =>
   session.answer({ kind: "language", id: ++id, query: "sourceTree", request: { documents: [{ uri, source }], uri, visualizers: {} } });
 
-/** A document as the editor holds it: text edits applied one after another, each one undo step. */
+/**
+ * A document as the editor holds it: an answer's text edits applied together, every range in the
+ * text as it was, as one undo step.
+ */
 function document(text) {
   const steps = [];
   const offset = (source, { line, character }) => {
@@ -41,8 +44,12 @@ function document(text) {
     },
     apply(edits) {
       steps.push(text);
-      for (const edit of edits) {
-        text = text.slice(0, offset(text, edit.range.start)) + edit.newText + text.slice(offset(text, edit.range.end));
+      const before = text;
+      const spans = edits
+        .map((edit) => ({ start: offset(before, edit.range.start), end: offset(before, edit.range.end), newText: edit.newText }))
+        .sort((a, b) => b.start - a.start);
+      for (const { start, end, newText } of spans) {
+        text = text.slice(0, start) + newText + text.slice(end);
       }
     },
   };
@@ -91,13 +98,16 @@ test("edits apply in the order they fire, each against the text the one before l
   assert.equal(edited.steps.length, 3);
 });
 
-test("a refused edit leaves the source as it was", async () => {
+test("a refused edit leaves the source as it was, and says so, so Visual is given its tree again", async () => {
   const edited = document(example);
-  const queue = createEditQueue(service, uri, edited, () => assert.fail("nothing is applied"));
+  let unchanged = 0;
+  const queue = createEditQueue(service, uri, edited, () => assert.fail("nothing is applied"), () => (unchanged += 1));
   await queue({ key: "no.such.node", edit: { kind: "setValue", value: { kind: "string", value: "x" } } });
   await queue({ key: await keyOf(example, "Latte", "name"), edit: { kind: "setValue", value: { kind: "number", text: "12px" } } });
+  await queue({ key: await keyOf(example, "Latte", "name"), edit: { kind: "setValue", value: { kind: "string", value: "Latte" } } });
   assert.equal(edited.text(), example);
   assert.deepEqual(edited.steps, []);
+  assert.equal(unchanged, 3, "two refusals and an edit that changes nothing");
 });
 
 test("an answer for text that changed while it was asked is not applied", async () => {
@@ -110,7 +120,9 @@ test("an answer for text that changed while it was asked is not applied", async 
       return answer;
     },
   };
-  const queue = createEditQueue(slow, uri, edited, () => assert.fail("nothing is applied"));
+  let unchanged = 0;
+  const queue = createEditQueue(slow, uri, edited, () => assert.fail("nothing is applied"), () => (unchanged += 1));
   await queue({ key, edit: { kind: "setValue", value: { kind: "string", value: "Mocha" } } });
   assert.ok(edited.text().includes('name="Latte"'));
+  assert.equal(unchanged, 1);
 });

@@ -42,6 +42,11 @@ export interface ReadingViewProps {
   /** Ctrl or Cmd+Z, and Ctrl+Y or Ctrl or Cmd+Shift+Z, pressed in Visual, for the editor's history. */
   readonly onUndo?: () => void;
   readonly onRedo?: () => void;
+  /**
+   * Raised when an edit made in Visual changed nothing in the source, so no new tree comes: the
+   * reading is given its tree again, and stops showing the value the visitor left.
+   */
+  readonly revision?: number;
 }
 
 /** What the NX pane's title bar can ask of the Visual view. */
@@ -83,6 +88,7 @@ export function ReadingView({
   onOpen,
   onUndo,
   onRedo,
+  revision,
 }: ReadingViewProps) {
   const element = useRef<NxViewerElement>(null);
   const latestFold = useRef(onFold);
@@ -150,7 +156,8 @@ export function ReadingView({
     target.editable = editable;
     target.colors = highlighter !== null ? colorize(highlighter, reading.text, EDITOR_THEMES) : [];
     target.tree = reading.tree;
-  }, [reading.tree, reading.text, highlighter, icons]);
+    // `revision` gives the tree again after an edit that changed nothing.
+  }, [reading.tree, reading.text, highlighter, icons, revision]);
 
   useLayoutEffect(() => {
     if (element.current !== null && element.current.selection !== selection) {

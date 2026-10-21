@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Editing in Visual (unstable)
+- New language query, `sourceEdit`: the text edits that set a literal or a bare union case that is
+  a whole value to a typed value (a string, a number, a boolean or a case), set a one-line run of
+  text, or remove an attribute, by the node's key in the source tree. Quoting, escaping and braces
+  are the service's; an edit it cannot make is refused with a reason (`unknownNode`, `notEditable`,
+  `invalidValue`), not an error. The language service, the Node and wasm SDKs,
+  `@nx-lang/language-protocol`, `-core`, `-http` and `-client` answer it.
+- `<nx-viewer>`'s new `editable` property edits values in place: a field for strings, ids and
+  one-line text, a number field that steps with the arrows and with the property's name dragged
+  sideways, toggles for booleans, a popover of a union's cases with their docs, and a hex field and
+  color picker for a color. Delete resets a property with a default or clears an optional one. Each
+  edit fires `nx-edit` with the node's key and a `sourceEdit` edit for the host to make in its
+  source; a value the reading cannot edit, such as an expression, fires `nx-open`.
+- The playground's Visual edits this way, through the editor, so undo and redo work in both views.
+- `@nx-lang/sdk-wasm`'s module ABI version is now 9; the loader refuses a module of another version.
+
 ## 0.8.0
 
 ### Component state and props
@@ -58,13 +76,6 @@ All notable changes to this project will be documented in this file.
   a reference's type. With the reading focused, `i` shows the selected unit's card. A doc's Markdown
   is rendered as text and elements only, links only to the web, or by the host's `markdown`.
 - The playground's NX pane opens in this view, Visual, beside Source.
-- With `editable` set, values edit in place (unstable): a field for strings, ids and one-line text,
-  a number field that steps with the arrows and with the property's name dragged sideways, toggles
-  for booleans, a popover of a union's cases with their docs, and a hex field and color picker for a
-  color. Delete resets a property with a default or clears an optional one. Each edit fires
-  `nx-edit` with the node's key and a `sourceEdit` edit for the host to make in its source; a value
-  the reading cannot edit, such as an expression, fires `nx-open`. The playground's Visual edits
-  this way, through the editor, so undo and redo work in both views.
 
 ### `@nx-lang/previewer` (new, unstable)
 - Runs one NX component as a headless preview session on `@nx-lang/ir-runtime`: the host draws the
@@ -88,12 +99,7 @@ All notable changes to this project will be documented in this file.
   every token of the source belongs to one. The language service, the Node and wasm SDKs,
   `@nx-lang/language-protocol`, `-core`, `-http` and `-client` answer it. It is
   unstable: its shape may change in any release until a later one commits to it.
-- New language query, `sourceEdit` (unstable): the text edits that set a literal or a bare union
-  case that is a whole value to a typed value (a string, a number, a boolean or a case), set a
-  one-line run of text, or remove an attribute, by the node's key in the source tree. Quoting,
-  escaping and braces are the service's; an edit it cannot make is refused with a reason
-  (`unknownNode`, `notEditable`, `invalidValue`), not an error. The same packages and SDKs answer it.
-- `@nx-lang/sdk-wasm`'s module ABI version is now 9; the loader refuses a module of another version.
+- `@nx-lang/sdk-wasm`'s module ABI version is now 8; the loader refuses a module of another version.
 
 ## 0.7.0
 
