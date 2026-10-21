@@ -217,7 +217,7 @@ SDK's `sourceEdit` and `sourceTree` (scratch script, not committed).
 
 ## New Findings Discovered During 2026-10-21 22:20 Verification
 
-### 🟡 Fixed - RF10 `#caretOf` calls `getComposedRanges` with the dictionary argument and no guard, so an older engine that throws on it would break the reading's render
+### ✅ Verified - RF10 `#caretOf` calls `getComposedRanges` with the dictionary argument and no guard, so an older engine that throws on it would break the reading's render
 - **Severity:** Low (confidence: medium; depends on the engine version)
 - **Evidence:** `#caretOf` (packages/viewer/src/index.ts) calls
   `selection.getComposedRanges?.({ shadowRoots: [...] })`. `#render` calls it with no try/catch,
@@ -234,6 +234,7 @@ SDK's `sourceEdit` and `sourceTree` (scratch script, not committed).
 - **Fix:** The `getComposedRanges` call is in a try/catch; a throw reads as no composed range, and the
   selection's own range is read, or the caret goes after the draft. The test "puts the caret after the
   draft when where it was cannot be read" now has `getComposedRanges` throw.
+- **Verification:** Verified (commit ccb1715). The `getComposedRanges` call is now inside a try/catch, and a throw counts as no composed range. `#caretOf` then reads the selection's own range or returns nothing, and `#render` puts the caret after the draft as RF9's fallback does. The render can no longer abort. The RF9 test now makes `getComposedRanges` throw a `TypeError` and still checks that the caret is collapsed after the draft. Viewer suite: 111/111 pass.
 
 ## Questions
 - Should Enter and F2 toggle a boolean when it is the first editable value of the selected unit? They do
