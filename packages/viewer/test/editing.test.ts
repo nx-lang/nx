@@ -315,6 +315,10 @@ describe("editing in place", () => {
     press(body(element), "Enter");
     field(element)!.textContent = "Half typed";
     selection.removeAllRanges();
+    // An engine that takes the shadow roots in another form throws.
+    (selection as Selection & { getComposedRanges(): never }).getComposedRanges = () => {
+      throw new TypeError("not a ShadowRoot");
+    };
     element.tree = fixed.tree;
     const range = selection.getRangeAt(0);
     assert.ok(field(element)!.contains(range.startContainer));

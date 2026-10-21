@@ -1220,9 +1220,15 @@ export class NxViewerElement extends ElementBase {
       return undefined;
     }
     // Where the browser keeps no selection apart for a shadow root, its composed ranges reach inside.
-    const composed = (
-      selection as Selection & { getComposedRanges?(options: { shadowRoots: ShadowRoot[] }): StaticRange[] }
-    ).getComposedRanges?.({ shadowRoots: this.shadowRoot === null ? [] : [this.shadowRoot] })[0];
+    // An engine that takes them in another form throws, and the selection's own range is read.
+    let composed: StaticRange | undefined;
+    try {
+      composed = (
+        selection as Selection & { getComposedRanges?(options: { shadowRoots: ShadowRoot[] }): StaticRange[] }
+      ).getComposedRanges?.({ shadowRoots: this.shadowRoot === null ? [] : [this.shadowRoot] })[0];
+    } catch {
+      composed = undefined;
+    }
     const range = composed ?? (selection.rangeCount === 0 ? undefined : selection.getRangeAt(0));
     if (range === undefined || !field.contains(range.startContainer) || !field.contains(range.endContainer)) {
       return undefined;

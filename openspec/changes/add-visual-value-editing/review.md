@@ -197,7 +197,7 @@ SDK's `sourceEdit` and `sourceTree` (scratch script, not committed).
 
 ## New Findings Discovered During 2026-10-21 22:10 Verification
 
-### 🟡 Fixed - RF9 An editor reopened with no caret it can read still selects everything, as a fresh open does
+### ✅ Verified - RF9 An editor reopened with no caret it can read still selects everything, as a fresh open does
 - **Severity:** Low (confidence: high on the code path; medium on which browsers reach it)
 - **Evidence:** `#openField`, `#openColor` and `#openCases` take `caret === undefined` to mean a fresh
   open, and `#openField` then calls `#selectAll`. But `#caretOf` also returns `undefined` on a reopen
@@ -213,6 +213,27 @@ SDK's `sourceEdit` and `sourceTree` (scratch script, not committed).
   (`#render` passes `{ start: end, end }`), so a reopened editor never selects the draft. `#caretOf`
   reads `Selection.getComposedRanges({ shadowRoots: [root] })` first where the browser has it, then
   the selection's own range. Test "puts the caret after the draft when where it was cannot be read".
+- **Verification:** Verified (commit 0d6018a). A reopen whose caret can't be read now gets a collapsed caret at the end of the draft (`reopen.caret ?? { start: end, end }`), so a reopened field or popover input never selects what was typed. Only a fresh open (with no caret passed) selects all. `#caretOf` reads `getComposedRanges` first, then the selection's own range. The new test "puts the caret after the draft when where it was cannot be read" covers the fallback. Viewer suite: 111/111 pass. See RF10 for one hardening point on the `getComposedRanges` call.
+
+## New Findings Discovered During 2026-10-21 22:20 Verification
+
+### 🟡 Fixed - RF10 `#caretOf` calls `getComposedRanges` with the dictionary argument and no guard, so an older engine that throws on it would break the reading's render
+- **Severity:** Low (confidence: medium; depends on the engine version)
+- **Evidence:** `#caretOf` (packages/viewer/src/index.ts) calls
+  `selection.getComposedRanges?.({ shadowRoots: [...] })`. `#render` calls it with no try/catch,
+  whenever an editor is open. The first engines to ship `getComposedRanges`, WebKit's (Safari 17 and
+  later), took the shadow roots as separate arguments (`getComposedRanges(...shadowRoots)`) before the
+  spec moved to the dictionary. An engine with that signature rejects a plain object with a
+  `TypeError`, and the optional call `?.` does not catch it. `#render` would then stop after clearing
+  the body, leaving an empty reading the first time a tree arrives with a field open. That is the
+  WebKit case RF9 set out to fix. The fallback added for RF9 never runs, because the exception comes
+  first.
+- **Recommendation:** Wrap the `getComposedRanges` call, or all of `#caretOf`, in try/catch and treat a
+  throw as "caret unknown", which RF9's fallback already handles. Alternatively, detect the signature
+  (try the dictionary, then the variadic form).
+- **Fix:** The `getComposedRanges` call is in a try/catch; a throw reads as no composed range, and the
+  selection's own range is read, or the caret goes after the draft. The test "puts the caret after the
+  draft when where it was cannot be read" now has `getComposedRanges` throw.
 
 ## Questions
 - Should Enter and F2 toggle a boolean when it is the first editable value of the selected unit? They do
