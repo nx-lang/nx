@@ -251,7 +251,7 @@ icons, and the spec, design and tasks section 6). Checks:
   - a click on a name only selects;
   - the title bar fits at 320 px.
 
-### 🟡 Fixed - RF11 The title bar's Undo, pressed while a Visual field is open, undoes the step before and throws away what was typed in the field
+### ✅ Verified - RF11 The title bar's Undo, pressed while a Visual field is open, undoes the step before and throws away what was typed in the field
 - **Severity:** Medium (confidence: high, reproduced in Chromium)
 - **Evidence:** I set the title (edit A, committed), then clicked the description, typed `BB` and clicked the
   title bar's Undo:
@@ -276,8 +276,9 @@ icons, and the spec, design and tasks section 6). Checks:
   so an Undo pressed with a field open takes back the field's edit, which the press committed, and
   the edit before it stays. Test in edits.test.mjs: a step waits for the edit fired before it. Spec
   sentence in the playground's requirement.
+- **Verification:** Verified (commit d785fbb). `createEditQueue` now has `after(step)`, and `visualHistory` runs undo and redo through it. A step therefore waits for every edit fired before it, including the one a button press commits by blurring the field. In Chromium I repeated my earlier steps: commit A, type `BB` in the description, click Undo. A stays and B is taken back; Undo and Redo are both enabled, and Redo restores `ABB 3-5…`. The new edits.test.mjs case checks the ordering. edits.test.mjs: 5/5 pass. The spec states the ordering.
 
-### 🟡 Fixed - RF12 With Backspace and the row button gone, Reset and Clear are out of reach on Mac laptops and touch screens
+### ✅ Verified - RF12 With Backspace and the row button gone, Reset and Clear are out of reach on Mac laptops and touch screens
 - **Severity:** Medium (confidence: high on the key mapping; how much it matters depends on who uses Visual)
 - **Evidence:** Removal now listens only for `event.key === "Delete"` (index.ts `#onKey`). On a Mac laptop the
   key labelled "delete" reports `Backspace`; a forward `Delete` needs Fn+Delete, which few readers know. Phones
@@ -297,8 +298,9 @@ icons, and the spec, design and tasks section 6). Checks:
 - **Fix:** Cmd+Backspace removes as Delete does (a Mac laptop's delete key). Touch has no removal for
   now: the spec and design say removal is from the keyboard until a later change gives rows a menu
   (phase 2 needs one for adding properties). Test: the removal test presses Cmd+Backspace.
+- **Verification:** Verified (commit d785fbb). Cmd+Backspace now removes the selected row's property (`#onKey`), as Delete does. Backspace alone still does not. The spec, design, tasks and README all say that removal is keyboard-only until a row menu arrives, so the touch gap is now a recorded choice. There is a viewer test.
 
-### 🟡 Fixed - RF13 A click on a case (or a color) whose popover is open opens it again instead of closing it
+### ✅ Verified - RF13 A click on a case (or a color) whose popover is open opens it again instead of closing it
 - **Severity:** Low (confidence: high, reproduced)
 - **Evidence:**
   1. The document pointerdown handler `#onDocumentPointerDown` cancels the popover, because the value
@@ -312,8 +314,9 @@ icons, and the spec, design and tasks section 6). Checks:
 - **Fix:** A press on the value whose popover is open closes it and marks that key, and the click that
   follows leaves it closed, as a dropdown does. Test "closes a case's popover on a click on its value,
   as a dropdown does"; spec sentence added.
+- **Verification:** Verified (commit d785fbb). `#onDocumentPointerDown` records a press on the open popover's own value (`#closedOnPress`), and the click that follows leaves the popover closed. Every new press clears the record. In Chromium a second click on `presentation` now closes its popover; it used to stay open. There is a viewer test, and the spec has the sentence.
 
-### 🟡 Fixed - RF14 `offsetAtPoint`, which places the caret where a click falls, has no test that exercises it
+### ✅ Verified - RF14 `offsetAtPoint`, which places the caret where a click falls, has no test that exercises it
 - **Severity:** Low (confidence: high)
 - **Evidence:** jsdom gives ranges no layout, so `offsetAtPoint` (editors.ts) returns the end of the text in every
   viewer test. The test "opens a value on a click, with a caret and nothing selected…" only checks that the
@@ -326,8 +329,9 @@ icons, and the spec, design and tasks section 6). Checks:
 - **Fix:** A test of `offsetAtPoint` with laid-out characters (Range boxes stubbed: 8 px a
   character, 4 a line) checks before/after a character's middle, a second line's start and past a
   line's end.
+- **Verification:** Verified (commit d785fbb). The new unit test stubs character boxes over two lines and checks five points with `offsetAtPoint`: either side of a character's middle, the start of the second line, and past the end of each line. Viewer suite: 114/114 pass.
 
-### 🟡 Fixed - RF15 `Removal`'s "reset" and "clear" have nothing left to tell apart
+### ✅ Verified - RF15 `Removal`'s "reset" and "clear" have nothing left to tell apart
 - **Severity:** Low (confidence: high)
 - **Evidence:** The button that showed "Reset to default" or "Clear" is gone. `removalOf` (edit.ts) still answers
   `"reset" | "clear"`, but its one caller, `#removeSelected`, checks only whether the answer is undefined.
@@ -335,6 +339,7 @@ icons, and the spec, design and tasks section 6). Checks:
 - **Recommendation:** Make it `mayLeaveOut(index, at): boolean`, or keep the two cases only if the planned
   row menu will label them, and say so in a comment.
 - **Fix:** `removalOf` is now `isRemovable`, a boolean; the `Removal` type is gone.
+- **Verification:** Verified (commit d785fbb). `removalOf` is now `isRemovable(index, at): boolean`, the `Removal` type is gone, and the one caller and the tests are updated.
 
 ## Questions
 - Should Enter and F2 toggle a boolean when it is the first editable value of the selected unit? They do
