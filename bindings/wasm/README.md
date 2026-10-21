@@ -97,6 +97,11 @@ try {
   const report = snapshot.diagnostics();
   const symbols = snapshot.documentSymbols(uri);
   const tree = snapshot.sourceTree(uri); // unstable
+  // The value of `let greeting = "Hello"`, by its key in the source tree.
+  const answer = snapshot.sourceEdit(uri, "greeting.value", {
+    kind: "setValue",
+    value: { kind: "string", value: "Hi" },
+  }); // unstable
 } finally {
   snapshot.dispose();
 }
@@ -109,7 +114,9 @@ and results are the `@nx-lang/language-protocol` shapes, re-exported here.
 
 `sourceTree(uri)` answers every piece of a document as a typed node, with the declarations the nodes
 refer to; the protocol's README describes the answer. It is **unstable**: its shape may change in any
-release until a later one commits to it.
+release until a later one commits to it. `sourceEdit(uri, key, edit)`, unstable too, answers the
+text edits that set a value, set a line of text or remove an attribute at the node with that key, or
+why it cannot.
 
 `createLanguageService(host, options)` implements the protocol's `NxLanguageService` over these
 snapshots, with a bounded cache of analyses. A host whose context declarations live in a catalog
@@ -494,13 +501,14 @@ The names and shapes match `@nx-lang/sdk-node`, so code can move between the two
 ## ABI
 
 The module exports `nx_wasm_abi_version`, which the loader checks before any other call and refuses
-when it disagrees, naming both versions. The current version is 8. Version 4 added library
+when it disagrees, naming both versions. The current version is 9. Version 4 added library
 registries (`nx_wasm_registry_new`, `nx_wasm_registry_load`, `nx_wasm_registry_free`), build
 contexts (`nx_wasm_build_context_new`, `nx_wasm_build_context_free`) and
 `nx_wasm_workspace_validate`, and gave `nx_wasm_workspace_build` a build-context handle argument
 (null for none); 5 added `nx_wasm_program_diagnostics`; 6 added `nx_wasm_program_function_schema`
 and `nx_wasm_program_type_schema`; 7 added `nx_wasm_snapshot_source_tree`; 8 added
-`nx_wasm_program_format_value` and a `pointer` on every value node.
+`nx_wasm_program_format_value` and a `pointer` on every value node; 9 added
+`nx_wasm_snapshot_source_edit`.
 
 | Exports | Purpose |
 | ------- | ------- |

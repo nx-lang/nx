@@ -1,5 +1,6 @@
 import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import * as monaco from "monaco-editor";
+import type { TextEdit } from "@nx-lang/language-protocol";
 // Monaco 0.56 maps `monaco-editor/<path>.js` onto `esm/vs/<path>.js` through its exports map.
 import editorWorker from "monaco-editor/editor/editor.worker.js?worker";
 import { NX_LANGUAGE_ID, registerNxLanguage } from "@nx-lang/monaco";
@@ -43,6 +44,17 @@ export interface NxEditorHandle {
    * For an editor that has just been shown again, so it is laid out first.
    */
   placeCursor(offset: number): void;
+  /** The editor's text, or null before the editor exists. */
+  text(): string | null;
+  /**
+   * Applies `edits`, each against the text the one before left, as one step of the editor's undo
+   * history, as an edit made in Visual is. The editor reports the new text as it does any edit.
+   */
+  applyEdits(edits: readonly TextEdit[]): void;
+  /** Undoes the last step of the editor's history, wherever it was made. */
+  undo(): void;
+  /** Redoes the step last undone. */
+  redo(): void;
 }
 
 export interface NxEditorProps {
@@ -105,6 +117,28 @@ export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, them
       instance.setPosition(position);
       instance.revealPositionInCenterIfOutsideViewport(position);
       instance.focus();
+    },
+    text() {
+      return editor.current?.getValue() ?? null;
+    },
+    applyEdits(edits) {
+      const instance = editor.current;
+      if (instance === null || edits.length === 0) {
+        return;
+      }
+      instance.pushUndoStop();
+      for (const edit of edits) {
+        const { start, end } = edit.range;
+        const range = new monaco.Range(start.line + 1, start.character + 1, end.line + 1, end.character + 1);
+        instance.executeEdits("nx-visual", [{ range, text: edit.newText, forceMoveMarkers: true }]);
+      }
+      instance.pushUndoStop();
+    },
+    undo() {
+      editor.current?.trigger("nx-visual", "undo", null);
+    },
+    redo() {
+      editor.current?.trigger("nx-visual", "redo", null);
     },
   }));
 

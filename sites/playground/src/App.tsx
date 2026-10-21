@@ -3,7 +3,7 @@ import type { NxValueDescribe, NxValueNavigateDetail, NxValueNode } from "@nx-la
 import "./app.css";
 import { evaluateInBrowser, type Diagnostic } from "./compile";
 import { NxEditor, languageService, MODEL_URI, type NxEditorHandle } from "./editor/NxEditor";
-import { declaredName, offsetOf, positionAt } from "./editor/positions.ts";
+import { declaredName, offsetAtPosition, offsetOf, positionAt } from "./editor/positions.ts";
 import {
   DEFAULT_EXAMPLE,
   EXAMPLE_GROUPS,
@@ -17,7 +17,8 @@ import { OutputPane, type OutputView } from "./output/OutputPane";
 import { PreviewView } from "./preview/PreviewView";
 import { usePreview } from "./preview/usePreview.ts";
 import { ReadingView, type ReadingCommands } from "./reading/ReadingView";
-import { keyAtRange, rangeOfKey } from "@nx-lang/viewer";
+import { keyAtRange, rangeOfKey, type NxOpenDetail } from "@nx-lang/viewer";
+import { createEditQueue } from "./reading/edits.ts";
 import { useSourceTree } from "./reading/useSourceTree.ts";
 import { SITE_ROOT } from "./paths.ts";
 import { createAddressKeeper } from "./address.ts";
@@ -168,13 +169,42 @@ export function App() {
   // anything, Visual folds the source's supporting declarations itself.
   const [folded, setFolded] = useState<readonly string[] | undefined>(undefined);
   const readingCommands = useRef<ReadingCommands | null>(null);
-  const reading = useSourceTree(source, mode === "visual");
+  // The text an edit made in Visual left, whose tree is asked for at once rather than after a pause.
+  const immediateTree = useRef<string | null>(null);
+  const reading = useSourceTree(source, mode === "visual", undefined, immediateTree);
+  // Visual's edits, made in the editor's text one after another, each one step of its undo history.
+  const applyVisualEdit = useMemo(
+    () =>
+      createEditQueue(
+        languageService,
+        MODEL_URI,
+        { text: () => editor.current?.text() ?? null, apply: (edits) => editor.current?.applyEdits(edits) },
+        (text) => {
+          immediateTree.current = text;
+        },
+      ),
+    [],
+  );
+  /** Undo or redo from Visual: the editor's history, the same as in Source. */
+  const visualHistory = (step: "undo" | "redo") => {
+    editor.current?.[step]();
+    immediateTree.current = editor.current?.text() ?? null;
+  };
   // The editor's cursor, carried into Visual until a tree of the same text can say what it is on.
   const cursorToSelect = useRef<number | null>(null);
   // The selected node's start, carried into Source until the editor is shown again.
   const cursorToPlace = useRef<number | null>(null);
   // The node the cursor selected on entering Visual: leaving with it still selected leaves the cursor be.
   const selectedOnEntry = useRef<string | undefined>(undefined);
+  /** Shows a value Visual cannot edit in Source, with the cursor at its start. */
+  const openInSource = (detail: NxOpenDetail) => {
+    const { text } = reading;
+    if (text !== null && text === sourceRef.current) {
+      cursorToPlace.current = offsetAtPosition(text, detail.range.start);
+    }
+    setSelection(detail.key);
+    setMode("source");
+  };
 
   useEffect(() => {
     const offset = cursorToSelect.current;
@@ -340,6 +370,10 @@ export function App() {
                 setSelection(kept);
               }}
               commands={readingCommands}
+              onEdit={(detail) => void applyVisualEdit(detail)}
+              onOpen={openInSource}
+              onUndo={() => visualHistory("undo")}
+              onRedo={() => visualHistory("redo")}
             />
           )}
           {/* The editor stays mounted while hidden, keeping its undo history and scroll position. */}

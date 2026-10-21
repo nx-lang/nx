@@ -11,7 +11,7 @@
     "source": "/// A person the survey is about.\ntype User = {\n  id:string\n  /// What to call them.\n  name:string?\n}\n"
   },
   "emoji": {
-    "source": "type Label = { text:string title:string }\n\nlet wave = <Label text=\"\ud83d\ude00 hello\" title=\"after\" />\n"
+    "source": "type Label = { text:string title:string }\n\nlet wave = <Label text=\"😀 hello\" title=\"after\" />\n"
   },
   "tasks": {
     "source": "type Task = {\n  title:string\n  priority:int = 2\n  notes?:string\n}\n\nlet root(): Task+ = {\n  <Task title=\"Ship the site\" priority=1 />\n  <Task title=\"Plan the next release, and then write down every step of it for the whole team\" notes=\"After the site ships\" />\n}\n"
@@ -98,5 +98,9 @@
   },
   "deepGroups": {
     "source": "type Box = { a:string b:string content items:Box* }\n\nlet deep =\n  <Box a=\"aaaaaaaaaaaa\" b=\"bbbbbbbbbbbb\">\n    <Box a=\"aaaaaaaaaaaa\" b=\"bbbbbbbbbbbb\">\n      <Box a=\"aaaaaaaaaaaa\" b=\"bbbbbbbbbbbb\">\n        <Box a=\"aaaaaaaaaaaa\" b=\"bbbbbbbbbbbb\">\n          <Box a=\"aaaaaaaaaaaa\" b=\"bbbbbbbbbbbb\">\n            <Box a=\"aaaaaaaaaaaa\" b=\"bbbbbbbbbbbb\">\n              <Box a=\"aaaaaaaaaaaa\" b=\"bbbbbbbbbbbb\">\n                <Box a=\"aaaaaaaaaaaa\" b=\"bbbbbbbbbbbb\">\n                </Box>\n              </Box>\n            </Box>\n          </Box>\n        </Box>\n      </Box>\n    </Box>\n  </Box>\n"
+  },
+  "editing": {
+    "source": "import \"@nx/visualizer\"\n\ntype uitext = string\ntype Swatch = string\ntype Count = int\n\ntype Size =\n  /// The smallest cup.\n  | small\n  /// The usual.\n  | medium\n  | large\n  | custom { ounces:int }\n\ntype Drink = {\n  name:string\n  size:Size = medium\n  iced:bool = false\n  shots:Count = 1\n  color?:Swatch\n  label:uitext = \"Drink\"\n  tags:string* = {}\n}\n\ntype Counter = { count:int }\ntype Text = { content text:string }\n\nvisualizer Swatch = <ValueVisualizer format=color />\n\nlet total = 3\n\nlet latte =\n  <Drink\n    name=\"Latte\"\n    size=medium\n    iced=false\n    shots=2\n    color=\"#5a3a22\"\n    label=\"Hot \\\"latte\\\"\"\n    tags={ \"warm\" \"milky\" }\n  />\n\nlet counter = <Counter count={total + 1} />\n\nlet note = <Text>Hello there</Text>\n\nlet ratio = 1.5\n",
+    "visualizers": []
   }
 }

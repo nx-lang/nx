@@ -378,4 +378,106 @@ export const styles = `
 .card-doc pre { padding: 4px 6px; border-radius: 4px; background: light-dark(#0000000a, #ffffff0f); overflow-x: auto; }
 .card-doc pre code { padding: 0; background: none; white-space: pre; }
 .card-doc a { color: var(--nx-viewer-link-color, light-dark(#0969da, #4daafc)); }
+
+/* Editing, when the host allows it. A value of the selected unit that opens an editor shows a faint
+   mark under the pointer; nothing else changes at rest. */
+.body.editable .editable-value.in-unit { cursor: text; }
+.body.editable .editable-value.in-unit:is(.edit-boolean, .edit-case, .edit-color) { cursor: pointer; }
+.body.editable .editable-value.in-unit:hover:not(.editing) {
+  background: var(--nx-viewer-edit-hover, light-dark(#0000000f, #ffffff17));
+  border-radius: 3px;
+}
+/* A boolean toggles on a second click, which would otherwise select the mark as a word. */
+.body.editable .edit-boolean { user-select: none; }
+/* A number's name drags sideways to change it. */
+.body.editable .scrub { cursor: ew-resize; user-select: none; }
+.body.scrubbing, .body.scrubbing * { cursor: ew-resize !important; user-select: none; }
+/* An edit made and not yet in the host's tree reads muted, as a stale reading does. */
+.source .pending { opacity: 0.55; }
+/* A field takes its value's own place in the reading, in its font: a tint and an underline say it
+   is open, and it grows and wraps with its text. */
+.source .field {
+  outline: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border-radius: 2px;
+  background: var(--nx-viewer-field-background, light-dark(#0969da14, #388bfd26));
+  box-shadow: 0 1px 0 var(--nx-viewer-field-underline, light-dark(#0969da, #4daafc));
+  caret-color: var(--nx-viewer-foreground, CanvasText);
+  font-weight: 400;
+}
+.source .field.invalid { box-shadow: 0 1px 0 var(--nx-viewer-invalid, light-dark(#cf222e, #f85149)); }
+/* A popover opens over the reading, under its value, as the hover card does. */
+.popover {
+  position: absolute;
+  z-index: 5;
+  min-width: 12rem;
+  max-width: min(28rem, 100%);
+  padding: 4px;
+  border-radius: 6px;
+  border: 1px solid var(--nx-viewer-card-border, light-dark(#d0d7de, #454545));
+  background: var(--nx-viewer-card-background, light-dark(#ffffff, #202020));
+  color: var(--nx-viewer-foreground, CanvasText);
+  box-shadow: 0 4px 14px light-dark(rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.5));
+  font-family: var(--nx-viewer-prose-font-family, inherit);
+  font-variation-settings: var(--nx-viewer-prose-font-variation, normal);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.popover[hidden] { display: none; }
+.popover input:not([type="color"]) {
+  width: 100%;
+  margin: 0;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 4px;
+  outline: none;
+  font: inherit;
+  color: inherit;
+  background: light-dark(#0000000a, #ffffff0f);
+}
+.popover.colors { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.popover .popover-hex { font-family: var(--nx-viewer-source-font-family, var(--mono)); width: 10ch; }
+.popover .popover-hex.invalid { box-shadow: inset 0 -1px 0 var(--nx-viewer-invalid, light-dark(#cf222e, #f85149)); }
+.popover .popover-picker { width: 28px; height: 22px; padding: 0; border: 0; background: none; cursor: pointer; }
+.popover .options { max-height: 16em; overflow: auto; margin-top: 4px; }
+.popover .option {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 8px 2px 22px;
+  border-radius: 4px;
+  cursor: pointer;
+  position: relative;
+}
+.popover .option[hidden] { display: none; }
+.popover .option.active { background: var(--nx-viewer-selection, light-dark(#0969da1f, #388bfd33)); }
+.popover .option.current::before { content: "\\2713"; position: absolute; left: 7px; }
+.popover .option-name {
+  font-family: var(--nx-viewer-source-font-family, var(--mono));
+  font-size: var(--nx-viewer-source-font-size, 13px);
+}
+.popover .option-doc {
+  color: var(--nx-viewer-fold-summary-color, light-dark(#6e7781, #9a9a9a));
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The selected row's way to leave its property out: a quiet word at the row's end. */
+.row-action {
+  position: absolute;
+  right: 12px;
+  z-index: 1;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-family: var(--nx-viewer-prose-font-family, inherit);
+  font-size: 11px;
+  line-height: var(--nx-viewer-source-line-height, 18px);
+  color: var(--nx-viewer-fold-summary-color, light-dark(#6e7781, #9a9a9a));
+  background: var(--nx-viewer-background, Canvas);
+  cursor: pointer;
+  user-select: none;
+}
+.row-action[hidden] { display: none; }
+.row-action:hover { color: var(--nx-viewer-foreground, CanvasText); background: var(--nx-viewer-hover, light-dark(#0000000a, #ffffff0d)); }
 `;

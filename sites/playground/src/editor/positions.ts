@@ -27,6 +27,19 @@ export function offsetOf(source: string, line: number, column: number): number {
   return offset;
 }
 
+/** The UTF-16 offset into `source` of a 0-based line and UTF-16 character, as the protocol counts them. */
+export function offsetAtPosition(source: string, position: { line: number; character: number }): number {
+  let offset = 0;
+  for (let current = 0; current < position.line; current += 1) {
+    const next = source.indexOf("\n", offset);
+    if (next === -1) {
+      return source.length;
+    }
+    offset = next + 1;
+  }
+  return Math.min(offset + position.character, source.length);
+}
+
 /** A 0-based line and UTF-16 character for a UTF-16 offset into `source`. */
 export function positionAt(source: string, offset: number): { line: number; character: number } {
   const before = source.slice(0, offset);

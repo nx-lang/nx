@@ -1313,7 +1313,7 @@ const UI_TEXT = "uitext";
  * or any alias that leads to it. Which strings these are comes from the declarations, never from
  * how a string looks.
  */
-function uiTextNodes(index: TreeIndex): Set<number> {
+export function uiTextNodes(index: TreeIndex): Set<number> {
   const { tree } = index;
   const declarations = tree.declarations;
   const known = new Map<string, boolean>();
@@ -1377,7 +1377,7 @@ function uiTextNodes(index: TreeIndex): Set<number> {
  * them: from `<PropertyVisualizer property=id format=id />`, or from the visualizer of the alias its type
  * names.
  */
-function formattedNodes(index: TreeIndex): Map<number, SourceValueFormat> {
+export function formattedNodes(index: TreeIndex): Map<number, SourceValueFormat> {
   const { tree } = index;
   const found = new Map<number, SourceValueFormat>();
   tree.nodes.forEach((node, at) => {

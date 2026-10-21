@@ -15,8 +15,9 @@ const handler = createNxLanguageHandler();
 
 The handler is Fetch-shaped: it takes a standard `Request` and returns a standard `Response`. It
 routes on the **final path segment** (`.../hover`, `.../completions`, `.../diagnostics`,
-`.../documentSymbols`, `.../sourceTree`), so the host chooses the base path. `sourceTree` is
-**unstable**: its answer's shape may change in any release until a later one commits to it. It accepts only `POST` with a JSON body,
+`.../documentSymbols`, `.../sourceTree`, `.../sourceEdit`), so the host chooses the base path.
+`sourceTree` and `sourceEdit` are **unstable**: their shapes may change in any release until a later
+one commits to them. A refused source edit is an answer, not an error. It accepts only `POST` with a JSON body,
 and every answer — success or failure — is JSON.
 
 ## Mounting

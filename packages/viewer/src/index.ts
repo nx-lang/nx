@@ -8,9 +8,11 @@
  * reads as written, in the colors the host's editor gives it. Every piece carries its node's key.
  * It has no framework dependency and keeps its markup and styles in a shadow root.</para>
  */
-import type { EditorRange, SourceRole, SourceTree } from "@nx-lang/language-protocol";
+import type { EditorRange, SourceEdit, SourceRole, SourceTree } from "@nx-lang/language-protocol";
 
 import { cardOf } from "./card.js";
+import { editOf, editTargets, isHexColor, isNumericLiteral, isWholeValue, removalOf, runProblem, type EditTarget } from "./edit.js";
+import { caseOptions, pickerColor, showValue, stepNumber, valueHost } from "./editors.js";
 import { renderMarkdown } from "./markdown.js";
 import { defaultFolded, readingRuns, renderSource, type NxViewerColor, type NxViewerIcons, type ReadingRun } from "./source.js";
 import { styles } from "./styles.js";
@@ -28,6 +30,29 @@ export const NX_SELECT_EVENT = "nx-select";
 
 /** The event fired when a reader folds or unfolds a group or a declaration. */
 export const NX_FOLD_EVENT = "nx-fold";
+
+/** The event fired when a reader commits an edit, when the host has set `editable`. */
+export const NX_EDIT_EVENT = "nx-edit";
+
+/**
+ * The event fired when a reader asks to open a value the reading cannot edit, as an expression, in
+ * the host's source editor, when the host has set `editable`.
+ */
+export const NX_OPEN_EVENT = "nx-open";
+
+/** What the `nx-edit` event carries: the target node's key and the edit, for the `sourceEdit` query. */
+export interface NxEditDetail {
+  /** The key of the node the edit is aimed at: a literal, a case, a run of text or an attribute. */
+  readonly key: string;
+  readonly edit: SourceEdit;
+}
+
+/** What the `nx-open` event carries: the node to open in the source. */
+export interface NxOpenDetail {
+  readonly key: string;
+  readonly role: SourceRole;
+  readonly range: EditorRange;
+}
 
 /** What the `nx-fold` event carries. */
 export interface NxFoldDetail {
@@ -54,7 +79,13 @@ export interface NxSelectDetail {
 export type NxViewerMarkdown = (markdown: string) => Node;
 
 /** The element's properties, which a host may set before the element is defined. */
-const PROPERTIES = ["tree", "text", "colors", "icons", "markdown", "folded", "selection", "stale"] as const;
+const PROPERTIES = ["tree", "text", "colors", "icons", "markdown", "folded", "selection", "stale", "editable"] as const;
+
+/** How far the pointer moves sideways, in pixels, for a number's name dragged to step it once. */
+const SCRUB_STEP = 2;
+
+/** How far the pointer moves before a press on a number's name becomes a drag, in pixels. */
+const SCRUB_SLOP = 3;
 
 /** How long the pointer rests on a name or a value before its card opens, in milliseconds. */
 const CARD_DELAY = 500;
@@ -106,6 +137,36 @@ function spoken(element: Element): string {
   return words.join("").replace(/\s+/g, " ").trim();
 }
 
+/** An editor open on one value: a field in the value's place, or a popover over the reading. */
+interface EditSession {
+  readonly target: EditTarget;
+  /** The value's rendering. */
+  readonly span: HTMLElement;
+  /** Where the value's text sits, and what it held, put back when the edit is cancelled. */
+  readonly host?: HTMLElement;
+  readonly restore?: readonly Node[];
+  /** A text, number or run field. */
+  readonly field?: HTMLElement;
+  /** A popover's field: a case's filter or a color's hex. */
+  readonly input?: HTMLInputElement;
+  /** A case popover's options, and the one Enter chooses. */
+  readonly options?: readonly HTMLElement[];
+  active?: HTMLElement | undefined;
+  closed: boolean;
+}
+
+/** A number's name being dragged sideways to change it. */
+interface Scrub {
+  readonly target: EditTarget;
+  readonly name: HTMLElement;
+  readonly pointer: number;
+  readonly x: number;
+  /** The number when the drag began. */
+  readonly from: string;
+  /** The number now, once the press became a drag. */
+  value: string | undefined;
+}
+
 function keyOf(element: Element): string | undefined {
   return (element as HTMLElement).dataset["key"];
 }
@@ -114,7 +175,7 @@ function keyOf(element: Element): string | undefined {
  * The `<nx-viewer>` element.
  *
  * <para>The attribute `stale` mirrors the property of the same name. Everything else is a property:
- * `tree`, `text`, `colors`, `icons`, `markdown`, `folded` and `selection`.</para>
+ * `tree`, `text`, `colors`, `icons`, `markdown`, `folded`, `selection` and `editable`.</para>
  */
 export class NxViewerElement extends ElementBase {
   static observedAttributes = ["stale"];
@@ -155,6 +216,19 @@ export class NxViewerElement extends ElementBase {
   #cardByKeyboard = false;
   #cardOpenTimer: ReturnType<typeof setTimeout> | undefined;
   #cardCloseTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Whether the reader may edit values in place. */
+  #editable = false;
+  /** The values of the tree shown that the reading can edit, by key, while it may. */
+  #targets = new Map<string, EditTarget>();
+  /** The editor open, if any. */
+  #session: EditSession | undefined;
+  /** Each value edited since the host last set a tree, as the reader left it, shown until it does. */
+  #pending = new Map<string, string>();
+  /** The attributes removed since the host last set a tree, shown muted until it does. */
+  #removed = new Set<string>();
+  #scrub: Scrub | undefined;
+  /** Set when a drag ends, so the click the press makes does not also select. */
+  #ignoreClick = false;
 
   readonly #badge: HTMLSpanElement;
   readonly #body: HTMLDivElement;
@@ -165,11 +239,22 @@ export class NxViewerElement extends ElementBase {
   readonly #frame: HTMLDivElement;
   /** The hover card: what a name or a value under the pointer is, and its doc. */
   readonly #card: HTMLDivElement;
+  /** The popover a case or a color is chosen in. */
+  readonly #popover: HTMLDivElement;
+  /** The quiet button at the end of a selected row whose property may be left out. */
+  readonly #rowAction: HTMLSpanElement;
   /** Closes the card when anything around the reading scrolls, or Escape is pressed anywhere. */
   readonly #onDocumentScroll = (): void => this.#closeCard();
   readonly #onDocumentKey = (event: KeyboardEvent): void => {
     if (event.key === "Escape") {
       this.#closeCard();
+    }
+  };
+  /** Cancels a popover when the pointer goes down anywhere outside it. */
+  readonly #onDocumentPointerDown = (event: PointerEvent): void => {
+    const session = this.#session;
+    if (session !== undefined && session.field === undefined && !event.composedPath().includes(this.#popover)) {
+      this.#cancel(session, false);
     }
   };
 
@@ -224,10 +309,46 @@ export class NxViewerElement extends ElementBase {
       }
     });
 
-    frame.append(toolbar, this.#body, this.#announcer, this.#card);
+    this.#popover = document.createElement("div");
+    this.#popover.className = "popover";
+    this.#popover.hidden = true;
+    this.#popover.addEventListener("keydown", (event) => this.#onPopoverKey(event));
+    // Choosing with the pointer keeps the focus in the popover's field.
+    this.#popover.addEventListener("pointerdown", (event) => {
+      if (!(event.target instanceof HTMLInputElement)) {
+        event.preventDefault();
+      }
+    });
+    this.#popover.addEventListener("click", (event) => {
+      const option = (event.target as Element).closest?.(".option") as HTMLElement | null;
+      const session = this.#session;
+      if (option !== null && session !== undefined && session.options !== undefined) {
+        this.#choose(session, option.dataset["name"]!);
+      }
+    });
+    this.#popover.addEventListener("focusout", (event) => {
+      const next = event.relatedTarget as Node | null;
+      const session = this.#session;
+      if (session !== undefined && session.field === undefined && next !== null && !this.#popover.contains(next)) {
+        this.#cancel(session, false);
+      }
+    });
+
+    this.#rowAction = document.createElement("span");
+    this.#rowAction.className = "row-action";
+    this.#rowAction.setAttribute("role", "button");
+    this.#rowAction.hidden = true;
+    this.#rowAction.addEventListener("pointerdown", (event) => event.preventDefault());
+
+    frame.append(toolbar, this.#body, this.#announcer, this.#card, this.#popover);
     shadow.append(style, frame);
 
     this.#body.addEventListener("click", (event) => this.#onClick(event));
+    this.#body.addEventListener("dblclick", (event) => this.#onDoubleClick(event));
+    this.#body.addEventListener("pointerdown", (event) => this.#onPointerDown(event));
+    this.#body.addEventListener("pointermove", (event) => this.#onPointerMove(event));
+    this.#body.addEventListener("pointerup", (event) => this.#onPointerUp(event, true));
+    this.#body.addEventListener("pointercancel", (event) => this.#onPointerUp(event, false));
     // A focus ring is for a reader on the keyboard; after a click, the selection says where they are.
     this.#body.addEventListener("pointerdown", () => {
       this.#body.classList.add("by-pointer");
@@ -275,12 +396,15 @@ export class NxViewerElement extends ElementBase {
   connectedCallback(): void {
     this.ownerDocument.addEventListener("scroll", this.#onDocumentScroll, true);
     this.ownerDocument.addEventListener("keydown", this.#onDocumentKey);
+    this.ownerDocument.addEventListener("pointerdown", this.#onDocumentPointerDown, true);
   }
 
   disconnectedCallback(): void {
     this.ownerDocument.removeEventListener("scroll", this.#onDocumentScroll, true);
     this.ownerDocument.removeEventListener("keydown", this.#onDocumentKey);
+    this.ownerDocument.removeEventListener("pointerdown", this.#onDocumentPointerDown, true);
     this.#closeCard();
+    this.#dropSession();
   }
 
   /** The source tree to show, as the language service's `sourceTree` query answers it. */
@@ -290,6 +414,9 @@ export class NxViewerElement extends ElementBase {
 
   set tree(tree: SourceTree | undefined) {
     this.#tree = tree;
+    // A new tree says what each edit made of the source, or that it made nothing.
+    this.#pending.clear();
+    this.#removed.clear();
     this.#render();
   }
 
@@ -396,6 +523,25 @@ export class NxViewerElement extends ElementBase {
   }
 
   /**
+   * Whether the reader may edit values where they read: a string, a number, a boolean, a union's
+   * case, a color or a line of text. Each edit fires `nx-edit` for the host to make in its source,
+   * and a value the reading cannot edit, opened with Enter or a double-click, fires `nx-open`. The
+   * element never changes the text or the tree itself. Off by default, when the reading reads as it
+   * does without it.
+   */
+  get editable(): boolean {
+    return this.#editable;
+  }
+
+  set editable(editable: boolean) {
+    const next = editable === true;
+    if (next !== this.#editable) {
+      this.#editable = next;
+      this.#render();
+    }
+  }
+
+  /**
    * The selected node's key. Setting it selects that node and scrolls it into view, without firing
    * `nx-select`; a key the tree does not hold clears it.
    */
@@ -484,13 +630,20 @@ export class NxViewerElement extends ElementBase {
 
   #render(): void {
     const tree = this.#tree;
-    // What the card described may be gone, and so may what the pointer was over.
+    // What the card described may be gone, and so may what the pointer was over. An editor open is
+    // opened again on its value, as the reader left it, when the value is still there.
     this.#closeCard();
+    const session = this.#session;
+    const reopen = session === undefined || session.closed ? undefined : { key: session.target.key, draft: this.#draftOf(session) };
+    this.#dropSession();
+    this.#scrub = undefined;
     this.#pointedKey = undefined;
     this.#rendered.clear();
     this.#hoveredUnit = undefined;
     this.#body.replaceChildren();
+    this.#body.classList.toggle("editable", this.#editable);
     this.#index = undefined;
+    this.#targets = new Map();
     if (tree === undefined) {
       return;
     }
@@ -523,6 +676,10 @@ export class NxViewerElement extends ElementBase {
     for (const element of this.#body.querySelectorAll<HTMLElement>("[data-key]")) {
       this.#rendered.set(element.dataset["key"]!, element);
     }
+    if (this.#editable) {
+      this.#targets = editTargets(index);
+      this.#markEditable();
+    }
     // Keep the selection across a new tree when the node is still there. A fold asked for since,
     // by the reader or the host, is kept: when it hides the selection, the selection moves to the
     // folded unit that hides it, as a tree's does, or is cleared when no drawn unit holds it.
@@ -540,9 +697,12 @@ export class NxViewerElement extends ElementBase {
         }
       }
     }
-    this.#body.append(this.#highlights);
+    this.#body.append(this.#highlights, this.#rowAction);
     this.#paintHighlights();
     this.#turnChevron();
+    if (reopen !== undefined && this.#targets.has(reopen.key) && this.#rendered.has(reopen.key)) {
+      this.#openEditor(reopen.key, reopen.draft);
+    }
     // Fonts that arrive later change where the rows fall, and what fits on a line.
     const remeasure = this.ownerDocument.fonts !== undefined && this.ownerDocument.fonts.status !== "loaded";
     void this.ownerDocument.fonts?.ready.then(() => (remeasure ? this.#remeasure() : this.#paintHighlights()));
@@ -722,6 +882,7 @@ export class NxViewerElement extends ElementBase {
   #paintHighlights(): void {
     const layer = this.#highlights;
     layer.replaceChildren();
+    this.#placeRowAction();
     if (!this.#body.contains(layer)) {
       return;
     }
@@ -772,6 +933,29 @@ export class NxViewerElement extends ElementBase {
       const within = unit !== undefined && unit.contains(hovered);
       draw(hovered, firstLine(hovered) ?? hovered.getBoundingClientRect(), within ? "hovered in-selection" : "hovered");
     }
+  }
+
+  /**
+   * Shows the quiet button that leaves out the selected row's property, at the end of the row's first
+   * line, when the reader may edit and the property has a default or is optional.
+   */
+  #placeRowAction(): void {
+    const action = this.#rowAction;
+    const unit = this.#selectedUnit();
+    const at = unit === undefined || !unit.matches(".sheet-row") ? undefined : this.#index?.byKey.get(keyOf(unit) ?? "");
+    const removal = !this.#editable || at === undefined || this.#removed.has(keyOf(unit!)!) ? undefined : removalOf(this.#index!, at);
+    if (removal === undefined || this.#session?.span !== undefined && unit!.contains(this.#session.span)) {
+      action.hidden = true;
+      return;
+    }
+    const label = removal === "reset" ? "Reset to default" : "Clear";
+    action.textContent = label;
+    action.title = label;
+    action.setAttribute("aria-label", label);
+    action.hidden = false;
+    const frame = this.#body.getBoundingClientRect();
+    const first = unit!.querySelector<HTMLElement>(":scope > .sheet-name")?.getBoundingClientRect() ?? unit!.getBoundingClientRect();
+    action.style.top = `${first.top - frame.top + this.#body.scrollTop}px`;
   }
 
   /** Every unit, in reading order. */
@@ -849,6 +1033,7 @@ export class NxViewerElement extends ElementBase {
     const at = key === undefined ? undefined : index?.byKey.get(key);
     if (index === undefined || key === undefined || at === undefined) {
       this.#selection = undefined;
+      this.#markUnitValues();
       return;
     }
     // A node folded away is unfolded to, so what is selected can be seen.
@@ -864,6 +1049,7 @@ export class NxViewerElement extends ElementBase {
     const original = this.#rendered.get(key);
     original?.classList.add("selected");
     original?.setAttribute("aria-current", "true");
+    this.#markUnitValues();
     if (fire) {
       if (original !== undefined) {
         const words = spoken(original);
@@ -877,6 +1063,659 @@ export class NxViewerElement extends ElementBase {
     }
   }
 
+  // ---- Editing ----------------------------------------------------------------------------
+
+  /**
+   * Marks each value the reading can edit, and the name of each number's property, which drags
+   * sideways to change it; then shows the values edited since the host last set a tree.
+   */
+  #markEditable(): void {
+    const index = this.#index!;
+    const names = new Map<string, HTMLElement[]>();
+    for (const name of this.#body.querySelectorAll<HTMLElement>(".sheet-name[data-hover], .line-name[data-hover]")) {
+      const list = names.get(name.dataset["hover"]!) ?? [];
+      list.push(name);
+      names.set(name.dataset["hover"]!, list);
+    }
+    for (const element of this.#body.querySelectorAll<HTMLElement>("[data-key]")) {
+      const target = this.#targets.get(element.dataset["key"]!);
+      if (target === undefined) {
+        continue;
+      }
+      element.classList.add("editable-value", `edit-${target.kind}`);
+      const owner = index.tree.nodes[target.at]!.parent;
+      if (target.kind === "number" && owner !== undefined && index.tree.nodes[owner]!.role === "attribute") {
+        for (const name of names.get(index.tree.nodes[owner]!.key) ?? []) {
+          name.classList.add("scrub");
+          name.dataset["scrubKey"] = target.key;
+        }
+      }
+    }
+    for (const [key, value] of this.#pending) {
+      const target = this.#targets.get(key);
+      const span = this.#rendered.get(key);
+      if (target !== undefined && span !== undefined) {
+        showValue(span, target, this.#writtenOf(target), value);
+      }
+    }
+    for (const key of this.#removed) {
+      this.#rendered.get(key)?.classList.add("pending");
+    }
+  }
+
+  /** The selected unit, as it is drawn, when the selection is one. */
+  #selectedUnit(): HTMLElement | undefined {
+    const drawn = this.#selection === undefined ? undefined : this.#rendered.get(this.#selection);
+    return drawn?.matches(DRAWN_UNITS) === true ? drawn : undefined;
+  }
+
+  /** The editable values `unit` shows as its own, not those of a unit inside it, in reading order. */
+  #unitValues(unit: HTMLElement): HTMLElement[] {
+    const found: HTMLElement[] = [];
+    for (const value of unit.querySelectorAll<HTMLElement>(".editable-value")) {
+      if (this.#unitOf(value) === unit && !found.some((other) => keyOf(other) === keyOf(value))) {
+        found.push(value);
+      }
+    }
+    return found;
+  }
+
+  /** Marks the values of the selected unit, which a click opens and the pointer marks over. */
+  #markUnitValues(): void {
+    for (const value of this.#body.querySelectorAll(".in-unit")) {
+      value.classList.remove("in-unit");
+    }
+    if (!this.#editable) {
+      return;
+    }
+    const unit = this.#selectedUnit();
+    const selected = this.#selection === undefined ? undefined : this.#rendered.get(this.#selection);
+    const values = unit !== undefined ? this.#unitValues(unit) : selected?.matches(".editable-value") === true ? [selected] : [];
+    values.forEach((value) => value.classList.add("in-unit"));
+  }
+
+  /** The text of the value `target` names as the tree writes it. */
+  #writtenOf(target: EditTarget): string {
+    return this.#index?.tree.nodes[target.at]?.value ?? "";
+  }
+
+  /** The value `target` reads as now: as the reader left it, or as the tree gives it. */
+  #currentOf(target: EditTarget): string {
+    return this.#pending.get(target.key) ?? target.value;
+  }
+
+  #fire(name: string, detail: NxEditDetail | NxOpenDetail): void {
+    this.dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true }));
+  }
+
+  /**
+   * Opens the editor of the value with `key`, holding `draft` when it is given, as when a reading
+   * drawn again opens an editor the reader had open; a boolean toggles instead.
+   */
+  #openEditor(key: string, draft?: string): void {
+    const target = this.#targets.get(key);
+    const span = this.#rendered.get(key);
+    if (target === undefined || span === undefined) {
+      return;
+    }
+    if (this.#session !== undefined) {
+      this.#cancel(this.#session, false);
+    }
+    this.#closeCard();
+    const current = this.#currentOf(target);
+    switch (target.kind) {
+      case "boolean":
+        this.#commitValue(target, current === "true" ? "false" : "true");
+        return;
+      case "case":
+        this.#openCases(target, span, draft ?? "");
+        return;
+      case "color":
+        this.#openColor(target, span, draft ?? current);
+        return;
+      default:
+        this.#openField(target, span, draft ?? current);
+    }
+  }
+
+  /** What an open editor holds now, to open it again with. */
+  #draftOf(session: EditSession): string | undefined {
+    return session.field !== undefined ? (session.field.textContent ?? "") : session.input?.value;
+  }
+
+  /** A field in the value's own place, holding `text`, that grows with it and wraps in the reading. */
+  #openField(target: EditTarget, span: HTMLElement, text: string): void {
+    const { host, lead, trail, keep } = valueHost(span, this.#writtenOf(target));
+    const restore = [...host.childNodes];
+    const field = this.ownerDocument.createElement("span");
+    field.className = `field field-${target.kind}`;
+    field.setAttribute("contenteditable", "plaintext-only");
+    field.setAttribute("role", "textbox");
+    field.setAttribute("aria-label", this.#labelOf(target));
+    field.spellcheck = target.kind === "run";
+    field.textContent = text;
+    host.replaceChildren(...keep, ...(lead === undefined ? [] : [lead]), field, ...(trail === undefined ? [] : [trail]));
+    span.classList.add("editing");
+    const session: EditSession = { target, span, host, restore, field, closed: false };
+    this.#session = session;
+    field.addEventListener("keydown", (event) => this.#onFieldKey(event, session));
+    field.addEventListener("input", () => this.#validate(session));
+    field.addEventListener("blur", () => {
+      if (!session.closed) {
+        this.#finishField(session, "blur");
+      }
+    });
+    this.#validate(session);
+    this.#paintHighlights();
+    field.focus({ preventScroll: true });
+    this.#selectAll(field);
+  }
+
+  /** Selects all `field` holds, so typing replaces it. */
+  #selectAll(field: HTMLElement): void {
+    const root = this.shadowRoot as (ShadowRoot & { getSelection?(): Selection | null }) | null;
+    const selection = root?.getSelection?.() ?? this.ownerDocument.getSelection?.();
+    try {
+      selection?.selectAllChildren(field);
+    } catch {
+      // A selection the DOM cannot make leaves the caret where it is.
+    }
+  }
+
+  /** What the value is called for a reader who cannot see it: its property's name, or its kind. */
+  #labelOf(target: EditTarget): string {
+    const index = this.#index!;
+    const owner = index.tree.nodes[target.at]!.parent;
+    const name = owner === undefined ? undefined : index.tree.nodes[owner]!.name;
+    return name ?? (target.kind === "run" ? "Text" : "Value");
+  }
+
+  /** Why the field's entry cannot be taken, or nothing when it can. */
+  #problemOf(target: EditTarget, value: string): string | undefined {
+    switch (target.kind) {
+      case "number":
+        return isNumericLiteral(value.trim()) ? undefined : "Not a number";
+      case "run":
+        return runProblem(value);
+      case "color":
+        return isHexColor(value.trim()) ? undefined : "Not a hex color";
+      default:
+        return undefined;
+    }
+  }
+
+  /** Marks the editor's entry as invalid while the editor cannot take it. */
+  #validate(session: EditSession): void {
+    const input = session.field ?? session.input;
+    if (input === undefined || session.target.kind === "case") {
+      return;
+    }
+    const problem = this.#problemOf(session.target, this.#draftOf(session) ?? "");
+    input.classList.toggle("invalid", problem !== undefined);
+    input.setAttribute("aria-invalid", String(problem !== undefined));
+    if (problem === undefined) {
+      input.removeAttribute("title");
+    } else {
+      input.title = problem;
+    }
+  }
+
+  #onFieldKey(event: KeyboardEvent, session: EditSession): void {
+    // A field's keys are its own, Ctrl+Z and Ctrl+Y included, not the reading's or the host's.
+    event.stopPropagation();
+    const field = session.field!;
+    switch (event.key) {
+      case "Enter":
+        event.preventDefault();
+        this.#finishField(session, "key");
+        return;
+      case "Escape":
+        event.preventDefault();
+        this.#cancel(session, true);
+        return;
+      case "Tab":
+        event.preventDefault();
+        if (this.#finishField(session, "key")) {
+          this.#openNext(session.target.key, event.shiftKey ? -1 : 1);
+        }
+        return;
+      case "ArrowUp":
+      case "ArrowDown": {
+        if (session.target.kind !== "number") {
+          return;
+        }
+        event.preventDefault();
+        const stepped = stepNumber(field.textContent ?? "", (event.key === "ArrowUp" ? 1 : -1) * (event.shiftKey ? 10 : 1));
+        if (stepped !== undefined) {
+          field.textContent = stepped;
+          this.#validate(session);
+          this.#selectAll(field);
+        }
+        return;
+      }
+    }
+  }
+
+  /**
+   * Commits the field's entry, or, when it cannot be taken, keeps the field open and marked; leaving
+   * the field with such an entry drops it. Answers whether the field closed.
+   */
+  #finishField(session: EditSession, how: "key" | "blur"): boolean {
+    const target = session.target;
+    let value = session.field!.textContent ?? "";
+    if (target.kind === "number") {
+      value = value.trim();
+    }
+    if (this.#problemOf(target, value) !== undefined) {
+      if (how === "blur") {
+        this.#cancel(session, false);
+        return true;
+      }
+      this.#validate(session);
+      return false;
+    }
+    this.#endSession(session, how === "key");
+    if (value === this.#currentOf(target)) {
+      session.host!.replaceChildren(...session.restore!);
+    } else {
+      this.#commitValue(target, value);
+    }
+    return true;
+  }
+
+  /** Closes `session` without an edit, putting back what its value showed. */
+  #cancel(session: EditSession, refocus: boolean): void {
+    this.#endSession(session, refocus);
+    session.host?.replaceChildren(...session.restore!);
+  }
+
+  /** Closes `session`: its popover goes, and with `refocus`, the reading takes the keys again. */
+  #endSession(session: EditSession, refocus: boolean): void {
+    session.closed = true;
+    if (this.#session === session) {
+      this.#session = undefined;
+    }
+    session.span.classList.remove("editing");
+    if (session.field === undefined) {
+      this.#popover.hidden = true;
+      this.#popover.replaceChildren();
+    }
+    if (refocus) {
+      this.#body.focus({ preventScroll: true });
+    }
+    this.#paintHighlights();
+  }
+
+  /** Forgets the open editor, as when the reading is drawn again. */
+  #dropSession(): void {
+    const session = this.#session;
+    if (session !== undefined) {
+      session.closed = true;
+      this.#session = undefined;
+    }
+    this.#popover.hidden = true;
+    this.#popover.replaceChildren();
+  }
+
+  /** Sets `target` to `value`: fires `nx-edit` and shows the value, muted, until the host's tree. */
+  #commitValue(target: EditTarget, value: string): void {
+    if (value === this.#currentOf(target)) {
+      return;
+    }
+    this.#pending.set(target.key, value);
+    const span = this.#rendered.get(target.key);
+    if (span !== undefined) {
+      showValue(span, target, this.#writtenOf(target), value);
+    }
+    this.#fire(NX_EDIT_EVENT, { key: target.key, edit: editOf(target, value) });
+  }
+
+  /**
+   * Opens the editor of the editable value after or before the one with `key`, in reading order,
+   * selecting its unit. A boolean, which has no editor, is passed over.
+   */
+  #openNext(key: string, direction: 1 | -1): void {
+    const values: HTMLElement[] = [];
+    for (const value of this.#body.querySelectorAll<HTMLElement>(".editable-value")) {
+      if (!values.some((other) => keyOf(other) === keyOf(value))) {
+        values.push(value);
+      }
+    }
+    const from = values.findIndex((value) => keyOf(value) === key);
+    let at = from + direction;
+    while (at >= 0 && at < values.length && this.#targets.get(keyOf(values[at]!)!)?.kind === "boolean") {
+      at += direction;
+    }
+    const next = from < 0 ? undefined : values[at];
+    if (next === undefined) {
+      return;
+    }
+    const unit = this.#unitOf(next);
+    this.#select(keyOf(unit ?? next), true);
+    this.#openEditor(keyOf(next)!);
+  }
+
+  /**
+   * Opens the selected unit's first editable value; or, with `open`, fires `nx-open` for a selected
+   * value the reading cannot edit, as a row's expression. Answers whether either happened.
+   */
+  #openSelected(open: boolean): boolean {
+    const unit = this.#selectedUnit();
+    const selected = this.#selection === undefined ? undefined : this.#rendered.get(this.#selection);
+    const first = unit !== undefined ? this.#unitValues(unit)[0] : selected?.matches(".editable-value") === true ? selected : undefined;
+    if (first !== undefined) {
+      this.#openEditor(keyOf(first)!);
+      return true;
+    }
+    const index = this.#index;
+    const at = this.#selection === undefined ? undefined : index?.byKey.get(this.#selection);
+    if (!open || index === undefined || at === undefined) {
+      return false;
+    }
+    const node = index.tree.nodes[at]!;
+    // A row opens its value; a unit that is not a value, as a group, opens nothing.
+    const value =
+      node.role === "attribute"
+        ? (index.children[at] ?? []).find((child) => !["comment", "docComment"].includes(index.tree.nodes[child]!.role))
+        : unit === undefined
+          ? this.#valueAt(at)
+          : undefined;
+    if (value === undefined) {
+      return false;
+    }
+    this.#fireOpen(value);
+    return true;
+  }
+
+  /**
+   * The value the node at `at` is part of: the nearest node, from it outwards, that is a whole value,
+   * and not past an element or a name. Nothing when there is none, as for an element's name.
+   */
+  #valueAt(at: number): number | undefined {
+    const index = this.#index!;
+    for (let node: number | undefined = at; node !== undefined; node = index.tree.nodes[node]!.parent) {
+      const role = index.tree.nodes[node]!.role;
+      if (role === "element" || role === "attribute" || role === "declaration" || role === "sequence") {
+        return undefined;
+      }
+      if (isWholeValue(index, node)) {
+        return node;
+      }
+    }
+    return undefined;
+  }
+
+  #fireOpen(at: number): void {
+    const node = nodeOf(this.#index!, at);
+    this.#fire(NX_OPEN_EVENT, { key: node.key, role: node.role, range: node.range });
+  }
+
+  /**
+   * A double-click on an editable value opens its editor, selecting its unit; on a value the reading
+   * cannot edit, it asks the host to open it in the source.
+   */
+  #onDoubleClick(event: MouseEvent): void {
+    if (!this.#editable) {
+      return;
+    }
+    const target = event.target as Element;
+    if (this.#session?.field?.contains(target) === true || target.closest?.(".row-action, .fold") != null) {
+      return;
+    }
+    const value = target.closest?.(".editable-value") as HTMLElement | null | undefined;
+    if (value !== null && value !== undefined && this.#body.contains(value)) {
+      const key = keyOf(value)!;
+      // A boolean toggled on the double-click's second click; an editor open is already open.
+      if (this.#targets.get(key)?.kind === "boolean" || this.#session?.target.key === key) {
+        return;
+      }
+      const unit = this.#unitOf(value);
+      if (keyOf(unit ?? value) !== this.#selection) {
+        this.#select(keyOf(unit ?? value), true);
+      }
+      this.#openEditor(key);
+      return;
+    }
+    const node = target.closest?.("[data-key]") as HTMLElement | null | undefined;
+    const at = node === null || node === undefined || !this.#body.contains(node) ? undefined : this.#index?.byKey.get(keyOf(node)!);
+    const whole = at === undefined ? undefined : this.#valueAt(at);
+    if (whole !== undefined) {
+      this.#fireOpen(whole);
+    }
+  }
+
+  /**
+   * Leaves out the selected row's property, when it has a default or is optional, and selects the
+   * element it was on. Answers whether it did.
+   */
+  #removeSelected(): boolean {
+    const index = this.#index;
+    const key = this.#selection;
+    const at = key === undefined ? undefined : index?.byKey.get(key);
+    const row = key === undefined ? undefined : this.#rendered.get(key);
+    if (!this.#editable || index === undefined || at === undefined || row?.matches(".sheet-row") !== true || this.#removed.has(key!)) {
+      return false;
+    }
+    if (removalOf(index, at) === undefined) {
+      return false;
+    }
+    this.#removed.add(key!);
+    row.classList.add("pending");
+    this.#fire(NX_EDIT_EVENT, { key: key!, edit: { kind: "remove" } });
+    const element = index.tree.nodes[at]!.parent;
+    this.#select(element === undefined ? undefined : index.tree.nodes[element]!.key, true);
+    return true;
+  }
+
+  // ---- Popovers ---------------------------------------------------------------------------
+
+  /** The union's cases with no properties, to choose from, the current one marked, `filter` typed. */
+  #openCases(target: EditTarget, span: HTMLElement, filter: string): void {
+    const document = this.ownerDocument;
+    const input = document.createElement("input");
+    input.className = "popover-filter";
+    input.placeholder = "Filter";
+    input.value = filter;
+    input.spellcheck = false;
+    input.setAttribute("role", "combobox");
+    input.setAttribute("aria-label", `${this.#labelOf(target)}: filter cases`);
+    input.setAttribute("aria-expanded", "true");
+    input.setAttribute("aria-controls", "nx-viewer-options");
+    const list = document.createElement("div");
+    list.className = "options";
+    list.id = "nx-viewer-options";
+    list.setAttribute("role", "listbox");
+    const current = this.#currentOf(target);
+    const options = caseOptions(document, target.cases ?? [], current);
+    options.forEach((option, position) => (option.id = `nx-viewer-option-${position}`));
+    list.append(...options);
+    this.#popover.className = "popover cases";
+    this.#popover.replaceChildren(input, list);
+    this.#popover.hidden = false;
+    span.classList.add("editing");
+    const session: EditSession = { target, span, input, options, active: undefined, closed: false };
+    this.#session = session;
+    input.addEventListener("input", () => this.#filterCases(session));
+    this.#filterCases(session, options.find((option) => option.dataset["name"] === current));
+    this.#placeCard(span, this.#popover);
+    input.focus({ preventScroll: true });
+  }
+
+  /** Shows the cases whose names hold what the filter holds, and keeps one of them active. */
+  #filterCases(session: EditSession, prefer?: HTMLElement): void {
+    const query = (session.input?.value ?? "").trim().toLowerCase();
+    for (const option of session.options ?? []) {
+      option.hidden = query !== "" && !option.dataset["name"]!.toLowerCase().includes(query);
+    }
+    const shown = (session.options ?? []).filter((option) => !option.hidden);
+    const keep = prefer ?? session.active;
+    this.#setActive(session, keep !== undefined && shown.includes(keep) ? keep : shown[0]);
+  }
+
+  #setActive(session: EditSession, option: HTMLElement | undefined): void {
+    session.active = option;
+    for (const candidate of session.options ?? []) {
+      candidate.classList.toggle("active", candidate === option);
+    }
+    if (option === undefined) {
+      session.input?.removeAttribute("aria-activedescendant");
+    } else {
+      session.input?.setAttribute("aria-activedescendant", option.id);
+      option.scrollIntoView?.({ block: "nearest" });
+    }
+  }
+
+  /** A hex field and the browser's color picker, for a string its visualizer formats as a color. */
+  #openColor(target: EditTarget, span: HTMLElement, text: string): void {
+    const document = this.ownerDocument;
+    const input = document.createElement("input");
+    input.className = "popover-hex";
+    input.value = text;
+    input.spellcheck = false;
+    input.setAttribute("aria-label", `${this.#labelOf(target)}: hex color`);
+    const picker = document.createElement("input");
+    picker.type = "color";
+    picker.className = "popover-picker";
+    picker.value = pickerColor(text, span.querySelector(".swatch") ?? undefined);
+    picker.setAttribute("aria-label", `${this.#labelOf(target)}: pick a color`);
+    this.#popover.className = "popover colors";
+    this.#popover.replaceChildren(input, picker);
+    this.#popover.hidden = false;
+    span.classList.add("editing");
+    const session: EditSession = { target, span, input, closed: false };
+    this.#session = session;
+    input.addEventListener("input", () => this.#validate(session));
+    picker.addEventListener("input", () => {
+      input.value = picker.value;
+      this.#validate(session);
+    });
+    picker.addEventListener("change", () => this.#choose(session, picker.value));
+    this.#validate(session);
+    this.#placeCard(span, this.#popover);
+    input.focus({ preventScroll: true });
+    input.select();
+  }
+
+  #onPopoverKey(event: KeyboardEvent): void {
+    // The popover's keys are its own, not the reading's or the host's.
+    event.stopPropagation();
+    const session = this.#session;
+    if (session === undefined || session.field !== undefined) {
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      this.#cancel(session, true);
+      return;
+    }
+    if (session.options !== undefined) {
+      const shown = session.options.filter((option) => !option.hidden);
+      const at = session.active === undefined ? -1 : shown.indexOf(session.active);
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const next = shown[Math.max(0, Math.min(shown.length - 1, at + (event.key === "ArrowDown" ? 1 : -1)))];
+        this.#setActive(session, next);
+      } else if (event.key === "Enter" || event.key === "Tab") {
+        event.preventDefault();
+        if (session.active !== undefined) {
+          this.#choose(session, session.active.dataset["name"]!);
+        }
+        if (event.key === "Tab") {
+          this.#openNext(session.target.key, event.shiftKey ? -1 : 1);
+        }
+      }
+      return;
+    }
+    if (event.key === "Enter" || event.key === "Tab") {
+      event.preventDefault();
+      const value = (session.input?.value ?? "").trim();
+      if (!isHexColor(value)) {
+        this.#validate(session);
+        return;
+      }
+      this.#choose(session, value);
+      if (event.key === "Tab") {
+        this.#openNext(session.target.key, event.shiftKey ? -1 : 1);
+      }
+    }
+  }
+
+  /** Closes a popover with `value` chosen. */
+  #choose(session: EditSession, value: string): void {
+    this.#endSession(session, true);
+    this.#commitValue(session.target, value);
+  }
+
+  // ---- Dragging a number's name -----------------------------------------------------------
+
+  #onPointerDown(event: PointerEvent): void {
+    if (!this.#editable || event.button !== 0) {
+      return;
+    }
+    const name = (event.target as Element).closest?.(".scrub") as HTMLElement | null | undefined;
+    const target = name === null || name === undefined ? undefined : this.#targets.get(name.dataset["scrubKey"] ?? "");
+    if (target === undefined || target.kind !== "number" || stepNumber(this.#currentOf(target), 0) === undefined) {
+      return;
+    }
+    this.#scrub = { target, name: name!, pointer: event.pointerId, x: event.clientX, from: this.#currentOf(target), value: undefined };
+  }
+
+  #onPointerMove(event: PointerEvent): void {
+    const scrub = this.#scrub;
+    if (scrub === undefined || event.pointerId !== scrub.pointer) {
+      return;
+    }
+    const moved = event.clientX - scrub.x;
+    if (scrub.value === undefined) {
+      if (Math.abs(moved) < SCRUB_SLOP) {
+        return;
+      }
+      // The press is a drag now: the pointer is the name's until it lets go.
+      try {
+        scrub.name.setPointerCapture?.(scrub.pointer);
+      } catch {
+        // A pointer the DOM no longer knows ends with its next event.
+      }
+      this.#closeCard();
+      this.#body.classList.add("scrubbing");
+    }
+    event.preventDefault();
+    const value = stepNumber(scrub.from, Math.trunc(moved / SCRUB_STEP) * (event.shiftKey ? 10 : 1)) ?? scrub.from;
+    scrub.value = value;
+    const span = this.#rendered.get(scrub.target.key);
+    if (span !== undefined) {
+      showValue(span, scrub.target, this.#writtenOf(scrub.target), value);
+    }
+  }
+
+  /** Ends a drag: its number is committed once, as it was let go, unless the drag was cancelled. */
+  #onPointerUp(event: PointerEvent, commit: boolean): void {
+    const scrub = this.#scrub;
+    if (scrub === undefined || event.pointerId !== scrub.pointer) {
+      return;
+    }
+    this.#scrub = undefined;
+    if (scrub.value === undefined) {
+      return;
+    }
+    this.#body.classList.remove("scrubbing");
+    this.#ignoreClick = true;
+    setTimeout(() => (this.#ignoreClick = false), 0);
+    if (commit && scrub.value !== scrub.from) {
+      this.#commitValue(scrub.target, scrub.value);
+      return;
+    }
+    // Back where it started: shown as before.
+    const span = this.#rendered.get(scrub.target.key);
+    if (span !== undefined) {
+      if (this.#pending.has(scrub.target.key)) {
+        showValue(span, scrub.target, this.#writtenOf(scrub.target), scrub.from);
+      } else {
+        this.#render();
+      }
+    }
+  }
+
   #onClick(event: MouseEvent): void {
     const target = event.target as Element;
     const toggle = (target.closest?.(".fold-run-head")?.querySelector(".fold") ?? target.closest?.(".fold")) as
@@ -887,11 +1726,31 @@ export class NxViewerElement extends ElementBase {
       this.#toggleFold(toggle.dataset["foldKey"]!, event.altKey);
       return;
     }
+    if (target.closest?.(".row-action") !== null && target.closest?.(".row-action") !== undefined) {
+      this.#removeSelected();
+      return;
+    }
+    // The press that ended a drag of a number's name, or a click inside an open field, is not a
+    // choice of node.
+    if (this.#ignoreClick) {
+      this.#ignoreClick = false;
+      return;
+    }
+    if (this.#session?.field?.contains(target) === true) {
+      return;
+    }
     // A drag that selected text is a text selection, not a choice of node.
     // Chromium reports a selection inside a shadow root only through the root itself.
     const root = this.shadowRoot as (ShadowRoot & { getSelection?(): Selection | null }) | null;
     const textSelection = root?.getSelection?.() ?? this.ownerDocument.getSelection?.();
     if (textSelection !== null && textSelection !== undefined && !textSelection.isCollapsed) {
+      return;
+    }
+    // A click on a value of the unit already selected opens its editor, or toggles a boolean:
+    // select, then change.
+    const value = this.#editable ? (target.closest?.(".editable-value") as HTMLElement | null | undefined) : undefined;
+    if (value !== null && value !== undefined && this.#body.contains(value) && keyOf(this.#unitOf(value) ?? value) === this.#selection) {
+      this.#openEditor(keyOf(value)!);
       return;
     }
     // A click chooses the unit it falls in: the element, row or line, not a word in it. Outside
@@ -919,6 +1778,31 @@ export class NxViewerElement extends ElementBase {
     if (event.key === "Escape") {
       this.#closeCard();
       return;
+    }
+    // Enter or F2 opens the selected unit's first value, Space toggles its boolean, and Delete or
+    // Backspace leaves out its property. Ctrl or Cmd with Z or Y are the host's, for its undo.
+    if (this.#editable && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      if (event.key === "Enter" || event.key === "F2") {
+        if (this.#openSelected(event.key === "Enter")) {
+          event.preventDefault();
+        }
+        return;
+      }
+      if (event.key === " ") {
+        const unit = this.#selectedUnit();
+        const toggle = unit === undefined ? undefined : this.#unitValues(unit).find((value) => this.#targets.get(keyOf(value)!)?.kind === "boolean");
+        if (toggle !== undefined) {
+          event.preventDefault();
+          this.#openEditor(keyOf(toggle)!);
+        }
+        return;
+      }
+      if (event.key === "Delete" || event.key === "Backspace") {
+        if (this.#removeSelected()) {
+          event.preventDefault();
+        }
+        return;
+      }
     }
     // `i` shows the selected unit's card, and tells a screen reader what it says.
     if (event.key === "i" && !event.ctrlKey && !event.metaKey && !event.altKey && this.#selection !== undefined) {
@@ -953,6 +1837,9 @@ export class NxViewerElement extends ElementBase {
     }
     this.#pointedKey = key;
     clearTimeout(this.#cardOpenTimer);
+    if (this.#session !== undefined || this.#scrub?.value !== undefined) {
+      return;
+    }
     if (key !== undefined && key === this.#cardKey) {
       clearTimeout(this.#cardCloseTimer);
       return;
@@ -1019,11 +1906,10 @@ export class NxViewerElement extends ElementBase {
   }
 
   /**
-   * Places the card below `anchor`, or above it where there is no room below, inside the element's
-   * box and what of it is in view.
+   * Places the card, or a popover, below `anchor`, or above it where there is no room below, inside
+   * the element's box and what of it is in view.
    */
-  #placeCard(anchor: HTMLElement): void {
-    const card = this.#card;
+  #placeCard(anchor: HTMLElement, card: HTMLElement = this.#card): void {
     // Measured from the frame's corner, so its width is not cut by where it last stood.
     card.style.left = "0px";
     card.style.top = "0px";
@@ -1031,7 +1917,8 @@ export class NxViewerElement extends ElementBase {
     const box = this.getBoundingClientRect();
     const port = this.#scrollPort();
     const top = Math.max(box.top, port.top);
-    const bottom = Math.min(box.bottom, port.top + port.height);
+    // A popover may run past the reading's end, over the room below it, as a menu does.
+    const bottom = card === this.#card ? Math.min(box.bottom, port.top + port.height) : port.top + port.height;
     const target = anchor.getBoundingClientRect();
     const size = card.getBoundingClientRect();
     let y = target.bottom + CARD_GAP;

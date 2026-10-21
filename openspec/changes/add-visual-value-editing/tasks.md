@@ -15,23 +15,23 @@
 
 ## 3. Editing in the viewer
 
-- [ ] 3.1 Add the `editable` property (honored when set before definition), the `nx-edit` and `nx-open` events and their detail types, exported from the package; verify that nothing changes when `editable` is not set, with the existing tests unchanged
-- [ ] 3.2 Decide what is editable and with which editor, from the tree: the value's place, its property's declared type through the element's declaration and alias chain, `uitext`, `format=id`, `format=color`, the union's constant cases; verify with unit tests over fixtures
-- [ ] 3.3 The text field (strings, `uitext`, ids, text runs) in the value's box, decoding a string literal's escapes for its content (a text run is shown as written); commit, cancel, Tab and Shift+Tab; growth and wrapping within the reading; verify "Editing a string", "Cancelling" and "Nothing moves"
-- [ ] 3.4 The number field: arrow and Shift+arrow steps, scrubbing by dragging the property's name with one commit on release, invalid entries kept and marked; verify with tests using faked pointer events
-- [ ] 3.5 Boolean toggles (Space and a click on a selected unit's check), the case popover (constant cases, docs, current marked, type to filter, arrows and Enter), the color popover (hex field and the browser's color picker); verify "Toggling" and "Picking a case"
-- [ ] 3.6 Selection and opening: click on a value of the selected unit, double-click, Enter and F2, first value of a line; hover cards close when an editor opens; `nx-open` for values that cannot be edited; Ctrl/Cmd+Z and Y left to the host
-- [ ] 3.7 Reset and Clear: Delete and Backspace on a selected row whose property has a default or is optional, the quiet button on the selected row, selection moving to the element; verify "Resetting" and "A required property"
-- [ ] 3.8 The edited value shown muted until the next tree, then the tree as it is; the selection kept by key; verify "The host refuses"
-- [ ] 3.9 Styles: editors in the reading's faces and theme tokens, no borders or chrome at rest, a faint hover mark on editable values of the selected unit; light and dark
+- [x] 3.1 Add the `editable` property (honored when set before definition), the `nx-edit` and `nx-open` events and their detail types, exported from the package; verify that nothing changes when `editable` is not set, with the existing tests unchanged
+- [x] 3.2 Decide what is editable and with which editor, from the tree: the value's place, its property's declared type through the element's declaration and alias chain, `uitext`, `format=id`, `format=color`, the union's constant cases; verify with unit tests over fixtures
+- [x] 3.3 The text field (strings, `uitext`, ids, text runs) in the value's box, decoding a string literal's escapes for its content (a text run is shown as written); commit, cancel, Tab and Shift+Tab; growth and wrapping within the reading; verify "Editing a string", "Cancelling" and "Nothing moves"
+- [x] 3.4 The number field: arrow and Shift+arrow steps, scrubbing by dragging the property's name with one commit on release, invalid entries kept and marked; verify with tests using faked pointer events
+- [x] 3.5 Boolean toggles (Space and a click on a selected unit's check), the case popover (constant cases, docs, current marked, type to filter, arrows and Enter), the color popover (hex field and the browser's color picker); verify "Toggling" and "Picking a case"
+- [x] 3.6 Selection and opening: click on a value of the selected unit, double-click, Enter and F2, first value of a line; hover cards close when an editor opens; `nx-open` for values that cannot be edited; Ctrl/Cmd+Z and Y left to the host
+- [x] 3.7 Reset and Clear: Delete and Backspace on a selected row whose property has a default or is optional, the quiet button on the selected row, selection moving to the element; verify "Resetting" and "A required property"
+- [x] 3.8 The edited value shown muted until the next tree, then the tree as it is; the selection kept by key; verify "The host refuses"
+- [x] 3.9 Styles: editors in the reading's faces and theme tokens, no borders or chrome at rest, a faint hover mark on editable values of the selected unit; light and dark
 
 ## 4. The playground
 
-- [ ] 4.1 The worker answers `sourceEdit`; the editor handle applies text edits with `executeEdits` as one undo step
-- [ ] 4.2 `ReadingView` sets `editable`, handles `nx-edit` in order (queued while one is in flight), asks for the source tree at once after an edit, and forwards Ctrl/Cmd+Z and redo to the editor; `App` switches to Source at the node for `nx-open`
-- [ ] 4.3 Verify the playground scenarios with its tests, and by screenshots in the playground: editing a string, picking a case, toggling, resetting, undo from Visual, in light and dark and at 375 pixels wide
+- [x] 4.1 The worker answers `sourceEdit`; the editor handle applies text edits with `executeEdits` as one undo step
+- [x] 4.2 `ReadingView` sets `editable`, handles `nx-edit` in order (queued while one is in flight), asks for the source tree at once after an edit, and forwards Ctrl/Cmd+Z and redo to the editor; `App` switches to Source at the node for `nx-open`
+- [x] 4.3 Verify the playground scenarios with its tests, and by screenshots in the playground: editing a string, picking a case, toggling, resetting, undo from Visual, in light and dark and at 375 pixels wide
 
 ## 5. Docs and checks
 
-- [ ] 5.1 Document editing, `editable`, `nx-edit` and `nx-open` in `packages/viewer/README.md`, and `sourceEdit` in the language packages' READMEs; add the changes to `src/vscode/CHANGELOG.md`'s next release and the package changelogs
+- [x] 5.1 Document editing, `editable`, `nx-edit` and `nx-open` in `packages/viewer/README.md`, and `sourceEdit` in the language packages' READMEs; add the changes to `src/vscode/CHANGELOG.md`'s next release and the package changelogs
 - [ ] 5.2 Run `cargo test`, `pnpm -r build` and `pnpm -r test`, and `openspec validate add-visual-value-editing --strict`, all passing

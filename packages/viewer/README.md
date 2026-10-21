@@ -97,6 +97,7 @@ declare module "react" {
 | `folded`    | property               | The keys of what is folded; `undefined`, the default, folds the document's supporting declarations |
 | `stale`     | property and attribute | The reading is muted and badged "Out of date"; selection still works         |
 | `selection` | property               | The selected node's key; setting it scrolls the node into view               |
+| `editable`  | property               | Values edit in place, and edits fire `nx-edit`; off by default               |
 
 ## How it reads
 
@@ -243,6 +244,62 @@ if (atTop !== undefined && start !== undefined) {
 }
 ```
 
+## Editing
+
+With `editable` set, a reader changes a value where it reads, with an editor that fits its type.
+The element never changes the text or the tree itself: each edit fires `nx-edit`, whose `detail` is
+`{ key, edit }`, the node's key and the edit as the language service's `sourceEdit` query takes it.
+The host asks its language service for the text edits, applies them to its own text, so the edit
+joins its editor's undo history, and sets the new text and tree. Until it does, the edited value
+reads muted; a host that sets the same tree again, as after a refused edit, has it read as before.
+
+| Value                                              | Editor                                                        |
+| -------------------------------------------------- | ------------------------------------------------------------- |
+| A string, `uitext` or an id                        | A field in the value's place, holding it without quotes or escapes |
+| An `int`, `float32` or `float64`, or an alias of one | A number field: the up and down arrows step by 1, Shift by 10; dragging the property's name sideways changes it, committed once on release |
+| A boolean                                          | Toggles: Space, or a click on the selected unit's mark         |
+| A bare case of a union                             | A popover of the union's cases that hold no properties, each with its doc, filtered as the reader types |
+| A string formatted as `color`                      | A popover with a hex field and the browser's color picker      |
+| A run of text on one line                          | A one-line field                                              |
+
+Only whole values edit: an attribute's value, an item of a braced list, or the value of a `let`
+with no parameters. Select first, then change: a click on a value of the selected unit, a
+double-click on a value, or Enter or F2 opens its editor (Enter opens a line's first value). Enter
+or leaving the field commits, Escape cancels, and Tab and Shift+Tab commit and open the next or
+previous value. An entry an editor cannot take, such as `12px` in a number field, stays in the
+field, marked. Fields take the value's own place and popovers open over the reading, so nothing
+else moves.
+
+On a selected row whose property has a default or is optional, Delete or Backspace, or the quiet
+"Reset to default" or "Clear" at the row's end, fires `nx-edit` with `{ kind: "remove" }` for the
+attribute, and the element it was on is selected. Enter or a double-click on a value the reading
+cannot edit, such as an expression, fires `nx-open` with the node's `{ key, role, range }`, for the
+host to show it in its editor. With the reading focused and no editor open, Ctrl or Cmd with Z or Y
+are left to the host; inside a field, they are the field's.
+
+```ts
+import { NX_EDIT_EVENT, NX_OPEN_EVENT, type NxEditDetail, type NxOpenDetail } from "@nx-lang/viewer";
+
+viewer.editable = true;
+viewer.addEventListener(NX_EDIT_EVENT, async (event) => {
+  const { key, edit } = (event as CustomEvent<NxEditDetail>).detail;
+  const text = model.getValue();
+  const answer = await service.sourceEdit({ documents: [{ uri, source: text }], uri, key, edit });
+  // Applied against the text the request carried; a refusal answers no edits.
+  if (answer.edits.length > 0 && model.getValue() === text) {
+    editor.pushUndoStop();
+    for (const { range, newText } of answer.edits) {
+      editor.executeEdits("visual", [{ range: toMonacoRange(range), text: newText }]);
+    }
+    editor.pushUndoStop();
+  }
+  // ...then set viewer.text and viewer.tree from the new text, as after any edit.
+});
+viewer.addEventListener(NX_OPEN_EVENT, (event) => showInEditor((event as CustomEvent<NxOpenDetail>).detail.range));
+```
+
+A host applies edits in the order they fire, each against the text the one before left.
+
 ## Hover cards
 
 Resting the pointer on a name or a value for half a second opens a card that says what it is, in the
@@ -299,6 +356,10 @@ restyle it:
 | `--nx-viewer-card-background`         | white, or a dark gray                     |
 | `--nx-viewer-card-border`             | a light or dark gray                      |
 | `--nx-viewer-link-color`              | a light or dark blue, for a card's links  |
+| `--nx-viewer-edit-hover`              | a faint tint, on an editable value of the selected unit |
+| `--nx-viewer-field-background`        | a faint blue tint, behind an open field    |
+| `--nx-viewer-field-underline`         | a light or dark blue, under an open field  |
+| `--nx-viewer-invalid`                 | a light or dark red, under an entry a field cannot take |
 
 ## Development
 
