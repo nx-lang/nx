@@ -18,6 +18,8 @@ import type {
   LanguageQueryName,
   NxLanguageService,
   SourceTree,
+  SourceEditAnswer,
+  SourceEditRequest,
   SourceTreeRequest
 } from "@nx-lang/language-protocol";
 
@@ -38,6 +40,8 @@ export function createWorkerLanguageService(): NxLanguageService {
     documentSymbols: (request: DocumentSymbolsRequest, signal?: AbortSignal) =>
       ask<DocumentSymbol[]>("documentSymbols", request, signal),
     sourceTree: (request: SourceTreeRequest, signal?: AbortSignal) =>
-      ask<SourceTree>("sourceTree", request, signal)
+      ask<SourceTree>("sourceTree", request, signal),
+    sourceEdit: (request: SourceEditRequest, signal?: AbortSignal) =>
+      ask<SourceEditAnswer>("sourceEdit", request, signal)
   };
 }

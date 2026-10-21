@@ -14,6 +14,8 @@ import type {
   Hover,
   LanguageDocument,
   LanguageQueryName,
+  SourceEdit,
+  SourceEditAnswer,
   SourceTree,
   SourceTreeVisualizersOption,
   TextPosition
@@ -41,6 +43,9 @@ export interface AnswerRequest {
   position: TextPosition | undefined;
   /** What a source-tree query asks to have resolved besides the tree. */
   visualizers?: SourceTreeVisualizersOption | undefined;
+  /** The node a source-edit query edits, and the edit. */
+  key?: string | undefined;
+  edit?: SourceEdit | undefined;
 }
 
 /**
@@ -154,5 +159,7 @@ export function answerQuery(
           ? snapshot.sourceTree(request.uri)
           : snapshot.sourceTree(request.uri, { visualizers: request.visualizers })) as SourceTree
       );
+    case "sourceEdit":
+      return snapshot.sourceEdit(request.uri, request.key ?? "", request.edit as SourceEdit) as SourceEditAnswer;
   }
 }

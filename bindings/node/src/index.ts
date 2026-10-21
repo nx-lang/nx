@@ -4,6 +4,8 @@ import type {
   DiagnosticReport,
   DocumentSymbol,
   Hover,
+  SourceEdit,
+  SourceEditAnswer,
   SourceTree,
   SourceTreeVisualizersOption,
   TextPosition
@@ -69,6 +71,10 @@ export type {
   SourceCase,
   SourceDeclaration,
   SourceDeclarationKind,
+  SourceEdit,
+  SourceEditAnswer,
+  SourceEditRefusal,
+  SourceEditValue,
   SourceFlag,
   SourceNode,
   SourceProperty,
@@ -77,6 +83,7 @@ export type {
   SourceTree,
   SourceTreeVisualizersOption,
   SourceVisualizer,
+  TextEdit,
   TextPosition,
   WorkspaceDiagnostic,
   WorkspaceDiagnosticLabel
@@ -673,6 +680,21 @@ export class NxLanguageSnapshot {
       )
     );
     return parseResultJson(json) as SourceTree;
+  }
+
+  /**
+   * The text edits that make `edit` at the node `key` of the document at `uri`, or why there are
+   * none.
+   *
+   * Unstable: the request's and the answer's shapes may change in any release until a later one
+   * commits to them.
+   *
+   * @throws NxEvaluationError when `uri` names no document in the snapshot.
+   * @throws NxDisposedResourceError when this snapshot has already been disposed.
+   */
+  public sourceEdit(uri: string, key: string, edit: SourceEdit): SourceEditAnswer {
+    const json = invokeNative(() => getLanguageSnapshotNative(this).sourceEdit(uri, key, JSON.stringify(edit)));
+    return parseResultJson(json) as SourceEditAnswer;
   }
 
   /**

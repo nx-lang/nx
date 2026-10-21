@@ -8,10 +8,10 @@
 
 ## 2. Exposing it to TypeScript hosts
 
-- [ ] 2.1 `bindings/wasm`: a `nx_wasm_snapshot_source_edit` export and `sourceEdit` on the snapshot in `host.ts`; raise the ABI version; `bindings/node`: the same on the native snapshot and `index.ts`
-- [ ] 2.2 `packages/language-protocol`: `SourceEditRequest`, `SourceEdit`, `SourceEditValue`, `TextEdit`, `SourceEditAnswer`, `SourceEditRefusal`; `sourceEdit` in the query names, requests, answers and `NxLanguageService`; mark it unstable in the docs
-- [ ] 2.3 `language-core` (answer and service), `language-http` (request validation), `language-client` (method); verify with each package's tests, including a refusal round-tripping through HTTP as an answer, not an error
-- [ ] 2.4 Parity: the wasm SDK's language-service tests ask for source edits over their corpus through TypeScript and Rust and compare after JSON round-trip
+- [x] 2.1 `bindings/wasm`: a `nx_wasm_snapshot_source_edit` export and `sourceEdit` on the snapshot in `host.ts`; raise the ABI version; `bindings/node`: the same on the native snapshot and `index.ts`
+- [x] 2.2 `packages/language-protocol`: `SourceEditRequest`, `SourceEdit`, `SourceEditValue`, `TextEdit`, `SourceEditAnswer`, `SourceEditRefusal`; `sourceEdit` in the query names, requests, answers and `NxLanguageService`; mark it unstable in the docs
+- [x] 2.3 `language-core` (answer and service), `language-http` (request validation), `language-client` (method); verify with each package's tests, including a refusal round-tripping through HTTP as an answer, not an error
+- [x] 2.4 Parity: the wasm SDK's language-service tests ask for source edits over their corpus through TypeScript and Rust and compare after JSON round-trip
 
 ## 3. Editing in the viewer
 

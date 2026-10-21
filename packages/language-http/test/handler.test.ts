@@ -232,6 +232,7 @@ test("an evicted snapshot is disposed and the cache never exceeds its size", asy
         diagnostics: () => ({ documents: [], workspace: [] }),
         documentSymbols: () => [],
         sourceTree: () => ({ uri: FORM, identity: "tenant/form.nx", version: null, nodes: [], declarations: [] }),
+        sourceEdit: () => ({ edits: [] }),
         dispose: () => disposed.push(source),
       };
     },
@@ -455,6 +456,7 @@ test("a sibling's related location keeps the coordinates the analysis gave it", 
       }),
       documentSymbols: () => [],
       sourceTree: () => ({ uri: FORM, identity: "tenant/form.nx", version: null, nodes: [], declarations: [] }),
+      sourceEdit: () => ({ edits: [] }),
       dispose: () => undefined,
     }),
   });

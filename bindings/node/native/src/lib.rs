@@ -10,7 +10,8 @@ use nx_api::{
 use nx_codegen::{emit_nx_ir, NxIrEmitOptions};
 use nx_ir::explain_nx_ir_image;
 use nx_language_service::{
-    DocumentInput, DocumentUri, SnapshotError, SourceTreeOptions, TextPosition, WorkspaceSnapshot,
+    DocumentInput, DocumentUri, SnapshotError, SourceEdit, SourceTreeOptions, TextPosition,
+    WorkspaceSnapshot,
 };
 use nx_value::NxValue;
 use serde::Serialize;
@@ -378,6 +379,22 @@ impl NativeNxLanguageSnapshot {
             .source_tree_with_options(&DocumentUri::new(uri), &options)
             .map_err(snapshot_error)?;
         result_json(&tree)
+    }
+
+    /// The text edits that make one edit at a node of one document, or why there are none, as
+    /// JSON. Unstable.
+    #[napi]
+    pub fn source_edit(&self, uri: String, key: String, edit_json: String) -> Result<String> {
+        let snapshot = self.snapshot()?;
+        let edit: SourceEdit = serde_json::from_str(&edit_json).map_err(|error| {
+            Error::from_reason(format!(
+                "{EVALUATION_ERROR_PREFIX}Invalid source edit: {error}"
+            ))
+        })?;
+        let answer = snapshot
+            .source_edit(&DocumentUri::new(uri), &key, &edit)
+            .map_err(snapshot_error)?;
+        result_json(&answer)
     }
 
     #[napi]

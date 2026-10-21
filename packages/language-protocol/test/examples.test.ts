@@ -23,6 +23,8 @@ import {
   type LanguageQueryAnswers,
   type LanguageQueryRequests,
   type NxLanguageService,
+  type SourceEditAnswer,
+  type SourceEditRequest,
   type SourceTree,
   type SourceTreeRequest,
 } from "../src/index.js";
@@ -133,6 +135,19 @@ export const sourceTreeAnswer: SourceTree = {
   ],
 };
 
+export const sourceEditRequest: SourceEditRequest = {
+  documents,
+  uri: "nx://tenant/ui.nx",
+  key: "Button.label.type",
+  edit: { kind: "setValue", value: { kind: "string", value: "Save" } },
+};
+
+export const sourceEditAnswer: SourceEditAnswer = {
+  edits: [{ range: range(25, 31), newText: '"Save"' }],
+};
+
+export const sourceEditRefusal: SourceEditAnswer = { edits: [], refused: "notEditable" };
+
 /** An in-process implementation, the shape an editor integration is tested against. */
 export const fakeService: NxLanguageService = {
   hover: async () => hoverAnswer,
@@ -140,6 +155,7 @@ export const fakeService: NxLanguageService = {
   diagnostics: async () => diagnosticsAnswer,
   documentSymbols: async () => documentSymbolsAnswer,
   sourceTree: async () => sourceTreeAnswer,
+  sourceEdit: async () => sourceEditAnswer,
 };
 
 test("every example round-trips through JSON without loss", () => {
@@ -154,6 +170,9 @@ test("every example round-trips through JSON without loss", () => {
     documentSymbolsAnswer,
     sourceTreeRequest,
     sourceTreeAnswer,
+    sourceEditRequest,
+    sourceEditAnswer,
+    sourceEditRefusal,
   ]) {
     assert.deepEqual(JSON.parse(JSON.stringify(example)), example);
   }
@@ -166,6 +185,7 @@ test("the request and answer maps name exactly the defined queries", () => {
     diagnostics: true,
     documentSymbols: true,
     sourceTree: true,
+    sourceEdit: true,
   };
   const answers: Record<keyof LanguageQueryAnswers, true> = requests;
   assert.deepEqual(Object.keys(answers).sort(), [...LANGUAGE_QUERIES].sort());

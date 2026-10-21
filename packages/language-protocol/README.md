@@ -194,6 +194,32 @@ type, its default as written, and whether it is optional, content or inherited),
 component's state, a union's cases, an alias's type, and a value's type and the range of its value.
 Optional properties of a node or a declaration are absent rather than `null` when they do not apply.
 
+### `sourceEdit` (unstable)
+
+**Unstable:** the request's and the answer's shapes may change in any release until a later one
+commits to them. It is published for the NX viewer's Visual editing to build on.
+
+```ts
+const request: SourceEditRequest = {
+  documents,
+  uri: "nx://tenant/ui.nx",
+  key: "Button.label.type",
+  edit: { kind: "setValue", value: { kind: "string", value: "Save" } },
+};
+
+const answer: SourceEditAnswer = { edits: [{ range: range(25, 31), newText: '"Save"' }] };
+const refused: SourceEditAnswer = { edits: [], refused: "notEditable" };
+```
+
+The request names a node of the document's source tree by its `key` and one change: `setValue`
+with a typed value (`string`, `number` as typed, `boolean`, or `case` by name) for a literal or a
+bare union case that is a whole value, `setText` with one line of text for a run of text content,
+or `remove` for an attribute. The answer's `edits`, applied one after another to the document as
+sent, make the change; the service writes the spelling (quotes, escapes, kept braces, an
+attribute's whole line). A change it cannot make answers no edits and `refused`: `unknownNode`,
+`notEditable` or `invalidValue`. A change that would leave the text as it is answers no edits and no
+refusal.
+
 ### Reserved names
 
 `definition`, `references`, `rename`, `signatureHelp`, `inlayHints` and `semanticTokens` are
@@ -210,6 +236,7 @@ interface NxLanguageService {
   diagnostics(request: DiagnosticsRequest, signal?: AbortSignal): Promise<DiagnosticReport>;
   documentSymbols(request: DocumentSymbolsRequest, signal?: AbortSignal): Promise<DocumentSymbol[]>;
   sourceTree(request: SourceTreeRequest, signal?: AbortSignal): Promise<SourceTree>; // unstable
+  sourceEdit(request: SourceEditRequest, signal?: AbortSignal): Promise<SourceEditAnswer>; // unstable
 }
 ```
 

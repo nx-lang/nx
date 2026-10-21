@@ -80,6 +80,7 @@ export interface NativeNxLanguageSnapshot {
   diagnostics(): string;
   documentSymbols(uri: string): string;
   sourceTree(uri: string, optionsJson?: string | null): string;
+  sourceEdit(uri: string, key: string, editJson: string): string;
   dispose(): void;
 }
 

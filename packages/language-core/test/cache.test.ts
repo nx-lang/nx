@@ -13,6 +13,7 @@ function fakeSnapshot(onDispose: () => void): SnapshotLike {
     diagnostics: () => ({ documents: [], workspace: [] }),
     documentSymbols: () => [],
     sourceTree: () => ({ uri: FORM, identity: "tenant/form.nx", version: null, nodes: [], declarations: [] }),
+    sourceEdit: () => ({ edits: [] }),
     dispose: onDispose,
   };
 }

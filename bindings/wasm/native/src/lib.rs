@@ -24,13 +24,14 @@ use nx_api::{
 use nx_codegen::{emit_nx_ir, write_nx_ir_bundle, NxIrEmitOptions};
 use nx_ir::explain_nx_ir_image;
 use nx_language_service::{
-    DocumentInput, DocumentUri, SnapshotError, SourceTreeOptions, TextPosition, WorkspaceSnapshot,
+    DocumentInput, DocumentUri, SnapshotError, SourceEdit, SourceTreeOptions, TextPosition,
+    WorkspaceSnapshot,
 };
 use serde::{Deserialize, Serialize};
 
 /// ABI version the loader checks before it makes any other call. Bump it whenever an export's
 /// signature, a status code or a payload shape changes.
-pub const ABI_VERSION: u32 = 8;
+pub const ABI_VERSION: u32 = 9;
 
 /// The operation succeeded; the payload is its JSON result.
 pub const STATUS_OK: u32 = 0;
@@ -150,6 +151,13 @@ struct SourceTreeRequest {
     uri: String,
     #[serde(flatten)]
     options: SourceTreeOptions,
+}
+
+#[derive(Deserialize)]
+struct SourceEditRequest {
+    uri: String,
+    key: String,
+    edit: SourceEdit,
 }
 
 /// The ABI version this module implements.
@@ -490,6 +498,19 @@ pub unsafe extern "C" fn nx_wasm_snapshot_source_tree(
     into_result(snapshot_source_tree(&*handle, argument(ptr, len)))
 }
 
+/// The text edits that make the edit a `{ uri, key, edit }` argument asks for, as JSON. Unstable.
+///
+/// # Safety
+/// `handle` must be a live snapshot handle; `ptr` and `len` must describe UTF-8 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn nx_wasm_snapshot_source_edit(
+    handle: *mut WorkspaceSnapshot,
+    ptr: *const u8,
+    len: usize,
+) -> *mut NxWasmResult {
+    into_result(snapshot_source_edit(&*handle, argument(ptr, len)))
+}
+
 /// Releases the snapshot `handle` names.
 ///
 /// # Safety
@@ -802,6 +823,17 @@ fn snapshot_source_tree(
         .source_tree_with_options(&DocumentUri::new(request.uri), &request.options)
         .map_err(snapshot_error)?;
     result_json(&tree)
+}
+
+fn snapshot_source_edit(
+    snapshot: &WorkspaceSnapshot,
+    argument: Result<&str, OperationError>,
+) -> Operation {
+    let request: SourceEditRequest = parse_request(argument?)?;
+    let answer = snapshot
+        .source_edit(&DocumentUri::new(request.uri), &request.key, &request.edit)
+        .map_err(snapshot_error)?;
+    result_json(&answer)
 }
 
 /// Reads the loader's argument buffer as UTF-8.
