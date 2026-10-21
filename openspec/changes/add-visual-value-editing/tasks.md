@@ -41,5 +41,5 @@
 - [x] 6.1 Popover placement: place the popover by its value before bringing its current option into view, and scroll only its list, so the reading no longer jumps and the popover lands by its value
 - [x] 6.2 A click on an editable value edits it (caret where the click fell; booleans toggle, cases and colors open their popover) and selects its unit; a click on a name selects; Enter and F2 still open with the text selected; a double-click's second click does not toggle again (replaces "select first" in 3.5 and 3.6)
 - [x] 6.3 Hover cues on every editable value (text cursor or hand, faint mark, a chevron after a case) and an input look for an open field: background, focus ring and its own selection color (revises 3.9)
-- [x] 6.4 Remove the row button and Backspace; Delete alone removes a property with a default or an optional one (revises 3.7)
+- [x] 6.4 Remove the row button and Backspace; Delete, or Cmd+Backspace on a Mac, removes a property with a default or an optional one (revises 3.7)
 - [x] 6.5 Playground: Undo and Redo buttons in the NX title bar for both views, disabled when there is nothing to undo or redo, tooltips naming the shortcuts; Collapse all and Expand all as icons on a narrow screen

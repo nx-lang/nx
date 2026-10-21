@@ -197,8 +197,11 @@ export function App() {
   const [history, setHistory] = useState<EditorHistory>({ canUndo: false, canRedo: false });
   /** Undo or redo, from Visual or the title bar: the editor's history, the same as in Source. */
   const visualHistory = (step: "undo" | "redo") => {
-    editor.current?.[step]();
-    immediateTree.current = editor.current?.text() ?? null;
+    // After any edit still being made, as a field's that pressing the button committed.
+    void applyVisualEdit.after(() => {
+      editor.current?.[step]();
+      immediateTree.current = editor.current?.text() ?? null;
+    });
   };
   // The editor's cursor, carried into Visual until a tree of the same text can say what it is on.
   const cursorToSelect = useRef<number | null>(null);

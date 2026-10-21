@@ -271,9 +271,10 @@ commit and open the next or previous value. An entry an editor cannot take, such
 number field, stays in the field, marked. Fields take the value's own place and popovers open over
 the reading, so nothing else moves.
 
-On a selected row whose property has a default or is optional, Delete fires `nx-edit` with
-`{ kind: "remove" }` for the attribute, and the element it was on is selected. Backspace does not,
-since a reader who meant to change the text would press it. Enter or a double-click on a value the reading
+On a selected row whose property has a default or is optional, Delete, or Cmd+Backspace (a Mac
+laptop's delete key), fires `nx-edit` with `{ kind: "remove" }` for the attribute, and the element it
+was on is selected. Backspace alone does not, since a reader who meant to change the text would
+press it. Enter or a double-click on a value the reading
 cannot edit, such as an expression, fires `nx-open` with the node's `{ key, role, range }`, for the
 host to show it in its editor. With the reading focused and no editor open, Ctrl or Cmd with Z or Y
 are left to the host; inside a field, they are the field's.

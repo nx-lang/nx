@@ -50,7 +50,7 @@ reading. A click on an editable value SHALL edit it and select its unit: a field
 collapsed caret where the click fell, a click on a check or cross SHALL toggle the boolean, and a
 case or a color SHALL open its popover; a click anywhere else in a unit, as on a property's name,
 SHALL select the unit and open nothing. The second click of a double-click SHALL NOT toggle a boolean
-again. Enter or F2 with a unit selected SHALL open the editor of its value, or of its first value
+again, and a click on a value whose popover is open SHALL close it, as a dropdown's does. Enter or F2 with a unit selected SHALL open the editor of its value, or of its first value
 when it holds several, with the field's text selected; Space SHALL toggle a boolean. Under the
 pointer, an editable value SHALL show a faint mark and a text cursor, or a hand for one that toggles
 or opens a popover, and a case SHALL show a chevron after it. An open field SHALL read as an input,
@@ -100,9 +100,10 @@ SHALL close any hover card.
 
 ### Requirement: A property with a default, or an optional one, can be left out
 The element SHALL let the reader leave out a property that has a default or is optional: when the
-host has set `editable` and such a property's row is selected, Delete SHALL remove it. Backspace SHALL
-NOT, since a reader who meant to change the text would press it, and the element SHALL offer no button
-for it. A row whose property is required SHALL NOT be removed. After the removal the element SHALL
+host has set `editable` and such a property's row is selected, Delete, or Cmd+Backspace (a Mac
+laptop's delete key is Backspace), SHALL remove it. Backspace alone SHALL NOT, since a reader who meant
+to change the text would press it, and the element SHALL offer no button for it; removal is from the
+keyboard until a later change gives rows a menu. A row whose property is required SHALL NOT be removed. After the removal the element SHALL
 select the element that held the row.
 
 #### Scenario: Resetting

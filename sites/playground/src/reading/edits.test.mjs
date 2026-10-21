@@ -126,3 +126,17 @@ test("an answer for text that changed while it was asked is not applied", async 
   assert.ok(edited.text().includes('name="Latte"'));
   assert.equal(unchanged, 1);
 });
+
+test("a step taken after an edit is fired waits for it, as an undo pressed while it is asked", async () => {
+  const edited = document(example);
+  const queue = createEditQueue(service, uri, edited, () => undefined);
+  const key = await keyOf(example, "Latte", "name");
+  const order = [];
+  const edit = queue({ key, edit: { kind: "setValue", value: { kind: "string", value: "Mocha" } } }).then(() => order.push("edit"));
+  const undo = queue.after(() => {
+    order.push("undo");
+    assert.ok(edited.text().includes('name="Mocha"'), "the edit is made before the step");
+  });
+  await Promise.all([edit, undo]);
+  assert.deepEqual(order, ["edit", "undo"]);
+});

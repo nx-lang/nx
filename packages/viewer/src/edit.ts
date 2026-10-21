@@ -36,9 +36,6 @@ export interface EditTarget {
   readonly signed?: boolean;
 }
 
-/** How a property that may be left out goes: back to its default, or cleared. */
-export type Removal = "reset" | "clear";
-
 /** The types a number field edits, and their aliases' ends. */
 const NUMBER_TYPES = new Set(["int", "float", "float32", "float64"]);
 
@@ -129,28 +126,22 @@ export function editTargets(index: TreeIndex): Map<string, EditTarget> {
 }
 
 /**
- * How the attribute at `at` may be left out: reset when its property has a default, cleared when it
- * is optional, or not at all.
+ * Whether the attribute at `at` may be left out: its property has a default, which it goes back to,
+ * or is optional.
  */
-export function removalOf(index: TreeIndex, at: number): Removal | undefined {
+export function isRemovable(index: TreeIndex, at: number): boolean {
   const { tree } = index;
   const attribute = tree.nodes[at];
   if (attribute?.role !== "attribute" || attribute.flags?.includes("content") === true || attribute.parent === undefined) {
-    return undefined;
+    return false;
   }
   const element = tree.nodes[attribute.parent]!;
   const declaration = element.declaration === undefined ? undefined : tree.declarations[element.declaration];
   if (element.role !== "element" || declaration === undefined || declaration.kind === "union") {
-    return undefined;
+    return false;
   }
   const property = declaration.properties?.find((candidate) => candidate.name === attribute.name);
-  if (property === undefined) {
-    return undefined;
-  }
-  if (property.default !== undefined) {
-    return "reset";
-  }
-  return property.flags?.includes("optional") === true ? "clear" : undefined;
+  return property !== undefined && (property.default !== undefined || property.flags?.includes("optional") === true);
 }
 
 function targetOf(

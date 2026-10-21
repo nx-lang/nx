@@ -236,6 +236,106 @@ SDK's `sourceEdit` and `sourceTree` (scratch script, not committed).
   draft when where it was cannot be read" now has `getComposedRanges` throw.
 - **Verification:** Verified (commit ccb1715). The `getComposedRanges` call is now inside a try/catch, and a throw counts as no composed range. `#caretOf` then reads the selection's own range or returns nothing, and `#render` puts the caret after the draft as RF9's fallback does. The render can no longer abort. The RF9 test now makes `getComposedRanges` throw a `TypeError` and still checks that the caret is collapsed after the draft. Viewer suite: 111/111 pass.
 
+## New Findings Discovered During 2026-10-21 23:44 Review
+
+Scope of this pass: commit f90ad06 only (click to edit, `offsetAtPoint`, popover placement, the Reset/Clear button and
+Backspace removed, hover cues and the field's input look, the playground's Undo/Redo buttons and narrow-screen
+icons, and the spec, design and tasks section 6). Checks:
+- viewer tests 112/112, playground `pnpm test` 122/122, `openspec validate --strict` valid;
+- in Chromium against the dev server (`/play/survey`, 1200 px and 375 px wide):
+  - a click puts a collapsed caret at the right character;
+  - the popover is placed by its value and the reading does not scroll;
+  - the Undo and Redo buttons enable and disable correctly;
+  - switching examples resets the history;
+  - a double-click toggles a boolean only once;
+  - a click on a name only selects;
+  - the title bar fits at 320 px.
+
+### 🟡 Fixed - RF11 The title bar's Undo, pressed while a Visual field is open, undoes the step before and throws away what was typed in the field
+- **Severity:** Medium (confidence: high, reproduced in Chromium)
+- **Evidence:** I set the title (edit A, committed), then clicked the description, typed `BB` and clicked the
+  title bar's Undo:
+  1. The button's pointerdown blurs the field, which commits B: `nx-edit` fires and the queue asks the
+     worker.
+  2. The button's click then runs `visualHistory("undo")` (App.tsx) at once, which undoes A.
+  3. B's answer arrives for text that has since changed, so `createEditQueue` drops it (edits.ts,
+     `document.text() !== text`).
+
+  The source ends with neither A nor B. Redo brings back A, but B is lost. Redo has the same race. The
+  spec scenario "Undo from the title bar" covers only an edit already made.
+- **Recommendation:** Make the buttons act on what the reader sees:
+  - with a Visual editor open, Undo should cancel the field (the reader's typing is the latest change)
+    rather than undo a step;
+  - or Undo should wait until the commit's edit has been applied (for example, go through the same
+    queue, `createEditQueue`) before undoing.
+
+  `preventDefault` on the buttons' pointerdown keeps the field from blurring first. Add a playground test
+  for an undo with a field open, or with an edit still queued.
+- **Fix:** `createEditQueue` gains `after(step)`, which runs a step once every edit fired before it
+  has been made or refused. The playground's undo and redo (title bar and shortcuts) go through it,
+  so an Undo pressed with a field open takes back the field's edit, which the press committed, and
+  the edit before it stays. Test in edits.test.mjs: a step waits for the edit fired before it. Spec
+  sentence in the playground's requirement.
+
+### 🟡 Fixed - RF12 With Backspace and the row button gone, Reset and Clear are out of reach on Mac laptops and touch screens
+- **Severity:** Medium (confidence: high on the key mapping; how much it matters depends on who uses Visual)
+- **Evidence:** Removal now listens only for `event.key === "Delete"` (index.ts `#onKey`). On a Mac laptop the
+  key labelled "delete" reports `Backspace`; a forward `Delete` needs Fn+Delete, which few readers know. Phones
+  and tablets have neither key, and the "Reset to default" and "Clear" button was their only way.
+  The viewer spec still requires that "A property with a default, or an optional one, can be left out"
+  (specs/viewer/spec.md). The playground is mostly read on Macs and phones, and there this has become a
+  keyboard-only feature with no way to discover it. The design's reason for dropping Backspace, that "a
+  reader who meant to change the text would press it", applies only while a field is open, and then the
+  field already handles its own keys.
+- **Recommendation:**
+  - Accept Cmd+Backspace on macOS, the Finder and Mail convention for delete, or Backspace with a row
+    (not a field) selected.
+  - Keep one pointer path to it: a small menu or a context-menu item on the row, which phase 2 needs
+    anyway.
+  - Or say in the spec and README that removal is keyboard-only for now, so the gap is a deliberate
+    choice.
+- **Fix:** Cmd+Backspace removes as Delete does (a Mac laptop's delete key). Touch has no removal for
+  now: the spec and design say removal is from the keyboard until a later change gives rows a menu
+  (phase 2 needs one for adding properties). Test: the removal test presses Cmd+Backspace.
+
+### 🟡 Fixed - RF13 A click on a case (or a color) whose popover is open opens it again instead of closing it
+- **Severity:** Low (confidence: high, reproduced)
+- **Evidence:**
+  1. The document pointerdown handler `#onDocumentPointerDown` cancels the popover, because the value
+     is outside it.
+  2. The click that follows reaches `#onClick`, finds no open session and opens the popover again.
+
+  So the popover cannot be closed by clicking its value. The new chevron and pointer cursor make the
+  value look like a dropdown, where a second click on the trigger closes it.
+- **Recommendation:** In `#onDocumentPointerDown`, when the press is on the session's own `span`,
+  remember that, and let the following click close the popover rather than reopen it. Add a viewer test.
+- **Fix:** A press on the value whose popover is open closes it and marks that key, and the click that
+  follows leaves it closed, as a dropdown does. Test "closes a case's popover on a click on its value,
+  as a dropdown does"; spec sentence added.
+
+### 🟡 Fixed - RF14 `offsetAtPoint`, which places the caret where a click falls, has no test that exercises it
+- **Severity:** Low (confidence: high)
+- **Evidence:** jsdom gives ranges no layout, so `offsetAtPoint` (editors.ts) returns the end of the text in every
+  viewer test. The test "opens a value on a click, with a caret and nothing selected…" only checks that the
+  caret is collapsed. The spec scenario "A click edits where it falls", with the caret between the
+  characters the click fell between, is checked only by hand. It works in Chromium. The function picks the
+  nearest line first, then the nearest character, which deserves a test, especially for wrapped UI text.
+- **Recommendation:** Unit-test `offsetAtPoint` with a stubbed `Range.prototype.getBoundingClientRect`
+  that lays out characters on one line and on two wrapped lines. Check a point before the first
+  character, between two characters, and after the end of a line.
+- **Fix:** A test of `offsetAtPoint` with laid-out characters (Range boxes stubbed: 8 px a
+  character, 4 a line) checks before/after a character's middle, a second line's start and past a
+  line's end.
+
+### 🟡 Fixed - RF15 `Removal`'s "reset" and "clear" have nothing left to tell apart
+- **Severity:** Low (confidence: high)
+- **Evidence:** The button that showed "Reset to default" or "Clear" is gone. `removalOf` (edit.ts) still answers
+  `"reset" | "clear"`, but its one caller, `#removeSelected`, checks only whether the answer is undefined.
+  The same holds for the viewer test "knows which properties may be left out".
+- **Recommendation:** Make it `mayLeaveOut(index, at): boolean`, or keep the two cases only if the planned
+  row menu will label them, and say so in a comment.
+- **Fix:** `removalOf` is now `isRemovable`, a boolean; the `Removal` type is gone.
+
 ## Questions
 - Should Enter and F2 toggle a boolean when it is the first editable value of the selected unit? They do
   now, because `#openEditor` toggles. Spec and design say Enter "opens" the value, and Tab skips booleans.

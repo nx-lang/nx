@@ -11,7 +11,7 @@
 import type { EditorRange, SourceEdit, SourceRole, SourceTree } from "@nx-lang/language-protocol";
 
 import { cardOf } from "./card.js";
-import { editOf, editTargets, isHexColor, isNumericLiteral, isWholeValue, removalOf, runProblem, type EditTarget } from "./edit.js";
+import { editOf, editTargets, isHexColor, isNumericLiteral, isRemovable, isWholeValue, runProblem, type EditTarget } from "./edit.js";
 import { caseOptions, offsetAtPoint, pickerColor, showValue, stepNumber, valueHost } from "./editors.js";
 import { renderMarkdown } from "./markdown.js";
 import { defaultFolded, readingRuns, renderSource, type NxViewerColor, type NxViewerIcons, type ReadingRun } from "./source.js";
@@ -245,6 +245,8 @@ export class NxViewerElement extends ElementBase {
   #scrub: Scrub | undefined;
   /** Set when a drag ends, so the click the press makes does not also select. */
   #ignoreClick = false;
+  /** The value whose popover a press on it closed, which the click that follows leaves closed. */
+  #closedOnPress: string | undefined;
 
   readonly #badge: HTMLSpanElement;
   readonly #body: HTMLDivElement;
@@ -267,8 +269,14 @@ export class NxViewerElement extends ElementBase {
   /** Cancels a popover when the pointer goes down anywhere outside it. */
   readonly #onDocumentPointerDown = (event: PointerEvent): void => {
     const session = this.#session;
+    this.#closedOnPress = undefined;
     if (session !== undefined && session.field === undefined && !event.composedPath().includes(this.#popover)) {
       this.#cancel(session, false);
+      // A press on the value whose popover was open closes it, as a dropdown's does; the click
+      // that follows does not open it again.
+      if (event.composedPath().includes(session.span)) {
+        this.#closedOnPress = session.target.key;
+      }
     }
   };
 
@@ -1547,7 +1555,7 @@ export class NxViewerElement extends ElementBase {
     if (!this.#editable || index === undefined || at === undefined || row?.matches(".sheet-row") !== true || this.#removed.has(key!)) {
       return false;
     }
-    if (removalOf(index, at) === undefined) {
+    if (!isRemovable(index, at)) {
       return false;
     }
     this.#removed.add(key!);
@@ -1847,7 +1855,9 @@ export class NxViewerElement extends ElementBase {
     if (value !== null && value !== undefined && this.#body.contains(value)) {
       const key = keyOf(value)!;
       // The second click of a double-click would toggle a boolean back, or open an editor again.
-      if ((event.detail > 1 && this.#targets.get(key)?.kind === "boolean") || this.#session?.target.key === key) {
+      const closed = this.#closedOnPress === key;
+      this.#closedOnPress = undefined;
+      if (closed || (event.detail > 1 && this.#targets.get(key)?.kind === "boolean") || this.#session?.target.key === key) {
         return;
       }
       const unit = keyOf(this.#unitOf(value) ?? value);
@@ -1886,6 +1896,14 @@ export class NxViewerElement extends ElementBase {
     }
     if (event.key === "Escape") {
       this.#closeCard();
+      return;
+    }
+    // Cmd+Backspace leaves out the selected row's property, as Delete does: a Mac laptop's delete
+    // key is Backspace.
+    if (this.#editable && event.key === "Backspace" && event.metaKey && !event.ctrlKey && !event.altKey) {
+      if (this.#removeSelected()) {
+        event.preventDefault();
+      }
       return;
     }
     // Enter or F2 opens the selected unit's first value, Space toggles its boolean, and Delete leaves

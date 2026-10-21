@@ -136,8 +136,10 @@ Docs, Sheets and Notion's mobile apps put them in their toolbars.
 
 ### 7. Reset and Clear
 
-With a row selected, Delete removes its property when its declaration gives it a default or makes it
-optional. Backspace does not: a reader who meant to change the text would press it. (The first version
+With a row selected, Delete, or Cmd+Backspace on a Mac laptop, whose delete key is Backspace, removes
+its property when its declaration gives it a default or makes it optional. Backspace alone does not:
+a reader who meant to change the text would press it. On a touch screen there is no way to remove a
+property until the row menu below. (The first version
 also showed a quiet "Reset to default" or "Clear" button on the selected row; Bret found it made a
 destructive change too easy for a rare action, so it was dropped. A row menu with Reset and Remove
 fits phase 2, where adding properties needs a menu anyway.)

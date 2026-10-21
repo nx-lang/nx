@@ -4,7 +4,8 @@ import assert from "node:assert/strict";
 import { after, describe, it, type TestContext } from "node:test";
 
 import { fixture, nxHost, type Fixture } from "./fixtures.js";
-import { editTargets, removalOf } from "../src/edit.js";
+import { editTargets, isRemovable } from "../src/edit.js";
+import { offsetAtPoint } from "../src/editors.js";
 import { indexTree } from "../src/tree.js";
 import type { NxEditDetail, NxOpenDetail, NxViewerElement } from "../src/index.js";
 
@@ -157,10 +158,43 @@ describe("what the reading can edit", () => {
   it("knows which properties may be left out", async () => {
     const { tree, text } = await fixture("editing");
     const index = indexTree(tree, text);
-    const removal = (key: string) => removalOf(index, index.byKey.get(key)!);
-    assert.equal(removal("latte.value.size"), "reset");
-    assert.equal(removal("latte.value.color"), "clear");
-    assert.equal(removal("latte.value.name"), undefined, "a required property");
+    const removable = (key: string) => isRemovable(index, index.byKey.get(key)!);
+    assert.equal(removable("latte.value.size"), true, "a property with a default");
+    assert.equal(removable("latte.value.color"), true, "an optional property");
+    assert.equal(removable("latte.value.name"), false, "a required property");
+  });
+});
+
+describe("where a click puts the caret", () => {
+  it("falls before or after the character the point is over, on the point's line", (t) => {
+    // Lays out text as jsdom does not: eight pixels a character, four characters a line.
+    const prototype = window.Range.prototype as Range & { getBoundingClientRect(): DOMRect };
+    const original = Object.getOwnPropertyDescriptor(prototype, "getBoundingClientRect");
+    Object.defineProperty(prototype, "getBoundingClientRect", {
+      configurable: true,
+      value(this: Range) {
+        const at = this.startOffset;
+        const left = (at % 4) * 8;
+        const top = Math.floor(at / 4) * 18;
+        return { left, right: left + 8, top, bottom: top + 18, width: 8, height: 18, x: left, y: top } as DOMRect;
+      }
+    });
+    t.after(() => {
+      if (original === undefined) {
+        delete (prototype as { getBoundingClientRect?: unknown }).getBoundingClientRect;
+      } else {
+        Object.defineProperty(prototype, "getBoundingClientRect", original);
+      }
+    });
+    const span = document.createElement("span");
+    span.textContent = "abcdefgh";
+    document.body.append(span);
+    t.after(() => span.remove());
+    assert.equal(offsetAtPoint(span, 19, 9), 2, "before the third character, left of its middle");
+    assert.equal(offsetAtPoint(span, 21, 9), 3, "after it, right of its middle");
+    assert.equal(offsetAtPoint(span, 1, 27), 4, "the second line's start");
+    assert.equal(offsetAtPoint(span, 200, 27), 8, "past the second line's end");
+    assert.equal(offsetAtPoint(span, 200, 9), 4, "past the first line's end, at its end");
   });
 });
 
@@ -419,6 +453,21 @@ describe("editing in place", () => {
     assert.equal(rendered(element, "latte.value.size.value").textContent, "large");
   });
 
+  it("closes a case's popover on a click on its value, as a dropdown does", async (t) => {
+    narrow(t, 40);
+    const element = show(await fixture("editing"));
+    const value = rendered(element, "latte.value.size.value");
+    value.click();
+    const popover = root(element).querySelector<HTMLElement>(".popover")!;
+    assert.equal(popover.hidden, false, "a click opens it");
+    value.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, composed: true }));
+    value.click();
+    assert.equal(popover.hidden, true, "a second click closes it");
+    value.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, composed: true }));
+    value.click();
+    assert.equal(popover.hidden, false, "and a third opens it again");
+  });
+
   it("chooses a case with the pointer and moves through them with the arrows", async (t) => {
     narrow(t, 40);
     const element = show(await fixture("editing"));
@@ -575,8 +624,8 @@ describe("editing in place", () => {
     element.selection = "latte.value.color";
     press(body(element), "Backspace");
     assert.equal(edits.length, 1, "Backspace, pressed to change the text, does not remove it");
-    press(body(element), "Delete");
-    assert.deepEqual(edits[1], { key: "latte.value.color", edit: { kind: "remove" } }, "an optional property clears");
+    press(body(element), "Backspace", { metaKey: true });
+    assert.deepEqual(edits[1], { key: "latte.value.color", edit: { kind: "remove" } }, "Cmd+Backspace, a Mac laptop's Delete, clears it");
   });
 
   it("leaves a required property in place", async (t) => {

@@ -24,6 +24,8 @@ export interface EditedDocument {
  * nothing. `onApplied` is told the text after each edit that changed it, and `onUnchanged` of each
  * edit that changed nothing: refused, answered with no edits, answered for text since changed, or
  * failed. Visual shows the reader's value until it is given a tree, so it is given the one it has.
+ * `after` runs a step, as an undo, after every edit fired before it: an undo pressed while a field's
+ * edit is still being asked takes back that edit, not the one before it.
  */
 export function createEditQueue(
   service: Pick<NxLanguageService, "sourceEdit">,
@@ -31,9 +33,9 @@ export function createEditQueue(
   document: EditedDocument,
   onApplied: (text: string) => void,
   onUnchanged: () => void = () => undefined,
-): (edit: VisualEdit) => Promise<void> {
+): EditQueue {
   let last: Promise<void> = Promise.resolve();
-  return (edit) => {
+  const queue = (edit: VisualEdit): Promise<void> => {
     const next = last.then(async () => {
       const text = document.text();
       if (text === null) {
@@ -59,4 +61,17 @@ export function createEditQueue(
     });
     return next;
   };
+  const after = (step: () => void): Promise<void> => {
+    const next = last.then(step);
+    last = next.catch((error: unknown) => console.debug("nx visual step", error));
+    return next;
+  };
+  return Object.assign(queue, { after });
+}
+
+/** Visual's edits, made one after another, and steps to take in their order. */
+export interface EditQueue {
+  (edit: VisualEdit): Promise<void>;
+  /** Runs `step` once every edit fired before it has been made, or refused. */
+  after(step: () => void): Promise<void>;
 }
