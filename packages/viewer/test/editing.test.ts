@@ -9,7 +9,7 @@ import { offsetAtPoint } from "../src/editors.js";
 import { indexTree } from "../src/tree.js";
 import type { NxEditDetail, NxOpenDetail, NxViewerElement } from "../src/index.js";
 
-const { NX_EDIT_EVENT, NX_OPEN_EVENT } = await import("../src/index.js");
+const { NX_DRAFT_EVENT, NX_EDIT_EVENT, NX_OPEN_EVENT } = await import("../src/index.js");
 
 const window = document.defaultView!;
 const created: NxViewerElement[] = [];
@@ -257,6 +257,29 @@ describe("editing in place", () => {
     assert.equal(element.selection, "latte.value.name", "the selection is kept");
   });
 
+  it("says when an open field holds a change, and when it no longer does", async (t) => {
+    narrow(t, 40);
+    const element = show(await fixture("editing"));
+    const drafts: boolean[] = [];
+    element.addEventListener(NX_DRAFT_EVENT, (event) => drafts.push((event as CustomEvent<{ changed: boolean }>).detail.changed));
+    element.selection = "latte.value.name";
+    press(body(element), "Enter");
+    assert.deepEqual(drafts, [], "opening changes nothing");
+    const open = field(element)!;
+    open.textContent = "Mocha";
+    open.dispatchEvent(new window.Event("input", { bubbles: true }));
+    open.textContent = "Mochas";
+    open.dispatchEvent(new window.Event("input", { bubbles: true }));
+    assert.deepEqual(drafts, [true], "a change, once");
+    open.textContent = "Latte";
+    open.dispatchEvent(new window.Event("input", { bubbles: true }));
+    assert.deepEqual(drafts, [true, false], "typed back to its value");
+    open.textContent = "Mocha";
+    open.dispatchEvent(new window.Event("input", { bubbles: true }));
+    press(open, "Enter");
+    assert.deepEqual(drafts, [true, false, true, false], "committed");
+  });
+
   it("cancels on Escape: nothing fires, the value reads as before and the unit stays selected", async (t) => {
     narrow(t, 40);
     const element = show(await fixture("editing"));
@@ -269,7 +292,7 @@ describe("editing in place", () => {
     press(open, "Escape");
     assert.deepEqual(edits, []);
     assert.equal(field(element), null);
-    assert.ok(rendered(element, "latte.value.label.value").textContent!.includes('Hot \\"latte\\"'), "as before");
+    assert.ok(rendered(element, "latte.value.label.value").textContent!.includes('Hot "latte"'), "as before");
     assert.equal(element.selection, "latte.value.label");
   });
 
@@ -404,6 +427,25 @@ describe("editing in place", () => {
     assert.ok(open.classList.contains("invalid"));
   });
 
+  it("reads a string's quote and backslash escapes as what they escape, and other escapes as written", async (t) => {
+    fakeSelection(t);
+    const element = show(await fixture("editingEdges"));
+    assert.equal(rendered(element, "box.value.note.value").textContent, 'say "hi" \\ ok');
+    assert.equal(rendered(element, "box.value.title.value").textContent, "a\\nb");
+    const { edits } = events(element);
+    // A string drawn with its quotes, as an item of a sequence is, keeps them around what it reads.
+    const item = root(element).querySelector<HTMLElement>('[data-key^="said."][data-role="literal"]')!;
+    assert.equal(item.textContent, '"say "hi""');
+    item.click();
+    const open = field(element)!;
+    assert.equal(open.textContent, 'say "hi"');
+    assert.equal(item.textContent, '"say "hi""', "the field sits between the quotes the reading draws");
+    open.textContent = 'say "yo"';
+    press(open, "Enter");
+    assert.deepEqual(edits, [{ key: item.dataset["key"], edit: { kind: "setValue", value: { kind: "string", value: 'say "yo"' } } }]);
+    assert.equal(item.textContent, '"say "yo""', "and shown so until the host's tree");
+  });
+
   it("offers no text field for a string with an escape other than a quote or a backslash", async () => {
     const fixed = await fixture("editingEdges");
     const targets = editTargets(indexTree(fixed.tree, fixed.text));
@@ -519,14 +561,28 @@ describe("editing in place", () => {
     assert.equal(open.textContent, "13");
     press(open, "ArrowDown");
     assert.equal(open.textContent, "12");
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const problem = root(element).querySelector<HTMLElement>(".edit-problem")!;
     open.textContent = "12px";
     open.dispatchEvent(new window.Event("input", { bubbles: true }));
     assert.ok(open.classList.contains("invalid"));
+    assert.equal(problem.hidden, true, "why waits for typing to pause");
+    t.mock.timers.tick(400);
+    assert.equal(problem.hidden, false, "and then says why");
+    assert.equal(problem.textContent, "Not a number");
+    assert.equal(open.getAttribute("aria-describedby"), problem.id);
+    open.textContent = "1";
+    open.dispatchEvent(new window.Event("input", { bubbles: true }));
+    assert.equal(problem.hidden, true, "an entry it can take says nothing");
+    open.textContent = "12px";
+    open.dispatchEvent(new window.Event("input", { bubbles: true }));
     press(open, "Enter");
     assert.deepEqual(edits, [], "not committed");
     assert.equal(field(element), open, "the field stays open");
+    assert.equal(problem.hidden, false, "Enter says why at once");
     open.textContent = "12";
     press(open, "Enter");
+    assert.equal(problem.hidden, true, "and closing the field hides it");
     assert.deepEqual(edits, [{ key: "latte.value.shots.value", edit: { kind: "setValue", value: { kind: "number", text: "12" } } }]);
   });
 

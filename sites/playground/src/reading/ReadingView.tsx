@@ -1,10 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState, type MutableRefObject } from "react";
 import "@nx-lang/viewer";
 import {
+  NX_DRAFT_EVENT,
   NX_EDIT_EVENT,
   NX_FOLD_EVENT,
   NX_OPEN_EVENT,
   NX_SELECT_EVENT,
+  type NxDraftDetail,
   type NxEditDetail,
   type NxFoldDetail,
   type NxOpenDetail,
@@ -37,6 +39,8 @@ export interface ReadingViewProps {
   readonly commands: MutableRefObject<ReadingCommands | null>;
   /** An edit the visitor made in Visual, for the source; with it, Visual edits values in place. */
   readonly onEdit?: (detail: NxEditDetail) => void;
+  /** Whether a field open in Visual holds an entry not yet committed that differs from its value. */
+  readonly onDraft?: (changed: boolean) => void;
   /** A value Visual cannot edit, to show in Source. */
   readonly onOpen?: (detail: NxOpenDetail) => void;
   /** Ctrl or Cmd+Z, and Ctrl+Y or Ctrl or Cmd+Shift+Z, pressed in Visual, for the editor's history. */
@@ -85,6 +89,7 @@ export function ReadingView({
   onFold,
   commands,
   onEdit,
+  onDraft,
   onOpen,
   onUndo,
   onRedo,
@@ -93,8 +98,8 @@ export function ReadingView({
   const element = useRef<NxViewerElement>(null);
   const latestFold = useRef(onFold);
   latestFold.current = onFold;
-  const latest = useRef({ onEdit, onOpen, onUndo, onRedo });
-  latest.current = { onEdit, onOpen, onUndo, onRedo };
+  const latest = useRef({ onEdit, onDraft, onOpen, onUndo, onRedo });
+  latest.current = { onEdit, onDraft, onOpen, onUndo, onRedo };
   const editable = onEdit !== undefined;
   useEffect(() => {
     commands.current = {
@@ -177,6 +182,7 @@ export function ReadingView({
     };
     const editListener = (event: Event) => latest.current.onEdit?.((event as CustomEvent<NxEditDetail>).detail);
     const openListener = (event: Event) => latest.current.onOpen?.((event as CustomEvent<NxOpenDetail>).detail);
+    const draftListener = (event: Event) => latest.current.onDraft?.((event as CustomEvent<NxDraftDetail>).detail.changed);
     // The reading leaves undo and redo to the host, which keeps one history for Source and Visual.
     // Inside one of the reading's own fields, they are the field's, and do not reach here.
     const keyListener = (event: KeyboardEvent) => {
@@ -198,12 +204,14 @@ export function ReadingView({
     target.addEventListener(NX_FOLD_EVENT, foldListener);
     target.addEventListener(NX_EDIT_EVENT, editListener);
     target.addEventListener(NX_OPEN_EVENT, openListener);
+    target.addEventListener(NX_DRAFT_EVENT, draftListener);
     target.addEventListener("keydown", keyListener);
     return () => {
       target.removeEventListener(NX_SELECT_EVENT, listener);
       target.removeEventListener(NX_FOLD_EVENT, foldListener);
       target.removeEventListener(NX_EDIT_EVENT, editListener);
       target.removeEventListener(NX_OPEN_EVENT, openListener);
+      target.removeEventListener(NX_DRAFT_EVENT, draftListener);
       target.removeEventListener("keydown", keyListener);
     };
   }, [reading.tree === null]);

@@ -40,6 +40,13 @@ export const NX_EDIT_EVENT = "nx-edit";
  */
 export const NX_OPEN_EVENT = "nx-open";
 
+/**
+ * The event fired when the open editor comes to hold an entry that differs from its value, and when
+ * it no longer does, as when it commits, cancels or closes, so a host can offer Undo for an edit not
+ * yet committed.
+ */
+export const NX_DRAFT_EVENT = "nx-draft";
+
 /** What the `nx-edit` event carries: the target node's key and the edit, for the `sourceEdit` query. */
 export interface NxEditDetail {
   /** The key of the node the edit is aimed at: a literal, a case, a run of text or an attribute. */
@@ -52,6 +59,12 @@ export interface NxOpenDetail {
   readonly key: string;
   readonly role: SourceRole;
   readonly range: EditorRange;
+}
+
+/** What the `nx-draft` event carries. */
+export interface NxDraftDetail {
+  /** Whether the open editor holds an entry that differs from its value. */
+  readonly changed: boolean;
 }
 
 /** What the `nx-fold` event carries. */
@@ -95,6 +108,10 @@ const CARD_GRACE = 300;
 
 /** The room between a card and what it describes, in pixels. */
 const CARD_GAP = 4;
+/** How long typing pauses before an invalid entry says why, in milliseconds. */
+const PROBLEM_DELAY = 400;
+/** How far beside its editor an invalid entry says why, in pixels. */
+const PROBLEM_GAP = 8;
 
 // A module imported where there is no DOM still loads; the element is only defined where
 // `HTMLElement` exists.
@@ -259,6 +276,11 @@ export class NxViewerElement extends ElementBase {
   readonly #card: HTMLDivElement;
   /** The popover a case or a color is chosen in. */
   readonly #popover: HTMLDivElement;
+  /** Whether the open editor holds an entry that differs from its value, as `nx-draft` last said. */
+  #draftChanged = false;
+  /** Why the open editor cannot take its entry, under it while it cannot. */
+  readonly #problem: HTMLDivElement;
+  #problemTimer: ReturnType<typeof setTimeout> | undefined;
   /** Closes the card when anything around the reading scrolls, or Escape is pressed anywhere. */
   readonly #onDocumentScroll = (): void => this.#closeCard();
   readonly #onDocumentKey = (event: KeyboardEvent): void => {
@@ -356,7 +378,11 @@ export class NxViewerElement extends ElementBase {
       }
     });
 
-    frame.append(toolbar, this.#body, this.#announcer, this.#card, this.#popover);
+    this.#problem = document.createElement("div");
+    this.#problem.className = "edit-problem";
+    this.#problem.id = "edit-problem";
+    this.#problem.hidden = true;
+    frame.append(toolbar, this.#body, this.#announcer, this.#card, this.#popover, this.#problem);
     shadow.append(style, frame);
 
     this.#body.addEventListener("click", (event) => this.#onClick(event));
@@ -1302,20 +1328,69 @@ export class NxViewerElement extends ElementBase {
     }
   }
 
-  /** Marks the editor's entry as invalid while the editor cannot take it. */
-  #validate(session: EditSession): void {
+  /**
+   * Marks the editor's entry as invalid while the editor cannot take it, and says why under it: once
+   * typing pauses, so a number half typed, as `-`, does not flash a message, or at once, `now`, as
+   * when Enter is pressed on it.
+   */
+  #validate(session: EditSession, now = false): void {
     const input = session.field ?? session.input;
     if (input === undefined || session.target.kind === "case") {
       return;
     }
+    this.#reportDraft(this.#draftOf(session) !== this.#currentOf(session.target));
     const problem = this.#problemOf(session.target, this.#draftOf(session) ?? "");
     input.classList.toggle("invalid", problem !== undefined);
     input.setAttribute("aria-invalid", String(problem !== undefined));
+    clearTimeout(this.#problemTimer);
     if (problem === undefined) {
-      input.removeAttribute("title");
-    } else {
-      input.title = problem;
+      this.#hideProblem();
+      input.removeAttribute("aria-describedby");
+      return;
     }
+    input.setAttribute("aria-describedby", this.#problem.id);
+    if (now || !this.#problem.hidden) {
+      this.#showProblem(session, problem);
+    } else {
+      this.#problemTimer = setTimeout(() => this.#showProblem(session, problem), PROBLEM_DELAY);
+    }
+  }
+
+  /** Shows why `session`'s entry is invalid, under its field, or under its popover. */
+  #showProblem(session: EditSession, problem: string): void {
+    if (session.closed) {
+      return;
+    }
+    this.#problem.textContent = problem;
+    this.#problem.hidden = false;
+    // Beside its field or popover where the reading has room, so it covers nothing it would explain;
+    // otherwise under it, as a card.
+    const anchor = session.field ?? this.#popover;
+    const frame = this.#frame.getBoundingClientRect();
+    const target = anchor.getBoundingClientRect();
+    const size = this.#problem.getBoundingClientRect();
+    const x = target.right + PROBLEM_GAP;
+    if (x + size.width <= this.getBoundingClientRect().right) {
+      this.#problem.style.left = `${x - frame.left}px`;
+      this.#problem.style.top = `${target.top + (target.height - size.height) / 2 - frame.top}px`;
+    } else {
+      this.#placeCard(session.field === undefined ? this.#popover : session.span, this.#problem);
+    }
+  }
+
+  /** Fires `nx-draft` when whether the open editor holds a changed entry changes. */
+  #reportDraft(changed: boolean): void {
+    if (changed === this.#draftChanged) {
+      return;
+    }
+    this.#draftChanged = changed;
+    this.dispatchEvent(new CustomEvent<NxDraftDetail>(NX_DRAFT_EVENT, { detail: { changed }, bubbles: true, composed: true }));
+  }
+
+  #hideProblem(): void {
+    clearTimeout(this.#problemTimer);
+    this.#problem.hidden = true;
+    this.#problem.textContent = "";
   }
 
   #onFieldKey(event: KeyboardEvent, session: EditSession): void {
@@ -1370,7 +1445,7 @@ export class NxViewerElement extends ElementBase {
         this.#cancel(session, false);
         return true;
       }
-      this.#validate(session);
+      this.#validate(session, true);
       return false;
     }
     this.#endSession(session, how === "key");
@@ -1395,6 +1470,8 @@ export class NxViewerElement extends ElementBase {
       this.#session = undefined;
     }
     session.span.classList.remove("editing");
+    this.#hideProblem();
+    this.#reportDraft(false);
     if (session.field === undefined) {
       this.#closePopover();
     }
@@ -1411,6 +1488,8 @@ export class NxViewerElement extends ElementBase {
       session.closed = true;
       this.#session = undefined;
     }
+    this.#hideProblem();
+    this.#reportDraft(false);
     this.#closePopover();
   }
 
@@ -1712,7 +1791,7 @@ export class NxViewerElement extends ElementBase {
       event.preventDefault();
       const value = (session.input?.value ?? "").trim();
       if (!isHexColor(value)) {
-        this.#validate(session);
+        this.#validate(session, true);
         return;
       }
       this.#choose(session, value);

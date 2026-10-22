@@ -38,7 +38,8 @@ is a literal or a bare union case that is a whole value (an attribute's value, a
 sequence, or a parameterless `let`'s value), or a run of plain text content written on one line, and
 an editor fits it:
 
-- a string, a `uitext` string or an id: a text field holding the value without quotes or escapes;
+- a string, a `uitext` string or an id: a text field holding the value without quotes or escapes,
+  which the reading also reads its `\"` and `\\` escapes as the quote and backslash they stand for;
 - a number, typed `int`, `float32` or `float64` or by an alias of one, or a numeric literal where no
   type is declared: a number field whose up and down arrows step by 1, by 10 with Shift, and whose
   property name, dragged sideways, changes the value as the pointer moves;
@@ -64,8 +65,10 @@ with a ring of its own apart from the selection's color. Enter or leaving the fi
 SHALL cancel and keep the selection, and Tab and Shift+Tab SHALL commit and open the next and previous
 editable value. A text field SHALL grow with its text and wrap within the reading's width. A number
 SHALL be committed once when a drag ends, and an entry an editor cannot take, such as a number field
-holding `12px`, SHALL stay in the field marked as invalid and SHALL NOT be committed. Opening an editor
-SHALL close any hover card.
+holding `12px`, SHALL stay in the field marked as invalid and SHALL NOT be committed; once typing
+pauses, or at once when the reader tries to commit it, a note beside the field, or under it where the
+reading has no room beside it, SHALL say why, and SHALL go when the entry can be taken or the editor
+closes. Opening an editor SHALL close any hover card.
 
 #### Scenario: Editing a string
 - **WHEN** the host has set `editable`, the reader selects the row `name` of a `Drink` whose name is
@@ -99,6 +102,14 @@ SHALL close any hover card.
 #### Scenario: Not editable by default
 - **WHEN** the host has not set `editable` and the reader double-clicks a value
 - **THEN** no editor SHALL open and no `nx-edit` SHALL fire
+
+#### Scenario: Saying why
+- **WHEN** the reader types `12px` in a number field and presses Enter
+- **THEN** no `nx-edit` SHALL fire and a note beside the field SHALL read `Not a number`
+
+#### Scenario: A quote in a string
+- **WHEN** a string is written `"Say \"hi\""`
+- **THEN** the reading SHALL read `Say "hi"`, as its field does
 
 #### Scenario: Nothing moves
 - **WHEN** the reader opens the editor of a value on a one-line element
@@ -134,11 +145,18 @@ show the edited value, muted as stale, until the host sets a newer tree, and SHA
 as it is. The element SHALL keep the selection by key across the newer tree. With the reading focused
 and no editor open, the element SHALL leave Ctrl or Cmd with Z or Y to the host. When the host has
 set `editable`, Enter or a double-click on a value the element cannot edit, such as an expression,
-SHALL fire `nx-open` with the node's key, role and range.
+SHALL fire `nx-open` with the node's key, role and range. The element SHALL fire `nx-draft` with
+`changed` true when an open editor comes to hold an entry that differs from its value, and with
+`changed` false when it no longer does, as when it commits, cancels or closes.
 
 #### Scenario: The host refuses
 - **WHEN** the element fires `nx-edit` and the host sets the same tree again without changing the text
 - **THEN** the element SHALL read the value as the tree gives it
+
+#### Scenario: A change not yet committed
+- **WHEN** the reader opens the field of `name="Latte"`, types `Mocha` over it and presses Enter
+- **THEN** the element SHALL fire `nx-draft` with `changed` true, then with `changed` false, then
+  `nx-edit`
 
 #### Scenario: An expression
 - **WHEN** the host has set `editable` and the reader double-clicks the value of `count={total + 1}`

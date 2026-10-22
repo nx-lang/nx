@@ -7,7 +7,7 @@
  */
 import type { SourceCase, SourceEdit, SourceValueFormat } from "@nx-lang/language-protocol";
 
-import { formattedNodes } from "./source.js";
+import { decodeString, formattedNodes } from "./source.js";
 import type { TreeIndex } from "./tree.js";
 
 /**
@@ -42,19 +42,6 @@ const NUMBER_TYPES = new Set(["int", "float", "float32", "float64"]);
 /** Whether `text` is an NX numeric literal: an integer, a real or a hex literal, with a leading minus. */
 export function isNumericLiteral(text: string): boolean {
   return /^-?(?:0[xX][0-9a-fA-F]+|\d+(?:\.\d+)?|\d+\.\d+[eE][+-]?\d+)$/.test(text);
-}
-
-/**
- * A string literal's content: its quotes taken off, and `\"` and `\\` read as a quote and a
- * backslash. Nothing when it holds any other escape, as `\n`: the source edit writes back only those
- * two, so editing it would lose the others.
- */
-export function decodeString(written: string): string | undefined {
-  const inner = written.length >= 2 && written.startsWith('"') && written.endsWith('"') ? written.slice(1, -1) : written;
-  if (inner.replace(/\\[\\"]/g, "").includes("\\")) {
-    return undefined;
-  }
-  return inner.replace(/\\([\\"])/g, "$1");
 }
 
 /**

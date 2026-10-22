@@ -5,6 +5,7 @@
 import type { SourceCase } from "@nx-lang/language-protocol";
 
 import { isNumericLiteral, type EditTarget } from "./edit.js";
+import { decodeString } from "./source.js";
 
 /** A boolean's mark, as the reading draws it. */
 export const BOOLEAN_MARKS = { true: "✓", false: "✗" } as const;
@@ -34,7 +35,9 @@ export function valueHost(span: HTMLElement, written: string): ValueHost {
   if (quotes === undefined) {
     const shown = host.textContent ?? "";
     const quoted = written.length >= 2 && written.startsWith('"') && written.endsWith('"');
-    quotes = quoted && shown === written ? "both" : quoted && shown === written.slice(1) ? "trail" : "none";
+    // The reading draws a string's quote and backslash escapes as what they escape.
+    const read = quoted ? `"${decodeString(written) ?? written.slice(1, -1)}"` : written;
+    quotes = quoted && shown === read ? "both" : quoted && shown === read.slice(1) ? "trail" : "none";
     span.dataset["quotes"] = quotes;
   }
   const both = quotes === "both";

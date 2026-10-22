@@ -392,15 +392,16 @@ export const styles = `
   background: var(--nx-viewer-edit-hover, light-dark(#0000000f, #ffffff17));
   border-radius: 3px;
 }
-/* The chevron stands past the value's end, over the gap after it, so nothing moves. */
+/* The chevron stands past the value's end, over the gap after it, so nothing moves, and nearer the
+   value than what follows the gap. */
 .body.editable .edit-case { position: relative; }
 .body.editable .edit-case:is(:hover, .editing)::after {
   content: "";
   position: absolute;
   top: 50%;
-  right: -13px;
-  width: 10px;
-  height: 10px;
+  right: -10px;
+  width: 8px;
+  height: 8px;
   transform: translateY(-50%);
   background: var(--nx-viewer-fold-color, light-dark(#8c959f, #7a7a7a));
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / contain no-repeat;
@@ -465,6 +466,24 @@ export const styles = `
 .popover.colors { display: flex; gap: 6px; align-items: center; min-width: 0; }
 /* After every rule that sets a popover's display, so a closed one never shows. */
 .popover[hidden] { display: none; }
+/* Why an editor cannot take its entry, under it, in the invalid ring's color. It only says; the
+   pointer passes through it to what it covers. */
+.edit-problem {
+  position: absolute;
+  z-index: 6;
+  max-width: min(24rem, 100%);
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--nx-viewer-invalid, light-dark(#cf222e, #f85149));
+  background: var(--nx-viewer-card-background, light-dark(#ffffff, #202020));
+  color: var(--nx-viewer-foreground, CanvasText);
+  font-family: var(--nx-viewer-prose-font-family, inherit);
+  font-variation-settings: var(--nx-viewer-prose-font-variation, normal);
+  font-size: 12px;
+  line-height: 1.4;
+  pointer-events: none;
+}
+.edit-problem[hidden] { display: none; }
 .popover .popover-hex { font-family: var(--nx-viewer-source-font-family, var(--mono)); width: 10ch; }
 .popover .popover-hex.invalid { box-shadow: inset 0 -1px 0 var(--nx-viewer-invalid, light-dark(#cf222e, #f85149)); }
 .popover .popover-picker { width: 28px; height: 22px; padding: 0; border: 0; background: none; cursor: pointer; }

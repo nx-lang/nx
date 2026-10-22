@@ -44,3 +44,13 @@
 - [x] 6.4 Remove the row button and Backspace; Delete, or Cmd+Backspace on a Mac, removes a property with a default or an optional one (revises 3.7)
 - [x] 6.5 Playground: Undo and Redo buttons in the NX title bar for both views, disabled when there is nothing to undo or redo, tooltips naming the shortcuts; Collapse all and Expand all as icons on a narrow screen
 - [x] 6.6 The "Out of date" badge floats over the reading instead of taking a line, and the badge and the muting wait half a second, so an edit's brief staleness neither flashes nor moves the reading
+
+## 7. Fixes and polish from a full test run (2026-10-22)
+
+- [x] 7.1 A closed color popover no longer stays on screen as an empty box (its kind class overrode `[hidden]`)
+- [x] 7.2 Undo or redo gives Visual its tree again, so Undo pressed with a field open drops the value it showed as pending
+- [x] 7.3 The editor sets a `value` only when it comes from outside, so quick edits in a row all land and keep the undo history
+- [x] 7.4 The reading reads a string's `\"` and `\\` escapes as its field does
+- [x] 7.5 A note beside an invalid entry says why, once typing pauses or at once on Enter
+- [x] 7.6 A case's chevron sits nearer its value than the next name
+- [x] 7.7 `nx-draft`, and the playground's Undo enabled for a field's change not yet committed and for edits in flight

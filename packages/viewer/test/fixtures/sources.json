@@ -104,6 +104,6 @@
     "visualizers": []
   },
   "editingEdges": {
-    "source": "type Text = { content text:string }\ntype Box = { title:string note:string depth:int items:int* }\n\nlet box = <Box title=\"a\\nb\" note=\"say \\\"hi\\\" \\\\ ok\" depth={3} items={ 1 2 } />\n\nlet mixed = <Text>Hello {1} world</Text>\n\nlet total = 3\n"
+    "source": "type Text = { content text:string }\ntype Box = { title:string note:string depth:int items:int* }\n\nlet box = <Box title=\"a\\nb\" note=\"say \\\"hi\\\" \\\\ ok\" depth={3} items={ 1 2 } />\n\nlet mixed = <Text>Hello {1} world</Text>\n\nlet total = 3\n\nlet said = { \"say \\\"hi\\\"\" \"ok\" }\n"
   }
 }

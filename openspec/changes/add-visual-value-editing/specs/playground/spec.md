@@ -7,7 +7,8 @@ to the editor's model as one undoable step, so that Source shows them and undo a
 and forth in either view; with Visual focused, Ctrl or Cmd with Z SHALL undo and Ctrl+Y or Ctrl or Cmd
 with Shift+Z SHALL redo. The NX pane's title bar SHALL show Undo and Redo buttons in both views, each
 disabled while the editor's history holds nothing to take back or forth, with tooltips naming their
-shortcuts on the visitor's platform. An undo or redo, from a button or a shortcut, SHALL take its step
+shortcuts on the visitor's platform; in Visual, Undo SHALL also be enabled while a field holds a
+change not yet committed, as `nx-draft` says, or an edit Visual fired is not yet in the history. An undo or redo, from a button or a shortcut, SHALL take its step
 after every edit Visual fired before it, so that pressing Undo with a field open, which commits the
 field, takes back the field's edit. On a narrow screen, the title bar's Collapse all and Expand all
 SHALL show as icons, so the view switch stays in view. After an edit from Visual the playground SHALL ask for the source tree at once,
@@ -28,6 +29,11 @@ Source with the cursor at the start of the node and reveal it.
 #### Scenario: Undo from the title bar
 - **WHEN** the visitor makes an edit in Visual and presses the title bar's Undo button
 - **THEN** the source SHALL read as before the edit, and Redo SHALL be enabled
+
+#### Scenario: Undo before the first edit
+- **WHEN** a visitor opens an example, types in a field in Visual and, before committing it, presses
+  the title bar's Undo button
+- **THEN** the source SHALL read as it did, and Visual SHALL read the value as before
 
 #### Scenario: Opening an expression in Source
 - **WHEN** a visitor double-clicks a braced expression in Visual

@@ -268,8 +268,11 @@ caret where the click fell, a boolean toggles, and a case or a color opens its p
 anything else, as a property's name, selects. Enter or F2 opens the selected unit's first value
 with its text selected. Enter or leaving the field commits, Escape cancels, and Tab and Shift+Tab
 commit and open the next or previous value. An entry an editor cannot take, such as `12px` in a
-number field, stays in the field, marked. Fields take the value's own place and popovers open over
-the reading, so nothing else moves.
+number field, stays in the field, marked, and once typing pauses, or at once on Enter, a note beside
+it says why. Fields take the value's own place and popovers open over the reading, so nothing else
+moves. A string's `\"` and `\\` escapes read as the quote and backslash they stand for, in the
+reading as in its field; a string with any other escape, as `\n`, reads as written and opens in the
+source.
 
 On a selected row whose property has a default or is optional, Delete, or Cmd+Backspace (a Mac
 laptop's delete key), fires `nx-edit` with `{ kind: "remove" }` for the attribute, and the element it
@@ -277,7 +280,10 @@ was on is selected. Backspace alone does not, since a reader who meant to change
 press it. Enter or a double-click on a value the reading
 cannot edit, such as an expression, fires `nx-open` with the node's `{ key, role, range }`, for the
 host to show it in its editor. With the reading focused and no editor open, Ctrl or Cmd with Z or Y
-are left to the host; inside a field, they are the field's.
+are left to the host; inside a field, they are the field's. The element fires `nx-draft`, whose
+`detail` is `{ changed }`, when an open editor comes to hold an entry that differs from its value and
+when it no longer does, so a host can offer Undo for an edit not yet committed: pressing it moves
+the focus, which commits the field, and the host then takes that edit back.
 
 ```ts
 import { NX_EDIT_EVENT, NX_OPEN_EVENT, type NxEditDetail, type NxOpenDetail } from "@nx-lang/viewer";
@@ -362,7 +368,7 @@ restyle it:
 | `--nx-viewer-field-background`        | white, or a dark gray, inside an open field |
 | `--nx-viewer-field-border`            | a light or dark blue, the ring around an open field |
 | `--nx-viewer-field-selection`         | a light or dark blue, selected text in a field |
-| `--nx-viewer-invalid`                 | a light or dark red, the ring around an entry a field cannot take |
+| `--nx-viewer-invalid`                 | a light or dark red, the ring around an entry a field cannot take, and the border of the note saying why |
 
 ## Development
 

@@ -196,6 +196,11 @@ export function App() {
   );
   // Whether the editor's history holds anything to undo and to redo, for the title bar's buttons.
   const [history, setHistory] = useState<EditorHistory>({ canUndo: false, canRedo: false });
+  // A field open in Visual holding a change, and edits fired and not yet in the editor's history:
+  // Undo takes them back too, after committing the field, so it is offered for them as well.
+  const [visualDraft, setVisualDraft] = useState(false);
+  const [editsInFlight, setEditsInFlight] = useState(0);
+  const canUndo = history.canUndo || (mode === "visual" && (visualDraft || editsInFlight > 0));
   /** Undo or redo, from Visual or the title bar: the editor's history, the same as in Source. */
   const visualHistory = (step: "undo" | "redo") => {
     // After any edit still being made, as a field's that pressing the button committed.
@@ -359,7 +364,7 @@ export function App() {
                 type="button"
                 aria-label="Undo"
                 title={`Undo (${SHORTCUTS.undo})`}
-                disabled={!history.canUndo}
+                disabled={!canUndo}
                 onClick={() => visualHistory("undo")}
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -422,7 +427,11 @@ export function App() {
                 setSelection(kept);
               }}
               commands={readingCommands}
-              onEdit={(detail) => void applyVisualEdit(detail)}
+              onEdit={(detail) => {
+                setEditsInFlight((count) => count + 1);
+                void applyVisualEdit(detail).finally(() => setEditsInFlight((count) => count - 1));
+              }}
+              onDraft={setVisualDraft}
               onOpen={openInSource}
               onUndo={() => visualHistory("undo")}
               onRedo={() => visualHistory("redo")}
