@@ -68,53 +68,14 @@ click elsewhere. Dimmed rows SHALL have no menu.
   `medium` and chooses Reset to default
 - **THEN** the element SHALL fire `nx-edit` removing that attribute
 
-### Requirement: Editors offer the named values the host gives
-The element SHALL accept from the host a `namedValues` function, given an element's key and a
-property's name and answering a promise of the named values the property can take, each with its
-reference path, type, doc and literal value as the `source-edits` capability defines them. When an
-editor opens on a property's value, written or dimmed, and the host has given the function, the
-element SHALL ask it and, when the answer holds items, SHALL list them above the editor's own entry,
-in a popover for a field, each reading its path, and its color as a swatch when its value is a color
-literal, with its doc in a hover card; a case popover or a color popover SHALL list them above its
-own choices. The list SHALL filter as the reader types. Choosing one SHALL commit the value as the
-`reference` with its path. An editor SHALL open at once and show the list when the answer arrives;
-with no function, or an empty answer, editors SHALL read as they do without this requirement.
-
-#### Scenario: Picking a token
-- **WHEN** the host's `namedValues` answers `accent` and `theme.muted` for `color`, and the reader opens
-  the color popover of `color="#5a3a22"` and chooses `accent`
-- **THEN** the element SHALL fire `nx-edit` setting the reference `accent`
-
-### Requirement: A reference to a named value edits with its type's editor
-A value written as a reference to a named value SHALL be editable when the host has set `editable`
-and its property's type has an editor, the reference being a name or a path of names, in braces or
-bare: it SHALL open that
-editor with the reference marked as the current item of the named values list, and an entry the
-reader types SHALL replace the reference with a literal. A named value is a `let` without
-parameters: the reference's name, or a path's first name, SHALL refer to one, as the tree's
-declaration for it says. A reference whose type has no editor, and a reference to anything else,
-such as a component's parameter or a loop variable, SHALL fire `nx-open` as an expression does.
-
-#### Scenario: From a token back to a literal
-- **WHEN** the reader opens the editor of `color={accent}` and types `#ffffff` in the hex field
-- **THEN** the element SHALL fire `nx-edit` setting the string `#ffffff`
-
-#### Scenario: A parameter is not a named value
-- **WHEN** the reader double-clicks `{name}` in `let <Special name:string /> = <Drink name={name} />`
-- **THEN** no editor SHALL open, and the element SHALL fire `nx-open` with its key
-
 ### Requirement: Editor hints choose and shape a value's editor
 The element SHALL edit a value as its property's resolved editor hints, from the tree's visualizer
 values, say:
 
-- a number with `editor=slider`, or with both `min` and `max` and no `editor`, SHALL open a popover
-  under the value holding a slider and the number field beside it; the slider SHALL draw `stops` as
-  ticks and snap to them unless Alt is held, show the value in place while dragged, and commit once on
-  release;
-- a number with `editor=field` SHALL edit as a number field even with `min` and `max`;
-- a number's arrows, drag and slider SHALL stay within `min` and `max` and step by `step`, Shift by ten
-  steps, and a typed number outside them SHALL stay in the field with a note saying the bound, such as
-  `At most 64`, and SHALL NOT be committed;
+- a number's field, arrows, steppers and drag SHALL stay within `min` and `max` and step by `step`,
+  Shift by ten steps, and a typed number outside them SHALL stay in the field with a note saying the
+  bound, such as `At most 64`, and SHALL NOT be committed; `editor=field` asks for the number field,
+  which every number has;
 - a number with `unit` SHALL read the unit after it, quieter, and show it after the field; the unit
   SHALL NOT be written, and an entry ending in it, such as `16px`, SHALL be taken as the number;
 - a case with `editor=segmented` SHALL show the union's cases as one row of buttons in its popover,
@@ -125,15 +86,49 @@ values, say:
 - a field whose property has a `placeholder` SHALL show it, quieter, while the field is empty, and
   SHALL NOT write it.
 
+A number or a string whose hints give `choices` SHALL offer them in a list under its field, Paper-style:
+each choice reading its label, and its value after it, quieter, in a second column; a choice with no
+label reads its value alone, in one column when none has a label. When the property has a default, a
+row of its own above the choices, set off by a rule, SHALL read `Default` and the default. The choice
+equal to the current value SHALL be marked. While the field is open, a chevron past it SHALL show
+that the list is there; a click on it, or Alt+Down, SHALL open the list, and so SHALL typing, the list
+then holding the choices whose label or value holds what was typed. While the list is closed, Up and
+Down SHALL step a number; while it is open, they SHALL move through it, Enter SHALL choose the active
+row, and Escape SHALL close the list before the field. Choosing a choice SHALL commit its value as
+the field would, and choosing the default's row SHALL leave the attribute out, as the row's Reset to
+default does, or, on a dimmed row, add nothing. The field SHALL stay typeable: the choices suggest
+and never restrict, and any entry the field takes SHALL commit.
+
+A number SHALL show steppers, an up and a down button drawn over the space just past the value so
+that nothing moves, while its field is open and while the pointer is over its value on the selected
+row, when the host has set `editable`. A click SHALL step the number once by `step`, or by one, and
+Shift+click by ten steps, within `min` and `max`: into the field while it is open, else committed at
+once. Pressing a stepper and dragging up or down SHALL change the number by a step for every few
+pixels, show it in place, and commit it once on release. The steppers' tooltip SHALL name the arrow
+keys, Shift and dragging. Dragging the property's name sideways SHALL still change the number.
+
 In any string field, Shift+Enter SHALL make a line break. A string literal written over several lines
 SHALL edit in a field that holds line breaks; one written with an escape other than `\"` and `\\`
 SHALL still fire `nx-open`.
 
-#### Scenario: A spacing slider
-- **WHEN** the reader opens `padding=8`, hinted `editor=slider min=0 max=64 stops={ 0 4 8 16 24 }`, and
-  drags the slider's thumb from 8 to near 15
-- **THEN** the value SHALL read `16` while dragged and, on release, the element SHALL fire one
-  `nx-edit` setting the number `16`
+#### Scenario: Picking a labeled choice
+- **WHEN** the reader opens `size=16`, hinted with the choices `12` labeled `sm`, `16` labeled `base`
+  and `20` labeled `lg`, where `size` defaults to `16`, opens the list and chooses `lg`
+- **THEN** the list SHALL have shown a `Default 16` row above `sm 12`, `base 16` and `lg 20`, `base`
+  marked, and the element SHALL fire `nx-edit` setting the number `20`
+
+#### Scenario: Back to the default from the list
+- **WHEN** the reader opens the list of the written `size=20` above and chooses its `Default 16` row
+- **THEN** the element SHALL fire `nx-edit` removing the attribute
+
+#### Scenario: Typing past the choices
+- **WHEN** the reader types `17` in that field and presses Enter
+- **THEN** the element SHALL fire `nx-edit` setting the number `17`
+
+#### Scenario: A stepper
+- **WHEN** the row `padding=8` is selected and the reader clicks the up stepper past its value, and
+  then Shift-clicks it
+- **THEN** the element SHALL fire `nx-edit` setting the number `9`, and then the number `19`
 
 #### Scenario: Out of range
 - **WHEN** the reader types `80` in the field of a number hinted `max=64` and presses Enter

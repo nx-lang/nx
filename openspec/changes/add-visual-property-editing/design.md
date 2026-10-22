@@ -18,20 +18,31 @@ The design behind this change is "Editing in Visual: design and plan"
 (https://claude.ai/artifact/66bGJxr9DjiS9GY5jk86Xu), phases 2 and 3: discovery (more properties and
 named values) and editor hints. Bret asked to combine them (2026-10-22).
 
+A first version had a slider snapping to `stops` and named values: every `let` in scope whose type
+fit the property, offered as references, through a `namedValues` query. After trying it and comparing
+how other products edit numbers (Figma, Framer, Paper, Penpot, Webflow; 2026-10-22), Bret chose
+instead: choices that a library declares, shown Paper-style; Framer-style steppers; and no slider.
+Listing every `let` of a fitting type guessed at intent from types alone (an `int` count is offered
+for a spacing), and tools that do offer tokens scope them explicitly (Figma's variable scopes,
+Penpot's typed tokens), so named values wait for design-system support.
+
 ## Goals / Non-Goals
 
 **Goals:**
 - A reader sees, on any element, what else it could set, and sets it where it reads.
-- Where a document or its libraries name values of a property's type, the reader picks one and the
-  source refers to it, which is how a design system steers people to its tokens.
-- A library says once how a type or a property edits (a slider from 0 to 64 snapping to 4, 8, 16, a
-  segmented control, a unit, a multi-line field) and every place that uses it gets that editor.
+- A library says once how a type or a property edits (a range and a unit, the choices to pick from,
+  a segmented control, a multi-line field) and every place that uses it gets that editor.
 - Nothing moves when an editor opens, as in phase 1, and undo stays the host's.
 
 **Non-Goals:**
 - Setting a property whose type is a record, an element, a sequence of them, or a function. Those
   list under more properties but open Source; phase 5's insert menu sets them.
-- Named values outside the document's scope (an index of every library), and palettes.
+- Named values and references: choices from a design system's tokens, and `let`s offered as
+  references, wait until design-system support is fleshed out. A value written as a reference opens
+  Source, as in phase 1.
+- Sliders: a slider earns its place with a live preview while dragging, which this change does not
+  have (it commits on release); they may return with one, for opacity-like values.
+- Palettes.
 - A spacing editor, property groups, `readonly`: later hints, when something uses them.
 - Text content over several lines and expressions edited as code (phases 4 and 7).
 - Enforcing `min` and `max` in the language: they are hints to an editor, not type constraints.
@@ -61,56 +72,62 @@ indentation. An element with no attributes takes it on the tag's line. A propert
 writes, or one it does not declare, is refused (`invalidValue`), as is a content property. Only the
 service knows the layout and the spelling, so the viewer stays out of text.
 
-### Named values come from a query, and are written as references
-
-`namedValues(uri, key, property)` answers, for the property `property` of the element at `key`, the
-values in the document's scope that the property's type accepts: parameterless `let`s, typed or
-inferred, in the document or visible through its imports, and the members of such a `let` whose value
-is a record, one level deep (`theme.accent`). Each item carries its reference as it would be written,
-its declared type, its doc, and its value's source text when it is a literal (so a color can show its
-swatch). Assignability is the type checker's, so a `Color` alias, a subtype or a union case all count.
-
-Picking one writes `setValue` (or `addProperty`) with `{ kind: "reference", path: "theme.accent" }`,
-spelled in braces where an attribute's value needs them (`color={theme.accent}`) and bare in a braced
-sequence or a `let`'s value. A value already written as such a reference opens its type's editor with
-the reference marked in the list, and typing a literal replaces it. A reference whose type the viewer
-has no editor for still opens Source.
-
-The viewer asks through a host hook, `namedValues(key, property) => Promise<NamedValue[]>`, when an
-editor opens, and shows the list when it arrives; with no hook, editors read as in phase 1. A hook,
-rather than more data in the source tree, keeps the tree small and asks only for the property in hand.
-
-Alternative: listing every in-scope value in the source tree (one query, but the tree grows with the
-scope, and assignability would be the viewer's to compute).
-
 ### Editor hints are visualizer attributes, resolved like formats
 
-On both `PropertyVisualizer` and `ValueVisualizer`: `editor: ValueEditor?` (`field | slider |
-dropdown | segmented`), `min`, `max`, `step: float64?`, `stops: float64*`, `unit: string?`. On
-`PropertyVisualizer` only: `multiline: boolean = false`, `placeholder: string?`. `ValueVisualizer.format`
-becomes optional, so `visualizer Spacing = <ValueVisualizer editor=slider min=0 max=64 stops={0 4 8 16
-24 32 48 64} unit="px" />` needs no format. Resolution follows `format`: a property's own
-`PropertyVisualizer` wins attribute by attribute, then the `ValueVisualizer` of the alias its type
-names. The source tree carries the result as an `editor` object on each `SourcePropertyVisualizer`,
-and on an alias's `SourceVisualizer`.
+On both `PropertyVisualizer` and `ValueVisualizer`: `editor: ValueEditor?` (`field | dropdown |
+segmented`), `min`, `max`, `step: float64?`, `unit: string?`, and the content `choices: ValueChoice+?`.
+On `PropertyVisualizer` only: `multiline: boolean = false`, `placeholder: string?`.
+`ValueVisualizer.format` becomes optional, so a type can be described by its hints alone:
+
+```nx
+visualizer FontSize = <ValueVisualizer min=8 max=128 unit="px">
+  <ValueChoice value=12 label="sm" />
+  <ValueChoice value=16 label="base" />
+  <ValueChoice value=20 label="lg" />
+</ValueVisualizer>
+```
+
+Resolution follows `format`: a property's own `PropertyVisualizer` wins attribute by attribute, then
+the `ValueVisualizer` of the alias its type names. Choices are one hint: a visualizer that gives any
+replaces all of an earlier or an alias's, in its order, since merging two lists would mix two
+scales. The source tree carries the result as an `editor` object on each `SourcePropertyVisualizer`,
+and on an alias's `SourceVisualizer`; each choice's value is typed as a `setValue` value, so the
+viewer passes it on as it is.
+
+`ValueChoice` is `{ value: object, label: string? }`, content rather than an attribute so a scale
+reads one choice a line, and named `ValueChoice` so it cannot clash with a document's own `Choice`
+type (the survey example has one). `value` is `object` because a `PropertyVisualizer`'s target is the
+record, so the library cannot name the property's type; analysis checks each choice instead.
 
 A hint that does not fit its property's type is a warning (`editor-hint-mismatch`), not an error, and
-the viewer ignores it: `slider`, `min`, `max`, `step`, `stops` and `unit` on a non-number;
-`dropdown` and `segmented` on anything but a union of bare cases; `multiline` and `placeholder` on a
-non-string. `min` above `max` is a warning too. Warnings, because a hint never changes what a
-program means.
+the viewer ignores it: `field`, `min`, `max`, `step` and `unit` on a non-number; `dropdown` and
+`segmented` on anything but a union of bare cases; `multiline` and `placeholder` on a non-string; a
+choice whose value is not a number literal for a number, or not a string literal for a string, and
+any choice on anything else. `min` above `max` is a warning too. Warnings, because a hint never
+changes what a program means.
 
 ### The hinted editors
 
-- **Slider** (`editor=slider`, or a number with both `min` and `max` and no `editor`): a popover
-  under the value with a slider and the number field beside it. Stops draw as ticks and the thumb snaps
-  to them unless Alt is held; the field takes any number in range. Dragging shows the value in place
-  and commits once on release, like scrubbing.
+- **Choices**, Paper-style (Bret, 2026-10-22): a list under a number's or a string's field, each
+  choice's label with its value after it, quieter, in a second column; one column when no choice has a
+  label. The property's default, when it has one, reads on a row of its own above them (`Default 16`),
+  set off by a rule, and picking it resets the property as the row menu's Reset does. The current
+  value's choice is marked. The list opens from a chevron past the open field, from Alt+Down, or as
+  the reader types, filtering by label and value. While it is closed, Up and Down step a number;
+  while it is open, they move through it. Picking writes the choice's value, never its label: these
+  are a library's suggestions, not references, and the field stays typeable, so they never restrict.
+  A fixed set is a union, which has its own editors.
+- **Steppers**, Framer-style (Bret, 2026-10-22): an up and a down button over the gap just past a
+  number, as the case chevron is drawn, so nothing moves. They show while the number's field is open
+  and on hover of a value in the selected row, not everywhere, so the reading does not flicker under
+  a passing pointer. A click steps once (Shift ten steps), into the open field or committed at once;
+  pressing one and dragging up or down scrubs, committed once on release. Their tooltip names the
+  keys. Dragging a number's name sideways stays, as before.
 - **Segmented** (`editor=segmented`): the case popover shows the cases as one row of buttons. With more
   than five cases, or names too long for the reading's width, it falls back to the list.
 - **Dropdown** (`editor=dropdown`): the phase 1 case popover, named so a library can say it.
-- **Field** (`editor=field`): a plain number field, even with `min` and `max`.
-- **Range**: arrows, scrubbing and the slider stay within `min` and `max`, and step by `step` (Shift
+- **Field** (`editor=field`): the number field every number has.
+- **Range**: arrows, steppers and scrubbing stay within `min` and `max`, and step by `step` (Shift
   by ten steps). A typed number outside the range stays in the field with a note (`At most 64`),
   as `12px` does today.
 - **Unit**: read after the number, quieter (`16 px`), and shown after the field while editing; never
@@ -133,17 +150,16 @@ worry that a button beside each row makes destructive changes too easy. Dimmed r
 
 - **The `+ N more` row adds a line to the selected element.** It is one quiet line, only on the
   selection. If it reads as clutter, it can move into the row menu.
-- **Named values can be many** in a library-heavy document. The list filters as the reader types and
-  shows the closest first: the document's own, then its imports'.
-- **References change meaning, not just text.** Picking `accent` ties the value to the token; the
-  marked reference and the swatch from its literal make that visible.
-- **Size.** This is about phase 1's size. If named values grow (the query and its tests across Rust
-  and TypeScript), they are the piece to split off, and the tasks put them last for that reason.
+- **Choices write literals.** A document that picks `lg` holds `20`, not a name; if the library
+  later changes its scale, the document keeps `20`. That is the point of choices as suggestions;
+  tokens that a document refers to come with design-system support.
+- **Steppers are small targets.** They are drawn only where they help (an open field, the selected
+  row), with a tooltip, and the arrow keys and the name drag remain.
 
 ## Open Questions
 
 1. The `+ N more` row: on the selected element only (proposed), or on every multi-line element?
-2. Named values: offer `let`s of the document and its imports, and one level of record members
-   (proposed), or only `let`s?
-3. A number with `min` and `max` and no `editor`: slider by default (proposed), or field until asked?
+2. Named values: answered (Bret, 2026-10-22): not yet; choices a library declares instead, tokens
+   with design-system support later.
+3. Sliders: answered (Bret, 2026-10-22): none for now; choices and steppers instead.
 4. The row menu: build it now (proposed), or leave removal to Delete for another round?

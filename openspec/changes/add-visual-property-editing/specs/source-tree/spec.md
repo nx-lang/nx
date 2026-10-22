@@ -4,25 +4,29 @@
 Each property in a declaration's `visualizer` `properties` list SHALL carry, when a `sourceTree`
 request asks for `visualizers`, besides its name and format, an `editor` value holding its resolved
 editor hints that fit its type, as the visualizer-declarations capability resolves them: `kind`
-(`field`, `slider`, `dropdown` or `segmented`), `min`, `max`, `step`, `stops`, `unit`, `multiline`
-and `placeholder`, each only when set. A hint reported as `editor-hint-mismatch` SHALL be left out,
-and a property's own mismatched hint SHALL NOT hide its type's hint of the same name. A `min` above
+(`field`, `dropdown` or `segmented`), `min`, `max`, `step`, `unit`, `multiline`, `placeholder` and
+`choices`, each only when set. `choices` SHALL list the choices that fit, in order, each with its
+`value` typed as a `setValue` value is (`{ kind: "number", text }` or `{ kind: "string", value }`)
+and its `label` when it has one. A hint or choice reported as `editor-hint-mismatch` SHALL be left
+out, and a property's own mismatched hint SHALL NOT hide its type's hint of the same name. A `min` above
 the `max`, reported as `editor-hint-range`, SHALL leave out both.
 An alias's `visualizer` value SHALL carry its own hints the same way. A property with no hints SHALL
 carry no `editor` value, and an entry whose only resolved values are hints SHALL carry a `visualizer`
 value as one with a format does. The values SHALL round-trip through JSON without loss.
 
-#### Scenario: A slider's hints
+#### Scenario: A number's hints and choices
 - **WHEN** a client asks with `visualizers` for the source tree of a document that constructs
-  `<Card padding=8 />`, where `Card.padding` is typed `Spacing`, hinted `editor=slider min=0 max=64
-  stops={ 0 4 8 16 } unit="px"`
+  `<Card padding=8 />`, where `Card.padding` is typed `Spacing`, hinted `min=0 max=64 unit="px"`
+  with the choices `<ValueChoice value=4 label="sm" />` and `<ValueChoice value=8 label="md" />`
 - **THEN** the `properties` entry for `padding` in `Card`'s `visualizer` value SHALL carry an `editor`
-  value with the kind `slider`, the minimum `0`, the maximum `64`, the stops `0`, `4`, `8` and `16`,
-  and the unit `px`
+  value with the minimum `0`, the maximum `64`, the unit `px`, and the choices `4` labeled `sm` and
+  `8` labeled `md`
 
 #### Scenario: A mismatched hint is left out
-- **WHEN** `Card.title` is a `string` hinted `editor=slider placeholder="Title"`
-- **THEN** the entry for `title` SHALL carry an `editor` value with the placeholder `Title` and no kind
+- **WHEN** `Card.title` is a `string` hinted `editor=field placeholder="Title"`, with the choices
+  `<ValueChoice value="Hi" />` and `<ValueChoice value=3 />`
+- **THEN** the entry for `title` SHALL carry an `editor` value with the placeholder `Title`, the one
+  choice `Hi`, and no kind
 
 #### Scenario: An empty range is left out
 - **WHEN** `Card.padding` is typed `Spacing`, hinted `min=10 max=0`

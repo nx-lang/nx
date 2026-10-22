@@ -2,12 +2,17 @@
 
 Visual edits the values a document already writes (`add-visual-value-editing`). What it cannot do yet
 is the part of editing that makes Visual worth having beside a text box: show the choices. A reader
-can't see which properties an element could also set, can't pick a design system's named color or
-spacing instead of typing a literal, and every number is the same plain field, whether it is a
-spacing that snaps to 4, 8, 16 or a font size with a unit. This change combines phases 2 and 3 of the
+can't see which properties an element could also set, can't pick from the values a library offers,
+and every number is the same plain field, whether it is a font size with a unit and a scale of
+sizes or a count. This change combines phases 2 and 3 of the
 design "Editing in Visual: design and plan" (https://claude.ai/artifact/66bGJxr9DjiS9GY5jk86Xu):
-discovering properties and named values, and the editor hints that pick a property's editor. Bret
-asked for the two together so the property editing can be tried as one experience.
+discovering properties, and the editor hints that pick a property's editor. Bret asked for the two
+together so the property editing can be tried as one experience.
+
+After trying a first version (a slider snapping to `stops`, and named values: every `let` whose type
+fits, offered as references), Bret compared how other products edit numbers (2026-10-22) and chose
+Paper-style choices that a library declares, Framer-style steppers, and no slider. Named values
+from `let`s guessed at intent from types alone, so they wait for design-system support.
 
 ## What Changes
 
@@ -17,24 +22,28 @@ asked for the two together so the property editing can be tried as one experienc
   one-line element, on a line of its own for one written a property per line.
 - **A row menu.** A selected row gets a quiet `⋯` menu: Reset to default or Remove (what Delete does
   today), and Show in Source. Delete stays as the keyboard path.
-- **Named values.** Where values of a property's type are in scope, such as `let accent:Color` or the
-  members of a `let theme:Theme` record, an editor lists them above free entry, and picking one writes
-  a reference (`color={accent}`) instead of a literal. A value that is already such a reference edits
-  with its type's editor, the reference marked, instead of opening Source. A new language query,
-  `namedValues`, answers the values a property can take; `sourceEdit` gains a `reference` value.
 - **Editor hints in `@nx/visualizer`.** `PropertyVisualizer` and `ValueVisualizer` gain `editor`
-  (`field | slider | dropdown | segmented`), `min`, `max`, `step`, `stops` and `unit`;
+  (`field | dropdown | segmented`), `min`, `max`, `step`, `unit`, and `choices`: `ValueChoice`
+  children, each a `value` and an optional `label`, the values a viewer offers to pick, in order.
   `PropertyVisualizer` also gains `multiline` and `placeholder`. `ValueVisualizer.format` becomes
-  optional. Analysis warns when a hint does not fit the property's type. The source tree carries the
-  resolved hints.
-- **New editors.** A slider in a popover with the number field beside it, snapping to `stops`; a
-  segmented control for a union's cases; units shown after a number and never written; numbers kept
-  in range, with a note when a typed number is outside it; a multi-line text field for `multiline`
-  strings; a placeholder in an empty field. Any string field takes Shift+Enter as a line break.
-- **The playground** answers `namedValues`, and the "Visual test cases" example gains the new cases.
+  optional. Analysis warns when a hint or a choice does not fit the property's type. The source tree
+  carries the resolved hints.
+- **New editors.** Choices in a list under a number or string field, Paper-style: each choice's label
+  beside its value (one column when no choice has a label), the property's default on a row of its
+  own above them, the current value marked; picking writes the value, and the default's row resets.
+  The field stays typeable, so choices suggest and never restrict. Steppers on numbers, Framer-style:
+  up and down buttons just past the value, while its field is open or on a selected row; a click
+  steps once, Shift ten steps, and a vertical drag scrubs. A segmented control for a union's cases;
+  units shown after a number and never written; numbers kept in range, with a note when a typed
+  number is outside it; a multi-line text field for `multiline` strings; a placeholder in an empty
+  field. Any string field takes Shift+Enter as a line break.
+- **The playground**'s "Visual test cases" example gains the new cases.
 - Not in this change: element-typed and record-typed properties set from Visual (phase 5's insert
-  menu), a spacing editor, palettes, text content over several lines (phase 4 or 7), expressions edited
-  as code (phase 7), and named values from anywhere but the document's scope.
+  menu), a spacing editor, palettes, text content over several lines (phase 4 or 7), and expressions
+  edited as code (phase 7). Deferred until design-system support is fleshed out: choices from a
+  design system's tokens, and named values or references from `let`s; a value written as a
+  reference still opens Source. Sliders are deferred too, perhaps returning with a live preview while
+  dragging for opacity-like values.
 
 ## Capabilities
 
@@ -44,29 +53,23 @@ None.
 
 ### Modified Capabilities
 
-- `source-edits`: `addProperty`, the `reference` value, and the `namedValues` query.
-- `language-protocol`: the protocol defines seven queries, `namedValues` among them.
-- `visualizer-library`: the editor hints on `PropertyVisualizer` and `ValueVisualizer`, and the
-  `ValueEditor` union; `ValueVisualizer.format` optional.
+- `source-edits`: `addProperty`.
+- `visualizer-library`: the editor hints on `PropertyVisualizer` and `ValueVisualizer`, `ValueChoice`
+  and the `ValueEditor` union; `ValueVisualizer.format` optional.
 - `visualizer-declarations`: hints merge like formats, an alias's hints reach the properties it types,
   and a hint that does not fit its property's type is a warning.
 - `source-tree`: a resolved visualizer carries each property's editor hints, and an alias's.
-- `viewer`: the more-properties row, the row menu, named values in editors, a reference that edits,
-  and the hinted editors.
-- `playground`: Visual's named values come from the worker; the test-cases example covers the new
-  cases.
+- `viewer`: the more-properties row, the row menu, and the hinted editors: choices and steppers.
+- `playground`: the test-cases example covers the new cases.
 
 ## Impact
 
 - `crates/nx-api/src/std/visualizer/visualizer.nx` and the visualizer resolution and diagnostics in
   the analyzer.
-- `crates/nx-language-service`: `source_edit` (`addProperty`, `reference`), a `named_values` module,
-  the source tree's visualizer values, and tests.
-- `bindings/wasm` and `bindings/node`: the snapshot answers `namedValues`; the wasm ABI version goes
-  up by one.
-- `packages/language-protocol`, `language-core`, `language-client`, `language-http`: the new query,
-  edit and value, and the visualizer hint fields.
-- `packages/viewer`: rows, menu, editors, the `namedValues` host hook, styles, tests and README.
-- `sites/playground`: the worker, `ReadingView.tsx`, and the test-cases example.
+- `crates/nx-language-service`: `source_edit` (`addProperty`), the source tree's visualizer values,
+  and tests.
+- `packages/language-protocol`: the `addProperty` edit and the visualizer hint fields.
+- `packages/viewer`: rows, menu, editors, styles, tests and README.
+- `sites/playground`: the test-cases example.
 - `sites/website`: the visualizer library reference page.
 - `src/vscode/CHANGELOG.md` and the package changelogs.
