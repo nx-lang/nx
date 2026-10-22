@@ -672,7 +672,7 @@ Checks:
 - A hidden or detached body holds `0px`, which is harmless, and lets go after the loop.
 - A host that sets the tree to `undefined` and leaves it empty lets go after the microtask.
 
-### 🟡 Fixed - RF26 The held height lets go after a single microtask, so a host that sets the next tree a moment later still makes the reading jump
+### ✅ Verified - RF26 The held height lets go after a single microtask, so a host that sets the next tree a moment later still makes the reading jump
 - **Severity:** Low (confidence: high, reproduced in Chromium)
 - **Evidence:** I tested on `/play/survey`, scrolled to the bottom (`scrollTop` 2600), with code run in the page:
   - `v.tree = undefined; v.tree = t` keeps 2600. This is what the playground does.
@@ -684,6 +684,11 @@ Checks:
   Also, if anything in the fitting loop throws (for example, `renderSource`), `min-height` stays set until the next render that succeeds.
 - **Recommendation:** Let go on the next animation frame instead of a microtask, or when the next tree has been drawn, whichever comes first. A tree that arrives within the frame then finds the hold still in place, and nothing is painted at the held height in the meantime. Wrapping the drawing in `try`/`finally` would clear the hold if a draw fails. Add a test for a tree set after an `await`.
 - **Fix:** An empty reading now holds its height for `EMPTY_HOLD` (1000 ms), not one microtask, and the next tree drawn in that time keeps it; the timer is cleared on every draw. The drawing and fitting sit in `try`/`finally`, so a draw that throws lets the height go. Tests: "keeps its height while it is drawn…" now also gives the tree a task later (`setTimeout(0)`), and "lets an empty reading's height go when no tree comes" checks the release with mocked timers; both fail on the microtask version. Chromium: choosing a case at the bottom of `visual-test-cases` still keeps scrollTop 747.
+- **Verification:** Verified (commit 6a0c24e). Viewer tests pass, 120/120. With `dist`'s `EMPTY_HOLD` set back to an immediate release (`setTimeout(…, 0)`), "keeps its height while it is drawn…" fails (1 of 120). I then rebuilt to restore it.
+  - In Chromium on `/play/survey`, scrolled to the bottom (2600), `scrollTop` stays at 2600 when the next tree comes at once, after `await null`, after `setTimeout(0)` and after 300 ms.
+  - A reading left empty holds `3144px` at 200 ms and lets go by 1.2 s.
+  - Near the bottom of `visual-test-cases` and `survey`, nothing regressed. A case choice, a number commit and an undo keep 777 and 2600. Delete and fold end at the new bottom (759, 525, 2523, 2546).
+  - The `finally` releases the hold if a draw throws. Every `#render`, including one with no tree, clears the pending timer, so only the latest empty render can release.
 
 ## Questions
 - Should Enter and F2 toggle a boolean when it is the first editable value of the selected unit? They do
