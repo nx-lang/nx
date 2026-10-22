@@ -442,7 +442,7 @@ Checks:
 
 ## New Findings Discovered During 2026-10-22 01:17 Verification
 
-### 🟡 Fixed - RF19 `createOwnTexts` forgets a reported text by comparing with the last effect's `value`, not the last render's, so a late effect can undo an undo
+### ✅ Verified - RF19 `createOwnTexts` forgets a reported text by comparing with the last effect's `value`, not the last render's, so a late effect can undo an undo
 - **Severity:** Low (confidence: medium; the window is narrow, from a render's commit to its passive effect)
 - **Evidence:** `ownTexts.reported(text)` clears every reported text when `text === rendered`. But `rendered`
   is set only in `shouldSet`, which runs in NxEditor's passive `useEffect`, after the render is
@@ -466,6 +466,11 @@ Checks:
   `latestValue.current` (set during render), and the helper keeps no `value` of its own. A new unit test
   covers the ordering: rendered T0, T1 reported and rendered before its effect, T0 reported, then
   `shouldSet(T1, T0)` is false and the next render agrees.
+- **Verification:** Verified (commit a64d3fe). `reported(text, rendered)` now takes the latest render's `value` (NxEditor passes `latestValue.current`, which it sets in the render body), and the helper keeps no value of its own, so an undo made between a render's commit and its effect no longer drops that render's text. The new test models exactly that order: the edit is rendered, it is undone before the effect, `shouldSet(edited, start)` is false, and the next render agrees with the editor. I also traced the other orders by hand:
+  - a further change after a render whose effect is pending keeps that render's text, so its late effect is skipped;
+  - returning to the latest render's text clears the list.
+
+  `ownTexts.test.mjs`: 7/7 pass.
 
 ## Questions
 - Should Enter and F2 toggle a boolean when it is the first editable value of the selected unit? They do
