@@ -186,9 +186,25 @@ describe("a reading drawn again", () => {
     element.tree = editing.tree;
     assert.equal(held, "500px", "the height it had holds while it is measured");
     assert.equal(body.style.minHeight, "", "and lets go once it is drawn");
+    // A host that gives the next tree a task later, once it has it, keeps the height too.
+    held = undefined;
     element.tree = undefined;
-    await Promise.resolve();
-    assert.equal(body.style.minHeight, "", "a reading left empty lets go too");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    element.tree = editing.tree;
+    assert.equal(held, "500px", "the height holds across a tree given later");
+    assert.equal(body.style.minHeight, "", "and lets go once it is drawn");
+  });
+
+  it("lets an empty reading's height go when no tree comes", async (t) => {
+    const editing = await fixture("editing");
+    const element = show(editing);
+    const body = root(element).querySelector<HTMLElement>(".body")!;
+    Object.defineProperty(body, "offsetHeight", { configurable: true, get: () => 500 });
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    element.tree = undefined;
+    assert.equal(body.style.minHeight, "500px", "it holds the height a while");
+    t.mock.timers.tick(1000);
+    assert.equal(body.style.minHeight, "", "and lets it go when no tree has come");
   });
 });
 

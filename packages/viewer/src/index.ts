@@ -110,6 +110,12 @@ const CARD_GRACE = 300;
 const CARD_GAP = 4;
 /** How long typing pauses before an invalid entry says why, in milliseconds. */
 const PROBLEM_DELAY = 400;
+
+/**
+ * How long, in milliseconds, a reading left with no tree keeps the height it had, for a host that
+ * gives the next tree a little later.
+ */
+const EMPTY_HOLD = 1000;
 /** How far beside its editor an invalid entry says why, in pixels. */
 const PROBLEM_GAP = 8;
 
@@ -234,6 +240,8 @@ export class NxViewerElement extends ElementBase {
   #fitWidth = -1;
   /** The measure waiting for the pane's width to settle. */
   #remeasureTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Lets go of the height an empty reading holds, once no tree has come for a while. */
+  #holdTimer: ReturnType<typeof setTimeout> | undefined;
   /**
    * The key of the name or value under the pointer, whose card opens once the pointer rests there.
    * A node marked on several spans, as a line's name and its `=`, is one target.
@@ -687,6 +695,7 @@ export class NxViewerElement extends ElementBase {
     // The reading keeps the height it had while it is drawn again, so the shorter drafts the fitting
     // below measures, or no tree between two, do not pull up what scrolls it: after an edit near
     // the bottom, the reader stays where they were.
+    clearTimeout(this.#holdTimer);
     if (this.#body.style.minHeight === "" && this.#body.childElementCount > 0) {
       this.#body.style.minHeight = `${this.#body.offsetHeight}px`;
     }
@@ -695,13 +704,13 @@ export class NxViewerElement extends ElementBase {
     this.#index = undefined;
     this.#targets = new Map();
     if (tree === undefined) {
-      // A host that sets the next tree at once keeps the height; one that leaves the reading empty
-      // lets it go.
-      queueMicrotask(() => {
+      // A host that gives the next tree soon, at once or once it has it, keeps the height; one that
+      // leaves the reading empty lets it go.
+      this.#holdTimer = setTimeout(() => {
         if (this.#tree === undefined) {
           this.#body.style.minHeight = "";
         }
-      });
+      }, EMPTY_HOLD);
       return;
     }
     // A drag on a number's name goes on with the next tree, on the same number.
@@ -717,24 +726,27 @@ export class NxViewerElement extends ElementBase {
         renderSource(this.ownerDocument, index, this.#colors, { wrapped, icons: this.#icons, folded: this.#folded, turning: this.#turning })
       );
     };
-    draw();
-    // Each element whose properties do not fit on one line gives each a row, drawn again until all
-    // left on lines fit. Hidden or unattached, nothing is measured, and the size the reading takes
-    // when shown draws it again.
-    this.#fitWidth = this.#body.clientWidth;
-    const wrapped = new Set<string>();
-    // A property's element value on a line or a header that does not fit is measured once that one
-    // has its rows, so each pass settles one level of values, and values nested deeper than this
-    // keep their innermost lines.
-    for (let pass = 0; pass < 6 && this.#fitWidth > 0; pass++) {
-      const found = this.#wrapped();
-      if (found.length === 0) {
-        break;
+    try {
+      draw();
+      // Each element whose properties do not fit on one line gives each a row, drawn again until
+      // all left on lines fit. Hidden or unattached, nothing is measured, and the size the reading
+      // takes when shown draws it again.
+      this.#fitWidth = this.#body.clientWidth;
+      const wrapped = new Set<string>();
+      // A property's element value on a line or a header that does not fit is measured once that
+      // one has its rows, so each pass settles one level of values, and values nested deeper than
+      // this keep their innermost lines.
+      for (let pass = 0; pass < 6 && this.#fitWidth > 0; pass++) {
+        const found = this.#wrapped();
+        if (found.length === 0) {
+          break;
+        }
+        found.forEach((key) => wrapped.add(key));
+        draw(wrapped);
       }
-      found.forEach((key) => wrapped.add(key));
-      draw(wrapped);
+    } finally {
+      this.#body.style.minHeight = "";
     }
-    this.#body.style.minHeight = "";
     for (const element of this.#body.querySelectorAll<HTMLElement>("[data-key]")) {
       this.#rendered.set(element.dataset["key"]!, element);
     }

@@ -659,6 +659,32 @@ Checks:
   - The as-written items in `settings-screen`, `orders-dashboard`, `typed-text`, `agent` and `visual-test-cases` are unchanged, and none draws left of its start.
   - One case remains, untested: a block that itself starts after other text on its line, such as a list `{ if a {` holding text that continues further left. It still takes the minimum over nested lines. Nothing in the repository writes that, so I have not opened a finding for it.
 
+## New Findings Discovered During 2026-10-22 04:45 Review
+
+Scope of this pass: commit 5568355, which holds `.body`'s `min-height` while `#render` draws the reading again.
+
+Checks:
+- Viewer tests pass, 119/119.
+- In Chromium against the dev server (viewport 1200×700, `.reading` scrolled to the bottom, every click by `page.mouse` at coordinates), on `visual-test-cases`, `orders-dashboard` and `survey`. Choosing a case, committing a number, committing text, toggling a boolean, and a number commit followed by Ctrl+Z each kept `scrollTop` where it was: 777, 1776 and 2600.
+- A Delete near the bottom, which really shortens the reading, ended at the new bottom and no further: 777→759 (max 759), 1776→1736 and 2600→2523. With the hold disabled in `dist`, the same Deletes jumped to 579 (max 759) and to 1659 (max 2523). So the fix also cures Delete.
+- Folding a group near the bottom ends at the new bottom, as it should.
+- `#remeasure`, used after fonts load or the width changes, holds the height through its `#render`, and its `scrollToKey` then restores the top node as before.
+- A hidden or detached body holds `0px`, which is harmless, and lets go after the loop.
+- A host that sets the tree to `undefined` and leaves it empty lets go after the microtask.
+
+### 🟡 Fixed - RF26 The held height lets go after a single microtask, so a host that sets the next tree a moment later still makes the reading jump
+- **Severity:** Low (confidence: high, reproduced in Chromium)
+- **Evidence:** I tested on `/play/survey`, scrolled to the bottom (`scrollTop` 2600), with code run in the page:
+  - `v.tree = undefined; v.tree = t` keeps 2600. This is what the playground does.
+  - `v.tree = undefined; await null; v.tree = t` lands at 1713.
+  - `v.tree = undefined; await new Promise(f => setTimeout(f, 0)); v.tree = t` lands at 0.
+
+  The microtask queued by the `undefined` render runs before the host's continuation and clears `min-height`. The next `#render` then finds the body empty (`childElementCount` 0) and holds nothing, so the fitting's first measure clamps the scroll. Elsewhere `#render` supports a host that clears the tree before setting the next one: the editor is reopened via `#reopen` whatever the timing. Only the height hold needs the next tree in the same task. A host that loads its tree asynchronously, such as an effect awaiting a language service, gets the jump back.
+
+  Also, if anything in the fitting loop throws (for example, `renderSource`), `min-height` stays set until the next render that succeeds.
+- **Recommendation:** Let go on the next animation frame instead of a microtask, or when the next tree has been drawn, whichever comes first. A tree that arrives within the frame then finds the hold still in place, and nothing is painted at the held height in the meantime. Wrapping the drawing in `try`/`finally` would clear the hold if a draw fails. Add a test for a tree set after an `await`.
+- **Fix:** An empty reading now holds its height for `EMPTY_HOLD` (1000 ms), not one microtask, and the next tree drawn in that time keeps it; the timer is cleared on every draw. The drawing and fitting sit in `try`/`finally`, so a draw that throws lets the height go. Tests: "keeps its height while it is drawn…" now also gives the tree a task later (`setTimeout(0)`), and "lets an empty reading's height go when no tree comes" checks the release with mocked timers; both fail on the microtask version. Chromium: choosing a case at the bottom of `visual-test-cases` still keeps scrollTop 747.
+
 ## Questions
 - Should Enter and F2 toggle a boolean when it is the first editable value of the selected unit? They do
   now, because `#openEditor` toggles. Spec and design say Enter "opens" the value, and Tab skips booleans.
