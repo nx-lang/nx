@@ -104,6 +104,39 @@ export interface SourceTreeVisualizersOption {
   modules?: string[];
 }
 
+/**
+ * A source edit: the text edits that make one change a reader asks for at one node of a
+ * document's source tree.
+ *
+ * Unstable: the request's and the answer's shapes may change until a later release commits to
+ * them.
+ */
+export interface SourceEditRequest extends LanguageQuery {
+  /** The key of the node to edit, as the document's source tree gives it. */
+  key: string;
+  /** The change. */
+  edit: SourceEdit;
+}
+
+/** One change a reader asks for, aimed at one node. */
+export type SourceEdit =
+  /** Set a literal or a bare union case that is a whole value. */
+  | { kind: "setValue"; value: SourceEditValue }
+  /** Set a run of text content written on one line. */
+  | { kind: "setText"; text: string }
+  /** Remove an attribute: Reset for a property with a default, Clear for an optional one. */
+  | { kind: "remove" };
+
+/** A value to write, by kind; the service decides its spelling. */
+export type SourceEditValue =
+  /** A string, its content unescaped. */
+  | { kind: "string"; value: string }
+  /** A number as the reader typed it, written as given when it is an NX numeric literal. */
+  | { kind: "number"; text: string }
+  | { kind: "boolean"; value: boolean }
+  /** A union case, by name. */
+  | { kind: "case"; name: string };
+
 /** The queries this protocol defines. */
 export const LANGUAGE_QUERIES = [
   "hover",
@@ -111,6 +144,7 @@ export const LANGUAGE_QUERIES = [
   "diagnostics",
   "documentSymbols",
   "sourceTree",
+  "sourceEdit",
 ] as const;
 
 /** A query name this protocol defines. */
@@ -141,6 +175,7 @@ export interface LanguageQueryRequests {
   diagnostics: DiagnosticsRequest;
   documentSymbols: DocumentSymbolsRequest;
   sourceTree: SourceTreeRequest;
+  sourceEdit: SourceEditRequest;
 }
 
 /** The answer shape of each defined query. */
@@ -150,6 +185,7 @@ export interface LanguageQueryAnswers {
   diagnostics: DiagnosticReport;
   documentSymbols: DocumentSymbol[];
   sourceTree: SourceTree;
+  sourceEdit: SourceEditAnswer;
 }
 
 /** Returns whether `name` is a query this protocol defines. */
@@ -175,6 +211,30 @@ export interface Hover {
   range: EditorRange;
   /** Markdown, with NX fragments in ```nx fences. */
   contents: string;
+}
+
+/** One replacement in a document's text. */
+export interface TextEdit {
+  /** The range replaced, in the document as the request carried it. The ranges of one answer never overlap. */
+  range: EditorRange;
+  /** What replaces it. */
+  newText: string;
+}
+
+/**
+ * Why a source edit was not made: the document's tree holds no node with the key, the node is not
+ * a target the edit takes, or the value cannot be spelled.
+ */
+export type SourceEditRefusal = "unknownNode" | "notEditable" | "invalidValue";
+
+/**
+ * The answer to a source edit query: the text edits that make the change, or none and why. Every
+ * range is in the document as sent and no two overlap, so a host applies them together, as one
+ * change. An edit that changes nothing answers no edits and no refusal.
+ */
+export interface SourceEditAnswer {
+  edits: TextEdit[];
+  refused?: SourceEditRefusal;
 }
 
 /** The kinds of completion item the language service produces. */
@@ -486,6 +546,8 @@ export interface NxLanguageService {
   documentSymbols(request: DocumentSymbolsRequest, signal?: AbortSignal): Promise<DocumentSymbol[]>;
   /** Unstable: the answer's shape may change until a later release commits to it. */
   sourceTree(request: SourceTreeRequest, signal?: AbortSignal): Promise<SourceTree>;
+  /** Unstable: the request's and the answer's shapes may change until a later release commits to them. */
+  sourceEdit(request: SourceEditRequest, signal?: AbortSignal): Promise<SourceEditAnswer>;
 }
 
 // ---------------------------------------------------------------------------------------------

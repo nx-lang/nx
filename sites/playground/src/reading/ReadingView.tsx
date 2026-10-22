@@ -1,9 +1,15 @@
 import { useEffect, useLayoutEffect, useRef, useState, type MutableRefObject } from "react";
 import "@nx-lang/viewer";
 import {
+  NX_DRAFT_EVENT,
+  NX_EDIT_EVENT,
   NX_FOLD_EVENT,
+  NX_OPEN_EVENT,
   NX_SELECT_EVENT,
+  type NxDraftDetail,
+  type NxEditDetail,
   type NxFoldDetail,
+  type NxOpenDetail,
   type NxSelectDetail,
   type NxViewerElement,
   type NxViewerIcons,
@@ -31,6 +37,20 @@ export interface ReadingViewProps {
   readonly onFold: (folded: readonly string[], selection: string | undefined) => void;
   /** Filled in with what the pane's title bar can ask of the reading. */
   readonly commands: MutableRefObject<ReadingCommands | null>;
+  /** An edit the visitor made in Visual, for the source; with it, Visual edits values in place. */
+  readonly onEdit?: (detail: NxEditDetail) => void;
+  /** Whether a field open in Visual holds an entry not yet committed that differs from its value. */
+  readonly onDraft?: (changed: boolean) => void;
+  /** A value Visual cannot edit, to show in Source. */
+  readonly onOpen?: (detail: NxOpenDetail) => void;
+  /** Ctrl or Cmd+Z, and Ctrl+Y or Ctrl or Cmd+Shift+Z, pressed in Visual, for the editor's history. */
+  readonly onUndo?: () => void;
+  readonly onRedo?: () => void;
+  /**
+   * Raised when an edit made in Visual changed nothing in the source, so no new tree comes: the
+   * reading is given its tree again, and stops showing the value the visitor left.
+   */
+  readonly revision?: number;
 }
 
 /** What the NX pane's title bar can ask of the Visual view. */
@@ -61,10 +81,26 @@ function loadIcons(): Promise<NxViewerIcons> {
 }
 
 /** The NX pane's Visual view: `<nx-viewer>` showing the source tree, or why it cannot. */
-export function ReadingView({ reading, selection, onSelect, folded, onFold, commands }: ReadingViewProps) {
+export function ReadingView({
+  reading,
+  selection,
+  onSelect,
+  folded,
+  onFold,
+  commands,
+  onEdit,
+  onDraft,
+  onOpen,
+  onUndo,
+  onRedo,
+  revision,
+}: ReadingViewProps) {
   const element = useRef<NxViewerElement>(null);
   const latestFold = useRef(onFold);
   latestFold.current = onFold;
+  const latest = useRef({ onEdit, onDraft, onOpen, onUndo, onRedo });
+  latest.current = { onEdit, onDraft, onOpen, onUndo, onRedo };
+  const editable = onEdit !== undefined;
   useEffect(() => {
     commands.current = {
       collapseAll: () => element.current?.collapseAll(),
@@ -122,9 +158,11 @@ export function ReadingView({ reading, selection, onSelect, folded, onFold, comm
     target.text = reading.text;
     target.folded = folded;
     target.icons = icons;
+    target.editable = editable;
     target.colors = highlighter !== null ? colorize(highlighter, reading.text, EDITOR_THEMES) : [];
     target.tree = reading.tree;
-  }, [reading.tree, reading.text, highlighter, icons]);
+    // `revision` gives the tree again after an edit that changed nothing.
+  }, [reading.tree, reading.text, highlighter, icons, revision]);
 
   useLayoutEffect(() => {
     if (element.current !== null && element.current.selection !== selection) {
@@ -142,11 +180,39 @@ export function ReadingView({ reading, selection, onSelect, folded, onFold, comm
       const { folded, selection } = (event as CustomEvent<NxFoldDetail>).detail;
       latestFold.current(folded, selection);
     };
+    const editListener = (event: Event) => latest.current.onEdit?.((event as CustomEvent<NxEditDetail>).detail);
+    const openListener = (event: Event) => latest.current.onOpen?.((event as CustomEvent<NxOpenDetail>).detail);
+    const draftListener = (event: Event) => latest.current.onDraft?.((event as CustomEvent<NxDraftDetail>).detail.changed);
+    // The reading leaves undo and redo to the host, which keeps one history for Source and Visual.
+    // Inside one of the reading's own fields, they are the field's, and do not reach here.
+    const keyListener = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) {
+        return;
+      }
+      const key = event.key.toLowerCase();
+      const redo = key === "y" || (key === "z" && event.shiftKey);
+      if (key !== "z" && key !== "y") {
+        return;
+      }
+      const handler = redo ? latest.current.onRedo : latest.current.onUndo;
+      if (handler !== undefined) {
+        event.preventDefault();
+        handler();
+      }
+    };
     target.addEventListener(NX_SELECT_EVENT, listener);
     target.addEventListener(NX_FOLD_EVENT, foldListener);
+    target.addEventListener(NX_EDIT_EVENT, editListener);
+    target.addEventListener(NX_OPEN_EVENT, openListener);
+    target.addEventListener(NX_DRAFT_EVENT, draftListener);
+    target.addEventListener("keydown", keyListener);
     return () => {
       target.removeEventListener(NX_SELECT_EVENT, listener);
       target.removeEventListener(NX_FOLD_EVENT, foldListener);
+      target.removeEventListener(NX_EDIT_EVENT, editListener);
+      target.removeEventListener(NX_OPEN_EVENT, openListener);
+      target.removeEventListener(NX_DRAFT_EVENT, draftListener);
+      target.removeEventListener("keydown", keyListener);
     };
   }, [reading.tree === null]);
 

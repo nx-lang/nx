@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { NxValueDescribe, NxValueNavigateDetail, NxValueNode } from "@nx-lang/value-view";
 import "./app.css";
 import { evaluateInBrowser, type Diagnostic } from "./compile";
-import { NxEditor, languageService, MODEL_URI, type NxEditorHandle } from "./editor/NxEditor";
-import { declaredName, offsetOf, positionAt } from "./editor/positions.ts";
+import { NxEditor, languageService, MODEL_URI, type EditorHistory, type NxEditorHandle } from "./editor/NxEditor";
+import { declaredName, offsetAtPosition, offsetOf, positionAt } from "./editor/positions.ts";
 import {
   DEFAULT_EXAMPLE,
   EXAMPLE_GROUPS,
@@ -17,7 +17,8 @@ import { OutputPane, type OutputView } from "./output/OutputPane";
 import { PreviewView } from "./preview/PreviewView";
 import { usePreview } from "./preview/usePreview.ts";
 import { ReadingView, type ReadingCommands } from "./reading/ReadingView";
-import { keyAtRange, rangeOfKey } from "@nx-lang/viewer";
+import { keyAtRange, rangeOfKey, type NxOpenDetail } from "@nx-lang/viewer";
+import { createEditQueue } from "./reading/edits.ts";
 import { useSourceTree } from "./reading/useSourceTree.ts";
 import { SITE_ROOT } from "./paths.ts";
 import { createAddressKeeper } from "./address.ts";
@@ -36,6 +37,11 @@ interface Opened {
 }
 
 const isExample = (id: string) => exampleById(id) !== undefined;
+
+/** The undo and redo shortcuts as the visitor's platform spells them, for the buttons' tooltips. */
+const SHORTCUTS = /Mac|iPhone|iPad/.test(globalThis.navigator?.platform ?? "")
+  ? { undo: "⌘Z", redo: "⇧⌘Z" }
+  : { undo: "Ctrl+Z", redo: "Ctrl+Y" };
 
 /** Reads the current address into source, decoding a `#code=` fragment. */
 async function openLocation(): Promise<Opened> {
@@ -168,13 +174,73 @@ export function App() {
   // anything, Visual folds the source's supporting declarations itself.
   const [folded, setFolded] = useState<readonly string[] | undefined>(undefined);
   const readingCommands = useRef<ReadingCommands | null>(null);
-  const reading = useSourceTree(source, mode === "visual");
+  // The text an edit made in Visual left, whose tree is asked for at once rather than after a pause.
+  const immediateTree = useRef<string | null>(null);
+  // Raised by an edit made in Visual that changed nothing, or by an undo or redo, to give Visual its
+  // tree again.
+  const [visualRevision, setVisualRevision] = useState(0);
+  const reading = useSourceTree(source, mode === "visual", undefined, immediateTree);
+  // Visual's edits, made in the editor's text one after another, each one step of its undo history.
+  const applyVisualEdit = useMemo(
+    () =>
+      createEditQueue(
+        languageService,
+        MODEL_URI,
+        { text: () => editor.current?.text() ?? null, apply: (edits) => editor.current?.applyEdits(edits) },
+        (text) => {
+          immediateTree.current = text;
+        },
+        () => setVisualRevision((revision) => revision + 1),
+      ),
+    [],
+  );
+  // Whether the editor's history holds anything to undo and to redo, for the title bar's buttons.
+  const [history, setHistory] = useState<EditorHistory>({ canUndo: false, canRedo: false });
+  // A field open in Visual holding a change, and edits fired and not yet in the editor's history:
+  // Undo takes them back too, after committing the field, so it is offered for them as well.
+  const [visualDraft, setVisualDraft] = useState(false);
+  const [editsInFlight, setEditsInFlight] = useState(0);
+  const canUndo = history.canUndo || (mode === "visual" && (visualDraft || editsInFlight > 0));
+  // When Visual last closed a field's change without committing it, as leaving a field holding an
+  // entry it cannot take does, and when the Undo button was last pressed: a press that closed one
+  // took that change back, which is all the visitor asked Undo for.
+  const visualDraftRef = useRef(false);
+  const draftDroppedAt = useRef(Number.NEGATIVE_INFINITY);
+  const undoPressedAt = useRef(Number.POSITIVE_INFINITY);
+  const onVisualDraft = (changed: boolean) => {
+    if (!changed && visualDraftRef.current) {
+      draftDroppedAt.current = performance.now();
+    }
+    visualDraftRef.current = changed;
+    setVisualDraft(changed);
+  };
+  /** Undo or redo, from Visual or the title bar: the editor's history, the same as in Source. */
+  const visualHistory = (step: "undo" | "redo") => {
+    // After any edit still being made, as a field's that pressing the button committed.
+    void applyVisualEdit.after(() => {
+      editor.current?.[step]();
+      immediateTree.current = editor.current?.text() ?? null;
+      // The step can take the text back to what Visual's tree already describes, as Undo does with a
+      // field open, whose edit it commits and takes back at once. No newer tree comes then, so Visual
+      // gets its tree again, and drops the value it shows as pending.
+      setVisualRevision((revision) => revision + 1);
+    });
+  };
   // The editor's cursor, carried into Visual until a tree of the same text can say what it is on.
   const cursorToSelect = useRef<number | null>(null);
   // The selected node's start, carried into Source until the editor is shown again.
   const cursorToPlace = useRef<number | null>(null);
   // The node the cursor selected on entering Visual: leaving with it still selected leaves the cursor be.
   const selectedOnEntry = useRef<string | undefined>(undefined);
+  /** Shows a value Visual cannot edit in Source, with the cursor at its start. */
+  const openInSource = (detail: NxOpenDetail) => {
+    const { text } = reading;
+    if (text !== null && text === sourceRef.current) {
+      cursorToPlace.current = offsetAtPosition(text, detail.range.start);
+    }
+    setSelection(detail.key);
+    setMode("source");
+  };
 
   useEffect(() => {
     const offset = cursorToSelect.current;
@@ -306,13 +372,56 @@ export function App() {
           <div className="pane-title">
             <span>NX</span>
             <span className="spacer" />
+            <span className="history-actions">
+              <button
+                type="button"
+                aria-label="Undo"
+                title={`Undo (${SHORTCUTS.undo})`}
+                disabled={!canUndo}
+                onPointerDown={(event) => {
+                  undoPressedAt.current = event.timeStamp;
+                }}
+                onClick={() => {
+                  const dropped = draftDroppedAt.current >= undoPressedAt.current;
+                  undoPressedAt.current = Number.POSITIVE_INFINITY;
+                  if (!dropped) {
+                    visualHistory("undo");
+                  }
+                }}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M9 14 4 9l5-5" />
+                  <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                aria-label="Redo"
+                title={`Redo (${SHORTCUTS.redo})`}
+                disabled={!history.canRedo}
+                onClick={() => visualHistory("redo")}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="m15 14 5-5-5-5" />
+                  <path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13" />
+                </svg>
+              </button>
+            </span>
             {mode === "visual" && (
               <span className="fold-actions">
-                <button type="button" onClick={() => readingCommands.current?.collapseAll()}>
-                  Collapse all
+                <button type="button" aria-label="Collapse all" title="Collapse all" onClick={() => readingCommands.current?.collapseAll()}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="m7 20 5-5 5 5" />
+                    <path d="m7 4 5 5 5-5" />
+                  </svg>
+                  <span>Collapse all</span>
                 </button>
-                <button type="button" onClick={() => readingCommands.current?.expandAll()}>
-                  Expand all
+                <button type="button" aria-label="Expand all" title="Expand all" onClick={() => readingCommands.current?.expandAll()}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="m7 15 5 5 5-5" />
+                    <path d="m7 9 5-5 5 5" />
+                  </svg>
+                  <span>Expand all</span>
                 </button>
               </span>
             )}
@@ -340,6 +449,17 @@ export function App() {
                 setSelection(kept);
               }}
               commands={readingCommands}
+              onEdit={(detail) => {
+                // The field's change was committed, not dropped: Undo takes back its edit.
+                draftDroppedAt.current = Number.NEGATIVE_INFINITY;
+                setEditsInFlight((count) => count + 1);
+                void applyVisualEdit(detail).finally(() => setEditsInFlight((count) => count - 1));
+              }}
+              onDraft={onVisualDraft}
+              onOpen={openInSource}
+              onUndo={() => visualHistory("undo")}
+              onRedo={() => visualHistory("redo")}
+              revision={visualRevision}
             />
           )}
           {/* The editor stays mounted while hidden, keeping its undo history and scroll position. */}
@@ -355,6 +475,7 @@ export function App() {
                 diagnostics={marked}
                 diagnosticsSource={evaluation.diagnosticsSource}
                 theme={theme}
+                onHistory={setHistory}
               />
             )}
           </div>

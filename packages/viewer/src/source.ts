@@ -220,10 +220,17 @@ export function renderSource(
   const root = document.createElement("pre");
   root.className = "source";
 
-  // A piece of the text in one color, or in none: a text node, or a span when it has a color.
-  const piece = (parent: HTMLElement, from: number, to: number, range: NxViewerColor | undefined): void => {
+  // A piece of the text in one color, or in none: a text node, or a span when it has a color. It
+  // shows the text from `from` to `to`, or `shown` in its place.
+  const piece = (
+    parent: HTMLElement,
+    from: number,
+    to: number,
+    range: NxViewerColor | undefined,
+    shown = text.slice(from, to)
+  ): void => {
     if (range === undefined) {
-      parent.append(text.slice(from, to));
+      parent.append(shown);
       return;
     }
     const element = document.createElement("span");
@@ -244,7 +251,7 @@ export function renderSource(
     if ((style & 4) !== 0) {
       element.style.textDecoration = "underline";
     }
-    element.textContent = text.slice(from, to);
+    element.textContent = shown;
     parent.append(element);
   };
 
@@ -269,6 +276,25 @@ export function renderSource(
       piece(parent, at, end, range);
       at = end;
     }
+  };
+
+  // A string literal's words as a person reads them: `\"` and `\\` as a quote and a backslash, as its
+  // editor shows them. Any other escape, as `\n`, leaves the words as written.
+  const readable = (start: number, end: number): string =>
+    decodeString(text.slice(start, end)) ?? text.slice(start + 1, end - 1);
+  // A string literal's words from `start` to `end`, without its quotes, written in the color the text
+  // has there, with its escapes read; or nothing, when it has none to read, so it is written as it
+  // is. Only where the reading draws no quotes, or quiet ones of its own: in a string drawn as code,
+  // between its own quotes, a quote read from `\"` would look like the string's end.
+  const writeReadable = (parent: HTMLElement, start: number, end: number): boolean => {
+    const written = text.slice(start + 1, end - 1);
+    const words = readable(start, end);
+    if (words === written) {
+      return false;
+    }
+    const range = colors.find((candidate) => candidate.start <= start + 1 && candidate.end > start + 1);
+    piece(parent, start + 1, end - 1, range, words);
+    return true;
   };
 
   const uiText = uiTextNodes(index);
@@ -301,7 +327,7 @@ export function renderSource(
       mark.textContent = '"';
       return mark;
     };
-    element.append(quote(), text.slice(start + 1, end - 1), quote());
+    element.append(quote(), readable(start, end), quote());
   };
 
   // A string a person will read: its words in the prose font and the reading's own color, between
@@ -323,7 +349,7 @@ export function renderSource(
     block.style.setProperty("--column", String(start + 1 - lineStart));
     const body = document.createElement("span");
     body.className = "uitext-body";
-    body.append(text.slice(start + 1, end - 1), quote());
+    body.append(readable(start, end), quote());
     block.append(body);
     element.append(quote(), block);
   };
@@ -690,7 +716,7 @@ export function renderSource(
     if (value.role === "literal" && written.startsWith('"') && end - start >= 2) {
       if (identifiers.has(at)) {
         const chip = marked(at, "span", "id-value");
-        chip.textContent = text.slice(start + 1, end - 1);
+        chip.textContent = readable(start, end);
         cell.append(chip);
       } else if (uiText.has(at)) {
         const words = marked(at, "span", "uitext");
@@ -698,7 +724,7 @@ export function renderSource(
         block.className = "uitext-block";
         const body = document.createElement("span");
         body.className = "uitext-body";
-        body.textContent = text.slice(start + 1, end - 1);
+        body.textContent = readable(start, end);
         block.append(body);
         words.append(block);
         cell.append(words);
@@ -710,7 +736,9 @@ export function renderSource(
           words.classList.add("colored");
           words.append(square);
         }
-        writeText(words, start + 1, end - 1);
+        if (!writeReadable(words, start, end)) {
+          writeText(words, start + 1, end - 1);
+        }
         cell.append(words);
       }
       return;
@@ -1148,7 +1176,19 @@ export function renderSource(
       // source has it, measured from where the item starts, wherever the group puts it.
       if (!onOneLine(start, end) && !(node.role === "element" && shapeOf(item) !== "written")) {
         line.classList.add("as-written");
-        line.style.setProperty("--column", String(start - (text.lastIndexOf("\n", start - 1) + 1)));
+        // Measured from the item's start. An item that starts after other text on its line, as text
+        // on its element's tag does, is measured from its least indented later line when one sits
+        // further left, so no line is drawn before the item.
+        const later = startsItsLine(start)
+          ? []
+          : text
+              .slice(start, end)
+              .split("\n")
+              .slice(1)
+              .filter((written) => written.trim() !== "")
+              .map((written) => written.length - written.trimStart().length);
+        const column = Math.min(start - (text.lastIndexOf("\n", start - 1) + 1), ...later);
+        line.style.setProperty("--column", String(column));
         // Room for the item's own indentation on its first line, which its later lines share.
         const lead = document.createElement("span");
         lead.className = "as-written-lead";
@@ -1278,7 +1318,7 @@ function elementIdPlans(
     plans.set(at, {
       attribute,
       literal,
-      value: (literalNode.value ?? "").slice(1, -1),
+      value: decodeString(literalNode.value ?? "") ?? (literalNode.value ?? "").slice(1, -1),
       removeFrom,
       removeTo,
       insertAt,
@@ -1313,7 +1353,7 @@ const UI_TEXT = "uitext";
  * or any alias that leads to it. Which strings these are comes from the declarations, never from
  * how a string looks.
  */
-function uiTextNodes(index: TreeIndex): Set<number> {
+export function uiTextNodes(index: TreeIndex): Set<number> {
   const { tree } = index;
   const declarations = tree.declarations;
   const known = new Map<string, boolean>();
@@ -1377,7 +1417,7 @@ function uiTextNodes(index: TreeIndex): Set<number> {
  * them: from `<PropertyVisualizer property=id format=id />`, or from the visualizer of the alias its type
  * names.
  */
-function formattedNodes(index: TreeIndex): Map<number, SourceValueFormat> {
+export function formattedNodes(index: TreeIndex): Map<number, SourceValueFormat> {
   const { tree } = index;
   const found = new Map<number, SourceValueFormat>();
   tree.nodes.forEach((node, at) => {
@@ -1450,4 +1490,17 @@ function markIndentation(document: Document, root: HTMLElement): void {
       node.replaceWith(fragment);
     }
   }
+}
+
+/**
+ * A string literal's content: its quotes taken off, and `\"` and `\\` read as a quote and a
+ * backslash. Nothing when it holds any other escape, as `\n`: the source edit writes back only those
+ * two, so editing it would lose the others.
+ */
+export function decodeString(written: string): string | undefined {
+  const inner = written.length >= 2 && written.startsWith('"') && written.endsWith('"') ? written.slice(1, -1) : written;
+  if (inner.replace(/\\[\\"]/g, "").includes("\\")) {
+    return undefined;
+  }
+  return inner.replace(/\\([\\"])/g, "$1");
 }

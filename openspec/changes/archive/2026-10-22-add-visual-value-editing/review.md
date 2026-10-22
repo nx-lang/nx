@@ -1,0 +1,713 @@
+# Review: add-visual-value-editing
+
+## Scope
+**Reviewed artifacts:** proposal.md, design.md, tasks.md, specs/source-edits/spec.md, specs/viewer/spec.md,
+specs/playground/spec.md, specs/language-protocol/spec.md  
+**Reviewed code:** `git diff origin/main...HEAD`: crates/nx-language-service/src/source_edit.rs and
+source_edit_tests.rs; bindings/wasm (native lib.rs, abi.ts, api.ts, host.ts, language-service test);
+bindings/node (native lib.rs, index.ts, native.ts); packages/language-protocol, language-core,
+language-http, language-client (src and tests); packages/viewer/src/edit.ts, editors.ts, index.ts,
+source.ts, styles.ts and test/editing.test.ts; sites/playground/src/App.tsx, editor/NxEditor.tsx,
+editor/positions.ts, language/worker.ts, worker/session.ts, reading/ReadingView.tsx, reading/edits.ts,
+reading/edits.test.mjs, reading/useSourceTree.ts; READMEs and src/vscode/CHANGELOG.md.  
+**Checks run:** viewer tests (104 pass), playground tests (104 pass), `cargo test -p nx-language-service
+source_edit` (23 pass), `openspec validate --strict` (valid). Edge cases were probed through the wasm
+SDK's `sourceEdit` and `sourceTree` (scratch script, not committed).
+
+## Findings
+
+### ✅ Verified - RF1 `setValue` spells a negative number (and a case) without regard to its place, so it can break the document or make the value uneditable
+- **Severity:** Medium (confidence: high, reproduced)
+- **Evidence:** `spell_value` (crates/nx-language-service/src/source_edit.rs:222) returns the same text
+  wherever the target is, but only `rhs_expression` (an unbraced attribute value or a `let` value)
+  accepts `signed_numeric_literal`. `value_list_item_expression` does not (crates/nx-syntax/grammar.js:540-553).
+  Results probed through the wasm SDK:
+  - item of a sequence: `let xs:int+ = { 2 3 5 }`, `xs.value[1]` set to `-4`, answers edits with no
+    refusal, and the result `{ 2 -4 5 }` is a parse error ("Expected ? here", "expects int+, found object+");
+  - braced value: `p={8}` set to `-3` gives `p={-3}`, which parses as a prefix operator, so the key now
+    names an `operator` node and the value is no longer editable in Visual after the next tree;
+  - a case written into a braced place: `let x:string = {"a"}` set to case `large` gives `{large}`,
+    which is "Undefined identifier 'large'". Bare case names only resolve unbraced.
+  The viewer makes the first two easy to hit: ArrowDown and scrubbing step below zero freely
+  (packages/viewer/src/editors.ts:87). The spec allows "signed or not" and says the edit touches nothing
+  beyond the target, but leaves out that the answer must still parse. The round-trip test
+  (source_edit_tests.rs:358) only ever writes `42` and compares keys, never parse errors, so it misses
+  this. The wasm parity corpus (`let xs = { 1 2 }` with `-2.5`) produces the broken text too, but never
+  applies it.
+- **Recommendation:** Make the spelling depend on the place. For a signed number in a sequence item or
+  a braced value, either refuse with `invalidValue` (simplest), or let the grammar take
+  `signed_numeric_literal` as a list item. Refuse a `case` value at a braced place that is not already
+  a qualified case. In `round_trips_over_the_repository`, also write a negative number, and assert
+  that the edited document has no more parse errors than the original. Add a sequence-item scenario
+  with a negative number to the spec.
+- **Fix:** `set_value` refuses a signed number, and a case, as `invalidValue` unless the target is an
+  unbraced attribute or `let` value (a qualified case still keeps its qualifier). Tests:
+  `a_negative_number_only_where_the_grammar_takes_one`, `a_bare_case_only_where_it_resolves`;
+  `round_trips_over_the_repository` now also writes `-42` and asserts no new parse errors. The viewer's
+  `EditTarget.signed` is false in a sequence or inside braces: the field marks a negative entry
+  invalid, and the arrows and scrubbing stop at zero there (test "takes a sign only where the grammar
+  takes one"). Spec: a sentence in "A value is set in the spelling its place takes" and the scenario
+  "A negative item of a sequence".
+- **Verification:** Verified. `set_value` (source_edit.rs) now refuses a signed number, and a case, as `invalidValue` outside an unbraced attribute or `let` value. A qualified case is still handled first and keeps its qualifier. The new tests `a_negative_number_only_where_the_grammar_takes_one` and `a_bare_case_only_where_it_resolves` cover the three cases I reproduced (`{ 2 -4 5 }`, `{-3}`, `{large}`). The round-trip test now also writes `-42` and asserts there are no new parse errors. On the viewer side, `EditTarget.signed` (edit.ts) stops the arrows and scrubbing at zero and marks a negative entry invalid in a sequence or inside braces. The spec has the sentence and the scenario. `cargo test -p nx-language-service source_edit`: 28 pass.
+
+### ✅ Verified - RF2 The viewer decodes every string escape as its bare character, so changing part of a string with `\n` or `\t` rewrites those escapes as letters
+- **Severity:** Medium (confidence: high)
+- **Evidence:** `decodeString` (packages/viewer/src/edit.ts:46-49) replaces every `\X` with `X`, so
+  `"a\nb"` opens as `anb`. If the reader changes anything in the field, `#finishField`
+  (index.ts:1318) commits the whole field content, and `quote_string` (source_edit.rs:245) writes it
+  back as `"…anb…"`, silently dropping the escape. NX authors do write `\n` in strings: several .nx
+  files under docs/ say "`\n` requests explicit line breaks". The literal is kept as written in the
+  tree (`value: "\"a\\nb\""`), so the viewer has what it needs to avoid this. The test only covers `\"`
+  (editing.test.ts:104, 199).
+- **Recommendation:** Decode only the escapes `quote_string` writes (`\"` and `\\`). For a string holding
+  any other escape, offer no text editor (`nx-open` instead) until NX settles what string escapes mean
+  (the HIR keeps them as written today). Add a test with `\n`.
+- **Fix:** `decodeString` reads only `\"` and `\\`, and answers nothing for a string holding any
+  other escape, so such a string gets no text editor; Enter or a double-click opens it in Source
+  (`nx-open`). Test "offers no text field for a string with an escape other than a quote or a
+  backslash" (`title="a\nb"`).
+- **Verification:** Verified. `decodeString` decodes only `\"` and `\\`, and returns `undefined` for a string holding any other escape, so `targetOf` offers no editor and Enter or a double-click falls through to `nx-open`. This matches what `quote_string` writes back. It is covered by the viewer test with `title="a\nb"`.
+
+### ✅ Verified - RF3 A tree that arrives while a field is open reopens the field with all its text selected, so the reader's next keystroke replaces their draft
+- **Severity:** Medium (confidence: high on the mechanism, medium on how often it happens)
+- **Evidence:** `#render` keeps only the open field's text (index.ts:637) and reopens it through
+  `#openEditor` → `#openField`, which always ends with `#selectAll(field)` (index.ts:704, 1211). The
+  caret position and any selection the reader made are lost. The common flow hits this: Tab commits
+  value A and opens B (index.ts `#onFieldKey`). The reader starts typing in B, A's tree arrives tens of
+  milliseconds later, B is rebuilt with "what was typed so far" selected, and the next key replaces it.
+  The playground makes this worse: ReadingView's effect sets `text`, `icons`, `colors` and `tree`
+  (ReadingView.tsx:147-152), and each setter calls `#render` (index.ts:430, 444, 458), so one update
+  rebuilds the field and moves the focus up to four times. An IME composition in progress is also cut
+  off. The test "keeps an editor open across a newer tree" (editing.test.ts:240) checks only the text,
+  not the caret.
+- **Recommendation:** When reopening, put back the caret and selection offsets, and select all only on
+  a fresh open. Better still, keep the field element across a render when its key is still editable.
+  Add a test that a reopened field keeps a collapsed caret at the end of what was typed.
+- **Fix:** `#render` keeps the open editor in `#reopen` (key, draft, caret and selection offsets), which
+  survives a render with no tree, as the playground clears the tree before it sets the next. A field
+  opened again puts its caret and selection back; only a fresh open selects all (popover inputs too).
+  Test "keeps the caret of an editor open across a newer tree, and through a tree cleared first". The
+  playground's other setters run while the tree is cleared, so the reading is rebuilt, and the field
+  reopened, once per tree.
+- **Verification:** Verified, with a caveat on the fallback (see RF9). `#render` saves the open editor's key, draft and caret in `#reopen`, which survives a render with no tree. Fields and popover inputs reopened this way put the caret back, and only a fresh open selects all. The playground's effect now clears the tree first, so the field is rebuilt once per tree, not once per setter. The new viewer test checks for a collapsed caret at offset 4 after a cleared-then-set tree. Viewer suite: 110 pass.
+
+### ✅ Verified - RF4 In the playground, a refused or empty edit leaves Visual showing the reader's value, muted, indefinitely; the viewer's run check also disagrees with the service
+- **Severity:** Medium (confidence: high, reproduced)
+- **Evidence:** The viewer drops a value it is showing only when the host sets a tree
+  (index.ts `set tree`). The viewer spec's "The host refuses" scenario assumes the host sets the tree
+  again. The playground's queue returns without doing anything when the answer is refused, has no
+  edits, or arrives after the text changed (sites/playground/src/reading/edits.ts:38). No new text means
+  no new tree, so the muted value stays, though the source never changed. The viewer's pre-check makes
+  refusals reachable, because `runProblem` (edit.ts:56) does not follow the run token's grammar
+  (`_mixed_text_run`, grammar.js:767):
+  - the viewer accepts `fo`, `e`, `i`, `el` and `els`, which the service refuses as `invalidValue`
+    (probed);
+  - the viewer rejects `a > b`, `a } b` and `if-then`, which the service accepts. The spec's own
+    "Fish & chips > all" cannot be typed in Visual.
+  No test covers a refusal reaching the reading in the playground.
+- **Recommendation:** When the queue gets a refusal, an empty answer or a dropped answer, the playground
+  should give the viewer the current tree again (for example a callback from `createEditQueue`), or the
+  viewer should offer a way to drop a pending value. Make `runProblem` match the grammar: refuse
+  `<` and `{` only, and refuse the `if`/`for`/`else` prefixes as the token regex does, including their
+  short prefixes. Otherwise leave that check to the service and show its refusal. Add a playground test
+  that a refused edit gives the reading the tree back.
+- **Fix:** `createEditQueue` takes `onUnchanged`, called for a refused answer, an empty one, one for
+  text that changed meanwhile, or a failure. The playground raises a `revision` prop on `ReadingView`,
+  which sets the tree again, so the muted value goes. `runProblem` now follows `_mixed_text_run`: it
+  refuses `<` and `{`, a leading space, and `if`/`for`/`else` or the start of one as a word (`fo`,
+  `e`), and allows `>` and `}`. Tests in edits.test.mjs (refusals and no-change edits call
+  `onUnchanged`; a stale answer too) and the viewer's run test.
+- **Verification:** Verified. `createEditQueue` calls `onUnchanged` when the answer is refused or empty, when it arrives after the text changed, and when the request fails. The playground raises `revision`, which makes ReadingView set the tree again, so the muted value goes. `runProblem` now uses the `_mixed_text_run` token regex, anchored: it accepts `>` and `}`, and refuses `fo`, `e`, `el` and `els`, matching what I probed from the service. edits.test.mjs: 4 pass. One minor caveat, not reopened: setting the tree again also drops the muted values of later edits still in the queue until their own tree arrives, which is a brief flicker in a rare path.
+
+### ✅ Verified - RF5 A text run's trailing whitespace is part of the field, so replacing a run before a braced value or an element merges words
+- **Severity:** Medium (confidence: high, reproduced)
+- **Evidence:** In `<L>Hello {1} world</L>`, the text node `text[0]` is `"Hello "`, trailing space
+  included (range 11..17), while `text[2]` is `"world"` with no leading space. The run field opens with
+  `"Hello "` selected (edit.ts:145, index.ts:1211). If the reader types `Hi`, the service writes
+  `<L>Hi{1} world</L>` (probed), which reads "Hi1 world". The same happens before a child element
+  (`Hello <b>x</b>`), which is common in mixed content. The tests only cover a run that is the whole
+  body (`<Label>Hello</Label>`).
+- **Recommendation:** Edit the run without its trailing (and leading) whitespace: the viewer shows the
+  trimmed text, and `set_text` keeps the run's edge whitespace (replace only the trimmed span).
+  Alternatively, have the source tree's text node leave out the trailing separator. Add a
+  mixed-content test in Rust and in the viewer.
+- **Fix:** `set_text` keeps the run's trailing whitespace and replaces only the words before it (the
+  read-back check runs on the new words plus that whitespace). The viewer's run target is the value
+  trimmed at the end. Tests: Rust `a_run_keeps_the_space_before_what_follows` (`Hello {1} world` →
+  `Hi {1} world`) and viewer "edits a run of text without the space that separates it from what
+  follows". Spec scenario "A run before a braced value".
+- **Verification:** Verified. `set_text` keeps the run's trailing whitespace: it replaces only the trimmed words, after checking that the new text plus that whitespace reads back as one run. The no-change check compares against the same span. The viewer's run target is trimmed at the end. Covered by `a_run_keeps_the_space_before_what_follows` (`<L>Hi {1} world</L>`), the viewer test and the new spec scenario.
+
+### ✅ Verified - RF6 A re-render during a number scrub drops the drag and leaves the reading with `scrubbing` set
+- **Severity:** Medium (confidence: high on the mechanism)
+- **Evidence:** `#render` sets `this.#scrub = undefined` (index.ts:639) but does not remove the
+  `scrubbing` class that `#onPointerMove` put on the persistent body (index.ts:1680). Only
+  `#onPointerUp` removes it (index.ts:1701), and that handler now returns early because `#scrub` is
+  undefined. After that, the whole reading has `cursor: ew-resize !important; user-select: none`
+  (styles.ts) until another scrub finishes. The drag in progress is silently dropped, with no commit
+  and no visual reset. Scrubbing twice in quick succession is enough: the first release's tree arrives
+  during the second drag.
+- **Recommendation:** In `#render`, remove `scrubbing` and either carry the scrub over to the new name
+  element (same key) or end it cleanly. Add a test that sets a tree mid-drag.
+- **Fix:** `#render` removes `scrubbing` and carries the drag on through the new tree on the same key
+  (`#resumeScrub`: new name element, pointer captured again, the dragged value shown); when the number
+  is gone, the drag ends cleanly. A render with no tree keeps the drag for the next one. Tests
+  "carries a drag on through a newer tree" and "ends a drag cleanly when the number is gone from the
+  newer tree".
+- **Verification:** Verified. `#render` no longer drops the drag on a render without a tree. With a tree it removes `scrubbing` and either resumes the drag through `#resumeScrub` (new name element, pointer captured again, value shown) or ends it cleanly when the number is gone. Both paths have viewer tests.
+
+### ✅ Verified - RF7 `remove` leaves a trailing line comment behind, and the comment cases that task 1.4 says were verified have no tests
+- **Severity:** Low (confidence: high, reproduced)
+- **Evidence:** In `remove` (source_edit.rs:350-386), only blanks count as separating space, so:
+  - an attribute alone on its line with a trailing comment, `  a=1 // note`, becomes `  // note`, an
+    orphaned comment line;
+  - `<T a=1 // note\n  b=2 />` becomes `<T // note\n  b=2 />`.
+  A comment line directly above an attribute that stands alone also stays. Task 1.4 is checked as
+  "verify … with comments beside it", but source_edit_tests.rs has no case with a comment.
+- **Recommendation:** Treat a trailing `//` comment on the same line as part of the attribute's line
+  when deciding "alone on its line", and remove it with the attribute. Decide and document what
+  happens to a comment line above it. Add the tests task 1.4 names.
+- **Fix:** `remove` takes a `//` comment that follows the attribute on its line with it, so
+  `  a=1 // note` goes as a whole line and `<T a=1 // note\n  b=2 />` becomes `<T\n  b=2 />`. A
+  comment on the line above stays (it may be about more than the attribute); documented on `remove` and
+  in the spec. Tests `removing_takes_a_trailing_comment_with_it` and
+  `removing_keeps_a_comment_line_above`.
+- **Verification:** Verified. A `//` comment after the attribute on its line now goes with it: a line holding only the attribute and its comment is removed whole, and `<T a=1 // note` becomes `<T`. Keeping a comment line above the attribute is now documented and tested. The spec has the scenario.
+
+### ✅ Verified - RF8 The contract for applying several `TextEdit`s is inconsistent between the service, its tests and the host
+- **Severity:** Low (confidence: high; latent while every answer has at most one edit)
+- **Evidence:**
+  - The Rust and protocol docs give each range "in the document as the request carried it"
+    (source_edit.rs:66, language-protocol `TextEdit`), and the Rust test helper applies edits in
+    reverse against the original (source_edit_tests.rs:47-55).
+  - The protocol's `SourceEditAnswer` doc and the spec say "to apply one after another".
+  - `NxEditor.applyEdits` (NxEditor.tsx:129-135) and edits.test.mjs apply each edit against the text
+    the previous one left.
+  These agree only for one edit. Later phases (adding properties, inserting elements) will return
+  several.
+- **Recommendation:** Choose LSP semantics: every range refers to the document as sent, and edits do not
+  overlap. State that in the spec and the protocol docs, and apply the edits with a single
+  `executeEdits` call over all of them (Monaco applies such a batch correctly).
+- **Fix:** LSP semantics throughout: every range is in the document as sent and no two overlap, so a
+  host applies them together. Updated the Rust doc, the protocol's `TextEdit` and `SourceEditAnswer`
+  docs, its README, the spec and `EditedDocument.apply`. `NxEditor.applyEdits` makes one
+  `executeEdits` call with every edit; edits.test.mjs applies an answer's edits against the text as
+  it was.
+- **Verification:** Verified. The Rust and protocol docs, the README and the spec now say LSP semantics: every range is in the document as sent, and no two overlap. `NxEditor.applyEdits` makes one `executeEdits` call with all the edits inside a single pair of undo stops, which Monaco applies against the original model. The edits.test.mjs helper and the Rust `apply` both apply against the original text.
+
+## New Findings Discovered During 2026-10-21 22:10 Verification
+
+### ✅ Verified - RF9 An editor reopened with no caret it can read still selects everything, as a fresh open does
+- **Severity:** Low (confidence: high on the code path; medium on which browsers reach it)
+- **Evidence:** `#openField`, `#openColor` and `#openCases` take `caret === undefined` to mean a fresh
+  open, and `#openField` then calls `#selectAll`. But `#caretOf` also returns `undefined` on a reopen
+  when the DOM selection cannot be read inside the field. That happens when the root has no
+  `ShadowRoot.getSelection` and `document.getSelection()` retargets the range to the shadow host, as
+  WebKit does, so `field.contains(range.startContainer)` is false. On those browsers RF3 is still
+  there: a tree arriving after Tab selects the reader's draft, and the next key replaces it.
+- **Recommendation:** Tell a reopen apart from a fresh open: pass a flag, or a draft without a caret.
+  When the caret is unknown on a reopen, collapse it at the end of the draft instead of selecting all.
+  Where available, consider `Selection.getComposedRanges({ shadowRoots: [root] })` to read the caret
+  in WebKit.
+- **Fix:** A reopen whose caret cannot be read collapses the caret at the end of the draft
+  (`#render` passes `{ start: end, end }`), so a reopened editor never selects the draft. `#caretOf`
+  reads `Selection.getComposedRanges({ shadowRoots: [root] })` first where the browser has it, then
+  the selection's own range. Test "puts the caret after the draft when where it was cannot be read".
+- **Verification:** Verified (commit 0d6018a). A reopen whose caret can't be read now gets a collapsed caret at the end of the draft (`reopen.caret ?? { start: end, end }`), so a reopened field or popover input never selects what was typed. Only a fresh open (with no caret passed) selects all. `#caretOf` reads `getComposedRanges` first, then the selection's own range. The new test "puts the caret after the draft when where it was cannot be read" covers the fallback. Viewer suite: 111/111 pass. See RF10 for one hardening point on the `getComposedRanges` call.
+
+## New Findings Discovered During 2026-10-21 22:20 Verification
+
+### ✅ Verified - RF10 `#caretOf` calls `getComposedRanges` with the dictionary argument and no guard, so an older engine that throws on it would break the reading's render
+- **Severity:** Low (confidence: medium; depends on the engine version)
+- **Evidence:** `#caretOf` (packages/viewer/src/index.ts) calls
+  `selection.getComposedRanges?.({ shadowRoots: [...] })`. `#render` calls it with no try/catch,
+  whenever an editor is open. The first engines to ship `getComposedRanges`, WebKit's (Safari 17 and
+  later), took the shadow roots as separate arguments (`getComposedRanges(...shadowRoots)`) before the
+  spec moved to the dictionary. An engine with that signature rejects a plain object with a
+  `TypeError`, and the optional call `?.` does not catch it. `#render` would then stop after clearing
+  the body, leaving an empty reading the first time a tree arrives with a field open. That is the
+  WebKit case RF9 set out to fix. The fallback added for RF9 never runs, because the exception comes
+  first.
+- **Recommendation:** Wrap the `getComposedRanges` call, or all of `#caretOf`, in try/catch and treat a
+  throw as "caret unknown", which RF9's fallback already handles. Alternatively, detect the signature
+  (try the dictionary, then the variadic form).
+- **Fix:** The `getComposedRanges` call is in a try/catch; a throw reads as no composed range, and the
+  selection's own range is read, or the caret goes after the draft. The test "puts the caret after the
+  draft when where it was cannot be read" now has `getComposedRanges` throw.
+- **Verification:** Verified (commit ccb1715). The `getComposedRanges` call is now inside a try/catch, and a throw counts as no composed range. `#caretOf` then reads the selection's own range or returns nothing, and `#render` puts the caret after the draft as RF9's fallback does. The render can no longer abort. The RF9 test now makes `getComposedRanges` throw a `TypeError` and still checks that the caret is collapsed after the draft. Viewer suite: 111/111 pass.
+
+## New Findings Discovered During 2026-10-21 23:44 Review
+
+Scope of this pass: commit f90ad06 only (click to edit, `offsetAtPoint`, popover placement, the Reset/Clear button and
+Backspace removed, hover cues and the field's input look, the playground's Undo/Redo buttons and narrow-screen
+icons, and the spec, design and tasks section 6). Checks:
+- viewer tests 112/112, playground `pnpm test` 122/122, `openspec validate --strict` valid;
+- in Chromium against the dev server (`/play/survey`, 1200 px and 375 px wide):
+  - a click puts a collapsed caret at the right character;
+  - the popover is placed by its value and the reading does not scroll;
+  - the Undo and Redo buttons enable and disable correctly;
+  - switching examples resets the history;
+  - a double-click toggles a boolean only once;
+  - a click on a name only selects;
+  - the title bar fits at 320 px.
+
+### ✅ Verified - RF11 The title bar's Undo, pressed while a Visual field is open, undoes the step before and throws away what was typed in the field
+- **Severity:** Medium (confidence: high, reproduced in Chromium)
+- **Evidence:** I set the title (edit A, committed), then clicked the description, typed `BB` and clicked the
+  title bar's Undo:
+  1. The button's pointerdown blurs the field, which commits B: `nx-edit` fires and the queue asks the
+     worker.
+  2. The button's click then runs `visualHistory("undo")` (App.tsx) at once, which undoes A.
+  3. B's answer arrives for text that has since changed, so `createEditQueue` drops it (edits.ts,
+     `document.text() !== text`).
+
+  The source ends with neither A nor B. Redo brings back A, but B is lost. Redo has the same race. The
+  spec scenario "Undo from the title bar" covers only an edit already made.
+- **Recommendation:** Make the buttons act on what the reader sees:
+  - with a Visual editor open, Undo should cancel the field (the reader's typing is the latest change)
+    rather than undo a step;
+  - or Undo should wait until the commit's edit has been applied (for example, go through the same
+    queue, `createEditQueue`) before undoing.
+
+  `preventDefault` on the buttons' pointerdown keeps the field from blurring first. Add a playground test
+  for an undo with a field open, or with an edit still queued.
+- **Fix:** `createEditQueue` gains `after(step)`, which runs a step once every edit fired before it
+  has been made or refused. The playground's undo and redo (title bar and shortcuts) go through it,
+  so an Undo pressed with a field open takes back the field's edit, which the press committed, and
+  the edit before it stays. Test in edits.test.mjs: a step waits for the edit fired before it. Spec
+  sentence in the playground's requirement.
+- **Verification:** Verified (commit d785fbb). `createEditQueue` now has `after(step)`, and `visualHistory` runs undo and redo through it. A step therefore waits for every edit fired before it, including the one a button press commits by blurring the field. In Chromium I repeated my earlier steps: commit A, type `BB` in the description, click Undo. A stays and B is taken back; Undo and Redo are both enabled, and Redo restores `ABB 3-5…`. The new edits.test.mjs case checks the ordering. edits.test.mjs: 5/5 pass. The spec states the ordering.
+
+### ✅ Verified - RF12 With Backspace and the row button gone, Reset and Clear are out of reach on Mac laptops and touch screens
+- **Severity:** Medium (confidence: high on the key mapping; how much it matters depends on who uses Visual)
+- **Evidence:** Removal now listens only for `event.key === "Delete"` (index.ts `#onKey`). On a Mac laptop the
+  key labelled "delete" reports `Backspace`; a forward `Delete` needs Fn+Delete, which few readers know. Phones
+  and tablets have neither key, and the "Reset to default" and "Clear" button was their only way.
+  The viewer spec still requires that "A property with a default, or an optional one, can be left out"
+  (specs/viewer/spec.md). The playground is mostly read on Macs and phones, and there this has become a
+  keyboard-only feature with no way to discover it. The design's reason for dropping Backspace, that "a
+  reader who meant to change the text would press it", applies only while a field is open, and then the
+  field already handles its own keys.
+- **Recommendation:**
+  - Accept Cmd+Backspace on macOS, the Finder and Mail convention for delete, or Backspace with a row
+    (not a field) selected.
+  - Keep one pointer path to it: a small menu or a context-menu item on the row, which phase 2 needs
+    anyway.
+  - Or say in the spec and README that removal is keyboard-only for now, so the gap is a deliberate
+    choice.
+- **Fix:** Cmd+Backspace removes as Delete does (a Mac laptop's delete key). Touch has no removal for
+  now: the spec and design say removal is from the keyboard until a later change gives rows a menu
+  (phase 2 needs one for adding properties). Test: the removal test presses Cmd+Backspace.
+- **Verification:** Verified (commit d785fbb). Cmd+Backspace now removes the selected row's property (`#onKey`), as Delete does. Backspace alone still does not. The spec, design, tasks and README all say that removal is keyboard-only until a row menu arrives, so the touch gap is now a recorded choice. There is a viewer test.
+
+### ✅ Verified - RF13 A click on a case (or a color) whose popover is open opens it again instead of closing it
+- **Severity:** Low (confidence: high, reproduced)
+- **Evidence:**
+  1. The document pointerdown handler `#onDocumentPointerDown` cancels the popover, because the value
+     is outside it.
+  2. The click that follows reaches `#onClick`, finds no open session and opens the popover again.
+
+  So the popover cannot be closed by clicking its value. The new chevron and pointer cursor make the
+  value look like a dropdown, where a second click on the trigger closes it.
+- **Recommendation:** In `#onDocumentPointerDown`, when the press is on the session's own `span`,
+  remember that, and let the following click close the popover rather than reopen it. Add a viewer test.
+- **Fix:** A press on the value whose popover is open closes it and marks that key, and the click that
+  follows leaves it closed, as a dropdown does. Test "closes a case's popover on a click on its value,
+  as a dropdown does"; spec sentence added.
+- **Verification:** Verified (commit d785fbb). `#onDocumentPointerDown` records a press on the open popover's own value (`#closedOnPress`), and the click that follows leaves the popover closed. Every new press clears the record. In Chromium a second click on `presentation` now closes its popover; it used to stay open. There is a viewer test, and the spec has the sentence.
+
+### ✅ Verified - RF14 `offsetAtPoint`, which places the caret where a click falls, has no test that exercises it
+- **Severity:** Low (confidence: high)
+- **Evidence:** jsdom gives ranges no layout, so `offsetAtPoint` (editors.ts) returns the end of the text in every
+  viewer test. The test "opens a value on a click, with a caret and nothing selected…" only checks that the
+  caret is collapsed. The spec scenario "A click edits where it falls", with the caret between the
+  characters the click fell between, is checked only by hand. It works in Chromium. The function picks the
+  nearest line first, then the nearest character, which deserves a test, especially for wrapped UI text.
+- **Recommendation:** Unit-test `offsetAtPoint` with a stubbed `Range.prototype.getBoundingClientRect`
+  that lays out characters on one line and on two wrapped lines. Check a point before the first
+  character, between two characters, and after the end of a line.
+- **Fix:** A test of `offsetAtPoint` with laid-out characters (Range boxes stubbed: 8 px a
+  character, 4 a line) checks before/after a character's middle, a second line's start and past a
+  line's end.
+- **Verification:** Verified (commit d785fbb). The new unit test stubs character boxes over two lines and checks five points with `offsetAtPoint`: either side of a character's middle, the start of the second line, and past the end of each line. Viewer suite: 114/114 pass.
+
+### ✅ Verified - RF15 `Removal`'s "reset" and "clear" have nothing left to tell apart
+- **Severity:** Low (confidence: high)
+- **Evidence:** The button that showed "Reset to default" or "Clear" is gone. `removalOf` (edit.ts) still answers
+  `"reset" | "clear"`, but its one caller, `#removeSelected`, checks only whether the answer is undefined.
+  The same holds for the viewer test "knows which properties may be left out".
+- **Recommendation:** Make it `mayLeaveOut(index, at): boolean`, or keep the two cases only if the planned
+  row menu will label them, and say so in a comment.
+- **Fix:** `removalOf` is now `isRemovable`, a boolean; the `Removal` type is gone.
+- **Verification:** Verified (commit d785fbb). `removalOf` is now `isRemovable(index, at): boolean`, the `Removal` type is gone, and the one caller and the tests are updated.
+
+## New Findings Discovered During 2026-10-22 01:09 Review
+
+Scope of this pass: commits 37a008b, 4a2c49a and 4d58eec (`e4e82ac..4d58eec`):
+- the color popover's `[hidden]` rule, the `visualRevision` raised after undo and redo, and
+  `NxEditor`'s `unseenChanges`;
+- the reading's decoding of `\"` and `\\`, the `.edit-problem` note, the chevron, `nx-draft` and the
+  playground's Undo for drafts and edits in flight;
+- tasks section 7 and the spec deltas.
+
+Checks:
+- viewer tests 116/116;
+- in Chromium against the dev server (`/play/survey`):
+  - a changed draft enables Undo on an empty history, and Undo puts the title and the source back
+    (the scenario "Undo before the first edit");
+  - Redo brings the draft's edit back;
+  - an invalid number entry shows "Not a number" beside the field after the pause.
+
+### ✅ Verified - RF16 Undo pressed while a field holds an entry it cannot take discards the entry and also undoes the step before
+- **Severity:** Low (confidence: high, reproduced in Chromium)
+- **Evidence:** I committed a title edit, then typed `px` after a `minLength` number. Undo was enabled and the
+  note said "Not a number". I clicked the title bar's Undo:
+  1. The button's pointerdown blurs the field, and `#finishField(…, "blur")` cancels an invalid entry
+     without firing an edit.
+  2. `visualHistory("undo")` then takes back the previous step, the committed title edit.
+
+  The source ended with the title back to `Bullseye…`, and Redo was enabled. The reader asked to undo what
+  they were typing and lost an earlier, unrelated edit as well (Redo recovers it). The same happens for
+  an entry that differs from its value but commits to nothing: `#reportDraft` compares the raw draft,
+  while `#finishField` trims a number, so ` 12` against `12` counts as a change but commits as no
+  edit. This is RF11's case for entries that never become an edit.
+- **Recommendation:** When the press that blurred the field only cancelled it or committed nothing, the
+  undo should end there. For example:
+  - have `#finishField` report whether it fired an edit, and let the host skip the editor step when a
+    draft was only dropped;
+  - or have Undo with an open field cancel the field in the viewer (a viewer method, such as
+    `cancelEdit()`) instead of going through blur.
+
+  Add a playground or viewer test for an undo with an invalid draft and history behind it.
+- **Fix:** The playground notes when Visual closes a field's change without an edit (`nx-draft` going
+  false with no `nx-edit` after it) and when the Undo button was pressed. A press that closed such a
+  change took it back, which is the step Undo was asked for, so the editor's history is left alone.
+  A change that commits still commits and is undone, so Redo brings it back. Checked in Chromium: a
+  committed name edit survives Undo pressed on `3px` or on ` 3`, and a second Undo takes it back; a
+  valid draft is committed and undone, and Redo restores it. The playground has no DOM test harness,
+  so this is covered by those checks rather than an automated test.
+- **Verification:** Verified (commit 81143cb). `onVisualDraft` records when `nx-draft` goes false with no `nx-edit` after it, since `onEdit` resets the mark, and the Undo button records its pointerdown. A click whose press dropped a draft skips the editor's undo. A draft that commits to nothing (` 12`) also goes false with no edit, so it is covered too. I checked in Chromium after committing a title edit:
+  - Undo pressed with `1px` or with `1 ` in a number field left the title edit in place;
+  - Undo with a valid draft (`10`) committed it and took it back, and Redo restored `minLength=10`.
+
+  The playground has no DOM test for this. The automated suites that do run pass: viewer 116/116, playground `ownTexts` + `edits` 11/11.
+
+### ✅ Verified - RF17 Decoding `\"` in the reading's code-styled strings makes the quotes around a string indistinguishable from quotes inside it
+- **Severity:** Low (confidence: high)
+- **Evidence:** `writeReadable` (source.ts) now draws an element line's or a list item's string with its
+  `\"` read as `"`, and `"…"` around it as plain text in the same color. The viewer test expects
+  `"say "hi""`. A list written `{ "a\" \"b" }` now reads `{ "a" "b" }`, two items to the eye, and an
+  attribute `t="x\" y=\"z"` reads `t="x" y="z"`, two attributes. This applies to every reading, not only
+  an editable one: the DrawnUI fiddle and other hosts that never set `editable` change too. Yet the spec
+  sentence sits under "Values edit in place when the host allows it". Prose (`uitext`) and id chips are
+  fine, because their delimiting quotes are distinct `.quote` marks or not drawn at all.
+- **Recommendation:** In code-styled strings, draw the delimiting quotes as distinct marks (as
+  `writeQuoted` and `uitext` do) and show a decoded quote so it cannot be mistaken for one, or keep `\"`
+  as written there and decode only in prose and id chips. Move the sentence into the reading requirement
+  ("One element shows a source tree…"), since it applies with or without `editable`.
+- **Fix:** A string drawn as code, between its own quotes, reads as written again; only a property
+  sheet's value, UI text and ids, where the reading draws no quotes or quiet ones of its own, read
+  `\"` and `\\` decoded. A value shown pending in a code string is escaped as the reading draws it.
+  The sentence moved into "One element shows a source tree in any host", with its scenario. The viewer
+  test now expects `"say \"hi\""` for a list item, its field to hold `say "hi"`, and the pending value
+  to read escaped.
+- **Verification:** Verified (commit 81143cb). `writeReadable` now writes only a string's words without quotes, and is used only for property-sheet values. UI text and ids decode through `readable` with their own quiet quotes, while an element line's or a list item's code string goes back to `writeNodes`, as written. `showValue` escapes a pending value in a code string (lead quote drawn, kind `text`), so the muted value reads as the reading would draw it. `valueHost` recognises both forms. The sentence and its scenario are now in the reading requirement. The viewer test expects `"say \"hi\""` for a list item. Viewer 116/116.
+
+### ✅ Verified - RF18 `NxEditor`'s `unseenChanges` bookkeeping, the fix for 7.3, has no test, and it keeps stale texts when changes end where they began
+- **Severity:** Low (confidence: medium)
+- **Evidence:** `NxEditor`'s value effect (editor/NxEditor.tsx) skips `setValue` for any `value` found in
+  `unseenChanges`, and trims the list only when the effect runs, which is only when `value` changes. It
+  does not run when changes return to the text the last render had. For example, Undo with a field open
+  applies the field's edit and undoes it in one task, so React batches both `setSource` calls and
+  `value` stays the same. The texts pushed then stay in the list until the next `value` change. If that
+  next change is an outside text equal to one of them (an address or history entry that restores an
+  edited text), it is taken for the editor's own and not set, and the editor and the app's `source`
+  disagree. Task 7.3 ("quick edits in a row all land and keep the undo history") has no automated test;
+  the playground's tests cover `createEditQueue` only.
+- **Recommendation:** Move the bookkeeping into a small pure helper, such as
+  `createValueTracker(): { reported(text), isOwn(value) }`, and unit-test it:
+  - two changes before a render;
+  - an edit and its undo batched;
+  - an outside value equal to a recently reported text.
+
+  Also have `isOwn` treat a `value` as the editor's own only when it equals the editor's current text or
+  a text reported since that text was last set. Clear the list when the editor's text and `value` agree.
+- **Fix:** The bookkeeping is `createOwnTexts()` in `editor/ownTexts.ts`, with `ownTexts.test.mjs`
+  covering two changes before a render, an edit and its undo batched into one render, an outside
+  value equal to a forgotten text, and no editor yet. It remembers the last rendered `value` and
+  forgets every reported text when the editor reports that value again, so changes that end where
+  they began leave nothing behind; it also forgets them whenever a render's `value` equals the
+  editor's text.
+- **Verification:** Verified (commit 81143cb), with a caveat raised as RF19. The bookkeeping is now `createOwnTexts()` (editor/ownTexts.ts) with six unit tests: two changes before a render, an edit and its undo batched, an outside value equal to a forgotten text, an outside value, and no editor yet. Changes that end at the last rendered value now leave nothing behind, so the stale-text case I described is fixed.
+
+## New Findings Discovered During 2026-10-22 01:17 Verification
+
+### ✅ Verified - RF19 `createOwnTexts` forgets a reported text by comparing with the last effect's `value`, not the last render's, so a late effect can undo an undo
+- **Severity:** Low (confidence: medium; the window is narrow, from a render's commit to its passive effect)
+- **Evidence:** `ownTexts.reported(text)` clears every reported text when `text === rendered`. But `rendered`
+  is set only in `shouldSet`, which runs in NxEditor's passive `useEffect`, after the render is
+  committed. Take this sequence:
+  1. A Visual edit makes T1. React renders and commits `value=T1`, but its passive effect has not run
+     yet, so `rendered` is still T0.
+  2. The visitor presses Ctrl+Z in Source (a quick undo), so the editor reports T0. That equals
+     `rendered`, and the list, T1 included, is cleared.
+  3. The pending effect then calls `shouldSet(T1, T0)`. T1 is no longer known as the editor's own, so
+     NxEditor calls `setValue(T1)`. That takes back the undo and, because it is a `setValue`, clears
+     the undo history.
+
+  The previous version kept `[T1, T0]` here and skipped the stale `value`. The unit tests drive
+  `reported` and `shouldSet` in order and never model a render committed before its effect.
+- **Recommendation:** Compare against the value of the latest render rather than the latest effect.
+  NxEditor already sets `latestValue.current = value` during render, so pass it in, for example
+  `reported(text, latestValue.current)` or a `rendering(value)` call in the render body. Add a unit
+  test: rendered T0, value T1 passed but not yet effected, T0 reported, then `shouldSet(T1, T0)` must
+  be false.
+- **Fix:** `reported(text, rendered)` now takes the latest render's `value`, which NxEditor passes as
+  `latestValue.current` (set during render), and the helper keeps no `value` of its own. A new unit test
+  covers the ordering: rendered T0, T1 reported and rendered before its effect, T0 reported, then
+  `shouldSet(T1, T0)` is false and the next render agrees.
+- **Verification:** Verified (commit a64d3fe). `reported(text, rendered)` now takes the latest render's `value` (NxEditor passes `latestValue.current`, which it sets in the render body), and the helper keeps no value of its own, so an undo made between a render's commit and its effect no longer drops that render's text. The new test models exactly that order: the edit is rendered, it is undone before the effect, `shouldSet(edited, start)` is false, and the next render agrees with the editor. I also traced the other orders by hand:
+  - a further change after a render whose effect is pending keeps that render's text, so its late effect is skipped;
+  - returning to the latest render's text clears the list.
+
+  `ownTexts.test.mjs`: 7/7 pass.
+
+## New Findings Discovered During 2026-10-22 03:27 Review
+
+Scope of this pass: commit bb1a25a, which adds:
+- the playground example `visual-test-cases.nx` under the new topic "Test cases";
+- the MODIFIED "Examples get a visitor started" requirement;
+- task 8.1, the README paragraph and `check-examples`' `UNCOUNTED_TOPICS`.
+
+I checked the example against the viewer spec (main and delta), the source-edits spec and
+`@nx/visualizer`.
+
+Checks:
+- `pnpm run check-examples` passes: 24 examples match their expected output.
+- In Chromium against the dev server (`/play/visual-test-cases`), these comments held as written:
+  - Tab on the Latte line runs code → name → size (popover of cases with their docs) → shots, and then
+    on into the next drink. It passes over `iced`, which is by design.
+  - Delete removes `size`, `iced`, `note` and `ratings` (each whole line), and removes `color` together
+    with its `// leaves with color`. Delete does nothing on `name` or `code`. Backspace does nothing,
+    and Cmd+Backspace removes.
+  - `-1` in `ratings` stays in the field with the note "Cannot be negative here", and no edit fires.
+    `-1` in the Latte's `shots` is written.
+  - Double-clicking `total + 1` or `priceOf(size)`, or double-clicking `lines` (or clicking it and
+    pressing Enter), switches to Source at that line.
+  - The run before `{total}` opens as `Ask for oat milk`; setting it to `Oat milk` keeps the space.
+  - `greeting` opens unescaped and is written back escaped.
+  - `pairsWith` reads as an id, and Croissant's id reads last.
+  - The Up arrow, Shift+Up, `12px` ("Not a number"), Space on a braced boolean (which stays braced),
+    the qualified case in `sizes` (which keeps `Size.`), the color popover's hex field, and Ctrl+Z and
+    Ctrl+Y all behaved as specified.
+- The example is concise for what it covers (96 lines, about one line per case). No case is
+  redundant. `welcome`, a run with no braced value, and `greeting` next to the sheet's `note`, which is
+  drawn as code as opposed to decoded, each cover a case of their own.
+
+### ✅ Verified - RF20 Several cases Visual reads or edits have no instance in the test cases
+- **Severity:** Medium (confidence: high)
+- **Evidence:** The example has nothing for these cases from the viewer spec and `@nx/visualizer`:
+  - **An element as a property's value.** For example, `padding=<Thickness left=1 top=2 />`. It reads
+    as a line in its row, or as a group under the property's name when it is too long. Its own
+    attributes are editable values ("an attribute's value"). Nothing exercises either.
+  - **The visualizer formats not used.** The example has no `ValueVisualizer format=id` (an alias that
+    reads as an id), and no `PropertyVisualizer format=color`. It uses only the other two
+    combinations.
+  - **Kinds' icons and the fallback.** Only `square-function` (Special) and visualizer icons appear.
+    None of these appears:
+    - a record with no visualizer on a line of its own (`box`);
+    - a union case written as an element (`tag`), which in a row is also "An element sharing its line";
+    - a visualizer icon the host cannot draw.
+
+    `Note` has no visualizer, but both `Note`s share their line with a `let`, so neither has an icon.
+  - **A folded group's child count.** Every group here has a title, so folding shows the title, never
+    `N children`. No comment mentions folding at all, although an `if` and a `for` are present.
+  - **Text after an emoji.** Offsets are UTF-8 in the tree and UTF-16 in Monaco, so editing a value
+    that follows an emoji on its line checks the reading ("Text after an emoji"). It also checks that
+    the playground applies `sourceEdit`'s ranges to the right characters. This is the edit path most
+    likely to break unnoticed.
+  - **A text run Visual will not take.** There is no run over several lines (`notEditable`), and
+    nothing invites typing `a < b` into a run (`invalidValue`).
+- **Recommendation:** Add the cases without growing the example much. For example:
+  - give `Drink` a `cup?:Cup` property, where `Cup` is a record with no visualizer and one of whose
+    fields is a `Color` formatted through a `PropertyVisualizer`;
+  - set `cup=<Cup …/>` on the sheet;
+  - put a `<Size.large />`-style case element and a `Tip` with `icon="no-such-icon"` in the menu;
+  - give one value an emoji before it (`name="☕ Latte"`, then edit `size` after it);
+  - add a no-title group holding the `for`, with a line in the header saying "fold it".
+
+  Then mention each case in its comment.
+- **Fix:** The example now has `cup=<Cup …/>` (an element as a value, with `PropertyVisualizer format=color` on `sleeve`), `extra=<Extra.syrup …/>` in the sheet and `let promo` on its own line (the `tag` icon), `Menu` with no visualizer (the `box` icon, and "6 children" folded), `Water` with `icon="no-such-icon"` (gives way to `box`), `type Code` with `ValueVisualizer format=id` (so `pairsWith` reads as an id through its type, and `Pastry`'s visualizer merges with `Item`'s), `name="☕ Latte"` before `size`, and `poem`, a run over two lines. The comment on text content invites `a < b`. Checked in Chromium: `size` after the emoji writes `size=medium` with the name intact; `a < b` shows "Text cannot hold < or {"; `poem` has no field; `pumps` and `sleeve` edit; folding `Menu` shows "6 children". `poem`, written starting on its tag, showed its second line left of the pane; fixed in `writeItems` (the column is the least of the item's start and its later lines' indentation), with a test in `element.test.ts`.
+- **Verification:** Verified (commit 30fdf9b). I checked each added case in Chromium against the dev server, with the viewer rebuilt (viewer tests 117/117; `check-examples` 24/24):
+  - `cup=<Cup …/>` reads as a line in its row, and `sleeve` has a color square and the hex popover; editing `sleeve`, toggling `lid`, Up on `pumps` and editing `flavor` (in the sheet and in `promo`) write the right attribute.
+  - Delete leaves out `cup` and `extra`.
+  - Icons: `promo` has `tag`, while `Menu`, `Water` (`no-such-icon`) and `poem`'s `Note` have `box`.
+  - Left on `Menu` folds it to "6 children".
+  - `Pastry` merges with `Item`'s visualizer (title `Croissant`, `CRO` last), and `pairsWith` and every `code` read as ids through `Code`.
+  - `size` and `shots` after `☕ Latte`, and the name itself, edit cleanly. A link with `😀🥐` before them also edited cleanly, so surrogate pairs hold too. `☕` is in the BMP; an emoji outside it would make the example test that case itself.
+  - `a < b` stays in the field with "Text cannot hold < or {", and `poem` has no field.
+
+  The `writeItems` change fixes `poem`, but it moves `if` and `for` blocks that hold such text: see RF25.
+
+### ✅ Verified - RF21 "Hover a name for its doc" finds a doc only on cases; the four doc comments sit where no hover in Visual reaches
+- **Severity:** Low (confidence: high, checked in Chromium)
+- **Evidence:** The docs are on `uitext`, `Color`, `Size` and `Item`. In Visual:
+  - Hovering `Drink` shows `type Drink extends Item` with no doc, because `Drink` has none and the card
+    does not show the base's doc.
+  - Every property card is `(property) name: Type …` with no doc, because no property has one.
+  - The type docs appear only in the folded declarations, where Visual gives no hover.
+
+  So the hover cases "An element's declaration" (signature and doc) and "A property's type, default
+  and doc" are not exercised. Only the case docs (`Size.small 8 oz` and the others) show. The `i` key,
+  "From the keyboard", is not mentioned.
+- **Recommendation:** Put the doc where a hover reaches it:
+  - a `///` on `Drink`, or move `Something on the menu.` there;
+  - a `///` on one property, such as `shots`.
+
+  Add "or press i" to the header.
+- **Fix:** `/// A drink, hot or iced.` on `Drink` and `/// Shots of espresso.` on `shots`; the docs on `uitext`, `Color` and `Item`, which no hover reached, are gone. The header says "Hover a name, or select it and press i, for its card". Checked in Chromium: both cards show their doc.
+- **Verification:** Verified (commit 30fdf9b). In Chromium, hovering `Drink` shows `type Drink extends Item` and "A drink, hot or iced.". Hovering `shots` shows `(property) shots: Count = 1` and "Shots of espresso.". `i` on the sheet's `shots` row shows the same card. The doc comments no hover reached are gone.
+
+### ✅ Verified - RF22 Three comments say less, or other, than Visual does
+- **Severity:** Low (confidence: high, checked in Chromium)
+- **Evidence:**
+  - **"Functions: a value from one is not edited here."** This is true of `priceOf`'s `5.5`, but
+    `Special`'s body values do edit: setting `SPC` to `SP2` and choosing `large` both write to the
+    source. The comment reads as if function bodies do not edit.
+  - **"One used as an element reads with its own icon."** `<Special>` reads with the function icon,
+    `square-function`, not `Drink`'s `coffee`, which "its own" could be taken to mean.
+  - **"Values: a number, an untyped number…"** Both `total` and `ratio` are untyped (an int and a
+    float). The same comment's "(it opens in Source)" needs a double-click or Enter, since a click
+    only selects.
+- **Recommendation:** Reword these comments. For example:
+  - "Functions: priceOf's values are code and do not edit, but the attributes Special's body writes
+    do; Special used as an element reads with the function icon";
+  - "an untyped int and float";
+  - "(double-click or Enter opens it in Source)".
+- **Fix:** Reworded: "an untyped int and float"; "one with \n, which Enter or a double-click opens in Source"; "priceOf's values are code and do not edit, but those Special's body writes do. Special used as an element reads with the function icon."
+- **Verification:** Verified (commit 30fdf9b). Each reworded comment matches Visual:
+  - `total` and `ratio` are an untyped int and float.
+  - `lines` opens in Source with a double-click, or with a click and then Enter.
+  - `priceOf`'s `5.5` has no editor, while `Special`'s `SPC` and `large` edit.
+  - `<Special>` reads with `square-function`.
+
+### ✅ Verified - RF23 Several kinds of value have no comment saying what to try, which the requirement asks of each
+- **Severity:** Low (confidence: high)
+- **Evidence:** The MODIFIED requirement says each case has "a comment saying what to try", and the
+  scenario says "with a comment for each". These have none, or only a mention in the Delete line:
+  - the color popover, with its hex field and picker;
+  - a number's arrow keys, Shift for 10, and dragging the property's name;
+  - "Not a number" (`12px`);
+  - a boolean, clicked or toggled with Space, and the braced `iced={true}` staying braced;
+  - `sizes`, the qualified case that keeps `Size.`, which has no comment at all;
+  - the alias `shots:Count` and the `float64` `price`;
+  - Shift+Tab;
+  - Cmd+Backspace on a Mac;
+  - the title bar's Undo and Redo, and redo itself.
+
+  The header's "Ctrl+Z to undo" is also wrong on a Mac, where it is Cmd+Z.
+- **Recommendation:** Fold these into the existing comments rather than adding lines. For example:
+  - on the Latte line: "Space or a click toggles iced; arrows step shots (Shift: 10), or drag its
+    name; try 12px";
+  - on the sheet: "the color opens a hex field and a picker; iced keeps its braces";
+  - over `sizes`: "a qualified case keeps Size.";
+  - in the header: "Ctrl/Cmd+Z and Shift+Z, or the title bar's buttons".
+- **Fix:** Folded into the comments: the header names Shift+Tab, Cmd+Backspace on a Mac, Ctrl or Cmd+Z and Shift+Z and the title bar's buttons; the Latte line names Space or a click on `iced`, Up and Down with Shift, dragging the name, `12px` and the case popover; the sheet names `iced` keeping its braces, `price` as a float64 and the color popovers; `sizes` has "A qualified case edits as a case and keeps its Size."; `shots` is a `Count`.
+- **Verification:** Verified (commit 30fdf9b). Every kind of value now has a comment saying what to try. In Chromium:
+  - Shift+Tab from `shots` opens `size`.
+  - Dragging `shots`' name 40px wrote `shots=22`.
+  - Ctrl+Z undid it, and Ctrl+Shift+Z redid it.
+  - The color popovers open on `color` and `sleeve`.
+  - Space, a click, the braced `iced`, `12px` and the qualified `sizes` behave as the comments say (checked in the previous pass).
+
+### ✅ Verified - RF24 The "Larger examples" scenario still says the tests count every other example
+- **Severity:** Low (confidence: high)
+- **Evidence:** The MODIFIED requirement and `UNCOUNTED_TOPICS` leave out "Test cases" as well as
+  "Larger examples". The scenario "Larger examples" still ends "the playground's tests SHALL count
+  only the other examples toward the 10 to 20", and "the other examples" includes "Visual test cases".
+  The "Visual test cases" scenario says nothing about counting.
+- **Recommendation:** Have one scenario state the rule: the tests count the examples outside "Larger
+  examples" and "Test cases". Do this either in the "Larger examples" scenario or in a THEN clause of
+  "Visual test cases".
+- **Fix:** The "Larger examples" scenario now counts only the examples under neither "Larger examples" nor "Test cases", and the "Visual test cases" scenario lists the added cases.
+- **Verification:** Verified (commit 30fdf9b). The "Larger examples" scenario now counts only the examples under neither topic, as `UNCOUNTED_TOPICS` does. The "Visual test cases" scenario lists every case the example now holds, and each case is in the example.
+
+## New Findings Discovered During 2026-10-22 03:58 Verification
+
+### ✅ Verified - RF25 The as-written column now counts lines of nested items, so an `if` or `for` holding text that continues further left draws its body and closing brace too far right
+- **Severity:** Low (confidence: high, reproduced in Chromium)
+- **Evidence:** `writeItems` takes the least indentation over all of the item's later lines, including lines that belong to an item nested inside it. A nested item is placed by its own `--column`. In this source:
+
+  ```nx
+      if wide {
+        <Note>Two lines
+  of text</Note>
+      }
+  ```
+
+  The `if` gets `--column: 0` from `of text`. Its first line is still drawn at the item's start, but every later line moves right by the `if`'s own column (4):
+  - the `Note` sits 6ch in, where the `for` beside it holds its `Note` 2ch in;
+  - the closing `}` sits 4ch right of its `if`, where the `for`'s `}` lines up with its `for`.
+
+  Before 30fdf9b, only `of text` would have gone left. I found no regression in the shipped examples. Every as-written item in `settings-screen`, `orders-dashboard`, `typed-text`, `agent` and `visual-test-cases` draws no glyph left of its start. A wrapped multi-line tag (`<Note` / `>tagged`) also reads as before.
+- **Recommendation:** When taking the least indentation, skip the lines of a nested as-written item, such as a text node or an element written over several lines inside the block, since that item places them itself. One way is to take the indentation only of lines that start outside a nested multi-line node's range. Add this block to `textOnItsTag` or a sibling fixture, and assert that the `if`'s `--column` stays 4.
+- **Fix:** `writeItems` takes the later lines' least indentation only for an item that starts after other text on its line, as text on its element's tag does; an item starting its own line, such as an `if` or a `for`, is measured from its start as before. Test "measures a block on a line of its own from its start, whatever the lines inside it" (fixture `textOnItsTagInBlock`, an `if` holding such text) fails under the previous rule (column 2) and passes now (column 4).
+- **Verification:** Verified (commit dcd5df2). Viewer tests pass 118/118 after a rebuild.
+  - With `dist`'s rule set back to the minimum over every later line, the new test "measures a block on a line of its own from its start…" fails (1 of 118). I then rebuilt to restore it.
+  - In Chromium, the `if wide` block now has `--column: 4`: its `Note` is 4ch in, as in the `for` beside it, and its `}` lines up under its `if`. The nested text still reads `Two lines` / `of text` from its own start.
+  - `poem` keeps `--column: 2` with both lines at its start.
+  - The as-written items in `settings-screen`, `orders-dashboard`, `typed-text`, `agent` and `visual-test-cases` are unchanged, and none draws left of its start.
+  - One case remains, untested: a block that itself starts after other text on its line, such as a list `{ if a {` holding text that continues further left. It still takes the minimum over nested lines. Nothing in the repository writes that, so I have not opened a finding for it.
+
+## New Findings Discovered During 2026-10-22 04:45 Review
+
+Scope of this pass: commit 5568355, which holds `.body`'s `min-height` while `#render` draws the reading again.
+
+Checks:
+- Viewer tests pass, 119/119.
+- In Chromium against the dev server (viewport 1200×700, `.reading` scrolled to the bottom, every click by `page.mouse` at coordinates), on `visual-test-cases`, `orders-dashboard` and `survey`. Choosing a case, committing a number, committing text, toggling a boolean, and a number commit followed by Ctrl+Z each kept `scrollTop` where it was: 777, 1776 and 2600.
+- A Delete near the bottom, which really shortens the reading, ended at the new bottom and no further: 777→759 (max 759), 1776→1736 and 2600→2523. With the hold disabled in `dist`, the same Deletes jumped to 579 (max 759) and to 1659 (max 2523). So the fix also cures Delete.
+- Folding a group near the bottom ends at the new bottom, as it should.
+- `#remeasure`, used after fonts load or the width changes, holds the height through its `#render`, and its `scrollToKey` then restores the top node as before.
+- A hidden or detached body holds `0px`, which is harmless, and lets go after the loop.
+- A host that sets the tree to `undefined` and leaves it empty lets go after the microtask.
+
+### ✅ Verified - RF26 The held height lets go after a single microtask, so a host that sets the next tree a moment later still makes the reading jump
+- **Severity:** Low (confidence: high, reproduced in Chromium)
+- **Evidence:** I tested on `/play/survey`, scrolled to the bottom (`scrollTop` 2600), with code run in the page:
+  - `v.tree = undefined; v.tree = t` keeps 2600. This is what the playground does.
+  - `v.tree = undefined; await null; v.tree = t` lands at 1713.
+  - `v.tree = undefined; await new Promise(f => setTimeout(f, 0)); v.tree = t` lands at 0.
+
+  The microtask queued by the `undefined` render runs before the host's continuation and clears `min-height`. The next `#render` then finds the body empty (`childElementCount` 0) and holds nothing, so the fitting's first measure clamps the scroll. Elsewhere `#render` supports a host that clears the tree before setting the next one: the editor is reopened via `#reopen` whatever the timing. Only the height hold needs the next tree in the same task. A host that loads its tree asynchronously, such as an effect awaiting a language service, gets the jump back.
+
+  Also, if anything in the fitting loop throws (for example, `renderSource`), `min-height` stays set until the next render that succeeds.
+- **Recommendation:** Let go on the next animation frame instead of a microtask, or when the next tree has been drawn, whichever comes first. A tree that arrives within the frame then finds the hold still in place, and nothing is painted at the held height in the meantime. Wrapping the drawing in `try`/`finally` would clear the hold if a draw fails. Add a test for a tree set after an `await`.
+- **Fix:** An empty reading now holds its height for `EMPTY_HOLD` (1000 ms), not one microtask, and the next tree drawn in that time keeps it; the timer is cleared on every draw. The drawing and fitting sit in `try`/`finally`, so a draw that throws lets the height go. Tests: "keeps its height while it is drawn…" now also gives the tree a task later (`setTimeout(0)`), and "lets an empty reading's height go when no tree comes" checks the release with mocked timers; both fail on the microtask version. Chromium: choosing a case at the bottom of `visual-test-cases` still keeps scrollTop 747.
+- **Verification:** Verified (commit 6a0c24e). Viewer tests pass, 120/120. With `dist`'s `EMPTY_HOLD` set back to an immediate release (`setTimeout(…, 0)`), "keeps its height while it is drawn…" fails (1 of 120). I then rebuilt to restore it.
+  - In Chromium on `/play/survey`, scrolled to the bottom (2600), `scrollTop` stays at 2600 when the next tree comes at once, after `await null`, after `setTimeout(0)` and after 300 ms.
+  - A reading left empty holds `3144px` at 200 ms and lets go by 1.2 s.
+  - Near the bottom of `visual-test-cases` and `survey`, nothing regressed. A case choice, a number commit and an undo keep 777 and 2600. Delete and fold end at the new bottom (759, 525, 2523, 2546).
+  - The `finally` releases the hold if a draw throws. Every `#render`, including one with no tree, clears the pending timer, so only the latest empty render can release.
+
+## Questions
+- Should Enter and F2 toggle a boolean when it is the first editable value of the selected unit? They do
+  now, because `#openEditor` toggles. Spec and design say Enter "opens" the value, and Tab skips booleans.
+  - **Answer:** Kept by design: a boolean's editor is its toggle, so opening it toggles, as Space does.
+- Task 5.2 (full `cargo test`, `pnpm -r build/test`) is still unchecked. Is it waiting on the
+  background workspace run?
+  - **Answer:** It was. The run passed apart from the wasm `recursion-stack` test, which fails in cloud
+    containers on main too; 5.2 is now checked, and the suites were run again after these fixes.
+
+## Summary
+- The language-service query, its exposure through every transport, and the viewer's editors are
+  well structured and well tested on the main paths. All suites run here pass.
+- The main risks are at the edges of spelling and of the viewer's live state:
+  - a negative number in a sequence item breaks the parse (RF1);
+  - string escapes are lost on edit (RF2);
+  - a field reopened on a new tree loses the reader's caret (RF3);
+  - refused edits stay shown in the playground (RF4);
+  - a text run's trailing separator is eaten (RF5);
+  - an interrupted scrub leaves the reading's cursor and text selection stuck (RF6).
+- RF7 and RF8 are smaller correctness and contract issues worth settling before later phases build on
+  `sourceEdit`.

@@ -8,6 +8,8 @@ import type {
   Hover,
   LanguageDocument,
   SourceTree,
+  SourceEdit,
+  SourceEditAnswer,
 } from "@nx-lang/language-protocol";
 import { isAbortError } from "@nx-lang/language-protocol";
 
@@ -120,6 +122,12 @@ function fakeSnapshot(
         declarations: [{ module: "tenant/catalog.nx", name: "Panel", kind: "function" }],
       };
     },
+    sourceEdit: (uri, key, edit): SourceEditAnswer => {
+      record.edits.push({ uri, key, edit });
+      return key === "root.mode.value"
+        ? { edits: [{ range: range(panelLine, 12, 17, queried.indexOf("light")), newText: "dark" }] }
+        : { edits: [], refused: "unknownNode" };
+    },
     dispose: () => {},
   };
 }
@@ -129,10 +137,11 @@ type Record_ = {
   sources: string[];
   implicitImports: string[][];
   treeOptions: ({ visualizers?: { modules?: string[] } } | undefined)[];
+  edits: { uri: string; key: string; edit: SourceEdit }[];
 };
 
 function newRecord(): Record_ {
-  return { analyses: 0, sources: [], implicitImports: [], treeOptions: [] };
+  return { analyses: 0, sources: [], implicitImports: [], treeOptions: [], edits: [] };
 }
 
 function serviceOver(record: Record_) {
@@ -301,6 +310,23 @@ test("a source tree asked with visualizers passes them to the snapshot, and one 
   });
 
   assert.deepEqual(record.treeOptions, [undefined, { visualizers: { modules: ["tenant/visualizers.nx"] } }]);
+});
+
+test("a source edit passes its key and edit to the snapshot, and a refusal is an answer", async () => {
+  const record = newRecord();
+  const service = serviceOver(record);
+  const edit = { kind: "setValue", value: { kind: "case", name: "dark" } } as const;
+
+  const made = await service.sourceEdit({ documents: [{ uri: FORM, source: SOURCE }], uri: FORM, key: "root.mode.value", edit });
+  const refused = await service.sourceEdit({ documents: [{ uri: FORM, source: SOURCE }], uri: FORM, key: "nowhere", edit });
+
+  assert.deepEqual(made.edits.map((change) => change.newText), ["dark"]);
+  assert.equal(made.refused, undefined);
+  assert.deepEqual(refused, { edits: [], refused: "unknownNode" });
+  assert.deepEqual(record.edits, [
+    { uri: FORM, key: "root.mode.value", edit },
+    { uri: FORM, key: "nowhere", edit },
+  ]);
 });
 
 test("repeated queries over unchanged text analyze once, and each answer carries its own version", async () => {

@@ -3,6 +3,8 @@ import type {
   DiagnosticReport,
   DocumentSymbol,
   Hover,
+  SourceEdit,
+  SourceEditAnswer,
   SourceTree,
   SourceTreeVisualizersOption,
   TextPosition
@@ -351,6 +353,15 @@ export interface NxLanguageSnapshot {
    * With `options.visualizers`, each declaration entry with a resolved visualizer carries it.
    */
   sourceTree(uri: string, options?: SourceTreeOptions): SourceTree;
+
+  /**
+   * The text edits that make `edit` at the node `key` of the document at `uri`, or why there are
+   * none.
+   *
+   * Unstable: the request's and the answer's shapes may change in any release until a later one
+   * commits to them.
+   */
+  sourceEdit(uri: string, key: string, edit: SourceEdit): SourceEditAnswer;
 
   /**
    * Releases the snapshot inside the module. Calling `dispose` more than once is allowed.
@@ -946,6 +957,15 @@ class WasmLanguageSnapshot implements NxLanguageSnapshot {
       "nx_wasm_snapshot_source_tree",
       (exports, pointer, length) => exports.nx_wasm_snapshot_source_tree(handle, pointer, length),
       options?.visualizers === undefined ? { uri } : { uri, visualizers: options.visualizers }
+    );
+  }
+
+  sourceEdit(uri: string, key: string, edit: SourceEdit): SourceEditAnswer {
+    const handle = this.#live();
+    return this.#host.callWithArgument<SourceEditAnswer>(
+      "nx_wasm_snapshot_source_edit",
+      (exports, pointer, length) => exports.nx_wasm_snapshot_source_edit(handle, pointer, length),
+      { uri, key, edit }
     );
   }
 

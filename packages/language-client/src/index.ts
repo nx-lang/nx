@@ -20,6 +20,8 @@ import {
   type LanguageQueryRequests,
   type NxLanguageService,
   type SourceTree,
+  type SourceEditAnswer,
+  type SourceEditRequest,
   type SourceTreeRequest,
 } from "@nx-lang/language-protocol";
 
@@ -147,6 +149,8 @@ export function createHttpLanguageService(options: HttpLanguageServiceOptions): 
       query("documentSymbols", request, signal),
     sourceTree: (request: SourceTreeRequest, signal?: AbortSignal): Promise<SourceTree> =>
       query("sourceTree", request, signal),
+    sourceEdit: (request: SourceEditRequest, signal?: AbortSignal): Promise<SourceEditAnswer> =>
+      query("sourceEdit", request, signal),
   };
 }
 

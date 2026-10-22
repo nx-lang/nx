@@ -19,19 +19,19 @@ export const styles = `
 :host([hidden]) { display: none; }
 * { box-sizing: border-box; }
 .frame { position: relative; }
+/* The toolbar takes no room: what it shows floats over the reading's top right corner, so showing it
+   moves nothing. */
 .toolbar {
   position: sticky;
   top: 0;
   z-index: 2;
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-  align-items: center;
-  padding: 4px 0;
-  min-height: 0;
+  height: 0;
 }
 .toolbar:empty { display: none; }
 .badge {
+  position: absolute;
+  top: 4px;
+  right: 8px;
   font-size: 11px;
   padding: 0 6px;
   border-radius: 4px;
@@ -58,7 +58,11 @@ export const styles = `
   white-space: pre;
   tab-size: 2;
 }
-:host([stale]) .source { opacity: 0.55; }
+/* A tree out of date for a moment, as while an edit's tree is on its way, reads as it is: the muting
+   and the badge come only once it stays out of date, and go at once. */
+:host([stale]) .source { opacity: 0.55; transition: opacity 0.15s ease-out 0.5s; }
+.badge:not([hidden]) { animation: nx-viewer-late 0.15s ease-out 0.5s both; }
+@keyframes nx-viewer-late { from { opacity: 0; } }
 .source .t { color: light-dark(var(--l, inherit), var(--d, inherit)); }
 .source .n { border-radius: 2px; }
 /* Text shown to people, as a \`uitext\` property holds: its words in the prose font and a plain,
@@ -378,4 +382,132 @@ export const styles = `
 .card-doc pre { padding: 4px 6px; border-radius: 4px; background: light-dark(#0000000a, #ffffff0f); overflow-x: auto; }
 .card-doc pre code { padding: 0; background: none; white-space: pre; }
 .card-doc a { color: var(--nx-viewer-link-color, light-dark(#0969da, #4daafc)); }
+
+/* Editing, when the host allows it. A value that a click edits shows a faint mark and a text cursor
+   under the pointer, or a hand for one that toggles or opens a popover, and a case a chevron, as a
+   dropdown does; nothing else changes at rest. */
+.body.editable .editable-value { cursor: text; }
+.body.editable .editable-value:is(.edit-boolean, .edit-case, .edit-color) { cursor: pointer; }
+.body.editable .editable-value:hover:not(.editing) {
+  background: var(--nx-viewer-edit-hover, light-dark(#0000000f, #ffffff17));
+  border-radius: 3px;
+}
+/* The chevron stands past the value's end, over the gap after it, so nothing moves, and nearer the
+   value than what follows the gap. */
+.body.editable .edit-case { position: relative; }
+.body.editable .edit-case:is(:hover, .editing)::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: -10px;
+  width: 8px;
+  height: 8px;
+  transform: translateY(-50%);
+  background: var(--nx-viewer-fold-color, light-dark(#8c959f, #7a7a7a));
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / contain no-repeat;
+  pointer-events: none;
+}
+/* A boolean toggles on a second click, which would otherwise select the mark as a word. */
+.body.editable .edit-boolean { user-select: none; }
+/* A number's name drags sideways to change it. */
+.body.editable .scrub { cursor: ew-resize; user-select: none; }
+.body.scrubbing, .body.scrubbing * { cursor: ew-resize !important; user-select: none; }
+/* An edit made and not yet in the host's tree reads muted, as a stale reading does. */
+.source .pending { opacity: 0.55; }
+/* A field takes its value's own place in the reading, in its font, and grows and wraps with its
+   text. It reads as an input: an editor's background inside a focus ring drawn just outside the
+   text, so nothing moves, and its own selection color, apart from the selected row's. */
+.source .field {
+  outline: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border-radius: 2px;
+  background: var(--nx-viewer-field-background, light-dark(#ffffff, #1e1e1e));
+  box-shadow: 0 0 0 2px var(--nx-viewer-field-background, light-dark(#ffffff, #1e1e1e)),
+    0 0 0 3px var(--nx-viewer-field-border, light-dark(#0090f1, #007fd4));
+  caret-color: var(--nx-viewer-foreground, CanvasText);
+  font-weight: 400;
+}
+.source .field::selection {
+  background: var(--nx-viewer-field-selection, light-dark(#add6ff, #264f78));
+}
+.source .field.invalid {
+  box-shadow: 0 0 0 2px var(--nx-viewer-field-background, light-dark(#ffffff, #1e1e1e)),
+    0 0 0 3px var(--nx-viewer-invalid, light-dark(#cf222e, #f85149));
+}
+/* A popover opens over the reading, under its value, as the hover card does. */
+.popover {
+  position: absolute;
+  z-index: 5;
+  min-width: 12rem;
+  max-width: min(28rem, 100%);
+  padding: 4px;
+  border-radius: 6px;
+  border: 1px solid var(--nx-viewer-card-border, light-dark(#d0d7de, #454545));
+  background: var(--nx-viewer-card-background, light-dark(#ffffff, #202020));
+  color: var(--nx-viewer-foreground, CanvasText);
+  box-shadow: 0 4px 14px light-dark(rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.5));
+  font-family: var(--nx-viewer-prose-font-family, inherit);
+  font-variation-settings: var(--nx-viewer-prose-font-variation, normal);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.popover input:not([type="color"]) {
+  width: 100%;
+  margin: 0;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 4px;
+  outline: none;
+  font: inherit;
+  color: inherit;
+  background: light-dark(#0000000a, #ffffff0f);
+}
+.popover.colors { display: flex; gap: 6px; align-items: center; min-width: 0; }
+/* After every rule that sets a popover's display, so a closed one never shows. */
+.popover[hidden] { display: none; }
+/* Why an editor cannot take its entry, under it, in the invalid ring's color. It only says; the
+   pointer passes through it to what it covers. */
+.edit-problem {
+  position: absolute;
+  z-index: 6;
+  max-width: min(24rem, 100%);
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--nx-viewer-invalid, light-dark(#cf222e, #f85149));
+  background: var(--nx-viewer-card-background, light-dark(#ffffff, #202020));
+  color: var(--nx-viewer-foreground, CanvasText);
+  font-family: var(--nx-viewer-prose-font-family, inherit);
+  font-variation-settings: var(--nx-viewer-prose-font-variation, normal);
+  font-size: 12px;
+  line-height: 1.4;
+  pointer-events: none;
+}
+.edit-problem[hidden] { display: none; }
+.popover .popover-hex { font-family: var(--nx-viewer-source-font-family, var(--mono)); width: 10ch; }
+.popover .popover-hex.invalid { box-shadow: inset 0 -1px 0 var(--nx-viewer-invalid, light-dark(#cf222e, #f85149)); }
+.popover .popover-picker { width: 28px; height: 22px; padding: 0; border: 0; background: none; cursor: pointer; }
+.popover .options { max-height: 16em; overflow: auto; margin-top: 4px; }
+.popover .option {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 8px 2px 22px;
+  border-radius: 4px;
+  cursor: pointer;
+  position: relative;
+}
+.popover .option[hidden] { display: none; }
+.popover .option.active { background: var(--nx-viewer-selection, light-dark(#0969da1f, #388bfd33)); }
+.popover .option.current::before { content: "\\2713"; position: absolute; left: 7px; }
+.popover .option-name {
+  font-family: var(--nx-viewer-source-font-family, var(--mono));
+  font-size: var(--nx-viewer-source-font-size, 13px);
+}
+.popover .option-doc {
+  color: var(--nx-viewer-fold-summary-color, light-dark(#6e7781, #9a9a9a));
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 `;

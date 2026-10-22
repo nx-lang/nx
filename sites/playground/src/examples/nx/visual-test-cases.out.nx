@@ -1,0 +1,16 @@
+<Menu
+  items={<Drink code="LAT" iced=false name="☕ Latte" price=4.5 shots=2 size=small /> <Drink
+    code="CBR"
+    color="#5a3a22"
+    cup=<Cup lid=false sleeve="#c8a27a" />
+    extra=<Extra.syrup flavor="caramel" pumps=2 />
+    iced=true
+    name="Cold brew"
+    note="Say \\\"hi\\\" \\\\ bye"
+    price=5.25
+    ratings={4 2 5}
+    shots=4
+    size=large
+  /> <Pastry code="CRO" name="Croissant" pairsWith="LAT" warm=true /> <Water code="H2O" name="Water" sparkling=false /> <Drink code="SPC" iced=false name="Flat white" price=4.5 shots=1 size=large /> <Drink code="ESP" iced=false name="Espresso" price=5.5 shots=1 size=large />}
+  title="Morning menu"
+/>

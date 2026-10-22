@@ -136,7 +136,9 @@ try {
 `sourceTree(uri)` answers every piece of one document as a typed node — role, range, parent, a key
 stable under edits elsewhere, type and declaration — with the declarations the nodes refer to listed
 beside them; `@nx-lang/language-protocol`'s README describes the answer. It is **unstable**: its
-shape may change in any release until a later one commits to it.
+shape may change in any release until a later one commits to it. `sourceEdit(uri, key, edit)`,
+unstable too, answers the text edits that set a value, set a line of text or remove an attribute at
+the node with that key, or why it cannot.
 
 A snapshot is immutable: build a new one when a document changes. Analysis runs on the first query
 and is cached for the snapshot's lifetime, so several queries against unchanged text cost one

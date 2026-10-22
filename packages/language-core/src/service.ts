@@ -18,6 +18,8 @@ import type {
   LanguageDocument,
   LanguageQueryName,
   NxLanguageService,
+  SourceEditAnswer,
+  SourceEditRequest,
   SourceTree,
   SourceTreeRequest
 } from "@nx-lang/language-protocol";
@@ -131,6 +133,13 @@ export function createSnapshotLanguageService(
       return answer(
         "sourceTree",
         request.visualizers === undefined ? answerRequest : { ...answerRequest, visualizers: request.visualizers },
+        signal
+      );
+    },
+    sourceEdit(request: SourceEditRequest, signal?: AbortSignal): Promise<SourceEditAnswer> {
+      return answer(
+        "sourceEdit",
+        { ...toAnswerRequest(request, undefined), key: request.key, edit: request.edit },
         signal
       );
     },

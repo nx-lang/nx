@@ -1,4 +1,4 @@
-import type { LanguageDocument } from "@nx-lang/language-protocol";
+import type { LanguageDocument, SourceEdit } from "@nx-lang/language-protocol";
 
 /** The subset of a language snapshot the query dispatcher uses, so a test can inject a fake. */
 export interface SnapshotLike {
@@ -7,6 +7,7 @@ export interface SnapshotLike {
   diagnostics(): unknown;
   documentSymbols(uri: string): unknown;
   sourceTree(uri: string, options?: { visualizers?: { modules?: string[] } }): unknown;
+  sourceEdit(uri: string, key: string, edit: SourceEdit): unknown;
   dispose(): void;
 }
 

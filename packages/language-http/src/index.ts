@@ -20,6 +20,7 @@ import {
   type LanguageQueryName,
   type LanguageServiceErrorBody,
   type LanguageServiceErrorCode,
+  type SourceEdit,
   type SourceTreeVisualizersOption,
   type TextPosition,
 } from "@nx-lang/language-protocol";
@@ -124,7 +125,7 @@ export function createNxLanguageHandler(options: NxLanguageHandlerOptions = {}):
     if ("problem" in validated) {
       return errorResponse(400, "invalid-request", validated.problem, query);
     }
-    const { documents, uri, position, visualizers } = validated;
+    const { documents, uri, position, visualizers, key, edit } = validated;
     const collision = contextCollision(documents, context);
     if (collision !== undefined) {
       return errorResponse(
@@ -136,7 +137,7 @@ export function createNxLanguageHandler(options: NxLanguageHandlerOptions = {}):
     }
 
     try {
-      const answer = answerQuery(query, { documents, uri, position, visualizers }, context, (analyzed) =>
+      const answer = answerQuery(query, { documents, uri, position, visualizers, key, edit }, context, (analyzed) =>
         cache.getOrCreate(documentSetKey(analyzed), () => createSnapshot(analyzed, snapshotOptions)),
       );
       return jsonResponse(200, answer);
@@ -217,6 +218,8 @@ type ValidatedQuery =
       uri: string;
       position: TextPosition | undefined;
       visualizers?: SourceTreeVisualizersOption;
+      key?: string;
+      edit?: SourceEdit;
     }
   | { problem: string };
 
@@ -298,7 +301,55 @@ function validateQuery(query: LanguageQueryName, body: unknown): ValidatedQuery 
       visualizers: modules === undefined ? {} : { modules: modules as string[] },
     };
   }
+  if (query === "sourceEdit") {
+    if (typeof record.key !== "string") {
+      return { problem: "The 'sourceEdit' query needs 'key', the key of the node to edit." };
+    }
+    const edit = sourceEditOf(record.edit);
+    if (edit === undefined) {
+      return {
+        problem:
+          "The 'sourceEdit' query needs 'edit': { kind: 'setValue', value }, { kind: 'setText', text } or { kind: 'remove' }.",
+      };
+    }
+    return { documents, uri, position, key: record.key, edit };
+  }
   return { documents, uri, position };
+}
+
+/** The edit a request carries, when it has the shape of a {@link SourceEdit}. */
+function sourceEditOf(candidate: unknown): SourceEdit | undefined {
+  if (typeof candidate !== "object" || candidate === null) {
+    return undefined;
+  }
+  const edit = candidate as Record<string, unknown>;
+  switch (edit.kind) {
+    case "remove":
+      return { kind: "remove" };
+    case "setText":
+      return typeof edit.text === "string" ? { kind: "setText", text: edit.text } : undefined;
+    case "setValue": {
+      const value = edit.value as Record<string, unknown> | null | undefined;
+      if (typeof value !== "object" || value === null) {
+        return undefined;
+      }
+      if (value.kind === "string" && typeof value.value === "string") {
+        return { kind: "setValue", value: { kind: "string", value: value.value } };
+      }
+      if (value.kind === "number" && typeof value.text === "string") {
+        return { kind: "setValue", value: { kind: "number", text: value.text } };
+      }
+      if (value.kind === "boolean" && typeof value.value === "boolean") {
+        return { kind: "setValue", value: { kind: "boolean", value: value.value } };
+      }
+      if (value.kind === "case" && typeof value.name === "string") {
+        return { kind: "setValue", value: { kind: "case", name: value.name } };
+      }
+      return undefined;
+    }
+    default:
+      return undefined;
+  }
 }
 
 /** The SDK reports bad snapshot input (an unparseable URI, a duplicate identity) as an evaluation error. */

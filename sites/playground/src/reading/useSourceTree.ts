@@ -7,9 +7,15 @@ export type { Reading } from "./reading.ts";
 /**
  * The source tree of `source` while `active`, asked of the worker once typing pauses, as evaluation
  * is. The last tree stays shown, marked stale, until the next one arrives; nothing is asked while
- * the reading view is hidden.
+ * the reading view is hidden. The tree of the text `immediate` holds is asked for at once, as after
+ * an edit made in the reading itself.
  */
-export function useSourceTree(source: string | null, active: boolean, debounceMs = 350): Reading {
+export function useSourceTree(
+  source: string | null,
+  active: boolean,
+  debounceMs = 350,
+  immediate?: { readonly current: string | null },
+): Reading {
   const [answers, setAnswers] = useState<Answers>(NO_ANSWERS);
 
   useEffect(() => {
@@ -36,7 +42,7 @@ export function useSourceTree(source: string | null, active: boolean, debounceMs
             },
           );
       },
-      answers.text === null ? 0 : debounceMs,
+      answers.text === null || source === immediate?.current ? 0 : debounceMs,
     );
     return () => {
       abort.abort();

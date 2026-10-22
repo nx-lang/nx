@@ -1,11 +1,13 @@
 import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import * as monaco from "monaco-editor";
+import type { TextEdit } from "@nx-lang/language-protocol";
 // Monaco 0.56 maps `monaco-editor/<path>.js` onto `esm/vs/<path>.js` through its exports map.
 import editorWorker from "monaco-editor/editor/editor.worker.js?worker";
 import { NX_LANGUAGE_ID, registerNxLanguage } from "@nx-lang/monaco";
 import type { Diagnostic, DiagnosticSpan } from "../compile";
 import { createWorkerLanguageService } from "../language/worker.ts";
 import { EDITOR_THEMES, type Theme } from "../theme.ts";
+import { createOwnTexts } from "./ownTexts.ts";
 import { offsetOf, positionAt } from "./positions.ts";
 import { openSuggestionDetailsOnce } from "./suggestDetails.ts";
 
@@ -43,6 +45,18 @@ export interface NxEditorHandle {
    * For an editor that has just been shown again, so it is laid out first.
    */
   placeCursor(offset: number): void;
+  /** The editor's text, or null before the editor exists. */
+  text(): string | null;
+  /**
+   * Applies `edits`, every range in the text as it is now and none overlapping, together as one step
+   * of the editor's undo history, as an edit made in Visual is. The editor reports the new text as
+   * it does any edit.
+   */
+  applyEdits(edits: readonly TextEdit[]): void;
+  /** Undoes the last step of the editor's history, wherever it was made. */
+  undo(): void;
+  /** Redoes the step last undone. */
+  redo(): void;
 }
 
 export interface NxEditorProps {
@@ -54,14 +68,24 @@ export interface NxEditorProps {
   readonly diagnosticsSource: string | null;
   readonly theme: Theme;
   readonly ref?: Ref<NxEditorHandle>;
+  /** Told whether there is anything to undo and to redo, whenever the text changes. */
+  readonly onHistory?: (history: EditorHistory) => void;
+}
+
+/** What the editor's undo history holds. */
+export interface EditorHistory {
+  readonly canUndo: boolean;
+  readonly canRedo: boolean;
 }
 
 /** The source pane: Monaco, the shared NX integration, and markers for the visitor's own errors. */
-export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, theme, ref }: NxEditorProps) {
+export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, theme, ref, onHistory }: NxEditorProps) {
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const latestChange = useRef(onChange);
   latestChange.current = onChange;
+  const latestHistory = useRef(onHistory);
+  latestHistory.current = onHistory;
   const latestTheme = useRef(theme);
   latestTheme.current = theme;
   // The editor is created once the highlighter has loaded, by which time the text to show may have
@@ -70,6 +94,9 @@ export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, them
   latestValue.current = value;
   // Setting the text from outside (an example chosen, a link opened) is not an edit.
   const settingValue = useRef(false);
+  // The texts the editor reported through `onChange`, so a render that passes one back late is not
+  // taken for a text from outside.
+  const ownTexts = useRef(createOwnTexts());
 
   useImperativeHandle(ref, () => ({
     select(start, end) {
@@ -105,6 +132,31 @@ export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, them
       instance.setPosition(position);
       instance.revealPositionInCenterIfOutsideViewport(position);
       instance.focus();
+    },
+    text() {
+      return editor.current?.getValue() ?? null;
+    },
+    applyEdits(edits) {
+      const instance = editor.current;
+      if (instance === null || edits.length === 0) {
+        return;
+      }
+      instance.pushUndoStop();
+      instance.executeEdits(
+        "nx-visual",
+        edits.map(({ range: { start, end }, newText }) => ({
+          range: new monaco.Range(start.line + 1, start.character + 1, end.line + 1, end.character + 1),
+          text: newText,
+          forceMoveMarkers: true,
+        })),
+      );
+      instance.pushUndoStop();
+    },
+    undo() {
+      editor.current?.trigger("nx-visual", "undo", null);
+    },
+    redo() {
+      editor.current?.trigger("nx-visual", "redo", null);
     },
   }));
 
@@ -143,10 +195,15 @@ export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, them
       // theme Monaco draws with. A theme passed to `create` reaches Monaco without the bridge
       // knowing, and a document set later is then colored from the other theme's palette.
       monaco.editor.setTheme(EDITOR_THEMES[latestTheme.current]);
+      const reportHistory = () => latestHistory.current?.({ canUndo: model.canUndo(), canRedo: model.canRedo() });
+      reportHistory();
       subscription = instance.onDidChangeModelContent(() => {
         if (!settingValue.current) {
-          latestChange.current(instance.getValue());
+          const text = instance.getValue();
+          ownTexts.current.reported(text, latestValue.current);
+          latestChange.current(text);
         }
+        reportHistory();
       });
     });
     return () => {
@@ -165,7 +222,7 @@ export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, them
   // An example chosen, or a link opened, replaces the whole document.
   useEffect(() => {
     const instance = editor.current;
-    if (instance !== null && instance.getValue() !== value) {
+    if (ownTexts.current.shouldSet(value, instance?.getValue() ?? null) && instance !== null) {
       settingValue.current = true;
       try {
         instance.setValue(value);

@@ -1,7 +1,7 @@
 /**
  * ABI version this loader is written against. It must equal the module's `nx_wasm_abi_version`.
  */
-export const abiVersion = 8;
+export const abiVersion = 9;
 
 /**
  * The operation succeeded; the payload is its result, JSON unless the export says otherwise.
@@ -58,6 +58,7 @@ export interface NxWasmExports {
   nx_wasm_snapshot_diagnostics(handle: number): number;
   nx_wasm_snapshot_document_symbols(handle: number, pointer: number, length: number): number;
   nx_wasm_snapshot_source_tree(handle: number, pointer: number, length: number): number;
+  nx_wasm_snapshot_source_edit(handle: number, pointer: number, length: number): number;
   nx_wasm_snapshot_free(handle: number): void;
   /**
    * Present only in a module built with the crate's `debug-trap` feature; it traps on purpose.

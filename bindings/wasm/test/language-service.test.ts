@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { createNxLanguageHandler } from "@nx-lang/language-http";
-import type { DiagnosticReport, Hover, SourceTree } from "@nx-lang/language-protocol";
+import type {
+  DiagnosticReport,
+  Hover,
+  SourceEdit,
+  SourceEditAnswer,
+  SourceTree
+} from "@nx-lang/language-protocol";
 
 import { createLanguageService } from "../src/language.js";
 import { createNxHost } from "../src/node.js";
@@ -98,6 +104,65 @@ describe("the wasm SDK's in-process language service", () => {
       expect(fromWasm.version).toBe(document.version);
       expect(fromWasm.nodes.length).toBeGreaterThan(0);
     }
+  });
+
+  // Spec: "Parity between Rust and TypeScript" for source edits: every node of a small corpus asked
+  // for an edit of its kind, through the wasm module and through the HTTP handler.
+  it("answers source edits identically to the HTTP handler, refusals included", async () => {
+    const editSource = [
+      '<Panel mode=light title="x" />',
+      'let more = <Panel mode={Mode.dark} title={"a" + "b"} />',
+      "let xs = { 1 2 }",
+      "type Label = { content text:string }",
+      "let label = <Label>Hello</Label>",
+      ""
+    ].join("\n");
+    const request = { documents: [{ uri, source: editSource, version: 8 }], uri };
+    const tree = await service.sourceTree(request);
+    const editsFor = (role: string): SourceEdit[] => {
+      switch (role) {
+        case "literal":
+          return [
+            { kind: "setValue", value: { kind: "string", value: 'say "hi"' } },
+            { kind: "setValue", value: { kind: "number", text: "-2.5" } },
+            { kind: "setValue", value: { kind: "boolean", value: true } }
+          ];
+        case "case":
+          return [{ kind: "setValue", value: { kind: "case", name: "dark" } }];
+        case "text":
+          return [{ kind: "setText", text: "Goodbye" }, { kind: "setText", text: "a < b" }];
+        default:
+          return [{ kind: "remove" }];
+      }
+    };
+    let made = 0;
+    let refused = 0;
+    for (const node of [...tree.nodes, { key: "nowhere", role: "literal" }]) {
+      for (const edit of editsFor(node.role)) {
+        const editRequest = { ...request, key: node.key, edit };
+        const fromWasm = await service.sourceEdit(editRequest);
+        const fromRust = await overHttp<SourceEditAnswer>("sourceEdit", editRequest);
+        expect(JSON.parse(JSON.stringify(fromWasm))).toEqual(fromRust);
+        if (fromWasm.refused === undefined) {
+          made += 1;
+        } else {
+          refused += 1;
+        }
+      }
+    }
+    expect(made).toBeGreaterThan(5);
+    expect(refused).toBeGreaterThan(5);
+  });
+
+  it("refuses a malformed source edit as an invalid request", async () => {
+    const response = await handler(
+      new Request("http://localhost/api/language/sourceEdit", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ documents, uri, key: "x", edit: { kind: "setValue", value: { kind: "number", text: 1 } } })
+      })
+    );
+    expect(response.status).toBe(400);
   });
 
   it("reports a fault in a host document against that document's URI", async () => {

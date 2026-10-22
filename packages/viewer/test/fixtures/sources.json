@@ -11,7 +11,7 @@
     "source": "/// A person the survey is about.\ntype User = {\n  id:string\n  /// What to call them.\n  name:string?\n}\n"
   },
   "emoji": {
-    "source": "type Label = { text:string title:string }\n\nlet wave = <Label text=\"\ud83d\ude00 hello\" title=\"after\" />\n"
+    "source": "type Label = { text:string title:string }\n\nlet wave = <Label text=\"😀 hello\" title=\"after\" />\n"
   },
   "tasks": {
     "source": "type Task = {\n  title:string\n  priority:int = 2\n  notes?:string\n}\n\nlet root(): Task+ = {\n  <Task title=\"Ship the site\" priority=1 />\n  <Task title=\"Plan the next release, and then write down every step of it for the whole team\" notes=\"After the site ships\" />\n}\n"
@@ -82,6 +82,12 @@
   "wrappedAttributes": {
     "source": "type Item = { name:string note:string }\ntype Shape = { kind:string width:int color:string stroke:int content items:Item* }\n\nlet shape =\n  <Shape kind=\"circle\" width=52\n    color=\"#6652AD\" stroke=1>\n    <Item name=\"a\" note=\"n\" />\n  </Shape>\n\nlet commented =\n  <Shape kind=\"square\">\n    <Item name= /* why */ \"a\"\n      note=\"n\" />\n  </Shape>\n"
   },
+  "textOnItsTag": {
+    "source": "type Note = { content text:string }\n\nlet poem = <Note>Two lines\n  of text</Note>\n"
+  },
+  "textOnItsTagInBlock": {
+    "source": "type Note = { content text:string }\ntype Panel = { content items:Note* }\n\nlet wide = true\nlet panel =\n  <Panel>\n    if wide {\n      <Note>Two lines\n  of text</Note>\n    }\n  </Panel>\n"
+  },
   "childCounts": {
     "source": "type Item = { name:string }\ntype Panel = { content items:Item+ }\n\nlet kids(): Item+ = { <Item name=\"k\" /> }\n\nlet root(wide:bool, names:string+, n:int) =\n  <Panel>\n    <Item name=\"x\" />\n    // A note is not a child.\n    if wide {\n      <Item name=\"b\" />\n      <Item name=\"c\" />\n    } else {\n      <Item name=\"d\" />\n    }\n    for title in names {\n      <Item name={title} />\n    }\n    if n is {\n      0 => <Item name=\"zero\" />\n      else => <Item name=\"many\" />\n    }\n  </Panel>\n\nlet given =\n  <Panel>\n    <Item name=\"y\" />\n    {kids()}\n  </Panel>\n",
     "visualizers": []
@@ -98,5 +104,12 @@
   },
   "deepGroups": {
     "source": "type Box = { a:string b:string content items:Box* }\n\nlet deep =\n  <Box a=\"aaaaaaaaaaaa\" b=\"bbbbbbbbbbbb\">\n    <Box a=\"aaaaaaaaaaaa\" b=\"bbbbbbbbbbbb\">\n      <Box a=\"aaaaaaaaaaaa\" b=\"bbbbbbbbbbbb\">\n        <Box a=\"aaaaaaaaaaaa\" b=\"bbbbbbbbbbbb\">\n          <Box a=\"aaaaaaaaaaaa\" b=\"bbbbbbbbbbbb\">\n            <Box a=\"aaaaaaaaaaaa\" b=\"bbbbbbbbbbbb\">\n              <Box a=\"aaaaaaaaaaaa\" b=\"bbbbbbbbbbbb\">\n                <Box a=\"aaaaaaaaaaaa\" b=\"bbbbbbbbbbbb\">\n                </Box>\n              </Box>\n            </Box>\n          </Box>\n        </Box>\n      </Box>\n    </Box>\n  </Box>\n"
+  },
+  "editing": {
+    "source": "import \"@nx/visualizer\"\n\ntype uitext = string\ntype Swatch = string\ntype Count = int\n\ntype Size =\n  /// The smallest cup.\n  | small\n  /// The usual.\n  | medium\n  | large\n  | custom { ounces:int }\n\ntype Drink = {\n  name:string\n  size:Size = medium\n  iced:bool = false\n  shots:Count = 1\n  color?:Swatch\n  label:uitext = \"Drink\"\n  tags:string* = {}\n}\n\ntype Counter = { count:int }\ntype Text = { content text:string }\n\nvisualizer Swatch = <ValueVisualizer format=color />\n\nlet total = 3\n\nlet latte =\n  <Drink\n    name=\"Latte\"\n    size=medium\n    iced=false\n    shots=2\n    color=\"#5a3a22\"\n    label=\"Hot \\\"latte\\\"\"\n    tags={ \"warm\" \"milky\" }\n  />\n\nlet counter = <Counter count={total + 1} />\n\nlet note = <Text>Hello there</Text>\n\nlet ratio = 1.5\n",
+    "visualizers": []
+  },
+  "editingEdges": {
+    "source": "type Text = { content text:string }\ntype Box = { title:string note:string depth:int items:int* }\n\nlet box = <Box title=\"a\\nb\" note=\"say \\\"hi\\\" \\\\ ok\" depth={3} items={ 1 2 } />\n\nlet mixed = <Text>Hello {1} world</Text>\n\nlet total = 3\n\nlet said = { \"say \\\"hi\\\"\" \"ok\" }\n"
   }
 }

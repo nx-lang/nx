@@ -287,6 +287,47 @@ code {
 }
 
 /* Visual's fold commands: quiet text buttons before the view switch. */
+/* Undo and redo, for both views: the editor's history, with the shortcuts in their tooltips. */
+.history-actions {
+  display: inline-flex;
+  gap: 0.125rem;
+  margin-right: 0.5rem;
+}
+
+.history-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0.25rem;
+  background: transparent;
+  color: var(--sl-color-gray-3);
+  cursor: pointer;
+}
+
+.history-actions svg {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.history-actions button:hover:not(:disabled) {
+  color: var(--sl-color-white);
+  background: var(--sl-color-gray-6);
+}
+
+.history-actions button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .fold-actions {
   display: inline-flex;
   gap: 0.25rem;
@@ -303,6 +344,34 @@ code {
   letter-spacing: 0;
   text-transform: none;
   cursor: pointer;
+}
+
+/* Words where there is room, and icons on a narrow screen, where the words would push the switch out. */
+.fold-actions svg {
+  display: none;
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+@media (max-width: 30rem) {
+  .fold-actions button {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.125rem 0.25rem;
+  }
+
+  .fold-actions svg {
+    display: block;
+  }
+
+  .fold-actions span {
+    display: none;
+  }
 }
 
 .fold-actions button:hover {

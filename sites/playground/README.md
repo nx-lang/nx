@@ -16,6 +16,12 @@ is. Visual starts with the source's supporting declarations folded to a line eac
 comes first, and offers Collapse all and Expand all. Switching to Visual selects the node at the
 cursor, and switching back puts the cursor at the start of the selected node.
 
+Values edit in Visual too: click a value, or select a unit and press Enter. Each edit asks the
+worker's `sourceEdit` query for its text edits and applies them to the editor, as one step of its
+undo history, so Source shows them and the title bar's Undo and Redo, or Ctrl or Cmd+Z, take them
+back and forth in either view; the reading's next tree is asked for at once. Double-clicking an expression, which Visual cannot edit,
+switches to Source with the cursor at its start.
+
 The output pane's Output and Preview switch runs a component instead. Preview starts a preview
 session of [`@nx-lang/previewer`](../../packages/previewer/README.md) in the worker, on the IR
 runtime: for the component whose element `root` returns, with that element's props, or for the
@@ -161,7 +167,10 @@ pnpm run check-examples               # fails on a diagnostic, a changed value o
 
 `--update` is also how a deliberate language change updates every example; review the diff it
 leaves. The check evaluates through the same module and the same `evaluateSource` the browser uses,
-so what is checked is what ships, and it keeps the set between 10 and 20 examples.
+so what is checked is what ships, and it keeps the set between 10 and 20 examples. The larger
+examples, under "Larger examples", and "Visual test cases", under "Test cases", are not counted. The
+test cases hold one or two of every reading and editing case Visual has, each with a comment saying
+what to try, for checking Visual by hand after a change.
 
 ## Layout
 
