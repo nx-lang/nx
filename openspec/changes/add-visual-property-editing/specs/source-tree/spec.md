@@ -1,0 +1,23 @@
+## ADDED Requirements
+
+### Requirement: A resolved visualizer carries its editor hints
+Each property in a declaration's `visualizer` `properties` list SHALL carry, when a `sourceTree`
+request asks for `visualizers`, besides its name and format, an `editor` value holding its resolved
+editor hints that fit its type, as the visualizer-declarations capability resolves them: `kind`
+(`field`, `slider`, `dropdown` or `segmented`), `min`, `max`, `step`, `stops`, `unit`, `multiline`
+and `placeholder`, each only when set. A hint reported as `editor-hint-mismatch` SHALL be left out.
+An alias's `visualizer` value SHALL carry its own hints the same way. A property with no hints SHALL
+carry no `editor` value, and an entry whose only resolved values are hints SHALL carry a `visualizer`
+value as one with a format does. The values SHALL round-trip through JSON without loss.
+
+#### Scenario: A slider's hints
+- **WHEN** a client asks with `visualizers` for the source tree of a document that constructs
+  `<Card padding=8 />`, where `Card.padding` is typed `Spacing`, hinted `editor=slider min=0 max=64
+  stops={ 0 4 8 16 } unit="px"`
+- **THEN** the `properties` entry for `padding` in `Card`'s `visualizer` value SHALL carry an `editor`
+  value with the kind `slider`, the minimum `0`, the maximum `64`, the stops `0`, `4`, `8` and `16`,
+  and the unit `px`
+
+#### Scenario: A mismatched hint is left out
+- **WHEN** `Card.title` is a `string` hinted `editor=slider placeholder="Title"`
+- **THEN** the entry for `title` SHALL carry an `editor` value with the placeholder `Title` and no kind
