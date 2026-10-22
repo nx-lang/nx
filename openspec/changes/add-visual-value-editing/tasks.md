@@ -55,3 +55,7 @@
 - [x] 7.6 A case's chevron sits nearer its value than the next name
 - [x] 7.7 `nx-draft`, and the playground's Undo enabled for a field's change not yet committed and for edits in flight
 - [x] 7.8 Review fixes RF16–RF18: Undo that only closes a field's change leaves the history alone; strings drawn as code keep their escapes; the editor's own-text bookkeeping is a tested helper
+
+## 8. A playground example of Visual's test cases (Bret, 2026-10-22)
+
+- [x] 8.1 Add "Visual test cases" under a new "Test cases" topic, not counted toward the 10 to 20: one or two of every reading and editing case, each with a comment saying what to try; its expected output committed and `check-examples` passing

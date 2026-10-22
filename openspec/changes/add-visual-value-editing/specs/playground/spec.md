@@ -38,3 +38,57 @@ Source with the cursor at the start of the node and reveal it.
 #### Scenario: Opening an expression in Source
 - **WHEN** a visitor double-clicks a braced expression in Visual
 - **THEN** Source SHALL show, with the cursor at the start of that expression
+
+## MODIFIED Requirements
+
+### Requirement: Examples get a visitor started
+The playground SHALL offer between 10 and 20 short examples, grouped by topic, that together cover
+the language's main features, and MAY offer, under the topic "Larger examples", a few longer programs
+of the kind a real app holds, such as a survey, a settings screen or an orders dashboard, for judging
+how the Visual view reads a whole program, and, under the topic "Test cases", one example holding
+one or two of every case the Visual view reads and edits, each with a comment saying what to try. The
+larger examples and the test cases SHALL NOT count toward the 10 to 20 and need not fit without
+scrolling. They SHALL be offered from a single drop-down in the toolbar and SHALL
+NOT be featured anywhere else on the page, because their purpose is to show what NX to write rather
+than to be browsed. Each short example SHALL be small enough to read without scrolling on a laptop,
+and each SHALL link to the documentation page for its topic.
+
+#### Scenario: Topics
+- **WHEN** a visitor opens the examples drop-down
+- **THEN** it SHALL offer examples, grouped under their topic, for at least: basic values, records
+  and defaults, unions, occurrences (`?`, `+`, `*`), sequences, `if`, `for` with a range, functions
+  and function values, components, and text with interpolation
+
+#### Scenario: The examples stay in the background
+- **WHEN** a visitor opens the playground
+- **THEN** the examples SHALL be reachable only through the toolbar's drop-down, which SHALL name
+  the current example, or say the source is edited once it no longer matches one
+
+#### Scenario: Choosing an example
+- **WHEN** a visitor chooses an example from the drop-down
+- **THEN** the source pane SHALL load it, the output pane SHALL show its value, and the address SHALL
+  become `/play/<id>` with no fragment
+
+#### Scenario: Leaving edits behind
+- **WHEN** a visitor has edited the source and chooses another example
+- **THEN** the edited source SHALL remain reachable through the browser's Back button, since its
+  address held it
+
+#### Scenario: From an example to its docs
+- **WHEN** an example is loaded
+- **THEN** the toolbar SHALL show a small link to the documentation page for its topic
+
+#### Scenario: Larger examples
+- **WHEN** a visitor opens the examples drop-down
+- **THEN** the larger examples SHALL be grouped under "Larger examples", and the playground's tests
+  SHALL count only the other examples toward the 10 to 20
+
+#### Scenario: Visual test cases
+- **WHEN** a visitor opens the "Visual test cases" example and switches to Visual
+- **THEN** it SHALL hold, with a comment for each, a one-line element, a property sheet, an element
+  whose visualizer puts its id last and formats a property as an id, a function used as an element,
+  text content around a braced value, and a value of every kind Visual edits: a string with escapes,
+  `uitext`, an id, an `int`, an alias of one, a `float64`, an untyped number, a boolean written bare
+  and in braces, a case, a color and a sequence of numbers, together with a string Visual opens in
+  Source, an expression, a `for` and an `if`, and properties that may and may not be left out
+

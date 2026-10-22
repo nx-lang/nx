@@ -167,7 +167,10 @@ pnpm run check-examples               # fails on a diagnostic, a changed value o
 
 `--update` is also how a deliberate language change updates every example; review the diff it
 leaves. The check evaluates through the same module and the same `evaluateSource` the browser uses,
-so what is checked is what ships, and it keeps the set between 10 and 20 examples.
+so what is checked is what ships, and it keeps the set between 10 and 20 examples. The larger
+examples, under "Larger examples", and "Visual test cases", under "Test cases", are not counted. The
+test cases hold one or two of every reading and editing case Visual has, each with a comment saying
+what to try, for checking Visual by hand after a change.
 
 ## Layout
 

@@ -21,5 +21,6 @@
   { "id": "visualizer-declarations", "title": "Visualizer declarations", "topic": "Libraries", "docs": "reference/concepts/visualizer-declarations" },
   { "id": "survey", "title": "A full survey", "topic": "Larger examples", "docs": "reference/concepts/visualizer-declarations" },
   { "id": "settings-screen", "title": "A settings screen", "topic": "Larger examples", "docs": "language-tour/functions#component-declarations" },
-  { "id": "orders-dashboard", "title": "An orders dashboard", "topic": "Larger examples", "docs": "language-tour/functions#element-style-functions" }
+  { "id": "orders-dashboard", "title": "An orders dashboard", "topic": "Larger examples", "docs": "language-tour/functions#element-style-functions" },
+  { "id": "visual-test-cases", "title": "Visual test cases", "topic": "Test cases", "docs": "reference/concepts/visualizer-declarations" }
 ]
