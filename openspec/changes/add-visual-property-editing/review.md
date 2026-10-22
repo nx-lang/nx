@@ -300,7 +300,7 @@ language snapshot and the built viewer under jsdom.
 
 ## New Findings Discovered During 2026-10-22 08:50 Verification
 
-### 🟡 Fixed - RF15 NX IR and TypeScript codegen now refuse a declared record with a property-list condition, and the changelog does not say so
+### ✅ Verified - RF15 NX IR and TypeScript codegen now refuse a declared record with a property-list condition, and the changelog does not say so
 - **Severity:** Low
 - **Evidence:** Before `3234c1c`, `<Theme accent="c" if flag { muted="d" } />`, with `Theme` declared in the
   same module, lowered to a record literal, so codegen built it and silently dropped `muted`. It now lowers
@@ -318,8 +318,13 @@ language snapshot and the built viewer under jsdom.
   condition, instead of dropping its conditional properties. Add a codegen test that pins the refusal for a
   same-module record. **Confidence in fix: high.**
 - **Fix:** The changelog entry moved under `## Unreleased` in a `### Fixes` section. It now says the interpreter keeps the conditional properties, and that executable codegen (NX IR, TypeScript, JavaScript), and so the playground's preview, refuses such a record with `codegen-unsupported-construct`, as it does a component. New codegen test `a_record_with_a_property_list_condition_fails_before_emission` pins the refusal.
+- **Verification:** Confirmed. The entry is under `## Unreleased`, in a `### Fixes` section above
+  `## 0.8.0`, and says what the interpreter and executable codegen now do. Codegen's refusal is the
+  `PropertyEntry::If | ConditionList | Match` arm of `build_element_expression`, the same one a component
+  takes, so the "as it does a component" claim holds. The new test fails with `lower.rs` from before
+  `3234c1c` (codegen then succeeds), so it pins the refusal. **Confidence: high.**
 
-### 🟡 Fixed - RF16 A condition makes a direct property's type error repeat once per branch path
+### ✅ Verified - RF16 A condition makes a direct property's type error repeat once per branch path
 - **Severity:** Low
 - **Evidence:** `property_paths_for_entries` (`crates/nx-types/src/infer.rs:5851`) expands an element's
   entries into one path per combination of branches, and each path checks its bindings, so a direct
@@ -335,6 +340,35 @@ language snapshot and the built viewer under jsdom.
   **Confidence in fix: medium.** The right place to deduplicate depends on how the element checker's
   other per-path diagnostics are reported.
 - **Fix:** `InferenceContext::finish` drops a diagnostic that repeats an earlier one in every part (`without_repeats`, keyed by message, then compared in full). Any per-path diagnostic that comes out the same on several paths is one defect, so this covers the type mismatch and any other check that runs once per path. `test_a_property_mismatch_under_conditions_is_reported_once_per_element` checks a record with two conditions and a component with one: one mismatch each. It fails (4 and 2) without the change. The changelog's Fixes section says so.
+- **Verification:** Confirmed. `check.rs` is the only caller of `finish`, and the language service gets
+  its diagnostics through it: in the wasm language snapshot, a same-module record with two conditions, a
+  component with two, and an imported record with two each report the mismatch once, while two elements
+  with the same error on different lines still report two. Equality is the derived `PartialEq` over
+  severity, code, message, every label's file, range and message, help and note, so only diagnostics that
+  read the same in every respect merge, and those carry nothing the first one does not. The per-path
+  checks already deduplicated unknown and duplicated properties by key and span; the type mismatch was
+  the one left. With the drop logged, the whole `cargo test --workspace` (CLI tests included) drops only
+  the new test's repeats, and type-checking the repository's 206 `.nx` files drops none, so no test,
+  snapshot or count depended on a repeat. With the drop disabled, the new test fails (6 mismatches, not
+  2). `cargo test --workspace` passes (3397). The cost on large files is RF17. **Confidence: high.**
+
+## New Findings Discovered During 2026-10-22 09:07 Verification
+
+### 🟡 Fixed - RF17 `without_repeats` is quadratic in diagnostics that share a message
+- **Severity:** Low
+- **Evidence:** `without_repeats` (`crates/nx-types/src/infer.rs:8528`) groups diagnostics by message and
+  compares a new one with every kept one of the same message. Diagnostics that share a message but not a
+  range, such as the same field mistyped in every instance of a record, all land in one bucket, so the
+  pass is O(n²) in them. Timed natively in release, `check_str` over N lets, each `<T0 accent=5 />`:
+  the pass takes 14 ms at 2,000, 0.57 s at 8,000 and 3.2 s at 16,000, against 0.4, 1.6 and 4.2 ms when the
+  messages differ. At 16,000 the whole check goes from 0.69 s to 3.9 s. Through the wasm language
+  snapshot, 8,000 such errors take 7.6 s against 5.7 s with distinct messages. A data file of a few
+  thousand records whose type changed is plausible, and the language service rechecks on each edit.
+- **Recommendation:** Make the lookup constant-time, for example by deriving `Hash` on `Diagnostic` and
+  `Label` (`Severity` and `TextRange` already have it) and keeping a set of the diagnostics seen, or by
+  keying on the message and the labels together. Add a test or a benchmark that checks many
+  same-message diagnostics at distinct ranges. **Confidence in fix: high.**
+- **Fix:** `Diagnostic` and `Label` derive `Hash`. `without_repeats` keeps an `FxHashSet` of the diagnostics seen, so each lookup is constant-time. Unit test `without_repeats_keeps_one_of_each_and_every_distinct_range` sends 20,000 same-message diagnostics at distinct ranges, each twice, and checks that 20,000 are kept in order. It counts and does not time, since wall-clock asserts flake in CI.
 
 ## Questions
 - RF7 and RF8 were product calls. The fix took the reviewer's first option for each: a conditional write
@@ -377,3 +411,6 @@ language snapshot and the built viewer under jsdom.
   declared record's conditional properties. Two Low findings are new: executable codegen now refuses
   such a record, which the changelog does not say and files under a released version (RF15), and a
   condition repeats a direct property's type error once per branch path (RF16).
+- Fourth verification (2026-10-22 09:07): RF15 and RF16 are verified. RF17 is new and Low: the
+  deduplication that fixed RF16 is quadratic in diagnostics that share a message, which takes seconds at
+  several thousand of them.

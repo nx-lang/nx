@@ -8526,19 +8526,11 @@ fn type_ref_mentions(ty: &ast::TypeRef, name: &Name) -> bool {
 /// property-list condition checks its direct properties once per path through its branches, and a
 /// mismatch found on each path is one defect.
 fn without_repeats(diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
-    let mut kept: Vec<Diagnostic> = Vec::with_capacity(diagnostics.len());
-    let mut by_message: FxHashMap<String, Vec<usize>> = FxHashMap::default();
-    for diagnostic in diagnostics {
-        let same = by_message
-            .entry(diagnostic.message().to_string())
-            .or_default();
-        if same.iter().any(|&index| kept[index] == diagnostic) {
-            continue;
-        }
-        same.push(kept.len());
-        kept.push(diagnostic);
-    }
-    kept
+    let mut seen: FxHashSet<Diagnostic> = FxHashSet::default();
+    diagnostics
+        .into_iter()
+        .filter(|diagnostic| seen.insert(diagnostic.clone()))
+        .collect()
 }
 
 #[cfg(test)]
@@ -8552,6 +8544,26 @@ mod tests {
 
     fn prepared(module: &LoweredModule) -> PreparedModule {
         PreparedModule::standalone("test.nx", module.clone())
+    }
+
+    #[test]
+    fn without_repeats_keeps_one_of_each_and_every_distinct_range() {
+        let at = |start: u32| {
+            Diagnostic::error("record-field-type-mismatch")
+                .with_message("Property 'accent' on 'Theme' expects string, found int")
+                .with_label(Label::primary(
+                    "test.nx",
+                    TextSpan::new(TextSize::from(start), TextSize::from(start + 4)),
+                ))
+                .build()
+        };
+        // Many diagnostics with one message at distinct ranges, each reported twice.
+        let diagnostics: Vec<Diagnostic> = (0..20_000u32)
+            .flat_map(|index| [at(index * 8), at(index * 8)])
+            .collect();
+        let kept = without_repeats(diagnostics);
+        assert_eq!(kept.len(), 20_000);
+        assert_eq!(kept[1], at(8), "the order is kept");
     }
 
     #[test]

@@ -28,7 +28,7 @@ impl Severity {
 }
 
 /// A label pointing to a specific location in source code.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Label {
     /// The source file this label refers to.
     pub file: String,
@@ -69,7 +69,7 @@ impl Label {
 }
 
 /// A diagnostic message (error, warning, info, or hint).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Diagnostic {
     /// Severity level of this diagnostic.
     severity: Severity,
